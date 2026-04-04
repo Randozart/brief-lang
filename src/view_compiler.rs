@@ -196,50 +196,11 @@ impl ViewCompiler {
         if let Some(closing_pos) = html.find(&closing_pattern) {
             if let Some(open_end) = html.find('>') {
                 if open_end < closing_pos {
-                    let inner = html[open_end + 1..closing_pos].trim();
-                    return self.strip_directives_from_html(inner);
+                    return html[open_end + 1..closing_pos].trim().to_string();
                 }
             }
         }
         String::new()
-    }
-
-    fn strip_directives_from_html(&self, html: &str) -> String {
-        let mut result = String::new();
-        let chars: Vec<char> = html.chars().collect();
-        let mut pos = 0;
-
-        while pos < chars.len() {
-            if chars[pos] == '<' {
-                if chars
-                    .get(pos + 1)
-                    .map(|&c| c.is_ascii_alphabetic() || c == '!')
-                    .unwrap_or(false)
-                {
-                    if let Some((tag_str, tag_len)) = self.parse_tag(&html[pos..]) {
-                        let stripped_tag = self.strip_directives_from_tag(&tag_str);
-                        result.push_str(&format!("<{}>", stripped_tag));
-                        pos += tag_len;
-                        continue;
-                    }
-                }
-                result.push(chars[pos]);
-                pos += 1;
-            } else {
-                result.push(chars[pos]);
-                pos += 1;
-            }
-        }
-        result
-    }
-
-    fn strip_directives_from_tag(&self, tag: &str) -> String {
-        let parts: Vec<String> = tag
-            .split_whitespace()
-            .filter(|s| !s.starts_with("b-") && !s.starts_with("B-"))
-            .map(|s| s.to_string())
-            .collect();
-        parts.join(" ")
     }
 
     fn parse_tag<'a>(&self, s: &'a str) -> Option<(String, usize)> {

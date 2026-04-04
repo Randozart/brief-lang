@@ -106,6 +106,7 @@ impl WasmGenerator {
         output.push_str("pub struct State {\n");
         output.push_str("    signals: Vec<JsValue>,\n");
         output.push_str("    dirty_signals: Vec<bool>,\n");
+        output.push_str("    each_templates: Vec<(String, String, String)>,\n");
         output.push_str("}\n\n");
 
         output.push_str("#[wasm_bindgen]\n");
@@ -134,11 +135,84 @@ impl WasmGenerator {
         }
         output.push_str("        ];\n");
         output.push_str("        let dirty_signals = vec![false; SIGNALS];\n");
-        output.push_str("        State { signals, dirty_signals }\n");
+
+        output.push_str(
+            "        let mut each_templates: Vec<(String, String, String)> = Vec::new();\n",
+        );
+        for binding in bindings {
+            if let Directive::Each {
+                iterable,
+                item_name,
+                template_html,
+                ..
+            } = &binding.directive
+            {
+                output.push_str(&format!(
+                    "        each_templates.push((\"{}\".to_string(), \"{}\".to_string(), r#\"{}\"#.to_string()));\n",
+                    iterable, item_name, template_html
+                ));
+            }
+        }
+
+        output.push_str("        State { signals, dirty_signals, each_templates }\n");
         output.push_str("    }\n\n");
 
         output.push_str("    pub fn get_signal(&self, id: usize) -> JsValue {\n");
         output.push_str("        self.signals[id].clone()\n");
+        output.push_str("    }\n\n");
+
+        output.push_str("    fn html_escape(s: &str) -> String {\n");
+        output.push_str("        s.replace('&', \"&amp;\").replace('<', \"&lt;\").replace('>', \"&gt;\").replace('\"', \"&quot;\")\n");
+        output.push_str("    }\n\n");
+
+        output.push_str("    pub fn render_each(&self, iterable: &str) -> String {\n");
+        output.push_str("        for (iter_name, item_name, template) in &self.each_templates {\n");
+        output.push_str("            if iter_name == iterable {\n");
+
+        for (name, &id) in &self.signal_map {
+            output.push_str(&format!("                if iterable == \"{}\" {{\n", name));
+            output.push_str(&format!(
+                "                    let list = &self.signals[{}];\n",
+                id
+            ));
+            output.push_str("                    if list.is_array() {\n");
+            output.push_str("                        let arr = js_sys::Array::from(list);\n");
+            output.push_str("                        let mut result = String::new();\n");
+            output.push_str("                        for i in 0..arr.length() {\n");
+            output.push_str("                            let item = arr.get(i);\n");
+            output.push_str("                            let item_str = if item.is_string() {\n");
+            output
+                .push_str("                                item.as_string().unwrap_or_default()\n");
+            output.push_str("                            } else {\n");
+            output.push_str("                                format!(\"{:?}\", item)\n");
+            output.push_str("                            };\n");
+            output.push_str(
+                "                            let escaped = Self::html_escape(&item_str);\n",
+            );
+            output.push_str("                            let mut html = template.clone();\n");
+            output.push_str("                            html = html.replace(&format!(\"b-text=\\\"{}\\\"\", item_name), &escaped);\n");
+            output.push_str("                            html = html.replace(&format!(\"b-text='{}'\", item_name), &escaped);\n");
+            output.push_str("                            result.push_str(&html);\n");
+            output.push_str("                        }\n");
+            output.push_str("                        return result;\n");
+            output.push_str("                    }\n");
+            output.push_str("                }\n");
+        }
+
+        output.push_str("            }\n");
+        output.push_str("        }\n");
+        output.push_str("        String::new()\n");
+        output.push_str("    }\n\n");
+
+        output.push_str("    fn signal_map(&self) -> std::collections::HashMap<String, usize> {\n");
+        output.push_str("        let mut map = std::collections::HashMap::new();\n");
+        for (name, &id) in &self.signal_map {
+            output.push_str(&format!(
+                "        map.insert(\"{}\".to_string(), {});\n",
+                name, id
+            ));
+        }
+        output.push_str("        map\n");
         output.push_str("    }\n\n");
 
         output.push_str("    fn mark_dirty(&mut self, id: usize) {\n");
@@ -637,77 +711,37 @@ impl WasmGenerator {
         }
         output.push_str("    };\n\n");
 
-        let mut has_each = false;
+        let mut each_configs: Vec<(String, String, String)> = Vec::new();
         for binding in bindings {
             if let Directive::Each {
                 iterable,
-                item_name,
-                template_html,
                 container_id,
+                ..
             } = &binding.directive
             {
-                has_each = true;
-                output.push_str(&format!(
-                    "    const EACH_{} = {{\n",
-                    binding.element_id.replace("-", "_")
+                each_configs.push((
+                    binding.element_id.clone(),
+                    iterable.clone(),
+                    container_id.clone(),
                 ));
-                output.push_str(&format!("        iterable: '{}',\n", iterable));
-                output.push_str(&format!("        itemName: '{}',\n", item_name));
-                output.push_str(&format!(
-                    "        template: `{}`,\n",
-                    template_html.replace("`", "\\`").replace("${", "\\${")
-                ));
-                output.push_str(&format!("        container: '#{}',\n", container_id));
-                output.push_str("    };\n\n");
             }
         }
 
-        if has_each {
-            output.push_str("    const renderedItems = new Map();\n\n");
-            output.push_str("    function renderEachItem(eachConfig, item, index) {\n");
-            output.push_str(
-                "        const container = document.querySelector(eachConfig.container);\n",
-            );
-            output.push_str("        if (!container) return;\n");
-            output.push_str("        const template = document.createElement('div');\n");
-            output.push_str("        template.innerHTML = eachConfig.template;\n");
-            output.push_str("        const el = template.firstElementChild;\n");
-            output.push_str("        el.dataset.index = index;\n");
-            output.push_str("        el.dataset.item = JSON.stringify(item);\n");
-            output.push_str("        container.appendChild(el);\n");
-            output.push_str("        return el;\n");
-            output.push_str("    }\n\n");
-
-            output.push_str("    function renderEach(eachConfig, signalId) {\n");
-            output.push_str(
-                "        const container = document.querySelector(eachConfig.container);\n",
-            );
-            output.push_str("        if (!container) return;\n");
-            output.push_str("        container.innerHTML = '';\n");
-            output.push_str("        renderedItems.get(signalId)?.forEach(el => el.remove());\n");
-            output.push_str("        const items = [];\n");
-            output.push_str("        const list = wasm.get_signal(signalId);\n");
-            output.push_str("        if (list && list.forEach) {\n");
-            output.push_str("            list.forEach((item, index) => {\n");
+        if !each_configs.is_empty() {
+            output.push_str("    function renderEach(iterable, containerSelector) {\n");
             output
-                .push_str("                const el = renderEachItem(eachConfig, item, index);\n");
-            output.push_str("                if (el) items.push(el);\n");
-            output.push_str("            });\n");
-            output.push_str("        }\n");
-            output.push_str("        renderedItems.set(signalId, items);\n");
+                .push_str("        const container = document.querySelector(containerSelector);\n");
+            output.push_str("        if (!container) return;\n");
+            output.push_str("        const html = wasm.render_each(iterable);\n");
+            output.push_str("        container.innerHTML = html;\n");
             output.push_str("    }\n\n");
 
             output.push_str("    function attachEachListeners() {\n");
-            for binding in bindings {
-                if let Directive::Each { iterable, .. } = &binding.directive {
-                    if let Some(&sig_id) = self.signal_map.get(iterable) {
-                        output.push_str(&format!(
-                            "        renderEach(EACH_{}, {});\n",
-                            binding.element_id.replace("-", "_"),
-                            sig_id
-                        ));
-                    }
-                }
+            for (_elem_id, iterable, container_id) in &each_configs {
+                output.push_str(&format!(
+                    "        renderEach('{}', '#{}');\n",
+                    iterable, container_id
+                ));
             }
             output.push_str("    }\n\n");
         }
@@ -755,7 +789,7 @@ impl WasmGenerator {
         output.push_str("        }\n");
         output.push_str("    }\n\n");
 
-        if has_each {
+        if !each_configs.is_empty() {
             output.push_str("    attachEachListeners();\n");
         }
         output.push_str("    attachListeners();\n");
