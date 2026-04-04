@@ -9,6 +9,7 @@ pub enum Value {
     String(String),
     Bool(bool),
     Data(Vec<u8>),
+    List(Vec<Value>),
     Void,
 }
 
@@ -20,6 +21,7 @@ impl fmt::Display for Value {
             Value::String(v) => write!(f, "\"{}\"", v),
             Value::Bool(v) => write!(f, "{}", v),
             Value::Data(_) => write!(f, "<data>"),
+            Value::List(items) => write!(f, "[{}]", items.len()),
             Value::Void => write!(f, "void"),
         }
     }
@@ -49,7 +51,7 @@ impl Interpreter {
         register_std_io(&mut foreign_functions);
         register_std_math(&mut foreign_functions);
         register_std_string(&mut foreign_functions);
-        
+
         Interpreter {
             state: HashMap::new(),
             prior_state: HashMap::new(),
@@ -86,7 +88,7 @@ impl Interpreter {
         let mut executed = true;
         let mut iterations = 0;
         let max_iterations = 100;
-        
+
         while executed && iterations < max_iterations {
             iterations += 1;
             executed = false;
@@ -126,9 +128,12 @@ impl Interpreter {
                 }
             }
         }
-        
+
         if iterations >= max_iterations {
-            eprintln!("Warning: Reactor loop hit iteration limit ({})", max_iterations);
+            eprintln!(
+                "Warning: Reactor loop hit iteration limit ({})",
+                max_iterations
+            );
         }
 
         Ok(())
@@ -356,6 +361,38 @@ impl Interpreter {
                     Err(RuntimeError::UndefinedForeignFunction(name.clone()))
                 }
             }
+            Expr::ListLiteral(elements) => {
+                let mut values = Vec::new();
+                for elem in elements {
+                    values.push(self.eval_expr(elem)?);
+                }
+                Ok(Value::List(values))
+            }
+            Expr::ListIndex(list_expr, index_expr) => {
+                let list_val = self.eval_expr(list_expr)?;
+                let index_val = self.eval_expr(index_expr)?;
+                match (list_val, index_val) {
+                    (Value::List(items), Value::Int(idx)) => {
+                        if idx < 0 || idx as usize >= items.len() {
+                            Err(RuntimeError::TypeMismatch(
+                                "Index out of bounds".to_string(),
+                            ))
+                        } else {
+                            Ok(items[idx as usize].clone())
+                        }
+                    }
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "List indexing requires List and Int".to_string(),
+                    )),
+                }
+            }
+            Expr::ListLen(list_expr) => {
+                let list_val = self.eval_expr(list_expr)?;
+                match list_val {
+                    Value::List(items) => Ok(Value::Int(items.len() as i64)),
+                    _ => Err(RuntimeError::TypeMismatch("len requires List".to_string())),
+                }
+            }
         }
     }
 }
@@ -366,19 +403,23 @@ fn register_std_io(registry: &mut HashMap<String, ForeignFn>) {
             print!("{}", s);
             Ok(Value::Bool(true))
         } else {
-            Err(RuntimeError::TypeMismatch("print expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "print expects String".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("println".to_string(), |args| {
         if let Value::String(s) = &args[0] {
             println!("{}", s);
             Ok(Value::Bool(true))
         } else {
-            Err(RuntimeError::TypeMismatch("println expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "println expects String".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("input".to_string(), |_args| {
         use std::io::{self, BufRead};
         let stdin = io::stdin();
@@ -400,17 +441,19 @@ fn register_std_math(registry: &mut HashMap<String, ForeignFn>) {
             Err(RuntimeError::TypeMismatch("abs expects Int".to_string()))
         }
     });
-    
+
     registry.insert("sqrt".to_string(), |args| {
         if let Value::Float(n) = &args[0] {
             Ok(Value::Float(n.sqrt()))
         } else if let Value::Int(n) = &args[0] {
             Ok(Value::Float((*n as f64).sqrt()))
         } else {
-            Err(RuntimeError::TypeMismatch("sqrt expects Float or Int".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "sqrt expects Float or Int".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("pow".to_string(), |args| {
         if let Value::Float(base) = &args[0] {
             if let Value::Float(exp) = &args[1] {
@@ -422,7 +465,7 @@ fn register_std_math(registry: &mut HashMap<String, ForeignFn>) {
             Err(RuntimeError::TypeMismatch("pow expects Float".to_string()))
         }
     });
-    
+
     registry.insert("sin".to_string(), |args| {
         if let Value::Float(n) = &args[0] {
             Ok(Value::Float(n.sin()))
@@ -430,7 +473,7 @@ fn register_std_math(registry: &mut HashMap<String, ForeignFn>) {
             Err(RuntimeError::TypeMismatch("sin expects Float".to_string()))
         }
     });
-    
+
     registry.insert("cos".to_string(), |args| {
         if let Value::Float(n) = &args[0] {
             Ok(Value::Float(n.cos()))
@@ -438,15 +481,17 @@ fn register_std_math(registry: &mut HashMap<String, ForeignFn>) {
             Err(RuntimeError::TypeMismatch("cos expects Float".to_string()))
         }
     });
-    
+
     registry.insert("floor".to_string(), |args| {
         if let Value::Float(n) = &args[0] {
             Ok(Value::Float(n.floor()))
         } else {
-            Err(RuntimeError::TypeMismatch("floor expects Float".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "floor expects Float".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("ceil".to_string(), |args| {
         if let Value::Float(n) = &args[0] {
             Ok(Value::Float(n.ceil()))
@@ -454,15 +499,17 @@ fn register_std_math(registry: &mut HashMap<String, ForeignFn>) {
             Err(RuntimeError::TypeMismatch("ceil expects Float".to_string()))
         }
     });
-    
+
     registry.insert("round".to_string(), |args| {
         if let Value::Float(n) = &args[0] {
             Ok(Value::Float(n.round()))
         } else {
-            Err(RuntimeError::TypeMismatch("round expects Float".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "round expects Float".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("random".to_string(), |_args| {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
@@ -481,27 +528,31 @@ fn register_std_string(registry: &mut HashMap<String, ForeignFn>) {
             Err(RuntimeError::TypeMismatch("len expects String".to_string()))
         }
     });
-    
+
     registry.insert("concat".to_string(), |args| {
         if let Value::String(a) = &args[0] {
             if let Value::String(b) = &args[1] {
                 Ok(Value::String(format!("{}{}", a, b)))
             } else {
-                Err(RuntimeError::TypeMismatch("concat expects String".to_string()))
+                Err(RuntimeError::TypeMismatch(
+                    "concat expects String".to_string(),
+                ))
             }
         } else {
-            Err(RuntimeError::TypeMismatch("concat expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "concat expects String".to_string(),
+            ))
         }
     });
-    
-    registry.insert("to_string".to_string(), |args| {
-        match &args[0] {
-            Value::Int(n) => Ok(Value::String(n.to_string())),
-            Value::Float(n) => Ok(Value::String(n.to_string())),
-            _ => Err(RuntimeError::TypeMismatch("to_string expects Int or Float".to_string()))
-        }
+
+    registry.insert("to_string".to_string(), |args| match &args[0] {
+        Value::Int(n) => Ok(Value::String(n.to_string())),
+        Value::Float(n) => Ok(Value::String(n.to_string())),
+        _ => Err(RuntimeError::TypeMismatch(
+            "to_string expects Int or Float".to_string(),
+        )),
     });
-    
+
     registry.insert("to_float".to_string(), |args| {
         if let Value::String(s) = &args[0] {
             match s.parse::<f64>() {
@@ -509,10 +560,12 @@ fn register_std_string(registry: &mut HashMap<String, ForeignFn>) {
                 Err(_) => Ok(Value::String("0".to_string())),
             }
         } else {
-            Err(RuntimeError::TypeMismatch("to_float expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "to_float expects String".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("to_int".to_string(), |args| {
         if let Value::String(s) = &args[0] {
             match s.parse::<i64>() {
@@ -520,67 +573,89 @@ fn register_std_string(registry: &mut HashMap<String, ForeignFn>) {
                 Err(_) => Ok(Value::Int(0)),
             }
         } else {
-            Err(RuntimeError::TypeMismatch("to_int expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "to_int expects String".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("trim".to_string(), |args| {
         if let Value::String(s) = &args[0] {
             Ok(Value::String(s.trim().to_string()))
         } else {
-            Err(RuntimeError::TypeMismatch("trim expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "trim expects String".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("contains".to_string(), |args| {
         if let Value::String(haystack) = &args[0] {
             if let Value::String(needle) = &args[1] {
                 Ok(Value::Bool(haystack.contains(needle)))
             } else {
-                Err(RuntimeError::TypeMismatch("contains expects String".to_string()))
+                Err(RuntimeError::TypeMismatch(
+                    "contains expects String".to_string(),
+                ))
             }
         } else {
-            Err(RuntimeError::TypeMismatch("contains expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "contains expects String".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("starts_with".to_string(), |args| {
         if let Value::String(s) = &args[0] {
             if let Value::String(prefix) = &args[1] {
                 Ok(Value::Bool(s.starts_with(prefix)))
             } else {
-                Err(RuntimeError::TypeMismatch("starts_with expects String".to_string()))
+                Err(RuntimeError::TypeMismatch(
+                    "starts_with expects String".to_string(),
+                ))
             }
         } else {
-            Err(RuntimeError::TypeMismatch("starts_with expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "starts_with expects String".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("ends_with".to_string(), |args| {
         if let Value::String(s) = &args[0] {
             if let Value::String(suffix) = &args[1] {
                 Ok(Value::Bool(s.ends_with(suffix)))
             } else {
-                Err(RuntimeError::TypeMismatch("ends_with expects String".to_string()))
+                Err(RuntimeError::TypeMismatch(
+                    "ends_with expects String".to_string(),
+                ))
             }
         } else {
-            Err(RuntimeError::TypeMismatch("ends_with expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "ends_with expects String".to_string(),
+            ))
         }
     });
-    
+
     registry.insert("replace".to_string(), |args| {
         if let Value::String(s) = &args[0] {
             if let Value::String(old) = &args[1] {
                 if let Value::String(new) = &args[2] {
                     Ok(Value::String(s.replace(old, new)))
                 } else {
-                    Err(RuntimeError::TypeMismatch("replace expects String".to_string()))
+                    Err(RuntimeError::TypeMismatch(
+                        "replace expects String".to_string(),
+                    ))
                 }
             } else {
-                Err(RuntimeError::TypeMismatch("replace expects String".to_string()))
+                Err(RuntimeError::TypeMismatch(
+                    "replace expects String".to_string(),
+                ))
             }
         } else {
-            Err(RuntimeError::TypeMismatch("replace expects String".to_string()))
+            Err(RuntimeError::TypeMismatch(
+                "replace expects String".to_string(),
+            ))
         }
     });
 }

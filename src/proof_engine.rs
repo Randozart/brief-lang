@@ -23,22 +23,22 @@ impl ProofError {
             hints: Vec::new(),
         }
     }
-    
+
     pub fn with_explanation(mut self, text: &str) -> Self {
         self.explanation = text.to_string();
         self
     }
-    
+
     pub fn with_proof_step(mut self, step: &str) -> Self {
         self.proof_chain.push(step.to_string());
         self
     }
-    
+
     pub fn with_example(mut self, example: &str) -> Self {
         self.examples.push(example.to_string());
         self
     }
-    
+
     pub fn with_hint(mut self, hint: &str) -> Self {
         self.hints.push(hint.to_string());
         self
@@ -70,7 +70,7 @@ impl ProofEngine {
         self.check_postcondition_contradictions(program);
         self.errors.clone()
     }
-    
+
     fn check_postcondition_contradictions(&mut self, program: &Program) {
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
@@ -78,42 +78,38 @@ impl ProofEngine {
             }
         }
     }
-    
+
     fn analyze_postcondition(&mut self, txn: &Transaction) {
         let post = &txn.contract.post_condition;
-        
+
         if let Expr::Eq(left, right) = post {
             let (var, prior_var) = match (left.as_ref(), right.as_ref()) {
                 (Expr::Identifier(v), Expr::PriorState(p)) => (v.clone(), p.clone()),
                 (Expr::PriorState(p), Expr::Identifier(v)) => (v.clone(), p.clone()),
                 _ => return,
             };
-            
+
             if var == prior_var {
-                let mut err = ProofError::new(
-                    "P003", 
-                    "postcondition is always satisfied"
-                );
+                let mut err = ProofError::new("P003", "postcondition is always satisfied");
                 err.explanation = format!(
                     "transaction '{}' postcondition '{} == @{}' is always true",
                     txn.name, var, var
                 );
                 err.proof_chain.push(format!(
-                    "1. '@{}' refers to the value of '{}' at transaction start", 
+                    "1. '@{}' refers to the value of '{}' at transaction start",
                     var, var
                 ));
-                err.proof_chain.push(format!(
-                    "2. postcondition requires: {} == @{}", var, var
-                ));
-                err.proof_chain.push(format!(
-                    "3. this is always true (any value equals itself)"
-                ));
-                err.hints.push("did you mean to modify the variable?".to_string());
+                err.proof_chain
+                    .push(format!("2. postcondition requires: {} == @{}", var, var));
+                err.proof_chain
+                    .push(format!("3. this is always true (any value equals itself)"));
+                err.hints
+                    .push("did you mean to modify the variable?".to_string());
                 self.errors.push(err);
             }
         }
     }
-    
+
     fn collect_transactions(&mut self, program: &Program) {
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
@@ -194,6 +190,18 @@ impl ProofEngine {
                 }
             }
             Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Bool(_) => {}
+            Expr::ListLiteral(elements) => {
+                for elem in elements {
+                    self.collect_identifiers(elem, vars);
+                }
+            }
+            Expr::ListIndex(list_expr, index_expr) => {
+                self.collect_identifiers(list_expr, vars);
+                self.collect_identifiers(index_expr, vars);
+            }
+            Expr::ListLen(inner) => {
+                self.collect_identifiers(inner, vars);
+            }
         }
     }
 
@@ -214,7 +222,12 @@ impl ProofEngine {
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
                 for stmt in &txn.body {
-                    if let Statement::Unification { name: _, pattern: _, expr } = stmt {
+                    if let Statement::Unification {
+                        name: _,
+                        pattern: _,
+                        expr,
+                    } = stmt
+                    {
                         // Legacy check - simplified for now
                     }
                 }
@@ -231,10 +244,35 @@ impl ProofEngine {
             Type::Bool => "Bool".to_string(),
             Type::Data => "Data".to_string(),
             Type::Void => "Void".to_string(),
-            Type::Union(types) => {
-                types.iter().map(|t| self.type_name(t)).collect::<Vec<_>>().join("|")
-            }
+            Type::Union(types) => types
+                .iter()
+                .map(|t| self.type_name(t))
+                .collect::<Vec<_>>()
+                .join("|"),
             Type::ContractBound(inner, _) => self.type_name(inner),
+            Type::TypeVar(name) => name.clone(),
+            Type::Generic(name, type_args) => {
+                format!(
+                    "{}<{}>",
+                    name,
+                    type_args
+                        .iter()
+                        .map(|t| self.type_name(t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Type::Applied(name, type_args) => {
+                format!(
+                    "{}<{}>",
+                    name,
+                    type_args
+                        .iter()
+                        .map(|t| self.type_name(t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
         }
     }
 
@@ -258,20 +296,18 @@ impl ProofEngine {
                 if !conflicts.is_empty() {
                     let pre1_overlaps = self.preconditions_overlap(txn1, txn2);
                     if pre1_overlaps {
-                        let mut err = ProofError::new(
-                            "P001", 
-                            "concurrent mutation without synchronization"
-                        );
+                        let mut err =
+                            ProofError::new("P001", "concurrent mutation without synchronization");
                         err.explanation = format!(
                             "both transactions '{}' and '{}' can mutate the same state variables",
                             txn1.name, txn2.name
                         );
                         err.proof_chain.push(format!(
-                            "1. '{}' is reactive (fires automatically)", 
+                            "1. '{}' is reactive (fires automatically)",
                             txn1.name
                         ));
                         err.proof_chain.push(format!(
-                            "2. '{}' is reactive (fires automatically)", 
+                            "2. '{}' is reactive (fires automatically)",
                             txn2.name
                         ));
                         err.proof_chain.push(format!(
@@ -287,7 +323,9 @@ impl ProofEngine {
                             "to make these mutually exclusive, add a guard: txn {} [...][...] {{ |{}| ... }}",
                             txn1.name, txn2.name
                         ));
-                        err.hints.push("or use sequential transactions instead of reactive ones".to_string());
+                        err.hints.push(
+                            "or use sequential transactions instead of reactive ones".to_string(),
+                        );
                         self.errors.push(err);
                     }
                 }
@@ -299,10 +337,7 @@ impl ProofEngine {
         let writes1 = self.extract_write_vars(txn1);
         let writes2 = self.extract_write_vars(txn2);
 
-        writes1
-            .intersection(&writes2)
-            .cloned()
-            .collect()
+        writes1.intersection(&writes2).cloned().collect()
     }
 
     fn extract_write_vars(&self, txn: &Transaction) -> HashSet<String> {
@@ -315,10 +350,16 @@ impl ProofEngine {
 
     fn collect_write_vars(&self, stmt: &Statement, vars: &mut HashSet<String>) {
         match stmt {
-            Statement::Assignment { is_owned: true, name, .. } => {
+            Statement::Assignment {
+                is_owned: true,
+                name,
+                ..
+            } => {
                 vars.insert(name.clone());
             }
-            Statement::Assignment { is_owned: false, .. } => {}
+            Statement::Assignment {
+                is_owned: false, ..
+            } => {}
             Statement::Let { .. } => {}
             Statement::Expression(_) => {}
             Statement::Term(_) => {}
@@ -343,25 +384,25 @@ impl ProofEngine {
                 if txn.is_reactive {
                     let has_accepting_path = self.has_term_statement(&txn.body);
                     if !has_accepting_path {
-                        let mut err = ProofError::new(
-                            "P005", 
-                            "transaction has no valid termination"
-                        );
+                        let mut err =
+                            ProofError::new("P005", "transaction has no valid termination");
                         err.explanation = format!(
                             "transaction '{}' has no 'term' statement, so it can never complete",
                             txn.name
                         );
-                        err.proof_chain.push(format!(
-                            "1. '{}' is declared as reactive (rct)", 
-                            txn.name
-                        ));
-                        err.proof_chain.push("2. reactive transactions must have a 'term' to settle".to_string());
-                        err.proof_chain.push("3. without 'term', the reactor will wait forever".to_string());
+                        err.proof_chain
+                            .push(format!("1. '{}' is declared as reactive (rct)", txn.name));
+                        err.proof_chain.push(
+                            "2. reactive transactions must have a 'term' to settle".to_string(),
+                        );
+                        err.proof_chain
+                            .push("3. without 'term', the reactor will wait forever".to_string());
                         err.hints.push(format!(
-                            "add 'term;' at the end of transaction '{}'", 
+                            "add 'term;' at the end of transaction '{}'",
                             txn.name
                         ));
-                        err.hints.push("or use 'term expr1, expr2, ...;' to return values".to_string());
+                        err.hints
+                            .push("or use 'term expr1, expr2, ...;' to return values".to_string());
                         self.errors.push(err);
                     }
                 }
@@ -385,16 +426,16 @@ impl ProofEngine {
         }
         false
     }
-    
+
     fn check_true_assertions(&mut self, program: &Program) {
         let mut defns: HashMap<String, &Definition> = HashMap::new();
-        
+
         for item in &program.items {
             if let TopLevel::Definition(defn) = item {
                 defns.insert(defn.name.clone(), defn);
             }
         }
-        
+
         for item in &program.items {
             if let TopLevel::Signature(sig) = item {
                 if let ResultType::TrueAssertion = sig.result_type {
@@ -405,12 +446,13 @@ impl ProofEngine {
             }
         }
     }
-    
+
     fn verify_true_assertion(&mut self, sig_name: &str, defn: &Definition) {
         let term_values = self.extract_term_values(defn);
-        
+
         for (i, values) in term_values.iter().enumerate() {
-            let bool_outputs: Vec<&Option<Expr>> = values.iter()
+            let bool_outputs: Vec<&Option<Expr>> = values
+                .iter()
                 .filter(|v| {
                     if let Some(Expr::Bool(_)) = v {
                         true
@@ -419,58 +461,46 @@ impl ProofEngine {
                     }
                 })
                 .collect();
-            
+
             for (j, val) in bool_outputs.iter().enumerate() {
                 if let Some(Expr::Bool(false)) = val {
-                    let mut err = ProofError::new(
-                        "P006", 
-                        "true assertion failed"
-                    );
+                    let mut err = ProofError::new("P006", "true assertion failed");
                     err.explanation = format!(
                         "signature '{}' declares '-> true' but exit path {} returns false",
                         sig_name, i
                     );
                     err.proof_chain.push(format!(
-                        "1. '{}' declares it returns true (verified by compiler)", 
+                        "1. '{}' declares it returns true (verified by compiler)",
                         sig_name
                     ));
-                    err.proof_chain.push(format!(
-                        "2. definition '{}' has exit path {}", 
-                        defn.name, i
-                    ));
-                    err.proof_chain.push(format!(
-                        "3. Bool output slot {} returns false",
-                        j
-                    ));
-                    err.examples.push(format!(
-                        "when this path executes, the contract is violated"
-                    ));
-                    err.hints.push("ensure all code paths return true for Bool outputs".to_string());
+                    err.proof_chain
+                        .push(format!("2. definition '{}' has exit path {}", defn.name, i));
+                    err.proof_chain
+                        .push(format!("3. Bool output slot {} returns false", j));
+                    err.examples
+                        .push(format!("when this path executes, the contract is violated"));
+                    err.hints
+                        .push("ensure all code paths return true for Bool outputs".to_string());
                     self.errors.push(err);
                     return;
                 }
             }
-            
+
             let has_any_bool = bool_outputs.iter().any(|v| v.is_some());
             if !has_any_bool && !bool_outputs.is_empty() {
-                let mut err = ProofError::new(
-                    "P007", 
-                    "true assertion cannot be verified"
-                );
+                let mut err = ProofError::new("P007", "true assertion cannot be verified");
                 err.explanation = format!(
                     "signature '{}' declares '-> true' but exit path {} has no Bool output",
                     sig_name, i
                 );
-                    err.proof_chain.push(format!(
-                        "1. '-> true' requires a Bool output that is always true for '{}'", 
-                        sig_name
-                    ));
                 err.proof_chain.push(format!(
-                    "2. exit path {} has no Bool in its outputs",
-                    i
+                    "1. '-> true' requires a Bool output that is always true for '{}'",
+                    sig_name
                 ));
+                err.proof_chain
+                    .push(format!("2. exit path {} has no Bool in its outputs", i));
                 err.hints.push(format!(
-                    "ensure definition '{}' returns a Bool value on all paths", 
+                    "ensure definition '{}' returns a Bool value on all paths",
                     defn.name
                 ));
                 self.errors.push(err);
@@ -478,20 +508,23 @@ impl ProofEngine {
             }
         }
     }
-    
+
     fn extract_term_values(&self, defn: &Definition) -> Vec<Vec<Option<Expr>>> {
         let mut values = Vec::new();
         self.collect_term_values(&defn.body, &mut values);
         values
     }
-    
+
     fn collect_term_values(&self, statements: &[Statement], results: &mut Vec<Vec<Option<Expr>>>) {
         for stmt in statements {
             match stmt {
                 Statement::Term(outputs) => {
                     results.push(outputs.clone());
                 }
-                Statement::Guarded { condition: _, statement } => {
+                Statement::Guarded {
+                    condition: _,
+                    statement,
+                } => {
                     self.collect_term_values(&[(*statement.clone()).clone()], results);
                 }
                 _ => {}

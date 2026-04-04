@@ -1,9 +1,9 @@
 use crate::manifest::{Dependency, Manifest};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use thiserror::Error;
 #[cfg(test)]
 use tempfile::TempDir;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ResolveError {
@@ -79,12 +79,13 @@ impl Resolver {
 
     pub fn resolve(&mut self, import: &Import) -> Result<ResolvedImport, ResolveError> {
         let name = &import.from;
-        
+
         if let Some(existing) = self.resolved.get(name) {
             return Ok(existing.clone());
         }
 
-        let project_root = self.manifest_path
+        let project_root = self
+            .manifest_path
             .as_ref()
             .and_then(|p| p.parent().map(|pp| pp.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."));
@@ -102,12 +103,12 @@ impl Resolver {
         }
 
         let candidates = self.search_import_file(name, &project_root);
-        
+
         match candidates.len() {
             0 => Err(ResolveError::NotFound(name.clone())),
             1 => {
                 let path = candidates.into_iter().next().unwrap();
-                
+
                 if let Some(ref mut manifest) = self.manifest {
                     manifest.add_dependency(
                         name.clone(),
@@ -198,27 +199,27 @@ mod tests {
     fn test_resolve_from_manifest() {
         let tmp = tempfile::TempDir::new().unwrap();
         let manifest_path = tmp.path().join("brief.toml");
-        
+
         let manifest = Manifest {
             project: crate::manifest::Project::default(),
-            dependencies: HashMap::from([
-                ("auth".to_string(), Dependency::Path(crate::manifest::PathDependency {
+            dependencies: HashMap::from([(
+                "auth".to_string(),
+                Dependency::Path(crate::manifest::PathDependency {
                     path: PathBuf::from("lib/auth.bv"),
-                })),
-            ]),
+                }),
+            )]),
         };
         manifest.save(&manifest_path).unwrap();
-        
+
         let lib_dir = tmp.path().join("lib");
         std::fs::create_dir(&lib_dir).unwrap();
         std::fs::write(lib_dir.join("auth.bv"), "").unwrap();
-        
-        let mut resolver = Resolver::new()
-            .with_manifest(manifest, manifest_path);
-        
+
+        let mut resolver = Resolver::new().with_manifest(manifest, manifest_path);
+
         let import = Import::new("auth".to_string(), vec!["login".to_string()]);
         let resolved = resolver.resolve(&import).unwrap();
-        
+
         assert_eq!(resolved.source, ImportSource::Manifest);
     }
 
@@ -228,18 +229,17 @@ mod tests {
         let lib_dir = tmp.path().join("lib");
         std::fs::create_dir(&lib_dir).unwrap();
         std::fs::write(lib_dir.join("utils.bv"), "").unwrap();
-        
+
         let manifest_path = tmp.path().join("brief.toml");
         let manifest = Manifest {
             project: crate::manifest::Project::default(),
             dependencies: HashMap::new(),
         };
         manifest.save(&manifest_path).unwrap();
-        
-        let mut resolver = Resolver::new()
-            .with_manifest(manifest, manifest_path);
+
+        let mut resolver = Resolver::new().with_manifest(manifest, manifest_path);
         let import = Import::new("utils".to_string(), vec!["format".to_string()]);
-        
+
         let resolved = resolver.resolve(&import).unwrap();
         assert!(resolved.path.ends_with("utils.bv"));
     }

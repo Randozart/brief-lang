@@ -76,13 +76,12 @@ impl Manifest {
     }
 
     pub fn parse(content: &str) -> Result<Self, ManifestError> {
-        toml::from_str(content)
-            .map_err(|e| ManifestError::ParseError(e.to_string()))
+        toml::from_str(content).map_err(|e| ManifestError::ParseError(e.to_string()))
     }
 
     pub fn save(&self, path: &Path) -> Result<(), ManifestError> {
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| ManifestError::ParseError(e.to_string()))?;
+        let content =
+            toml::to_string_pretty(self).map_err(|e| ManifestError::ParseError(e.to_string()))?;
         fs::write(path, content)?;
         Ok(())
     }
@@ -109,9 +108,7 @@ impl Manifest {
                     None
                 }
             }
-            Dependency::Registry(_) => {
-                None
-            }
+            Dependency::Registry(_) => None,
         }
     }
 
@@ -148,20 +145,20 @@ impl fmt::Display for Manifest {
 
 pub fn find_manifest(start_dir: &Path) -> Option<PathBuf> {
     let mut current = start_dir.to_path_buf();
-    
+
     loop {
         let manifest_path = current.join("brief.toml");
         if manifest_path.exists() {
             return Some(manifest_path);
         }
-        
+
         let parent = current.parent()?;
         if parent == current {
             break;
         }
         current = parent.to_path_buf();
     }
-    
+
     None
 }
 
@@ -208,11 +205,11 @@ utils = { path = "lib/utils.bv" }
     fn test_find_manifest() {
         let tmp = TempDir::new().unwrap();
         let project_dir = tmp.path();
-        
+
         fs::create_dir(project_dir.join("src")).unwrap();
         let manifest_path = project_dir.join("brief.toml");
         fs::write(&manifest_path, "").unwrap();
-        
+
         let found = find_manifest(&project_dir.join("src").join("main.bv"));
         assert!(found.is_some());
         assert_eq!(found.unwrap(), manifest_path);

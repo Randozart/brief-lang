@@ -34,10 +34,10 @@ impl<'a> Parser<'a> {
                 text: text.clone(),
             });
         }
-        
+
         self.current = self.peek.take();
         self.peek = self.lexer.next().map(|token| (token, self.lexer.span()));
-        
+
         if let Some((_, span)) = &self.current {
             self.current_line = span.start;
         }
@@ -46,20 +46,26 @@ impl<'a> Parser<'a> {
     fn current_token(&self) -> Option<&Result<Token, ()>> {
         self.current.as_ref().map(|(t, _)| t)
     }
-    
+
     fn current_span(&self) -> Option<Span> {
         self.current.as_ref().map(|(_, span)| {
             let line = self.source[..span.start].matches('\n').count() + 1;
-            let line_start = self.source[..span.start].rfind('\n').map(|p| p + 1).unwrap_or(0);
+            let line_start = self.source[..span.start]
+                .rfind('\n')
+                .map(|p| p + 1)
+                .unwrap_or(0);
             let column = span.start - line_start + 1;
             Span::new(span.start, span.end, line, column)
         })
     }
-    
+
     fn peek_span(&self) -> Option<Span> {
         self.peek.as_ref().map(|(_, span)| {
             let line = self.source[..span.start].matches('\n').count() + 1;
-            let line_start = self.source[..span.start].rfind('\n').map(|p| p + 1).unwrap_or(0);
+            let line_start = self.source[..span.start]
+                .rfind('\n')
+                .map(|p| p + 1)
+                .unwrap_or(0);
             let column = span.start - line_start + 1;
             Span::new(span.start, span.end, line, column)
         })
@@ -127,7 +133,10 @@ impl<'a> Parser<'a> {
             });
             self.advance();
         }
-        Ok(Program { items, comments: self.comments.clone() })
+        Ok(Program {
+            items,
+            comments: self.comments.clone(),
+        })
     }
 
     fn parse_top_level(&mut self) -> Result<TopLevel, String> {
@@ -135,11 +144,11 @@ impl<'a> Parser<'a> {
         while let Some(Ok(Token::Comment(_))) = self.current_token() {
             self.advance();
         }
-        
+
         if self.current_token().is_none() {
             return Err("Unexpected EOF".to_string());
         }
-        
+
         match self.current_token() {
             Some(Ok(Token::Import)) => {
                 let import = self.parse_import()?;
@@ -181,7 +190,7 @@ impl<'a> Parser<'a> {
 
     fn parse_import(&mut self) -> Result<Import, String> {
         self.expect(Token::Import)?;
-        
+
         let items = if let Some(Ok(Token::LBrace)) = self.current_token() {
             self.advance();
             let mut items = Vec::new();
@@ -205,7 +214,7 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        
+
         let path = if let Some(Ok(Token::From)) = self.current_token() {
             self.advance();
             let mut path = Vec::new();
@@ -217,7 +226,10 @@ impl<'a> Parser<'a> {
             path
         } else if let Some(Ok(Token::Identifier(_))) = self.current_token() {
             if !items.is_empty() {
-                return Err("Cannot have both import items and direct namespace path. Use 'from' keyword.".to_string());
+                return Err(
+                    "Cannot have both import items and direct namespace path. Use 'from' keyword."
+                        .to_string(),
+                );
             }
             let mut path = Vec::new();
             path.push(self.expect_identifier()?);
@@ -229,7 +241,7 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        
+
         self.expect(Token::Semicolon)?;
         Ok(Import { items, path })
     }
@@ -240,9 +252,9 @@ impl<'a> Parser<'a> {
         self.expect(Token::Colon)?;
         let input_type = self.parse_type()?;
         self.expect(Token::Arrow)?;
-        
+
         let result_type = self.parse_result_type()?;
-        
+
         let source = if let Some(Ok(Token::From)) = self.current_token() {
             self.advance();
             let mut path = Vec::new();
@@ -255,14 +267,14 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        
+
         let alias = if let Some(Ok(Token::As)) = self.current_token() {
             self.advance();
             Some(self.expect_identifier()?)
         } else {
             None
         };
-        
+
         self.expect(Token::Semicolon)?;
         Ok(Signature {
             name,
@@ -277,7 +289,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::Frgn)?;
         self.expect(Token::Sig)?;
         let name = self.expect_identifier()?;
-        
+
         let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
             self.advance();
             let mut params = Vec::new();
@@ -297,11 +309,11 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        
+
         self.expect(Token::Arrow)?;
         let outputs = self.parse_output_types()?;
         self.expect(Token::Semicolon)?;
-        
+
         Ok(ForeignSig {
             name,
             input_types: parameters,
@@ -322,7 +334,12 @@ impl<'a> Parser<'a> {
         };
         let span = self.current_span();
         self.expect(Token::Semicolon)?;
-        Ok(StateDecl { name, ty, expr, span })
+        Ok(StateDecl {
+            name,
+            ty,
+            expr,
+            span,
+        })
     }
 
     fn parse_constant(&mut self) -> Result<Constant, String> {
@@ -376,6 +393,40 @@ impl<'a> Parser<'a> {
         self.expect(Token::Defn)?;
         let name = self.expect_identifier()?;
 
+        let type_params = if let Some(Ok(Token::Lt)) = self.current_token() {
+            self.advance();
+            let mut params = Vec::new();
+            loop {
+                let param_name = self.expect_identifier()?;
+                let mut bounds = Vec::new();
+                if let Some(Ok(Token::Colon)) = self.current_token() {
+                    self.advance();
+                    loop {
+                        let bound_name = self.expect_identifier()?;
+                        bounds.push(TypeBound::HasTrait(bound_name));
+                        if let Some(Ok(Token::Plus)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                params.push(TypeParam {
+                    name: param_name,
+                    bounds,
+                });
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::Gt)?;
+            params
+        } else {
+            Vec::new()
+        };
+
         let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
             self.advance();
             let mut params = Vec::new();
@@ -397,7 +448,7 @@ impl<'a> Parser<'a> {
         };
 
         let contract = self.parse_contract()?;
-        
+
         let outputs = if let Some(Ok(Token::Arrow)) = self.current_token() {
             self.advance();
             self.parse_output_types()?
@@ -412,13 +463,14 @@ impl<'a> Parser<'a> {
 
         Ok(Definition {
             name,
+            type_params,
             parameters,
             outputs,
             contract,
             body,
         })
     }
-    
+
     fn parse_output_types(&mut self) -> Result<Vec<Type>, String> {
         let mut outputs = Vec::new();
         outputs.push(self.parse_type()?);
@@ -428,32 +480,32 @@ impl<'a> Parser<'a> {
         }
         Ok(outputs)
     }
-    
+
     fn parse_result_type(&mut self) -> Result<ResultType, String> {
         if let Some(Ok(Token::BoolTrue)) = self.current_token() {
             self.advance();
             return Ok(ResultType::TrueAssertion);
         }
-        
+
         let mut outputs = Vec::new();
         outputs.push(self.parse_type()?);
         while let Some(Ok(Token::Comma)) = self.current_token() {
             self.advance();
             outputs.push(self.parse_type()?);
         }
-        
+
         Ok(ResultType::Projection(outputs))
     }
-    
+
     fn parse_term_outputs(&mut self) -> Result<Vec<Option<Expr>>, String> {
         let mut outputs = Vec::new();
-        
+
         if let Some(Ok(Token::Semicolon)) = self.current_token() {
             return Ok(outputs);
         }
-        
+
         outputs.push(Some(self.parse_expression()?));
-        
+
         while let Some(Ok(Token::Comma)) = self.current_token() {
             self.advance();
             if let Some(Ok(Token::Comma)) = self.current_token() {
@@ -464,7 +516,7 @@ impl<'a> Parser<'a> {
                 outputs.push(Some(self.parse_expression()?));
             }
         }
-        
+
         Ok(outputs)
     }
 
@@ -667,6 +719,28 @@ impl<'a> Parser<'a> {
             None => return Err("Expected type, found EOF".to_string()),
         };
 
+        // Check for generic type arguments: Type<Type1, Type2, ...>
+        if let Some(Ok(Token::Lt)) = self.current_token() {
+            self.advance();
+            let mut type_args = Vec::new();
+            loop {
+                type_args.push(self.parse_type()?);
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::Gt)?;
+            ty = Type::Applied(
+                match &ty {
+                    Type::Custom(name) => name.clone(),
+                    _ => return Err("Generic type must have a base name".to_string()),
+                },
+                type_args,
+            );
+        }
+
         // Check for contract bound: Type[Expr]
         if let Some(Ok(Token::LBracket)) = self.current_token() {
             self.advance();
@@ -846,11 +920,48 @@ impl<'a> Parser<'a> {
                         Err("Expected identifier after @".to_string())
                     }
                 }
-                _ => self.parse_primary(),
+                _ => self.parse_postfix(),
             }
         } else {
             self.parse_primary()
         }
+    }
+
+    fn parse_postfix(&mut self) -> Result<Expr, String> {
+        let mut expr = self.parse_primary()?;
+        loop {
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance();
+                let index = self.parse_expression()?;
+                self.expect(Token::RBracket)?;
+                expr = Expr::ListIndex(Box::new(expr), Box::new(index));
+            } else if let Some(Ok(Token::Dot)) = self.current_token() {
+                self.advance();
+                let member_name = self.expect_identifier()?;
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    expr = Expr::Call(member_name, vec![expr]);
+                } else {
+                    return Err(format!("Expected '(' after method '{}'", member_name));
+                }
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
     }
 
     fn parse_primary(&mut self) -> Result<Expr, String> {
@@ -1046,6 +1157,24 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_expression()?;
                 self.expect(Token::RParen)?;
                 Ok(expr)
+            }
+            Some(Ok(Token::LBracket)) => {
+                self.advance();
+                let mut elements = Vec::new();
+                if let Some(Ok(Token::RBracket)) = self.current_token() {
+                    // Empty list
+                } else {
+                    loop {
+                        elements.push(self.parse_expression()?);
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.expect(Token::RBracket)?;
+                Ok(Expr::ListLiteral(elements))
             }
             Some(Ok(Token::TildeSlash)) => {
                 // This should be handled in parse_contract or type context.

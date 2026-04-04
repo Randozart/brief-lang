@@ -37,25 +37,25 @@ impl WatchCallback {
         }
     }
 
-    pub fn on_file_saved<F>(mut self, f: F) -> Self 
-    where 
-        F: Fn(PathBuf) + Send + Sync + 'static 
+    pub fn on_file_saved<F>(mut self, f: F) -> Self
+    where
+        F: Fn(PathBuf) + Send + Sync + 'static,
     {
         self.on_file_saved = Box::new(f);
         self
     }
 
-    pub fn on_manifest_changed<F>(mut self, f: F) -> Self 
-    where 
-        F: Fn() + Send + Sync + 'static 
+    pub fn on_manifest_changed<F>(mut self, f: F) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
     {
         self.on_manifest_changed = Box::new(f);
         self
     }
 
-    pub fn on_error<F>(mut self, f: F) -> Self 
-    where 
-        F: Fn(WatchError) + Send + Sync + 'static 
+    pub fn on_error<F>(mut self, f: F) -> Self
+    where
+        F: Fn(WatchError) + Send + Sync + 'static,
     {
         self.on_error = Box::new(f);
         self
@@ -138,10 +138,9 @@ pub struct WatcherState {
 impl WatcherState {
     pub fn new(debounce_ms: u64) -> Result<Self, WatchError> {
         let debouncer = Debouncer::new(WatchCallback::new());
-        
+
         let watcher = RecommendedWatcher::new(
-            move |res: Result<Event, notify::Error>| {
-            },
+            move |res: Result<Event, notify::Error>| {},
             Config::default().with_poll_interval(Duration::from_millis(100)),
         )?;
 
@@ -198,7 +197,7 @@ impl WatchManager {
     pub fn start(&self, project_root: &Path) -> Result<(), WatchError> {
         let mut state = WatcherState::new(self.debounce_ms)?;
         state.watch(project_root)?;
-        
+
         let mut guard = self.state.lock();
         *guard = Some(state);
         Ok(())
@@ -213,9 +212,9 @@ impl WatchManager {
         self.state.lock().is_some()
     }
 
-    pub fn process_events<F>(&self, callback: F) 
-    where 
-        F: Fn(WatchEvent) 
+    pub fn process_events<F>(&self, callback: F)
+    where
+        F: Fn(WatchEvent),
     {
         let mut guard = self.state.lock();
         if let Some(ref mut state) = *guard {
@@ -234,12 +233,12 @@ mod tests {
     #[test]
     fn test_debouncer() {
         let debouncer = Debouncer::new(WatchCallback::new());
-        
+
         debouncer.on_file_event(PathBuf::from("file1.bv"));
         debouncer.on_file_event(PathBuf::from("file2.bv"));
-        
+
         std::thread::sleep(Duration::from_millis(50));
-        
+
         let flushed = debouncer.flush(10);
         assert!(flushed.len() <= 2);
     }

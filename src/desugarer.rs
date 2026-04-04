@@ -71,7 +71,9 @@ impl Desugarer {
     fn needs_desugaring(&self, txn: &Transaction) -> bool {
         if let Expr::Not(inner) = &txn.contract.pre_condition {
             if let Expr::Identifier(name) = &**inner {
-                if name == "done" && matches!(&txn.contract.post_condition, Expr::Identifier(n) if n == "done") {
+                if name == "done"
+                    && matches!(&txn.contract.post_condition, Expr::Identifier(n) if n == "done")
+                {
                     return self.has_term_with_expression(&txn.body);
                 }
             }
@@ -90,7 +92,10 @@ impl Desugarer {
         false
     }
 
-    fn desugar_reactive_txn(&mut self, txn: &Transaction) -> (Transaction, Vec<Signature>, Vec<StateDecl>) {
+    fn desugar_reactive_txn(
+        &mut self,
+        txn: &Transaction,
+    ) -> (Transaction, Vec<Signature>, Vec<StateDecl>) {
         let mut sigs = Vec::new();
         let mut state = Vec::new();
 
@@ -139,7 +144,8 @@ impl Desugarer {
 
     fn extract_function_call(&mut self, expr: &Expr) -> Vec<Signature> {
         if let Expr::Call(name, args) = expr {
-            let input_types: Vec<Type> = args.iter().map(|_| Type::Custom("_".to_string())).collect();
+            let input_types: Vec<Type> =
+                args.iter().map(|_| Type::Custom("_".to_string())).collect();
 
             if !self.generated_signatures.iter().any(|s| s.name == *name) {
                 let sig = Signature {

@@ -20,12 +20,12 @@ impl TypeChecker {
             source: String::new(),
         }
     }
-    
+
     pub fn with_source(mut self, source: String) -> Self {
         self.source = source;
         self
     }
-    
+
     pub fn check_program(&mut self, program: &Program) -> Vec<TypeError> {
         for item in &program.items {
             match item {
@@ -35,15 +35,17 @@ impl TypeChecker {
                         self.diagnostics.push(
                             Diagnostic::new("B002", Severity::Warning, "uninitialized signal")
                                 .with_explanation(&format!(
-                                    "signal '{}' has no initial value specified", 
+                                    "signal '{}' has no initial value specified",
                                     decl.name
                                 ))
                                 .with_hint(&format!(
-                                    "add an initial value: let {}: {} = 0;", 
-                                    decl.name, 
+                                    "add an initial value: let {}: {} = 0;",
+                                    decl.name,
                                     self.type_to_string(&decl.ty)
                                 ))
-                                .with_note("uninitialized signals may contain garbage values at runtime")
+                                .with_note(
+                                    "uninitialized signals may contain garbage values at runtime",
+                                ),
                         );
                     }
                 }
@@ -51,19 +53,15 @@ impl TypeChecker {
                     self.declare_variable(&const_decl.name, const_decl.ty.clone());
                     let expr_ty = self.infer_expression(&const_decl.expr);
                     if !self.types_compatible(&expr_ty, &const_decl.ty) {
-                        let diag = Diagnostic::new(
-                            "B001", 
-                            Severity::Error, 
-                            "type mismatch"
-                        )
-                        .with_explanation(&format!(
-                            "expected {} for constant '{}', but found {}", 
-                            self.type_to_string(&const_decl.ty),
-                            const_decl.name,
-                            self.type_to_string(&expr_ty)
-                        ))
-                        .with_hint("ensure the expression type matches the declared type");
-                        
+                        let diag = Diagnostic::new("B001", Severity::Error, "type mismatch")
+                            .with_explanation(&format!(
+                                "expected {} for constant '{}', but found {}",
+                                self.type_to_string(&const_decl.ty),
+                                const_decl.name,
+                                self.type_to_string(&expr_ty)
+                            ))
+                            .with_hint("ensure the expression type matches the declared type");
+
                         self.diagnostics.push(diag);
                         self.errors.push(TypeError::TypeMismatch {
                             expected: self.type_to_string(&const_decl.ty),
@@ -87,11 +85,11 @@ impl TypeChecker {
         }
         self.errors.clone()
     }
-    
+
     pub fn get_diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
-    
+
     fn format_diagnostics(&self) -> String {
         let mut output = String::new();
         for diag in &self.diagnostics {
@@ -163,7 +161,11 @@ impl TypeChecker {
 
     fn check_statement(&mut self, stmt: &Statement, is_async: Option<&bool>) {
         match stmt {
-            Statement::Assignment { is_owned, name, expr } => {
+            Statement::Assignment {
+                is_owned,
+                name,
+                expr,
+            } => {
                 let expr_ty = self.infer_expression(expr);
                 if let Some(var_ty) = self.lookup_variable(name) {
                     if !self.types_compatible(&expr_ty, &var_ty) {
@@ -175,11 +177,16 @@ impl TypeChecker {
                     }
 
                     if *is_owned {
-                        let has_lower_scope = self.scopes.iter().take(self.scopes.len() - 1).any(|s| s.contains_key(name));
+                        let has_lower_scope = self
+                            .scopes
+                            .iter()
+                            .take(self.scopes.len() - 1)
+                            .any(|s| s.contains_key(name));
                         if !has_lower_scope {
                             self.errors.push(TypeError::OwnershipViolation {
                                 var: name.clone(),
-                                reason: "owned reference requires variable to exist in outer scope".to_string(),
+                                reason: "owned reference requires variable to exist in outer scope"
+                                    .to_string(),
                             });
                         }
                     }
@@ -220,7 +227,10 @@ impl TypeChecker {
                     self.infer_expression(expr);
                 }
             }
-            Statement::Guarded { condition, statement } => {
+            Statement::Guarded {
+                condition,
+                statement,
+            } => {
                 let cond_ty = self.infer_expression(condition);
                 if !self.types_compatible(&cond_ty, &Type::Bool) {
                     self.errors.push(TypeError::TypeMismatch {
@@ -231,7 +241,11 @@ impl TypeChecker {
                 }
                 self.check_statement(statement, is_async);
             }
-            Statement::Unification { name, pattern, expr } => {
+            Statement::Unification {
+                name,
+                pattern,
+                expr,
+            } => {
                 self.infer_expression(expr);
                 self.declare_variable(name, Type::Custom(pattern.clone()));
             }
@@ -244,23 +258,50 @@ impl TypeChecker {
             Expr::Float(_) => Type::Float,
             Expr::String(_) => Type::String,
             Expr::Bool(_) => Type::Bool,
-            Expr::Identifier(name) => {
-                self.lookup_variable(name).unwrap_or(Type::Custom(name.clone()))
-            }
-            Expr::OwnedRef(name) => {
-                self.lookup_variable(name).unwrap_or(Type::Custom(name.clone()))
-            }
-            Expr::PriorState(name) => {
-                self.lookup_variable(name).unwrap_or(Type::Custom(name.clone()))
-            }
+            Expr::Identifier(name) => self
+                .lookup_variable(name)
+                .unwrap_or(Type::Custom(name.clone())),
+            Expr::OwnedRef(name) => self
+                .lookup_variable(name)
+                .unwrap_or(Type::Custom(name.clone())),
+            Expr::PriorState(name) => self
+                .lookup_variable(name)
+                .unwrap_or(Type::Custom(name.clone())),
             Expr::Add(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
             Expr::Sub(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
             Expr::Mul(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
             Expr::Div(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
-            Expr::Eq(_, _) | Expr::Ne(_, _) | Expr::Lt(_, _) | Expr::Le(_, _)
-            | Expr::Gt(_, _) | Expr::Ge(_, _) | Expr::Or(_, _) | Expr::And(_, _) => Type::Bool,
+            Expr::Eq(_, _)
+            | Expr::Ne(_, _)
+            | Expr::Lt(_, _)
+            | Expr::Le(_, _)
+            | Expr::Gt(_, _)
+            | Expr::Ge(_, _)
+            | Expr::Or(_, _)
+            | Expr::And(_, _) => Type::Bool,
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.infer_expression(e),
             Expr::Call(name, _args) => Type::Custom(name.clone()),
+            Expr::ListLiteral(elements) => {
+                if elements.is_empty() {
+                    Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])
+                } else {
+                    let elem_type = self.infer_expression(&elements[0]);
+                    Type::Applied("List".to_string(), vec![elem_type])
+                }
+            }
+            Expr::ListIndex(list_expr, _) => {
+                let list_type = self.infer_expression(list_expr);
+                if let Type::Applied(_, type_args) = list_type {
+                    if !type_args.is_empty() {
+                        type_args[0].clone()
+                    } else {
+                        Type::TypeVar("T".to_string())
+                    }
+                } else {
+                    Type::TypeVar("T".to_string())
+                }
+            }
+            Expr::ListLen(_) => Type::Int,
         }
     }
 
@@ -287,6 +328,23 @@ impl TypeChecker {
             (Type::Union(types), t) | (t, Type::Union(types)) => {
                 types.iter().any(|u| self.types_compatible(u, t))
             }
+            (Type::TypeVar(a), Type::TypeVar(b)) => a == b,
+            (Type::Generic(a, args_a), Type::Generic(b, args_b)) => {
+                a == b
+                    && args_a.len() == args_b.len()
+                    && args_a
+                        .iter()
+                        .zip(args_b.iter())
+                        .all(|(x, y)| self.types_compatible(x, y))
+            }
+            (Type::Applied(a, args_a), Type::Applied(b, args_b)) => {
+                a == b
+                    && args_a.len() == args_b.len()
+                    && args_a
+                        .iter()
+                        .zip(args_b.iter())
+                        .all(|(x, y)| self.types_compatible(x, y))
+            }
             _ => false,
         }
     }
@@ -301,6 +359,11 @@ impl TypeChecker {
             Type::ContractBound(inner, _) => {
                 self.validate_type(inner);
             }
+            Type::Generic(_, type_args) | Type::Applied(_, type_args) => {
+                for t in type_args {
+                    self.validate_type(t);
+                }
+            }
             _ => {}
         }
     }
@@ -314,11 +377,36 @@ impl TypeChecker {
             Type::Data => "Data".to_string(),
             Type::Void => "Void".to_string(),
             Type::Custom(name) => name.clone(),
-            Type::Union(types) => {
-                types.iter().map(|t| self.type_to_string(t)).collect::<Vec<_>>().join(" | ")
-            }
+            Type::TypeVar(name) => name.clone(),
+            Type::Union(types) => types
+                .iter()
+                .map(|t| self.type_to_string(t))
+                .collect::<Vec<_>>()
+                .join(" | "),
             Type::ContractBound(inner, guard) => {
                 format!("{}[{:?}]", self.type_to_string(inner), guard)
+            }
+            Type::Generic(name, type_args) => {
+                format!(
+                    "{}<{}>",
+                    name,
+                    type_args
+                        .iter()
+                        .map(|t| self.type_to_string(t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Type::Applied(name, type_args) => {
+                format!(
+                    "{}<{}>",
+                    name,
+                    type_args
+                        .iter()
+                        .map(|t| self.type_to_string(t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
         }
     }

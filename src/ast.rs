@@ -11,6 +11,23 @@ pub enum Type {
     Custom(String),
     Union(Vec<Type>),
     ContractBound(Box<Type>, Box<Expr>),
+    TypeVar(String),
+    Generic(String, Vec<Type>),
+    Applied(String, Vec<Type>),
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeParam {
+    pub name: String,
+    pub bounds: Vec<TypeBound>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeBound {
+    Eq(Type),
+    SubTypeOf(Type),
+    SuperTypeOf(Type),
+    HasTrait(String),
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +61,9 @@ pub enum Expr {
     Neg(Box<Expr>),
     BitNot(Box<Expr>),
     Call(String, Vec<Expr>),
+    ListLiteral(Vec<Expr>),
+    ListIndex(Box<Expr>, Box<Expr>),
+    ListLen(Box<Expr>),
 }
 
 impl Expr {
@@ -120,6 +140,7 @@ pub struct Signature {
 #[derive(Debug, Clone)]
 pub struct Definition {
     pub name: String,
+    pub type_params: Vec<TypeParam>,
     pub parameters: Vec<(String, Type)>,
     pub outputs: Vec<Type>,
     pub contract: Contract,

@@ -23,12 +23,11 @@ impl RbvFile {
     pub fn parse(source: &str) -> Result<Self, RbvError> {
         let script = extract_tag(source, "<script type=\"brief\">", "</script>")
             .ok_or(RbvError::MissingScript)?;
-        
-        let view = extract_tag(source, "<view>", "</view>")
-            .ok_or(RbvError::MissingView)?;
-        
+
+        let view = extract_tag(source, "<view>", "</view>").ok_or(RbvError::MissingView)?;
+
         let style = extract_tag(source, "<style>", "</style>");
-        
+
         Ok(RbvFile {
             brief_source: script.trim().to_string(),
             view_html: view.trim().to_string(),

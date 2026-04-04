@@ -23,7 +23,11 @@ impl ImportResolver {
         self.search_paths.push(path);
     }
 
-    pub fn resolve_imports(&mut self, program: &Program, file_path: &PathBuf) -> Result<Program, String> {
+    pub fn resolve_imports(
+        &mut self,
+        program: &Program,
+        file_path: &PathBuf,
+    ) -> Result<Program, String> {
         let mut items = program.items.clone();
         let mut index = 0;
 
@@ -43,7 +47,11 @@ impl ImportResolver {
         })
     }
 
-    fn resolve_import(&mut self, import: &Import, source_file: &PathBuf) -> Result<Program, String> {
+    fn resolve_import(
+        &mut self,
+        import: &Import,
+        source_file: &PathBuf,
+    ) -> Result<Program, String> {
         if import.items.is_empty() && import.path.is_empty() {
             return Ok(Program {
                 items: vec![],
@@ -100,10 +108,12 @@ impl ImportResolver {
             .map_err(|e| format!("Failed to read '{}': {}", resolved_path.display(), e))?;
 
         let mut parser = crate::parser::Parser::new(&source);
-        let imported_program = parser.parse()
+        let imported_program = parser
+            .parse()
             .map_err(|e| format!("Failed to parse '{}': {}", resolved_path.display(), e))?;
 
-        self.loaded_modules.insert(path_str.clone(), imported_program.clone());
+        self.loaded_modules
+            .insert(path_str.clone(), imported_program.clone());
 
         let resolved = self.resolve_imports(&imported_program, &resolved_path)?;
         self.filter_items(&resolved, &import.items)

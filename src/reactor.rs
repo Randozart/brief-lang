@@ -133,6 +133,18 @@ impl Reactor {
                 }
             }
             Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Bool(_) => {}
+            Expr::ListLiteral(elements) => {
+                for elem in elements {
+                    self.collect_identifiers(elem, deps);
+                }
+            }
+            Expr::ListIndex(list_expr, index_expr) => {
+                self.collect_identifiers(list_expr, deps);
+                self.collect_identifiers(index_expr, deps);
+            }
+            Expr::ListLen(inner) => {
+                self.collect_identifiers(inner, deps);
+            }
         }
     }
 
@@ -175,7 +187,8 @@ impl Reactor {
                             match self.execute_statement(interp, stmt) {
                                 Ok(StmtResult::Continue) => {}
                                 Ok(StmtResult::TermSuccess) => {
-                                    let post_val = interp.eval_expr(&txn.contract.post_condition)?;
+                                    let post_val =
+                                        interp.eval_expr(&txn.contract.post_condition)?;
                                     if post_val == Value::Bool(true) {
                                         term_executed = true;
                                         any_executed = true;
@@ -228,7 +241,11 @@ impl Reactor {
         stmt: &Statement,
     ) -> Result<StmtResult, crate::interpreter::RuntimeError> {
         match stmt {
-            Statement::Assignment { is_owned, name, expr } => {
+            Statement::Assignment {
+                is_owned,
+                name,
+                expr,
+            } => {
                 let value = interp.eval_expr(expr)?;
                 if *is_owned {
                     interp.state.insert(name.clone(), value);
@@ -264,10 +281,11 @@ impl Reactor {
                     Ok(StmtResult::TermSuccess)
                 }
             }
-            Statement::Escape(_) => {
-                Ok(StmtResult::Escaped)
-            }
-            Statement::Guarded { condition, statement } => {
+            Statement::Escape(_) => Ok(StmtResult::Escaped),
+            Statement::Guarded {
+                condition,
+                statement,
+            } => {
                 let cond_val = interp.eval_expr(condition)?;
                 if cond_val == Value::Bool(true) {
                     self.execute_statement(interp, statement)
@@ -275,9 +293,7 @@ impl Reactor {
                     Ok(StmtResult::Continue)
                 }
             }
-            Statement::Unification { .. } => {
-                Ok(StmtResult::Continue)
-            }
+            Statement::Unification { .. } => Ok(StmtResult::Continue),
         }
     }
 }
@@ -289,7 +305,10 @@ enum StmtResult {
     Escaped,
 }
 
-pub fn run_reactor(program: &Program, interp: &mut Interpreter) -> Result<(), crate::interpreter::RuntimeError> {
+pub fn run_reactor(
+    program: &Program,
+    interp: &mut Interpreter,
+) -> Result<(), crate::interpreter::RuntimeError> {
     let mut reactor = Reactor::new();
     reactor.build_from_program(program);
 

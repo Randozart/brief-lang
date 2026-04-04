@@ -50,7 +50,7 @@ impl CacheManager {
         if !cache_dir.exists() {
             fs::create_dir_all(&cache_dir)?;
         }
-        
+
         let modules_dir = cache_dir.join("modules");
         if !modules_dir.exists() {
             fs::create_dir_all(&modules_dir)?;
@@ -103,7 +103,7 @@ impl CacheManager {
 
     pub fn update_file_cache(&mut self, file_path: String, source: &str, interface_hash: String) {
         let source_hash = self.source_hash(source);
-        
+
         let file_cache = FileCache {
             source_hash: source_hash.clone(),
             interface_hash: interface_hash.clone(),
@@ -112,9 +112,11 @@ impl CacheManager {
             proofs_valid: true,
             last_modified: std::time::SystemTime::now(),
         };
-        
+
         self.manifest.files.insert(file_path.clone(), file_cache);
-        self.manifest.interface_hashes.insert(file_path, interface_hash);
+        self.manifest
+            .interface_hashes
+            .insert(file_path, interface_hash);
     }
 
     pub fn invalidate_file(&mut self, file_path: &str) {
@@ -132,7 +134,10 @@ impl CacheManager {
     }
 
     pub fn get_module_cache(&self, name: &str) -> Option<ModuleCache> {
-        let path = self.cache_dir.join("modules").join(format!("{}.json", name));
+        let path = self
+            .cache_dir
+            .join("modules")
+            .join(format!("{}.json", name));
         if path.exists() {
             let content = fs::read_to_string(&path).ok()?;
             serde_json::from_str(&content).ok()
@@ -142,7 +147,10 @@ impl CacheManager {
     }
 
     pub fn save_module_cache(&self, name: &str, cache: &ModuleCache) -> Result<(), CacheError> {
-        let path = self.cache_dir.join("modules").join(format!("{}.json", name));
+        let path = self
+            .cache_dir
+            .join("modules")
+            .join(format!("{}.json", name));
         let content = serde_json::to_string_pretty(cache)
             .map_err(|e| CacheError::SerializationError(e.to_string()))?;
         fs::write(&path, content)?;
@@ -162,9 +170,7 @@ impl CacheManager {
             .files
             .iter()
             .filter(|(k, _)| *k != file_path)
-            .filter(|(_, cache)| {
-                self.is_interface_changed(file_path, &cache.interface_hash)
-            })
+            .filter(|(_, cache)| self.is_interface_changed(file_path, &cache.interface_hash))
             .map(|(k, _)| k.clone())
             .collect()
     }
@@ -226,7 +232,7 @@ impl InterfaceHasher {
         combined.push_str(&self.signatures.join("\n"));
         combined.push('\n');
         combined.push_str(&self.types.join("\n"));
-        
+
         blake3::hash(combined.as_bytes()).to_hex().to_string()
     }
 }
@@ -246,11 +252,11 @@ mod tests {
     fn test_source_hashing() {
         let tmp = TempDir::new().unwrap();
         let cache = CacheManager::new(tmp.path().to_path_buf()).unwrap();
-        
+
         let hash1 = cache.source_hash("let x = 1;");
         let hash2 = cache.source_hash("let x = 1;");
         let hash3 = cache.source_hash("let x = 2;");
-        
+
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
     }
@@ -259,13 +265,13 @@ mod tests {
     fn test_cache_validity() {
         let tmp = TempDir::new().unwrap();
         let mut cache = CacheManager::new(tmp.path().to_path_buf()).unwrap();
-        
+
         let source = "let x = 1;";
         assert!(!cache.is_file_cache_valid("test.bv", source));
-        
+
         cache.update_file_cache("test.bv".to_string(), source, "iface1".to_string());
         assert!(cache.is_file_cache_valid("test.bv", source));
-        
+
         let new_source = "let x = 2;";
         assert!(!cache.is_file_cache_valid("test.bv", new_source));
     }
@@ -274,9 +280,9 @@ mod tests {
     fn test_interface_change_detection() {
         let tmp = TempDir::new().unwrap();
         let mut cache = CacheManager::new(tmp.path().to_path_buf()).unwrap();
-        
+
         cache.update_file_cache("test.bv".to_string(), "source", "iface_v1".to_string());
-        
+
         assert!(!cache.is_interface_changed("test.bv", "iface_v1"));
         assert!(cache.is_interface_changed("test.bv", "iface_v2"));
     }
