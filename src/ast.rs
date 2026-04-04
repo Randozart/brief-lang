@@ -64,6 +64,7 @@ pub enum Expr {
     ListLiteral(Vec<Expr>),
     ListIndex(Box<Expr>, Box<Expr>),
     ListLen(Box<Expr>),
+    FieldAccess(Box<Expr>, String),
 }
 
 impl Expr {
@@ -200,6 +201,32 @@ pub enum TopLevel {
     Constant(Constant),
     Import(Import),
     ForeignSig(ForeignSig),
+    Struct(StructDefinition),
+}
+
+#[derive(Debug, Clone)]
+pub struct StructDefinition {
+    pub name: String,
+    pub fields: Vec<StructField>,
+    pub transactions: Vec<Transaction>,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructField {
+    pub name: String,
+    pub ty: Type,
+}
+
+impl StructDefinition {
+    pub fn new(name: String) -> Self {
+        StructDefinition {
+            name,
+            fields: Vec::new(),
+            transactions: Vec::new(),
+            span: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

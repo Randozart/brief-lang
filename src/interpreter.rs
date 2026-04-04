@@ -10,6 +10,7 @@ pub enum Value {
     Bool(bool),
     Data(Vec<u8>),
     List(Vec<Value>),
+    Struct(HashMap<String, Value>),
     Void,
 }
 
@@ -22,6 +23,7 @@ impl fmt::Display for Value {
             Value::Bool(v) => write!(f, "{}", v),
             Value::Data(_) => write!(f, "<data>"),
             Value::List(items) => write!(f, "[{}]", items.len()),
+            Value::Struct(fields) => write!(f, "{{{} fields}}", fields.len()),
             Value::Void => write!(f, "void"),
         }
     }
@@ -391,6 +393,17 @@ impl Interpreter {
                 match list_val {
                     Value::List(items) => Ok(Value::Int(items.len() as i64)),
                     _ => Err(RuntimeError::TypeMismatch("len requires List".to_string())),
+                }
+            }
+            Expr::FieldAccess(obj_expr, field_name) => {
+                let obj_val = self.eval_expr(obj_expr)?;
+                match obj_val {
+                    Value::Struct(fields) => fields.get(field_name).cloned().ok_or_else(|| {
+                        RuntimeError::UndefinedVariable(format!("field '{}'", field_name))
+                    }),
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "field access requires Struct".to_string(),
+                    )),
                 }
             }
         }

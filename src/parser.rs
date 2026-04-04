@@ -182,6 +182,10 @@ impl<'a> Parser<'a> {
                 let frgn_sig = self.parse_frgn_sig()?;
                 Ok(TopLevel::ForeignSig(frgn_sig))
             }
+            Some(Ok(Token::Struct)) => {
+                let struct_def = self.parse_struct()?;
+                Ok(TopLevel::Struct(struct_def))
+            }
             Some(Ok(Token::Comment(_))) => {
                 self.advance();
                 self.parse_top_level()
@@ -323,6 +327,62 @@ impl<'a> Parser<'a> {
             input_types: parameters,
             outputs,
         })
+    }
+
+    fn parse_struct(&mut self) -> Result<StructDefinition, String> {
+        self.expect(Token::Struct)?;
+        let name = self.expect_identifier()?;
+
+        self.expect(Token::LBrace)?;
+
+        let mut fields = Vec::new();
+        let mut transactions = Vec::new();
+
+        while let Some(token) = self.current_token() {
+            match token {
+                Ok(Token::RBrace) => {
+                    self.advance();
+                    break;
+                }
+                Ok(Token::Identifier(_)) => {
+                    if let Some(Ok(Token::Identifier(_))) = self.peek() {
+                        let field_name = self.expect_identifier()?;
+                        self.expect(Token::Colon)?;
+                        let field_type = self.parse_type()?;
+                        self.expect(Token::Semicolon)?;
+                        fields.push(StructField {
+                            name: field_name,
+                            ty: field_type,
+                        });
+                    } else {
+                        let txn = self.parse_transaction()?;
+                        transactions.push(txn);
+                    }
+                }
+                Ok(Token::Txn) | Ok(Token::Rct) | Ok(Token::Async) => {
+                    let txn = self.parse_transaction()?;
+                    transactions.push(txn);
+                }
+                Ok(Token::Comment(_)) => {
+                    self.advance();
+                }
+                _ => {
+                    return Err(format!("Unexpected token in struct: {:?}", token));
+                }
+            }
+        }
+
+        let span = self.current_span();
+        Ok(StructDefinition {
+            name,
+            fields,
+            transactions,
+            span,
+        })
+    }
+
+    fn peek(&self) -> Option<&Result<Token, ()>> {
+        self.peek.as_ref().map(|(t, _)| t)
     }
 
     fn parse_state_decl(&mut self) -> Result<StateDecl, String> {
@@ -1058,7 +1118,7 @@ impl<'a> Parser<'a> {
                     self.expect(Token::RParen)?;
                     expr = Expr::Call(member_name, vec![expr]);
                 } else {
-                    return Err(format!("Expected '(' after method '{}'", member_name));
+                    expr = Expr::FieldAccess(Box::new(expr), member_name);
                 }
             } else {
                 break;

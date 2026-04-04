@@ -9,6 +9,7 @@ enum SignalType {
     Bool,
     String,
     List,
+    Struct,
 }
 
 pub struct WasmGenerator {
@@ -62,15 +63,20 @@ impl WasmGenerator {
                         Type::String => SignalType::String,
                         Type::Applied(name, _) if name == "List" => SignalType::List,
                         Type::Generic(name, _) if name == "List" => SignalType::List,
+                        Type::Custom(_) => SignalType::Struct,
                         Type::TypeVar(_) => SignalType::Int,
                         _ => SignalType::Int,
                     };
-                    self.signal_types.insert(decl.name.clone(), signal_type);
+                    self.signal_types
+                        .insert(decl.name.clone(), signal_type.clone());
 
                     let initializer = if let Some(expr) = &decl.expr {
                         self.expr_to_js_value(expr)
                     } else {
-                        "js_sys::Array::new()".to_string()
+                        match &signal_type {
+                            SignalType::Struct => "js_sys::Object::new()".to_string(),
+                            _ => "js_sys::Array::new()".to_string(),
+                        }
                     };
                     self.signal_initializers
                         .insert(decl.name.clone(), initializer);
@@ -133,7 +139,7 @@ impl WasmGenerator {
         for (name, sig_type) in &self.signal_types {
             let &id = self.signal_map.get(name).unwrap();
             match sig_type {
-                SignalType::List => {
+                SignalType::List | SignalType::Struct => {
                     let getter = format!("    pub fn get_{}(&self) -> JsValue {{\n", name);
                     output.push_str(&getter);
                     output.push_str(&format!("        self.signals[{}].clone()\n", id));
@@ -415,6 +421,10 @@ impl WasmGenerator {
             Expr::ListLen(list_expr) => {
                 let list_val = self.expr_to_js_value(list_expr);
                 format!("{}.length()", list_val)
+            }
+            Expr::FieldAccess(obj_expr, field_name) => {
+                let obj_val = self.expr_to_js_value(obj_expr);
+                format!("{}.{}", obj_val, field_name)
             }
             _ => "JsValue::TRUE".to_string(),
         }

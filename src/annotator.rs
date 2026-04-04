@@ -379,6 +379,16 @@ impl Annotator {
                         frgn.name, inputs, outputs
                     ));
                 }
+                TopLevel::Struct(struct_def) => {
+                    output.push_str(&format!("struct {} {{ ", struct_def.name));
+                    let field_strs: Vec<String> = struct_def
+                        .fields
+                        .iter()
+                        .map(|f| format!("{}: {}", f.name, self.type_to_string(&f.ty)))
+                        .collect();
+                    output.push_str(&field_strs.join(", "));
+                    output.push_str(" }\n");
+                }
             }
             output.push('\n');
         }
@@ -659,6 +669,9 @@ impl Annotator {
             }
             Expr::ListLen(list) => {
                 format!("{}.len()", self.format_expr(list))
+            }
+            Expr::FieldAccess(obj, field) => {
+                format!("{}.{}", self.format_expr(obj), field)
             }
         }
     }

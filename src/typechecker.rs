@@ -81,6 +81,7 @@ impl TypeChecker {
                 }
                 TopLevel::Import(_) => {}
                 TopLevel::ForeignSig(_) => {}
+                TopLevel::Struct(_) => {}
             }
         }
         self.errors.clone()
@@ -302,6 +303,7 @@ impl TypeChecker {
                 }
             }
             Expr::ListLen(_) => Type::Int,
+            Expr::FieldAccess(_, _) => Type::Custom("unknown".to_string()),
         }
     }
 

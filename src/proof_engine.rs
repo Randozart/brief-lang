@@ -202,6 +202,9 @@ impl ProofEngine {
             Expr::ListLen(inner) => {
                 self.collect_identifiers(inner, vars);
             }
+            Expr::FieldAccess(obj, _) => {
+                self.collect_identifiers(obj, vars);
+            }
         }
     }
 

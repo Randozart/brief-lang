@@ -145,6 +145,9 @@ impl Reactor {
             Expr::ListLen(inner) => {
                 self.collect_identifiers(inner, deps);
             }
+            Expr::FieldAccess(obj, _) => {
+                self.collect_identifiers(obj, deps);
+            }
         }
     }
 

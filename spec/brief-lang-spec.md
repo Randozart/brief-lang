@@ -52,7 +52,40 @@ rct_transaction ::= "rct" ("async")? "txn" identifier contract "{" body "}" ";"
 body ::= statement*
 ```
 
-### 2.2 Types and Contracts
+### 2.2 Structs (Stateful Objects)
+
+```bnf
+struct_def ::= "struct" identifier "{" struct_member* "}"
+struct_member ::= field_decl | transaction
+field_decl ::= identifier ":" type ";"
+```
+
+**Example:**
+```brief
+struct Player {
+    name: String;
+    score: Int;
+    position: Int;
+    
+    txn update_score [score >= 0][score == @score + points] {
+        &score = score + points;
+        term;
+    };
+};
+```
+
+Structs can contain:
+- **Fields**: Named data members with types
+- **Transactions**: Methods that operate on the struct's state
+
+**Field Access:**
+```brief
+let player: Player;
+player.name       # Access field
+player.score      # Access another field
+```
+
+### 2.3 Types and Contracts
 
 ```bnf
 type_spec ::= simple_type | union_type | contract_bound_type

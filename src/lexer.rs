@@ -31,6 +31,8 @@ pub enum Token {
     As,
     #[token("frgn")]
     Frgn,
+    #[token("struct")]
+    Struct,
 
     #[token("true")]
     BoolTrue,
