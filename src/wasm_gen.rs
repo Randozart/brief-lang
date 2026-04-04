@@ -356,6 +356,7 @@ impl WasmGenerator {
             Expr::Integer(n) => format!("JsValue::from({})", n),
             Expr::Bool(true) => "JsValue::TRUE".to_string(),
             Expr::Bool(false) => "JsValue::FALSE".to_string(),
+            Expr::String(s) => format!("JsValue::from(\"{}\")", s),
             Expr::Identifier(name) => {
                 if let Some(&id) = self.signal_map.get(name) {
                     format!("self.signals[{}].clone()", id)
