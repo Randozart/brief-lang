@@ -1,0 +1,10 @@
+let greeting: String = "Hello";
+
+txn greet [true] {
+  term greeting;
+};
+
+txn set_greeting [true] {
+  &greeting = "Hello, World!";
+  term;
+};
