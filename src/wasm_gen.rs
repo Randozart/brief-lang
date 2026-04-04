@@ -8,6 +8,7 @@ enum SignalType {
     Float,
     Bool,
     String,
+    List,
 }
 
 pub struct WasmGenerator {
@@ -59,14 +60,17 @@ impl WasmGenerator {
                         Type::Float => SignalType::Float,
                         Type::Bool => SignalType::Bool,
                         Type::String => SignalType::String,
+                        Type::Applied(name, _) if name == "List" => SignalType::List,
+                        Type::Generic(name, _) if name == "List" => SignalType::List,
+                        Type::TypeVar(_) => SignalType::Int,
                         _ => SignalType::Int,
                     };
                     self.signal_types.insert(decl.name.clone(), signal_type);
 
                     let initializer = if let Some(expr) = &decl.expr {
-                        self.expr_to_rust(expr)
+                        self.expr_to_js_value(expr)
                     } else {
-                        "0".to_string()
+                        "js_sys::Array::new()".to_string()
                     };
                     self.signal_initializers
                         .insert(decl.name.clone(), initializer);
@@ -94,7 +98,7 @@ impl WasmGenerator {
         ));
         output.push_str("#[wasm_bindgen]\n");
         output.push_str("pub struct State {\n");
-        output.push_str("    signals: Vec<i32>,\n");
+        output.push_str("    signals: Vec<JsValue>,\n");
         output.push_str("    dirty_signals: Vec<bool>,\n");
         output.push_str("}\n\n");
 
@@ -108,16 +112,16 @@ impl WasmGenerator {
                 .signal_initializers
                 .get(name)
                 .cloned()
-                .unwrap_or_else(|| "0".to_string());
-            output.push_str(&format!("            {} as i32, // signal {}\n", init, id));
+                .unwrap_or_else(|| "js_sys::Array::new()".to_string());
+            output.push_str(&format!("            {}.into(), // signal {}\n", init, id));
         }
         output.push_str("        ];\n");
         output.push_str("        let dirty_signals = vec![false; SIGNALS];\n");
         output.push_str("        State { signals, dirty_signals }\n");
         output.push_str("    }\n\n");
 
-        output.push_str("    pub fn get_signal(&self, id: usize) -> i32 {\n");
-        output.push_str("        self.signals[id]\n");
+        output.push_str("    pub fn get_signal(&self, id: usize) -> JsValue {\n");
+        output.push_str("        self.signals[id].clone()\n");
         output.push_str("    }\n\n");
 
         output.push_str("    fn mark_dirty(&mut self, id: usize) {\n");
@@ -126,17 +130,40 @@ impl WasmGenerator {
         output.push_str("        }\n");
         output.push_str("    }\n\n");
 
-        for (name, &id) in &self.signal_map {
-            let getter = format!("    pub fn get_{}(&self) -> i32 {{\n", name);
-            output.push_str(&getter);
-            output.push_str(&format!("        self.signals[{}]\n", id));
-            output.push_str("    }\n\n");
+        for (name, sig_type) in &self.signal_types {
+            let &id = self.signal_map.get(name).unwrap();
+            match sig_type {
+                SignalType::List => {
+                    let getter = format!("    pub fn get_{}(&self) -> JsValue {{\n", name);
+                    output.push_str(&getter);
+                    output.push_str(&format!("        self.signals[{}].clone()\n", id));
+                    output.push_str("    }\n\n");
 
-            let setter = format!("    pub fn set_{}(&mut self, value: i32) {{\n", name);
-            output.push_str(&setter);
-            output.push_str(&format!("        self.signals[{}] = value;\n", id));
-            output.push_str(&format!("        self.mark_dirty({});\n", id));
-            output.push_str("    }\n\n");
+                    let setter = format!("    pub fn set_{}(&mut self, value: JsValue) {{\n", name);
+                    output.push_str(&setter);
+                    output.push_str(&format!("        self.signals[{}] = value;\n", id));
+                    output.push_str(&format!("        self.mark_dirty({});\n", id));
+                    output.push_str("    }\n\n");
+                }
+                _ => {
+                    let getter = format!("    pub fn get_{}(&self) -> i32 {{\n", name);
+                    output.push_str(&getter);
+                    output.push_str(&format!(
+                        "        self.signals[{}].as_f64().unwrap_or(0.0) as i32\n",
+                        id
+                    ));
+                    output.push_str("    }\n\n");
+
+                    let setter = format!("    pub fn set_{}(&mut self, value: i32) {{\n", name);
+                    output.push_str(&setter);
+                    output.push_str(&format!(
+                        "        self.signals[{}] = JsValue::from(value);\n",
+                        id
+                    ));
+                    output.push_str(&format!("        self.mark_dirty({});\n", id));
+                    output.push_str("    }\n\n");
+                }
+            }
         }
 
         for item in &program.items {
@@ -148,15 +175,19 @@ impl WasmGenerator {
         output.push_str("    pub fn poll_dispatch(&mut self) -> JsValue {\n");
         output.push_str("        let mut parts: Vec<String> = vec![];\n");
 
-        output.push_str("        fn json_text(el: &str, val: i32) -> String {\n");
-        output.push_str("            format!(\"{{\\\"op\\\":\\\"text\\\",\\\"el\\\":\\\"{}\\\",\\\"value\\\":{}}}\", el, val)\n");
+        output.push_str("        fn json_text(el: &str, val: JsValue) -> String {\n");
+        output.push_str("            if let Some(n) = val.as_f64() {\n");
+        output.push_str("                format!(\"{{\\\"op\\\":\\\"text\\\",\\\"el\\\":\\\"{}\\\",\\\"value\\\":{}}}\", el, n as i32)\n");
+        output.push_str("            } else {\n");
+        output.push_str("                format!(\"{{\\\"op\\\":\\\"text\\\",\\\"el\\\":\\\"{}\\\",\\\"value\\\":0}}\", el)\n");
+        output.push_str("            }\n");
         output.push_str("        }\n");
         for binding in bindings {
             if let Directive::Text { signal } = &binding.directive {
                 if let Some(&sig_id) = self.signal_map.get(signal) {
                     output.push_str(&format!("        if self.dirty_signals[{}] {{\n", sig_id));
                     output.push_str(&format!(
-                        "            let val = self.signals[{}];\n",
+                        "            let val = self.signals[{}].clone();\n",
                         sig_id
                     ));
                     output.push_str("            let json = json_text(&format!(\"{}\", \"");
@@ -187,7 +218,7 @@ impl WasmGenerator {
         output.push_str(&method_name);
 
         output.push_str("        // Precondition\n");
-        let pre_code = self.expr_to_rust_condition(&txn.contract.pre_condition);
+        let pre_code = self.expr_to_js_value_for_condition(&txn.contract.pre_condition);
         output.push_str(&format!("        if !({}) {{\n", pre_code));
         output.push_str("            return;\n");
         output.push_str("        }\n\n");
@@ -195,7 +226,7 @@ impl WasmGenerator {
         output.push_str("        // Save prior state\n");
         for (name, &id) in &self.signal_map {
             output.push_str(&format!(
-                "        let prior_{} = self.signals[{}];\n",
+                "        let prior_{} = self.signals[{}].clone();\n",
                 name, id
             ));
         }
@@ -208,7 +239,7 @@ impl WasmGenerator {
 
         output.push_str("\n");
         output.push_str("        // Postcondition\n");
-        let post_code = self.expr_to_rust_postcondition(&txn.contract.post_condition);
+        let post_code = self.expr_to_js_value_for_condition(&txn.contract.post_condition);
         output.push_str(&format!("        if !({}) {{\n", post_code));
         output.push_str("            // Rollback\n");
         for (name, &id) in &self.signal_map {
@@ -231,10 +262,12 @@ impl WasmGenerator {
                 expr,
             } => {
                 if *is_owned {
-                    let expr_code = self.expr_to_rust(expr);
+                    let expr_code = self.expr_to_js_value(expr);
                     if let Some(&id) = self.signal_map.get(name) {
-                        output
-                            .push_str(&format!("        self.signals[{}] = {};\n", id, expr_code));
+                        output.push_str(&format!(
+                            "        self.signals[{}] = {}.into();\n",
+                            id, expr_code
+                        ));
                         output.push_str(&format!("        self.mark_dirty({});\n", id));
                     }
                 }
@@ -246,49 +279,202 @@ impl WasmGenerator {
         }
     }
 
-    fn expr_to_rust(&self, expr: &Expr) -> String {
+    fn expr_to_js_value(&self, expr: &Expr) -> String {
         match expr {
-            Expr::Integer(n) => n.to_string(),
-            Expr::Bool(true) => "true".to_string(),
-            Expr::Bool(false) => "false".to_string(),
+            Expr::Integer(n) => format!("JsValue::from({})", n),
+            Expr::Bool(true) => "JsValue::TRUE".to_string(),
+            Expr::Bool(false) => "JsValue::FALSE".to_string(),
             Expr::Identifier(name) => {
                 if let Some(&id) = self.signal_map.get(name) {
-                    format!("self.signals[{}]", id)
+                    format!("self.signals[{}].clone()", id)
                 } else {
-                    name.clone()
+                    format!("JsValue::from(\"{}\")", name)
                 }
             }
             Expr::PriorState(name) => {
                 if let Some(&id) = self.signal_map.get(name) {
-                    format!("prior_{}", name)
+                    format!("prior_{}.clone()", name)
                 } else {
-                    name.clone()
+                    format!("JsValue::from(\"{}\")", name)
                 }
             }
-            Expr::Add(a, b) => format!("({} + {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Sub(a, b) => format!("({} - {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Mul(a, b) => format!("({} * {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Div(a, b) => format!("({} / {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Eq(a, b) => format!("({} == {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Ne(a, b) => format!("({} != {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Lt(a, b) => format!("({} < {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Le(a, b) => format!("({} <= {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Gt(a, b) => format!("({} > {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Ge(a, b) => format!("({} >= {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::And(a, b) => format!("({} && {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Or(a, b) => format!("({} || {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Not(a) => format!("(!{})", self.expr_to_rust(a)),
-            Expr::Neg(a) => format!("(-{})", self.expr_to_rust(a)),
-            _ => "true".to_string(),
+            Expr::Add(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "JsValue::from({}.as_f64().unwrap_or(0.0) + {}.as_f64().unwrap_or(0.0))",
+                    a_val, b_val
+                )
+            }
+            Expr::Sub(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "JsValue::from({}.as_f64().unwrap_or(0.0) - {}.as_f64().unwrap_or(0.0))",
+                    a_val, b_val
+                )
+            }
+            Expr::Mul(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "JsValue::from({}.as_f64().unwrap_or(0.0) * {}.as_f64().unwrap_or(0.0))",
+                    a_val, b_val
+                )
+            }
+            Expr::Div(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "JsValue::from({}.as_f64().unwrap_or(0.0) / {}.as_f64().unwrap_or(0.0))",
+                    a_val, b_val
+                )
+            }
+            Expr::Eq(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "{}.as_f64().unwrap_or(0.0) == {}.as_f64().unwrap_or(0.0)",
+                    a_val, b_val
+                )
+            }
+            Expr::Ne(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "{}.as_f64().unwrap_or(0.0) != {}.as_f64().unwrap_or(0.0)",
+                    a_val, b_val
+                )
+            }
+            Expr::Lt(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "{}.as_f64().unwrap_or(0.0) < {}.as_f64().unwrap_or(0.0)",
+                    a_val, b_val
+                )
+            }
+            Expr::Le(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "{}.as_f64().unwrap_or(0.0) <= {}.as_f64().unwrap_or(0.0)",
+                    a_val, b_val
+                )
+            }
+            Expr::Gt(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "{}.as_f64().unwrap_or(0.0) > {}.as_f64().unwrap_or(0.0)",
+                    a_val, b_val
+                )
+            }
+            Expr::Ge(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "{}.as_f64().unwrap_or(0.0) >= {}.as_f64().unwrap_or(0.0)",
+                    a_val, b_val
+                )
+            }
+            Expr::And(a, b) => {
+                let a_val = self.expr_to_js_value_for_condition(a);
+                let b_val = self.expr_to_js_value_for_condition(b);
+                format!("({} && {})", a_val, b_val)
+            }
+            Expr::Or(a, b) => {
+                let a_val = self.expr_to_js_value_for_condition(a);
+                let b_val = self.expr_to_js_value_for_condition(b);
+                format!("({} || {})", a_val, b_val)
+            }
+            Expr::Not(a) => {
+                let a_val = self.expr_to_js_value_for_condition(a);
+                format!("(!{})", a_val)
+            }
+            Expr::Neg(a) => {
+                let a_val = self.expr_to_js_value(a);
+                format!("-{}.as_f64().unwrap_or(0.0)", a_val)
+            }
+            Expr::ListLiteral(elements) => {
+                let items: Vec<String> =
+                    elements.iter().map(|e| self.expr_to_js_value(e)).collect();
+                if items.is_empty() {
+                    "js_sys::Array::new()".to_string()
+                } else {
+                    let array_items: Vec<String> =
+                        elements.iter().map(|e| self.expr_to_js_value(e)).collect();
+                    format!("[{}].into()", array_items.join(", "))
+                }
+            }
+            Expr::ListIndex(list_expr, index_expr) => {
+                let list_val = self.expr_to_js_value(list_expr);
+                let index_val = self.expr_to_js_value(index_expr);
+                format!("{}.get({})", list_val, index_val)
+            }
+            Expr::ListLen(list_expr) => {
+                let list_val = self.expr_to_js_value(list_expr);
+                format!("{}.length()", list_val)
+            }
+            _ => "JsValue::TRUE".to_string(),
         }
     }
 
-    fn expr_to_rust_condition(&self, expr: &Expr) -> String {
-        self.expr_to_rust(expr)
+    fn expr_to_js_value_for_condition(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Bool(true) => "true".to_string(),
+            Expr::Bool(false) => "false".to_string(),
+            Expr::Not(inner) => format!("!{}", self.expr_to_js_value_for_condition(inner)),
+            Expr::And(a, b) => {
+                let a_val = self.expr_to_js_value_for_condition(a);
+                let b_val = self.expr_to_js_value_for_condition(b);
+                format!("({} && {})", a_val, b_val)
+            }
+            Expr::Or(a, b) => {
+                let a_val = self.expr_to_js_value_for_condition(a);
+                let b_val = self.expr_to_js_value_for_condition(b);
+                format!("({} || {})", a_val, b_val)
+            }
+            Expr::Eq(a, b) => {
+                let a_val = self.js_value_to_f64(a);
+                let b_val = self.js_value_to_f64(b);
+                format!("({} == {})", a_val, b_val)
+            }
+            Expr::Ne(a, b) => {
+                let a_val = self.js_value_to_f64(a);
+                let b_val = self.js_value_to_f64(b);
+                format!("({} != {})", a_val, b_val)
+            }
+            Expr::Lt(a, b) => {
+                let a_val = self.js_value_to_f64(a);
+                let b_val = self.js_value_to_f64(b);
+                format!("({} < {})", a_val, b_val)
+            }
+            Expr::Le(a, b) => {
+                let a_val = self.js_value_to_f64(a);
+                let b_val = self.js_value_to_f64(b);
+                format!("({} <= {})", a_val, b_val)
+            }
+            Expr::Gt(a, b) => {
+                let a_val = self.js_value_to_f64(a);
+                let b_val = self.js_value_to_f64(b);
+                format!("({} > {})", a_val, b_val)
+            }
+            Expr::Ge(a, b) => {
+                let a_val = self.js_value_to_f64(a);
+                let b_val = self.js_value_to_f64(b);
+                format!("({} >= {})", a_val, b_val)
+            }
+            _ => {
+                let val = self.js_value_to_f64(expr);
+                format!("({} != 0.0)", val)
+            }
+        }
     }
 
-    fn expr_to_rust_postcondition(&self, expr: &Expr) -> String {
-        self.expr_to_rust(expr)
+    fn js_value_to_f64(&self, expr: &Expr) -> String {
+        let val = self.expr_to_js_value(expr);
+        format!("{}.as_f64().unwrap_or(0.0)", val)
     }
 
     fn generate_js_glue(&self, program_name: &str, bindings: &[Binding]) -> String {
