@@ -33,6 +33,8 @@ pub enum Token {
     Frgn,
     #[token("struct")]
     Struct,
+    #[token("render")]
+    Render,
 
     #[token("true")]
     BoolTrue,

@@ -389,6 +389,9 @@ impl Annotator {
                     output.push_str(&field_strs.join(", "));
                     output.push_str(" }\n");
                 }
+                TopLevel::RenderBlock(rb) => {
+                    output.push_str(&format!("render {} {{ ... }}\n", rb.struct_name));
+                }
             }
             output.push('\n');
         }

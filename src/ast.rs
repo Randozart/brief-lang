@@ -202,6 +202,7 @@ pub enum TopLevel {
     Import(Import),
     ForeignSig(ForeignSig),
     Struct(StructDefinition),
+    RenderBlock(RenderBlock),
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +210,7 @@ pub struct StructDefinition {
     pub name: String,
     pub fields: Vec<StructField>,
     pub transactions: Vec<Transaction>,
+    pub view_html: Option<String>,
     pub span: Option<Span>,
 }
 
@@ -224,9 +226,17 @@ impl StructDefinition {
             name,
             fields: Vec::new(),
             transactions: Vec::new(),
+            view_html: None,
             span: None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderBlock {
+    pub struct_name: String,
+    pub view_html: String,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]

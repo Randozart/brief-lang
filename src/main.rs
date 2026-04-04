@@ -3,6 +3,7 @@ use brief_compiler::{
     proof_engine, rbv, typechecker, view_compiler, wasm_gen,
 };
 use notify::Watcher;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -699,6 +700,47 @@ fn run_rbv(
     }
     println!("  Type checked OK");
 
+    // Merge RenderBlock into corresponding StructDefinition
+    let mut program = program;
+    let mut render_blocks: HashMap<String, String> = HashMap::new();
+    program.items.retain(|item| {
+        if let ast::TopLevel::RenderBlock(rb) = item {
+            render_blocks.insert(rb.struct_name.clone(), rb.view_html.clone());
+            false
+        } else {
+            true
+        }
+    });
+    for (name, html) in &render_blocks {
+        for item in &mut program.items {
+            if let ast::TopLevel::Struct(s) = item {
+                if s.name == *name {
+                    s.view_html = Some(html.clone());
+                    break;
+                }
+            }
+        }
+    }
+
+    // Expand component tags in view HTML
+    let mut expanded_view = rbv_file.view_html.clone();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (name, html) in &render_blocks {
+            let tag = format!("<{} />", name);
+            if expanded_view.contains(&tag) {
+                expanded_view = expanded_view.replace(&tag, html);
+                changed = true;
+            }
+            let tag2 = format!("<{}/>", name);
+            if expanded_view.contains(&tag2) {
+                expanded_view = expanded_view.replace(&tag2, html);
+                changed = true;
+            }
+        }
+    }
+
     let mut pe = proof_engine::ProofEngine::new();
     println!("  Proof engine running...");
     let proof_errors = pe.verify_program(&program);
@@ -721,7 +763,7 @@ fn run_rbv(
             view_compiler.register_transaction(&t.name, i);
         }
     }
-    let bindings = view_compiler.compile(&rbv_file.view_html);
+    let bindings = view_compiler.compile(&expanded_view);
     println!("  View compiled: {} bindings", bindings.len());
 
     let output_path = if let Some(p) = out_dir {
@@ -759,7 +801,7 @@ fn run_rbv(
     }
 
     let html_path = output_path.join(format!("{}.html", stem));
-    let html = generate_html(stem, &rbv_file.view_html);
+    let html = generate_html(stem, &expanded_view);
     fs::write(&html_path, &html)?;
     println!("  Generated: {}", html_path.display());
 
@@ -790,6 +832,9 @@ js-sys = "0.3"
 [profile.release]
 opt-level = "s"
 lto = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
 "#,
         stem
     );

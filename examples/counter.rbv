@@ -1,32 +1,96 @@
 <script type="brief">
-let count: Int = 0;
+struct Counter {
+  count: Int;
+}
 
-txn increment [true][count == @count + 1] {
+txn Counter.increment [true][@count + 1 == count] {
   &count = count + 1;
   term;
 };
 
-txn decrement [count > 0][count == @count - 1] {
+txn Counter.decrement [true][@count - 1 == count] {
   &count = count - 1;
   term;
 };
+
+txn Counter.reset [true][0 == count] {
+  &count = 0;
+  term;
+};
+
+render Counter {
+  <div class="counter">
+    <span b-text="count">0</span>
+    <button b-trigger:click="increment">+</button>
+    <button b-trigger:click="decrement">-</button>
+    <button b-trigger:click="reset">Reset</button>
+  </div>
+}
 </script>
 
 <view>
-  <div>
-    <p>Count: <span id="count-display" b-text="count"></span></p>
-    <button id="inc-btn" b-trigger:click="increment">+</button>
-    <button id="dec-btn" b-trigger:click="decrement">-</button>
+  <div class="container">
+    <h1>Counter Component</h1>
+    <Counter />
   </div>
 </view>
 
 <style>
-  button {
-    padding: 8px 16px;
-    margin: 4px;
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
   }
-  p {
+  
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .container {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    padding: 40px;
+    text-align: center;
+  }
+  
+  h1 {
+    color: #333;
+    margin-bottom: 20px;
     font-size: 1.5em;
-    margin: 16px 0;
+  }
+  
+  .counter {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+  
+  .counter span {
+    font-size: 48px;
+    font-weight: bold;
+    color: #667eea;
+    min-width: 80px;
+  }
+  
+  .counter button {
+    padding: 12px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 20px;
+    cursor: pointer;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    transition: transform 0.2s;
+  }
+  
+  .counter button:hover {
+    transform: scale(1.1);
   }
 </style>

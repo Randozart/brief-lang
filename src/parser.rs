@@ -186,6 +186,10 @@ impl<'a> Parser<'a> {
                 let struct_def = self.parse_struct()?;
                 Ok(TopLevel::Struct(struct_def))
             }
+            Some(Ok(Token::Render)) => {
+                let render_block = self.parse_render_block()?;
+                Ok(TopLevel::RenderBlock(render_block))
+            }
             Some(Ok(Token::Comment(_))) => {
                 self.advance();
                 self.parse_top_level()
@@ -345,7 +349,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 Ok(Token::Identifier(_)) => {
-                    if let Some(Ok(Token::Identifier(_))) = self.peek() {
+                    if let Some(Ok(Token::Colon)) = self.peek() {
                         let field_name = self.expect_identifier()?;
                         self.expect(Token::Colon)?;
                         let field_type = self.parse_type()?;
@@ -377,6 +381,47 @@ impl<'a> Parser<'a> {
             name,
             fields,
             transactions,
+            view_html: None,
+            span,
+        })
+    }
+
+    fn parse_render_block(&mut self) -> Result<RenderBlock, String> {
+        self.expect(Token::Render)?;
+        let struct_name = self.expect_identifier()?;
+
+        let lbrace_pos = if let Some((_, span)) = &self.current {
+            if let Some(Ok(Token::LBrace)) = self.current_token() {
+                span.start
+            } else {
+                return Err(format!("Expected LBrace, found {:?}", self.current_token()));
+            }
+        } else {
+            return Err("Unexpected EOF".to_string());
+        };
+        self.advance();
+
+        let mut brace_depth = 1;
+        let mut end_pos = lbrace_pos;
+        while let Some((_, span)) = &self.current {
+            if let Some(Ok(Token::LBrace)) = self.current_token() {
+                brace_depth += 1;
+            } else if let Some(Ok(Token::RBrace)) = self.current_token() {
+                brace_depth -= 1;
+                if brace_depth == 0 {
+                    end_pos = span.start;
+                    self.advance();
+                    break;
+                }
+            }
+            self.advance();
+        }
+
+        let view_html = self.source[lbrace_pos + 1..end_pos].trim().to_string();
+        let span = self.current_span();
+        Ok(RenderBlock {
+            struct_name,
+            view_html,
             span,
         })
     }
@@ -436,6 +481,13 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::Txn)?;
         let name = self.expect_identifier()?;
+        let name = if let Some(Ok(Token::Dot)) = self.current_token() {
+            self.advance();
+            let method = self.expect_identifier()?;
+            format!("{}.{}", name, method)
+        } else {
+            name
+        };
         let contract = self.parse_contract()?;
         self.expect(Token::LBrace)?;
         let body = self.parse_body()?;

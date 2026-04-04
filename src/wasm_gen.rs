@@ -190,8 +190,19 @@ impl WasmGenerator {
                 "                            let escaped = Self::html_escape(&item_str);\n",
             );
             output.push_str("                            let mut html = template.clone();\n");
-            output.push_str("                            html = html.replace(&format!(\"b-text=\\\"{}\\\"\", item_name), &escaped);\n");
-            output.push_str("                            html = html.replace(&format!(\"b-text='{}'\", item_name), &escaped);\n");
+            output.push_str("                            let search = format!(\"b-text=\\\"{}\\\">\", item_name);\n");
+            output
+                .push_str("                            if let Some(pos) = html.find(&search) {\n");
+            output.push_str(
+                "                                let after = &html[pos + search.len()..];\n",
+            );
+            output
+                .push_str("                                if let Some(end) = after.find('<') {\n");
+            output.push_str("                                    let before = &html[..pos];\n");
+            output.push_str("                                    let rest = &after[end..];\n");
+            output.push_str("                                    html = format!(\"{}>{}{}\", before, escaped, rest);\n");
+            output.push_str("                                }\n");
+            output.push_str("                            }\n");
             output.push_str("                            result.push_str(&html);\n");
             output.push_str("                        }\n");
             output.push_str("                        return result;\n");
@@ -324,7 +335,10 @@ impl WasmGenerator {
     }
 
     fn generate_transaction(&self, output: &mut String, txn: &crate::ast::Transaction) {
-        let method_name = format!("    pub fn invoke_{}(&mut self) {{\n", txn.name);
+        let method_name = format!(
+            "    pub fn invoke_{}(&mut self) {{\n",
+            txn.name.replace(".", "_")
+        );
         output.push_str(&method_name);
 
         output.push_str("        // Precondition\n");
