@@ -1,0 +1,20 @@
+# Standard Math Library
+# Foreign function declarations
+
+frgn sig abs(n: Int) -> Int;
+
+frgn sig sqrt(n: Float) -> Float;
+
+frgn sig pow(base: Float, exp: Float) -> Float;
+
+frgn sig sin(n: Float) -> Float;
+
+frgn sig cos(n: Float) -> Float;
+
+frgn sig floor(n: Float) -> Float;
+
+frgn sig ceil(n: Float) -> Float;
+
+frgn sig round(n: Float) -> Float;
+
+frgn sig random() -> Float;

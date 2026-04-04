@@ -1,0 +1,24 @@
+# Standard String Library
+# Foreign function declarations
+
+frgn sig len(s: String) -> Int;
+
+frgn sig concat(a: String, b: String) -> String;
+
+frgn sig to_string(n: Int) -> String;
+
+frgn sig to_float(n: Float) -> String;
+
+frgn sig to_int(s: String) -> Int;
+
+frgn sig trim(s: String) -> String;
+
+frgn sig contains(haystack: String, needle: String) -> Bool;
+
+frgn sig starts_with(s: String, prefix: String) -> Bool;
+
+frgn sig ends_with(s: String, suffix: String) -> Bool;
+
+frgn sig replace(s: String, old: String, new: String) -> String;
+
+frgn sig split(s: String, delim: String) -> String;
