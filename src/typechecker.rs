@@ -50,6 +50,7 @@ impl TypeChecker {
                     self.check_transaction(txn);
                 }
                 TopLevel::Import(_) => {}
+                TopLevel::ForeignSig(_) => {}
             }
         }
         self.errors.clone()

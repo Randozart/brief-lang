@@ -27,6 +27,8 @@ pub enum Token {
     From,
     #[token("as")]
     As,
+    #[token("frgn")]
+    Frgn,
 
     #[token("true")]
     BoolTrue,

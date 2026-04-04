@@ -1,0 +1,8 @@
+# Standard I/O Library
+# Foreign function declarations
+
+frgn sig print(msg: String) -> Bool;
+
+frgn sig println(msg: String) -> Bool;
+
+frgn sig input() -> String;

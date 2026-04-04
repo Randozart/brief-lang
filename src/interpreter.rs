@@ -32,18 +32,26 @@ pub enum RuntimeError {
     DivisionByZero,
     ContractViolation(String),
     UnhandledOutcome(String),
+    UndefinedForeignFunction(String),
 }
+
+pub type ForeignFn = fn(Vec<Value>) -> Result<Value, RuntimeError>;
 
 pub struct Interpreter {
     pub state: HashMap<String, Value>,
     pub prior_state: HashMap<String, Value>,
+    pub foreign_functions: HashMap<String, ForeignFn>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
+        let mut foreign_functions = HashMap::new();
+        register_std_io(&mut foreign_functions);
+        
         Interpreter {
             state: HashMap::new(),
             prior_state: HashMap::new(),
+            foreign_functions,
         }
     }
 
@@ -336,15 +344,48 @@ impl Interpreter {
                 }
             }
             Expr::Call(name, args) => {
-                // For now, just print "calling function"
-                // A real implementation would look up the function definition
-                println!("Calling function: {} with args: {:?}", name, args);
-                // Evaluate args
-                for arg in args {
-                    self.eval_expr(arg)?;
+                if let Some(frgn_fn) = self.foreign_functions.get(name) {
+                    let mut arg_values = Vec::new();
+                    for arg in args {
+                        arg_values.push(self.eval_expr(arg)?);
+                    }
+                    frgn_fn(arg_values)
+                } else {
+                    Err(RuntimeError::UndefinedForeignFunction(name.clone()))
                 }
-                Ok(Value::Void)
             }
         }
     }
+}
+
+fn register_std_io(registry: &mut HashMap<String, ForeignFn>) {
+    registry.insert("print".to_string(), |args| {
+        if let Value::String(s) = &args[0] {
+            print!("{}", s);
+            Ok(Value::Bool(true))
+        } else {
+            Err(RuntimeError::TypeMismatch("print expects String".to_string()))
+        }
+    });
+    
+    registry.insert("println".to_string(), |args| {
+        if let Value::String(s) = &args[0] {
+            println!("{}", s);
+            Ok(Value::Bool(true))
+        } else {
+            Err(RuntimeError::TypeMismatch("println expects String".to_string()))
+        }
+    });
+    
+    registry.insert("input".to_string(), |_args| {
+        use std::io::{self, BufRead};
+        let stdin = io::stdin();
+        let mut line = String::new();
+        if let Ok(_) = stdin.lock().read_line(&mut line) {
+            line.pop(); // Remove trailing newline
+            Ok(Value::String(line))
+        } else {
+            Ok(Value::String(String::new()))
+        }
+    });
 }

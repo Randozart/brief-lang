@@ -146,6 +146,10 @@ impl<'a> Parser<'a> {
                 let defn = self.parse_definition()?;
                 Ok(TopLevel::Definition(defn))
             }
+            Some(Ok(Token::Frgn)) => {
+                let frgn_sig = self.parse_frgn_sig()?;
+                Ok(TopLevel::ForeignSig(frgn_sig))
+            }
             Some(Ok(Token::Comment(_))) => {
                 self.advance();
                 self.parse_top_level()
@@ -236,6 +240,42 @@ impl<'a> Parser<'a> {
             result_type,
             source,
             alias,
+        })
+    }
+
+    fn parse_frgn_sig(&mut self) -> Result<ForeignSig, String> {
+        self.expect(Token::Frgn)?;
+        self.expect(Token::Sig)?;
+        let name = self.expect_identifier()?;
+        
+        let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
+            self.advance();
+            let mut params = Vec::new();
+            while let Some(Ok(Token::Identifier(_))) = self.current_token() {
+                let _param_name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let param_type = self.parse_type()?;
+                params.push(param_type);
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RParen)?;
+            params
+        } else {
+            Vec::new()
+        };
+        
+        self.expect(Token::Arrow)?;
+        let outputs = self.parse_output_types()?;
+        self.expect(Token::Semicolon)?;
+        
+        Ok(ForeignSig {
+            name,
+            input_types: parameters,
+            outputs,
         })
     }
 

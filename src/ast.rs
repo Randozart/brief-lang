@@ -152,6 +152,13 @@ pub struct ImportItem {
 }
 
 #[derive(Debug, Clone)]
+pub struct ForeignSig {
+    pub name: String,
+    pub input_types: Vec<Type>,
+    pub outputs: Vec<Type>,
+}
+
+#[derive(Debug, Clone)]
 pub enum TopLevel {
     Signature(Signature),
     Definition(Definition),
@@ -159,6 +166,7 @@ pub enum TopLevel {
     StateDecl(StateDecl),
     Constant(Constant),
     Import(Import),
+    ForeignSig(ForeignSig),
 }
 
 #[derive(Debug, Clone)]

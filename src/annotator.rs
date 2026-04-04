@@ -346,6 +346,17 @@ impl Annotator {
                 TopLevel::Import(import) => {
                     output.push_str(&format!("import {};\n", import.path.join(".")));
                 }
+                TopLevel::ForeignSig(frgn) => {
+                    let inputs = frgn.input_types.iter()
+                        .map(|t| self.type_to_string(t))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let outputs = frgn.outputs.iter()
+                        .map(|t| self.type_to_string(t))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    output.push_str(&format!("frgn sig {}: {} -> {};\n", frgn.name, inputs, outputs));
+                }
             }
             output.push('\n');
         }
