@@ -147,6 +147,7 @@ fn print_usage(program: &str) {
     eprintln!("  serve [dir]      Serve static files (default: .)");
     eprintln!("  rbv <file>       Compile RBV to browser-ready files");
     eprintln!("  run <file>       Compile, build WASM, serve, and open browser");
+    eprintln!("  install          Install 'brief' to ~/.local/bin");
     eprintln!("  lsp              Start Language Server (for IDE integration)");
     eprintln!();
     eprintln!("RBV Options:");
@@ -162,6 +163,32 @@ fn print_usage(program: &str) {
     eprintln!("  -v, --verbose        Verbose output");
     eprintln!("  --quiet, --whisper   Minimal output (for CI/automated use)");
     eprintln!("  -h, --help           Show this help");
+}
+
+fn run_install() {
+    let install_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".local")
+        .join("bin");
+
+    let current_exe = std::env::current_exe().expect("Failed to get current executable path");
+    let install_path = install_dir.join("brief");
+
+    if !install_dir.exists() {
+        fs::create_dir_all(&install_dir).expect("Failed to create install directory");
+    }
+
+    fs::copy(&current_exe, &install_path).expect("Failed to copy binary");
+    fs::set_permissions(
+        &install_path,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("Failed to set permissions");
+
+    println!("Installed 'brief' to {}", install_path.display());
+    println!("\nAdd to your PATH if needed:");
+    println!("  export PATH=\"$PATH:{}\"", install_dir.display());
+    println!("\nAdd this line to your ~/.bashrc or ~/.zshrc to make it permanent.");
 }
 
 fn run_check(
@@ -1087,6 +1114,10 @@ fn main() {
                 errors::ErrorMode::Verbose
             };
             lsp::run_lsp_server(mode);
+        }
+
+        "install" => {
+            run_install();
         }
 
         "-h" | "--help" | "help" => {
