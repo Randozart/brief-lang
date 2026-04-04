@@ -1,6 +1,6 @@
 # Brief Language - VSCode Extension
 
-Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv) files.
+Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (`.bv`) and Rendered Brief (`.rbv`) files.
 
 ## Features
 

@@ -1,5 +1,5 @@
 {
-  "brief.language": {
+  "[brief]": {
     "editor.fontSize": 14,
     "editor.lineHeight": 1.6,
     "editor.fontFamily": "JetBrains Mono, Fira Code, Consolas, monospace",
@@ -10,10 +10,16 @@
     "editor.foldingStrategy": "indentation",
     "editor.autoClosingBrackets": "always",
     "editor.autoClosingQuotes": "always",
-    "editor.formatOnPaste": true,
-    "editor.rulers": [80, 120],
     "editor.tabSize": 2,
     "editor.insertSpaces": true,
-    "editor.wordWrap": "off"
+    "editor.rulers": [80, 120]
+  },
+  "[rbv]": {
+    "editor.fontSize": 14,
+    "editor.lineHeight": 1.6,
+    "editor.fontFamily": "JetBrains Mono, Fira Code, Consolas, monospace",
+    "editor.bracketPairColorization.enabled": true,
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true
   }
 }
