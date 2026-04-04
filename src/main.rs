@@ -1,7 +1,7 @@
-use brief_compiler::{annotator, desugarer, import_resolver, interpreter, manifest, parser, proof_engine, typechecker};
+use brief_compiler::{annotator, ast, desugarer, import_resolver, interpreter, manifest, parser, proof_engine, typechecker, rbv, view_compiler, wasm_gen};
 use notify::Watcher;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 fn strip_annotations(source: &str) -> String {
@@ -407,6 +407,130 @@ fn run_watch(file_path: PathBuf, verbose: bool) -> Result<(), Box<dyn std::error
     }
 }
 
+fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Compiling RBV: {}", file_path.display());
+    
+    let source = fs::read_to_string(file_path)?;
+    
+    let rbv_file = rbv::RbvFile::parse(&source)
+        .map_err(|e| format!("RBV parse error: {}", e))?;
+    
+    println!("  Brief source: {} chars", rbv_file.brief_source.len());
+    
+    let mut parser = parser::Parser::new(&rbv_file.brief_source);
+    let program = parser.parse()
+        .map_err(|e| format!("Brief parse error: {}", e))?;
+    
+    println!("  Parsed {} items", program.items.len());
+    
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let program = import_resolver.resolve_imports(&program, file_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+    
+    println!("  Resolved imports");
+    
+    let mut desug = desugarer::Desugarer::new();
+    let program = desug.desugar(&program);
+    
+    let mut tc = typechecker::TypeChecker::new();
+    println!("  Type checking...");
+    let type_errors = tc.check_program(&program);
+    if !type_errors.is_empty() {
+        eprintln!("Type errors:");
+        for err in &type_errors {
+            eprintln!("  - {:?}", err);
+        }
+        return Err("Type errors".into());
+    }
+    println!("  Type checked OK");
+    
+    let mut pe = proof_engine::ProofEngine::new();
+    println!("  Proof engine running...");
+    let proof_errors = pe.verify_program(&program);
+    println!("  Proof engine done");
+    if !proof_errors.is_empty() {
+        eprintln!("Proof errors:");
+        for err in &proof_errors {
+            eprintln!("  - {:?}", err);
+        }
+        return Err("Proof errors".into());
+    }
+    
+    let mut view_compiler = view_compiler::ViewCompiler::new();
+    println!("  Compiling view...");
+    for (i, item) in program.items.iter().enumerate() {
+        if let ast::TopLevel::StateDecl(d) = item {
+            view_compiler.register_signal(&d.name, i);
+        }
+        if let ast::TopLevel::Transaction(t) = item {
+            view_compiler.register_transaction(&t.name, i);
+        }
+    }
+    let bindings = view_compiler.compile(&rbv_file.view_html);
+    println!("  View compiled: {} bindings", bindings.len());
+    
+    let mut wasm_gen = wasm_gen::WasmGenerator::new();
+    println!("  Generating WASM...");
+    let output = wasm_gen.generate(&program, &bindings);
+    println!("  WASM generated");
+    
+    let output_path = if let Some(p) = out_dir {
+        p.to_path_buf()
+    } else if file_path.is_absolute() {
+        file_path.parent().unwrap_or(&file_path).to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    };
+    println!("  Output path: {:?}", output_path);
+    let stem = file_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    
+    let rust_path = output_path.join(format!("{}.rs", stem));
+    fs::write(&rust_path, &output.rust_code)?;
+    println!("  Generated: {}", rust_path.display());
+    
+    let js_path = output_path.join(format!("{}_glue.js", stem));
+    fs::write(&js_path, &output.js_glue)?;
+    println!("  Generated: {}", js_path.display());
+    
+    if let Some(css) = &rbv_file.style_css {
+        let css_path = output_path.join(format!("{}.css", stem));
+        fs::write(&css_path, css)?;
+        println!("  Generated: {}", css_path.display());
+    }
+    
+    let html_path = output_path.join(format!("{}.html", stem));
+    let html = generate_html(stem, &rbv_file.view_html);
+    fs::write(&html_path, &html)?;
+    println!("  Generated: {}", html_path.display());
+    
+    println!("\n✓ RBV compiled successfully");
+    println!("  Signals: {}, Transactions: {}", output.signal_count, output.txn_count);
+    println!("  Bindings: {}", bindings.len());
+    
+    Ok(())
+}
+
+fn generate_html(name: &str, view_html: &str) -> String {
+    format!(r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{}</title>
+    <link rel="stylesheet" href="{}.css">
+</head>
+<body>
+{}
+    <script type="module">
+        import init from './{}_glue.js';
+        init(`./{}.wasm`);
+    </script>
+</body>
+</html>
+"#, name, name, view_html, name, name)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     
@@ -501,6 +625,36 @@ fn main() {
             
             if let Err(e) = run_import(name, path, true) {
                 eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        
+        "rbv" => {
+            let mut out_dir = None;
+            let mut file_path = None;
+            
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg.ends_with(".rbv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+            
+            if let Some(path) = file_path {
+                if let Err(e) = run_rbv(&path, out_dir.as_deref()) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .rbv file specified");
+                eprintln!("Usage: {} rbv <file.rbv> [--out <dir>]", args[0]);
                 std::process::exit(1);
             }
         }
