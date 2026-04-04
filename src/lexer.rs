@@ -15,6 +15,8 @@ pub enum Token {
     Txn,
     #[token("rct")]
     Rct,
+    #[token("txc")]
+    Txc,
     #[token("async")]
     Async,
     #[token("term")]
