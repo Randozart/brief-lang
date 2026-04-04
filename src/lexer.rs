@@ -25,6 +25,8 @@ pub enum Token {
     Import,
     #[token("from")]
     From,
+    #[token("as")]
+    As,
 
     #[token("true")]
     BoolTrue,

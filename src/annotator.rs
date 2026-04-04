@@ -333,10 +333,8 @@ impl Annotator {
                     output.push_str(&self.format_transaction(txn));
                 }
                 TopLevel::Signature(sig) => {
-                    output.push_str(&format!(
-                        "// CALLERS: (external)\n// RESOLVES_TO: {}\n",
-                        self.type_to_string(&sig.output_type)
-                    ));
+                    output.push_str("// CALLERS: (external)\n");
+                    output.push_str(&format!("// RESOLVES_TO: {}\n", self.format_result_type(&sig.result_type)));
                     output.push_str(&self.format_signature(sig));
                 }
                 TopLevel::StateDecl(state) => {
@@ -382,9 +380,12 @@ impl Annotator {
         } else { 
             format!("({})", params.join(", ")) 
         };
-        let return_str = if let Some(ret) = &defn.return_type {
-            format!(": {}", self.type_to_string(ret))
-        } else { String::new() };
+        let outputs_str = if defn.outputs.is_empty() { 
+            String::new() 
+        } else { 
+            let outputs: Vec<String> = defn.outputs.iter().map(|t| self.type_to_string(t)).collect();
+            format!(": {}", outputs.join(", "))
+        };
         
         let pre = self.format_expr(&defn.contract.pre_condition);
         let post = self.format_expr(&defn.contract.post_condition);
@@ -392,7 +393,7 @@ impl Annotator {
         let body = self.format_body(&defn.body);
         
         format!("defn {}{}{} [{}][{}] {{\n{}}};\n", 
-            defn.name, params_str, return_str, pre, post, body)
+            defn.name, params_str, outputs_str, pre, post, body)
     }
 
     fn format_transaction(&self, txn: &Transaction) -> String {
@@ -410,7 +411,16 @@ impl Annotator {
 
     fn format_signature(&self, sig: &Signature) -> String {
         let inputs: Vec<String> = sig.input_types.iter().map(|t| self.type_to_string(t)).collect();
-        format!("sig {}: {} -> {};\n", sig.name, inputs.join(" -> "), self.type_to_string(&sig.output_type))
+        format!("sig {}: {} -> {};\n", sig.name, inputs.join(" -> "), self.format_result_type(&sig.result_type))
+    }
+    
+    fn format_result_type(&self, rt: &ResultType) -> String {
+        match rt {
+            ResultType::Projection(types) => {
+                types.iter().map(|t| self.type_to_string(t)).collect::<Vec<_>>().join(", ")
+            }
+            ResultType::TrueAssertion => "true".to_string(),
+        }
     }
 
     fn format_state_decl(&self, state: &StateDecl) -> String {
@@ -448,11 +458,17 @@ impl Annotator {
             Statement::Expression(expr) => {
                 format!("{}{};\n", spaces, self.format_expr(expr))
             }
-            Statement::Term(expr) => {
-                let e = if let Some(ex) = expr {
-                    format!(" {}", self.format_expr(ex))
-                } else { String::new() };
-                format!("{}term{};\n", spaces, e)
+            Statement::Term(outputs) => {
+                let outputs_str = outputs.iter()
+                    .map(|e| {
+                        match e {
+                            Some(ex) => self.format_expr(ex),
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}term {};\n", spaces, outputs_str)
             }
             Statement::Escape(expr) => {
                 let e = if let Some(ex) = expr {

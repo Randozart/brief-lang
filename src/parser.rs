@@ -158,14 +158,46 @@ impl<'a> Parser<'a> {
 
     fn parse_import(&mut self) -> Result<Import, String> {
         self.expect(Token::Import)?;
-        let mut path = Vec::new();
-        path.push(self.expect_identifier()?);
-        while let Some(Ok(Token::Dot)) = self.current_token() {
+        
+        let items = if let Some(Ok(Token::LBrace)) = self.current_token() {
             self.advance();
+            let mut items = Vec::new();
+            while let Some(Ok(Token::Identifier(_))) = self.current_token() {
+                let name = self.expect_identifier()?;
+                let alias = if let Some(Ok(Token::As)) = self.current_token() {
+                    self.advance();
+                    Some(self.expect_identifier()?)
+                } else {
+                    None
+                };
+                items.push(ImportItem { name, alias });
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RBrace)?;
+            items
+        } else {
+            Vec::new()
+        };
+        
+        let path = if let Some(Ok(Token::From)) = self.current_token() {
+            self.advance();
+            let mut path = Vec::new();
             path.push(self.expect_identifier()?);
-        }
+            while let Some(Ok(Token::Dot)) = self.current_token() {
+                self.advance();
+                path.push(self.expect_identifier()?);
+            }
+            path
+        } else {
+            Vec::new()
+        };
+        
         self.expect(Token::Semicolon)?;
-        Ok(Import { path })
+        Ok(Import { items, path })
     }
 
     fn parse_signature(&mut self) -> Result<Signature, String> {
@@ -174,14 +206,36 @@ impl<'a> Parser<'a> {
         self.expect(Token::Colon)?;
         let input_type = self.parse_type()?;
         self.expect(Token::Arrow)?;
-        let output_type = self.parse_type()?;
+        
+        let result_type = self.parse_result_type()?;
+        
+        let source = if let Some(Ok(Token::From)) = self.current_token() {
+            self.advance();
+            let mut path = Vec::new();
+            path.push(self.expect_identifier()?);
+            while let Some(Ok(Token::Dot)) = self.current_token() {
+                self.advance();
+                path.push(self.expect_identifier()?);
+            }
+            Some(path.join("."))
+        } else {
+            None
+        };
+        
+        let alias = if let Some(Ok(Token::As)) = self.current_token() {
+            self.advance();
+            Some(self.expect_identifier()?)
+        } else {
+            None
+        };
+        
         self.expect(Token::Semicolon)?;
         Ok(Signature {
             name,
             input_types: vec![input_type],
-            output_type,
-            source: None,
-            alias: None,
+            result_type,
+            source,
+            alias,
         })
     }
 
@@ -269,14 +323,15 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
-        let return_type = if let Some(Ok(Token::Colon)) = self.current_token() {
+        let contract = self.parse_contract()?;
+        
+        let outputs = if let Some(Ok(Token::Arrow)) = self.current_token() {
             self.advance();
-            Some(self.parse_type()?)
+            self.parse_output_types()?
         } else {
-            None
+            Vec::new()
         };
 
-        let contract = self.parse_contract()?;
         self.expect(Token::LBrace)?;
         let body = self.parse_body()?;
         self.expect(Token::RBrace)?;
@@ -285,10 +340,59 @@ impl<'a> Parser<'a> {
         Ok(Definition {
             name,
             parameters,
-            return_type,
+            outputs,
             contract,
             body,
         })
+    }
+    
+    fn parse_output_types(&mut self) -> Result<Vec<Type>, String> {
+        let mut outputs = Vec::new();
+        outputs.push(self.parse_type()?);
+        while let Some(Ok(Token::Comma)) = self.current_token() {
+            self.advance();
+            outputs.push(self.parse_type()?);
+        }
+        Ok(outputs)
+    }
+    
+    fn parse_result_type(&mut self) -> Result<ResultType, String> {
+        if let Some(Ok(Token::BoolTrue)) = self.current_token() {
+            self.advance();
+            return Ok(ResultType::TrueAssertion);
+        }
+        
+        let mut outputs = Vec::new();
+        outputs.push(self.parse_type()?);
+        while let Some(Ok(Token::Comma)) = self.current_token() {
+            self.advance();
+            outputs.push(self.parse_type()?);
+        }
+        
+        Ok(ResultType::Projection(outputs))
+    }
+    
+    fn parse_term_outputs(&mut self) -> Result<Vec<Option<Expr>>, String> {
+        let mut outputs = Vec::new();
+        
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            return Ok(outputs);
+        }
+        
+        outputs.push(Some(self.parse_expression()?));
+        
+        while let Some(Ok(Token::Comma)) = self.current_token() {
+            self.advance();
+            if let Some(Ok(Token::Comma)) = self.current_token() {
+                outputs.push(None);
+            } else if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                outputs.push(None);
+            } else {
+                outputs.push(Some(self.parse_expression()?));
+            }
+        }
+        
+        Ok(outputs)
     }
 
     fn parse_contract(&mut self) -> Result<Contract, String> {
@@ -382,13 +486,9 @@ impl<'a> Parser<'a> {
             }
             Some(Ok(Token::Term)) => {
                 self.advance();
-                let expr = if let Some(Ok(Token::Semicolon)) = self.current_token() {
-                    None
-                } else {
-                    Some(self.parse_expression()?)
-                };
+                let outputs = self.parse_term_outputs()?;
                 self.expect(Token::Semicolon)?;
-                Ok(Statement::Term(expr))
+                Ok(Statement::Term(outputs))
             }
             Some(Ok(Token::Escape)) => {
                 self.advance();

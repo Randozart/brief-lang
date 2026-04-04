@@ -12,6 +12,12 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone)]
+pub enum ResultType {
+    Projection(Vec<Type>),
+    TrueAssertion,
+}
+
+#[derive(Debug, Clone)]
 pub enum Expr {
     // Literals
     Integer(i64),
@@ -69,8 +75,8 @@ pub enum Statement {
         statement: Box<Statement>,
     },
 
-    // Term statement: term expr?;
-    Term(Option<Expr>),
+    // Term statement: term expr?, expr?, ... (multi-output with trailing commas for void)
+    Term(Vec<Option<Expr>>),
 
     // Escape statement: escape expr?;
     Escape(Option<Expr>),
@@ -96,7 +102,7 @@ pub struct Contract {
 pub struct Signature {
     pub name: String,
     pub input_types: Vec<Type>,
-    pub output_type: Type,
+    pub result_type: ResultType,
     pub source: Option<String>,
     pub alias: Option<String>,
 }
@@ -105,7 +111,7 @@ pub struct Signature {
 pub struct Definition {
     pub name: String,
     pub parameters: Vec<(String, Type)>,
-    pub return_type: Option<Type>,
+    pub outputs: Vec<Type>,
     pub contract: Contract,
     pub body: Vec<Statement>,
 }
@@ -135,7 +141,14 @@ pub struct Constant {
 
 #[derive(Debug, Clone)]
 pub struct Import {
+    pub items: Vec<ImportItem>,
     pub path: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportItem {
+    pub name: String,
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone)]

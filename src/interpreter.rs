@@ -151,14 +151,13 @@ impl Interpreter {
             Statement::Expression(expr) => {
                 self.eval_expr(expr)?;
             }
-            Statement::Term(expr_opt) => {
-                if let Some(expr) = expr_opt {
-                    let value = self.eval_expr(expr)?;
-                    // If term expression is false, we should loop (but we don't have loop logic here)
-                    // For now, we just evaluate
-                    if value != Value::Bool(true) {
-                        // In Brief, this would loop the transaction
-                        // Here we just continue
+            Statement::Term(outputs) => {
+                if let Some(first) = outputs.first() {
+                    if let Some(expr) = first {
+                        let value = self.eval_expr(expr)?;
+                        if value != Value::Bool(true) {
+                            // In Brief, this would loop the transaction
+                        }
                     }
                 }
             }

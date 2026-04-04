@@ -248,13 +248,17 @@ impl Reactor {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::Term(expr_opt) => {
-                if let Some(expr) = expr_opt {
-                    let value = interp.eval_expr(expr)?;
-                    if value == Value::Bool(true) {
-                        Ok(StmtResult::TermSuccess)
+            Statement::Term(outputs) => {
+                if let Some(first) = outputs.first() {
+                    if let Some(expr) = first {
+                        let value = interp.eval_expr(expr)?;
+                        if value == Value::Bool(true) {
+                            Ok(StmtResult::TermSuccess)
+                        } else {
+                            Ok(StmtResult::TermFailed)
+                        }
                     } else {
-                        Ok(StmtResult::TermFailed)
+                        Ok(StmtResult::TermSuccess)
                     }
                 } else {
                     Ok(StmtResult::TermSuccess)

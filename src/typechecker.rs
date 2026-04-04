@@ -82,7 +82,14 @@ impl TypeChecker {
         for input_ty in &sig.input_types {
             self.validate_type(input_ty);
         }
-        self.validate_type(&sig.output_type);
+        match &sig.result_type {
+            ResultType::Projection(types) => {
+                for ty in types {
+                    self.validate_type(ty);
+                }
+            }
+            ResultType::TrueAssertion => {}
+        }
     }
 
     fn check_definition(&mut self, defn: &Definition) {
@@ -154,9 +161,11 @@ impl TypeChecker {
             Statement::Expression(expr) => {
                 self.infer_expression(expr);
             }
-            Statement::Term(expr_opt) => {
-                if let Some(expr) = expr_opt {
-                    self.infer_expression(expr);
+            Statement::Term(outputs) => {
+                for expr_opt in outputs {
+                    if let Some(expr) = expr_opt {
+                        self.infer_expression(expr);
+                    }
                 }
             }
             Statement::Escape(expr_opt) => {
