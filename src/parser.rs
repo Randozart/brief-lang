@@ -1063,22 +1063,20 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Token::Ampersand) => {
                     self.advance();
-                    // OwnedRef
                     if let Some(Ok(Token::Identifier(name))) = self.current_token() {
                         let name = name.clone();
                         self.advance();
-                        Ok(Expr::OwnedRef(name))
+                        self.parse_postfix_expr(Expr::OwnedRef(name))
                     } else {
                         Err("Expected identifier after &".to_string())
                     }
                 }
                 Ok(Token::At) => {
                     self.advance();
-                    // PriorState
                     if let Some(Ok(Token::Identifier(name))) = self.current_token() {
                         let name = name.clone();
                         self.advance();
-                        Ok(Expr::PriorState(name))
+                        self.parse_postfix_expr(Expr::PriorState(name))
                     } else {
                         Err("Expected identifier after @".to_string())
                     }
@@ -1086,8 +1084,45 @@ impl<'a> Parser<'a> {
                 _ => self.parse_postfix(),
             }
         } else {
-            self.parse_primary()
+            self.parse_postfix()
         }
+    }
+
+    fn parse_postfix_expr(&mut self, expr: Expr) -> Result<Expr, String> {
+        let mut expr = expr;
+        loop {
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance();
+                let index = self.parse_expression()?;
+                self.expect(Token::RBracket)?;
+                expr = Expr::ListIndex(Box::new(expr), Box::new(index));
+            } else if let Some(Ok(Token::Dot)) = self.current_token() {
+                self.advance();
+                let member_name = self.expect_identifier()?;
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    expr = Expr::Call(member_name, vec![expr]);
+                } else {
+                    expr = Expr::FieldAccess(Box::new(expr), member_name);
+                }
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
     }
 
     fn parse_postfix(&mut self) -> Result<Expr, String> {

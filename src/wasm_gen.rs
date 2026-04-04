@@ -119,7 +119,18 @@ impl WasmGenerator {
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| "js_sys::Array::new()".to_string());
-            output.push_str(&format!("            {}.into(), // signal {}\n", init, id));
+            if let Some(sig_type) = self.signal_types.get(name) {
+                if matches!(sig_type, SignalType::List) {
+                    output.push_str(&format!(
+                        "            JsValue::from({}), // signal {}\n",
+                        init, id
+                    ));
+                } else {
+                    output.push_str(&format!("            {}.into(), // signal {}\n", init, id));
+                }
+            } else {
+                output.push_str(&format!("            {}.into(), // signal {}\n", init, id));
+            }
         }
         output.push_str("        ];\n");
         output.push_str("        let dirty_signals = vec![false; SIGNALS];\n");
@@ -134,6 +145,25 @@ impl WasmGenerator {
         output.push_str("        if id < SIGNALS {\n");
         output.push_str("            self.dirty_signals[id] = true;\n");
         output.push_str("        }\n");
+        output.push_str("    }\n\n");
+
+        output
+            .push_str("    fn list_concat(&self, signal_id: usize, other: JsValue) -> JsValue {\n");
+        output.push_str("        let current = self.signals[signal_id].clone();\n");
+        output.push_str("        let arr = js_sys::Array::new();\n");
+        output.push_str("        if current.is_array() {\n");
+        output.push_str("            let curr_arr = js_sys::Array::from(&current);\n");
+        output.push_str("            for i in 0..curr_arr.length() {\n");
+        output.push_str("                arr.push(&curr_arr.get(i));\n");
+        output.push_str("            }\n");
+        output.push_str("        }\n");
+        output.push_str("        if other.is_array() {\n");
+        output.push_str("            let other_arr = js_sys::Array::from(&other);\n");
+        output.push_str("            for i in 0..other_arr.length() {\n");
+        output.push_str("                arr.push(&other_arr.get(i));\n");
+        output.push_str("            }\n");
+        output.push_str("        }\n");
+        output.push_str("        arr.into()\n");
         output.push_str("    }\n\n");
 
         for (name, sig_type) in &self.signal_types {
@@ -268,6 +298,28 @@ impl WasmGenerator {
                 expr,
             } => {
                 if *is_owned {
+                    if let Expr::Add(a, b) = expr {
+                        let a_is_list = self.is_list_signal(a);
+                        let b_is_list = self.is_list_signal(b);
+                        if a_is_list || b_is_list {
+                            if let Expr::Identifier(name) = a.as_ref() {
+                                if let Some(&id) = self.signal_map.get(name) {
+                                    let other_code = self.expr_to_js_value(b);
+                                    let other_arg = if matches!(b.as_ref(), Expr::ListLiteral(_)) {
+                                        format!("{}.into()", other_code)
+                                    } else {
+                                        other_code
+                                    };
+                                    output.push_str(&format!(
+                                        "        self.signals[{}] = self.list_concat({}, {});\n",
+                                        id, id, other_arg
+                                    ));
+                                    output.push_str(&format!("        self.mark_dirty({});\n", id));
+                                    return;
+                                }
+                            }
+                        }
+                    }
                     let expr_code = self.expr_to_js_value(expr);
                     if let Some(&id) = self.signal_map.get(name) {
                         output.push_str(&format!(
@@ -282,6 +334,20 @@ impl WasmGenerator {
                 output.push_str("        // term - transaction settled\n");
             }
             _ => {}
+        }
+    }
+
+    fn is_list_signal(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::ListLiteral(_) => true,
+            Expr::Identifier(name) => {
+                if let Some(sig_type) = self.signal_types.get(name) {
+                    matches!(sig_type, SignalType::List)
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
     }
 
@@ -307,16 +373,16 @@ impl WasmGenerator {
             Expr::Add(a, b) => {
                 let a_val = self.expr_to_js_value(a);
                 let b_val = self.expr_to_js_value(b);
-                let a_is_list = matches!(a.as_ref(), Expr::ListLiteral(_));
-                let b_is_list = matches!(b.as_ref(), Expr::ListLiteral(_));
+                let a_is_list = self.is_list_signal(a);
+                let b_is_list = self.is_list_signal(b);
                 if a_is_list || b_is_list {
                     let arr_a = if a_is_list {
-                        format!("js_sys::Array::from(&{})", a_val)
+                        format!("{}.clone()", a_val)
                     } else {
                         format!("js_sys::Array::new()")
                     };
                     let arr_b = if b_is_list {
-                        format!("js_sys::Array::from(&{})", b_val)
+                        format!("{}.clone()", b_val)
                     } else {
                         format!("js_sys::Array::new()")
                     };
@@ -435,11 +501,14 @@ impl WasmGenerator {
             Expr::ListIndex(list_expr, index_expr) => {
                 let list_val = self.expr_to_js_value(list_expr);
                 let index_val = self.expr_to_js_value(index_expr);
-                format!("{}.get({})", list_val, index_val)
+                format!("(if {}.is_array() {{ js_sys::Array::from(&{}).get({}) }} else {{ JsValue::NULL }})", list_val, list_val, index_val)
             }
             Expr::ListLen(list_expr) => {
                 let list_val = self.expr_to_js_value(list_expr);
-                format!("{}.length()", list_val)
+                format!(
+                    "(if {}.is_array() {{ js_sys::Array::from(&{}).length() }} else {{ 0.0 }})",
+                    list_val, list_val
+                )
             }
             Expr::FieldAccess(obj_expr, field_name) => {
                 let obj_val = self.expr_to_js_value(obj_expr);
@@ -447,7 +516,10 @@ impl WasmGenerator {
             }
             Expr::Call(name, args) if name == "len" && args.len() == 1 => {
                 let list_val = self.expr_to_js_value(&args[0]);
-                format!("{}.length()", list_val)
+                format!(
+                    "JsValue::from(if {}.is_array() {{ js_sys::Array::from(&{}).length() as f64 }} else {{ 0.0 }})",
+                    list_val, list_val
+                )
             }
             Expr::Call(name, args) => {
                 let args_vals: Vec<String> =
@@ -503,6 +575,13 @@ impl WasmGenerator {
                 let b_val = self.js_value_to_f64(b);
                 format!("({} >= {})", a_val, b_val)
             }
+            Expr::ListLen(list_expr) => {
+                let list_val = self.expr_to_js_value(list_expr);
+                format!(
+                    "JsValue::from(if {}.is_array() {{ js_sys::Array::from(&{}).length() as f64 }} else {{ 0.0 }})",
+                    list_val, list_val
+                )
+            }
             _ => {
                 let val = self.js_value_to_f64(expr);
                 format!("({} != 0.0)", val)
@@ -511,8 +590,16 @@ impl WasmGenerator {
     }
 
     fn js_value_to_f64(&self, expr: &Expr) -> String {
-        let val = self.expr_to_js_value(expr);
-        format!("{}.as_f64().unwrap_or(0.0)", val)
+        match expr {
+            Expr::ListLen(list_expr) => self.expr_to_js_value(expr),
+            Expr::Call(name, args) if name == "len" && args.len() == 1 => {
+                self.expr_to_js_value(expr)
+            }
+            _ => {
+                let val = self.expr_to_js_value(expr);
+                format!("{}.as_f64().unwrap_or(0.0)", val)
+            }
+        }
     }
 
     fn generate_js_glue(&self, program_name: &str, bindings: &[Binding]) -> String {

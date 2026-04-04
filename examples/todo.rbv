@@ -1,13 +1,12 @@
 <script type="brief">
 let items: List<String> = ["Buy groceries", "Walk the dog", "Read a book"];
-let next_id: Int = 4;
 
-txn add_item [true][next_id == @next_id + 1] {
-  &next_id = next_id + 1;
+txn add_item [true][items.len() == @items.len() + 1] {
+  &items = items + ["New task"];
   term;
 };
 
-txn clear_all [true][true] {
+txn clear_all [true][items.len() == 0] {
   &items = [];
   term;
 };
