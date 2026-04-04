@@ -1,4 +1,4 @@
-use brief_compiler::{annotator, import_resolver, interpreter, manifest, parser, proof_engine, typechecker};
+use brief_compiler::{annotator, desugarer, import_resolver, interpreter, manifest, parser, proof_engine, typechecker};
 use std::fs;
 use std::path::PathBuf;
 
@@ -75,6 +75,12 @@ fn run_check(file_path: &PathBuf, verbose: bool, annotate: bool) -> Result<(), B
             return Err("Import error".into());
         }
     };
+
+    if verbose {
+        println!("[Desugarer] Processing sugared syntax...");
+    }
+    let mut desug = desugarer::Desugarer::new();
+    let program = desug.desugar(&program);
 
     if verbose {
         println!("[Parser] Successfully parsed {} items", program.items.len());
@@ -154,6 +160,12 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
             return Err("Import error".into());
         }
     };
+
+    if verbose {
+        println!("[Desugarer] Processing sugared syntax...");
+    }
+    let mut desug = desugarer::Desugarer::new();
+    let program = desug.desugar(&program);
 
     if verbose {
         println!("[Parser] Successfully parsed {} items", program.items.len());
