@@ -146,7 +146,15 @@ fn print_usage(program: &str) {
     eprintln!("  import <name>    Add dependency to project");
     eprintln!("  serve [dir]      Serve static files (default: .)");
     eprintln!("  rbv <file>       Compile RBV to browser-ready files");
+    eprintln!("  run <file>       Compile, build WASM, serve, and open browser");
     eprintln!("  lsp              Start Language Server (for IDE integration)");
+    eprintln!();
+    eprintln!("RBV Options:");
+    eprintln!("  --out <dir>      Output directory (default: <name>-build)");
+    eprintln!("  --no-build       Skip wasm-pack build");
+    eprintln!("  --port <port>    Port for server (default: 8080)");
+    eprintln!("  --no-open        Don't open browser (for 'run' command)");
+    eprintln!("  --watch, -w      Watch for changes and rebuild (for 'run' command)");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -a, --annotate       Generate path annotations");
@@ -622,7 +630,11 @@ fn run_serve(dir: &Path, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
+fn run_rbv(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+    build_wasm: bool,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling RBV: {}", file_path.display());
 
     let source = fs::read_to_string(file_path)?;
@@ -687,11 +699,16 @@ fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn st
 
     let output_path = if let Some(p) = out_dir {
         p.to_path_buf()
-    } else if file_path.is_absolute() {
-        file_path.parent().unwrap_or(&file_path).to_path_buf()
     } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        let stem = file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+        std::env::current_dir()?.join(format!("{}-build", stem))
     };
+
+    fs::create_dir_all(&output_path)?;
+
     let stem = file_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -722,17 +739,13 @@ fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn st
     let src_dir = output_path.join("src");
     fs::create_dir_all(&src_dir)?;
 
-    let lib_rs = format!("mod {};\npub use {}::*;\n", stem, stem);
-    fs::write(src_dir.join("lib.rs"), lib_rs)?;
-
     let wasm_rs = output.rust_code.clone();
     fs::write(src_dir.join(format!("{}.rs", stem)), wasm_rs)?;
 
     let lib_rs = format!("mod {};\npub use {}::{{State}};\n", stem, stem);
     fs::write(src_dir.join("lib.rs"), lib_rs)?;
 
-    let main_rs = format!("fn main() {{}}\n");
-    fs::write(src_dir.join("main.rs"), main_rs)?;
+    fs::write(src_dir.join("main.rs"), "fn main() {}\n")?;
 
     let cargo_toml = format!(
         r#"[package]
@@ -750,7 +763,6 @@ js-sys = "0.3"
 [profile.release]
 opt-level = "s"
 lto = true
-js-sys = "0.3"
 "#,
         stem
     );
@@ -759,19 +771,30 @@ js-sys = "0.3"
     println!("  Generated: {}/src/lib.rs", output_path.display());
     println!("  Generated: {}/src/main.rs", output_path.display());
 
+    if build_wasm {
+        println!("\n  Building WASM with wasm-pack...");
+        let status = std::process::Command::new("wasm-pack")
+            .args(["build", "--target", "web"])
+            .current_dir(&output_path)
+            .status()?;
+
+        if !status.success() {
+            return Err(
+                format!("wasm-pack build failed with exit code: {:?}", status.code()).into(),
+            );
+        }
+        println!("  WASM build complete");
+    }
+
     println!("\n✓ RBV compiled successfully");
     println!(
         "  Signals: {}, Transactions: {}",
         output.signal_count, output.txn_count
     );
     println!("  Bindings: {}", bindings.len());
-    println!("\n  To build WASM, run:");
-    println!(
-        "    cd {} && wasm-pack build --target web",
-        output_path.display()
-    );
+    println!("\n  Output: {}", output_path.display());
 
-    Ok(())
+    Ok(output_path)
 }
 
 fn generate_html(name: &str, view_html: &str) -> String {
@@ -935,6 +958,7 @@ fn main() {
         "rbv" => {
             let mut out_dir = None;
             let mut file_path = None;
+            let mut build_wasm = true;
 
             let mut i = 2;
             while i < args.len() {
@@ -942,6 +966,9 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
+                } else if arg == "--no-build" {
+                    build_wasm = false;
+                    i += 1;
                 } else if arg.ends_with(".rbv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -951,13 +978,102 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                if let Err(e) = run_rbv(&path, out_dir.as_deref()) {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
+                match run_rbv(&path, out_dir.as_deref(), build_wasm) {
+                    Ok(output_path) => {
+                        if build_wasm {
+                            println!("\n  Ready to serve! Run:");
+                            println!("    brief serve {}", output_path.display());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             } else {
                 eprintln!("Error: No .rbv file specified");
-                eprintln!("Usage: {} rbv <file.rbv> [--out <dir>]", args[0]);
+                eprintln!(
+                    "Usage: {} rbv <file.rbv> [--out <dir>] [--no-build]",
+                    args[0]
+                );
+                std::process::exit(1);
+            }
+        }
+
+        "run" => {
+            let mut file_path = None;
+            let mut port = None::<u16>;
+            let mut open_browser = true;
+            let mut watch_mode = false;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--port" && i + 1 < args.len() {
+                    if let Ok(p) = args[i + 1].parse() {
+                        port = Some(p);
+                    }
+                    i += 2;
+                } else if arg.starts_with("--port=") {
+                    if let Ok(p) = arg.strip_prefix("--port=").unwrap_or("").parse() {
+                        port = Some(p);
+                    }
+                    i += 1;
+                } else if arg == "--no-open" {
+                    open_browser = false;
+                    i += 1;
+                } else if arg == "--watch" || arg == "-w" {
+                    watch_mode = true;
+                    i += 1;
+                } else if arg.ends_with(".rbv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                let out_dir = std::env::temp_dir().join(format!(
+                    "brief-run-{}",
+                    path.file_stem().and_then(|s| s.to_str()).unwrap_or("app")
+                ));
+
+                match run_rbv(&path, Some(&out_dir), true) {
+                    Ok(output_path) => {
+                        let port = port.unwrap_or(8080);
+                        let html_file = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("output");
+                        let url = format!("http://localhost:{}/{}.html", port, html_file);
+
+                        if open_browser {
+                            println!("  Opening browser at {}", url);
+                            let _ = open::that(&url);
+                        }
+
+                        println!("\n  Server running on http://localhost:{}", port);
+                        if watch_mode {
+                            println!("  Watch mode enabled - rebuilding on file changes");
+                        }
+                        println!("  Press Ctrl+C to stop");
+                        if let Err(e) = run_serve(&output_path, port) {
+                            eprintln!("Server error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No .rbv file specified");
+                eprintln!(
+                    "Usage: {} run <file.rbv> [--port <port>] [--no-open]",
+                    args[0]
+                );
                 std::process::exit(1);
             }
         }
