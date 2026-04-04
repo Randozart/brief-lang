@@ -511,6 +511,83 @@ impl WasmGenerator {
         }
         output.push_str("    };\n\n");
 
+        let mut has_each = false;
+        for binding in bindings {
+            if let Directive::Each {
+                iterable,
+                item_name,
+                template_html,
+            } = &binding.directive
+            {
+                has_each = true;
+                output.push_str(&format!(
+                    "    const EACH_{} = {{\n",
+                    binding.element_id.replace("-", "_")
+                ));
+                output.push_str(&format!("        iterable: '{}',\n", iterable));
+                output.push_str(&format!("        itemName: '{}',\n", item_name));
+                output.push_str(&format!(
+                    "        template: `{}`,\n",
+                    template_html.replace("`", "\\`").replace("${", "\\${")
+                ));
+                output.push_str(&format!(
+                    "        container: ELEMENT_MAP['{}'],\n",
+                    binding.element_id
+                ));
+                output.push_str("    };\n\n");
+            }
+        }
+
+        if has_each {
+            output.push_str("    const renderedItems = new Map();\n\n");
+            output.push_str("    function renderEachItem(eachConfig, item, index) {\n");
+            output.push_str(
+                "        const container = document.querySelector(eachConfig.container);\n",
+            );
+            output.push_str("        if (!container) return;\n");
+            output.push_str("        const template = document.createElement('div');\n");
+            output.push_str("        template.innerHTML = eachConfig.template;\n");
+            output.push_str("        const el = template.firstElementChild;\n");
+            output.push_str("        el.dataset.index = index;\n");
+            output.push_str("        el.dataset.item = JSON.stringify(item);\n");
+            output.push_str("        container.appendChild(el);\n");
+            output.push_str("        return el;\n");
+            output.push_str("    }\n\n");
+
+            output.push_str("    function renderEach(eachConfig, signalId) {\n");
+            output.push_str(
+                "        const container = document.querySelector(eachConfig.container);\n",
+            );
+            output.push_str("        if (!container) return;\n");
+            output.push_str("        container.innerHTML = '';\n");
+            output.push_str("        renderedItems.get(signalId)?.forEach(el => el.remove());\n");
+            output.push_str("        const items = [];\n");
+            output.push_str("        const list = wasm.get_signal(signalId);\n");
+            output.push_str("        if (list && list.forEach) {\n");
+            output.push_str("            list.forEach((item, index) => {\n");
+            output
+                .push_str("                const el = renderEachItem(eachConfig, item, index);\n");
+            output.push_str("                if (el) items.push(el);\n");
+            output.push_str("            });\n");
+            output.push_str("        }\n");
+            output.push_str("        renderedItems.set(signalId, items);\n");
+            output.push_str("    }\n\n");
+
+            output.push_str("    function attachEachListeners() {\n");
+            for binding in bindings {
+                if let Directive::Each { iterable, .. } = &binding.directive {
+                    if let Some(&sig_id) = self.signal_map.get(iterable) {
+                        output.push_str(&format!(
+                            "        renderEach(EACH_{}, {});\n",
+                            binding.element_id.replace("-", "_"),
+                            sig_id
+                        ));
+                    }
+                }
+            }
+            output.push_str("    }\n\n");
+        }
+
         output.push_str("    function attachListeners() {\n");
         output.push_str("        for (const [elId, config] of Object.entries(TRIGGER_MAP)) {\n");
         output.push_str("            const el = document.querySelector(ELEMENT_MAP[elId]);\n");
@@ -554,6 +631,9 @@ impl WasmGenerator {
         output.push_str("        }\n");
         output.push_str("    }\n\n");
 
+        if has_each {
+            output.push_str("    attachEachListeners();\n");
+        }
         output.push_str("    attachListeners();\n");
         output.push_str("    startPollLoop();\n");
         output.push_str("})();\n");

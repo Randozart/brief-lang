@@ -9,12 +9,31 @@ pub struct Binding {
 
 #[derive(Debug, Clone)]
 pub enum Directive {
-    Text { signal: String },
-    Show { expr: String },
-    Hide { expr: String },
-    Trigger { event: String, txn: String },
-    Class { pairs: Vec<(String, String)> },
-    Attr { name: String, value: String },
+    Text {
+        signal: String,
+    },
+    Show {
+        expr: String,
+    },
+    Hide {
+        expr: String,
+    },
+    Trigger {
+        event: String,
+        txn: String,
+    },
+    Class {
+        pairs: Vec<(String, String)>,
+    },
+    Attr {
+        name: String,
+        value: String,
+    },
+    Each {
+        iterable: String,
+        item_name: String,
+        template_html: String,
+    },
 }
 
 pub struct ViewCompiler {
@@ -140,6 +159,18 @@ impl ViewCompiler {
                         });
                     }
                 }
+            } else if attr.starts_with("b-each:") {
+                if let Some((item_name, iterable)) = self.extract_each_value(attr) {
+                    let elem_id = self.generate_element_id(tag);
+                    self.bindings.push(Binding {
+                        element_id: elem_id,
+                        directive: Directive::Each {
+                            iterable: iterable,
+                            item_name: item_name,
+                            template_html: tag.to_string(),
+                        },
+                    });
+                }
             }
         }
     }
@@ -251,6 +282,22 @@ impl ViewCompiler {
             None
         }
     }
+
+    fn extract_each_value(&self, attr: &str) -> Option<(String, String)> {
+        let after_prefix = attr.strip_prefix("b-each:")?;
+        let (item_name, after_item) = after_item_name(after_prefix)?;
+        if !after_item.starts_with('=') {
+            return None;
+        }
+        let after_eq = &after_item[1..].trim();
+        let iterable = after_eq.trim_matches('"').trim_matches('\'').to_string();
+        Some((item_name.to_string(), iterable))
+    }
+}
+
+fn after_item_name(s: &str) -> Option<(&str, &str)> {
+    let end = s.find(|c: char| !c.is_alphanumeric() && c != '_')?;
+    Some((&s[..end], &s[end..]))
 }
 
 impl Default for ViewCompiler {
