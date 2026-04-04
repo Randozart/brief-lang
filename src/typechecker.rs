@@ -314,6 +314,13 @@ impl TypeChecker {
             (Type::Int, Type::Int) => int_type,
             (Type::Float, Type::Float) => float_type,
             (Type::Int, Type::Float) | (Type::Float, Type::Int) => float_type,
+            (Type::String, _) | (_, Type::String) => Type::String,
+            (Type::Applied(a, _), Type::Applied(b, _))
+            | (Type::Generic(a, _), Type::Generic(b, _))
+                if a == "List" && b == "List" =>
+            {
+                l_ty.clone()
+            }
             _ => Type::Custom("unknown".to_string()),
         }
     }
@@ -331,6 +338,7 @@ impl TypeChecker {
                 types.iter().any(|u| self.types_compatible(u, t))
             }
             (Type::TypeVar(a), Type::TypeVar(b)) => a == b,
+            (Type::TypeVar(_), _) | (_, Type::TypeVar(_)) => true,
             (Type::Generic(a, args_a), Type::Generic(b, args_b)) => {
                 a == b
                     && args_a.len() == args_b.len()
@@ -346,6 +354,12 @@ impl TypeChecker {
                         .iter()
                         .zip(args_b.iter())
                         .all(|(x, y)| self.types_compatible(x, y))
+            }
+            (Type::Applied(a, _), Type::Applied(b, _))
+            | (Type::Applied(b, _), Type::Applied(a, _))
+                if a == b =>
+            {
+                true
             }
             _ => false,
         }

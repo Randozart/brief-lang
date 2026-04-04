@@ -1,13 +1,14 @@
 <script type="brief">
-let items: Int = 0;
+let items: List<String> = ["Buy groceries", "Walk the dog", "Read a book"];
+let next_id: Int = 4;
 
-txn add_item [true][items == @items + 1] {
-  &items = items + 1;
+txn add_item [true][next_id == @next_id + 1] {
+  &next_id = next_id + 1;
   term;
 };
 
-txn remove_item [items > 0][items == @items - 1] {
-  &items = items - 1;
+txn clear_all [true][true] {
+  &items = [];
   term;
 };
 </script>
@@ -17,27 +18,18 @@ txn remove_item [items > 0][items == @items - 1] {
     <h1>Todo App</h1>
     
     <div class="input-row">
-      <input id="task-input" type="text" placeholder="What needs to be done?" />
-      <button id="add-btn" b-trigger:click="add_item">Add</button>
+      <button id="add-btn" b-trigger:click="add_item">+ Add Task</button>
     </div>
     
     <div id="todo-container">
-      <div class="todo-item" b-show="items > 0">
-        <span>Sample task - click to complete</span>
-        <div class="actions">
-          <button class="complete-btn">✓</button>
-          <button class="delete-btn" b-trigger:click="remove_item">×</button>
-        </div>
-      </div>
-      
-      <div class="empty-state" b-show="items == 0">
-        <p>No tasks yet. Add one above!</p>
+      <div b-each:item="items" class="todo-item">
+        <span b-text="item">Task</span>
       </div>
     </div>
     
     <div class="footer">
-      <span><span b-text="items"></span> tasks</span>
-      <button id="clear-btn" b-trigger:click="remove_item">Remove Last</button>
+      <span><span b-text="items.len()"></span> tasks</span>
+      <button id="clear-btn" b-trigger:click="clear_all">Clear All</button>
     </div>
   </div>
 </view>
@@ -82,20 +74,6 @@ txn remove_item [items > 0][items == @items - 1] {
     border-bottom: 1px solid #eee;
   }
   
-  input {
-    flex: 1;
-    padding: 14px 18px;
-    border: 2px solid #e0e0e0;
-    border-radius: 8px;
-    font-size: 16px;
-    transition: border-color 0.3s;
-  }
-  
-  input:focus {
-    outline: none;
-    border-color: #667eea;
-  }
-  
   button {
     padding: 14px 24px;
     border: none;
@@ -109,6 +87,7 @@ txn remove_item [items > 0][items == @items - 1] {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     font-weight: 600;
+    width: 100%;
   }
   
   #add-btn:hover {
@@ -141,34 +120,6 @@ txn remove_item [items > 0][items == @items - 1] {
     color: #333;
   }
   
-  .actions {
-    display: flex;
-    gap: 8px;
-  }
-  
-  .complete-btn {
-    background: #4CAF50;
-    color: white;
-    padding: 8px 12px;
-    font-size: 14px;
-  }
-  
-  .complete-btn:hover {
-    background: #45a049;
-  }
-  
-  .delete-btn {
-    background: #f44336;
-    color: white;
-    padding: 8px 14px;
-    font-size: 18px;
-    font-weight: bold;
-  }
-  
-  .delete-btn:hover {
-    background: #d32f2f;
-  }
-  
   .footer {
     display: flex;
     justify-content: space-between;
@@ -184,19 +135,12 @@ txn remove_item [items > 0][items == @items - 1] {
   }
   
   #clear-btn {
-    background: #ff9800;
+    background: #f44336;
     color: white;
     padding: 10px 16px;
   }
   
   #clear-btn:hover {
-    background: #f57c00;
-  }
-  
-  .empty-state {
-    padding: 40px;
-    text-align: center;
-    color: #999;
-    font-size: 18px;
+    background: #d32f2f;
   }
 </style>

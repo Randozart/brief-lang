@@ -307,10 +307,26 @@ impl WasmGenerator {
             Expr::Add(a, b) => {
                 let a_val = self.expr_to_js_value(a);
                 let b_val = self.expr_to_js_value(b);
-                format!(
-                    "JsValue::from({}.as_f64().unwrap_or(0.0) + {}.as_f64().unwrap_or(0.0))",
-                    a_val, b_val
-                )
+                let a_is_list = matches!(a.as_ref(), Expr::ListLiteral(_));
+                let b_is_list = matches!(b.as_ref(), Expr::ListLiteral(_));
+                if a_is_list || b_is_list {
+                    let arr_a = if a_is_list {
+                        format!("js_sys::Array::from(&{})", a_val)
+                    } else {
+                        format!("js_sys::Array::new()")
+                    };
+                    let arr_b = if b_is_list {
+                        format!("js_sys::Array::from(&{})", b_val)
+                    } else {
+                        format!("js_sys::Array::new()")
+                    };
+                    format!("{{ let mut __arr = js_sys::Array::new(); for __i in 0..{}.length() {{ __arr.push(&{}.get(__i)); }} for __i in 0..{}.length() {{ __arr.push(&{}.get(__i)); }} __arr.into() }}", arr_a, arr_a, arr_b, arr_b)
+                } else {
+                    format!(
+                        "JsValue::from({}.as_f64().unwrap_or(0.0) + {}.as_f64().unwrap_or(0.0))",
+                        a_val, b_val
+                    )
+                }
             }
             Expr::Sub(a, b) => {
                 let a_val = self.expr_to_js_value(a);
@@ -408,9 +424,12 @@ impl WasmGenerator {
                 if items.is_empty() {
                     "js_sys::Array::new()".to_string()
                 } else {
-                    let array_items: Vec<String> =
-                        elements.iter().map(|e| self.expr_to_js_value(e)).collect();
-                    format!("[{}].into()", array_items.join(", "))
+                    let mut arr = String::from("{ let __arr = js_sys::Array::new(); ");
+                    for item in &items {
+                        arr.push_str(&format!("__arr.push(&{}); ", item));
+                    }
+                    arr.push_str("__arr }");
+                    arr
                 }
             }
             Expr::ListIndex(list_expr, index_expr) => {
@@ -425,6 +444,15 @@ impl WasmGenerator {
             Expr::FieldAccess(obj_expr, field_name) => {
                 let obj_val = self.expr_to_js_value(obj_expr);
                 format!("{}.{}", obj_val, field_name)
+            }
+            Expr::Call(name, args) if name == "len" && args.len() == 1 => {
+                let list_val = self.expr_to_js_value(&args[0]);
+                format!("{}.length()", list_val)
+            }
+            Expr::Call(name, args) => {
+                let args_vals: Vec<String> =
+                    args.iter().map(|a| self.expr_to_js_value(a)).collect();
+                format!("{}({})", name, args_vals.join(", "))
             }
             _ => "JsValue::TRUE".to_string(),
         }
