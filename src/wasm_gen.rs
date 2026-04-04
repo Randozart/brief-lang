@@ -643,6 +643,7 @@ impl WasmGenerator {
                 iterable,
                 item_name,
                 template_html,
+                container_id,
             } = &binding.directive
             {
                 has_each = true;
@@ -656,10 +657,7 @@ impl WasmGenerator {
                     "        template: `{}`,\n",
                     template_html.replace("`", "\\`").replace("${", "\\${")
                 ));
-                output.push_str(&format!(
-                    "        container: ELEMENT_MAP['{}'],\n",
-                    binding.element_id
-                ));
+                output.push_str(&format!("        container: '#{}',\n", container_id));
                 output.push_str("    };\n\n");
             }
         }

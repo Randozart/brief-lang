@@ -33,6 +33,7 @@ pub enum Directive {
         iterable: String,
         item_name: String,
         template_html: String,
+        container_id: String,
     },
 }
 
@@ -77,7 +78,50 @@ impl ViewCompiler {
                     .unwrap_or(false)
             {
                 if let Some((tag, end_pos)) = self.parse_tag(&html[pos..]) {
+                    let full_tag_start = pos;
                     let tag_str = String::from_utf8_lossy(&bytes[pos..pos + end_pos]).to_string();
+
+                    let tag_lower = tag_str.to_lowercase();
+                    let has_each = tag_lower.contains("b-each:");
+
+                    if has_each {
+                        let each_attr = tag_lower
+                            .split_whitespace()
+                            .find(|s| s.contains("b-each:"))
+                            .unwrap_or("");
+                        if let Some((item_name, iterable)) = self.extract_each_value(each_attr) {
+                            let elem_id = self.generate_element_id(&tag_str);
+                            let inner_html = self.find_each_inner_html(&html[pos..], &tag);
+                            let elem_name = tag.split_whitespace().next().unwrap_or(&tag).trim();
+                            let tag_attrs: String = tag
+                                .split_whitespace()
+                                .skip(1)
+                                .filter(|s| !s.starts_with("b-"))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            let opening_tag = if tag_attrs.is_empty() {
+                                format!("<{}>", elem_name)
+                            } else {
+                                format!("<{} {}>", elem_name, tag_attrs)
+                            };
+                            let template_html =
+                                format!("{} {}</{}>", opening_tag, inner_html, elem_name);
+                            let container_id = format!("{}-container", iterable);
+                            self.bindings.push(Binding {
+                                element_id: elem_id,
+                                directive: Directive::Each {
+                                    iterable: iterable,
+                                    item_name: item_name,
+                                    template_html: template_html,
+                                    container_id: container_id,
+                                },
+                            });
+                            let total_len = end_pos + inner_html.len() + elem_name.len() + 3;
+                            pos += total_len;
+                            continue;
+                        }
+                    }
+
                     self.extract_directives(&tag_str);
                     pos += end_pos;
                     continue;
@@ -85,6 +129,58 @@ impl ViewCompiler {
             }
             pos += 1;
         }
+    }
+
+    fn find_each_inner_html(&self, html: &str, tag: &str) -> String {
+        let elem_name = tag.split_whitespace().next().unwrap_or(tag).trim();
+        let closing_pattern = format!("</{}>", elem_name);
+        if let Some(closing_pos) = html.find(&closing_pattern) {
+            if let Some(open_end) = html.find('>') {
+                if open_end < closing_pos {
+                    let inner = html[open_end + 1..closing_pos].trim();
+                    return self.strip_directives_from_html(inner);
+                }
+            }
+        }
+        String::new()
+    }
+
+    fn strip_directives_from_html(&self, html: &str) -> String {
+        let mut result = String::new();
+        let chars: Vec<char> = html.chars().collect();
+        let mut pos = 0;
+
+        while pos < chars.len() {
+            if chars[pos] == '<' {
+                if chars
+                    .get(pos + 1)
+                    .map(|&c| c.is_ascii_alphabetic() || c == '!')
+                    .unwrap_or(false)
+                {
+                    if let Some((tag_str, tag_len)) = self.parse_tag(&html[pos..]) {
+                        let stripped_tag = self.strip_directives_from_tag(&tag_str);
+                        result.push_str(&format!("<{}>", stripped_tag));
+                        pos += tag_len;
+                        continue;
+                    }
+                }
+                result.push(chars[pos]);
+                pos += 1;
+            } else {
+                result.push(chars[pos]);
+                pos += 1;
+            }
+        }
+        result
+    }
+
+    fn strip_directives_from_tag(&self, tag: &str) -> String {
+        let parts: Vec<String> = tag
+            .split_whitespace()
+            .filter(|s| !s.starts_with("b-") && !s.starts_with("B-"))
+            .map(|s| s.to_string())
+            .collect();
+        parts.join(" ")
     }
 
     fn parse_tag<'a>(&self, s: &'a str) -> Option<(String, usize)> {
@@ -158,18 +254,6 @@ impl ViewCompiler {
                             directive: Directive::Attr { name, value },
                         });
                     }
-                }
-            } else if attr.starts_with("b-each:") {
-                if let Some((item_name, iterable)) = self.extract_each_value(attr) {
-                    let elem_id = self.generate_element_id(tag);
-                    self.bindings.push(Binding {
-                        element_id: elem_id,
-                        directive: Directive::Each {
-                            iterable: iterable,
-                            item_name: item_name,
-                            template_html: tag.to_string(),
-                        },
-                    });
                 }
             }
         }
