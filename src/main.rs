@@ -1,8 +1,107 @@
-use brief_compiler::{annotator, ast, desugarer, import_resolver, interpreter, manifest, parser, proof_engine, typechecker, rbv, view_compiler, wasm_gen};
+use brief_compiler::{annotator, ast, desugarer, errors, import_resolver, interpreter, manifest, parser, proof_engine, typechecker, rbv, view_compiler, wasm_gen};
 use notify::Watcher;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+fn format_type_errors(errors: &[typechecker::TypeError], file_name: &str) -> String {
+    let mut output = String::new();
+    for err in errors {
+        match err {
+            typechecker::TypeError::UndefinedVariable { name, available } => {
+                output.push_str(&format!(
+                    "error[B001]: undefined variable '{}'\n --> {}:?:?\n  |\n",
+                    name, file_name
+                ));
+                if !available.is_empty() {
+                    output.push_str(&format!(
+                        "  = available variables: {}\n",
+                        available.join(", ")
+                    ));
+                }
+            }
+            typechecker::TypeError::TypeMismatch { expected, found, context } => {
+                output.push_str(&format!(
+                    "error[B002]: type mismatch\n --> {}:?:?\n  |\n",
+                    file_name
+                ));
+                output.push_str(&format!(
+                    "  = expected {} for {}, but found {}\n",
+                    expected, context, found
+                ));
+            }
+            typechecker::TypeError::UninitializedSignal { name } => {
+                output.push_str(&format!(
+                    "error[B003]: uninitialized signal\n --> {}:?:?\n  |\n",
+                    file_name
+                ));
+                output.push_str(&format!(
+                    "  = signal '{}' has no initial value\n",
+                    name
+                ));
+                output.push_str(&format!(
+                    "  = hint: provide an initial value like let {}: Int = 0;\n",
+                    name
+                ));
+            }
+            typechecker::TypeError::OwnershipViolation { var, reason } => {
+                output.push_str(&format!(
+                    "error[B004]: ownership violation\n --> {}:?:?\n  |\n",
+                    file_name
+                ));
+                output.push_str(&format!(
+                    "  = {}: {}\n",
+                    var, reason
+                ));
+            }
+            typechecker::TypeError::InvalidOperation { operation, type_name } => {
+                output.push_str(&format!(
+                    "error[B005]: invalid operation\n --> {}:?:?\n  |\n",
+                    file_name
+                ));
+                output.push_str(&format!(
+                    "  = cannot perform '{}' on type {}\n",
+                    operation, type_name
+                ));
+            }
+        }
+        output.push('\n');
+    }
+    output
+}
+
+fn format_proof_errors(errors: &[proof_engine::ProofError], file_name: &str) -> String {
+    let mut output = String::new();
+    for err in errors {
+        output.push_str(&format!(
+            "error[{}]: {}\n --> {}:?:?\n",
+            err.code, err.title, file_name
+        ));
+        if !err.explanation.is_empty() {
+            output.push_str(&format!("  |\n  = {}\n", err.explanation));
+        }
+        if !err.proof_chain.is_empty() {
+            output.push_str("  |\n  = proof:\n");
+            for step in &err.proof_chain {
+                output.push_str(&format!("  =   • {}\n", step));
+            }
+        }
+        if !err.examples.is_empty() {
+            output.push_str("  |\n  = example failure:\n");
+            for ex in &err.examples {
+                output.push_str(&format!("  =   {}\n", ex));
+            }
+        }
+        if !err.hints.is_empty() {
+            output.push_str("  |\n  = hint:");
+            for hint in &err.hints {
+                output.push_str(&format!(" {}\n", hint));
+            }
+        }
+        output.push('\n');
+    }
+    output
+}
 
 fn strip_annotations(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
@@ -41,6 +140,8 @@ fn print_usage(program: &str) {
     eprintln!("  build <file>     Full compilation");
     eprintln!("  init [name]      Create new project");
     eprintln!("  import <name>    Add dependency to project");
+    eprintln!("  serve [dir]      Serve static files (default: .)");
+    eprintln!("  rbv <file>       Compile RBV to browser-ready files");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -a, --annotate       Generate path annotations");
@@ -92,10 +193,7 @@ fn run_check(file_path: &PathBuf, verbose: bool, annotate: bool) -> Result<(), B
     let mut tc = typechecker::TypeChecker::new();
     let type_errors = tc.check_program(&program);
     if !type_errors.is_empty() {
-        eprintln!("Type errors found:");
-        for err in &type_errors {
-            eprintln!("  - {:?}", err);
-        }
+        eprintln!("{}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv")));
         return Err("Type errors".into());
     }
     if verbose {
@@ -108,10 +206,7 @@ fn run_check(file_path: &PathBuf, verbose: bool, annotate: bool) -> Result<(), B
     let mut pe = proof_engine::ProofEngine::new();
     let proof_errors = pe.verify_program(&program);
     if !proof_errors.is_empty() {
-        eprintln!("Proof errors found:");
-        for err in &proof_errors {
-            eprintln!("  - {:?}", err);
-        }
+        eprintln!("{}", format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv")));
         return Err("Proof errors".into());
     }
     if verbose {
@@ -177,10 +272,7 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
     let mut tc = typechecker::TypeChecker::new();
     let type_errors = tc.check_program(&program);
     if !type_errors.is_empty() {
-        eprintln!("Type errors found:");
-        for err in &type_errors {
-            eprintln!("  - {:?}", err);
-        }
+        eprintln!("{}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv")));
         return Err("Type errors".into());
     }
 
@@ -190,10 +282,7 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
     let mut pe = proof_engine::ProofEngine::new();
     let proof_errors = pe.verify_program(&program);
     if !proof_errors.is_empty() {
-        eprintln!("Proof errors found:");
-        for err in &proof_errors {
-            eprintln!("  - {:?}", err);
-        }
+        eprintln!("{}", format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv")));
         return Err("Proof errors".into());
     }
 
@@ -363,20 +452,14 @@ fn run_watch(file_path: PathBuf, verbose: bool) -> Result<(), Box<dyn std::error
     let mut tc = typechecker::TypeChecker::new();
     let type_errors = tc.check_program(&program);
     if !type_errors.is_empty() {
-        eprintln!("Type errors found:");
-        for err in &type_errors {
-            eprintln!("  - {:?}", err);
-        }
+        eprintln!("{}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv")));
         return Err("Type errors".into());
     }
 
     let mut pe = proof_engine::ProofEngine::new();
     let proof_errors = pe.verify_program(&program);
     if !proof_errors.is_empty() {
-        eprintln!("Proof errors found:");
-        for err in &proof_errors {
-            eprintln!("  - {:?}", err);
-        }
+        eprintln!("{}", format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv")));
         return Err("Proof errors".into());
     }
 
@@ -405,6 +488,99 @@ fn run_watch(file_path: PathBuf, verbose: bool) -> Result<(), Box<dyn std::error
     loop {
         std::thread::sleep(Duration::from_secs(1));
     }
+}
+
+fn run_serve(dir: &Path, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    
+    let addr = format!("127.0.0.1:{}", port);
+    let listener = TcpListener::bind(&addr)?;
+    
+    println!("Brief Server");
+    println!("Serving {} on http://{}", dir.display(), addr);
+    println!("Press Ctrl+C to stop\n");
+    
+    fn get_mime_type(path: &Path) -> &'static str {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("html") => "text/html",
+            Some("css") => "text/css",
+            Some("js") => "application/javascript",
+            Some("wasm") => "application/wasm",
+            Some("json") => "application/json",
+            Some("png") => "image/png",
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("svg") => "image/svg+xml",
+            Some("ico") => "image/x-icon",
+            _ => "application/octet-stream",
+        }
+    }
+    
+    fn handle_request(mut stream: TcpStream, root_dir: &Path) {
+        let mut buffer = [0u8; 8192];
+        let bytes_read = match stream.read(&mut buffer) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        
+        let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+        let first_line = request.lines().next();
+        
+        let path = if let Some(line) = first_line {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                parts[1].trim_start_matches('/')
+            } else {
+                "index.html"
+            }
+        } else {
+            "index.html"
+        };
+        
+        let file_path = root_dir.join(path);
+        let file_path = if file_path.is_dir() {
+            file_path.join("index.html")
+        } else {
+            file_path
+        };
+        
+        let (status, content_type, body) = if file_path.exists() && file_path.is_file() {
+            match fs::read(&file_path) {
+                Ok(data) => ("200 OK", get_mime_type(&file_path), data),
+                Err(_) => ("500 Internal Server Error", "text/plain", b"Error reading file".to_vec()),
+            }
+        } else {
+            ("404 Not Found", "text/plain", b"File not found".to_vec())
+        };
+        
+        let response = format!(
+            "HTTP/1.1 {}\r\n\
+            Content-Type: {}\r\n\
+            Content-Length: {}\r\n\
+            Connection: close\r\n\
+            \r\n",
+            status, content_type, body.len()
+        );
+        
+        let _ = stream.write_all(response.as_bytes());
+        let _ = stream.write_all(&body);
+    }
+    
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let dir = dir.to_path_buf();
+                std::thread::spawn(move || {
+                    handle_request(stream, &dir);
+                });
+            }
+            Err(e) => {
+                eprintln!("Connection error: {}", e);
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
@@ -436,10 +612,7 @@ fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn st
     println!("  Type checking...");
     let type_errors = tc.check_program(&program);
     if !type_errors.is_empty() {
-        eprintln!("Type errors:");
-        for err in &type_errors {
-            eprintln!("  - {:?}", err);
-        }
+        eprintln!("{}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.rbv")));
         return Err("Type errors".into());
     }
     println!("  Type checked OK");
@@ -449,10 +622,7 @@ fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn st
     let proof_errors = pe.verify_program(&program);
     println!("  Proof engine done");
     if !proof_errors.is_empty() {
-        eprintln!("Proof errors:");
-        for err in &proof_errors {
-            eprintln!("  - {:?}", err);
-        }
+        eprintln!("{}", format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.rbv")));
         return Err("Proof errors".into());
     }
     
@@ -514,10 +684,10 @@ fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn st
     let wasm_rs = output.rust_code.clone();
     fs::write(src_dir.join(format!("{}.rs", stem)), wasm_rs)?;
     
-    let main_rs = format!(
-        "use {}::{{State}};\nuse wasm_bindgen::{{prelude::*}};\n\n#[wasm_bindgen]\npub fn run() {{\n    web_sys::console_log(\"Brief RBV initialized\");\n}}\n",
-        stem
-    );
+    let lib_rs = format!("mod {};\npub use {}::{{State}};\n", stem, stem);
+    fs::write(src_dir.join("lib.rs"), lib_rs)?;
+    
+    let main_rs = format!("fn main() {{}}\n");
     fs::write(src_dir.join("main.rs"), main_rs)?;
     
     let cargo_toml = format!(r#"[package]
@@ -530,6 +700,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
 js-sys = "0.3"
 "#, stem);
     fs::write(output_path.join("Cargo.toml"), cargo_toml)?;
@@ -656,6 +831,39 @@ fn main() {
             
             if let Err(e) = run_import(name, path, true) {
                 eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        
+        "serve" => {
+            let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let mut port: Option<u16> = None;
+            
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--port" && i + 1 < args.len() {
+                    if let Ok(p) = args[i + 1].parse() {
+                        port = Some(p);
+                    }
+                    i += 2;
+                } else if arg.starts_with("--port=") {
+                    if let Ok(p) = arg.strip_prefix("--port=").unwrap_or("").parse() {
+                        port = Some(p);
+                    }
+                    i += 1;
+                } else if !arg.starts_with("-") {
+                    dir = PathBuf::from(arg);
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+            
+            let port = port.unwrap_or(8080);
+            
+            if let Err(e) = run_serve(&dir, port) {
+                eprintln!("Server error: {}", e);
                 std::process::exit(1);
             }
         }

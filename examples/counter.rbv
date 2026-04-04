@@ -1,12 +1,12 @@
 <script type="brief">
 let count: Int = 0;
 
-rct txn increment [count >= 0][count == @count + 1] {
+txn increment [true][count == @count + 1] {
   &count = count + 1;
   term;
 };
 
-rct txn decrement [count > 0][count == @count - 1] {
+txn decrement [count > 0][count == @count - 1] {
   &count = count - 1;
   term;
 };

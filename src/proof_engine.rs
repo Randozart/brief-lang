@@ -1,20 +1,54 @@
 use crate::ast::*;
+use crate::errors::{Diagnostic, Severity, Span};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
-pub enum ProofError {
-    UnhandledOutcome { sig: String, missing: Vec<String> },
-    MutualExclusionViolation { txn1: String, txn2: String, conflict_vars: Vec<String> },
-    UnreachableState { precondition: String, reachable_from: Vec<String> },
-    NoAcceptingPath { txn: String },
-    BorrowConflict { txn1: String, txn2: String, var: String },
-    ContractImplicationFailure { defn: String },
-    TrueAssertionFailure { sig: String, reason: String },
+pub struct ProofError {
+    pub code: String,
+    pub title: String,
+    pub explanation: String,
+    pub proof_chain: Vec<String>,
+    pub examples: Vec<String>,
+    pub hints: Vec<String>,
+}
+
+impl ProofError {
+    pub fn new(code: &str, title: &str) -> Self {
+        ProofError {
+            code: code.to_string(),
+            title: title.to_string(),
+            explanation: String::new(),
+            proof_chain: Vec::new(),
+            examples: Vec::new(),
+            hints: Vec::new(),
+        }
+    }
+    
+    pub fn with_explanation(mut self, text: &str) -> Self {
+        self.explanation = text.to_string();
+        self
+    }
+    
+    pub fn with_proof_step(mut self, step: &str) -> Self {
+        self.proof_chain.push(step.to_string());
+        self
+    }
+    
+    pub fn with_example(mut self, example: &str) -> Self {
+        self.examples.push(example.to_string());
+        self
+    }
+    
+    pub fn with_hint(mut self, hint: &str) -> Self {
+        self.hints.push(hint.to_string());
+        self
+    }
 }
 
 pub struct ProofEngine {
     errors: Vec<ProofError>,
     state_dag: HashMap<String, HashSet<String>>,
+    transactions: Vec<Transaction>,
 }
 
 impl ProofEngine {
@@ -22,16 +56,70 @@ impl ProofEngine {
         ProofEngine {
             errors: Vec::new(),
             state_dag: HashMap::new(),
+            transactions: Vec::new(),
         }
     }
 
     pub fn verify_program(&mut self, program: &Program) -> Vec<ProofError> {
         self.build_state_dag(program);
+        self.collect_transactions(program);
         self.check_exhaustiveness(program);
         self.check_mutual_exclusion(program);
         self.check_total_path(program);
         self.check_true_assertions(program);
+        self.check_postcondition_contradictions(program);
         self.errors.clone()
+    }
+    
+    fn check_postcondition_contradictions(&mut self, program: &Program) {
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                self.analyze_postcondition(txn);
+            }
+        }
+    }
+    
+    fn analyze_postcondition(&mut self, txn: &Transaction) {
+        let post = &txn.contract.post_condition;
+        
+        if let Expr::Eq(left, right) = post {
+            let (var, prior_var) = match (left.as_ref(), right.as_ref()) {
+                (Expr::Identifier(v), Expr::PriorState(p)) => (v.clone(), p.clone()),
+                (Expr::PriorState(p), Expr::Identifier(v)) => (v.clone(), p.clone()),
+                _ => return,
+            };
+            
+            if var == prior_var {
+                let mut err = ProofError::new(
+                    "P003", 
+                    "postcondition is always satisfied"
+                );
+                err.explanation = format!(
+                    "transaction '{}' postcondition '{} == @{}' is always true",
+                    txn.name, var, var
+                );
+                err.proof_chain.push(format!(
+                    "1. '@{}' refers to the value of '{}' at transaction start", 
+                    var, var
+                ));
+                err.proof_chain.push(format!(
+                    "2. postcondition requires: {} == @{}", var, var
+                ));
+                err.proof_chain.push(format!(
+                    "3. this is always true (any value equals itself)"
+                ));
+                err.hints.push("did you mean to modify the variable?".to_string());
+                self.errors.push(err);
+            }
+        }
+    }
+    
+    fn collect_transactions(&mut self, program: &Program) {
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                self.transactions.push(txn.clone());
+            }
+        }
     }
 
     fn build_state_dag(&mut self, program: &Program) {
@@ -170,11 +258,37 @@ impl ProofEngine {
                 if !conflicts.is_empty() {
                     let pre1_overlaps = self.preconditions_overlap(txn1, txn2);
                     if pre1_overlaps {
-                        self.errors.push(ProofError::MutualExclusionViolation {
-                            txn1: txn1.name.clone(),
-                            txn2: txn2.name.clone(),
-                            conflict_vars: conflicts,
-                        });
+                        let mut err = ProofError::new(
+                            "P001", 
+                            "concurrent mutation without synchronization"
+                        );
+                        err.explanation = format!(
+                            "both transactions '{}' and '{}' can mutate the same state variables",
+                            txn1.name, txn2.name
+                        );
+                        err.proof_chain.push(format!(
+                            "1. '{}' is reactive (fires automatically)", 
+                            txn1.name
+                        ));
+                        err.proof_chain.push(format!(
+                            "2. '{}' is reactive (fires automatically)", 
+                            txn2.name
+                        ));
+                        err.proof_chain.push(format!(
+                            "3. both mutate shared variable(s): {}",
+                            conflicts.join(", ")
+                        ));
+                        err.examples.push(format!(
+                            "race condition scenario: if {} runs first and sets {} to X, \
+                            then {} runs and expects a different value, the result is undefined",
+                            txn1.name, conflicts[0], txn2.name
+                        ));
+                        err.hints.push(format!(
+                            "to make these mutually exclusive, add a guard: txn {} [...][...] {{ |{}| ... }}",
+                            txn1.name, txn2.name
+                        ));
+                        err.hints.push("or use sequential transactions instead of reactive ones".to_string());
+                        self.errors.push(err);
                     }
                 }
             }
@@ -229,9 +343,26 @@ impl ProofEngine {
                 if txn.is_reactive {
                     let has_accepting_path = self.has_term_statement(&txn.body);
                     if !has_accepting_path {
-                        self.errors.push(ProofError::NoAcceptingPath {
-                            txn: txn.name.clone(),
-                        });
+                        let mut err = ProofError::new(
+                            "P005", 
+                            "transaction has no valid termination"
+                        );
+                        err.explanation = format!(
+                            "transaction '{}' has no 'term' statement, so it can never complete",
+                            txn.name
+                        );
+                        err.proof_chain.push(format!(
+                            "1. '{}' is declared as reactive (rct)", 
+                            txn.name
+                        ));
+                        err.proof_chain.push("2. reactive transactions must have a 'term' to settle".to_string());
+                        err.proof_chain.push("3. without 'term', the reactor will wait forever".to_string());
+                        err.hints.push(format!(
+                            "add 'term;' at the end of transaction '{}'", 
+                            txn.name
+                        ));
+                        err.hints.push("or use 'term expr1, expr2, ...;' to return values".to_string());
+                        self.errors.push(err);
                     }
                 }
             }
@@ -291,26 +422,58 @@ impl ProofEngine {
             
             for (j, val) in bool_outputs.iter().enumerate() {
                 if let Some(Expr::Bool(false)) = val {
-                    self.errors.push(ProofError::TrueAssertionFailure {
-                        sig: sig_name.to_string(),
-                        reason: format!(
-                            "Exit path {} contains Bool output {} with value false",
-                            i, j
-                        ),
-                    });
+                    let mut err = ProofError::new(
+                        "P006", 
+                        "true assertion failed"
+                    );
+                    err.explanation = format!(
+                        "signature '{}' declares '-> true' but exit path {} returns false",
+                        sig_name, i
+                    );
+                    err.proof_chain.push(format!(
+                        "1. '{}' declares it returns true (verified by compiler)", 
+                        sig_name
+                    ));
+                    err.proof_chain.push(format!(
+                        "2. definition '{}' has exit path {}", 
+                        defn.name, i
+                    ));
+                    err.proof_chain.push(format!(
+                        "3. Bool output slot {} returns false",
+                        j
+                    ));
+                    err.examples.push(format!(
+                        "when this path executes, the contract is violated"
+                    ));
+                    err.hints.push("ensure all code paths return true for Bool outputs".to_string());
+                    self.errors.push(err);
                     return;
                 }
             }
             
             let has_any_bool = bool_outputs.iter().any(|v| v.is_some());
             if !has_any_bool && !bool_outputs.is_empty() {
-                self.errors.push(ProofError::TrueAssertionFailure {
-                    sig: sig_name.to_string(),
-                    reason: format!(
-                        "Exit path {} has no Bool output to assert as true",
-                        i
-                    ),
-                });
+                let mut err = ProofError::new(
+                    "P007", 
+                    "true assertion cannot be verified"
+                );
+                err.explanation = format!(
+                    "signature '{}' declares '-> true' but exit path {} has no Bool output",
+                    sig_name, i
+                );
+                    err.proof_chain.push(format!(
+                        "1. '-> true' requires a Bool output that is always true for '{}'", 
+                        sig_name
+                    ));
+                err.proof_chain.push(format!(
+                    "2. exit path {} has no Bool in its outputs",
+                    i
+                ));
+                err.hints.push(format!(
+                    "ensure definition '{}' returns a Bool value on all paths", 
+                    defn.name
+                ));
+                self.errors.push(err);
                 return;
             }
         }

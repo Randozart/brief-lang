@@ -227,6 +227,8 @@ impl WasmGenerator {
     fn expr_to_rust(&self, expr: &Expr) -> String {
         match expr {
             Expr::Integer(n) => n.to_string(),
+            Expr::Bool(true) => "true".to_string(),
+            Expr::Bool(false) => "false".to_string(),
             Expr::Identifier(name) => {
                 if let Some(&id) = self.signal_map.get(name) {
                     format!("self.signals[{}]", id)
@@ -255,7 +257,7 @@ impl WasmGenerator {
             Expr::Or(a, b) => format!("({} || {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Not(a) => format!("(!{})", self.expr_to_rust(a)),
             Expr::Neg(a) => format!("(-{})", self.expr_to_rust(a)),
-            _ => "0".to_string(),
+            _ => "true".to_string(),
         }
     }
 

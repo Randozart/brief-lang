@@ -1,11 +1,13 @@
 use crate::ast::*;
+use crate::errors::Span;
 use crate::lexer::Token;
-use logos::{Lexer, Logos, Span};
+use logos::{Lexer, Logos};
 
 pub struct Parser<'a> {
     lexer: Lexer<'a, Token>,
-    current: Option<(Result<Token, ()>, Span)>,
-    peek: Option<(Result<Token, ()>, Span)>,
+    source: &'a str,
+    current: Option<(Result<Token, ()>, logos::Span)>,
+    peek: Option<(Result<Token, ()>, logos::Span)>,
     comments: Vec<Comment>,
     current_line: usize,
 }
@@ -17,6 +19,7 @@ impl<'a> Parser<'a> {
         let peek = lexer.next().map(|token| (token, lexer.span()));
         Parser {
             lexer,
+            source: input,
             current,
             peek,
             comments: Vec::new(),
@@ -25,7 +28,6 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) {
-        // Check for comments before advancing
         if let Some((Ok(Token::Comment(text)), span)) = &self.current {
             self.comments.push(Comment {
                 line: span.start,
@@ -36,7 +38,6 @@ impl<'a> Parser<'a> {
         self.current = self.peek.take();
         self.peek = self.lexer.next().map(|token| (token, self.lexer.span()));
         
-        // Update line number
         if let Some((_, span)) = &self.current {
             self.current_line = span.start;
         }
@@ -44,6 +45,24 @@ impl<'a> Parser<'a> {
 
     fn current_token(&self) -> Option<&Result<Token, ()>> {
         self.current.as_ref().map(|(t, _)| t)
+    }
+    
+    fn current_span(&self) -> Option<Span> {
+        self.current.as_ref().map(|(_, span)| {
+            let line = self.source[..span.start].matches('\n').count() + 1;
+            let line_start = self.source[..span.start].rfind('\n').map(|p| p + 1).unwrap_or(0);
+            let column = span.start - line_start + 1;
+            Span::new(span.start, span.end, line, column)
+        })
+    }
+    
+    fn peek_span(&self) -> Option<Span> {
+        self.peek.as_ref().map(|(_, span)| {
+            let line = self.source[..span.start].matches('\n').count() + 1;
+            let line_start = self.source[..span.start].rfind('\n').map(|p| p + 1).unwrap_or(0);
+            let column = span.start - line_start + 1;
+            Span::new(span.start, span.end, line, column)
+        })
     }
 
     fn expect(&mut self, expected: Token) -> Result<(), String> {
@@ -301,8 +320,9 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        let span = self.current_span();
         self.expect(Token::Semicolon)?;
-        Ok(StateDecl { name, ty, expr })
+        Ok(StateDecl { name, ty, expr, span })
     }
 
     fn parse_constant(&mut self) -> Result<Constant, String> {
@@ -339,6 +359,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::LBrace)?;
         let body = self.parse_body()?;
         self.expect(Token::RBrace)?;
+        let span = self.current_span();
         self.expect(Token::Semicolon)?;
 
         Ok(Transaction {
@@ -347,6 +368,7 @@ impl<'a> Parser<'a> {
             name,
             contract,
             body,
+            span,
         })
     }
 
@@ -497,9 +519,11 @@ impl<'a> Parser<'a> {
         // But for type bounds (like Int[expr]), this is handled in parse_type
         // So we just return what we have
 
+        let span = self.current_span();
         Ok(Contract {
             pre_condition,
             post_condition,
+            span,
         })
     }
 

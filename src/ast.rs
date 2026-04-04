@@ -1,3 +1,5 @@
+use crate::errors::Span;
+
 #[derive(Debug, Clone)]
 pub enum Type {
     Int,
@@ -19,18 +21,13 @@ pub enum ResultType {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    // Literals
     Integer(i64),
     Float(f64),
     String(String),
     Bool(bool),
-
-    // Identifiers and references
     Identifier(String),
     OwnedRef(String),
     PriorState(String),
-
-    // Binary operators
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
     Mul(Box<Expr>, Box<Expr>),
@@ -43,14 +40,16 @@ pub enum Expr {
     Ge(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
-
-    // Unary operators
     Not(Box<Expr>),
     Neg(Box<Expr>),
     BitNot(Box<Expr>),
-
-    // Call
     Call(String, Vec<Expr>),
+}
+
+impl Expr {
+    pub fn span(&self) -> Option<Span> {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +95,17 @@ pub enum Statement {
 pub struct Contract {
     pub pre_condition: Expr,
     pub post_condition: Expr,
+    pub span: Option<Span>,
+}
+
+impl Contract {
+    pub fn new(pre: Expr, post: Expr) -> Self {
+        Contract {
+            pre_condition: pre,
+            post_condition: post,
+            span: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +133,7 @@ pub struct Transaction {
     pub name: String,
     pub contract: Contract,
     pub body: Vec<Statement>,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +141,7 @@ pub struct StateDecl {
     pub name: String,
     pub ty: Type,
     pub expr: Option<Expr>,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]

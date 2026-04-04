@@ -2,6 +2,7 @@ pub mod ast;
 pub mod annotator;
 pub mod cache;
 pub mod desugarer;
+pub mod errors;
 pub mod import_resolver;
 pub mod interpreter;
 pub mod lexer;

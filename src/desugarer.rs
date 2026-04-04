@@ -98,6 +98,7 @@ impl Desugarer {
             name: "done".to_string(),
             ty: Type::Bool,
             expr: Some(Expr::Bool(false)),
+            span: None,
         });
 
         let mut new_body_items = Vec::new();
@@ -127,8 +128,10 @@ impl Desugarer {
             contract: Contract {
                 pre_condition: Expr::Not(Box::new(Expr::Identifier("done".to_string()))),
                 post_condition: Expr::Identifier("done".to_string()),
+                span: None,
             },
             body: new_body_items,
+            span: None,
         };
 
         (new_txn, sigs, state)

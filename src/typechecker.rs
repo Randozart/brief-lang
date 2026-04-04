@@ -1,18 +1,14 @@
 use crate::ast::*;
+use crate::errors::{Diagnostic, Severity, Span};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum TypeError {
-    UndefinedVariable(String),
-    TypeMismatch { expected: String, found: String, context: String },
-    UnificationFailure { pattern: String, value_type: String },
-    InvalidOwnershipClaim { var: String },
-    ContractViolation(String),
-}
+pub use crate::errors::TypeError;
 
 pub struct TypeChecker {
     scopes: Vec<HashMap<String, Type>>,
-    errors: Vec<TypeError>,
+    errors: Vec<crate::errors::TypeError>,
+    diagnostics: Vec<Diagnostic>,
+    source: String,
 }
 
 impl TypeChecker {
@@ -20,19 +16,55 @@ impl TypeChecker {
         TypeChecker {
             scopes: vec![HashMap::new()],
             errors: Vec::new(),
+            diagnostics: Vec::new(),
+            source: String::new(),
         }
     }
-
+    
+    pub fn with_source(mut self, source: String) -> Self {
+        self.source = source;
+        self
+    }
+    
     pub fn check_program(&mut self, program: &Program) -> Vec<TypeError> {
         for item in &program.items {
             match item {
                 TopLevel::StateDecl(decl) => {
                     self.declare_variable(&decl.name, decl.ty.clone());
+                    if decl.expr.is_none() {
+                        self.diagnostics.push(
+                            Diagnostic::new("B002", Severity::Warning, "uninitialized signal")
+                                .with_explanation(&format!(
+                                    "signal '{}' has no initial value specified", 
+                                    decl.name
+                                ))
+                                .with_hint(&format!(
+                                    "add an initial value: let {}: {} = 0;", 
+                                    decl.name, 
+                                    self.type_to_string(&decl.ty)
+                                ))
+                                .with_note("uninitialized signals may contain garbage values at runtime")
+                        );
+                    }
                 }
                 TopLevel::Constant(const_decl) => {
                     self.declare_variable(&const_decl.name, const_decl.ty.clone());
                     let expr_ty = self.infer_expression(&const_decl.expr);
                     if !self.types_compatible(&expr_ty, &const_decl.ty) {
+                        let diag = Diagnostic::new(
+                            "B001", 
+                            Severity::Error, 
+                            "type mismatch"
+                        )
+                        .with_explanation(&format!(
+                            "expected {} for constant '{}', but found {}", 
+                            self.type_to_string(&const_decl.ty),
+                            const_decl.name,
+                            self.type_to_string(&expr_ty)
+                        ))
+                        .with_hint("ensure the expression type matches the declared type");
+                        
+                        self.diagnostics.push(diag);
                         self.errors.push(TypeError::TypeMismatch {
                             expected: self.type_to_string(&const_decl.ty),
                             found: self.type_to_string(&expr_ty),
@@ -54,6 +86,19 @@ impl TypeChecker {
             }
         }
         self.errors.clone()
+    }
+    
+    pub fn get_diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+    
+    fn format_diagnostics(&self) -> String {
+        let mut output = String::new();
+        for diag in &self.diagnostics {
+            output.push_str(&diag.format(&self.source, "main.bv"));
+            output.push('\n');
+        }
+        output
     }
 
     fn push_scope(&mut self) {
@@ -132,8 +177,9 @@ impl TypeChecker {
                     if *is_owned {
                         let has_lower_scope = self.scopes.iter().take(self.scopes.len() - 1).any(|s| s.contains_key(name));
                         if !has_lower_scope {
-                            self.errors.push(TypeError::InvalidOwnershipClaim {
+                            self.errors.push(TypeError::OwnershipViolation {
                                 var: name.clone(),
+                                reason: "owned reference requires variable to exist in outer scope".to_string(),
                             });
                         }
                     }
