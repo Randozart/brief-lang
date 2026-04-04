@@ -1,0 +1,202 @@
+<script type="brief">
+let items: Int = 0;
+
+txn add_item [true][items == @items + 1] {
+  &items = items + 1;
+  term;
+};
+
+txn remove_item [items > 0][items == @items - 1] {
+  &items = items - 1;
+  term;
+};
+</script>
+
+<view>
+  <div class="container">
+    <h1>Todo App</h1>
+    
+    <div class="input-row">
+      <input id="task-input" type="text" placeholder="What needs to be done?" />
+      <button id="add-btn" b-trigger:click="add_item">Add</button>
+    </div>
+    
+    <div id="todo-container">
+      <div class="todo-item" b-show="items > 0">
+        <span>Sample task - click to complete</span>
+        <div class="actions">
+          <button class="complete-btn">✓</button>
+          <button class="delete-btn" b-trigger:click="remove_item">×</button>
+        </div>
+      </div>
+      
+      <div class="empty-state" b-show="items == 0">
+        <p>No tasks yet. Add one above!</p>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <span><span b-text="items"></span> tasks</span>
+      <button id="clear-btn" b-trigger:click="remove_item">Remove Last</button>
+    </div>
+  </div>
+</view>
+
+<style>
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+  }
+  
+  .container {
+    max-width: 600px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+  }
+  
+  h1 {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 24px;
+    text-align: center;
+    font-size: 2em;
+    font-weight: 300;
+    letter-spacing: 2px;
+  }
+  
+  .input-row {
+    display: flex;
+    padding: 20px;
+    gap: 12px;
+    border-bottom: 1px solid #eee;
+  }
+  
+  input {
+    flex: 1;
+    padding: 14px 18px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: border-color 0.3s;
+  }
+  
+  input:focus {
+    outline: none;
+    border-color: #667eea;
+  }
+  
+  button {
+    padding: 14px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+  
+  #add-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: 600;
+  }
+  
+  #add-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  }
+  
+  .todo-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #f0f0f0;
+    animation: slideIn 0.3s ease-out;
+  }
+  
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateX(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  
+  .todo-item span {
+    font-size: 18px;
+    color: #333;
+  }
+  
+  .actions {
+    display: flex;
+    gap: 8px;
+  }
+  
+  .complete-btn {
+    background: #4CAF50;
+    color: white;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+  
+  .complete-btn:hover {
+    background: #45a049;
+  }
+  
+  .delete-btn {
+    background: #f44336;
+    color: white;
+    padding: 8px 14px;
+    font-size: 18px;
+    font-weight: bold;
+  }
+  
+  .delete-btn:hover {
+    background: #d32f2f;
+  }
+  
+  .footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: #f9f9f9;
+    border-top: 1px solid #eee;
+  }
+  
+  .footer span {
+    color: #666;
+    font-size: 14px;
+  }
+  
+  #clear-btn {
+    background: #ff9800;
+    color: white;
+    padding: 10px 16px;
+  }
+  
+  #clear-btn:hover {
+    background: #f57c00;
+  }
+  
+  .empty-state {
+    padding: 40px;
+    text-align: center;
+    color: #999;
+    font-size: 18px;
+  }
+</style>
