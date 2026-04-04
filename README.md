@@ -107,7 +107,3 @@ The Brief logic owns all state; HTML and CSS are declarative projections of that
   <button b-trigger="increment">+</button>
 </view>
 ```
-
-## License
-
-MIT
