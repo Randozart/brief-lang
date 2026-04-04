@@ -118,10 +118,20 @@ arguments ::= expression ("," expression)*
 ### 2.5 Imports and Namespaces
 
 ```bnf
-import_stmt ::= "import" ("{" import_item ("," import_item)* "}")? ("from" namespace_path)? ";"
-import_item ::= identifier ("as" identifier)?           # symbol or symbol as alias
-namespace_path ::= identifier ("." identifier)*          # e.g., std.io
+import_stmt ::= "import" ("{" import_item ("," import_item)* "}")? (("from" namespace_path) | namespace_path)? ";"
+import_item ::= identifier ("as" identifier)?
+namespace_path ::= identifier ("." identifier)*
 ```
+
+**Examples:**
+```brief
+import std.io;                           # Import everything from std.io (shorthand)
+import { print } from std.io;            # Import specific symbol
+import { print as p } from std.io;       # Import with alias
+import { map, filter as f } from collections;  # Multiple with aliases
+```
+
+**Note:** The `from` keyword is optional when importing an entire namespace (e.g., `import std.io;`). It is required when importing specific items (e.g., `import { print } from std.io;`).
 
 **Examples:**
 ```brief

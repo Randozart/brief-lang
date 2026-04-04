@@ -196,6 +196,17 @@ impl<'a> Parser<'a> {
                 path.push(self.expect_identifier()?);
             }
             path
+        } else if let Some(Ok(Token::Identifier(_))) = self.current_token() {
+            if !items.is_empty() {
+                return Err("Cannot have both import items and direct namespace path. Use 'from' keyword.".to_string());
+            }
+            let mut path = Vec::new();
+            path.push(self.expect_identifier()?);
+            while let Some(Ok(Token::Dot)) = self.current_token() {
+                self.advance();
+                path.push(self.expect_identifier()?);
+            }
+            path
         } else {
             Vec::new()
         };

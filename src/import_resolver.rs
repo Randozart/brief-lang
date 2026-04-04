@@ -1,0 +1,146 @@
+use crate::ast::{Import, ImportItem, Program, TopLevel};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+pub struct ImportResolver {
+    search_paths: Vec<PathBuf>,
+    loaded_modules: HashMap<String, Program>,
+}
+
+impl ImportResolver {
+    pub fn new() -> Self {
+        ImportResolver {
+            search_paths: vec![
+                PathBuf::from("lib"),
+                PathBuf::from("imports"),
+                PathBuf::from("."),
+            ],
+            loaded_modules: HashMap::new(),
+        }
+    }
+
+    pub fn add_search_path(&mut self, path: PathBuf) {
+        self.search_paths.push(path);
+    }
+
+    pub fn resolve_imports(&mut self, program: &Program, file_path: &PathBuf) -> Result<Program, String> {
+        let mut items = program.items.clone();
+        let mut index = 0;
+
+        while index < items.len() {
+            if let TopLevel::Import(import) = &items[index] {
+                let resolved = self.resolve_import(import, file_path)?;
+                items.remove(index);
+                items.splice(index..index, resolved.items.clone());
+            } else {
+                index += 1;
+            }
+        }
+
+        Ok(Program {
+            items,
+            comments: program.comments.clone(),
+        })
+    }
+
+    fn resolve_import(&mut self, import: &Import, source_file: &PathBuf) -> Result<Program, String> {
+        if import.items.is_empty() && import.path.is_empty() {
+            return Ok(Program {
+                items: vec![],
+                comments: vec![],
+            });
+        }
+
+        let path_str = if import.path.is_empty() {
+            return Ok(Program {
+                items: vec![],
+                comments: vec![],
+            });
+        } else {
+            import.path.join(".")
+        };
+
+        if let Some(cached) = self.loaded_modules.get(&path_str) {
+            return self.filter_items(cached, &import.items);
+        }
+
+        let file_name = format!("{}.bv", path_str.replace('.', "/"));
+        let source_dir = source_file
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        let mut found_path = None;
+        for search_dir in &self.search_paths {
+            let candidate = source_dir.join(search_dir).join(&file_name);
+            if candidate.exists() {
+                found_path = Some(candidate);
+                break;
+            }
+        }
+
+        if found_path.is_none() {
+            let direct = source_dir.join(&file_name);
+            if direct.exists() {
+                found_path = Some(direct);
+            }
+        }
+
+        let resolved_path = found_path.ok_or_else(|| {
+            format!(
+                "Cannot find module '{}'. Searched in: lib/{}.bv, imports/{}.bv, ./{}.bv",
+                path_str,
+                path_str.replace('.', "/"),
+                path_str.replace('.', "/"),
+                path_str.replace('.', "/")
+            )
+        })?;
+
+        let source = std::fs::read_to_string(&resolved_path)
+            .map_err(|e| format!("Failed to read '{}': {}", resolved_path.display(), e))?;
+
+        let mut parser = crate::parser::Parser::new(&source);
+        let imported_program = parser.parse()
+            .map_err(|e| format!("Failed to parse '{}': {}", resolved_path.display(), e))?;
+
+        self.loaded_modules.insert(path_str.clone(), imported_program.clone());
+
+        let resolved = self.resolve_imports(&imported_program, &resolved_path)?;
+        self.filter_items(&resolved, &import.items)
+    }
+
+    fn filter_items(&self, program: &Program, items: &[ImportItem]) -> Result<Program, String> {
+        if items.is_empty() {
+            return Ok(program.clone());
+        }
+
+        let item_names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+
+        let filtered: Vec<TopLevel> = program
+            .items
+            .iter()
+            .filter(|item| {
+                let name = match item {
+                    TopLevel::Definition(d) => Some(d.name.as_str()),
+                    TopLevel::Signature(s) => Some(s.name.as_str()),
+                    TopLevel::ForeignSig(f) => Some(f.name.as_str()),
+                    TopLevel::Constant(c) => Some(c.name.as_str()),
+                    _ => None,
+                };
+                name.map(|n| item_names.contains(&n)).unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+
+        Ok(Program {
+            items: filtered,
+            comments: vec![],
+        })
+    }
+}
+
+impl Default for ImportResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}

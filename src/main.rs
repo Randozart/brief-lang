@@ -1,4 +1,4 @@
-use brief_compiler::{annotator, interpreter, manifest, parser, proof_engine, typechecker};
+use brief_compiler::{annotator, import_resolver, interpreter, manifest, parser, proof_engine, typechecker};
 use std::fs;
 use std::path::PathBuf;
 
@@ -61,6 +61,18 @@ fn run_check(file_path: &PathBuf, verbose: bool, annotate: bool) -> Result<(), B
         Err(e) => {
             eprintln!("Parse error: {}", e);
             return Err("Parse error".into());
+        }
+    };
+
+    if verbose {
+        println!("[Resolver] Resolving imports...");
+    }
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let program = match import_resolver.resolve_imports(&program, file_path) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            eprintln!("Import error: {}", e);
+            return Err("Import error".into());
         }
     };
 
@@ -128,6 +140,18 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
         Err(e) => {
             eprintln!("Parse error: {}", e);
             return Err("Parse error".into());
+        }
+    };
+
+    if verbose {
+        println!("[Resolver] Resolving imports...");
+    }
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let program = match import_resolver.resolve_imports(&program, file_path) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            eprintln!("Import error: {}", e);
+            return Err("Import error".into());
         }
     };
 
