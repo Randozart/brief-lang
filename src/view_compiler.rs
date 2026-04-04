@@ -69,6 +69,7 @@ impl ViewCompiler {
     fn extract_bindings(&mut self, html: &str, depth: usize) {
         let mut pos = 0;
         let bytes = html.as_bytes();
+        let mut element_stack: Vec<(String, usize)> = Vec::new();
 
         while pos < bytes.len() {
             if bytes[pos] == b'<'
@@ -78,10 +79,30 @@ impl ViewCompiler {
                     .unwrap_or(false)
             {
                 if let Some((tag, end_pos)) = self.parse_tag(&html[pos..]) {
-                    let full_tag_start = pos;
                     let tag_str = String::from_utf8_lossy(&bytes[pos..pos + end_pos]).to_string();
-
                     let tag_lower = tag_str.to_lowercase();
+
+                    if tag_lower.starts_with('/') {
+                        let closing_name = tag_lower
+                            .trim_start_matches('/')
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("");
+                        if let Some(pos_in_stack) = element_stack
+                            .iter()
+                            .position(|(name, _)| name == closing_name)
+                        {
+                            element_stack.truncate(pos_in_stack);
+                        }
+                        pos += end_pos;
+                        continue;
+                    }
+
+                    if !tag_lower.ends_with("/>") && !tag_lower.ends_with("?") {
+                        let elem_name = tag.split_whitespace().next().unwrap_or("div").to_string();
+                        element_stack.push((elem_name, pos));
+                    }
+
                     let has_each = tag_lower.contains("b-each:");
 
                     if has_each {
@@ -106,7 +127,29 @@ impl ViewCompiler {
                             };
                             let template_html =
                                 format!("{} {}</{}>", opening_tag, inner_html, elem_name);
-                            let container_id = format!("{}-container", iterable);
+
+                            let container_id =
+                                if let Some((_, parent_pos)) = element_stack.iter().rev().nth(1) {
+                                    let parent_html = &html[*parent_pos..];
+                                    if let Some((parent_tag, _)) = self.parse_tag(parent_html) {
+                                        if let Some(id) = self.extract_id_from_tag(&parent_tag) {
+                                            id
+                                        } else {
+                                            format!(
+                                                "rbv-{}",
+                                                parent_tag
+                                                    .split_whitespace()
+                                                    .next()
+                                                    .unwrap_or("container")
+                                            )
+                                        }
+                                    } else {
+                                        "rbv-container".to_string()
+                                    }
+                                } else {
+                                    "rbv-container".to_string()
+                                };
+
                             self.bindings.push(Binding {
                                 element_id: elem_id,
                                 directive: Directive::Each {
@@ -129,6 +172,22 @@ impl ViewCompiler {
             }
             pos += 1;
         }
+    }
+
+    fn extract_id_from_tag(&self, tag: &str) -> Option<String> {
+        let tag_lower = tag.to_lowercase();
+        if let Some(id_pos) = tag_lower.find("id=") {
+            let after = &tag[id_pos + 3..];
+            let trimmed = after
+                .trim_start_matches('=')
+                .trim_start_matches('\"')
+                .trim_start_matches('\'');
+            let end = trimmed
+                .find(|c: char| c.is_whitespace() || c == '\"' || c == '\'' || c == '>')
+                .unwrap_or(trimmed.len());
+            return Some(trimmed[..end].to_string());
+        }
+        None
     }
 
     fn find_each_inner_html(&self, html: &str, tag: &str) -> String {

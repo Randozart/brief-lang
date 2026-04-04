@@ -20,7 +20,7 @@ txn clear_all [true][items.len() == 0] {
       <button id="add-btn" b-trigger:click="add_item">+ Add Task</button>
     </div>
     
-    <div id="items-container">
+    <div id="todo-container">
       <div b-each:item="items" class="todo-item">
         <span b-text="item">Task</span>
       </div>
