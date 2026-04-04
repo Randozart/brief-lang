@@ -31,10 +31,11 @@ File extension is `.bv`.
 ### 2.1 Top-Level Program Structure
 
 ```bnf
-program ::= (signature | definition | state_decl | constant | transaction | rct_transaction)*
+program ::= (signature | definition | foreign_sig | state_decl | constant | transaction | rct_transaction)*
 
 signature ::= "sig" identifier ":" type_spec "->" result_type ("from" namespace_path)? ("as" identifier)? ";"
-definition ::= "defn" identifier parameter_list? ":" output_types contract "{" body "}" ";"
+foreign_sig ::= "frgn" "sig" identifier "(" parameters? ")" "->" output_types ";"
+definition ::= "defn" identifier parameter_list? contract "->" output_types "{" body "}" ";"
 
 output_types ::= type ("," type)*          # Multi-output: (A, B, C)
 result_type ::= output_list | "true"        # Projection or assertion
