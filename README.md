@@ -85,7 +85,7 @@ Syntax highlighting for `.bv` and `.rbv` files is included in `syntax-highlighte
 cp -r syntax-highlighter/ ~/.var/app/com.vscodium.codium/data/vscodium/extensions/brief
 ```
 
-## Rendered Brief
+## Rendered Brief (.rbv)
 
 Rendered Brief (`.rbv`) is a reactive UI framework where Brief logic and HTML coexist in a single file.
 
@@ -107,3 +107,54 @@ The Brief logic owns all state; HTML and CSS are declarative projections of that
   <button b-trigger="increment">+</button>
 </view>
 ```
+
+### Compile
+
+```bash
+# Compile .rbv to a directory
+brief rbv component.rbv --out dist/
+```
+
+This generates:
+- `component.rs` - Rust source
+- `component_glue.js` - JS event bridge
+- `component.css` - Styles
+- `component.html` - HTML wrapper
+
+### Build for Browser
+
+The generated Rust needs to be compiled to WASM:
+
+```bash
+# Add wasm32 target
+rustup target add wasm32-unknown-unknown
+
+# Install wasm-pack
+cargo install wasm-pack
+
+# Create dist/Cargo.toml:
+[package]
+name = "my-component"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+# Build
+cd dist && wasm-pack build --target web
+```
+
+### Serve
+
+```bash
+# Simple HTTP server
+python3 -m http.server 8080
+# or
+npx serve .
+```
+
+Open `http://localhost:8080/component.html`

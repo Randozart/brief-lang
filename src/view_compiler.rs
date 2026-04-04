@@ -51,7 +51,7 @@ impl ViewCompiler {
         let bytes = html.as_bytes();
         
         while pos < bytes.len() {
-            if bytes[pos] == b'<' {
+            if bytes[pos] == b'<' && bytes.get(pos + 1).map(|&b| b.is_ascii_alphabetic() || b == b'!').unwrap_or(false) {
                 if let Some((tag, end_pos)) = self.parse_tag(&html[pos..]) {
                     let tag_str = String::from_utf8_lossy(&bytes[pos..pos+end_pos]).to_string();
                     self.extract_directives(&tag_str);
@@ -77,6 +77,8 @@ impl ViewCompiler {
         let tag_lower = tag.to_lowercase();
         
         for attr in tag_lower.split_whitespace().skip(1) {
+            let attr = attr.trim_end_matches('>').trim_end_matches('/');
+            
             if attr.starts_with("b-text") {
                 if let Some(expr) = self.extract_attr_value(tag, "b-text") {
                     let elem_id = self.generate_element_id(tag);
@@ -101,15 +103,16 @@ impl ViewCompiler {
                         directive: Directive::Hide { expr },
                     });
                 }
-            } else if attr.starts_with("b-trigger") {
-                if let Some(txn) = self.extract_attr_value(tag, "b-trigger") {
-                    let elem_id = self.generate_element_id(tag);
-                    let event = self.extract_event_suffix(&tag_lower, "b-trigger");
+            } else if attr.starts_with("b-trigger:") {
+                let txn = self.extract_trigger_value(attr);
+                let elem_id = self.generate_element_id(tag);
+                let event = self.extract_event_suffix(&tag_lower, "b-trigger");
+                if let Some(txn_name) = txn {
                     self.bindings.push(Binding {
                         element_id: elem_id,
                         directive: Directive::Trigger { 
                             event: event.unwrap_or_else(|| "click".to_string()),
-                            txn,
+                            txn: txn_name,
                         },
                     });
                 }
@@ -133,6 +136,24 @@ impl ViewCompiler {
                     }
                 }
             }
+        }
+    }
+    
+    fn extract_trigger_value(&self, attr: &str) -> Option<String> {
+        let after_colon = attr.strip_prefix("b-trigger:")?;
+        let after_event = after_colon.find('=')?;
+        let value_part = &after_colon[after_event + 1..];
+        
+        let value = value_part.trim();
+        if value.starts_with('"') {
+            let end = value[1..].find('"')?;
+            Some(value[1..end + 1].to_string())
+        } else if value.starts_with('\'') {
+            let end = value[1..].find('\'')?;
+            Some(value[1..end + 1].to_string())
+        } else {
+            let end = value.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(value.len());
+            Some(value[..end].to_string())
         }
     }
 

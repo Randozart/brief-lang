@@ -1,0 +1,32 @@
+<script type="brief">
+let count: Int = 0;
+
+rct txn increment [count >= 0][count == @count + 1] {
+  &count = count + 1;
+  term;
+};
+
+rct txn decrement [count > 0][count == @count - 1] {
+  &count = count - 1;
+  term;
+};
+</script>
+
+<view>
+  <div>
+    <p>Count: <span id="count-display" b-text="count"></span></p>
+    <button id="inc-btn" b-trigger:click="increment">+</button>
+    <button id="dec-btn" b-trigger:click="decrement">-</button>
+  </div>
+</view>
+
+<style>
+  button {
+    padding: 8px 16px;
+    margin: 4px;
+  }
+  p {
+    font-size: 1.5em;
+    margin: 16px 0;
+  }
+</style>

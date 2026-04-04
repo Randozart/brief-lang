@@ -469,11 +469,6 @@ fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn st
     let bindings = view_compiler.compile(&rbv_file.view_html);
     println!("  View compiled: {} bindings", bindings.len());
     
-    let mut wasm_gen = wasm_gen::WasmGenerator::new();
-    println!("  Generating WASM...");
-    let output = wasm_gen.generate(&program, &bindings);
-    println!("  WASM generated");
-    
     let output_path = if let Some(p) = out_dir {
         p.to_path_buf()
     } else if file_path.is_absolute() {
@@ -481,14 +476,16 @@ fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn st
     } else {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
-    println!("  Output path: {:?}", output_path);
     let stem = file_path.file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
     
-    let rust_path = output_path.join(format!("{}.rs", stem));
-    fs::write(&rust_path, &output.rust_code)?;
-    println!("  Generated: {}", rust_path.display());
+    let mut wasm_gen = wasm_gen::WasmGenerator::new();
+    println!("  Generating WASM...");
+    let output = wasm_gen.generate(&program, &bindings, stem);
+    println!("  WASM generated");
+    
+    println!("  Output path: {:?}", output_path);
     
     let js_path = output_path.join(format!("{}_glue.js", stem));
     fs::write(&js_path, &output.js_glue)?;
@@ -505,9 +502,46 @@ fn run_rbv(file_path: &PathBuf, out_dir: Option<&Path>) -> Result<(), Box<dyn st
     fs::write(&html_path, &html)?;
     println!("  Generated: {}", html_path.display());
     
+    let src_dir = output_path.join("src");
+    fs::create_dir_all(&src_dir)?;
+    
+    let lib_rs = format!(
+        "mod {};\npub use {}::*;\n",
+        stem, stem
+    );
+    fs::write(src_dir.join("lib.rs"), lib_rs)?;
+    
+    let wasm_rs = output.rust_code.clone();
+    fs::write(src_dir.join(format!("{}.rs", stem)), wasm_rs)?;
+    
+    let main_rs = format!(
+        "use {}::{{State}};\nuse wasm_bindgen::{{prelude::*}};\n\n#[wasm_bindgen]\npub fn run() {{\n    web_sys::console_log(\"Brief RBV initialized\");\n}}\n",
+        stem
+    );
+    fs::write(src_dir.join("main.rs"), main_rs)?;
+    
+    let cargo_toml = format!(r#"[package]
+name = "{}"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+"#, stem);
+    fs::write(output_path.join("Cargo.toml"), cargo_toml)?;
+    println!("  Generated: {}/Cargo.toml", output_path.display());
+    println!("  Generated: {}/src/lib.rs", output_path.display());
+    println!("  Generated: {}/src/main.rs", output_path.display());
+    
     println!("\n✓ RBV compiled successfully");
     println!("  Signals: {}, Transactions: {}", output.signal_count, output.txn_count);
     println!("  Bindings: {}", bindings.len());
+    println!("\n  To build WASM, run:");
+    println!("    cd {} && wasm-pack build --target web", output_path.display());
     
     Ok(())
 }
@@ -522,13 +556,10 @@ fn generate_html(name: &str, view_html: &str) -> String {
 </head>
 <body>
 {}
-    <script type="module">
-        import init from './{}_glue.js';
-        init(`./{}.wasm`);
-    </script>
+    <script type="module" src="{}_glue.js"></script>
 </body>
 </html>
-"#, name, name, view_html, name, name)
+"#, name, name, view_html, name)
 }
 
 fn main() {
