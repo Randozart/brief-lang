@@ -1,0 +1,6 @@
+sig fetch: String -> Data;
+let data: Data;
+txn load [~/data] {
+  &data = "test";
+  term;
+};

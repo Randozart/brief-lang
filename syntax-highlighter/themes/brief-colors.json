@@ -1,0 +1,23 @@
+{
+  "colors": {
+    "brief.keyword.control.txn": "#C586C0",
+    "brief.keyword.control.reactive": "#DCDCAA",
+    "brief.keyword.control.async": "#9CDCFE",
+    "brief.keyword.control.flow": "#D7BA7D",
+    "brief.keyword.declaration": "#569CD6",
+    "brief.keyword.import": "#C586C0",
+    "brief.support.type.primitive": "#4EC9B0",
+    "brief.entity.name.type.custom": "#B5CEA8",
+    "brief.string.quoted.double": "#CE9178",
+    "brief.constant.numeric.integer": "#B5CEA8",
+    "brief.constant.numeric.float": "#B5CEA8",
+    "brief.constant.language.true": "#569CD6",
+    "brief.constant.language.false": "#569CD6",
+    "brief.comment.line": "#6A9955",
+    "brief.comment.annotation": "#00FF00",
+    "brief.meta.annotation": "#FFD700",
+    "brief.storage.modifier.ownership": "#C586C0",
+    "brief.variable.language.prior-state": "#DCDCAA",
+    "brief.keyword.operator": "#D4D4D4"
+  }
+}

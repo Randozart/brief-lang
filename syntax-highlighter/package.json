@@ -1,0 +1,100 @@
+{
+  "name": "brief-language",
+  "displayName": "Brief Language",
+  "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv) files",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Themes"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "brief",
+        "aliases": ["Brief", "brief"],
+        "extensions": [".bv"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "brief",
+        "scopeName": "source.brief",
+        "path": "./syntaxes/brief.tmLanguage.json"
+      }
+    ],
+    "themes": [
+      {
+        "label": "Brief Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/brief-dark.json"
+      },
+      {
+        "label": "Brief Light",
+        "uiTheme": "vs",
+        "path": "./themes/brief-light.json"
+      }
+    ],
+    "folding": [
+      {
+        "language": "brief",
+        "boundaries": ["// === PATH ANALYSIS ===", "// === END PATH ANALYSIS ==="]
+      }
+    ],
+    "brackets": [
+      {
+        "language": "brief",
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "language": "brief",
+        "open": "[",
+        "close": "]"
+      },
+      {
+        "language": "brief",
+        "open": "(",
+        "close": ")"
+      }
+    ],
+    "autoClosingPairs": [
+      {
+        "open": "{",
+        "close": "}",
+        "notIn": ["string", "comment"]
+      },
+      {
+        "open": "[",
+        "close": "]",
+        "notIn": ["string", "comment"]
+      },
+      {
+        "open": "(",
+        "close": ")",
+        "notIn": ["string", "comment"]
+      },
+      {
+        "open": "\"",
+        "close": "\"",
+        "notIn": ["string", "comment"]
+      }
+    ],
+    "surroundingPairs": [
+      { "open": "{", "close": "}" },
+      { "open": "[", "close": "]" },
+      { "open": "(", "close": ")" },
+      { "open": "\"", "close": "\"" }
+    ],
+    "comments": {
+      "lineComment": "#"
+    },
+    "indentationRules": {
+      "increaseIndentPattern": "\\{[^}]*${|\\[([^\\]]*${|\\([^)]*${",
+      "decreaseIndentPattern": "^\\s*\\]|\\}\\s*$|\\)\\s*$"
+    }
+  }
+}

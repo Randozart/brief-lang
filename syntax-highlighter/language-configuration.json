@@ -1,0 +1,32 @@
+{
+  "comments": {
+    "lineComment": "#"
+  },
+  "brackets": [
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"]
+  ],
+  "autoClosingPairs": [
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"],
+    ["\"", "\""]
+  ],
+  "surroundingPairs": [
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"],
+    ["\"", "\""]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*// === PATH ANALYSIS ===",
+      "end": "^\\s*// === END PATH ANALYSIS ==="
+    }
+  },
+  "indentationRules": {
+    "increaseIndentPattern": ".*\\{[^}]*$|.*\\[[^\\]]*$|.*\\([^)]*$",
+    "decreaseIndentPattern": "^\\s*\\}|^\\s*\\]|^\\s*\\)"
+  }
+}

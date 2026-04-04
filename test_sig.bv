@@ -1,0 +1,1 @@
+sig get_id: String -> Int[~0];

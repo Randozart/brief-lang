@@ -1,0 +1,392 @@
+use brief_compiler::{annotator, interpreter, manifest, parser, proof_engine, typechecker};
+use std::fs;
+use std::path::PathBuf;
+
+fn strip_annotations(source: &str) -> String {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut output = Vec::new();
+    let mut in_block = false;
+    
+    for line in lines {
+        if line.contains("=== PATH ANALYSIS ===") {
+            in_block = true;
+            continue;
+        }
+        if line.contains("=== END PATH ANALYSIS ===") {
+            in_block = false;
+            continue;
+        }
+        if in_block {
+            continue;
+        }
+        output.push(line);
+    }
+    
+    while output.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        output.pop();
+    }
+    
+    output.join("\n")
+}
+
+fn print_usage(program: &str) {
+    eprintln!("Brief Compiler v{}", env!("CARGO_PKG_VERSION"));
+    eprintln!();
+    eprintln!("Usage: {} <command> [options] [file]", program);
+    eprintln!();
+    eprintln!("Commands:");
+    eprintln!("  check <file>     Type check without execution (fast)");
+    eprintln!("  build <file>     Full compilation");
+    eprintln!("  init [name]      Create new project");
+    eprintln!("  import <name>    Add dependency to project");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  -a, --annotate       Generate path annotations");
+    eprintln!("  --skip-proof         Skip proof verification");
+    eprintln!("  -v, --verbose        Verbose output");
+    eprintln!("  -h, --help           Show this help");
+}
+
+fn run_check(file_path: &PathBuf, verbose: bool, annotate: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let source = fs::read_to_string(file_path)?;
+    let clean_source = strip_annotations(&source);
+
+    if verbose {
+        println!("[Lexer] Tokenizing...");
+    }
+    
+    let mut parser = parser::Parser::new(&clean_source);
+    let program = match parser.parse() {
+        Ok(prog) => prog,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            return Err("Parse error".into());
+        }
+    };
+
+    if verbose {
+        println!("[Parser] Successfully parsed {} items", program.items.len());
+        println!("[TypeChecker] Running type checks...");
+    }
+
+    let mut tc = typechecker::TypeChecker::new();
+    let type_errors = tc.check_program(&program);
+    if !type_errors.is_empty() {
+        eprintln!("Type errors found:");
+        for err in &type_errors {
+            eprintln!("  - {:?}", err);
+        }
+        return Err("Type errors".into());
+    }
+    if verbose {
+        println!("[TypeChecker] No type errors");
+    }
+
+    if verbose {
+        println!("[ProofEngine] Running proof verification...");
+    }
+    let mut pe = proof_engine::ProofEngine::new();
+    let proof_errors = pe.verify_program(&program);
+    if !proof_errors.is_empty() {
+        eprintln!("Proof errors found:");
+        for err in &proof_errors {
+            eprintln!("  - {:?}", err);
+        }
+        return Err("Proof errors".into());
+    }
+    if verbose {
+        println!("[ProofEngine] All proofs verified");
+    }
+
+    if annotate {
+        if verbose {
+            println!("[Annotator] Computing call paths...");
+        }
+        let mut ann = annotator::Annotator::new();
+        ann.analyze(&program);
+        let annotated = ann.annotate_program(&program);
+        println!("\n// === ANNOTATED PROGRAM ===\n");
+        println!("{}", annotated);
+        println!("// === END ANNOTATED PROGRAM ===");
+    }
+
+    println!("✓ All checks passed");
+    Ok(())
+}
+
+fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let source = fs::read_to_string(file_path)?;
+    let clean_source = strip_annotations(&source);
+
+    if verbose {
+        println!("[Lexer] Tokenizing...");
+    }
+    
+    let mut parser = parser::Parser::new(&clean_source);
+    let program = match parser.parse() {
+        Ok(prog) => prog,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            return Err("Parse error".into());
+        }
+    };
+
+    if verbose {
+        println!("[Parser] Successfully parsed {} items", program.items.len());
+        println!("[TypeChecker] Running type checks...");
+    }
+
+    let mut tc = typechecker::TypeChecker::new();
+    let type_errors = tc.check_program(&program);
+    if !type_errors.is_empty() {
+        eprintln!("Type errors found:");
+        for err in &type_errors {
+            eprintln!("  - {:?}", err);
+        }
+        return Err("Type errors".into());
+    }
+
+    if verbose {
+        println!("[ProofEngine] Running proof verification...");
+    }
+    let mut pe = proof_engine::ProofEngine::new();
+    let proof_errors = pe.verify_program(&program);
+    if !proof_errors.is_empty() {
+        eprintln!("Proof errors found:");
+        for err in &proof_errors {
+            eprintln!("  - {:?}", err);
+        }
+        return Err("Proof errors".into());
+    }
+
+    if verbose {
+        println!("[Interpreter] Running program...");
+    }
+    
+    let mut interp = interpreter::Interpreter::new();
+    match interp.run(&program) {
+        Ok(_) => {
+            if verbose {
+                println!("[Interpreter] Final state: {:?}", interp.state);
+            }
+            println!("Execution completed successfully");
+        }
+        Err(e) => {
+            eprintln!("Runtime error: {:?}", e);
+            return Err("Runtime error".into());
+        }
+    }
+    
+    Ok(())
+}
+
+fn run_init(name: Option<&str>, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let project_name = name.unwrap_or("my-brief-project").to_string();
+    let project_dir = PathBuf::from(&project_name);
+    
+    if project_dir.exists() {
+        eprintln!("Error: Directory '{}' already exists", project_name);
+        return Err("Directory exists".into());
+    }
+    
+    if verbose {
+        println!("Creating project '{}'...", project_name);
+    }
+    
+    std::fs::create_dir_all(project_dir.join("lib"))?;
+    
+    let manifest_content = format!(
+        r#"[project]
+name = "{}"
+version = "0.1.0"
+entry = "main.bv"
+
+[dependencies]
+"#,
+        project_name
+    );
+    
+    std::fs::write(project_dir.join("brief.toml"), manifest_content)?;
+    
+    let main_content = r#"# Welcome to Brief!
+# Your main entry point
+
+let ready: Bool = false;
+
+rct txn init [true][ready == true] {
+  &ready = true;
+  term;
+};
+"#;
+    
+    std::fs::write(project_dir.join("main.bv"), main_content)?;
+    
+    if verbose {
+        println!("Created project structure:");
+        println!("  {}/", project_name);
+        println!("  {}/brief.toml", project_name);
+        println!("  {}/main.bv", project_name);
+        println!("  {}/lib/", project_name);
+    }
+    
+    println!("✓ Project '{}' created successfully", project_name);
+    println!("  Run: cd {} && brief check main.bv", project_name);
+    
+    Ok(())
+}
+
+fn run_import(name: &str, path: Option<&str>, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let manifest_path = manifest::find_manifest(&std::env::current_dir()?)
+        .ok_or("No brief.toml found. Run 'brief init' first.")?;
+    
+    if verbose {
+        println!("Found manifest at: {}", manifest_path.display());
+    }
+    
+    let mut manifest = manifest::Manifest::load(&manifest_path)?;
+    
+    let dep_path: PathBuf = if let Some(p) = path {
+        PathBuf::from(p)
+    } else {
+        let search_paths = ["lib", "imports", "."];
+        let file_name = format!("{}.bv", name);
+        
+        let project_root = manifest_path.parent().unwrap_or(std::path::Path::new("."));
+        
+        let mut found = None;
+        for search_dir in &search_paths {
+            let candidate = project_root.join(search_dir).join(&file_name);
+            if candidate.exists() {
+                found = Some(candidate);
+                break;
+            }
+        }
+        
+        found.ok_or_else(|| {
+            format!(
+                "Could not find '{}'. Looked in: lib/{}.bv, imports/{}.bv, ./{}.bv\n\
+                Or specify path: brief import {} --path <path>",
+                name, name, name, name, name
+            )
+        })?
+    };
+    
+    let relative_path = if let Ok(rel) = dep_path.strip_prefix(manifest_path.parent().unwrap_or(std::path::Path::new("."))) {
+        rel.to_path_buf()
+    } else {
+        dep_path.clone()
+    };
+    
+    manifest.add_dependency(
+        name.to_string(),
+        manifest::Dependency::Path(manifest::PathDependency {
+            path: relative_path,
+        }),
+    );
+    
+    manifest.save(&manifest_path)?;
+    
+    if verbose {
+        println!("Added dependency '{}' = '{}'", name, dep_path.display());
+    }
+    
+    println!("✓ Added '{}' to dependencies", name);
+    
+    Ok(())
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    
+    if args.len() < 2 {
+        print_usage(&args[0]);
+        return;
+    }
+    
+    let command = &args[1];
+    
+    match command.as_str() {
+        "check" | "c" => {
+            let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
+            let annotate = args.contains(&"-a".to_string()) || args.contains(&"--annotate".to_string());
+            
+            let file_path = args.iter()
+                .skip(2)
+                .find(|a| a.ends_with(".bv"))
+                .map(PathBuf::from);
+            
+            if let Some(path) = file_path {
+                if let Err(_e) = run_check(&path, verbose, annotate) {
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .bv file specified");
+                eprintln!("Usage: {} check <file.bv>", args[0]);
+                std::process::exit(1);
+            }
+        }
+        
+        "build" | "b" => {
+            let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
+            
+            let file_path = args.iter()
+                .skip(2)
+                .find(|a| a.ends_with(".bv"))
+                .map(PathBuf::from);
+            
+            if let Some(path) = file_path {
+                if let Err(_e) = run_build(&path, verbose) {
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .bv file specified");
+                eprintln!("Usage: {} build <file.bv>", args[0]);
+                std::process::exit(1);
+            }
+        }
+        
+        "init" => {
+            let name = args.get(2).map(|s| s.as_str());
+            if let Err(e) = run_init(name, true) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        
+        "import" => {
+            if args.len() < 3 {
+                eprintln!("Error: No dependency name specified");
+                eprintln!("Usage: {} import <name> [--path <path>]", args[0]);
+                std::process::exit(1);
+            }
+            
+            let name = &args[2];
+            let path = args.iter()
+                .skip(3)
+                .skip_while(|a| a.as_str() != "--path")
+                .nth(1)
+                .map(|s| s.as_str());
+            
+            if let Err(e) = run_import(name, path, true) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        
+        "-h" | "--help" | "help" => {
+            print_usage(&args[0]);
+        }
+        
+        _ => {
+            if command.ends_with(".bv") {
+                if let Err(_e) = run_check(&PathBuf::from(command), false, false) {
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Unknown command: {}", command);
+                print_usage(&args[0]);
+                std::process::exit(1);
+            }
+        }
+    }
+}

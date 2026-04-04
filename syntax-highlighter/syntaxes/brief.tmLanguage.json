@@ -1,0 +1,290 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Brief",
+  "fileTypes": ["bv"],
+  "firstLineMatch": "^#.*",
+  "patterns": [
+    {
+      "include": "#block-comments"
+    },
+    {
+      "include": "#line-comments"
+    },
+    {
+      "include": "#annotations"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#contracts"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#booleans"
+    },
+    {
+      "include": "#identifiers"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "block-comments": {
+      "patterns": [
+        {
+          "name": "comment.block.brief",
+          "begin": "#\\[",
+          "end": "\\]#"
+        }
+      ]
+    },
+    "line-comments": {
+      "patterns": [
+        {
+          "name": "comment.line.brief",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "annotations": {
+      "patterns": [
+        {
+          "name": "meta.annotation.brief",
+          "match": "^// === PATH ANALYSIS ==="
+        },
+        {
+          "name": "meta.annotation.brief",
+          "match": "^// === END PATH ANALYSIS ==="
+        },
+        {
+          "name": "comment.annotation.brief",
+          "match": "^// \\[(ENTRY_POINT|RECURSIVE)\\]"
+        },
+        {
+          "name": "comment.annotation.brief",
+          "match": "^// (PATHS_TO|CALLERS|RESOLVES_TO):"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.txn.brief",
+          "match": "\\btxn\\b"
+        },
+        {
+          "name": "keyword.control.reactive.brief",
+          "match": "\\brct\\b"
+        },
+        {
+          "name": "keyword.control.async.brief",
+          "match": "\\basync\\b"
+        },
+        {
+          "name": "keyword.control.flow.brief",
+          "match": "\\b(term|escape)\\b"
+        },
+        {
+          "name": "keyword.declaration.brief",
+          "match": "\\b(sig|defn|let|const)\\b"
+        },
+        {
+          "name": "keyword.import.brief",
+          "match": "\\b(import|from)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.brief",
+          "match": "\\b(Int|Float|String|Bool|Data|Void)\\b"
+        },
+        {
+          "name": "entity.name.type.custom.brief",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "contracts": {
+      "patterns": [
+        {
+          "name": "meta.contract.pre.brief",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#expressions"
+            }
+          ]
+        },
+        {
+          "name": "meta.contract.post.brief",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#expressions"
+            }
+          ]
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "storage.modifier.ownership.brief",
+          "match": "&"
+        },
+        {
+          "name": "variable.language.prior-state.brief",
+          "match": "@"
+        },
+        {
+          "name": "keyword.operator.comparison.brief",
+          "match": "==|!="
+        },
+        {
+          "name": "keyword.operator.relational.brief",
+          "match": "<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.logical.brief",
+          "match": "&&|\\|\\|"
+        },
+        {
+          "name": "keyword.operator.arithmetic.brief",
+          "match": "\\+|\\-|\\*|/"
+        },
+        {
+          "name": "keyword.operator.bitwise.brief",
+          "match": "~|&(?!&)|\\|(?!\\|)"
+        },
+        {
+          "name": "keyword.operator.arrow.brief",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.term-until.brief",
+          "match": "~/"
+        },
+        {
+          "name": "keyword.operator.assignment.brief",
+          "match": "="
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.brief",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.brief",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.brief",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.brief",
+          "match": "\\b0x[0-9a-fA-F]+\\b|\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "booleans": {
+      "patterns": [
+        {
+          "name": "constant.language.true.brief",
+          "match": "\\btrue\\b"
+        },
+        {
+          "name": "constant.language.false.brief",
+          "match": "\\bfalse\\b"
+        },
+        {
+          "name": "constant.language.null.brief",
+          "match": "\\bnull\\b"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.function.brief",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*(?=\\s*\\()"
+        },
+        {
+          "name": "variable.other.read.brief",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "expressions": {
+      "patterns": [
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#booleans"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#identifiers"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.terminator.brief",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.comma.brief",
+          "match": ","
+        },
+        {
+          "name": "punctuation.bracket.curly.brief",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.bracket.square.brief",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.bracket.round.brief",
+          "match": "[()]"
+        }
+      ]
+    }
+  },
+  "scopeName": "source.brief"
+}
