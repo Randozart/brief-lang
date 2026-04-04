@@ -1,1 +1,0 @@
-sig test: Int -> Int[~0];

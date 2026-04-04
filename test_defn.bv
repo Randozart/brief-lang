@@ -1,1 +1,0 @@
-defn helper(x: Int): Int [x > 0][x == x] { term x + 1; };
