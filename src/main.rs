@@ -1,6 +1,8 @@
 use brief_compiler::{annotator, desugarer, import_resolver, interpreter, manifest, parser, proof_engine, typechecker};
+use notify::Watcher;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 fn strip_annotations(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
@@ -331,6 +333,80 @@ fn run_import(name: &str, path: Option<&str>, verbose: bool) -> Result<(), Box<d
     Ok(())
 }
 
+fn run_watch(file_path: PathBuf, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Watching for changes... (Ctrl+C to stop)");
+    
+    let source = fs::read_to_string(&file_path)?;
+    let clean_source = strip_annotations(&source);
+    
+    let mut parser = parser::Parser::new(&clean_source);
+    let program = match parser.parse() {
+        Ok(prog) => prog,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            return Err("Parse error".into());
+        }
+    };
+
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let program = match import_resolver.resolve_imports(&program, &file_path) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            eprintln!("Import error: {}", e);
+            return Err("Import error".into());
+        }
+    };
+
+    let mut desug = desugarer::Desugarer::new();
+    let program = desug.desugar(&program);
+
+    let mut tc = typechecker::TypeChecker::new();
+    let type_errors = tc.check_program(&program);
+    if !type_errors.is_empty() {
+        eprintln!("Type errors found:");
+        for err in &type_errors {
+            eprintln!("  - {:?}", err);
+        }
+        return Err("Type errors".into());
+    }
+
+    let mut pe = proof_engine::ProofEngine::new();
+    let proof_errors = pe.verify_program(&program);
+    if !proof_errors.is_empty() {
+        eprintln!("Proof errors found:");
+        for err in &proof_errors {
+            eprintln!("  - {:?}", err);
+        }
+        return Err("Proof errors".into());
+    }
+
+    println!("✓ Initial check passed - watching for changes...");
+    
+    let watch_path = file_path.clone();
+    let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+        match res {
+            Ok(event) => {
+                if event.kind.is_modify() || event.kind.is_create() {
+                    println!("\n[Change detected] Rebuilding...");
+                    if let Err(e) = run_check(&watch_path, true, false) {
+                        eprintln!("Build failed: {}", e);
+                    } else {
+                        println!("Watch mode active");
+                    }
+                }
+            }
+            Err(e) => eprintln!("Watch error: {:?}", e),
+        }
+    })?;
+
+    let source_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+    watcher.watch(source_dir, notify::RecursiveMode::Recursive)?;
+    
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     
@@ -377,6 +453,26 @@ fn main() {
             } else {
                 eprintln!("Error: No .bv file specified");
                 eprintln!("Usage: {} build <file.bv>", args[0]);
+                std::process::exit(1);
+            }
+        }
+        
+        "watch" | "w" => {
+            let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
+            
+            let file_path = args.iter()
+                .skip(2)
+                .find(|a| a.ends_with(".bv"))
+                .map(PathBuf::from);
+            
+            if let Some(path) = file_path {
+                if let Err(e) = run_watch(path, verbose) {
+                    eprintln!("Watch error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .bv file specified");
+                eprintln!("Usage: {} watch <file.bv>", args[0]);
                 std::process::exit(1);
             }
         }
