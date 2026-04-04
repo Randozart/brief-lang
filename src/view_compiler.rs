@@ -41,6 +41,7 @@ pub struct ViewCompiler {
     signals: HashMap<String, usize>,
     transactions: HashMap<String, usize>,
     bindings: Vec<Binding>,
+    id_counter: usize,
 }
 
 impl ViewCompiler {
@@ -49,6 +50,7 @@ impl ViewCompiler {
             signals: HashMap::new(),
             transactions: HashMap::new(),
             bindings: Vec::new(),
+            id_counter: 0,
         }
     }
 
@@ -336,7 +338,7 @@ impl ViewCompiler {
         }
     }
 
-    fn generate_element_id(&self, tag: &str) -> String {
+    fn generate_element_id(&mut self, tag: &str) -> String {
         if let Some(id_pos) = tag.to_lowercase().find("id=") {
             let after = &tag[id_pos + 3..];
             let trimmed = after
@@ -350,7 +352,8 @@ impl ViewCompiler {
         }
 
         let tag_name = tag.split_whitespace().next().unwrap_or("elem").to_string();
-        let id = format!("rbv-{}", tag_name.replace("<", ""));
+        let id = format!("rbv-{}-{}", tag_name.replace("<", ""), self.id_counter);
+        self.id_counter += 1;
         id
     }
 
