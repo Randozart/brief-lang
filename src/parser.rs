@@ -815,11 +815,11 @@ impl<'a> Parser<'a> {
 
         let contract = self.parse_contract()?;
 
-        let outputs = if let Some(Ok(Token::Arrow)) = self.current_token() {
+        let (outputs, output_names) = if let Some(Ok(Token::Arrow)) = self.current_token() {
             self.advance();
-            self.parse_output_types()?
+            self.parse_output_types_with_names(&parameters)?
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
 
         self.expect(Token::LBrace)?;
@@ -832,6 +832,7 @@ impl<'a> Parser<'a> {
             type_params,
             parameters,
             outputs,
+            output_names, // NEW
             contract,
             body,
         })
@@ -845,6 +846,64 @@ impl<'a> Parser<'a> {
             outputs.push(self.parse_type()?);
         }
         Ok(outputs)
+    }
+
+    /// Parse output types with optional names: `Bool`, `result: Bool`, or mixed
+    /// Returns (output_types, output_names) where output_names is parallel to output_types
+    fn parse_output_types_with_names(
+        &mut self,
+        parameters: &[(String, Type)],
+    ) -> Result<(Vec<Type>, Vec<Option<String>>), String> {
+        let mut outputs = Vec::new();
+        let mut names = Vec::new();
+        let param_names: std::collections::HashSet<String> =
+            parameters.iter().map(|(n, _)| n.clone()).collect();
+        let mut seen_names = std::collections::HashSet::new();
+
+        loop {
+            // Check if next token is an identifier followed by colon (indicates a name)
+            let name = if let Some(Ok(Token::Identifier(id))) = self.current_token() {
+                let id = id.clone();
+
+                // Check if next token is colon (peek token)
+                if let Some(Ok(Token::Colon)) = self.peek() {
+                    // This is a named output
+                    self.advance(); // consume identifier
+                    self.advance(); // consume colon
+
+                    // Check for duplicate names
+                    if seen_names.contains(&id) {
+                        return Err(format!("Duplicate output name: '{}'", id));
+                    }
+
+                    // Check for shadowing parameters
+                    if param_names.contains(&id) {
+                        return Err(format!("Output name '{}' shadows parameter", id));
+                    }
+
+                    seen_names.insert(id.clone());
+                    Some(id)
+                } else {
+                    // Not a named output
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Parse the type
+            outputs.push(self.parse_type()?);
+            names.push(name);
+
+            // Check for comma (more outputs)
+            if let Some(Ok(Token::Comma)) = self.current_token() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        Ok((outputs, names))
     }
 
     fn parse_result_type(&mut self) -> Result<ResultType, String> {

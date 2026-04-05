@@ -146,6 +146,7 @@ pub struct Definition {
     pub type_params: Vec<TypeParam>,
     pub parameters: Vec<(String, Type)>,
     pub outputs: Vec<Type>,
+    pub output_names: Vec<Option<String>>, // NEW: optional names for each output (parallel to outputs)
     pub contract: Contract,
     pub body: Vec<Statement>,
 }
