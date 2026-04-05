@@ -722,12 +722,16 @@ impl WasmGenerator {
         }
         output.push_str("    };\n\n");
 
+        output.push_str(&format!("    console.log('Loading WASM module...');\n"));
         output.push_str(&format!(
             "    const wasm_pkg = await import('./pkg/{}.js');\n",
             program_name
         ));
+        output.push_str("    console.log('WASM module loaded, initializing...');\n");
         output.push_str("    await wasm_pkg.default();\n");
-        output.push_str("    const wasm = new wasm_pkg.State();\n\n");
+        output.push_str("    console.log('WASM initialized, creating State...');\n");
+        output.push_str("    const wasm = new wasm_pkg.State();\n");
+        output.push_str("    console.log('State created, methods available:', Object.keys(wasm).filter(k => k.startsWith('invoke')));\n\n");
 
         output.push_str("    const TRIGGER_MAP = {\n");
         for binding in bindings {
@@ -780,13 +784,25 @@ impl WasmGenerator {
         }
 
         output.push_str("    function attachListeners() {\n");
+        output.push_str("        console.log('Attaching event listeners...');\n");
         output.push_str("        for (const [elId, config] of Object.entries(TRIGGER_MAP)) {\n");
         output.push_str("            const el = document.querySelector(ELEMENT_MAP[elId]);\n");
-        output.push_str("            if (!el) continue;\n");
+        output.push_str("            if (!el) {\n");
+        output.push_str("                console.warn('Element not found:', elId);\n");
+        output.push_str("                continue;\n");
+        output.push_str("            }\n");
+        output.push_str("            console.log('Attaching', config.event, 'handler to', elId, '->', config.txn);\n");
         output.push_str("            el.addEventListener(config.event, () => {\n");
-        output.push_str("                wasm[config.txn]();\n");
+        output.push_str("                console.log('Trigger clicked:', config.txn, 'typeof:', typeof wasm[config.txn]);\n");
+        output.push_str("                try {\n");
+        output.push_str("                    wasm[config.txn]();\n");
+        output.push_str("                } catch(e) {\n");
+        output
+            .push_str("                    console.error('Error calling', config.txn, ':', e);\n");
+        output.push_str("                }\n");
         output.push_str("            });\n");
         output.push_str("        }\n");
+        output.push_str("        console.log('All listeners attached');\n");
         output.push_str("    }\n\n");
 
         output.push_str("    function startPollLoop() {\n");
