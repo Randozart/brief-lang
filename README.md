@@ -1,97 +1,117 @@
-# Brief Compiler
+# Brief
 
 <img src="brief-logo-draft.jpg" alt="Brief" width="400"/>
 
-A transactional, contract-enforced language compiler. Brief treats program execution as verified state transitions with mathematical proofs at compile time.
+**Brief doesn't break.** A language where state transitions are mathematically verified at compile time — eliminating entire categories of runtime errors.
 
-## Status
+## The Problem
 
-**Active development.** The core compiler (lexer, parser, typechecker, interpreter) is complete. Rendered Brief (`.rbv`) UI framework is in progress.
+State management is hard. Your app crashes because:
+- A state transition was invalid but nobody checked before executing
+- Race conditions corrupt state in concurrent code
+- Edge cases slip through testing
+- Nobody can prove the system is correct
 
-## What is Brief?
+**Brief fixes this by making the compiler verify all state transitions before your code runs.**
 
-Brief is a declarative language where:
+## How It Works
 
-- **Transactions are contracts.** Every state change is proven valid before execution.
-- **No runtime surprises.** The compiler verifies all state transitions, not the runtime.
-- **Lock-free concurrency.** Preconditions act as hardware-level gates — no mutexes needed.
-- **Formal verification without boilerplate.** Reactive state machines with pre/post conditions.
+Every state change in Brief is a **transaction** with proven pre- and post-conditions:
 
 ```brief
 let balance: Int = 100;
-let withdrawn: Int = 0;
 
-txn withdraw(amount: Int) [amount > 0 && amount <= balance][balance == @balance - amount] {
+txn withdraw(amount: Int) 
+  [amount > 0 && amount <= balance]           # Pre: amount is valid
+  [balance == @balance - amount]              # Post: balance decreases by amount
+{
   &balance = balance - amount;
-  &withdrawn = withdrawn + amount;
   term;
 };
 ```
 
-## Installation
+The compiler proves:
+- If the pre-condition holds, the code will execute
+- When it executes, the post-condition will be true
+- All execution paths are reachable and valid
+
+This happens at **compile time**, not runtime.
+
+## Key Benefits
+
+**Correctness**: State transitions are mathematically proven before execution  
+**Concurrency**: Lock-free, safe concurrent operations (preconditions act as gates)  
+**Simplicity**: No boilerplate — just declare what should be true, compiler verifies it  
+**Performance**: All verification happens at compile time, zero runtime overhead  
+**Confidence**: Deploy knowing your state machine is provably correct  
+
+## Quick Start
+
+### Install
 
 ```bash
 cargo install --path .
 ```
 
-## Usage
+### Usage
 
 ```bash
-# Type check without execution
+# Type check and verify
 brief check program.bv
 
-# Build/execute
+# Run the program
 brief build program.bv
 
-# Initialize a new project
+# Create a new project
 brief init my-project
 
-# Add a dependency
-brief import <name> --path <location>
+# Add a library dependency
+brief import my_lib --path ./lib/my_lib.bv
 ```
 
-## Project Structure
+### Example Program
 
-```
-src/
-├── lexer.rs        # Tokenizer
-├── parser.rs       # Recursive descent parser
-├── ast.rs          # AST definitions
-├── typechecker.rs  # Type inference and verification
-├── proof_engine.rs # Contract and reachability proofs
-├── interpreter.rs  # Reactive execution engine
-├── reactor.rs      # Event-driven reactor loop
-├── resolver.rs     # Import resolution
-├── manifest.rs     # Dependency management (brief.toml)
-├── cache.rs        # Incremental compilation cache
-├── watch.rs        # File watching
-└── main.rs         # CLI
-```
+```brief
+# State
+let count: Int = 0;
+let locked: Bool = false;
 
-## Documentation
+# Increment transaction
+txn increment 
+  [!locked && count < 1000000]           # Only increment if not locked and under limit
+  [count == @count + 1]                  # Guarantee count increases by 1
+{
+  &count = count + 1;
+  term;
+};
 
-| Spec | Description |
-|------|-------------|
-| [brief-lang-spec.md](spec/brief-lang-spec.md) | Brief language specification |
-| [rendered-brief-spec-v4.md](spec/rendered-brief-spec-v4.md) | Rendered Brief (`.rbv`) UI framework |
-| [ARCHITECTURE.md](spec/ARCHITECTURE.md) | Compiler architecture decisions |
-| [brief-compiler-build-plan.md](spec/brief-compiler-build-plan.md) | Implementation roadmap |
-
-## VSCode Extension
-
-Syntax highlighting for `.bv` and `.rbv` files is included in `syntax-highlighter/`. Install to VSCodium:
-
-```bash
-cp -r syntax-highlighter/ ~/.var/app/com.vscodium.codium/data/vscodium/extensions/brief
+# Lock transaction  
+txn lock 
+  [true]                                 # Can always lock
+  [locked == true]                       # Guarantee locked is true after
+{
+  &locked = true;
+  term;
+};
 ```
 
-## Rendered Brief (.rbv)
+## What Brief Includes
 
-Rendered Brief (`.rbv`) is a reactive UI framework where Brief logic and HTML coexist in a single file.
+### Core Language
+- **Transactions**: Named blocks with proven pre/post conditions
+- **Signals**: Reactive state variables
+- **Type System**: String, Int, Float, Bool, Void
+- **Pattern Matching**: Destructure and validate data
+- **Imports**: Reusable modules and libraries
 
-<img src="r-brief-logo-draft.jpg" alt="Rendered Brief" width="400"/>
+### Compiler Pipeline
+- Lexer → Parser → Type Checker → Proof Engine → Interpreter
+- Incremental compilation with caching
+- Live file watching for development
+- Clear error messages with diagnostic hints
 
-The Brief logic owns all state; HTML and CSS are declarative projections of that state. No virtual DOM, no component tree — just bindings.
+### UI Framework (Rendered Brief)
+Build reactive web UIs where Brief logic owns the state:
 
 ```html
 <script type="brief">
@@ -104,57 +124,172 @@ The Brief logic owns all state; HTML and CSS are declarative projections of that
 
 <view>
   <p b-text="count">0</p>
-  <button b-trigger="increment">+</button>
+  <button b-trigger="increment">Click me</button>
 </view>
 ```
 
-### Compile
+Compiles to WebAssembly with automatic JS bindings.
+
+### Foreign Function Interface (FFI)
+Call external Rust functions safely. 59 stdlib functions included:
+
+```brief
+frgn read_file(path: String) -> Result<String, IoError> from "std::io";
+
+defn load_config(path: String) -> String [true][true] {
+  let content: String = read_file(path);
+  content;
+};
+```
+
+See [FFI-USER-GUIDE.md](spec/FFI-USER-GUIDE.md) for details.
+
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [brief-lang-spec.md](spec/brief-lang-spec.md) | Language specification |
+| [FFI-USER-GUIDE.md](spec/FFI-USER-GUIDE.md) | Creating and using FFI bindings |
+| [FFI-STDLIB-REFERENCE.md](spec/FFI-STDLIB-REFERENCE.md) | Reference for 59 stdlib functions |
+| [ARCHITECTURE.md](spec/ARCHITECTURE.md) | Compiler architecture |
+
+## Project Structure
+
+```
+src/
+├── lexer.rs         # Tokenization
+├── parser.rs        # Syntax analysis
+├── ast.rs           # AST definitions
+├── typechecker.rs   # Type checking and inference
+├── proof_engine.rs  # Contract verification
+├── interpreter.rs   # Execution engine
+├── reactor.rs       # Event loop for reactive execution
+├── resolver.rs      # Module import resolution
+├── ffi/             # Foreign function interface
+│   ├── mod.rs
+│   ├── loader.rs
+│   ├── validator.rs
+│   ├── resolver.rs
+│   └── types.rs
+├── errors.rs        # Error types and diagnostics
+└── main.rs          # CLI interface
+
+std/bindings/        # Standard library FFI bindings
+├── io.toml          # File I/O
+├── math.toml        # Math functions
+├── string.toml      # String manipulation
+└── time.toml        # Timing functions
+
+spec/                # Documentation
+tests/               # Integration tests
+examples/            # Example programs
+```
+
+## Development
+
+### Run Tests
 
 ```bash
-# Compile .rbv to a directory
+# Unit tests
+cargo test --lib
+
+# All tests
+cargo test
+```
+
+### Build the Compiler
+
+```bash
+cargo build --release
+```
+
+### LSP Server (IDE Integration)
+
+Brief includes a Language Server Protocol implementation:
+
+```bash
+brief lsp
+```
+
+Integrates with VSCode, Neovim, Emacs, and other LSP-compatible editors.
+
+### VSCode Syntax Highlighting
+
+Copy the syntax highlighter extension:
+
+```bash
+cp -r syntax-highlighter/ ~/.config/Code/User/extensions/brief
+```
+
+## Rendered Brief (Web UI)
+
+Create reactive web components where Brief logic drives HTML:
+
+```bash
+# Compile .rbv file to WebAssembly
 brief rbv component.rbv --out dist/
-```
 
-This generates:
-- `component.rs` - Rust source
-- `component_glue.js` - JS event bridge
-- `component.css` - Styles
-- `component.html` - HTML wrapper
+# Outputs:
+# - component.rs (Brief logic compiled to Rust)
+# - component_glue.js (event bridge)
+# - component.html (page)
+# - component.css (styles)
 
-### Build for Browser
-
-The generated Rust needs to be compiled to WASM:
-
-```bash
-# Add wasm32 target
-rustup target add wasm32-unknown-unknown
-
-# Install wasm-pack
-cargo install wasm-pack
-
-# Create dist/Cargo.toml:
-[package]
-name = "my-component"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-wasm-bindgen = "0.2"
-
-# Build
+# Build WebAssembly
 cd dist && wasm-pack build --target web
-```
 
-### Serve
-
-```bash
-# Simple HTTP server
+# Serve
 python3 -m http.server 8080
-# or
-npx serve .
 ```
 
-Open `http://localhost:8080/component.html`
+Open `http://localhost:8080/component.html` in your browser.
+
+## Status
+
+| Component | Status |
+|-----------|--------|
+| Core Language | Production |
+| Type System | Production |
+| Proof Engine | Production |
+| FFI System | Production |
+| Stdlib Bindings | Production |
+| Rendered Brief (UI) | In Progress |
+
+## Philosophy
+
+Brief starts with a simple principle: **don't let runtime errors happen**.
+
+Rather than catching errors after they occur, Brief prevents entire categories of errors from existing. State transitions are proven correct before execution. Concurrency is safe by design. Type mismatches are impossible.
+
+This is practical formal verification — not academic, but built into the language from the ground up.
+
+## Influence & Inspiration
+
+Brief draws ideas from:
+- **Reactive programming**: State as the source of truth
+- **Proof systems**: Formal verification for correctness
+- **Transactional semantics**: ACID properties for state
+- **Functional languages**: Immutability and pure functions
+- **Rust**: Type safety and memory efficiency
+
+(Yes, code generation and symbolic execution are used during compilation, but the language itself is straightforward.)
+
+## Contributing
+
+Contributions welcome. See issues for areas needing work. Most valuable contributions:
+
+1. **Stdlib bindings** - Add more useful FFI functions
+2. **Documentation** - Clear examples and guides
+3. **Bug fixes** - Issues labeled "bug"
+4. **Performance** - Compilation speed and code generation
+5. **Rendered Brief** - UI framework completion
+
+## License
+
+MIT
+
+---
+
+**Learn more**: Start with [examples/](examples/) or read [spec/brief-lang-spec.md](spec/brief-lang-spec.md).
+
+**Questions?** Open an issue or start a discussion.
