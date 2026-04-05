@@ -389,6 +389,16 @@ impl Annotator {
                     output.push_str(&field_strs.join(", "));
                     output.push_str(" }\n");
                 }
+                TopLevel::RStruct(rstruct_def) => {
+                    output.push_str(&format!("rstruct {} {{ ", rstruct_def.name));
+                    let field_strs: Vec<String> = rstruct_def
+                        .fields
+                        .iter()
+                        .map(|f| format!("{}: {}", f.name, self.type_to_string(&f.ty)))
+                        .collect();
+                    output.push_str(&field_strs.join(", "));
+                    output.push_str(" ...view... }\n");
+                }
                 TopLevel::RenderBlock(rb) => {
                     output.push_str(&format!("render {} {{ ... }}\n", rb.struct_name));
                 }

@@ -82,6 +82,7 @@ impl TypeChecker {
                 TopLevel::Import(_) => {}
                 TopLevel::ForeignSig(_) => {}
                 TopLevel::Struct(_) => {}
+                TopLevel::RStruct(_) => {}
                 TopLevel::RenderBlock(_) => {}
             }
         }

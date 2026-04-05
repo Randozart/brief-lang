@@ -231,6 +231,12 @@ fn run_check(
     let mut desug = desugarer::Desugarer::new();
     let program = desug.desugar(&program);
 
+    for item in &program.items {
+        if let ast::TopLevel::RStruct(_) = item {
+            return Err("rstruct can only be used in .rbv files, not .bv files. Use .rbv for files with HTML/CSS.".into());
+        }
+    }
+
     if verbose {
         println!("[Parser] Successfully parsed {} items", program.items.len());
         println!("[TypeChecker] Running type checks...");

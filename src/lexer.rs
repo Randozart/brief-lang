@@ -33,6 +33,8 @@ pub enum Token {
     Frgn,
     #[token("struct")]
     Struct,
+    #[token("rstruct")]
+    Rstruct,
     #[token("render")]
     Render,
 
@@ -54,6 +56,8 @@ pub enum Token {
     Ne,
     #[token("<")]
     Lt,
+    #[token("</")]
+    LtSlash,
     #[token("<=")]
     Le,
     #[token(">")]
