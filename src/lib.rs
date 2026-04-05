@@ -4,6 +4,7 @@ pub mod ast;
 pub mod cache;
 pub mod desugarer;
 pub mod errors;
+pub mod ffi;
 pub mod import_resolver;
 pub mod interpreter;
 pub mod lexer;

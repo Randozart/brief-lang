@@ -38,6 +38,46 @@ pub enum ResultType {
     TrueAssertion,
 }
 
+/// Foreign Function Target Platform
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForeignTarget {
+    Native, // Rust FFI (v6.2)
+    Wasm,   // WebAssembly (future)
+}
+
+impl std::fmt::Display for ForeignTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ForeignTarget::Native => write!(f, "native"),
+            ForeignTarget::Wasm => write!(f, "wasm"),
+        }
+    }
+}
+
+/// Foreign Function Signature (from frgn declaration)
+#[derive(Debug, Clone)]
+pub struct ForeignSignature {
+    pub name: String,
+    pub inputs: Vec<(String, Type)>,         // param_name -> type
+    pub success_output: Vec<(String, Type)>, // named fields (can be empty for void)
+    pub error_type_name: String,             // e.g., "IoError"
+    pub error_fields: Vec<(String, Type)>,   // error shape
+    pub span: Option<Span>,
+}
+
+/// Foreign Function Binding (loaded from TOML)
+#[derive(Debug, Clone)]
+pub struct ForeignBinding {
+    pub name: String,
+    pub description: Option<String>,
+    pub location: String, // Rust module path: std::fs::read_to_string
+    pub target: ForeignTarget,
+    pub inputs: Vec<(String, Type)>, // Parameter names and types
+    pub success_output: Vec<(String, Type)>, // Success output shape
+    pub error_type: String,          // Error type name
+    pub error_fields: Vec<(String, Type)>, // Error fields
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Integer(i64),
@@ -249,6 +289,13 @@ pub enum TopLevel {
     Constant(Constant),
     Import(Import),
     ForeignSig(ForeignSig),
+    ForeignBinding {
+        name: String,
+        toml_path: String,
+        signature: ForeignSignature,
+        target: ForeignTarget,
+        span: Option<Span>,
+    },
     Struct(StructDefinition),
     RStruct(RStructDefinition),
     RenderBlock(RenderBlock),

@@ -91,6 +91,10 @@ impl TypeChecker {
                 }
                 TopLevel::Import(_) => {}
                 TopLevel::ForeignSig(_) => {}
+                TopLevel::ForeignBinding { .. } => {
+                    // FFI validation will be done in Phase 4
+                    // For now, just skip
+                }
                 TopLevel::Struct(_) => {}
                 TopLevel::RStruct(_) => {}
                 TopLevel::RenderBlock(_) => {}

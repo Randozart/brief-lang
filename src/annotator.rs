@@ -379,6 +379,11 @@ impl Annotator {
                         frgn.name, inputs, outputs
                     ));
                 }
+                TopLevel::ForeignBinding {
+                    name, toml_path, ..
+                } => {
+                    output.push_str(&format!("frgn {} from \"{}\";\n", name, toml_path));
+                }
                 TopLevel::Struct(struct_def) => {
                     output.push_str(&format!("struct {} {{ ", struct_def.name));
                     let field_strs: Vec<String> = struct_def
