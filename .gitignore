@@ -3,7 +3,10 @@
 # ============================================
 # SPECS
 # ============================================
-spec/
+# spec/ is NOT ignored - we track specification files
+# Only ignore generated spec outputs
+spec/*.pdf
+spec/*.html
 
 # ============================================
 # TESTS

@@ -460,6 +460,9 @@ impl TypeChecker {
                         .join(", ")
                 )
             }
+            Type::Option(inner) => {
+                format!("Option<{}>", self.type_to_string(inner))
+            }
         }
     }
 }

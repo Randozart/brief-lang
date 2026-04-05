@@ -782,6 +782,9 @@ impl ProofEngine {
                         .join(", ")
                 )
             }
+            Type::Option(inner) => {
+                format!("Option<{}>", self.type_name(inner))
+            }
         }
     }
 
