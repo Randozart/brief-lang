@@ -346,7 +346,7 @@ impl WasmGenerator {
         output.push_str("            }\n");
         output.push_str("            true // default to visible if can't evaluate\n");
         output.push_str("        };\n");
-        output.push_str("        let signal_map = std::collections::HashMap::new();\n");
+        output.push_str("        let mut signal_map = std::collections::HashMap::new();\n");
         for (name, &id) in &self.signal_map {
             output.push_str(&format!(
                 "        signal_map.insert(\"{}\", {});\n",
