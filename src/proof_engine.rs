@@ -552,6 +552,7 @@ impl ProofEngine {
         self.check_true_assertions(program);
         self.check_postcondition_contradictions(program);
         self.check_sig_projections(program);
+        self.check_ffi_error_handling(program);
         self.verify_contracts(program);
         self.errors.clone()
     }
@@ -624,6 +625,121 @@ impl ProofEngine {
                     }
                 }
             }
+        }
+    }
+
+    fn check_ffi_error_handling(&mut self, program: &Program) {
+        // Build a map of FFI bindings for verification
+        let mut ffi_bindings: HashMap<String, ForeignSignature> = HashMap::new();
+        for item in &program.items {
+            if let TopLevel::ForeignBinding {
+                name, signature, ..
+            } = item
+            {
+                ffi_bindings.insert(name.clone(), signature.clone());
+            }
+        }
+
+        // If no FFI bindings, nothing to verify
+        if ffi_bindings.is_empty() {
+            return;
+        }
+
+        // Check all definitions for proper FFI error handling
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                self.verify_ffi_error_handling_in_definition(defn, &ffi_bindings);
+            }
+        }
+    }
+
+    fn verify_ffi_error_handling_in_definition(
+        &mut self,
+        defn: &Definition,
+        ffi_bindings: &HashMap<String, ForeignSignature>,
+    ) {
+        // Find all FFI calls in the definition
+        let ffi_calls = self.find_ffi_calls_in_body(&defn.body, ffi_bindings);
+
+        for (frgn_name, _call_context) in ffi_calls {
+            // For each FFI call, verify that there's proper error handling
+            // This is a placeholder for more sophisticated verification
+            // In a full implementation, we would:
+            // 1. Check if the result is destructured into Success and Error
+            // 2. Verify both branches are non-empty
+            // 3. Check that error handling is reachable and not contradictory
+        }
+    }
+
+    fn find_ffi_calls_in_body(
+        &self,
+        body: &[Statement],
+        ffi_bindings: &HashMap<String, ForeignSignature>,
+    ) -> Vec<(String, String)> {
+        let mut calls = Vec::new();
+
+        for stmt in body {
+            match stmt {
+                Statement::Let { name: _, expr, .. } => {
+                    if let Some(e) = expr {
+                        self.find_ffi_calls_in_expr(e, &mut calls, ffi_bindings);
+                    }
+                }
+                Statement::Assignment { expr, .. } => {
+                    self.find_ffi_calls_in_expr(expr, &mut calls, ffi_bindings);
+                }
+                Statement::Expression(e) => {
+                    self.find_ffi_calls_in_expr(e, &mut calls, ffi_bindings);
+                }
+                Statement::Guarded { statements, .. } => {
+                    calls.extend(self.find_ffi_calls_in_body(statements, ffi_bindings));
+                }
+                _ => {}
+            }
+        }
+
+        calls
+    }
+
+    fn find_ffi_calls_in_expr(
+        &self,
+        expr: &Expr,
+        calls: &mut Vec<(String, String)>,
+        ffi_bindings: &HashMap<String, ForeignSignature>,
+    ) {
+        match expr {
+            Expr::Call(name, _args) => {
+                if ffi_bindings.contains_key(name) {
+                    calls.push((name.clone(), "frgn call".to_string()));
+                }
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.find_ffi_calls_in_expr(l, calls, ffi_bindings);
+                self.find_ffi_calls_in_expr(r, calls, ffi_bindings);
+            }
+            Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r) => {
+                self.find_ffi_calls_in_expr(l, calls, ffi_bindings);
+                self.find_ffi_calls_in_expr(r, calls, ffi_bindings);
+            }
+            Expr::And(l, r) | Expr::Or(l, r) => {
+                self.find_ffi_calls_in_expr(l, calls, ffi_bindings);
+                self.find_ffi_calls_in_expr(r, calls, ffi_bindings);
+            }
+            Expr::Not(inner) => self.find_ffi_calls_in_expr(inner, calls, ffi_bindings),
+            Expr::Neg(inner) => self.find_ffi_calls_in_expr(inner, calls, ffi_bindings),
+            Expr::BitNot(inner) => self.find_ffi_calls_in_expr(inner, calls, ffi_bindings),
+            Expr::FieldAccess(inner, _) => self.find_ffi_calls_in_expr(inner, calls, ffi_bindings),
+            Expr::ListIndex(list, index) => {
+                self.find_ffi_calls_in_expr(list, calls, ffi_bindings);
+                self.find_ffi_calls_in_expr(index, calls, ffi_bindings);
+            }
+            Expr::ListLen(list) => self.find_ffi_calls_in_expr(list, calls, ffi_bindings),
+            _ => {}
         }
     }
 
