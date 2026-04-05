@@ -1188,6 +1188,10 @@ fn main() {
                 if let Err(_e) = run_check(&PathBuf::from(command), false, false) {
                     std::process::exit(1);
                 }
+            } else if command.ends_with(".rbv") {
+                if let Err(_e) = run_rbv(&PathBuf::from(command), None, true) {
+                    std::process::exit(1);
+                }
             } else {
                 eprintln!("Unknown command: {}", command);
                 print_usage(&args[0]);
