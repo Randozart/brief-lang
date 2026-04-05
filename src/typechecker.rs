@@ -9,6 +9,7 @@ pub struct TypeChecker {
     errors: Vec<crate::errors::TypeError>,
     diagnostics: Vec<Diagnostic>,
     source: String,
+    signatures: HashMap<String, Signature>,
 }
 
 impl TypeChecker {
@@ -18,6 +19,7 @@ impl TypeChecker {
             errors: Vec::new(),
             diagnostics: Vec::new(),
             source: String::new(),
+            signatures: HashMap::new(),
         }
     }
 
@@ -27,6 +29,14 @@ impl TypeChecker {
     }
 
     pub fn check_program(&mut self, program: &Program) -> Vec<TypeError> {
+        // First pass: collect signatures
+        for item in &program.items {
+            if let TopLevel::Signature(sig) = item {
+                let key = sig.alias.clone().unwrap_or_else(|| sig.name.clone());
+                self.signatures.insert(key, sig.clone());
+            }
+        }
+
         for item in &program.items {
             match item {
                 TopLevel::StateDecl(decl) => {
@@ -125,6 +135,20 @@ impl TypeChecker {
         None
     }
 
+    fn resolve_type(&self, ty: Type) -> Type {
+        match ty {
+            Type::Custom(name) => {
+                // Check if name matches a signature
+                if self.signatures.contains_key(&name) {
+                    Type::Sig(name)
+                } else {
+                    Type::Custom(name)
+                }
+            }
+            other => other,
+        }
+    }
+
     fn check_signature(&mut self, sig: &Signature) {
         for input_ty in &sig.input_types {
             self.validate_type(input_ty);
@@ -142,7 +166,8 @@ impl TypeChecker {
     fn check_definition(&mut self, defn: &Definition) {
         self.push_scope();
         for (param_name, param_ty) in &defn.parameters {
-            self.declare_variable(param_name, param_ty.clone());
+            let resolved_ty = self.resolve_type(param_ty.clone());
+            self.declare_variable(param_name, resolved_ty);
         }
 
         for stmt in &defn.body {
@@ -323,6 +348,7 @@ impl TypeChecker {
             {
                 l_ty.clone()
             }
+            (Type::Sig(_), Type::Sig(_)) => l_ty.clone(),
             _ => Type::Custom("unknown".to_string()),
         }
     }
@@ -336,6 +362,8 @@ impl TypeChecker {
             (Type::Data, Type::Data) => true,
             (Type::Void, Type::Void) => true,
             (Type::Custom(a), Type::Custom(b)) => a == b,
+            (Type::Sig(a), Type::Sig(b)) => a == b, // Sig types match by name
+            (Type::Sig(_), _) | (_, Type::Sig(_)) => false, // Sig doesn't match other types
             (Type::Union(types), t) | (t, Type::Union(types)) => {
                 types.iter().any(|u| self.types_compatible(u, t))
             }
@@ -382,6 +410,11 @@ impl TypeChecker {
                     self.validate_type(t);
                 }
             }
+            Type::Sig(name) => {
+                if !self.signatures.contains_key(name) {
+                    // Will be caught as error in check_definition if used incorrectly
+                }
+            }
             _ => {}
         }
     }
@@ -395,6 +428,7 @@ impl TypeChecker {
             Type::Data => "Data".to_string(),
             Type::Void => "Void".to_string(),
             Type::Custom(name) => name.clone(),
+            Type::Sig(name) => format!("sig {}", name),
             Type::TypeVar(name) => name.clone(),
             Type::Union(types) => types
                 .iter()

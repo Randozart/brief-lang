@@ -14,6 +14,8 @@ pub enum Type {
     TypeVar(String),
     Generic(String, Vec<Type>),
     Applied(String, Vec<Type>),
+    Sig(String),       // Signature used as function type: sig name -> ...
+    Option(Box<Type>), // Option<T> - Some(T) or None
 }
 
 #[derive(Debug, Clone)]

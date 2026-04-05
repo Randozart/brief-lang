@@ -38,6 +38,11 @@ pub enum Token {
     #[token("render")]
     Render,
 
+    #[token("some")]
+    Some,
+    #[token("none")]
+    None,
+
     #[token("true")]
     BoolTrue,
     #[token("false")]

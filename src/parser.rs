@@ -1054,6 +1054,7 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Identifier(name))) => {
                 let name = name.clone();
                 self.advance();
+                // Create as Custom - type checker will resolve to Sig if needed
                 Type::Custom(name)
             }
             Some(Ok(Token::TypeData)) => {

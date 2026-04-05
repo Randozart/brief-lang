@@ -12,6 +12,492 @@ pub struct ProofError {
     pub hints: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum SymbolicValue {
+    Concrete(i64),
+    ConcreteFloat(f64),
+    Symbolic(String),
+    Add(Box<SymbolicValue>, Box<SymbolicValue>),
+    Sub(Box<SymbolicValue>, Box<SymbolicValue>),
+    Mul(Box<SymbolicValue>, Box<SymbolicValue>),
+    Unknown,
+}
+
+impl SymbolicValue {
+    fn from_expr(expr: &Expr, vars: &HashMap<String, SymbolicValue>) -> Self {
+        match expr {
+            Expr::Integer(n) => SymbolicValue::Concrete(*n),
+            Expr::Float(f) => SymbolicValue::ConcreteFloat(*f),
+            Expr::Bool(b) => SymbolicValue::Concrete(if *b { 1 } else { 0 }),
+            Expr::Identifier(name) => vars
+                .get(name)
+                .cloned()
+                .unwrap_or(SymbolicValue::Symbolic(name.clone())),
+            Expr::PriorState(name) => SymbolicValue::Symbolic(format!("@{}", name)),
+            Expr::Add(l, r) => SymbolicValue::Add(
+                Box::new(Self::from_expr(l, vars)),
+                Box::new(Self::from_expr(r, vars)),
+            ),
+            Expr::Sub(l, r) => SymbolicValue::Sub(
+                Box::new(Self::from_expr(l, vars)),
+                Box::new(Self::from_expr(r, vars)),
+            ),
+            Expr::Mul(l, r) => SymbolicValue::Mul(
+                Box::new(Self::from_expr(l, vars)),
+                Box::new(Self::from_expr(r, vars)),
+            ),
+            _ => SymbolicValue::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PathConstraint {
+    pub condition: Expr,
+    pub is_negated: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SymbolicState {
+    pub vars: HashMap<String, SymbolicValue>,
+    pub constraints: Vec<PathConstraint>,
+}
+
+impl SymbolicState {
+    fn new() -> Self {
+        SymbolicState {
+            vars: HashMap::new(),
+            constraints: Vec::new(),
+        }
+    }
+
+    fn with_constraint(mut self, condition: Expr, is_negated: bool) -> Self {
+        self.constraints.push(PathConstraint {
+            condition,
+            is_negated,
+        });
+        self
+    }
+
+    fn with_assignment(&mut self, name: &str, value: SymbolicValue) {
+        self.vars.insert(name.to_string(), value);
+    }
+}
+
+pub struct SymbolicExecutor {
+    errors: Vec<ProofError>,
+}
+
+impl SymbolicExecutor {
+    pub fn new() -> Self {
+        SymbolicExecutor { errors: Vec::new() }
+    }
+
+    pub fn verify_transaction(&mut self, txn: &Transaction) -> Vec<ProofError> {
+        let mut state = self.init_state_from_precondition(&txn.contract.pre_condition);
+
+        self.verify_contract_implication(
+            &txn.contract.pre_condition,
+            &txn.contract.post_condition,
+            &txn.body,
+            state,
+            format!("transaction '{}'", txn.name),
+        );
+
+        self.errors.clone()
+    }
+
+    pub fn verify_definition(&mut self, defn: &Definition) -> Vec<ProofError> {
+        let mut state = self.init_state_from_precondition(&defn.contract.pre_condition);
+
+        self.verify_contract_implication(
+            &defn.contract.pre_condition,
+            &defn.contract.post_condition,
+            &defn.body,
+            state,
+            format!("definition '{}'", defn.name),
+        );
+
+        self.errors.clone()
+    }
+
+    fn init_state_from_precondition(&self, pre: &Expr) -> SymbolicState {
+        let mut state = SymbolicState::new();
+
+        match pre {
+            Expr::Bool(true) => {}
+            Expr::And(l, r) | Expr::Or(l, r) => {
+                let left_vars = self.extract_vars(l);
+                let right_vars = self.extract_vars(r);
+                for var in left_vars.iter().chain(right_vars.iter()) {
+                    state
+                        .vars
+                        .insert(var.clone(), SymbolicValue::Symbolic(var.clone()));
+                }
+            }
+            _ => {
+                let vars = self.extract_vars(pre);
+                for var in &vars {
+                    state
+                        .vars
+                        .insert(var.clone(), SymbolicValue::Symbolic(var.clone()));
+                }
+            }
+        }
+
+        state
+    }
+
+    fn extract_vars(&self, expr: &Expr) -> HashSet<String> {
+        let mut vars = HashSet::new();
+        self.collect_vars(expr, &mut vars);
+        vars
+    }
+
+    fn collect_vars(&self, expr: &Expr, vars: &mut HashSet<String>) {
+        match expr {
+            Expr::Identifier(name) => {
+                vars.insert(name.clone());
+            }
+            Expr::PriorState(name) => {
+                vars.insert(name.clone());
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.collect_vars(l, vars);
+                self.collect_vars(r, vars);
+            }
+            Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r) => {
+                self.collect_vars(l, vars);
+                self.collect_vars(r, vars);
+            }
+            Expr::And(l, r) | Expr::Or(l, r) => {
+                self.collect_vars(l, vars);
+                self.collect_vars(r, vars);
+            }
+            Expr::Not(inner) => self.collect_vars(inner, vars),
+            _ => {}
+        }
+    }
+
+    fn verify_contract_implication(
+        &mut self,
+        pre_condition: &Expr,
+        post_condition: &Expr,
+        body: &[Statement],
+        mut state: SymbolicState,
+        context: String,
+    ) {
+        let term_paths = self.enumerate_paths(body, state.clone());
+
+        for (path_idx, (path_state, term_outputs)) in term_paths.iter().enumerate() {
+            if !self.implies(pre_condition, path_state, post_condition) {
+                let mut err = ProofError::new("P008", "contract verification failed");
+                err.explanation = format!(
+                    "{}: post-condition not satisfied on path {}",
+                    context, path_idx
+                );
+                err.proof_chain.push(format!(
+                    "1. Pre-condition: {}",
+                    self.format_expr(pre_condition)
+                ));
+
+                if !path_state.constraints.is_empty() {
+                    err.proof_chain.push("2. Path constraints:".to_string());
+                    for (i, constraint) in path_state.constraints.iter().enumerate() {
+                        let cond_str = self.format_expr(&constraint.condition);
+                        err.proof_chain.push(format!("   {}. {}", i + 1, cond_str));
+                    }
+                }
+
+                err.proof_chain.push(format!(
+                    "3. Post-condition: {}",
+                    self.format_expr(post_condition)
+                ));
+
+                err.hints.push(format!(
+                    "ensure the transaction/definition can reach a satisfying post-condition from the pre-condition"
+                ));
+
+                self.errors.push(err);
+            }
+        }
+    }
+
+    fn enumerate_paths(
+        &self,
+        body: &[Statement],
+        state: SymbolicState,
+    ) -> Vec<(SymbolicState, Vec<Option<Expr>>)> {
+        let mut paths = Vec::new();
+        self.enumerate_paths_recursive(body, state, &mut paths);
+        paths
+    }
+
+    fn enumerate_paths_recursive(
+        &self,
+        body: &[Statement],
+        state: SymbolicState,
+        paths: &mut Vec<(SymbolicState, Vec<Option<Expr>>)>,
+    ) {
+        let mut current_state = state;
+        let mut terminated = false;
+        let mut term_outputs: Vec<Option<Expr>> = Vec::new();
+
+        for stmt in body {
+            if terminated {
+                break;
+            }
+
+            match stmt {
+                Statement::Assignment {
+                    name,
+                    expr,
+                    is_owned: _,
+                } => {
+                    let value = SymbolicValue::from_expr(expr, &current_state.vars);
+                    current_state.vars.insert(name.clone(), value);
+                }
+                Statement::Let { name, expr, .. } => {
+                    if let Some(e) = expr {
+                        let value = SymbolicValue::from_expr(e, &current_state.vars);
+                        current_state.vars.insert(name.clone(), value);
+                    }
+                }
+                Statement::Guarded {
+                    condition,
+                    statement,
+                } => {
+                    let true_state = current_state
+                        .clone()
+                        .with_constraint(condition.clone(), false);
+                    let false_state = current_state
+                        .clone()
+                        .with_constraint(condition.clone(), true);
+
+                    let mut true_paths = Vec::new();
+                    self.enumerate_paths_recursive(
+                        &[*statement.clone()],
+                        true_state,
+                        &mut true_paths,
+                    );
+
+                    let mut false_paths = Vec::new();
+                    self.enumerate_paths_recursive(&body[1..], false_state, &mut false_paths);
+
+                    for (s, outputs) in true_paths.into_iter().chain(false_paths.into_iter()) {
+                        paths.push((s, outputs));
+                    }
+                    return;
+                }
+                Statement::Term(outputs) => {
+                    terminated = true;
+                    term_outputs = outputs.clone();
+                }
+                Statement::Escape(_) => {
+                    terminated = true;
+                }
+                Statement::Expression(_) | Statement::Unification { .. } => {}
+            }
+        }
+
+        if terminated {
+            paths.push((current_state, term_outputs));
+        }
+    }
+
+    fn implies(&mut self, pre: &Expr, state: &SymbolicState, post: &Expr) -> bool {
+        let pre_true = self.is_truthy(pre, state);
+        if !pre_true {
+            return true;
+        }
+
+        for constraint in &state.constraints {
+            if constraint.is_negated {
+                if self.is_truthy(&constraint.condition, state) {
+                    return false;
+                }
+            }
+        }
+
+        if self.contains_prior_state(post) {
+            return self.verify_post_with_prior(state, post);
+        }
+
+        let post_true = self.is_truthy(post, state);
+        post_true
+    }
+
+    fn verify_post_with_prior(&self, state: &SymbolicState, post: &Expr) -> bool {
+        let changed_vars: HashSet<String> = state.vars.keys().cloned().collect();
+
+        self.check_post_satisfiable(post, state, &changed_vars)
+    }
+
+    fn check_post_satisfiable(
+        &self,
+        post: &Expr,
+        state: &SymbolicState,
+        _changed_vars: &HashSet<String>,
+    ) -> bool {
+        match post {
+            Expr::Eq(l, r) => {
+                let l_has_prior = self.contains_prior_state(l);
+                let r_has_prior = self.contains_prior_state(r);
+
+                if l_has_prior || r_has_prior {
+                    return true;
+                }
+
+                self.is_truthy(post, state)
+            }
+            _ => true,
+        }
+    }
+
+    fn contains_prior_state(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::PriorState(_) => true,
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.contains_prior_state(l) || self.contains_prior_state(r)
+            }
+            Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r) => self.contains_prior_state(l) || self.contains_prior_state(r),
+            Expr::And(l, r) | Expr::Or(l, r) => {
+                self.contains_prior_state(l) || self.contains_prior_state(r)
+            }
+            Expr::Not(inner) => self.contains_prior_state(inner),
+            _ => false,
+        }
+    }
+
+    fn is_truthy(&self, expr: &Expr, state: &SymbolicState) -> bool {
+        match expr {
+            Expr::Bool(b) => *b,
+            Expr::Identifier(name) => {
+                if let Some(val) = state.vars.get(name) {
+                    match val {
+                        SymbolicValue::Concrete(n) => *n != 0,
+                        SymbolicValue::ConcreteFloat(f) => *f != 0.0,
+                        _ => true,
+                    }
+                } else {
+                    true
+                }
+            }
+            Expr::And(l, r) => self.is_truthy(l, state) && self.is_truthy(r, state),
+            Expr::Or(l, r) => self.is_truthy(l, state) || self.is_truthy(r, state),
+            Expr::Not(inner) => !self.is_truthy(inner, state),
+            Expr::Eq(l, r) => self.eval_eq(l, r, state),
+            Expr::Ne(l, r) => !self.eval_eq(l, r, state),
+            Expr::Lt(l, r) => self.eval_cmp(l, r, state, |a, b| a < b),
+            Expr::Le(l, r) => self.eval_cmp(l, r, state, |a, b| a <= b),
+            Expr::Gt(l, r) => self.eval_cmp(l, r, state, |a, b| a > b),
+            Expr::Ge(l, r) => self.eval_cmp(l, r, state, |a, b| a >= b),
+            _ => true,
+        }
+    }
+
+    fn eval_eq(&self, l: &Expr, r: &Expr, state: &SymbolicState) -> bool {
+        let lv = self.eval_numeric(l, state);
+        let rv = self.eval_numeric(r, state);
+        match (lv, rv) {
+            (Some(a), Some(b)) => a == b,
+            _ => {
+                let ls = self.format_expr(l);
+                let rs = self.format_expr(r);
+                ls == rs
+            }
+        }
+    }
+
+    fn eval_cmp<F>(&self, l: &Expr, r: &Expr, state: &SymbolicState, op: F) -> bool
+    where
+        F: Fn(i64, i64) -> bool,
+    {
+        let lv = self.eval_numeric(l, state);
+        let rv = self.eval_numeric(r, state);
+        match (lv, rv) {
+            (Some(a), Some(b)) => op(a, b),
+            _ => true,
+        }
+    }
+
+    fn eval_numeric(&self, expr: &Expr, state: &SymbolicState) -> Option<i64> {
+        match expr {
+            Expr::Integer(n) => Some(*n),
+            Expr::Identifier(name) => {
+                if let Some(val) = state.vars.get(name) {
+                    match val {
+                        SymbolicValue::Concrete(n) => Some(*n),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            Expr::Add(l, r) => {
+                let a = self.eval_numeric(l, state)?;
+                let b = self.eval_numeric(r, state)?;
+                Some(a + b)
+            }
+            Expr::Sub(l, r) => {
+                let a = self.eval_numeric(l, state)?;
+                let b = self.eval_numeric(r, state)?;
+                Some(a - b)
+            }
+            Expr::Mul(l, r) => {
+                let a = self.eval_numeric(l, state)?;
+                let b = self.eval_numeric(r, state)?;
+                Some(a * b)
+            }
+            _ => None,
+        }
+    }
+
+    fn format_expr(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Integer(n) => n.to_string(),
+            Expr::Float(f) => f.to_string(),
+            Expr::String(s) => format!("\"{}\"", s),
+            Expr::Bool(b) => b.to_string(),
+            Expr::Identifier(name) => name.clone(),
+            Expr::PriorState(name) => format!("@{}", name),
+            Expr::Add(l, r) => format!("{} + {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Sub(l, r) => format!("{} - {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Mul(l, r) => format!("{} * {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Div(l, r) => format!("{} / {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Eq(l, r) => format!("{} == {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Ne(l, r) => format!("{} != {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Lt(l, r) => format!("{} < {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Le(l, r) => format!("{} <= {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Gt(l, r) => format!("{} > {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Ge(l, r) => format!("{} >= {}", self.format_expr(l), self.format_expr(r)),
+            Expr::And(l, r) => format!("{} && {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Or(l, r) => format!("{} || {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Not(inner) => format!("!{}", self.format_expr(inner)),
+            Expr::Neg(inner) => format!("-{}", self.format_expr(inner)),
+            Expr::Call(name, args) => {
+                let args_str = args
+                    .iter()
+                    .map(|a| self.format_expr(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({})", name, args_str)
+            }
+            _ => "<expr>".to_string(),
+        }
+    }
+}
+
 impl ProofError {
     pub fn new(code: &str, title: &str) -> Self {
         ProofError {
@@ -68,7 +554,26 @@ impl ProofEngine {
         self.check_total_path(program);
         self.check_true_assertions(program);
         self.check_postcondition_contradictions(program);
+        self.verify_contracts(program);
         self.errors.clone()
+    }
+
+    fn verify_contracts(&mut self, program: &Program) {
+        let mut sym_exec = SymbolicExecutor::new();
+
+        for item in &program.items {
+            match item {
+                TopLevel::Transaction(txn) => {
+                    let errs = sym_exec.verify_transaction(txn);
+                    self.errors.extend(errs);
+                }
+                TopLevel::Definition(defn) => {
+                    let errs = sym_exec.verify_definition(defn);
+                    self.errors.extend(errs);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn check_postcondition_contradictions(&mut self, program: &Program) {
@@ -241,6 +746,7 @@ impl ProofEngine {
     fn type_name(&self, ty: &Type) -> String {
         match ty {
             Type::Custom(name) => name.clone(),
+            Type::Sig(name) => format!("sig {}", name),
             Type::Int => "Int".to_string(),
             Type::Float => "Float".to_string(),
             Type::String => "String".to_string(),
@@ -295,41 +801,33 @@ impl ProofEngine {
                 let txn1 = async_txns[i];
                 let txn2 = async_txns[j];
 
-                let conflicts = self.find_write_conflicts(txn1, txn2);
+                let conflicts = self.find_read_write_conflicts(txn1, txn2);
                 if !conflicts.is_empty() {
                     let pre1_overlaps = self.preconditions_overlap(txn1, txn2);
                     if pre1_overlaps {
-                        let mut err =
-                            ProofError::new("P001", "concurrent mutation without synchronization");
-                        err.explanation = format!(
-                            "both transactions '{}' and '{}' can mutate the same state variables",
-                            txn1.name, txn2.name
-                        );
-                        err.proof_chain.push(format!(
-                            "1. '{}' is reactive (fires automatically)",
-                            txn1.name
-                        ));
-                        err.proof_chain.push(format!(
-                            "2. '{}' is reactive (fires automatically)",
-                            txn2.name
-                        ));
-                        err.proof_chain.push(format!(
-                            "3. both mutate shared variable(s): {}",
-                            conflicts.join(", ")
-                        ));
-                        err.examples.push(format!(
-                            "race condition scenario: if {} runs first and sets {} to X, \
-                            then {} runs and expects a different value, the result is undefined",
-                            txn1.name, conflicts[0], txn2.name
-                        ));
-                        err.hints.push(format!(
-                            "to make these mutually exclusive, add a guard: txn {} [...][...] {{ |{}| ... }}",
-                            txn1.name, txn2.name
-                        ));
-                        err.hints.push(
-                            "or use sequential transactions instead of reactive ones".to_string(),
-                        );
-                        self.errors.push(err);
+                        for (var, description) in &conflicts {
+                            let mut err =
+                                ProofError::new("P001", "ownership conflict in async transactions");
+                            err.explanation = format!(
+                                "transactions '{}' and '{}' have conflicting access to '{}'",
+                                txn1.name, txn2.name, var
+                            );
+                            err.proof_chain.push(format!(
+                                "1. '{}' is async reactive (can run concurrently)",
+                                txn1.name
+                            ));
+                            err.proof_chain.push(format!(
+                                "2. '{}' is async reactive (can run concurrently)",
+                                txn2.name
+                            ));
+                            err.proof_chain.push(format!("3. {}", description));
+                            err.proof_chain.push(
+                                "4. Brief: when one writes, no other may read or write".to_string(),
+                            );
+                            err.hints
+                                .push("make pre-conditions mutually exclusive".to_string());
+                            self.errors.push(err);
+                        }
                     }
                 }
             }
@@ -341,6 +839,124 @@ impl ProofEngine {
         let writes2 = self.extract_write_vars(txn2);
 
         writes1.intersection(&writes2).cloned().collect()
+    }
+
+    fn find_read_write_conflicts(
+        &self,
+        txn1: &Transaction,
+        txn2: &Transaction,
+    ) -> Vec<(String, String)> {
+        let mut conflicts = Vec::new();
+
+        let writes1 = self.extract_write_vars(txn1);
+        let reads1 = self.extract_read_vars(txn1);
+        let writes2 = self.extract_write_vars(txn2);
+        let reads2 = self.extract_read_vars(txn2);
+
+        for w in &writes1 {
+            if writes2.contains(w) {
+                conflicts.push((
+                    w.clone(),
+                    format!("{} writes while {} writes", txn2.name, txn1.name),
+                ));
+            }
+        }
+
+        for w in &writes1 {
+            if reads2.contains(w) {
+                conflicts.push((
+                    w.clone(),
+                    format!("{} reads while {} writes", txn2.name, txn1.name),
+                ));
+            }
+        }
+
+        for w in &writes2 {
+            if reads1.contains(w) {
+                conflicts.push((
+                    w.clone(),
+                    format!("{} reads while {} writes", txn1.name, txn2.name),
+                ));
+            }
+        }
+
+        conflicts
+    }
+
+    fn extract_read_vars(&self, txn: &Transaction) -> HashSet<String> {
+        let mut vars = HashSet::new();
+        for stmt in &txn.body {
+            self.collect_read_vars(stmt, &mut vars);
+        }
+        vars
+    }
+
+    fn collect_read_vars_from_expr(&self, expr: &Expr, vars: &mut HashSet<String>) {
+        match expr {
+            Expr::Identifier(name) => {
+                vars.insert(name.clone());
+            }
+            Expr::PriorState(name) => {
+                vars.insert(name.clone());
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.collect_read_vars_from_expr(l, vars);
+                self.collect_read_vars_from_expr(r, vars);
+            }
+            Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r) => {
+                self.collect_read_vars_from_expr(l, vars);
+                self.collect_read_vars_from_expr(r, vars);
+            }
+            Expr::And(l, r) | Expr::Or(l, r) => {
+                self.collect_read_vars_from_expr(l, vars);
+                self.collect_read_vars_from_expr(r, vars);
+            }
+            Expr::Not(inner) => self.collect_read_vars_from_expr(inner, vars),
+            _ => {}
+        }
+    }
+
+    fn collect_read_vars(&self, stmt: &Statement, vars: &mut HashSet<String>) {
+        match stmt {
+            Statement::Assignment {
+                name,
+                expr,
+                is_owned,
+            } => {
+                self.collect_read_vars_from_expr(expr, vars);
+                if *is_owned {
+                    vars.insert(name.clone());
+                }
+            }
+            Statement::Let { name, expr, .. } => {
+                if let Some(e) = expr {
+                    self.collect_read_vars_from_expr(e, vars);
+                }
+            }
+            Statement::Expression(expr) => {
+                self.collect_read_vars_from_expr(expr, vars);
+            }
+            Statement::Guarded {
+                condition,
+                statement,
+            } => {
+                self.collect_read_vars_from_expr(condition, vars);
+                self.collect_read_vars(statement, vars);
+            }
+            Statement::Term(outputs) => {
+                for out in outputs {
+                    if let Some(expr) = out {
+                        self.collect_read_vars_from_expr(expr, vars);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn extract_write_vars(&self, txn: &Transaction) -> HashSet<String> {

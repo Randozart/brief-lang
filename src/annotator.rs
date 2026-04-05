@@ -420,6 +420,7 @@ impl Annotator {
             Type::Data => "Data".to_string(),
             Type::Void => "Void".to_string(),
             Type::Custom(name) => name.clone(),
+            Type::Sig(name) => format!("sig {}", name),
             Type::TypeVar(name) => name.clone(),
             Type::Union(types) => types
                 .iter()

@@ -11,6 +11,7 @@ pub enum Value {
     Data(Vec<u8>),
     List(Vec<Value>),
     Struct(HashMap<String, Value>),
+    Defn(String), // Reference to a definition by name
     Void,
 }
 
@@ -24,6 +25,7 @@ impl fmt::Display for Value {
             Value::Data(_) => write!(f, "<data>"),
             Value::List(items) => write!(f, "[{}]", items.len()),
             Value::Struct(fields) => write!(f, "{{{} fields}}", fields.len()),
+            Value::Defn(name) => write!(f, "<defn {}>", name),
             Value::Void => write!(f, "void"),
         }
     }
@@ -45,6 +47,7 @@ pub struct Interpreter {
     pub state: HashMap<String, Value>,
     pub prior_state: HashMap<String, Value>,
     pub foreign_functions: HashMap<String, ForeignFn>,
+    pub definitions: HashMap<String, Definition>,
 }
 
 impl Interpreter {
@@ -58,7 +61,48 @@ impl Interpreter {
             state: HashMap::new(),
             prior_state: HashMap::new(),
             foreign_functions,
+            definitions: HashMap::new(),
         }
+    }
+
+    fn call_defn(&mut self, name: &str, args: &[Expr]) -> Result<Value, RuntimeError> {
+        // Clone the defn to avoid borrow issues
+        let defn = match self.definitions.get(name) {
+            Some(d) => d.clone(),
+            None => return Err(RuntimeError::UndefinedForeignFunction(name.to_string())),
+        };
+
+        // Evaluate arguments and bind to parameter names
+        let mut local_scope = self.state.clone();
+        for (i, (param_name, _)) in defn.parameters.iter().enumerate() {
+            if i < args.len() {
+                let arg_val = self.eval_expr(&args[i])?;
+                local_scope.insert(param_name.clone(), arg_val);
+            }
+        }
+
+        // Save old state and swap in local scope
+        let old_state = std::mem::replace(&mut self.state, local_scope);
+
+        // Execute the defn body
+        let mut result = Value::Void;
+        for stmt in &defn.body {
+            match stmt {
+                Statement::Term(outputs) => {
+                    if let Some(Some(expr)) = outputs.first() {
+                        result = self.eval_expr(expr)?;
+                    }
+                }
+                _ => {
+                    self.exec_stmt(stmt)?;
+                }
+            }
+        }
+
+        // Restore old state
+        self.state = old_state;
+
+        Ok(result)
     }
 
     pub fn run(&mut self, program: &Program) -> Result<(), RuntimeError> {
@@ -81,6 +125,9 @@ impl Interpreter {
             } else if let TopLevel::Constant(const_decl) = item {
                 let value = self.eval_expr(&const_decl.expr)?;
                 self.state.insert(const_decl.name.clone(), value);
+            } else if let TopLevel::Definition(defn) = item {
+                // Store definitions for calling later
+                self.definitions.insert(defn.name.clone(), defn.clone());
             }
         }
 
@@ -201,7 +248,7 @@ impl Interpreter {
         Ok(())
     }
 
-    pub fn eval_expr(&self, expr: &Expr) -> Result<Value, RuntimeError> {
+    pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
         match expr {
             Expr::Integer(v) => Ok(Value::Int(*v)),
             Expr::Float(v) => Ok(Value::Float(*v)),
@@ -353,15 +400,38 @@ impl Interpreter {
                 }
             }
             Expr::Call(name, args) => {
-                if let Some(frgn_fn) = self.foreign_functions.get(name) {
-                    let mut arg_values = Vec::new();
-                    for arg in args {
-                        arg_values.push(self.eval_expr(arg)?);
-                    }
-                    frgn_fn(arg_values)
-                } else {
-                    Err(RuntimeError::UndefinedForeignFunction(name.clone()))
+                // Clone the function name to avoid borrow issues
+                let fn_name = name.clone();
+
+                // Check if it's a defn and call it
+                if self.definitions.contains_key(&fn_name) {
+                    return self.call_defn(&fn_name, args);
                 }
+
+                // Check if it's in state as a defn reference
+                let defn_call = self.state.get(&fn_name).and_then(|v| {
+                    if let Value::Defn(n) = v {
+                        Some(n.clone())
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(defn_name) = defn_call {
+                    return self.call_defn(&defn_name, args);
+                }
+
+                // Finally check foreign functions - need to evaluate args first
+                let mut arg_values = Vec::new();
+                for arg in args {
+                    arg_values.push(self.eval_expr(arg)?);
+                }
+
+                if let Some(frgn_fn) = self.foreign_functions.get(&fn_name) {
+                    return frgn_fn(arg_values);
+                }
+
+                Err(RuntimeError::UndefinedForeignFunction(fn_name))
             }
             Expr::ListLiteral(elements) => {
                 let mut values = Vec::new();
