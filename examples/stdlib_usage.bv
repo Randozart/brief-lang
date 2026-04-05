@@ -1,96 +1,29 @@
-# Example: Using Both Native Brief Stdlib and FFI Stdlib
-
-# Native Brief functions (from std/core.bv) - no FFI needed
-# These are proven at compile time
+# Example: Native Brief Stdlib vs FFI Bindings
 
 let x: Int = -42;
 let y: Int = 10;
 let z: Int = 20;
-
-# Integer math using native Brief
-defn demo_native_math() 
-  -> Int 
-  [true]
-  [result >= 0]
-{
-  let abs_x: Int = absolute(x);
-  let smaller: Int = min(y, z);
-  let bounded: Int = clamp(x, -50, 50);
-  term abs_x;
-};
-
-# Predicates using native Brief
-defn demo_predicates() 
-  -> Bool 
-  [true]
-  [true]
-{
-  let x_is_neg: Bool = is_negative(x);
-  let y_is_pos: Bool = is_positive(y);
-  let z_is_even: Bool = is_even(z);
-  [x_is_neg && y_is_pos && z_is_even] term true;
-  term false;
-};
-
-# State management patterns using native Brief
 let initialized: Bool = false;
-let value: Int = 0;
+let counter: Int = 0;
 
-txn lazy_init 
-  [~initialized]
-  [initialized == true]
+# Native Brief: Integer Operations & Predicates
+# Brief includes these proven functions natively:
+#   absolute(n) | min(a, b) | max(a, b) | clamp(v, lo, hi)
+#   is_positive(n) | is_negative(n) | is_zero(n) | is_even(n)
+#
+# Key advantage: Proven correct at compile time, zero FFI overhead
+
+defn demo_predicates() [true][true] -> Bool {
+  term true;
+};
+
+# State Management (Brief's Core Strength)
+# Brief is designed for proving state transitions correct
+
+rct txn initialize_system
+  [initialized == false]
+  [initialized == true && counter == @counter]
 {
   &initialized = true;
-  &value = 100;
   term;
 };
-
-# ============================================================================
-# FFI bindings for operations Brief can't do natively
-# ============================================================================
-
-# For I/O (Brief has no file operations)
-frgn read_file(path: String) -> Result<String, IoError> from "std::io";
-frgn write_file(path: String, content: String) -> Result<Void, IoError> from "std::io";
-
-# For transcendental math (Brief only has basic arithmetic)
-frgn sqrt(value: Float) -> Result<Float, MathError> from "std::math";
-frgn sin(radians: Float) -> Result<Float, MathError> from "std::math";
-frgn pow(base: Float, exponent: Float) -> Result<Float, MathError> from "std::math";
-
-# For string utilities (Brief has no string operations)
-frgn string_length(text: String) -> Result<Int, StringError> from "std::string";
-frgn string_to_upper(text: String) -> Result<String, StringError> from "std::string";
-frgn parse_int(text: String) -> Result<Int, ParseError> from "std::string";
-
-# For time operations (Brief has no time access)
-frgn current_timestamp() -> Result<Int, TimeError> from "std::time";
-frgn sleep_ms(milliseconds: Int) -> Result<Void, TimeError> from "std::time";
-
-# ============================================================================
-# Example: Using FFI in a transaction
-# ============================================================================
-
-defn load_config_file(path: String) 
-  -> String 
-  [true]
-  [true]
-{
-  let content: String = read_file(path);
-  content;
-};
-
-# ============================================================================
-# Key Insight
-# ============================================================================
-
-# Native Brief (from std/core.bv):
-# - Proven correct at compile time
-# - No runtime overhead
-# - What Brief is designed for: state and computation
-#
-# FFI Rust (from std/bindings/):
-# - Required for I/O, OS operations
-# - Required for complex math, string utilities, time
-# - Type-safe, but crosses FFI boundary
-# - Use when Brief can't do it natively

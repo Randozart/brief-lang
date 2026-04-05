@@ -378,6 +378,8 @@ d = "Int"
 
 ## Examples
 
+This section provides 6 progressively advanced examples showing different FFI patterns.
+
 ### Example 1: File Operations
 
 **Binding File** (`io.toml`):
@@ -491,6 +493,274 @@ defn process_text(input: String) -> Int [true] [true] {
     let upper: String = string_to_uppercase(input);
     let len: Int = string_length(upper);
     len;
+};
+```
+
+### Example 4: Error Handling Patterns
+
+**Binding File** (`network.toml`):
+```toml
+[[functions]]
+name = "send_request"
+location = "http::send_request"
+target = "native"
+description = "Send HTTP request and get response"
+
+[functions.input]
+url = "String"
+method = "String"
+
+[functions.output.success]
+status = "Int"
+body = "String"
+
+[functions.output.error]
+type = "NetworkError"
+code = "Int"
+message = "String"
+```
+
+**Brief Code** (showing different error handling patterns):
+```brief
+frgn send_request(url: String, method: String) -> Result<{status: Int, body: String}, NetworkError> from "network.toml";
+
+# Pattern 1: Unwrap (fails if error occurs)
+defn fetch_with_unwrap(url: String) -> String [true] [true] {
+    let response: {status: Int, body: String} = send_request(url, "GET");
+    response.body;
+};
+
+# Pattern 2: Handle error explicitly
+defn fetch_with_error_handling(url: String) -> String [true] [true] {
+    let result: Result<{status: Int, body: String}, NetworkError> = send_request(url, "GET");
+    [result is success] {
+        let response: {status: Int, body: String} = result.success;
+        response.body;
+    };
+    [result is error] {
+        let error: NetworkError = result.error;
+        "Error: " ++ error.message;
+    };
+    term "Unknown result";
+};
+
+# Pattern 3: Use in transaction with guards
+let request_count: Int = 0;
+let last_error: String = "";
+
+rct txn track_request
+    [request_count < 100]
+    [request_count == @request_count + 1]
+{
+    let response: Result<{status: Int, body: String}, NetworkError> = send_request("https://api.example.com", "GET");
+    [response is success] {
+        &request_count = request_count + 1;
+        &last_error = "";
+    };
+    [response is error] {
+        let error: NetworkError = response.error;
+        &last_error = error.message;
+    };
+    term;
+};
+```
+
+### Example 5: Custom Binding Module
+
+**Binding File** (`payment.toml`):
+```toml
+# Payment processing with multiple related functions
+
+[[functions]]
+name = "validate_card"
+location = "payment::validate_card_number"
+target = "native"
+description = "Validate credit card format"
+
+[functions.input]
+card_number = "String"
+
+[functions.output.success]
+valid = "Bool"
+
+[functions.output.error]
+type = "PaymentError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "process_payment"
+location = "payment::charge_card"
+target = "native"
+description = "Process payment charge"
+
+[functions.input]
+card_number = "String"
+amount = "Int"
+
+[functions.output.success]
+transaction_id = "String"
+amount_charged = "Int"
+
+[functions.output.error]
+type = "PaymentError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "refund_payment"
+location = "payment::refund_transaction"
+target = "native"
+description = "Refund a previous transaction"
+
+[functions.input]
+transaction_id = "String"
+
+[functions.output.success]
+refunded_amount = "Int"
+
+[functions.output.error]
+type = "PaymentError"
+code = "Int"
+message = "String"
+```
+
+**Brief Code**:
+```brief
+frgn validate_card(card_number: String) -> Result<Bool, PaymentError> from "payment.toml";
+frgn process_payment(card_number: String, amount: Int) -> Result<{transaction_id: String, amount_charged: Int}, PaymentError> from "payment.toml";
+frgn refund_payment(transaction_id: String) -> Result<Int, PaymentError> from "payment.toml";
+
+let last_transaction_id: String = "";
+let processing_payment: Bool = false;
+let payment_error_count: Int = 0;
+
+defn charge_customer(card: String, amount: Int) -> String [true] [true] {
+    let validation: Result<Bool, PaymentError> = validate_card(card);
+    [validation is error] {
+        let err: PaymentError = validation.error;
+        term "Card validation failed: " ++ err.message;
+    };
+    let result: Result<{transaction_id: String, amount_charged: Int}, PaymentError> = process_payment(card, amount);
+    [result is success] {
+        let tx: {transaction_id: String, amount_charged: Int} = result.success;
+        term "Payment processed: " ++ tx.transaction_id;
+    };
+    [result is error] {
+        let err: PaymentError = result.error;
+        term "Payment failed: " ++ err.message;
+    };
+    term "Unknown error";
+};
+
+# Reactive workflow: Monitor payment processing
+rct txn process_payment_workflow
+    [processing_payment == false && last_transaction_id == ""]
+    [processing_payment == false && last_transaction_id != ""]
+{
+    &processing_payment = true;
+    term;
+};
+
+rct txn complete_payment
+    [processing_payment == true && last_transaction_id != ""]
+    [processing_payment == false]
+{
+    &processing_payment = false;
+    term;
+};
+```
+
+### Example 6: State Machine with FFI Transitions
+
+**Binding File** (`database.toml`):
+```toml
+[[functions]]
+name = "save_record"
+location = "db::insert_record"
+target = "native"
+
+[functions.input]
+key = "String"
+value = "String"
+
+[functions.output.success]
+record_id = "Int"
+
+[functions.output.error]
+type = "DbError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "get_record"
+location = "db::select_record"
+target = "native"
+
+[functions.input]
+record_id = "Int"
+
+[functions.output.success]
+value = "String"
+
+[functions.output.error]
+type = "DbError"
+code = "Int"
+message = "String"
+```
+
+**Brief Code** (state machine with persistence):
+```brief
+frgn save_record(key: String, value: String) -> Result<Int, DbError> from "database.toml";
+frgn get_record(record_id: Int) -> Result<String, DbError> from "database.toml";
+
+let state: Int = 0;        # 0=init, 1=saving, 2=saved, 3=error
+let record_id: Int = -1;
+let error_msg: String = "";
+
+# State 0→1: Initiate save
+rct txn initiate_save
+    [state == 0 && record_id == -1]
+    [state == 1]
+{
+    &state = 1;
+    term;
+};
+
+# State 1→2: Perform actual save via FFI
+rct txn perform_save
+    [state == 1 && record_id == -1]
+    [state == 2 || state == 3]
+{
+    let result: Result<Int, DbError> = save_record("user_data", "test_value");
+    [result is success] {
+        let id: Int = result.success;
+        &record_id = id;
+        &state = 2;
+    };
+    [result is error] {
+        let err: DbError = result.error;
+        &error_msg = err.message;
+        &state = 3;
+    };
+    term;
+};
+
+# State 2→... : Retrieve saved data
+defn retrieve_data(id: Int) -> String [true] [true] {
+    let result: Result<String, DbError> = get_record(id);
+    [result is success] {
+        let value: String = result.success;
+        term value;
+    };
+    [result is error] {
+        let err: DbError = result.error;
+        term "Error: " ++ err.message;
+    };
+    term "Unknown";
 };
 ```
 

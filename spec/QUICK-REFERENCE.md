@@ -132,15 +132,35 @@ txn process [true][true] {
 ```brief
 import std.core;
 
-absolute(x)           # |x|
-min(a, b)            # a if a <= b, else b
-max(a, b)            # a if a >= b, else b
-clamp(x, min, max)   # x clamped to [min, max]
-is_positive(x)       # x > 0
-is_negative(x)       # x < 0
-is_zero(x)           # x == 0
-is_even(x)           # x % 2 == 0
-choose_if(c, t, f)   # c ? t : f
+# Integer Math
+absolute(x)                              # |x|
+min(a, b)                               # a if a <= b, else b
+max(a, b)                               # a if a >= b, else b
+clamp(x, min_val, max_val)              # x clamped to [min, max]
+
+# Integer Predicates
+is_positive(x)                          # x > 0
+is_negative(x)                          # x < 0
+is_zero(x)                              # x == 0
+is_even(x)                              # x % 2 == 0
+
+# Float Predicates
+float_is_positive(x)                    # x > 0.0
+float_is_negative(x)                    # x < 0.0
+float_is_zero(x)                        # x == 0.0
+
+# Control & Logic
+choose_if(condition, true_val, false_val)  # Conditional expression
+always_true()                            # Always returns true
+always_false()                           # Always returns false
+not_equal(a, b)                          # a != b
+
+# State Patterns
+get_or_init_with_default(init, default)    # Returns default if not initialized
+is_valid_state(state, min, max)             # true if min <= state <= max
+
+# String Utilities
+string_is_empty(s)                      # true if s == ""
 ```
 
 ## FFI Modules

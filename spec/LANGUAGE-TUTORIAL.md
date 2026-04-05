@@ -572,6 +572,181 @@ error[B001]: Postcondition not satisfiable
   = Hint: postcondition requires +2, but code does +1
 ```
 
+### Common Errors and How to Fix Them
+
+#### Error: "Postcondition not satisfiable"
+
+**What it means**: Your transaction claims to achieve something in the postcondition, but the code doesn't actually do it.
+
+**Example**:
+```brief
+txn bad_increment [count < 100]
+  [count == @count + 2]  # Claims to add 2
+{
+  &count = count + 1;     # But only adds 1
+  term;
+};
+```
+
+**Fix**: Make the postcondition match what you actually do:
+```brief
+txn good_increment [count < 100]
+  [count == @count + 1]  # Now matches code
+{
+  &count = count + 1;
+  term;
+};
+```
+
+#### Error: "Contract cannot be satisfied"
+
+**What it means**: The precondition and postcondition are contradictory - there's no state where both can be true.
+
+**Example**:
+```brief
+txn impossible [x == 0]
+  [x == 5]  # Started at 0, ends at 5...but need @x reference!
+{
+  &x = 5;
+  term;
+};
+```
+
+**Fix**: Use `@variable` to reference prior state:
+```brief
+txn fixed [x == 0]
+  [x == 5 && @x == 0]  # "x is now 5, and it was 0"
+{
+  &x = 5;
+  term;
+};
+```
+
+#### Error: "Unhandled outcome"
+
+**What it means**: You have a pattern match or conditional that doesn't cover all possibilities.
+
+**Example**:
+```brief
+let is_valid: Bool = true;
+
+defn check_status() [true] [true] -> String {
+  [is_valid] term "Valid";
+  # Missing: what if is_valid is false?
+};
+```
+
+**Fix**: Add all branches:
+```brief
+defn check_status() [true] [true] -> String {
+  [is_valid] term "Valid";
+  [~is_valid] term "Invalid";
+};
+```
+
+#### Error: "Termination cannot be proven"
+
+**What it means**: Your code might loop infinitely. Brief requires all code paths to provably terminate.
+
+**Why it happens**: Brief doesn't allow recursion or unbounded loops. Every code path must reach `term` or `escape`.
+
+**Example** (invalid):
+```brief
+# This won't compile - infinite loop
+txn spin [true] [false] {
+  [true] &counter = counter + 1;  # Always true, cycles infinitely
+  term;
+};
+```
+
+**Fix**: Use a bounded loop counter or guard that eventually becomes false:
+```brief
+txn count_once [counter < 100]
+  [counter == @counter + 1]
+{
+  [counter < 100] &counter = counter + 1;
+  term;
+};
+```
+
+#### Error: "Type mismatch"
+
+**What it means**: You're using the wrong type somewhere.
+
+**Example**:
+```brief
+let x: Int = "hello";  # String assigned to Int!
+```
+
+**Fix**: Use the correct type:
+```brief
+let x: String = "hello";
+```
+
+#### Error: "Cannot mutate in definition"
+
+**What it means**: You tried to use `&variable` in a `defn` (which isn't a transaction).
+
+**Example**:
+```brief
+defn try_modify() [true] [true] -> Void {
+  &x = x + 1;  # Can't do this in a function!
+  term;
+};
+```
+
+**Fix**: Only use `&` in transactions:
+```brief
+txn do_modify [x < 100]
+  [x == @x + 1]
+{
+  &x = x + 1;
+  term;
+};
+```
+
+#### Error: "Binding validation failed"
+
+**What it means**: Your FFI function signature doesn't match the TOML binding.
+
+**Example**:
+```brief
+# Brief code
+frgn read_file(path: String) -> Result<String, IoError> from "io.toml";
+
+# But io.toml has:
+# [[functions]]
+# name = "read_file_v2"  # Name doesn't match!
+```
+
+**Fix**: Make sure the function name in Brief matches the name in TOML:
+```toml
+[[functions]]
+name = "read_file"  # Must match Brief code
+```
+
+### Debugging Workflow
+
+1. **Run the type checker first**:
+   ```bash
+   brief check program.bv
+   ```
+   This catches most errors quickly.
+
+2. **Read proof engine output** if type checking passes:
+   - "Postcondition not satisfiable" → Code doesn't match postcondition
+   - "Unhandled outcome" → Missing pattern case
+   - "Contract cannot be satisfied" → Precondition conflicts with postcondition
+
+3. **Check your invariants**: Ask yourself:
+   - "Do I reference `@old_value` correctly?"
+   - "Have I covered all guards `[condition]`?"
+   - "Can this code path terminate?"
+
+4. **Simplify to isolate**: Remove unrelated code to see if error still occurs
+
+5. **Review the examples**: Look at `examples/*.bv` for similar patterns that work
+
 ---
 
 ## Next Steps
