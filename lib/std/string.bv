@@ -1,24 +1,89 @@
 # Standard String Library
 # Foreign function declarations
 
+# Length
 frgn sig len(s: String) -> Int;
 
+# Concatenation
 frgn sig concat(a: String, b: String) -> String;
+frgn sig append(s: String, c: String) -> String;
+frgn sig prepend(c: String, s: String) -> String;
 
-frgn sig to_string(n: Int) -> String;
+# Case Conversion
+frgn sig to_lower(s: String) -> String;
+frgn sig to_upper(s: String) -> String;
+frgn sig to_title(s: String) -> String;
+frgn sig is_lower(s: String) -> Bool;
+frgn sig is_upper(s: String) -> Bool;
 
-frgn sig to_float(n: Float) -> String;
-
-frgn sig to_int(s: String) -> Int;
-
+# Whitespace
 frgn sig trim(s: String) -> String;
+frgn sig trim_left(s: String) -> String;
+frgn sig trim_right(s: String) -> String;
+frgn sig trim_start(s: String) -> String;
+frgn sig trim_end(s: String) -> String;
+frgn sig is_whitespace(s: String) -> Bool;
+frgn sig is_alpha(s: String) -> Bool;
+frgn sig is_alphanumeric(s: String) -> Bool;
+frgn sig is_numeric(s: String) -> Bool;
 
+# Search
 frgn sig contains(haystack: String, needle: String) -> Bool;
-
+frgn sig contains_at(haystack: String, needle: String, start: Int) -> Bool;
 frgn sig starts_with(s: String, prefix: String) -> Bool;
-
 frgn sig ends_with(s: String, suffix: String) -> Bool;
+frgn sig find(s: String, needle: String) -> Int;
+frgn sig find_from(s: String, needle: String, start: Int) -> Int;
+frgn sig rfind(s: String, needle: String) -> Int;
 
+# Extraction
+frgn sig char_at(s: String, index: Int) -> String;
+frgn sig substr(s: String, start: Int) -> String;
+frgn sig substr_range(s: String, start: Int, end: Int) -> String;
+frgn sig get_chars(s: String) -> List<String>;
+
+# Replacement
 frgn sig replace(s: String, old: String, new: String) -> String;
+frgn sig replace_all(s: String, old: String, new: String) -> String;
+frgn sig replace_at(s: String, index: Int, new: String) -> String;
 
-frgn sig split(s: String, delim: String) -> String;
+# Split & Join
+frgn sig split(s: String, delim: String) -> List<String>;
+frgn sig splitn(s: String, delim: String, n: Int) -> List<String>;
+frgn sig rsplit(s: String, delim: String) -> List<String>;
+frgn sig lines(s: String) -> List<String>;
+frgn sig words(s: String) -> List<String>;
+frgn sig join(list: List<String>, delim: String) -> String;
+
+# Padding & Alignment
+frgn sig pad_left(s: String, width: Int) -> String;
+frgn sig pad_right(s: String, width: Int) -> String;
+frgn sig pad_both(s: String, width: Int) -> String;
+frgn sig repeat(s: String, count: Int) -> String;
+
+# Truncation
+frgn sig truncate(s: String, max_len: Int) -> String;
+frgn sig truncate_with(s: String, max_len: Int, suffix: String) -> String;
+
+# Escaping
+frgn sig escape(s: String) -> String;
+frgn sig unescape(s: String) -> String;
+frgn sig quote(s: String) -> String;
+frgn sig unquote(s: String) -> String;
+
+# Comparison
+frgn sig eq_ignore_case(a: String, b: String) -> Bool;
+frgn sig cmp(s1: String, s2: String) -> Int;
+
+# Type Conversions
+frgn sig to_string(n: Int) -> String;
+frgn sig to_float(s: String) -> String;
+frgn sig to_int(s: String) -> Int;
+frgn sig to_bool(s: String) -> Bool;
+frgn sig parse_int(s: String) -> Int;
+frgn sig parse_float(s: String) -> Float;
+
+# Encoding
+frgn sig bytes(s: String) -> List<Int>;
+frgn sig from_bytes(list: List<Int>) -> String;
+frgn sig utf8_len(s: String) -> Int;

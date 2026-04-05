@@ -1,0 +1,55 @@
+# Standard Time Library
+# Foreign function declarations
+
+# Current Time
+frgn sig now() -> Int;           # Unix timestamp in seconds
+frgn sig now_millis() -> Int;    # Unix timestamp in milliseconds
+frgn sig now_micros() -> Int;    # Unix timestamp in microseconds
+
+# Time Components
+frgn sig year(timestamp: Int) -> Int;
+frgn sig month(timestamp: Int) -> Int;
+frgn sig day(timestamp: Int) -> Int;
+frgn sig hour(timestamp: Int) -> Int;
+frgn sig minute(timestamp: Int) -> Int;
+frgn sig second(timestamp: Int) -> Int;
+frgn sig weekday(timestamp: Int) -> Int;
+frgn sig yearday(timestamp: Int) -> Int;
+
+# Time Creation
+frgn sig timestamp(year: Int, month: Int, day: Int) -> Int;
+frgn sig timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int;
+
+# Duration
+frgn sig duration_seconds(secs: Int) -> Int;
+frgn sig duration_millis(ms: Int) -> Int;
+frgn sig duration_minutes(mins: Int) -> Int;
+frgn sig duration_hours(hours: Int) -> Int;
+frgn sig duration_days(days: Int) -> Int;
+
+# Time Arithmetic
+frgn sig add_seconds(timestamp: Int, secs: Int) -> Int;
+frgn sig add_minutes(timestamp: Int, mins: Int) -> Int;
+frgn sig add_hours(timestamp: Int, hours: Int) -> Int;
+frgn sig add_days(timestamp: Int, days: Int) -> Int;
+
+# Time Differences
+frgn sig diff_seconds(t1: Int, t2: Int) -> Int;
+frgn sig diff_days(t1: Int, t2: Int) -> Int;
+
+# Formatting
+frgn sig format_timestamp(timestamp: Int, format: String) -> String;
+frgn sig format_date(timestamp: Int) -> String;
+frgn sig format_time(timestamp: Int) -> String;
+frgn sig format_datetime(timestamp: Int) -> String;
+
+# Parsing
+frgn sig parse_timestamp(s: String) -> Int;
+frgn sig parse_datetime(s: String) -> Int;
+
+# Constants
+frgn sig seconds_per_minute() -> Int;
+frgn sig seconds_per_hour() -> Int;
+frgn sig seconds_per_day() -> Int;
+frgn sig millis_per_second() -> Int;
+frgn sig micros_per_second() -> Int;

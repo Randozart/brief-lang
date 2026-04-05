@@ -1,20 +1,70 @@
 # Standard Math Library
 # Foreign function declarations
 
+# Basic Math
 frgn sig abs(n: Int) -> Int;
+frgn sig abs_float(n: Float) -> Float;
 
+frgn sig min(a: Int, b: Int) -> Int;
+frgn sig max(a: Int, b: Int) -> Int;
+
+frgn sig min_float(a: Float, b: Float) -> Float;
+frgn sig max_float(a: Float, b: Float) -> Float;
+
+# Power & Roots
 frgn sig sqrt(n: Float) -> Float;
-
+frgn sig cbrt(n: Float) -> Float;
 frgn sig pow(base: Float, exp: Float) -> Float;
+frgn sig powi(base: Float, exp: Int) -> Float;
 
+# Trigonometry
 frgn sig sin(n: Float) -> Float;
-
 frgn sig cos(n: Float) -> Float;
+frgn sig tan(n: Float) -> Float;
 
+frgn sig asin(n: Float) -> Float;
+frgn sig acos(n: Float) -> Float;
+frgn sig atan(n: Float) -> Float;
+frgn sig atan2(y: Float, x: Float) -> Float;
+
+frgn sig sinh(n: Float) -> Float;
+frgn sig cosh(n: Float) -> Float;
+frgn sig tanh(n: Float) -> Float;
+
+# Exponents & Logs
+frgn sig exp(n: Float) -> Float;
+frgn sig exp2(n: Float) -> Float;
+frgn sig ln(n: Float) -> Float;
+frgn sig log(n: Float, base: Float) -> Float;
+frgn sig log2(n: Float) -> Float;
+frgn sig log10(n: Float) -> Float;
+
+# Rounding
 frgn sig floor(n: Float) -> Float;
-
 frgn sig ceil(n: Float) -> Float;
-
 frgn sig round(n: Float) -> Float;
+frgn sig trunc(n: Float) -> Float;
+frgn sig fract(n: Float) -> Float;
 
+# Integer Operations
+frgn sig div_rem(a: Int, b: Int) -> Int;
+frgn sig gcd(a: Int, b: Int) -> Int;
+frgn sig lcm(a: Int, b: Int) -> Int;
+
+# Comparisons
+frgn sig is_nan(n: Float) -> Bool;
+frgn sig is_infinite(n: Float) -> Bool;
+frgn sig is_finite(n: Float) -> Bool;
+frgn sig is_normal(n: Float) -> Bool;
+
+# Sign
+frgn sig signum(n: Int) -> Int;
+frgn sig signum_float(n: Float) -> Float;
+
+# Clamp
+frgn sig clamp(val: Int, min: Int, max: Int) -> Int;
+frgn sig clamp_float(val: Float, min: Float, max: Float) -> Float;
+
+# Random
 frgn sig random() -> Float;
+frgn sig random_int(min: Int, max: Int) -> Int;

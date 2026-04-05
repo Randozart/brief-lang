@@ -1,0 +1,58 @@
+# Standard List/Collection Library
+
+# Length
+frgn sig len<T>(list: List<T>) -> Int;
+
+# Append - returns new list (immutable)
+frgn sig append<T>(list: List<T>, item: T) -> List<T>;
+
+# Prepend
+frgn sig prepend<T>(item: T, list: List<T>) -> List<T>;
+
+# Concat - merge two lists
+frgn sig concat<T>(a: List<T>, b: List<T>) -> List<T>;
+
+# Get item at index
+frgn sig get<T>(list: List<T>, index: Int) -> T;
+
+# Set item at index (returns new list)
+frgn sig set<T>(list: List<T>, index: Int, item: T) -> List<T>;
+
+# Remove item at index
+frgn sig remove<T>(list: List<T>, index: Int) -> List<T>;
+
+# Slice - get sublist
+frgn sig slice<T>(list: List<T>, start: Int, end: Int) -> List<T>;
+
+# Contains
+frgn sig contains<T>(list: List<T>, item: T) -> Bool;
+
+# Find index of item
+frgn sig find<T>(list: List<T>, item: T) -> Int;
+
+# Filter - keep items matching predicate
+frgn sig filter<T>(list: List<T>, pred: T -> Bool) -> List<T>;
+
+# Map - transform each item
+frgn sig map<T, U>(list: List<T>, transform: T -> U) -> List<U>;
+
+# Reduce - fold over list
+frgn sig reduce<T, U>(list: List<T>, initial: U, reducer: (U, T) -> U) -> U;
+
+# Reverse
+frgn sig reverse<T>(list: List<T>) -> List<T>;
+
+# Unique - remove duplicates
+frgn sig unique<T>(list: List<T>) -> List<T>;
+
+# Sort
+frgn sig sort<T>(list: List<T>) -> List<T>;
+
+# Take first n items
+frgn sig take<T>(list: List<T>, n: Int) -> List<T>;
+
+# Drop first n items
+frgn sig drop<T>(list: List<T>, n: Int) -> List<T>;
+
+# Empty check
+frgn sig is_empty<T>(list: List<T>) -> Bool;

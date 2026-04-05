@@ -1,0 +1,49 @@
+# Standard JSON Library
+# Foreign function declarations
+
+# Parse & Serialize
+frgn sig parse(s: String) -> Data;
+frgn sig stringify(data: Data) -> String;
+frgn sig to_json(data: Data) -> String;
+frgn sig from_json(s: String) -> Data;
+
+# Type Check
+frgn sig is_null(data: Data) -> Bool;
+frgn sig is_bool(data: Data) -> Bool;
+frgn sig is_number(data: Data) -> Bool;
+frgn sig is_string(data: Data) -> Bool;
+frgn sig is_array(data: Data) -> Bool;
+frgn sig is_object(data: Data) -> Bool;
+
+# Get Values
+frgn sig get_bool(data: Data, key: String) -> Bool;
+frgn sig get_number(data: Data, key: String) -> Float;
+frgn sig get_string(data: Data, key: String) -> String;
+frgn sig get_array(data: Data, key: String) -> Data;
+frgn sig get_object(data: Data, key: String) -> Data;
+
+# Array Access
+frgn sig get_index(data: Data, index: Int) -> Data;
+frgn sig array_len(data: Data) -> Int;
+frgn sig array_push(data: Data, item: Data) -> Data;
+frgn sig array_pop(data: Data) -> Data;
+frgn sig array_shift(data: Data) -> Data;
+
+# Object Operations
+frgn sig keys(data: Data) -> List<String>;
+frgn sig values(data: Data) -> List<Data>;
+frgn sig has_key(data: Data, key: String) -> Bool;
+
+# Create Values
+frgn sig null() -> Data;
+frgn sig bool_val(b: Bool) -> Data;
+frgn sig number_val(n: Float) -> Data;
+frgn sig string_val(s: String) -> Data;
+frgn sig array_val(list: List<Data>) -> Data;
+frgn sig object_val(map: Data) -> Data;
+
+# Merge
+frgn sig merge(a: Data, b: Data) -> Data;
+
+# Pretty Print
+frgn sig pretty_print(data: Data) -> String;

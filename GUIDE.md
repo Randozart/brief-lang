@@ -14,9 +14,10 @@ A transactional, contract-enforced language compiler. Brief treats program execu
 8. [Structs & Components](#structs--components)
 9. [Expressions](#expressions)
 10. [Imports & Foreign](#imports--foreign)
-11. [Rendered Brief (.rbv)](#rendered-brief-rbv)
-12. [Examples](#examples)
-13. [FAQ](#faq)
+11. [Standard Library](#standard-library)
+12. [Rendered Brief (.rbv)](#rendered-brief-rbv)
+13. [Examples](#examples)
+14. [FAQ](#faq)
 
 ---
 
@@ -465,6 +466,123 @@ Declare functions implemented elsewhere:
 frgn sig log: (String) -> Void;
 frgn sig random: () -> Int;
 frgn sig http_get: (String) -> String;
+```
+
+---
+
+## Standard Library
+
+Brief includes a standard library with common operations. Import modules as needed:
+
+```brief
+import { abs, sqrt, sin, cos } from "math";
+import { len, trim, split } from "string";
+import { append, map, filter } from "collections";
+import { now, timestamp } from "time";
+import { parse, stringify } from "json";
+import { base64_encode, url_encode } from "encoding";
+```
+
+### std/math - Mathematics
+
+```brief
+abs(n: Int) -> Int           # Absolute value
+sqrt(n: Float) -> Float       # Square root
+pow(base: Float, exp: Float) -> Float  # Power
+sin, cos, tan(n: Float) -> Float  # Trigonometry
+asin, acos, atan(n: Float) -> Float  # Inverse trig
+floor, ceil, round(n: Float) -> Float  # Rounding
+random() -> Float            # 0.0 to 1.0
+random_int(min, max) -> Int   # Random integer
+min, max(a: Int, b: Int) -> Int
+log(n: Float, base: Float) -> Float
+exp(n: Float) -> Float
+```
+
+### std/string - String Operations
+
+```brief
+len(s: String) -> Int
+concat(a: String, b: String) -> String
+trim(s: String) -> String
+to_upper(s: String) -> String
+to_lower(s: String) -> String
+contains(haystack: String, needle: String) -> Bool
+starts_with(s: String, prefix: String) -> Bool
+ends_with(s: String, suffix: String) -> Bool
+find(s: String, needle: String) -> Int
+replace(s: String, old: String, new: String) -> String
+split(s: String, delim: String) -> List<String>
+to_string(n: Int) -> String
+to_int(s: String) -> Int
+```
+
+### std/collections - List/Collection Operations
+
+```brief
+len<T>(list: List<T>) -> Int
+append<T>(list: List<T>, item: T) -> List<T>
+prepend<T>(item: T, list: List<T>) -> List<T>
+concat<T>(a: List<T>, b: List<T>) -> List<T>
+get<T>(list: List<T>, index: Int) -> T
+set<T>(list: List<T>, index: Int, item: T) -> List<T>
+contains<T>(list: List<T>, item: T) -> Bool
+find<T>(list: List<T>, item: T) -> Int
+map<T, U>(list: List<T>, fn: T -> U) -> List<U>
+filter<T>(list: List<T>, pred: T -> Bool) -> List<T>
+reduce<T, U>(list: List<T>, init: U, fn: (U, T) -> U) -> U
+reverse<T>(list: List<T>) -> List<T>
+unique<T>(list: List<T>) -> List<T>
+sort<T>(list: List<T>) -> List<T>
+take<T>(list: List<T>, n: Int) -> List<T>
+drop<T>(list: List<T>, n: Int) -> List<T>
+```
+
+### std/time - Time/Date
+
+```brief
+now() -> Int              # Unix timestamp (seconds)
+now_millis() -> Int       # Unix timestamp (milliseconds)
+year(timestamp: Int) -> Int
+month(timestamp: Int) -> Int
+day(timestamp: Int) -> Int
+hour(timestamp: Int) -> Int
+minute(timestamp: Int) -> Int
+second(timestamp: Int) -> Int
+timestamp(y, m, d) -> Int
+add_days(timestamp: Int, days: Int) -> Int
+diff_days(t1: Int, t2: Int) -> Int
+format_timestamp(timestamp: Int, format: String) -> String
+```
+
+### std/json - JSON Processing
+
+```brief
+parse(s: String) -> Data
+stringify(data: Data) -> String
+is_null(data: Data) -> Bool
+is_string(data: Data) -> Bool
+is_number(data: Data) -> Bool
+is_array(data: Data) -> Bool
+get_string(data: Data, key: String) -> String
+get_index(data: Data, index: Int) -> Data
+array_len(data: Data) -> Int
+keys(data: Data) -> List<String>
+```
+
+### std/encoding - Encoding & Hashing
+
+```brief
+base64_encode(s: String) -> String
+base64_decode(s: String) -> String
+hex_encode(s: String) -> String
+hex_decode(s: String) -> String
+url_encode(s: String) -> String
+url_decode(s: String) -> String
+html_escape(s: String) -> String
+md5(s: String) -> String
+sha256(s: String) -> String
+uuid_v4() -> String
 ```
 
 ---

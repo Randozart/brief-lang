@@ -1,0 +1,45 @@
+# Standard Encoding Library
+# Foreign function declarations
+
+# Base64
+frgn sig base64_encode(data: String) -> String;
+frgn sig base64_decode(s: String) -> String;
+frgn sig base64_url_encode(data: String) -> String;
+frgn sig base64_url_decode(s: String) -> String;
+
+# Hex
+frgn sig hex_encode(data: String) -> String;
+frgn sig hex_decode(s: String) -> String;
+frgn sig hex_encode_bytes(list: List<Int>) -> String;
+frgn sig hex_decode_bytes(s: String) -> List<Int>;
+
+# URL Encoding
+frgn sig url_encode(s: String) -> String;
+frgn sig url_decode(s: String) -> String;
+frgn sig url_encode_component(s: String) -> String;
+frgn sig url_decode_component(s: String) -> String;
+
+# HTML Encoding
+frgn sig html_escape(s: String) -> String;
+frgn sig html_unescape(s: String) -> String;
+
+# Unicode
+frgn sig utf8_encode(s: String) -> List<Int>;
+frgn sig utf8_decode(list: List<Int>) -> String;
+frgn sig codepoint_to_char(code: Int) -> String;
+frgn sig char_to_codepoint(c: String) -> Int;
+
+# Hashing
+frgn sig md5(s: String) -> String;
+frgn sig sha1(s: String) -> String;
+frgn sig sha256(s: String) -> String;
+frgn sig sha512(s: String) -> String;
+
+# UUID
+frgn sig uuid_v4() -> String;
+frgn sig is_uuid(s: String) -> Bool;
+
+# URI Components
+frgn sig uri_parse(s: String) -> Data;
+frgn sig uri_build(data: Data) -> String;
+frgn sig uri_get_param(url: String, key: String) -> String;
