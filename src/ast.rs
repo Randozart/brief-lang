@@ -140,12 +140,56 @@ pub struct Signature {
     pub alias: Option<String>,
 }
 
+/// Multi-output type structure for Feature A
+/// Represents: Single | Union | Tuple | Mixed combinations
+#[derive(Debug, Clone)]
+pub enum OutputType {
+    /// Single type: -> Bool
+    Single(Type),
+
+    /// Union of types: -> Bool | Error | Timeout (caller must handle all)
+    Union(Vec<Type>),
+
+    /// Tuple of types: -> Bool, String, Int (all produced, caller binds all)
+    Tuple(Vec<Type>),
+}
+
+impl OutputType {
+    /// Get all types in this output structure (flattened)
+    pub fn all_types(&self) -> Vec<Type> {
+        match self {
+            OutputType::Single(ty) => vec![ty.clone()],
+            OutputType::Union(types) => types.clone(),
+            OutputType::Tuple(types) => types.clone(),
+        }
+    }
+
+    /// Check if this is a union type (multiple alternatives)
+    pub fn is_union(&self) -> bool {
+        matches!(self, OutputType::Union(_))
+    }
+
+    /// Check if this is a tuple type (all required)
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, OutputType::Tuple(_))
+    }
+
+    /// Get number of output slots
+    pub fn slot_count(&self) -> usize {
+        match self {
+            OutputType::Single(_) => 1,
+            OutputType::Union(_) | OutputType::Tuple(_) => self.all_types().len(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Definition {
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub parameters: Vec<(String, Type)>,
-    pub outputs: Vec<Type>,
+    pub outputs: Vec<Type>, // Kept for backward compat during transition
+    pub output_type: Option<OutputType>, // NEW: Feature A - multi-output support
     pub output_names: Vec<Option<String>>, // NEW: optional names for each output (parallel to outputs)
     pub contract: Contract,
     pub body: Vec<Statement>,

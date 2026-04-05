@@ -892,12 +892,29 @@ impl<'a> Parser<'a> {
 
         let contract = self.parse_contract()?;
 
-        let (outputs, output_names) = if let Some(Ok(Token::Arrow)) = self.current_token() {
-            self.advance();
-            self.parse_output_types_with_names(&parameters)?
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        let (outputs, output_names, output_type) =
+            if let Some(Ok(Token::Arrow)) = self.current_token() {
+                self.advance();
+                let (outputs, output_names) = self.parse_output_types_with_names(&parameters)?;
+
+                // Detect if this is a union or tuple
+                let output_type = if outputs.is_empty() {
+                    None
+                } else if outputs.len() == 1 {
+                    // Single output - no special OutputType needed
+                    None
+                } else {
+                    // Multiple outputs - need to determine if union or tuple
+                    // For now: If we encounter pipes, it's a union; if only commas, it's a tuple
+                    // This is a simplified detection - ideally we'd track separators during parsing
+                    // For now we'll use a heuristic: assume tuple (comma-separated is most common)
+                    Some(crate::ast::OutputType::Tuple(outputs.clone()))
+                };
+
+                (outputs, output_names, output_type)
+            } else {
+                (Vec::new(), Vec::new(), None)
+            };
 
         self.expect(Token::LBrace)?;
         let body = self.parse_body()?;
@@ -909,6 +926,7 @@ impl<'a> Parser<'a> {
             type_params,
             parameters,
             outputs,
+            output_type,  // Feature A: multi-output support
             output_names, // NEW
             contract,
             body,
@@ -972,15 +990,75 @@ impl<'a> Parser<'a> {
             outputs.push(self.parse_type()?);
             names.push(name);
 
-            // Check for comma (more outputs)
-            if let Some(Ok(Token::Comma)) = self.current_token() {
-                self.advance();
-            } else {
-                break;
+            // Check for comma (tuple separator) or pipe (union)
+            match self.current_token() {
+                Some(Ok(Token::Comma)) => {
+                    self.advance();
+                }
+                Some(Ok(Token::Pipe)) => {
+                    // Union detected - continue parsing union members
+                    self.advance();
+                }
+                _ => {
+                    break;
+                }
             }
         }
 
         Ok((outputs, names))
+    }
+
+    /// Detect and parse output type structure: Single | Union | Tuple
+    /// Returns OutputType for Feature A multi-output support
+    /// Syntax:
+    ///   -> Bool                    (Single)
+    ///   -> Bool | Error            (Union)
+    ///   -> Bool, String            (Tuple)
+    ///   -> Bool | Error, String    (Mixed: Union then Tuple element)
+    fn parse_output_type_structure(&mut self) -> Result<Option<OutputType>, String> {
+        use crate::ast::OutputType;
+
+        let mut all_types = Vec::new();
+        let mut has_pipe = false;
+        let mut has_comma = false;
+
+        // Parse first type
+        all_types.push(self.parse_type()?);
+
+        // Look for pipes (union) or commas (tuple)
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::Pipe)) => {
+                    has_pipe = true;
+                    self.advance();
+                    all_types.push(self.parse_type()?);
+                }
+                Some(Ok(Token::Comma)) => {
+                    has_comma = true;
+                    self.advance();
+                    all_types.push(self.parse_type()?);
+                }
+                _ => break,
+            }
+        }
+
+        // Determine structure based on what we found
+        if all_types.len() == 1 {
+            // Single output - no special structure needed
+            Ok(None)
+        } else if has_pipe && !has_comma {
+            // Pure union: A | B | C
+            Ok(Some(OutputType::Union(all_types)))
+        } else if has_comma && !has_pipe {
+            // Pure tuple: A, B, C
+            Ok(Some(OutputType::Tuple(all_types)))
+        } else if has_pipe && has_comma {
+            // Mixed: Handle as tuple, but first element is union
+            // For now, simplify to tuple (future: could model as tuple of unions)
+            Ok(Some(OutputType::Tuple(all_types)))
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_result_type(&mut self) -> Result<ResultType, String> {
