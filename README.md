@@ -8,7 +8,7 @@ A language for building state machines that are guaranteed to work correctly. Th
 
 ## What This Is
 
-Brief is an early-stage language. It works, but it's not finished. We're building something ambitious: a practical way to write systems where you can prove the state machine is correct.
+Brief is an early-stage language. It works, but it's not finished. The goal: let you write state machines and have the compiler verify they're correct.
 
 The idea is simple: state management bugs are the source of most application failures. We want to catch those bugs at compile time instead of in production.
 
@@ -159,11 +159,9 @@ Brief can compile to WebAssembly for reactive web components. This is still bein
 | Standard Library | 59 functions available |
 | Rendered Brief (UI) | In progress |
 
-## What We're Trying to Do
+## Next Steps
 
-Make it practical to write systems where you can actually prove the state machine is correct. Not academic research, but real tools for real systems.
-
-The longer-term goal is to extend this to distributed systems, async operations, and more complex verification. But for now, we're focusing on getting the foundations solid.
+Right now: get the foundations solid. Later: distributed systems, async operations, more complex verification.
 
 ## Contributing
 
