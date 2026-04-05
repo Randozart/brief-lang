@@ -261,6 +261,9 @@ impl LspServer {
             } => {
                 format!("invalid operation '{}' on type {}", operation, type_name)
             }
+            TypeError::FFIError { message, .. } => {
+                format!("FFI error: {}", message)
+            }
         };
 
         serde_json::json!({

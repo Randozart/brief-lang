@@ -1,6 +1,8 @@
 use crate::ast::*;
 use crate::errors::{Diagnostic, Severity, Span};
+use crate::ffi;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub use crate::errors::TypeError;
 
@@ -91,9 +93,13 @@ impl TypeChecker {
                 }
                 TopLevel::Import(_) => {}
                 TopLevel::ForeignSig(_) => {}
-                TopLevel::ForeignBinding { .. } => {
-                    // FFI validation will be done in Phase 4
-                    // For now, just skip
+                TopLevel::ForeignBinding {
+                    name,
+                    toml_path,
+                    signature,
+                    ..
+                } => {
+                    self.check_frgn_binding(name, toml_path, signature);
                 }
                 TopLevel::Struct(_) => {}
                 TopLevel::RStruct(_) => {}
@@ -189,6 +195,150 @@ impl TypeChecker {
         }
 
         self.pop_scope();
+    }
+
+    fn check_frgn_binding(&mut self, name: &str, toml_path: &str, signature: &ForeignSignature) {
+        // Resolve the TOML path using the FFI resolver
+        let resolved_path = match ffi::resolver::resolve_binding_path(toml_path, &None) {
+            Ok(path) => path,
+            Err(err) => {
+                let diag = Diagnostic::new(
+                    "F001",
+                    Severity::Error,
+                    "FFI binding path resolution failed",
+                )
+                .with_explanation(&format!(
+                    "Failed to resolve binding path '{}': {}",
+                    toml_path, err
+                ))
+                .with_hint("Ensure the path is correct and the file exists");
+                self.diagnostics.push(diag);
+                self.errors.push(TypeError::FFIError {
+                    message: format!("Path resolution failed for '{}': {}", name, err),
+                });
+                return;
+            }
+        };
+
+        // Load the TOML binding file
+        let bindings = match ffi::loader::load_binding(&resolved_path) {
+            Ok(bindings) => bindings,
+            Err(err) => {
+                let diag = Diagnostic::new("F002", Severity::Error, "FFI binding file load failed")
+                    .with_explanation(&format!(
+                        "Failed to load binding file '{}': {}",
+                        toml_path, err
+                    ))
+                    .with_hint("Ensure the TOML file is valid");
+                self.diagnostics.push(diag);
+                self.errors.push(TypeError::FFIError {
+                    message: format!("Failed to load binding file for '{}': {}", name, err),
+                });
+                return;
+            }
+        };
+
+        // Find the matching binding for this frgn
+        let matching_binding = bindings.iter().find(|b| b.name == name);
+
+        let binding = match matching_binding {
+            Some(b) => b,
+            None => {
+                let diag = Diagnostic::new("F003", Severity::Error, "FFI binding not found")
+                    .with_explanation(&format!(
+                        "No binding found for '{}' in '{}'",
+                        name, toml_path
+                    ))
+                    .with_hint(&format!(
+                        "Available bindings in '{}': {}",
+                        toml_path,
+                        bindings
+                            .iter()
+                            .map(|b| format!("'{}'", b.name))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                self.diagnostics.push(diag);
+                self.errors.push(TypeError::FFIError {
+                    message: format!("Binding '{}' not found in '{}'", name, toml_path),
+                });
+                return;
+            }
+        };
+
+        // Create a mutable copy of the signature to populate error_fields from the binding
+        let mut sig = signature.clone();
+        sig.error_fields = binding.error_fields.clone();
+
+        // Validate the frgn signature against the TOML binding
+        if let Err(err) = ffi::validator::validate_frgn_against_binding(&sig, binding) {
+            let diag = Diagnostic::new("F004", Severity::Error, "FFI binding validation failed")
+                .with_explanation(&format!(
+                    "The frgn declaration for '{}' does not match its TOML binding: {}",
+                    name, err
+                ))
+                .with_hint("Ensure the frgn signature matches the binding definition");
+            self.diagnostics.push(diag);
+            self.errors.push(TypeError::FFIError {
+                message: format!("Binding validation failed for '{}': {}", name, err),
+            });
+            return;
+        }
+
+        // Validate that all FFI types are supported
+        for (_, ty) in &sig.inputs {
+            if !ffi::validator::is_valid_ffi_type(ty) {
+                let diag = Diagnostic::new("F005", Severity::Error, "Invalid FFI type")
+                    .with_explanation(&format!(
+                        "Input parameter in '{}' uses unsupported type: {:?}",
+                        name, ty
+                    ))
+                    .with_hint(
+                        "FFI supports: String, Int, Float, Bool, Void, Data, and custom structs",
+                    );
+                self.diagnostics.push(diag);
+                self.errors.push(TypeError::FFIError {
+                    message: format!("Invalid FFI type in input for '{}'", name),
+                });
+                return;
+            }
+        }
+
+        for (_, ty) in &sig.success_output {
+            if !ffi::validator::is_valid_ffi_type(ty) {
+                let diag = Diagnostic::new("F005", Severity::Error, "Invalid FFI type")
+                    .with_explanation(&format!(
+                        "Output parameter in '{}' uses unsupported type: {:?}",
+                        name, ty
+                    ))
+                    .with_hint(
+                        "FFI supports: String, Int, Float, Bool, Void, Data, and custom structs",
+                    );
+                self.diagnostics.push(diag);
+                self.errors.push(TypeError::FFIError {
+                    message: format!("Invalid FFI type in output for '{}'", name),
+                });
+                return;
+            }
+        }
+
+        for (_, ty) in &sig.error_fields {
+            if !ffi::validator::is_valid_ffi_type(ty) {
+                let diag = Diagnostic::new("F005", Severity::Error, "Invalid FFI type")
+                    .with_explanation(&format!(
+                        "Error field in '{}' uses unsupported type: {:?}",
+                        name, ty
+                    ))
+                    .with_hint(
+                        "FFI supports: String, Int, Float, Bool, Void, Data, and custom structs",
+                    );
+                self.diagnostics.push(diag);
+                self.errors.push(TypeError::FFIError {
+                    message: format!("Invalid FFI type in error for '{}'", name),
+                });
+                return;
+            }
+        }
     }
 
     fn check_statement(&mut self, stmt: &Statement, is_async: Option<&bool>) {

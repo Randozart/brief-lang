@@ -296,6 +296,9 @@ pub enum TypeError {
         operation: String,
         type_name: String,
     },
+    FFIError {
+        message: String,
+    },
 }
 
 impl fmt::Display for TypeError {
@@ -328,6 +331,9 @@ impl fmt::Display for TypeError {
                 ..
             } => {
                 write!(f, "invalid operation '{}' on type {}", operation, type_name)
+            }
+            TypeError::FFIError { message, .. } => {
+                write!(f, "FFI error: {}", message)
             }
         }
     }
