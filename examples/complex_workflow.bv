@@ -1,0 +1,64 @@
+let order_id: Int = 0;
+let order_status: Int = 0;
+let payment_processed: Bool = false;
+let inventory_reserved: Bool = false;
+let shipment_ready: Bool = false;
+let delivery_complete: Bool = false;
+let total_orders: Int = 0;
+
+defn validate_order(id: Int) [id > 0][true] -> Bool {
+  term true;
+};
+
+txn create_order [order_id == 0]
+  [order_id > 0 && order_status == 0]
+{
+  &order_id = 1;
+  &order_status = 0;
+  term;
+};
+
+rct txn process_payment [order_id > 0 && payment_processed == false]
+  [payment_processed == true]
+{
+  &payment_processed = true;
+  &order_status = 1;
+  term;
+};
+
+rct txn reserve_inventory [payment_processed == true && inventory_reserved == false]
+  [inventory_reserved == true]
+{
+  &inventory_reserved = true;
+  &order_status = 2;
+  term;
+};
+
+rct txn prepare_shipment [inventory_reserved == true && shipment_ready == false]
+  [shipment_ready == true]
+{
+  &shipment_ready = true;
+  &order_status = 3;
+  term;
+};
+
+rct txn deliver_order [shipment_ready == true && delivery_complete == false]
+  [delivery_complete == true && total_orders == @total_orders + 1]
+{
+  &delivery_complete = true;
+  &total_orders = total_orders + 1;
+  &order_status = 4;
+  term;
+};
+
+rct txn reset_for_next_order [delivery_complete == true]
+  [order_id == 0 && payment_processed == false && inventory_reserved == false && shipment_ready == false && delivery_complete == false]
+{
+  &order_id = 0;
+  &order_status = 0;
+  &payment_processed = false;
+  &inventory_reserved = false;
+  &shipment_ready = false;
+  &delivery_complete = false;
+  term;
+};

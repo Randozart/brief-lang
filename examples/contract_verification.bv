@@ -1,0 +1,35 @@
+let balance: Int = 100;
+let min_balance: Int = 10;
+let fund_available: Bool = false;
+
+defn sufficient_funds(amount: Int) [amount > 0][true] -> Bool {
+  term true;
+};
+
+txn withdraw [balance > min_balance]
+  [balance == @balance - 50]
+{
+  &balance = balance - 50;
+  term;
+};
+
+txn deposit [true]
+  [balance == @balance + 25]
+{
+  &balance = balance + 25;
+  term;
+};
+
+rct txn emergency_refill [balance < 20]
+  [balance == 100]
+{
+  &balance = 100;
+  term;
+};
+
+rct txn check_funds [balance > 0]
+  [fund_available == true]
+{
+  &fund_available = true;
+  term;
+};

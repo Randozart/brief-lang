@@ -1,0 +1,14 @@
+let user_id: Int = 1;
+let fetch_status: Bool = false;
+
+sig fetch_user: Int -> Bool | Int;
+
+txn load_user [fetch_status == false]
+  [fetch_status == true]
+{
+  let result = fetch_user(user_id);
+  
+  Bool(b) = result;
+  [b == true] &fetch_status = true;
+  term;
+};

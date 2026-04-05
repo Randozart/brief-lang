@@ -1,0 +1,22 @@
+let count: Int = 0;
+let message: String = "start";
+let done: Bool = false;
+
+defn process_step -> Int, String, Bool {
+  term 1, "processed", true;
+};
+
+txn run_process [done == false]
+  [done == true]
+{
+  let a: Int;
+  let b: String;
+  let c: Bool;
+  
+  let results = process_step();
+  
+  &count = a;
+  &message = b;
+  &done = c;
+  term;
+};

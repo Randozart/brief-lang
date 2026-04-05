@@ -1,0 +1,31 @@
+let resource_state: Int = 0;
+let reader_count: Int = 0;
+let writer_active: Bool = false;
+
+rct async txn reader_access [resource_state == 0 && writer_active == false]
+  [reader_count == @reader_count + 1 && writer_active == false]
+{
+  &reader_count = reader_count + 1;
+  term;
+};
+
+rct async txn writer_access [resource_state == 1 && reader_count == 0]
+  [writer_active == true && reader_count == @reader_count]
+{
+  &writer_active = true;
+  term;
+};
+
+rct txn reset_reader [reader_count > 0 && writer_active == false]
+  [reader_count == 0 && writer_active == @writer_active]
+{
+  &reader_count = 0;
+  term;
+};
+
+rct txn reset_writer [writer_active == true]
+  [writer_active == false && reader_count == @reader_count]
+{
+  &writer_active = false;
+  term;
+};

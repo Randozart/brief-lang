@@ -1,0 +1,56 @@
+let alice_balance: Int = 1000;
+let bob_balance: Int = 500;
+let charlie_balance: Int = 750;
+let transfer_in_progress: Bool = false;
+let total_transfers: Int = 0;
+let failed_transfers: Int = 0;
+
+txn transfer_alice_to_bob [transfer_in_progress == false && alice_balance >= 10]
+  [alice_balance == @alice_balance - 10 && bob_balance == @bob_balance + 10 && transfer_in_progress == false]
+{
+  &transfer_in_progress = true;
+  &alice_balance = alice_balance - 10;
+  &bob_balance = bob_balance + 10;
+  &total_transfers = total_transfers + 1;
+  &transfer_in_progress = false;
+  term;
+};
+
+txn transfer_bob_to_charlie [transfer_in_progress == false && bob_balance >= 5]
+  [bob_balance == @bob_balance - 5 && charlie_balance == @charlie_balance + 5 && transfer_in_progress == false]
+{
+  &transfer_in_progress = true;
+  &bob_balance = bob_balance - 5;
+  &charlie_balance = charlie_balance + 5;
+  &total_transfers = total_transfers + 1;
+  &transfer_in_progress = false;
+  term;
+};
+
+txn transfer_charlie_to_alice [transfer_in_progress == false && charlie_balance >= 20]
+  [charlie_balance == @charlie_balance - 20 && alice_balance == @alice_balance + 20 && transfer_in_progress == false]
+{
+  &transfer_in_progress = true;
+  &charlie_balance = charlie_balance - 20;
+  &alice_balance = alice_balance + 20;
+  &total_transfers = total_transfers + 1;
+  &transfer_in_progress = false;
+  term;
+};
+
+txn transfer_large_amount [transfer_in_progress == false && alice_balance >= 100]
+  [alice_balance == @alice_balance - 100 && bob_balance == @bob_balance + 100 && transfer_in_progress == false]
+{
+  &transfer_in_progress = true;
+  &alice_balance = alice_balance - 100;
+  &bob_balance = bob_balance + 100;
+  &total_transfers = total_transfers + 1;
+  &transfer_in_progress = false;
+  term;
+};
+
+txn audit_balances [transfer_in_progress == false]
+  [transfer_in_progress == false]
+{
+  term;
+};

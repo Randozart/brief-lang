@@ -1,0 +1,17 @@
+let counter: Int = 0;
+let max_count: Int = 10;
+let done: Bool = false;
+
+rct txn increment [counter < max_count && done == false]
+  [counter == @counter + 1 && done == false]
+{
+  &counter = counter + 1;
+  term;
+};
+
+rct txn mark_done [counter >= max_count && done == false]
+  [done == true && counter == @counter]
+{
+  &done = true;
+  term;
+};

@@ -1,0 +1,8 @@
+let counter: Int = 0;
+
+rct txn increment [counter < 10]
+  [counter == @counter + 1]
+{
+  &counter = counter + 1;
+  term;
+};

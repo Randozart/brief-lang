@@ -1,0 +1,15 @@
+sig print_func: String -> true;
+
+defn my_printer(msg: String) [true][true] -> Bool {
+  term true;
+};
+
+defn apply_function(msg: String, func: sig_print_func) [true][true] -> Bool {
+  term func(msg);
+};
+
+txn test_higher_order [true][true]
+{
+  let result = apply_function("hello", my_printer);
+  term;
+};
