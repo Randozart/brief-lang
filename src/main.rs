@@ -859,12 +859,36 @@ wasm-opt = false
     if build_wasm {
         println!("\n  Building WASM with wasm-pack...");
         let output_dir = output_path.join("pkg");
-        let wasm_already_exists = output_dir.join("counter_bg.wasm").exists()
-            || output_dir.join(format!("{}_bg.wasm", stem)).exists();
 
-        if wasm_already_exists {
-            println!("  WASM already built from previous run");
+        // Check if WASM needs rebuild by comparing source timestamps
+        let src_file = src_dir.join(format!("{}.rs", stem));
+        let wasm_bin = output_dir.join(format!("{}_bg.wasm", stem));
+
+        let needs_rebuild = !wasm_bin.exists() || {
+            // Check if source is newer than WASM binary
+            if let (Ok(src_meta), Ok(wasm_meta)) =
+                (fs::metadata(&src_file), fs::metadata(&wasm_bin))
+            {
+                if let (Ok(src_modified), Ok(wasm_modified)) =
+                    (src_meta.modified(), wasm_meta.modified())
+                {
+                    src_modified > wasm_modified
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        };
+
+        if !needs_rebuild {
+            println!("  WASM already built and source unchanged");
         } else {
+            // Remove old pkg directory to force clean rebuild
+            if output_dir.exists() {
+                fs::remove_dir_all(&output_dir)?;
+            }
+
             let wasm_pack_path = if let Ok(home) = std::env::var("HOME") {
                 format!("{}/.cargo/bin/wasm-pack", home)
             } else {
