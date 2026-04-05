@@ -6,6 +6,7 @@ use logos::{Lexer, Logos};
 pub struct Parser<'a> {
     lexer: Lexer<'a, Token>,
     source: &'a str,
+    pos: usize,
     current: Option<(Result<Token, ()>, logos::Span)>,
     peek: Option<(Result<Token, ()>, logos::Span)>,
     comments: Vec<Comment>,
@@ -20,6 +21,7 @@ impl<'a> Parser<'a> {
         Parser {
             lexer,
             source: input,
+            pos: 0,
             current,
             peek,
             comments: Vec::new(),
@@ -185,6 +187,10 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Struct)) => {
                 let struct_def = self.parse_struct()?;
                 Ok(TopLevel::Struct(struct_def))
+            }
+            Some(Ok(Token::Rstruct)) => {
+                let rstruct_def = self.parse_rstruct()?;
+                Ok(TopLevel::RStruct(rstruct_def))
             }
             Some(Ok(Token::Render)) => {
                 let render_block = self.parse_render_block()?;
@@ -384,6 +390,151 @@ impl<'a> Parser<'a> {
             view_html: None,
             span,
         })
+    }
+
+    fn parse_rstruct(&mut self) -> Result<RStructDefinition, String> {
+        self.expect(Token::Rstruct)?;
+        let name = self.expect_identifier()?;
+
+        self.expect(Token::LBrace)?;
+
+        let mut fields = Vec::new();
+        let mut transactions = Vec::new();
+        let mut view_html = String::new();
+
+        let mut iterations = 0;
+        const MAX_ITERATIONS: usize = 10000;
+
+        while let Some(token) = self.current_token() {
+            iterations += 1;
+            if iterations > MAX_ITERATIONS {
+                return Err(
+                    "rstruct parsing exceeded iteration limit - possible infinite loop".to_string(),
+                );
+            }
+
+            match token {
+                Ok(Token::RBrace) => {
+                    self.advance();
+                    break;
+                }
+                Ok(Token::Identifier(_)) => {
+                    if let Some(Ok(Token::Colon)) = self.peek() {
+                        let field_name = self.expect_identifier()?;
+                        self.expect(Token::Colon)?;
+                        let field_type = self.parse_type()?;
+                        self.expect(Token::Semicolon)?;
+                        fields.push(StructField {
+                            name: field_name,
+                            ty: field_type,
+                        });
+                    } else {
+                        let txn = self.parse_transaction()?;
+                        transactions.push(txn);
+                    }
+                }
+                Ok(Token::Txn) | Ok(Token::Rct) | Ok(Token::Async) => {
+                    let txn = self.parse_transaction()?;
+                    transactions.push(txn);
+                }
+                Ok(Token::Lt) => {
+                    let start = if let Some((_, span)) = &self.current {
+                        span.start
+                    } else {
+                        return Err("Unexpected EOF in rstruct".to_string());
+                    };
+                    let (html, end_pos) = self.scan_html_block(start)?;
+                    view_html.push_str(&html);
+                    self.advance_past_position(end_pos);
+                    self.advance();
+                }
+                Ok(Token::Comment(_)) => {
+                    self.advance();
+                }
+                _ => {
+                    return Err(format!("Unexpected token in rstruct: {:?}", token));
+                }
+            }
+        }
+
+        let span = self.current_span();
+
+        if view_html.is_empty() {
+            return Err(
+                "rstruct requires a view body (HTML). Add <div>...</div> inside the rstruct."
+                    .to_string(),
+            );
+        }
+
+        Ok(RStructDefinition {
+            name,
+            fields,
+            transactions,
+            view_html,
+            span,
+        })
+    }
+
+    fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
+        let mut pos = start;
+
+        while pos < self.source.len() && self.source.chars().nth(pos) != Some('>') {
+            pos += 1;
+        }
+
+        if pos >= self.source.len() {
+            return Err("Unclosed HTML tag in rstruct (no closing >)".to_string());
+        }
+
+        pos += 1;
+
+        let tag_content = &self.source[start..pos];
+
+        let mut tag_name = String::new();
+        let after_lt = if tag_content.starts_with("<") {
+            &tag_content[1..]
+        } else {
+            tag_content
+        };
+        if !after_lt.starts_with('/') && !after_lt.starts_with('!') {
+            for c in after_lt.chars() {
+                if c.is_alphanumeric() || c == '-' {
+                    tag_name.push(c);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if tag_name.is_empty() {
+            return Err("Could not parse HTML tag in rstruct (no tag name)".to_string());
+        }
+
+        let close_tag = format!("</{}>", tag_name);
+
+        let end_pos;
+        while pos < self.source.len() {
+            if self.source[pos..].starts_with(&close_tag) {
+                pos += close_tag.len();
+                end_pos = pos;
+                return Ok((self.source[start..pos].to_string(), end_pos));
+            }
+            pos += 1;
+        }
+
+        Err(format!(
+            "Unclosed HTML tag in rstruct (missing </{}>)",
+            tag_name
+        ))
+    }
+
+    fn advance_past_position(&mut self, target_pos: usize) {
+        while let Some((_, span)) = &self.current {
+            if span.end >= target_pos {
+                break;
+            }
+            self.advance();
+        }
     }
 
     fn parse_render_block(&mut self) -> Result<RenderBlock, String> {

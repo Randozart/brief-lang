@@ -1,24 +1,22 @@
 <script type="brief">
-struct Counter {
+rstruct Counter {
   count: Int;
-}
 
-txn Counter.increment [true][@count + 1 == count] {
-  &count = count + 1;
-  term;
-};
+  txn Counter.increment [true][@count + 1 == count] {
+    &count = count + 1;
+    term;
+  };
 
-txn Counter.decrement [count > 0][@count - 1 == count] {
-  &count = count - 1;
-  term;
-};
+  txn Counter.decrement [count > 0][@count - 1 == count] {
+    &count = count - 1;
+    term;
+  };
 
-txn Counter.reset [true][0 == count] {
-  &count = 0;
-  term;
-};
+  txn Counter.reset [true][0 == count] {
+    &count = 0;
+    term;
+  };
 
-render Counter {
   <div class="counter">
     <span b-text="count">0</span>
     <button b-trigger:click="increment">+</button>
