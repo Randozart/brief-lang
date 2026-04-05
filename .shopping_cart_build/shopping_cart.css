@@ -1,0 +1,26 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto; background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; padding: 20px; }
+.app { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 30px 80px rgba(0,0,0,0.25); overflow: hidden; display: block; }
+.header { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 24px 32px; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { margin: 0; font-size: 2em; }
+.badge { background: rgba(255,255,255,0.2); padding: 10px 20px; border-radius: 20px; font-weight: 600; display: inline-block; }
+.shop { padding: 32px; display: grid; grid-template-columns: 2fr 1fr; gap: 32px; }
+.left, .right { display: block; }
+h2 { color: #333; margin-bottom: 20px; }
+.product { background: #f9fafb; padding: 20px; border-radius: 12px; text-align: center; display: block; border: 2px solid #e5e7eb; margin-bottom: 12px; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.product h3 { color: #1f2937; margin-bottom: 8px; }
+.product p { color: #6b7280; font-size: 14px; }
+.buttons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.buttons button { padding: 10px; background: white; border: 2px solid #667eea; color: #667eea; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.buttons button:hover { background: #f0f4ff; }
+button { padding: 10px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; width: 100%; margin-top: 12px; }
+button:hover { background: #764ba2; }
+input { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #d1d5db; border-radius: 6px; font-family: inherit; }
+input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+p { color: #666; margin-bottom: 12px; }
+.confirmed { display: block; padding: 60px 32px; text-align: center; }
+.confirmed h2 { color: #333; font-size: 2em; }
+.confirmed button { width: auto; }
+[b-show="false"] { display: none !important; }
+@media (max-width: 900px) { .shop { grid-template-columns: 1fr; } }

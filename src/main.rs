@@ -897,21 +897,27 @@ wasm-opt = false
 }
 
 fn generate_html(name: &str, view_html: &str) -> String {
+    // Use timestamp for cache-busting
+    let cache_buster = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
     format!(
         r#"<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>{}</title>
-    <link rel="stylesheet" href="{}.css">
+    <link rel="stylesheet" href="{}.css?v={}">
 </head>
 <body>
 {}
-    <script type="module" src="{}_glue.js"></script>
+     <script type="module" src="{}_glue.js?v={}"></script>
 </body>
 </html>
 "#,
-        name, name, view_html, name
+        name, name, cache_buster, view_html, name, cache_buster
     )
 }
 

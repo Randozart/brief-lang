@@ -335,6 +335,9 @@ impl WasmGenerator {
     }
 
     fn generate_transaction(&self, output: &mut String, txn: &crate::ast::Transaction) {
+        // Add wasm_bindgen attribute to export to JavaScript
+        output.push_str("    #[wasm_bindgen]\n");
+
         let method_name = format!(
             "    pub fn invoke_{}(&mut self) {{\n",
             txn.name.replace(".", "_")
@@ -379,6 +382,7 @@ impl WasmGenerator {
 
         if txn.name.contains('.') {
             let short_name = txn.name.split('.').last().unwrap_or(&txn.name);
+            output.push_str("    #[wasm_bindgen]\n");
             let alias = format!("    pub fn invoke_{}(&mut self) {{\n", short_name);
             output.push_str(&alias);
             output.push_str(&format!(

@@ -1,0 +1,1 @@
+/home/randozart/Desktop/Projects/brief-compiler/.shopping_cart_build/target/wasm32-unknown-unknown/release/shopping_cart.wasm: /home/randozart/Desktop/Projects/brief-compiler/.shopping_cart_build/src/lib.rs /home/randozart/Desktop/Projects/brief-compiler/.shopping_cart_build/src/shopping_cart.rs

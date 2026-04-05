@@ -1,0 +1,365 @@
+================================================================================
+BRIEF COMPILER - THREE CRITICAL PARSER BUGS - TECHNICAL ANALYSIS COMPLETE
+================================================================================
+
+ANALYSIS GENERATED: April 5, 2026
+PROJECT: brief-compiler
+STATUS: Comprehensive technical documentation created
+
+================================================================================
+DOCUMENTATION FILES CREATED
+================================================================================
+
+1. CRITICAL_PARSER_BUGS_ANALYSIS.md (PRIMARY - Comprehensive Technical Document)
+   - 600+ lines of detailed technical analysis
+   - Complete root cause explanations
+   - Full code examples showing failures
+   - Detailed fix implementations with code
+   - Edge cases and dependencies for each bug
+   - Testing recommendations with test cases
+
+2. BUGS_QUICK_REFERENCE.md (EXECUTIVE SUMMARY)
+   - Quick diagnosis guide for each bug
+   - Symptom-to-root-cause mapping
+   - Fix checklist for each bug
+   - Severity and impact assessment
+   - Before/after examples
+   - File locations and modification points
+
+3. BUG_FLOWCHARTS.md (VISUAL WALKTHROUGH)
+   - Algorithm comparison: broken vs fixed
+   - Step-by-step execution traces
+   - UTF-8 boundary detection explained
+   - Data flow diagrams
+   - Complexity assessment for each fix
+   - Implementation priority matrix
+
+================================================================================
+BUG SUMMARY
+================================================================================
+
+BUG #1: NESTED BLOCK ELEMENTS (src/parser.rs:636-687)
+  Severity: HIGH
+  Symptom: "Unexpected token in rstruct: Ok(LtSlash)"
+  Root Cause: scan_html_block() finds FIRST </div> without depth tracking
+  Impact: Blocks all nested HTML structures (most real-world UIs)
+  Fix Time: 1-2 hours
+  Complexity: Medium (requires depth counter + tag pattern matching)
+  
+  Example failure:
+    <div>
+      <div>child</div>    ← Parser stops at first </div>
+    </div>               ← ERROR: unparsed closing tag
+
+---
+
+BUG #2: UNICODE EMOJI (src/parser.rs:639, 675, 680)
+  Severity: MEDIUM
+  Symptom: Panic - "byte index X is not a char boundary; it is inside 'emoji'"
+  Root Cause: Mixed byte and character indexing; assumes 1 char = 1 byte
+  Impact: Emoji/Unicode in comments causes parser to panic
+  Fix Time: 30 minutes
+  Complexity: Low (UTF-8 aware iteration)
+  
+  Example failure:
+    # Shopping Cart 🛍️
+    rstruct App { ... }
+    → panic at byte boundary in emoji (4 bytes, not 1)
+
+---
+
+BUG #3: WASM METHOD NAMES (src/wasm_gen.rs:337-390, 779)
+  Severity: CRITICAL
+  Symptom: Runtime error - "wasm.invoke_increment is not a function"
+  Root Cause: Method name transformation mismatch between Rust and JavaScript
+  Impact: Click handlers fail at runtime; blocks ALL interactive apps
+  Fix Time: 15 minutes
+  Complexity: Very Low (string mapping)
+  
+  Example failure:
+    txn Counter.increment
+    → Rust generates: invoke_Counter_increment
+    → JS tries to call: invoke_increment ← DOESN'T EXIST!
+
+================================================================================
+DETAILED ANALYSIS FOR EACH BUG
+================================================================================
+
+BUG #1: NESTED BLOCK ELEMENTS BUG
+────────────────────────────────
+
+Current Implementation (BROKEN):
+  Line 674-681: Simple linear search for closing tag
+  
+  while pos < self.source.len() {
+    if self.source[pos..].starts_with(&close_tag) {
+      // Returns at FIRST match, no depth tracking
+      return Ok((self.source[start..pos].to_string(), pos));
+    }
+    pos += 1;
+  }
+
+Why It Fails:
+  - Doesn't distinguish between nested vs root closing tags
+  - `</div>` could belong to child or root element
+  - Always returns on first match = premature termination
+  - Leaves remaining HTML unparsed = parser error
+
+Required Fix:
+  1. Add depth counter (initialize to 1)
+  2. When encountering opening tag: depth++
+  3. When encountering closing tag: depth--
+  4. Return only when depth == 0
+  5. Handle self-closing tags (don't increment depth)
+  6. Handle HTML comments (ignore content)
+
+Code Changes:
+  - 100 lines in scan_html_block()
+  - Add: tag pattern matching logic
+  - Add: depth tracking loops
+  - Add: self-closing tag detection
+
+Testing:
+  - Nested divs at 3+ levels
+  - Mixed block and inline elements
+  - Self-closing tags (br, hr, img)
+  - HTML comments in template
+  - Deeply nested structures
+
+────────────────────────────────
+
+BUG #2: UNICODE EMOJI BUG
+────────────────────────────────
+
+Current Implementation (BROKEN):
+  Line 639, 675, 680: Mixed byte/character iteration
+  
+  while pos < self.source.len() && self.source.chars().nth(pos) != Some('>') {
+    // chars().nth() treats pos as CHARACTER INDEX
+    pos += 1;  // But pos is actually BYTE OFFSET
+  }
+  
+  // Later:
+  if self.source[pos..].starts_with(&close_tag) {
+    // Assumes pos is valid byte boundary
+  }
+
+Why It Fails:
+  - Rust strings are UTF-8 encoded
+  - Multi-byte characters (emoji, CJK, accents) take multiple bytes
+  - Emoji 🛍 = 4 bytes: [F0 9F 9B 8D]
+  - Byte-based slicing fails at non-boundary positions
+  - Panic: "byte index is not a char boundary"
+
+UTF-8 Byte Boundaries:
+  - 0xxxxxxx (ASCII) → always boundary
+  - 10xxxxxx (continuation) → never boundary
+  - 11xxxxxx (start byte) → always boundary
+
+Required Fix:
+  Option A (Recommended): Use character iteration
+    for ch in self.source[start..].chars() {
+      if ch == '>' { break; }
+      byte_pos += ch.len_utf8();  // Always advances to next boundary
+    }
+  
+  Option B: Add boundary validation
+    if self.is_char_boundary(pos) { ... }
+
+Code Changes:
+  - 20-30 lines in scan_html_block()
+  - Replace chars().nth() with proper iteration
+  - Add is_char_boundary() helper (5 lines)
+  - Use char.len_utf8() for position advancement
+
+Testing:
+  - Emoji in comments (🛍️, 😀, etc.)
+  - Chinese/Japanese characters (购物, 買い物)
+  - Combining diacriticals (é = e + ´)
+  - Mixed scripts (English + Arabic + emoji)
+
+────────────────────────────────
+
+BUG #3: WASM METHOD NAMES BUG
+────────────────────────────────
+
+Current Implementation (BROKEN):
+  Line 338-341 (Rust generation):
+    let method_name = format!(
+      "pub fn invoke_{}(&mut self) {{",
+      txn.name.replace(".", "_")  // "Counter.increment" → "invoke_Counter_increment"
+    );
+  
+  Line 779 (JavaScript generation):
+    wasm[`invoke_${config.txn}`]();
+    // config.txn might be "increment" → "invoke_increment"
+    // But that method doesn't exist!
+
+Why It Fails:
+  - Transaction name "Counter.increment" gets transformed to "invoke_Counter_increment" in Rust
+  - But binding stores only short name "increment"
+  - JavaScript tries to call "invoke_increment" which was never generated
+  - Runtime error: method doesn't exist on WASM State object
+
+Name Transformation:
+  Brief source:      txn Counter.increment
+         ↓
+  Rust generation:   invoke_Counter_increment (line 338)
+         ↓
+  wasm-bindgen:      exports this function name as-is
+         ↓
+  JS needs to call:  wasm.invoke_Counter_increment
+         ↓
+  Current JS calls:  wasm.invoke_increment ← ERROR!
+
+Required Fix:
+  1. Create transaction name mapping in JS glue code
+  2. Map "Counter.increment" → "invoke_Counter_increment"
+  3. Store mapped method name in binding config
+  4. Event listener uses mapped method name
+  5. Validate all referenced transactions exist
+
+Code Changes:
+  - 30-40 lines in generate_js_glue()
+  - Add transaction method mapping before trigger map
+  - Update event listener to use mapped name
+  - Add validation in generate() method
+
+JavaScript Fix:
+  const TRANSACTION_METHODS = {
+    'Counter.increment': 'invoke_Counter_increment',
+    'Counter.decrement': 'invoke_Counter_decrement',
+    ...
+  };
+  
+  // Update trigger map:
+  for (binding in bindings) {
+    method: TRANSACTION_METHODS[txn.name]
+  }
+  
+  // Use in listener:
+  wasm[config.method]()  // Not config.txn
+
+Testing:
+  - Struct.method transaction names
+  - Simple (non-struct) transaction names
+  - Multiple transactions with different names
+  - Verify generated JS contains correct mapping
+
+================================================================================
+IMPLEMENTATION PRIORITY & ROI
+================================================================================
+
+Recommended Order (by Return on Investment):
+
+1. BUG #3 (WASM NAMES) - IMMEDIATE
+   Fix Time: 15 minutes
+   Impact: Unblocks ALL interactive apps
+   Effort: Very Low (simple string mapping)
+   Priority: CRITICAL
+   
+   Why first?: Quick win, highest severity
+
+2. BUG #2 (UNICODE) - NEXT
+   Fix Time: 30 minutes
+   Impact: Enables documentation with emoji/Unicode
+   Effort: Low (UTF-8 iteration)
+   Priority: MEDIUM
+   
+   Why second?: Quick fix, improves usability
+
+3. BUG #1 (NESTED HTML) - FINAL
+   Fix Time: 1-2 hours
+   Impact: Enables complex real-world UIs
+   Effort: Medium (depth tracking logic)
+   Priority: HIGH
+   
+   Why last?: Longest fix, but most impactful
+
+Total Time to Fix All: ~2.5 hours
+
+================================================================================
+AFFECTED CODE LOCATIONS
+================================================================================
+
+BUG #1 + #2: src/parser.rs
+  - Function: scan_html_block() [lines 636-687]
+  - Function: parse_rstruct() [lines 553-634] (calls scan_html_block)
+  - Related: advance_past_position() [lines 689-696]
+
+BUG #3: src/wasm_gen.rs
+  - Function: generate() [lines 36-53] (validation point)
+  - Function: generate_transaction() [lines 337-390] (method naming)
+  - Function: generate_js_glue() [lines 705-845] (JS generation)
+  - Location: Transaction mapping [lines 728-779]
+
+Associated Files (for testing):
+  - tests/ffi_parser_tests.rs
+  - examples/counter.rbv
+  - examples/shopping_cart.rbv
+  - examples/todo.rbv
+
+================================================================================
+FILES CREATED FOR REFERENCE
+================================================================================
+
+1. CRITICAL_PARSER_BUGS_ANALYSIS.md
+   Complete technical deep-dive with:
+   - Detailed root cause analysis
+   - Full code examples and fixes
+   - Edge cases and dependencies
+   - Comprehensive testing strategy
+
+2. BUGS_QUICK_REFERENCE.md
+   Quick-reference guide with:
+   - Quick diagnosis for each bug
+   - Before/after examples
+   - Fix checklist
+   - Severity assessment
+
+3. BUG_FLOWCHARTS.md
+   Visual documentation with:
+   - Algorithm comparison (broken vs fixed)
+   - Execution traces with byte positions
+   - Data flow diagrams
+   - Complexity assessment
+
+================================================================================
+VALIDATION CHECKLIST
+================================================================================
+
+For each fix, verify:
+
+Bug #1 (Nested HTML):
+  ✓ Parser correctly handles nested divs (3+ levels)
+  ✓ Self-closing tags don't break nesting
+  ✓ HTML comments are handled properly
+  ✓ Existing non-nested HTML still works
+  ✓ Error messages are clear on failure
+
+Bug #2 (Unicode):
+  ✓ Emoji in comments doesn't panic
+  ✓ Chinese/Japanese characters work
+  ✓ Combining diacriticals handled
+  ✓ Mixed scripts parse correctly
+  ✓ Regular ASCII still works
+
+Bug #3 (WASM):
+  ✓ Struct.method transactions work
+  ✓ Simple (non-struct) transactions work
+  ✓ Generated JS contains correct method names
+  ✓ Click handlers call correct methods
+  ✓ No runtime "not a function" errors
+
+================================================================================
+END OF ANALYSIS
+================================================================================
+
+Next Steps:
+1. Review documentation in CRITICAL_PARSER_BUGS_ANALYSIS.md
+2. Use BUGS_QUICK_REFERENCE.md for quick lookups
+3. Refer to BUG_FLOWCHARTS.md for visual understanding
+4. Follow implementation order (Bug #3 → Bug #2 → Bug #1)
+5. Use provided code examples and test cases
+
+All documentation is ready for implementation.
