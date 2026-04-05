@@ -634,20 +634,24 @@ impl<'a> Parser<'a> {
     }
 
     fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
-        let mut pos = start;
+        // Find the opening tag's closing >
+        let mut byte_pos = start;
+        let source_bytes = self.source.as_bytes();
 
-        while pos < self.source.len() && self.source.chars().nth(pos) != Some('>') {
-            pos += 1;
+        // Scan to find the '>' that closes the opening tag
+        while byte_pos < source_bytes.len() && source_bytes[byte_pos] != b'>' {
+            byte_pos += 1;
         }
 
-        if pos >= self.source.len() {
+        if byte_pos >= source_bytes.len() {
             return Err("Unclosed HTML tag in rstruct (no closing >)".to_string());
         }
 
-        pos += 1;
+        byte_pos += 1; // Move past the '>'
 
-        let tag_content = &self.source[start..pos];
+        let tag_content = &self.source[start..byte_pos];
 
+        // Extract tag name from opening tag
         let mut tag_name = String::new();
         let after_lt = if tag_content.starts_with("<") {
             &tag_content[1..]
@@ -669,15 +673,48 @@ impl<'a> Parser<'a> {
         }
 
         let close_tag = format!("</{}>", tag_name);
+        let open_tag = format!("<{}", tag_name);
 
-        let end_pos;
-        while pos < self.source.len() {
-            if self.source[pos..].starts_with(&close_tag) {
-                pos += close_tag.len();
-                end_pos = pos;
-                return Ok((self.source[start..pos].to_string(), end_pos));
+        // Now scan for matching closing tag with depth tracking
+        // to handle nested tags with the same name
+        let mut depth = 1;
+
+        while byte_pos < source_bytes.len() {
+            // Check if we found the close tag
+            if self.source[byte_pos..].starts_with(&close_tag) {
+                depth -= 1;
+                if depth == 0 {
+                    byte_pos += close_tag.len();
+                    return Ok((self.source[start..byte_pos].to_string(), byte_pos));
+                }
+                // Skip past this close tag
+                byte_pos += close_tag.len();
             }
-            pos += 1;
+            // Check if we found an open tag (for depth tracking)
+            else if self.source[byte_pos..].starts_with(&open_tag) {
+                // Make sure this is actually an opening tag (not closing or self-closing)
+                let after_tag_name = &self.source[byte_pos + open_tag.len()..];
+                if !after_tag_name.is_empty() {
+                    let next_char = after_tag_name.chars().next().unwrap_or('\0');
+                    // If next char is '>', space, or attribute marker, it's an open tag
+                    if next_char == '>'
+                        || next_char == ' '
+                        || next_char == '\t'
+                        || next_char == '\n'
+                    {
+                        depth += 1;
+                    }
+                }
+                byte_pos += open_tag.len();
+            } else {
+                // Safely advance by one character
+                if byte_pos < source_bytes.len() {
+                    let ch = self.source[byte_pos..].chars().next().unwrap_or('\0');
+                    byte_pos += ch.len_utf8();
+                } else {
+                    byte_pos += 1;
+                }
+            }
         }
 
         Err(format!(

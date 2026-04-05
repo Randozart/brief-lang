@@ -728,9 +728,13 @@ impl WasmGenerator {
         output.push_str("    const TRIGGER_MAP = {\n");
         for binding in bindings {
             if let Directive::Trigger { event, txn } = &binding.directive {
+                // Transform transaction name to invoke method name
+                // e.g., "ShoppingCart.add" -> "invoke_ShoppingCart_add"
+                // e.g., "add" -> "invoke_add"
+                let invoke_method = format!("invoke_{}", txn.replace(".", "_"));
                 output.push_str(&format!(
                     "        '{}': {{ event: '{}', txn: '{}' }},\n",
-                    binding.element_id, event, txn
+                    binding.element_id, event, invoke_method
                 ));
             }
         }
@@ -776,7 +780,7 @@ impl WasmGenerator {
         output.push_str("            const el = document.querySelector(ELEMENT_MAP[elId]);\n");
         output.push_str("            if (!el) continue;\n");
         output.push_str("            el.addEventListener(config.event, () => {\n");
-        output.push_str("                wasm[`invoke_${config.txn}`]();\n");
+        output.push_str("                wasm[config.txn]();\n");
         output.push_str("            });\n");
         output.push_str("        }\n");
         output.push_str("    }\n\n");
