@@ -107,6 +107,7 @@ impl WasmGenerator {
         output.push_str("    signals: Vec<JsValue>,\n");
         output.push_str("    dirty_signals: Vec<bool>,\n");
         output.push_str("    each_templates: Vec<(String, String, String)>,\n");
+        output.push_str("    show_bindings: Vec<(String, String, bool)>,\n");
         output.push_str("}\n\n");
 
         output.push_str("#[wasm_bindgen]\n");
@@ -154,7 +155,19 @@ impl WasmGenerator {
             }
         }
 
-        output.push_str("        State { signals, dirty_signals, each_templates }\n");
+        output
+            .push_str("        let mut show_bindings: Vec<(String, String, bool)> = Vec::new();\n");
+        for binding in bindings {
+            if let Directive::Show { expr } = &binding.directive {
+                output.push_str(&format!(
+                    "        show_bindings.push((\"{}\".to_string(), \"{}\".to_string(), true));\n",
+                    binding.element_id, expr
+                ));
+            }
+        }
+
+        output
+            .push_str("        State { signals, dirty_signals, each_templates, show_bindings }\n");
         output.push_str("    }\n\n");
 
         output.push_str("    pub fn get_signal(&self, id: usize) -> JsValue {\n");
@@ -303,6 +316,44 @@ impl WasmGenerator {
         output.push_str("                format!(\"{{\\\"op\\\":\\\"text\\\",\\\"el\\\":\\\"{}\\\",\\\"value\\\":0}}\", el)\n");
         output.push_str("            }\n");
         output.push_str("        }\n");
+        output.push_str("        let eval_show = |signals: &[JsValue], signal_map: &std::collections::HashMap<&str, usize>, expr: &str| -> bool {\n");
+        output.push_str("            // Simple expression evaluator for show conditions\n");
+        output.push_str(
+            "            // Handles: signal == value, signal != value, signal > value, etc.\n",
+        );
+        output.push_str("            let parts: Vec<&str> = expr.split_whitespace().collect();\n");
+        output.push_str("            if parts.len() >= 3 {\n");
+        output.push_str("                let signal_name = parts[0];\n");
+        output.push_str("                let op = parts[1];\n");
+        output.push_str("                let value_str = parts[2];\n");
+        output.push_str("                if let Some(&sig_id) = signal_map.get(signal_name) {\n");
+        output.push_str("                    let sig_val = &signals[sig_id];\n");
+        output.push_str("                    if let Some(sig_num) = sig_val.as_f64() {\n");
+        output.push_str(
+            "                        let compare_val: f64 = value_str.parse().unwrap_or(0.0);\n",
+        );
+        output.push_str("                        match op {\n");
+        output.push_str("                            \"==\" => return sig_num == compare_val,\n");
+        output.push_str("                            \"!=\" => return sig_num != compare_val,\n");
+        output.push_str("                            \">\" => return sig_num > compare_val,\n");
+        output.push_str("                            \"<\" => return sig_num < compare_val,\n");
+        output.push_str("                            \">=\" => return sig_num >= compare_val,\n");
+        output.push_str("                            \"<=\" => return sig_num <= compare_val,\n");
+        output.push_str("                            _ => {}\n");
+        output.push_str("                        }\n");
+        output.push_str("                    }\n");
+        output.push_str("                }\n");
+        output.push_str("            }\n");
+        output.push_str("            true // default to visible if can't evaluate\n");
+        output.push_str("        };\n");
+        output.push_str("        let signal_map = std::collections::HashMap::new();\n");
+        for (name, &id) in &self.signal_map {
+            output.push_str(&format!(
+                "        signal_map.insert(\"{}\", {});\n",
+                name, id
+            ));
+        }
+
         for binding in bindings {
             if let Directive::Text { signal } = &binding.directive {
                 if let Some(&sig_id) = self.signal_map.get(signal) {
@@ -319,6 +370,16 @@ impl WasmGenerator {
                 }
             }
         }
+
+        // Emit show instructions for all show bindings (check visibility)
+        output.push_str("        for (el_id, expr, prev_visible) in &mut self.show_bindings {\n");
+        output.push_str("            let visible = eval_show(&self.signals, &signal_map, expr);\n");
+        output.push_str("            if visible != *prev_visible {\n");
+        output.push_str("                *prev_visible = visible;\n");
+        output.push_str("                parts.push(format!(\"{{\\\"op\\\":\\\"show\\\",\\\"el\\\":\\\"{}\\\",\\\"visible\\\":{}}}\", el_id, visible));\n");
+        output.push_str("            }\n");
+        output.push_str("        }\n");
+
         output.push_str("        self.dirty_signals.fill(false);\n");
         output.push_str("        let result = format!(\"[{}]\", parts.join(\",\"));\n");
         output.push_str("        result.into()\n");
