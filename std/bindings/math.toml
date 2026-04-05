@@ -39,24 +39,6 @@ message = "String"
 
 
 [[functions]]
-name = "abs_int"
-location = "std::num::IntAbsExt::abs"
-target = "native"
-description = "Compute absolute value of integer"
-
-[functions.input]
-value = "Int"
-
-[functions.output.success]
-result = "Int"
-
-[functions.output.error]
-type = "MathError"
-code = "Int"
-message = "String"
-
-
-[[functions]]
 name = "abs_float"
 location = "std::f64::abs"
 target = "native"
@@ -211,44 +193,6 @@ value = "Float"
 
 [functions.output.success]
 result = "Float"
-
-[functions.output.error]
-type = "MathError"
-code = "Int"
-message = "String"
-
-
-[[functions]]
-name = "min_int"
-location = "std::cmp::min"
-target = "native"
-description = "Return minimum of two integers"
-
-[functions.input]
-a = "Int"
-b = "Int"
-
-[functions.output.success]
-result = "Int"
-
-[functions.output.error]
-type = "MathError"
-code = "Int"
-message = "String"
-
-
-[[functions]]
-name = "max_int"
-location = "std::cmp::max"
-target = "native"
-description = "Return maximum of two integers"
-
-[functions.input]
-a = "Int"
-b = "Int"
-
-[functions.output.success]
-result = "Int"
 
 [functions.output.error]
 type = "MathError"

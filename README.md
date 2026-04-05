@@ -8,7 +8,7 @@ A compiled language for building reactive systems where the compiler proves all 
 
 ## What Brief Actually Is
 
-Brief is a reactive, blackboard-based language. You declare state as global variables. You write transactions (blocks of code) that specify what conditions must be true before they can run, and what must be true after. The runtime continuously checks if transaction conditions are met and fires them automatically.
+Brief is a reactive, declarative, blackboard-based language. You declare state as global variables. You write transactions (blocks of code) that specify what conditions must be true before they can run, and what must be true after. The runtime continuously checks if transaction conditions are met and fires them automatically.
 
 The compiler verifies two things:
 1. Every transaction will actually reach its termination condition
@@ -40,14 +40,14 @@ The compiler proves `balance` will actually decrease, and that the postcondition
 
 ## How It Works
 
-Brief runs on a **reactor loop**. The runtime:
+Brief runs on a reactor loop. The runtime:
 1. Tracks which variables each reactive transaction cares about
 2. When a variable changes, marks only the affected transactions as dirty
 3. Re-evaluates their preconditions
 4. Fires any that now have true preconditions
 5. When nothing can fire, the program is at equilibrium and the reactor sleeps
 
-No polling. No event dispatchers. Just: state changes → check affected transactions → fire them if their preconditions hold.
+This means polling and event dispatchers are replaced by simple logical evaluation. The state changes → check affected transactions → fire them if their preconditions hold.
 
 ## Current Status
 

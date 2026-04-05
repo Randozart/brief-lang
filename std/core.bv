@@ -1,0 +1,191 @@
+# Brief Core Standard Library
+# 
+# Native Brief implementations - no FFI needed.
+# These are provably correct state and computation patterns.
+
+# ============================================================================
+# Integer Math
+# ============================================================================
+
+defn absolute(x: Int) 
+  -> Int 
+  [true]
+  [result >= 0]
+{
+  [x < 0] term -x;
+  [x >= 0] term x;
+};
+
+defn min(a: Int, b: Int) 
+  -> Int 
+  [true]
+  [result == a || result == b]
+{
+  [a <= b] term a;
+  [a > b] term b;
+};
+
+defn max(a: Int, b: Int) 
+  -> Int 
+  [true]
+  [result == a || result == b]
+{
+  [a >= b] term a;
+  [a < b] term b;
+};
+
+defn clamp(x: Int, min_val: Int, max_val: Int) 
+  -> Int 
+  [min_val <= max_val]
+  [result >= min_val && result <= max_val]
+{
+  [x < min_val] term min_val;
+  [x > max_val] term max_val;
+  term x;
+};
+
+defn is_even(x: Int) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [x * 2 == x + x] term true;
+  term false;
+};
+
+defn is_positive(x: Int) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [x > 0] term true;
+  term false;
+};
+
+defn is_negative(x: Int) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [x < 0] term true;
+  term false;
+};
+
+defn is_zero(x: Int) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [x == 0] term true;
+  term false;
+};
+
+# ============================================================================
+# Float Comparison (since Brief has basic float ops)
+# ============================================================================
+
+defn float_is_positive(x: Float) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [x > 0.0] term true;
+  term false;
+};
+
+defn float_is_negative(x: Float) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [x < 0.0] term true;
+  term false;
+};
+
+defn float_is_zero(x: Float) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [x == 0.0] term true;
+  term false;
+};
+
+# ============================================================================
+# State Management Patterns
+# ============================================================================
+
+# Lazy initialization pattern
+defn get_or_init_with_default(initialized: Bool, default_value: Int) 
+  -> Int, Bool 
+  [true]
+  [true]
+{
+  [initialized] term default_value, true;
+  [!initialized] term default_value, true;
+};
+
+# State validation
+defn is_valid_state(state: Int, min_state: Int, max_state: Int) 
+  -> Bool 
+  [min_state <= max_state]
+  [true]
+{
+  [state >= min_state && state <= max_state] term true;
+  term false;
+};
+
+# ============================================================================
+# Conditional Results
+# ============================================================================
+
+# Choose between two values based on condition
+defn choose_if(condition: Bool, true_val: Int, false_val: Int) 
+  -> Int 
+  [true]
+  [true]
+{
+  [condition] term true_val;
+  term false_val;
+};
+
+# ============================================================================
+# Guards and Precondition Helpers
+# ============================================================================
+
+# Always-valid guard (useful for explicit guards)
+defn always_true() 
+  -> Bool 
+  [true]
+  [true]
+{
+  term true;
+};
+
+# Always-invalid guard
+defn always_false() 
+  -> Bool 
+  [true]
+  [true]
+{
+  term false;
+};
+
+# Negation helper
+defn not_equal(a: Int, b: Int) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [a != b] term true;
+  term false;
+};
+
+defn string_is_empty(s: String) 
+  -> Bool 
+  [true]
+  [true]
+{
+  [s == ""] term true;
+  term false;
+};
