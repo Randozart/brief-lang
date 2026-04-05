@@ -2,6 +2,7 @@ use logos::Logos;
 
 #[derive(Logos, Debug, PartialEq, Clone)]
 #[logos(skip r"[ \t\n\r]+")]
+#[logos(skip r"//[^\n]*")] // Skip // comments entirely
 pub enum Token {
     #[token("sig")]
     Sig,
