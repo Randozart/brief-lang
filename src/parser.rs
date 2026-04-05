@@ -223,8 +223,20 @@ impl<'a> Parser<'a> {
                 Ok(TopLevel::Definition(defn))
             }
             Some(Ok(Token::Frgn)) => {
-                let frgn_sig = self.parse_frgn_sig()?;
-                Ok(TopLevel::ForeignSig(frgn_sig))
+                // Peek ahead to see if this is "frgn sig" or just "frgn"
+                let is_frgn_sig = if let Some((Ok(Token::Sig), _)) = &self.peek {
+                    true
+                } else {
+                    false
+                };
+
+                if is_frgn_sig {
+                    let frgn_sig = self.parse_frgn_sig()?;
+                    Ok(TopLevel::ForeignSig(frgn_sig))
+                } else {
+                    let frgn_binding = self.parse_frgn_binding()?;
+                    Ok(frgn_binding)
+                }
             }
             Some(Ok(Token::Struct)) => {
                 let struct_def = self.parse_struct()?;
@@ -378,6 +390,110 @@ impl<'a> Parser<'a> {
             name,
             input_types: parameters,
             outputs,
+        })
+    }
+
+    /// Convert a type name string to a Type
+    fn string_to_type(&self, type_name: &str) -> Result<Type, String> {
+        match type_name {
+            "String" => Ok(Type::String),
+            "Int" => Ok(Type::Int),
+            "Float" => Ok(Type::Float),
+            "Bool" => Ok(Type::Bool),
+            "void" => Ok(Type::Void),
+            "Data" => Ok(Type::Data),
+            other => Ok(Type::Custom(other.to_string())),
+        }
+    }
+
+    /// Parse a foreign function binding declaration
+    /// Syntax: frgn name(param: Type, ...) -> Result<T, E> from "binding.toml";
+    fn parse_frgn_binding(&mut self) -> Result<TopLevel, String> {
+        use crate::ast::{ForeignBinding, ForeignSignature, ForeignTarget, ResultType};
+
+        self.expect(Token::Frgn)?;
+        let name = self.expect_identifier()?;
+
+        // Parse parameters
+        self.expect(Token::LParen)?;
+        let mut inputs = Vec::new();
+        while let Some(Ok(Token::Identifier(_))) = self.current_token() {
+            let param_name = self.expect_identifier()?;
+            self.expect(Token::Colon)?;
+            let param_type_name = self.expect_identifier()?;
+            let param_type = self.string_to_type(&param_type_name)?;
+            inputs.push((param_name, param_type));
+
+            if let Some(Ok(Token::Comma)) = self.current_token() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::RParen)?;
+
+        // Parse return type: Result<SuccessType, ErrorType>
+        self.expect(Token::Arrow)?;
+
+        // Expect "Result<T, E>" pattern
+        if let Some(Ok(Token::Identifier(result_id))) = self.current_token() {
+            if result_id != "Result" {
+                return Err(format!("Expected 'Result<T, E>', found {}", result_id));
+            }
+            self.advance();
+        } else {
+            return Err("Expected Result type for frgn binding".to_string());
+        }
+
+        // Parse <T, E>
+        self.expect(Token::Lt)?;
+
+        // Parse success type (as simple identifier for now)
+        let success_type_name = self.expect_identifier()?;
+        let success_type = self.string_to_type(&success_type_name)?;
+
+        let mut success_output = Vec::new();
+        success_output.push(("value".to_string(), success_type));
+
+        self.expect(Token::Comma)?;
+
+        // Parse error type (just the name)
+        let error_type_name = self.expect_identifier()?;
+
+        self.expect(Token::Gt)?;
+
+        // Parse "from" clause
+        self.expect(Token::From)?;
+
+        // Parse TOML path
+        let toml_path = if let Some(Ok(Token::String(s))) = self.current_token() {
+            let path = s.clone();
+            self.advance();
+            path
+        } else {
+            return Err("Expected TOML file path as string".to_string());
+        };
+
+        self.expect(Token::Semicolon)?;
+
+        // For now, error fields are empty until we load the TOML
+        let error_fields = Vec::new();
+
+        let frgn_sig = ForeignSignature {
+            name: name.clone(),
+            inputs,
+            success_output,
+            error_type_name: error_type_name.clone(),
+            error_fields,
+            span: None,
+        };
+
+        Ok(TopLevel::ForeignBinding {
+            name,
+            toml_path,
+            signature: frgn_sig,
+            target: ForeignTarget::Native,
+            span: None,
         })
     }
 
