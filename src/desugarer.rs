@@ -28,6 +28,52 @@ impl Desugarer {
                         items.push(item.clone());
                     }
                 }
+                TopLevel::Struct(s) => {
+                    for field in &s.fields {
+                        let ty = match &field.ty {
+                            Type::Int => Type::Int,
+                            Type::Float => Type::Float,
+                            Type::Bool => Type::Bool,
+                            Type::String => Type::String,
+                            Type::Applied(name, _) if name == "List" => {
+                                Type::Applied("List".to_string(), vec![])
+                            }
+                            _ => Type::Int,
+                        };
+                        let initial_expr = match &ty {
+                            Type::Int => Some(Expr::Integer(0)),
+                            Type::Float => Some(Expr::Integer(0)),
+                            Type::Bool => Some(Expr::Bool(false)),
+                            Type::String => Some(Expr::String("".to_string())),
+                            Type::Applied(name, _) if name == "List" => {
+                                Some(Expr::ListLiteral(vec![]))
+                            }
+                            _ => Some(Expr::Integer(0)),
+                        };
+                        self.generated_state.push(StateDecl {
+                            name: field.name.clone(),
+                            ty,
+                            expr: initial_expr,
+                            span: None,
+                        });
+                    }
+                    for txn in &s.transactions {
+                        let txn_name = if txn.name.contains('.') {
+                            txn.name.clone()
+                        } else {
+                            format!("{}.{}", s.name, txn.name)
+                        };
+                        items.push(TopLevel::Transaction(Transaction {
+                            is_async: txn.is_async,
+                            is_reactive: txn.is_reactive,
+                            name: txn_name,
+                            contract: txn.contract.clone(),
+                            body: txn.body.clone(),
+                            span: txn.span,
+                        }));
+                    }
+                    items.push(item.clone());
+                }
                 _ => {
                     items.push(item.clone());
                 }

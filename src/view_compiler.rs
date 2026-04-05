@@ -62,10 +62,67 @@ impl ViewCompiler {
         self.transactions.insert(name.to_string(), id);
     }
 
-    pub fn compile(&mut self, view_html: &str) -> Vec<Binding> {
+    pub fn compile(&mut self, view_html: &str) -> (Vec<Binding>, String) {
         self.bindings.clear();
-        self.extract_bindings(view_html, 0);
-        self.bindings.clone()
+        let modified_html = self.inject_ids(view_html);
+        self.extract_bindings(&modified_html, 0);
+        (self.bindings.clone(), modified_html)
+    }
+
+    fn inject_ids(&mut self, html: &str) -> String {
+        let mut result = String::new();
+        let mut pos = 0;
+        let bytes = html.as_bytes();
+
+        while pos < bytes.len() {
+            if bytes[pos] == b'<'
+                && bytes
+                    .get(pos + 1)
+                    .map(|&b| b.is_ascii_alphabetic() || b == b'!')
+                    .unwrap_or(false)
+            {
+                if let Some((tag, end_pos)) = self.parse_tag(&html[pos..]) {
+                    let tag_str = &html[pos..pos + end_pos];
+                    let tag_lower = tag_str.to_lowercase();
+
+                    if tag_lower.starts_with('/')
+                        || tag_lower.starts_with('!')
+                        || tag_lower.ends_with("/>")
+                    {
+                        result.push_str(tag_str);
+                        pos += end_pos;
+                        continue;
+                    }
+
+                    let has_directive = tag_lower.contains("b-text")
+                        || tag_lower.contains("b-show")
+                        || tag_lower.contains("b-hide")
+                        || tag_lower.contains("b-trigger")
+                        || tag_lower.contains("b-class")
+                        || tag_lower.contains("b-attr")
+                        || tag_lower.contains("b-each");
+
+                    if has_directive && !tag_lower.contains("id=") {
+                        let elem_id = self.generate_element_id(tag_str);
+                        let tag_name = tag_str.split_whitespace().next().unwrap_or("");
+                        let tag_name_stripped = tag_name.trim_start_matches('<');
+                        let rest = &tag_str[tag_name.len()..];
+                        result.push_str(&format!(
+                            "<{} id=\"{}\"{}",
+                            tag_name_stripped, elem_id, rest
+                        ));
+                    } else {
+                        result.push_str(tag_str);
+                    }
+                    pos += end_pos;
+                    continue;
+                }
+            }
+            result.push(html.chars().nth(pos).unwrap_or(' '));
+            pos += 1;
+        }
+
+        result
     }
 
     fn extract_bindings(&mut self, html: &str, depth: usize) {

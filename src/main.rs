@@ -763,7 +763,7 @@ fn run_rbv(
             view_compiler.register_transaction(&t.name, i);
         }
     }
-    let bindings = view_compiler.compile(&expanded_view);
+    let (bindings, html_with_ids) = view_compiler.compile(&expanded_view);
     println!("  View compiled: {} bindings", bindings.len());
 
     let output_path = if let Some(p) = out_dir {
@@ -801,7 +801,7 @@ fn run_rbv(
     }
 
     let html_path = output_path.join(format!("{}.html", stem));
-    let html = generate_html(stem, &expanded_view);
+    let html = generate_html(stem, &html_with_ids);
     fs::write(&html_path, &html)?;
     println!("  Generated: {}", html_path.display());
 
@@ -845,17 +845,25 @@ wasm-opt = false
 
     if build_wasm {
         println!("\n  Building WASM with wasm-pack...");
-        let status = std::process::Command::new("wasm-pack")
-            .args(["build", "--target", "web"])
-            .current_dir(&output_path)
-            .status()?;
+        let output_dir = output_path.join("pkg");
+        let wasm_already_exists = output_dir.join("counter_bg.wasm").exists()
+            || output_dir.join(format!("{}_bg.wasm", stem)).exists();
 
-        if !status.success() {
-            return Err(
-                format!("wasm-pack build failed with exit code: {:?}", status.code()).into(),
-            );
+        if wasm_already_exists {
+            println!("  WASM already built from previous run");
+        } else {
+            let status = std::process::Command::new("wasm-pack")
+                .args(["build", "--target", "web"])
+                .current_dir(&output_path)
+                .status()?;
+
+            if !status.success() {
+                return Err(
+                    format!("wasm-pack build failed with exit code: {:?}", status.code()).into(),
+                );
+            }
+            println!("  WASM build complete");
         }
-        println!("  WASM build complete");
     }
 
     println!("\n✓ RBV compiled successfully");

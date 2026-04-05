@@ -376,6 +376,17 @@ impl WasmGenerator {
         output.push_str("        }\n");
 
         output.push_str("    }\n\n");
+
+        if txn.name.contains('.') {
+            let short_name = txn.name.split('.').last().unwrap_or(&txn.name);
+            let alias = format!("    pub fn invoke_{}(&mut self) {{\n", short_name);
+            output.push_str(&alias);
+            output.push_str(&format!(
+                "        self.invoke_{}();\n",
+                txn.name.replace(".", "_")
+            ));
+            output.push_str("    }\n\n");
+        }
     }
 
     fn statement_to_rust(&self, output: &mut String, stmt: &Statement) {
@@ -765,8 +776,7 @@ impl WasmGenerator {
         output.push_str("            const el = document.querySelector(ELEMENT_MAP[elId]);\n");
         output.push_str("            if (!el) continue;\n");
         output.push_str("            el.addEventListener(config.event, () => {\n");
-        output.push_str("                const txnName = `invoke_${config.txn}`;\n");
-        output.push_str("                wasm[txnName]();\n");
+        output.push_str("                wasm[`invoke_${config.txn}`]();\n");
         output.push_str("            });\n");
         output.push_str("        }\n");
         output.push_str("    }\n\n");
@@ -803,6 +813,27 @@ impl WasmGenerator {
         output.push_str("        }\n");
         output.push_str("    }\n\n");
 
+        output.push_str("    function applyInstructions(instructions) {\n");
+        output.push_str("        for (const inst of instructions) {\n");
+        output.push_str("            const el = document.querySelector(ELEMENT_MAP[inst.el]);\n");
+        output.push_str("            if (!el) continue;\n");
+        output.push_str("            switch (inst.op) {\n");
+        output.push_str("                case 'text':\n");
+        output.push_str("                    el.textContent = inst.value;\n");
+        output.push_str("                    break;\n");
+        output.push_str("                case 'show':\n");
+        output.push_str("                    el.hidden = !inst.visible;\n");
+        output.push_str("                    break;\n");
+        output.push_str("                case 'class_add':\n");
+        output.push_str("                    el.classList.add(inst.class);\n");
+        output.push_str("                    break;\n");
+        output.push_str("                case 'class_remove':\n");
+        output.push_str("                    el.classList.remove(inst.class);\n");
+        output.push_str("                    break;\n");
+        output.push_str("            }\n");
+        output.push_str("        }\n");
+        output.push_str("    }\n\n");
+
         if !each_configs.is_empty() {
             output.push_str("    attachEachListeners();\n");
         }
@@ -814,8 +845,8 @@ impl WasmGenerator {
     }
 
     fn escape_selector(&self, id: &str) -> String {
-        if id.starts_with("rbv-") {
-            id.to_string()
+        if id.starts_with("rbv-") || id.starts_with('#') {
+            format!("#{}", id.trim_start_matches('#'))
         } else {
             format!("#{}", id)
         }
