@@ -123,7 +123,48 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) -> Result<Program, String> {
+        let mut reactor_speed: Option<u32> = None;
         let mut items = Vec::new();
+
+        // NEW: Check for file-level reactor @Hz declaration at start
+        if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+            if name == "reactor" {
+                self.advance(); // consume 'reactor'
+                self.expect(Token::At)?;
+
+                // Parse the speed number
+                if let Some(Ok(Token::Integer(speed_num))) = self.current_token() {
+                    let speed = *speed_num as u32;
+                    self.advance();
+
+                    // Expect 'Hz' (as identifier, since logos doesn't tokenize it specially)
+                    if let Some(Ok(Token::Identifier(hz))) = self.current_token() {
+                        if hz == "Hz" {
+                            self.advance();
+
+                            // Validate speed
+                            if speed == 0 {
+                                return Err("Reactor speed must be positive (> 0)".to_string());
+                            }
+                            if speed >= 10000 {
+                                // Warn but allow
+                                eprintln!("warning: Unusually high reactor speed @{}Hz", speed);
+                            }
+
+                            reactor_speed = Some(speed);
+                            self.expect(Token::Semicolon)?;
+                        } else {
+                            return Err("Expected 'Hz' after reactor speed".to_string());
+                        }
+                    } else {
+                        return Err("Expected 'Hz' after reactor speed".to_string());
+                    }
+                } else {
+                    return Err("Expected numeric speed after 'reactor @'".to_string());
+                }
+            }
+        }
+
         while self.current_token().is_some() {
             items.push(self.parse_top_level()?);
         }
@@ -138,6 +179,7 @@ impl<'a> Parser<'a> {
         Ok(Program {
             items,
             comments: self.comments.clone(),
+            reactor_speed,
         })
     }
 
@@ -644,6 +686,39 @@ impl<'a> Parser<'a> {
         let body = self.parse_body()?;
         self.expect(Token::RBrace)?;
         let span = self.current_span();
+
+        // NEW: Check for @Hz speed declaration after closing brace (for rct blocks)
+        let reactor_speed = if is_reactive && matches!(self.current_token(), Some(Ok(Token::At))) {
+            self.advance(); // consume @
+
+            if let Some(Ok(Token::Integer(speed_num))) = self.current_token() {
+                let speed = *speed_num as u32;
+                self.advance();
+
+                // Expect 'Hz'
+                if let Some(Ok(Token::Identifier(hz))) = self.current_token() {
+                    if hz == "Hz" {
+                        self.advance();
+                        if speed == 0 {
+                            return Err("Reactor speed must be positive".to_string());
+                        }
+                        if speed >= 10000 {
+                            eprintln!("warning: Unusually high reactor speed @{}Hz", speed);
+                        }
+                        Some(speed)
+                    } else {
+                        return Err("Expected 'Hz' after reactor speed".to_string());
+                    }
+                } else {
+                    return Err("Expected 'Hz' after reactor speed".to_string());
+                }
+            } else {
+                return Err("Expected numeric speed after '@'".to_string());
+            }
+        } else {
+            None
+        };
+
         self.expect(Token::Semicolon)?;
 
         Ok(Transaction {
@@ -652,6 +727,7 @@ impl<'a> Parser<'a> {
             name,
             contract,
             body,
+            reactor_speed,
             span,
         })
     }
@@ -715,6 +791,7 @@ impl<'a> Parser<'a> {
                 span: None,
             },
             body: body_statements,
+            reactor_speed: None, // NEW: No explicit speed for txc
             span,
         })
     }

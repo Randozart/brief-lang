@@ -158,6 +158,7 @@ pub struct Transaction {
     pub name: String,
     pub contract: Contract,
     pub body: Vec<Statement>,
+    pub reactor_speed: Option<u32>, // NEW: @Hz speed declaration for rct blocks
     pub span: Option<Span>,
 }
 
@@ -262,4 +263,5 @@ pub struct Comment {
 pub struct Program {
     pub items: Vec<TopLevel>,
     pub comments: Vec<Comment>,
+    pub reactor_speed: Option<u32>, // NEW: file-level @Hz default
 }

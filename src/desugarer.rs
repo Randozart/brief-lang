@@ -69,6 +69,7 @@ impl Desugarer {
                             name: txn_name,
                             contract: txn.contract.clone(),
                             body: txn.body.clone(),
+                            reactor_speed: txn.reactor_speed,
                             span: txn.span,
                         }));
                     }
@@ -115,6 +116,7 @@ impl Desugarer {
                             name: txn_name,
                             contract: txn.contract.clone(),
                             body: txn.body.clone(),
+                            reactor_speed: txn.reactor_speed,
                             span: txn.span,
                         }));
                     }
@@ -168,6 +170,7 @@ impl Desugarer {
         Program {
             items,
             comments: program.comments.clone(),
+            reactor_speed: program.reactor_speed,
         }
     }
 
@@ -239,6 +242,7 @@ impl Desugarer {
                 span: None,
             },
             body: new_body_items,
+            reactor_speed: txn.reactor_speed,
             span: None,
         };
 

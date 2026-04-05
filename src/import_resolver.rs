@@ -44,6 +44,7 @@ impl ImportResolver {
         Ok(Program {
             items,
             comments: program.comments.clone(),
+            reactor_speed: program.reactor_speed,
         })
     }
 
@@ -56,6 +57,7 @@ impl ImportResolver {
             return Ok(Program {
                 items: vec![],
                 comments: vec![],
+                reactor_speed: None,
             });
         }
 
@@ -63,6 +65,7 @@ impl ImportResolver {
             return Ok(Program {
                 items: vec![],
                 comments: vec![],
+                reactor_speed: None,
             });
         } else {
             import.path.join(".")
@@ -145,6 +148,7 @@ impl ImportResolver {
         Ok(Program {
             items: filtered,
             comments: vec![],
+            reactor_speed: None,
         })
     }
 }
