@@ -13,6 +13,7 @@ pub mod proof_engine;
 pub mod rbv;
 pub mod reactor;
 pub mod resolver;
+pub mod scheduler;
 pub mod symbolic;
 pub mod typechecker;
 pub mod view_compiler;
