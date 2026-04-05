@@ -1,94 +1,98 @@
 <script type="brief">
 rstruct ShoppingCart {
-  count: Int;
+  product: Int;
+  items: Int;
+  total: Int;
+  step: Int;
 
-  txn ShoppingCart.increment [true][count == @count + 1] {
-    &count = count + 1;
+  txn ShoppingCart.select_laptop [true][product == 1] { &product = 1; term; };
+  txn ShoppingCart.select_keyboard [true][product == 2] { &product = 2; term; };
+  txn ShoppingCart.select_mouse [true][product == 3] { &product = 3; term; };
+  txn ShoppingCart.select_monitor [true][product == 4] { &product = 4; term; };
+
+  txn ShoppingCart.add [product > 0][items == @items + 1] {
+    &items = items + 1;
+    [product == 1] &total = total + 1299;
+    [product == 2] &total = total + 149;
+    [product == 3] &total = total + 49;
+    [product == 4] &total = total + 399;
     term;
   };
 
-  txn ShoppingCart.decrement [count > 0][count == @count - 1] {
-    &count = count - 1;
-    term;
-  };
+  txn ShoppingCart.checkout [items > 0 && step == 0][step == 1] { &step = 1; term; };
+  txn ShoppingCart.confirm [step == 1][step == 2] { &step = 2; term; };
+  txn ShoppingCart.reset [step > 0][step == 0] { &step = 0; &items = 0; &total = 0; &product = 0; term; };
 
-  txn ShoppingCart.reset [true][0 == count] {
-    &count = 0;
-    term;
-  };
-
-  <div class="store">
-    <span b-text="count">0</span>
-    <button b-trigger:click="increment">+</button>
-    <button b-trigger:click="decrement">-</button>
-    <button b-trigger:click="reset">Reset</button>
+  <div class="app">
+    <span class="header">
+      <h1>Brief Store</h1>
+      <span class="badge"><span b-text="items">0</span> items | $<span b-text="total">0</span></span>
+    </span>
+    <span class="shop" b-show="step == 0">
+      <span class="left">
+        <h2>Select a Product</h2>
+        <span class="product" b-show="product == 1"><h3>Laptop $1,299</h3><p>Intel i9 32GB RTX 4090</p><button b-trigger:click="add">Add to Cart</button></span>
+        <span class="product" b-show="product == 2"><h3>Keyboard $149</h3><p>RGB Cherry MX Aluminum</p><button b-trigger:click="add">Add to Cart</button></span>
+        <span class="product" b-show="product == 3"><h3>Mouse $49</h3><p>16K DPI Wireless</p><button b-trigger:click="add">Add to Cart</button></span>
+        <span class="product" b-show="product == 4"><h3>Monitor $399</h3><p>27 inch 144Hz HDR</p><button b-trigger:click="add">Add to Cart</button></span>
+        <span class="product" b-show="product == 0"><p>Choose a product</p></span>
+        <span class="buttons"><button b-trigger:click="select_laptop">Laptop</button><button b-trigger:click="select_keyboard">Keyboard</button><button b-trigger:click="select_mouse">Mouse</button><button b-trigger:click="select_monitor">Monitor</button></span>
+      </span>
+      <span class="right">
+        <h2>Cart</h2>
+        <span b-show="items == 0"><p>Empty</p></span>
+        <span b-show="items > 0"><p>Items: <span b-text="items">0</span></p><p>Total: $<span b-text="total">0</span></p><button b-trigger:click="checkout">Checkout</button></span>
+      </span>
+    </span>
+    <span class="checkout" b-show="step == 1">
+      <h2>Checkout</h2>
+      <p>Total: $<span b-text="total">0</span></p>
+      <input type="text" placeholder="Name">
+      <input type="email" placeholder="Email">
+      <input type="text" placeholder="Address">
+      <input type="text" placeholder="Card">
+      <span style="display: flex; gap: 10px;"><input type="text" placeholder="MM/YY" style="flex:1;"><input type="text" placeholder="CVV" style="flex:1;"></span>
+      <button b-trigger:click="confirm">Pay</button>
+      <button b-trigger:click="reset">Cancel</button>
+    </span>
+    <span class="confirmed" b-show="step == 2">
+      <h2>Confirmed</h2>
+      <p style="color: #4caf50; font-size: 48px; font-weight: 700;">SUCCESS</p>
+      <p>Total: $<span b-text="total">0</span></p>
+      <p>Items: <span b-text="items">0</span></p>
+      <button b-trigger:click="reset">Shop Again</button>
+    </span>
   </div>
 }
 </script>
 
-<view>
-  <div class="container">
-    <h1>Shopping Cart</h1>
-    <ShoppingCart />
-  </div>
-</view>
+<view><ShoppingCart /></view>
 
 <style>
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.container {
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  padding: 40px;
-  text-align: center;
-}
-
-h1 {
-  color: #333;
-  margin-bottom: 20px;
-  font-size: 1.5em;
-}
-
-.store {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-}
-
-.store span {
-  font-size: 48px;
-  font-weight: bold;
-  color: #667eea;
-  min-width: 80px;
-}
-
-.store button {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 8px;
-  font-size: 20px;
-  cursor: pointer;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  transition: transform 0.2s;
-}
-
-.store button:hover {
-  transform: scale(1.1);
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto; background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; padding: 20px; }
+.app { max-width: 1000px; margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 30px 80px rgba(0,0,0,0.25); overflow: hidden; display: block; }
+.header { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 24px 32px; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { margin: 0; font-size: 2em; }
+.badge { background: rgba(255,255,255,0.2); padding: 10px 20px; border-radius: 20px; font-weight: 600; display: inline-block; }
+.shop { padding: 32px; display: grid; grid-template-columns: 2fr 1fr; gap: 32px; }
+.left, .right { display: block; }
+h2 { color: #333; margin-bottom: 20px; }
+.product { background: #f9fafb; padding: 20px; border-radius: 12px; text-align: center; display: block; border: 2px solid #e5e7eb; margin-bottom: 12px; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.product h3 { color: #1f2937; margin-bottom: 8px; }
+.product p { color: #6b7280; font-size: 14px; }
+.buttons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.buttons button { padding: 10px; background: white; border: 2px solid #667eea; color: #667eea; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.buttons button:hover { background: #f0f4ff; }
+button { padding: 10px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; width: 100%; margin-top: 12px; }
+button:hover { background: #764ba2; }
+input { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #d1d5db; border-radius: 6px; font-family: inherit; }
+input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+p { color: #666; margin-bottom: 12px; }
+.confirmed { display: block; padding: 60px 32px; text-align: center; }
+.confirmed h2 { color: #333; font-size: 2em; }
+.confirmed button { width: auto; }
+[b-show="false"] { display: none !important; }
+@media (max-width: 900px) { .shop { grid-template-columns: 1fr; } }
 </style>

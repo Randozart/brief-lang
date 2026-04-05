@@ -1,6 +1,7 @@
 # Brief
 
-<img src="brief-logo-draft.jpg" alt="Brief" width="400"/>
+<img src="brief-logo-draft.jpg" alt="Brief" width="200"/> <img src="r-brief-logo-draft.jpg" alt="Brief" width="200"/>
+
 
 **Brief doesn't break.**
 

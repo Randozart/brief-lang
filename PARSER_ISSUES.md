@@ -4,6 +4,40 @@
 **Compiler Version:** 0.1.0  
 **Context:** Attempting to create `shopping_cart.rbv` example
 
+---
+
+## CRITICAL FINDING - rstruct Limitation
+
+**The rstruct HTML parser can only handle ONE top-level HTML element.**
+
+Multiple sibling elements cause: `Unexpected token in rstruct: Ok(LtSlash)`
+
+**Root Cause (Detailed):** 
+- `scan_html_block()` (src/parser.rs:636) scans from opening tag (`<div>`) to closing tag (`</div>`)
+- Works fine for inline elements: `<span>` → `</span>`, `<button>` → `</button>`
+- **BREAKS on nested block elements:** When root `<div>` contains child `<div>`, parser finds FIRST `</div>` and thinks it closes the root
+- This closes the root prematurely, leaving child HTML unparsed
+- Parser then encounters `</div>` from the child as a stray token = `Ok(LtSlash)` error
+
+**Specific Limitation:**
+- ✓ Single root `<div>` with inline child elements: `<span>`, `<button>`, `<input>`, `<p>` (usually work)
+- ✗ Nested `<div>` tags anywhere inside the root
+- ✗ Any block-level element nested inside block-level element
+
+**Workaround:** Use ONLY inline elements inside the root div:
+```brief
+rstruct App {
+  <div class="root">
+    <div b-show="step == 1">Step 1</div>
+    <div b-show="step == 2">Step 2</div>
+  </div>
+}
+```
+
+**Impact:** This explains ALL previous shopping cart failures - they were structurally valid HTML but violate the parser's single-root limitation.
+
+---
+
 ## Issues Encountered
 
 ### Issue 1: Unicode Emoji in Brief Code Section

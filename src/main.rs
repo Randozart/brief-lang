@@ -865,7 +865,13 @@ wasm-opt = false
         if wasm_already_exists {
             println!("  WASM already built from previous run");
         } else {
-            let status = std::process::Command::new("wasm-pack")
+            let wasm_pack_path = if let Ok(home) = std::env::var("HOME") {
+                format!("{}/.cargo/bin/wasm-pack", home)
+            } else {
+                "wasm-pack".to_string()
+            };
+
+            let status = std::process::Command::new(&wasm_pack_path)
                 .args(["build", "--target", "web"])
                 .current_dir(&output_path)
                 .status()?;
