@@ -1,0 +1,280 @@
+# Standard Library String Bindings
+# Provides string manipulation and conversion functions
+
+[[functions]]
+name = "string_length"
+location = "std::string::String::len"
+target = "native"
+description = "Get length of string in bytes"
+
+[functions.input]
+text = "String"
+
+[functions.output.success]
+length = "Int"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "substring"
+location = "std::string::String::chars"
+target = "native"
+description = "Extract substring from start position for length"
+
+[functions.input]
+text = "String"
+start = "Int"
+length = "Int"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_replace"
+location = "std::string::String::replace"
+target = "native"
+description = "Replace all occurrences of pattern with replacement"
+
+[functions.input]
+text = "String"
+pattern = "String"
+replacement = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_contains"
+location = "std::string::String::contains"
+target = "native"
+description = "Check if string contains substring"
+
+[functions.input]
+text = "String"
+substring = "String"
+
+[functions.output.success]
+found = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_starts_with"
+location = "std::string::String::starts_with"
+target = "native"
+description = "Check if string starts with prefix"
+
+[functions.input]
+text = "String"
+prefix = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_ends_with"
+location = "std::string::String::ends_with"
+target = "native"
+description = "Check if string ends with suffix"
+
+[functions.input]
+text = "String"
+suffix = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_to_upper"
+location = "std::string::String::to_uppercase"
+target = "native"
+description = "Convert string to uppercase"
+
+[functions.input]
+text = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_to_lower"
+location = "std::string::String::to_lowercase"
+target = "native"
+description = "Convert string to lowercase"
+
+[functions.input]
+text = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_trim"
+location = "std::string::String::trim"
+target = "native"
+description = "Remove leading and trailing whitespace"
+
+[functions.input]
+text = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_split"
+location = "std::string::String::split"
+target = "native"
+description = "Split string by delimiter (returns first part)"
+
+[functions.input]
+text = "String"
+delimiter = "String"
+
+[functions.output.success]
+part = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "parse_int"
+location = "std::str::FromStr::from_str"
+target = "native"
+description = "Parse string as signed integer"
+
+[functions.input]
+text = "String"
+
+[functions.output.success]
+value = "Int"
+
+[functions.output.error]
+type = "ParseError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "parse_float"
+location = "std::str::FromStr::from_str"
+target = "native"
+description = "Parse string as floating-point number"
+
+[functions.input]
+text = "String"
+
+[functions.output.success]
+value = "Float"
+
+[functions.output.error]
+type = "ParseError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "int_to_string"
+location = "std::string::ToString::to_string"
+target = "native"
+description = "Convert integer to string"
+
+[functions.input]
+value = "Int"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "float_to_string"
+location = "std::string::ToString::to_string"
+target = "native"
+description = "Convert float to string"
+
+[functions.input]
+value = "Float"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "string_concat"
+location = "std::string::String::push_str"
+target = "native"
+description = "Concatenate two strings"
+
+[functions.input]
+left = "String"
+right = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"

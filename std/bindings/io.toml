@@ -1,0 +1,159 @@
+# Standard Library I/O Bindings
+# Provides file system and stream operations
+
+[[functions]]
+name = "read_file"
+location = "std::fs::read_to_string"
+target = "native"
+description = "Read entire file contents as string"
+
+[functions.input]
+path = "String"
+
+[functions.output.success]
+content = "String"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "write_file"
+location = "std::fs::write"
+target = "native"
+description = "Write string contents to file, creating or truncating"
+
+[functions.input]
+path = "String"
+content = "String"
+
+[functions.output.success]
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "append_file"
+location = "std::fs::OpenOptions::new().append(true).open().and_then(|mut f| io::Write::write_all(&mut f, data.as_bytes()))"
+target = "native"
+description = "Append string contents to end of file"
+
+[functions.input]
+path = "String"
+content = "String"
+
+[functions.output.success]
+bytes_written = "Int"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "file_exists"
+location = "std::path::Path::new(path).exists()"
+target = "native"
+description = "Check if file or directory exists"
+
+[functions.input]
+path = "String"
+
+[functions.output.success]
+exists = "Bool"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "delete_file"
+location = "std::fs::remove_file"
+target = "native"
+description = "Delete a file"
+
+[functions.input]
+path = "String"
+
+[functions.output.success]
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "create_dir"
+location = "std::fs::create_dir"
+target = "native"
+description = "Create a single directory"
+
+[functions.input]
+path = "String"
+
+[functions.output.success]
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "create_dir_all"
+location = "std::fs::create_dir_all"
+target = "native"
+description = "Create directory and all parent directories"
+
+[functions.input]
+path = "String"
+
+[functions.output.success]
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "delete_dir"
+location = "std::fs::remove_dir"
+target = "native"
+description = "Delete an empty directory"
+
+[functions.input]
+path = "String"
+
+[functions.output.success]
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "delete_dir_all"
+location = "std::fs::remove_dir_all"
+target = "native"
+description = "Delete directory and all contents recursively"
+
+[functions.input]
+path = "String"
+
+[functions.output.success]
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"

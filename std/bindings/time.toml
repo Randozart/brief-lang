@@ -1,0 +1,87 @@
+# Standard Library Time Bindings
+# Provides time and date operations
+
+[[functions]]
+name = "current_timestamp"
+location = "std::time::SystemTime::now"
+target = "native"
+description = "Get current Unix timestamp in milliseconds"
+
+[functions.input]
+
+[functions.output.success]
+timestamp = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "sleep_ms"
+location = "std::thread::sleep"
+target = "native"
+description = "Sleep for specified milliseconds"
+
+[functions.input]
+milliseconds = "Int"
+
+[functions.output.success]
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "sleep_seconds"
+location = "std::thread::sleep"
+target = "native"
+description = "Sleep for specified seconds"
+
+[functions.input]
+seconds = "Int"
+
+[functions.output.success]
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "measure_time_ms"
+location = "std::time::Instant::now"
+target = "native"
+description = "Start timing measurement (returns handle)"
+
+[functions.input]
+
+[functions.output.success]
+handle = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "elapsed_ms"
+location = "std::time::Instant::elapsed"
+target = "native"
+description = "Get elapsed milliseconds since measurement started"
+
+[functions.input]
+handle = "Int"
+
+[functions.output.success]
+elapsed = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"

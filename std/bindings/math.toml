@@ -1,0 +1,294 @@
+# Standard Library Math Bindings
+# Provides mathematical operations and functions
+
+[[functions]]
+name = "sqrt"
+location = "std::f64::sqrt"
+target = "native"
+description = "Compute square root of a float"
+
+[functions.input]
+value = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "pow"
+location = "std::f64::powf"
+target = "native"
+description = "Raise float to a power"
+
+[functions.input]
+base = "Float"
+exponent = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "abs_int"
+location = "std::num::IntAbsExt::abs"
+target = "native"
+description = "Compute absolute value of integer"
+
+[functions.input]
+value = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "abs_float"
+location = "std::f64::abs"
+target = "native"
+description = "Compute absolute value of float"
+
+[functions.input]
+value = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "floor"
+location = "std::f64::floor"
+target = "native"
+description = "Round float down to nearest integer"
+
+[functions.input]
+value = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "ceil"
+location = "std::f64::ceil"
+target = "native"
+description = "Round float up to nearest integer"
+
+[functions.input]
+value = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "round"
+location = "std::f64::round"
+target = "native"
+description = "Round float to nearest integer"
+
+[functions.input]
+value = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "sin"
+location = "std::f64::sin"
+target = "native"
+description = "Compute sine of angle in radians"
+
+[functions.input]
+radians = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "cos"
+location = "std::f64::cos"
+target = "native"
+description = "Compute cosine of angle in radians"
+
+[functions.input]
+radians = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "tan"
+location = "std::f64::tan"
+target = "native"
+description = "Compute tangent of angle in radians"
+
+[functions.input]
+radians = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "log"
+location = "std::f64::ln"
+target = "native"
+description = "Compute natural logarithm"
+
+[functions.input]
+value = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "exp"
+location = "std::f64::exp"
+target = "native"
+description = "Compute e raised to the power"
+
+[functions.input]
+value = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "min_int"
+location = "std::cmp::min"
+target = "native"
+description = "Return minimum of two integers"
+
+[functions.input]
+a = "Int"
+b = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "max_int"
+location = "std::cmp::max"
+target = "native"
+description = "Return maximum of two integers"
+
+[functions.input]
+a = "Int"
+b = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "min_float"
+location = "f64::min"
+target = "native"
+description = "Return minimum of two floats"
+
+[functions.input]
+a = "Float"
+b = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "max_float"
+location = "f64::max"
+target = "native"
+description = "Return maximum of two floats"
+
+[functions.input]
+a = "Float"
+b = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
