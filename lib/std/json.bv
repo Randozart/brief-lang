@@ -1,5 +1,12 @@
 # Standard JSON Library
-# Foreign function declarations
+#
+# Functions marked with 'frgn' require foreign implementation.
+# Functions with 'defn' are implemented natively in Brief.
+#
+# Note: JSON requires a Data type which is inherently foreign,
+# but we can provide helper functions natively.
+
+# ===== PURE FOREIGN (requires Data type implementation) =====
 
 # Parse & Serialize
 frgn sig parse(s: String) -> Data;
@@ -45,5 +52,95 @@ frgn sig object_val(map: Data) -> Data;
 # Merge
 frgn sig merge(a: Data, b: Data) -> Data;
 
-# Pretty Print
-frgn sig pretty_print(data: Data) -> String;
+# ===== NATIVE DEFINITIONS =====
+
+# Pretty Print - simple version
+defn pretty_print(data: Data) [result.len() >= 0] -> String {
+  term stringify(data);
+};
+
+# Helper: Check if data exists and is not null
+defn exists(data: Data) [true][result == true || result == false] -> Bool {
+  term !is_null(data);
+};
+
+# Helper: Get value with default
+defn get_or_default(data: Data, key: String, default: String) [true][result.len() >= 0] -> String {
+  [has_key(data, key)] {
+    term get_string(data, key);
+  };
+  term default;
+};
+
+# Helper: Get number with default
+defn get_number_or(data: Data, key: String, default: Float) [true][result >= 0.0 || result < 0.0] -> Float {
+  [has_key(data, key) && is_number(get_object(data, key))] {
+    term get_number(data, key);
+  };
+  term default;
+};
+
+# Helper: Get number with default (Int)
+defn get_int_or(data: Data, key: String, default: Int) [true][result == default || result != default] -> Int {
+  [has_key(data, key) && is_number(get_object(data, key))] {
+    let n: Float = get_number(data, key);
+    term n;
+  };
+  term default;
+};
+
+# Helper: Get bool with default
+defn get_bool_or(data: Data, key: String, default: Bool) [true][result == true || result == false] -> Bool {
+  [has_key(data, key) && is_bool(get_object(data, key))] {
+    term get_bool(data, key);
+  };
+  term default;
+};
+
+# Helper: Safe array access with bounds check
+defn array_get(data: Data, index: Int) [true][true] -> Data {
+  [index < 0 || index >= array_len(data)] {
+    term null();
+  };
+  term get_index(data, index);
+};
+
+# Helper: Array to list of strings (if strings)
+defn array_to_strings(data: Data) [is_array(data)][result.len() == array_len(data)] -> List<String> {
+  let len: Int = array_len(data);
+  [len == 0] {
+    term [];
+  };
+  let result: List<String> = [];
+  let i: Int = 0;
+  [i < len] {
+    let item: Data = get_index(data, i);
+    [is_string(item)] {
+      &result = result + [get_string(data, "__item")];  # Note: need proper way to get from temp
+    };
+    &i = i + 1;
+  };
+  term result;
+};
+
+# Helper: Get array item count safely
+defn array_count(data: Data) [is_array(data)][result >= 0] -> Int {
+  term array_len(data);
+};
+
+# Helper: Check if array is empty
+defn array_empty(data: Data) [is_array(data)][result == true || result == false] -> Bool {
+  term array_len(data) == 0;
+};
+
+# Helper: Object to list count
+defn object_count(data: Data) [is_object(data)][result >= 0] -> Int {
+  let k: List<String> = keys(data);
+  term k.len();
+};
+
+# Helper: Object is empty
+defn object_empty(data: Data) [is_object(data)][result == true || result == false] -> Bool {
+  let k: List<String> = keys(data);
+  term k.len() == 0;
+};

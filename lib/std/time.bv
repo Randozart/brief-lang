@@ -1,12 +1,16 @@
 # Standard Time Library
-# Foreign function declarations
+#
+# Functions marked with 'frgn' require foreign implementation.
+# Functions with 'defn' are implemented natively in Brief.
 
-# Current Time
-frgn sig now() -> Int;           # Unix timestamp in seconds
-frgn sig now_millis() -> Int;    # Unix timestamp in milliseconds
-frgn sig now_micros() -> Int;    # Unix timestamp in microseconds
+# ===== PURE FOREIGN (requires system time) =====
 
-# Time Components
+# Current time
+frgn sig now() -> Int;
+frgn sig now_millis() -> Int;
+frgn sig now_micros() -> Int;
+
+# Time component extraction
 frgn sig year(timestamp: Int) -> Int;
 frgn sig month(timestamp: Int) -> Int;
 frgn sig day(timestamp: Int) -> Int;
@@ -16,26 +20,9 @@ frgn sig second(timestamp: Int) -> Int;
 frgn sig weekday(timestamp: Int) -> Int;
 frgn sig yearday(timestamp: Int) -> Int;
 
-# Time Creation
+# Time creation
 frgn sig timestamp(year: Int, month: Int, day: Int) -> Int;
 frgn sig timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int;
-
-# Duration
-frgn sig duration_seconds(secs: Int) -> Int;
-frgn sig duration_millis(ms: Int) -> Int;
-frgn sig duration_minutes(mins: Int) -> Int;
-frgn sig duration_hours(hours: Int) -> Int;
-frgn sig duration_days(days: Int) -> Int;
-
-# Time Arithmetic
-frgn sig add_seconds(timestamp: Int, secs: Int) -> Int;
-frgn sig add_minutes(timestamp: Int, mins: Int) -> Int;
-frgn sig add_hours(timestamp: Int, hours: Int) -> Int;
-frgn sig add_days(timestamp: Int, days: Int) -> Int;
-
-# Time Differences
-frgn sig diff_seconds(t1: Int, t2: Int) -> Int;
-frgn sig diff_days(t1: Int, t2: Int) -> Int;
 
 # Formatting
 frgn sig format_timestamp(timestamp: Int, format: String) -> String;
@@ -47,7 +34,56 @@ frgn sig format_datetime(timestamp: Int) -> String;
 frgn sig parse_timestamp(s: String) -> Int;
 frgn sig parse_datetime(s: String) -> Int;
 
-# Constants
+# ===== NATIVE DEFINITIONS =====
+
+# Duration helpers - native arithmetic
+defn duration_seconds(secs: Int) [result == secs] -> Int {
+  term secs;
+};
+
+defn duration_millis(ms: Int) [result == ms] -> Int {
+  term ms;
+};
+
+defn duration_minutes(mins: Int) [result == mins * 60] -> Int {
+  term mins * 60;
+};
+
+defn duration_hours(hours: Int) [result == hours * 3600] -> Int {
+  term hours * 3600;
+};
+
+defn duration_days(days: Int) [result == days * 86400] -> Int {
+  term days * 86400;
+};
+
+# Time arithmetic - native
+defn add_seconds(timestamp: Int, secs: Int) [true][result == timestamp + secs] -> Int {
+  term timestamp + secs;
+};
+
+defn add_minutes(timestamp: Int, mins: Int) [true][result == timestamp + mins * 60] -> Int {
+  term timestamp + mins * 60;
+};
+
+defn add_hours(timestamp: Int, hours: Int) [true][result == timestamp + hours * 3600] -> Int {
+  term timestamp + hours * 3600;
+};
+
+defn add_days(timestamp: Int, days: Int) [true][result == timestamp + days * 86400] -> Int {
+  term timestamp + days * 86400;
+};
+
+# Time differences - native
+defn diff_seconds(t1: Int, t2: Int) [true][result == t1 - t2] -> Int {
+  term t1 - t2;
+};
+
+defn diff_days(t1: Int, t2: Int) [result == (t1 - t2) / 86400] -> Int {
+  term (t1 - t2) / 86400;
+};
+
+# Constants - these could be frgn or defn
 frgn sig seconds_per_minute() -> Int;
 frgn sig seconds_per_hour() -> Int;
 frgn sig seconds_per_day() -> Int;

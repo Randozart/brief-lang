@@ -1,5 +1,12 @@
 # Standard Encoding Library
-# Foreign function declarations
+#
+# Functions marked with 'frgn' require foreign implementation.
+# Functions with 'defn' are implemented natively in Brief.
+#
+# Note: Most encoding functions require bit manipulation 
+# and complex algorithms, so they are mostly foreign.
+
+# ===== PURE FOREIGN (requires bit manipulation/complex algorithms) =====
 
 # Base64
 frgn sig base64_encode(data: String) -> String;
@@ -43,3 +50,135 @@ frgn sig is_uuid(s: String) -> Bool;
 frgn sig uri_parse(s: String) -> Data;
 frgn sig uri_build(data: Data) -> String;
 frgn sig uri_get_param(url: String, key: String) -> String;
+
+# ===== NATIVE DEFINITIONS =====
+
+# Simple hex digit to int
+defn hex_digit_to_int(c: String) [c.len() == 1][result >= 0 && result <= 15] -> Int {
+  [c == "0"] { term 0; };
+  [c == "1"] { term 1; };
+  [c == "2"] { term 2; };
+  [c == "3"] { term 3; };
+  [c == "4"] { term 4; };
+  [c == "5"] { term 5; };
+  [c == "6"] { term 6; };
+  [c == "7"] { term 7; };
+  [c == "8"] { term 8; };
+  [c == "9"] { term 9; };
+  [c == "a" || c == "A"] { term 10; };
+  [c == "b" || c == "B"] { term 11; };
+  [c == "c" || c == "C"] { term 12; };
+  [c == "d" || c == "D"] { term 13; };
+  [c == "e" || c == "E"] { term 14; };
+  [c == "f" || c == "F"] { term 15; };
+  term 0;
+};
+
+# Int to hex digit
+defn int_to_hex_digit(n: Int) [n >= 0 && n <= 15][result.len() == 1] -> String {
+  [n == 0] { term "0"; };
+  [n == 1] { term "1"; };
+  [n == 2] { term "2"; };
+  [n == 3] { term "3"; };
+  [n == 4] { term "4"; };
+  [n == 5] { term "5"; };
+  [n == 6] { term "6"; };
+  [n == 7] { term "7"; };
+  [n == 8] { term "8"; };
+  [n == 9] { term "9"; };
+  [n == 10] { term "a"; };
+  [n == 11] { term "b"; };
+  [n == 12] { term "c"; };
+  [n == 13] { term "d"; };
+  [n == 14] { term "e"; };
+  [n == 15] { term "f"; };
+  term "0";
+};
+
+# Simple byte to hex (for single byte)
+defn byte_to_hex(b: Int) [b >= 0 && b <= 255][result.len() == 2] -> String {
+  let high: Int = b / 16;
+  let low: Int = b % 16;
+  term int_to_hex_digit(high) + int_to_hex_digit(low);
+};
+
+# Simple URL encode (basic version - only encodes spaces)
+defn url_encode_simple(s: String) [true][result.len() >= s.len()] -> String {
+  let result: String = "";
+  let i: Int = 0;
+  [i < s.len()] {
+    let c: String = s[i..i+1];
+    [c == " "] {
+      &result = result + "%20";
+    } {
+      &result = result + c;
+    };
+    &i = i + 1;
+  };
+  term result;
+};
+
+# Simple URL decode (basic version - only decodes %20)
+defn url_decode_simple(s: String) [true][result.len() <= s.len()] -> String {
+  let result: String = "";
+  let i: Int = 0;
+  [i < s.len()] {
+    [i + 2 < s.len() && s[i..i+1] == "%" && s[i+1..i+3] == "20"] {
+      &result = result + " ";
+      &i = i + 3;
+    } {
+      &result = result + s[i..i+1];
+      &i = i + 1;
+    };
+  };
+  term result;
+};
+
+# Check if char is hex digit
+defn is_hex_digit(c: String) [c.len() == 1][result == true || result == false] -> Bool {
+  [c >= "0" && c <= "9"] { term true; };
+  [c >= "a" && c <= "f"] { term true; };
+  [c >= "A" && c <= "F"] { term true; };
+  term false;
+};
+
+# Check if string is valid hex
+defn is_hex_string(s: String) [true][result == true || result == false] -> Bool {
+  [s.len() == 0] { term false; };
+  let i: Int = 0;
+  let valid: Bool = true;
+  [i < s.len() && valid] {
+    [is_hex_digit(s[i..i+1])] {
+      &valid = true;
+    } {
+      &valid = false;
+    };
+    &i = i + 1;
+  };
+  term valid;
+};
+
+# Reverse string (useful for some encodings)
+defn reverse_string(s: String) [true][result.len() == s.len()] -> String {
+  [s.len() <= 1] { term s; };
+  let result: String = "";
+  let i: Int = s.len() - 1;
+  [i >= 0] {
+    &result = result + s[i..i+1];
+    &i = i - 1;
+  };
+  term result;
+};
+
+# Count occurrences (useful for validation)
+defn count_char(s: String, c: String) [c.len() == 1][result >= 0] -> Int {
+  let count: Int = 0;
+  let i: Int = 0;
+  [i < s.len()] {
+    [s[i..i+1] == c] {
+      &count = count + 1;
+    };
+    &i = i + 1;
+  };
+  term count;
+};
