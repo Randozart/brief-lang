@@ -91,10 +91,10 @@ pub enum Statement {
         expr: Expr,
     },
 
-    // Guarded statement: [expr] statement
+    // Guarded statement: [expr] statement or [expr] { statements }
     Guarded {
         condition: Expr,
-        statement: Box<Statement>,
+        statements: Vec<Statement>, // Changed from single statement to vec
     },
 
     // Term statement: term expr?, expr?, ... (multi-output with trailing commas for void)

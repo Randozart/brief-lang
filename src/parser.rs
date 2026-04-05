@@ -1053,15 +1053,41 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Escape(expr))
             }
             Some(Ok(Token::LBracket)) => {
-                // Guarded statement: [condition] statement
+                // Guarded statement: [condition] statement or [condition] { statements }
                 self.advance(); // consume [
                 let condition = self.parse_expression()?;
                 self.expect(Token::RBracket)?;
-                let statement = self.parse_statement()?;
-                Ok(Statement::Guarded {
-                    condition,
-                    statement: Box::new(statement),
-                })
+
+                // Check for block syntax
+                if let Some(Ok(Token::LBrace)) = self.current_token() {
+                    // Block guard: [condition] { statements };
+                    self.advance(); // consume {
+                    let mut statements = Vec::new();
+
+                    // Parse statements until we hit }
+                    while !matches!(self.current_token(), Some(Ok(Token::RBrace))) {
+                        statements.push(self.parse_statement()?);
+                    }
+
+                    if statements.is_empty() {
+                        return Err("Empty guarded block".to_string());
+                    }
+
+                    self.expect(Token::RBrace)?;
+                    self.expect(Token::Semicolon)?; // Block must be terminated with ;
+
+                    Ok(Statement::Guarded {
+                        condition,
+                        statements,
+                    })
+                } else {
+                    // Flat guard: [condition] statement
+                    let statement = self.parse_statement()?;
+                    Ok(Statement::Guarded {
+                        condition,
+                        statements: vec![statement],
+                    })
+                }
             }
             _ => {
                 // Expression statement or Assignment/Unification

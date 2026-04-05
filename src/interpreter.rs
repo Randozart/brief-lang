@@ -234,11 +234,13 @@ impl Interpreter {
             }
             Statement::Guarded {
                 condition,
-                statement,
+                statements,
             } => {
                 let cond_val = self.eval_expr(condition)?;
                 if cond_val == Value::Bool(true) {
-                    self.exec_stmt(statement)?;
+                    for stmt in statements {
+                        self.exec_stmt(stmt)?;
+                    }
                 }
             }
             Statement::Unification { .. } => {

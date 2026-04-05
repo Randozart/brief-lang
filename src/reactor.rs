@@ -287,11 +287,18 @@ impl Reactor {
             Statement::Escape(_) => Ok(StmtResult::Escaped),
             Statement::Guarded {
                 condition,
-                statement,
+                statements,
             } => {
                 let cond_val = interp.eval_expr(condition)?;
                 if cond_val == Value::Bool(true) {
-                    self.execute_statement(interp, statement)
+                    for stmt in statements {
+                        let result = self.execute_statement(interp, stmt)?;
+                        match result {
+                            StmtResult::Continue => {}
+                            _ => return Ok(result),
+                        }
+                    }
+                    Ok(StmtResult::Continue)
                 } else {
                     Ok(StmtResult::Continue)
                 }

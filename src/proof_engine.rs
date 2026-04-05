@@ -270,7 +270,7 @@ impl SymbolicExecutor {
                 }
                 Statement::Guarded {
                     condition,
-                    statement,
+                    statements,
                 } => {
                     let true_state = current_state
                         .clone()
@@ -280,11 +280,7 @@ impl SymbolicExecutor {
                         .with_constraint(condition.clone(), true);
 
                     let mut true_paths = Vec::new();
-                    self.enumerate_paths_recursive(
-                        &[*statement.clone()],
-                        true_state,
-                        &mut true_paths,
-                    );
+                    self.enumerate_paths_recursive(statements, true_state, &mut true_paths);
 
                     let mut false_paths = Vec::new();
                     self.enumerate_paths_recursive(&body[1..], false_state, &mut false_paths);
@@ -946,10 +942,12 @@ impl ProofEngine {
             }
             Statement::Guarded {
                 condition,
-                statement,
+                statements,
             } => {
                 self.collect_read_vars_from_expr(condition, vars);
-                self.collect_read_vars(statement, vars);
+                for stmt in statements {
+                    self.collect_read_vars(stmt, vars);
+                }
             }
             Statement::Term(outputs) => {
                 for out in outputs {
@@ -986,8 +984,10 @@ impl ProofEngine {
             Statement::Expression(_) => {}
             Statement::Term(_) => {}
             Statement::Escape(_) => {}
-            Statement::Guarded { statement, .. } => {
-                self.collect_write_vars(statement, vars);
+            Statement::Guarded { statements, .. } => {
+                for stmt in statements {
+                    self.collect_write_vars(stmt, vars);
+                }
             }
             Statement::Unification { .. } => {}
         }
@@ -1038,8 +1038,8 @@ impl ProofEngine {
                 Statement::Term(outputs) => {
                     return true;
                 }
-                Statement::Guarded { statement, .. } => {
-                    if self.has_term_statement(&[(*statement.clone()).clone()]) {
+                Statement::Guarded { statements, .. } => {
+                    if self.has_term_statement(statements) {
                         return true;
                     }
                 }
@@ -1145,9 +1145,9 @@ impl ProofEngine {
                 }
                 Statement::Guarded {
                     condition: _,
-                    statement,
+                    statements,
                 } => {
-                    self.collect_term_values(&[(*statement.clone()).clone()], results);
+                    self.collect_term_values(statements, results);
                 }
                 _ => {}
             }

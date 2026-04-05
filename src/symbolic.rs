@@ -337,14 +337,16 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
             match stmt {
                 Statement::Guarded {
                     condition,
-                    statement,
+                    statements,
                 } => {
-                    // Path 1: Guard taken - execute the statement
+                    // Path 1: Guard taken - execute the statements
                     let mut true_state = state.clone();
                     true_state.add_constraint(condition, true);
 
-                    // Process the inner statement(s)
-                    execute_statement(statement, &mut true_state);
+                    // Process all inner statements
+                    for stmt in statements {
+                        execute_statement(stmt, &mut true_state);
+                    }
                     new_paths.push(true_state);
 
                     // Path 2: Guard not taken - skip the statement

@@ -78,8 +78,8 @@ impl Annotator {
                 Statement::Expression(Expr::Call(name, _)) => {
                     calls.push((name.clone(), 0));
                 }
-                Statement::Guarded { statement, .. } => {
-                    self.collect_calls_from_stmts(&[(**statement).clone()], calls);
+                Statement::Guarded { statements, .. } => {
+                    self.collect_calls_from_stmts(statements, calls);
                 }
                 Statement::Let { expr, .. } => {
                     if let Some(e) = expr {
@@ -615,14 +615,25 @@ impl Annotator {
             }
             Statement::Guarded {
                 condition,
-                statement,
+                statements,
             } => {
-                format!(
-                    "{}[{}] {}\n",
-                    spaces,
-                    self.format_expr(condition),
-                    self.format_statement(statement, 0).trim()
-                )
+                if statements.len() == 1 {
+                    // Single statement: flat syntax
+                    format!(
+                        "{}[{}] {}\n",
+                        spaces,
+                        self.format_expr(condition),
+                        self.format_statement(&statements[0], 0).trim()
+                    )
+                } else {
+                    // Multiple statements: block syntax
+                    let mut result = format!("{}[{}] {{\n", spaces, self.format_expr(condition));
+                    for stmt in statements {
+                        result.push_str(&self.format_statement(stmt, indent + 2));
+                    }
+                    result.push_str(&format!("{}}}\n", spaces));
+                    result
+                }
             }
             Statement::Unification {
                 name,

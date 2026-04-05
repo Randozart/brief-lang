@@ -257,7 +257,7 @@ impl TypeChecker {
             }
             Statement::Guarded {
                 condition,
-                statement,
+                statements,
             } => {
                 let cond_ty = self.infer_expression(condition);
                 if !self.types_compatible(&cond_ty, &Type::Bool) {
@@ -267,7 +267,9 @@ impl TypeChecker {
                         context: "guard condition".to_string(),
                     });
                 }
-                self.check_statement(statement, is_async);
+                for stmt in statements {
+                    self.check_statement(stmt, is_async);
+                }
             }
             Statement::Unification {
                 name,
