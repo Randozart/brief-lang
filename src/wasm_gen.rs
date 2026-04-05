@@ -808,11 +808,14 @@ impl WasmGenerator {
         output.push_str("    function startPollLoop() {\n");
         output.push_str("        function poll() {\n");
         output.push_str("            const dispatch = wasm.poll_dispatch();\n");
+        output.push_str("            console.log('Poll loop, dispatch:', dispatch);\n");
         output.push_str("            if (dispatch && dispatch !== '[]') {\n");
+        output.push_str("                console.log('Applying instructions:', dispatch);\n");
         output.push_str("                applyInstructions(JSON.parse(dispatch));\n");
         output.push_str("            }\n");
         output.push_str("            requestAnimationFrame(poll);\n");
         output.push_str("        }\n");
+        output.push_str("        console.log('Starting poll loop');\n");
         output.push_str("        requestAnimationFrame(poll);\n");
         output.push_str("    }\n\n");
 
