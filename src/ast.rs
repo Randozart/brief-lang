@@ -1,6 +1,6 @@
 use crate::errors::Span;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Int,
     Float,
@@ -38,7 +38,7 @@ pub enum ResultType {
     TrueAssertion,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Integer(i64),
     Float(f64),
@@ -308,4 +308,31 @@ pub struct Program {
     pub items: Vec<TopLevel>,
     pub comments: Vec<Comment>,
     pub reactor_speed: Option<u32>, // NEW: file-level @Hz default
+}
+
+/// Helper for exhaustiveness checking (Feature A)
+impl OutputType {
+    /// Determine what types the CALLER must handle
+    /// For union types: caller must handle each type
+    /// For tuple types: caller must bind all slots
+    /// For single: caller binds one type
+    pub fn required_caller_bindings(&self) -> Vec<Type> {
+        match self {
+            OutputType::Single(ty) => vec![ty.clone()],
+            OutputType::Union(types) => types.clone(), // All must be handled
+            OutputType::Tuple(types) => types.clone(), // All must be bound
+        }
+    }
+
+    /// Check if caller's binding is sufficient for this output
+    /// This is a placeholder for full exhaustiveness checking
+    pub fn is_caller_binding_sufficient(&self, caller_type: &Type) -> bool {
+        // For now: simple check
+        // Future: implement full exhaustiveness verification
+        match self {
+            OutputType::Single(ty) => ty == caller_type,
+            OutputType::Union(_) => true, // Deferred to type checker
+            OutputType::Tuple(_) => true, // Deferred to type checker
+        }
+    }
 }

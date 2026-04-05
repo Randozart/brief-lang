@@ -773,7 +773,7 @@ For async transactions that may run concurrently, the following ownership rules 
 
 **Read Access:**
 - Many transactions may read the same variable simultaneously (shared read)
-- Reading does not block other readers or writers
+- Reading never blocks other readers or writers
 
 **Write Access:**
 - Only one transaction may hold write access (`&variable`) at a time
@@ -784,6 +784,8 @@ Two async transactions that both claim write access to the same outer-scope vari
 1. Their pre-conditions are mutually exclusive (can never both be true)
 2. They can never be called simultaneously (enforced by caller)
 
+Multiple readers are always allowed simultaneously. Writes require exclusive access.
+
 ```brief
 # ILLEGAL: Both write to &counter, pre-conditions can overlap
 async txn inc_a [true][...] { &counter = ... }
@@ -793,7 +795,11 @@ async txn inc_b [true][...] { &counter = ... }
 async txn inc_a [counter == 0][...] { &counter = ... }
 async txn inc_b [counter == 1][...] { &counter = ... }
 
-# LEGAL: One reads, one writes (reader doesn't block writer, but writer blocks reader)
+# LEGAL: Multiple readers allowed (no blocking)
+async txn reader_a [true][...] { let x = counter; ... }
+async txn reader_b [true][...] { let y = counter; ... }
+
+# ILLEGAL: Writer blocks all reads and writes
 async txn reader [true][...] { let x = counter; ... }
 async txn writer [x == 0][...] { &counter = ... }
 ```
