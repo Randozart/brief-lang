@@ -1,4 +1,5 @@
 pub mod annotator;
+pub mod assertion_verify;
 pub mod ast;
 pub mod cache;
 pub mod desugarer;
@@ -14,6 +15,7 @@ pub mod rbv;
 pub mod reactor;
 pub mod resolver;
 pub mod scheduler;
+pub mod sig_casting;
 pub mod symbolic;
 pub mod typechecker;
 pub mod view_compiler;

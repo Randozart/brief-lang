@@ -336,3 +336,17 @@ impl OutputType {
         }
     }
 }
+
+/// Sig Casting Support (Feature B)
+/// Allows projecting specific output types from multi-output functions
+#[derive(Debug, Clone)]
+pub struct SigProjection {
+    /// The signature name being projected to
+    pub sig_name: String,
+
+    /// The types this sig projects from the defn
+    pub projected_types: Vec<Type>,
+
+    /// The source defn this sig casts from
+    pub source_defn: String,
+}

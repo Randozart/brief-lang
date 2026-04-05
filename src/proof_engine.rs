@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::errors::{Diagnostic, Severity, Span};
+use crate::sig_casting;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -64,7 +65,7 @@ pub struct SymbolicState {
 }
 
 impl SymbolicState {
-    fn new() -> Self {
+    pub fn new() -> Self {
         SymbolicState {
             vars: HashMap::new(),
             constraints: Vec::new(),
@@ -550,6 +551,7 @@ impl ProofEngine {
         self.check_total_path(program);
         self.check_true_assertions(program);
         self.check_postcondition_contradictions(program);
+        self.check_sig_projections(program);
         self.verify_contracts(program);
         self.errors.clone()
     }
@@ -568,6 +570,59 @@ impl ProofEngine {
                     self.errors.extend(errs);
                 }
                 _ => {}
+            }
+        }
+    }
+
+    fn check_sig_projections(&mut self, program: &Program) {
+        // Build a map of definitions by name for quick lookup
+        let mut definitions: HashMap<String, &Definition> = HashMap::new();
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                definitions.insert(defn.name.clone(), defn);
+            }
+        }
+
+        // Verify each signature's projections against its corresponding definition
+        for item in &program.items {
+            if let TopLevel::Signature(sig) = item {
+                if let Some(source_name) = &sig.source {
+                    if let Some(defn) = definitions.get(source_name) {
+                        // Feature B: Verify sig casting
+                        match sig_casting::verify_sig_projection(sig, defn) {
+                            Ok(()) => {
+                                // Projection is valid
+                            }
+                            Err(err_msg) => {
+                                let mut proof_err =
+                                    ProofError::new("B001", "invalid sig projection");
+                                proof_err.explanation = format!("Sig '{}': {}", sig.name, err_msg);
+                                proof_err.proof_chain.push(format!(
+                                    "1. Signature '{}' projects from definition '{}'",
+                                    sig.name, source_name
+                                ));
+                                proof_err.proof_chain.push(format!(
+                                    "2. Requested types: {:?}",
+                                    match &sig.result_type {
+                                        ResultType::Projection(types) => types.clone(),
+                                        ResultType::TrueAssertion => vec![],
+                                    }
+                                ));
+                                if let Some(ref output_type) = defn.output_type {
+                                    proof_err.proof_chain.push(format!(
+                                        "3. Available types from definition: {:?}",
+                                        output_type.all_types()
+                                    ));
+                                }
+                                proof_err.hints.push(
+                                    "ensure all requested types are produced by the definition"
+                                        .to_string(),
+                                );
+                                self.errors.push(proof_err);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1061,7 +1116,41 @@ impl ProofEngine {
         for item in &program.items {
             if let TopLevel::Signature(sig) = item {
                 if let ResultType::TrueAssertion = sig.result_type {
-                    if let Some(defn) = defns.get(&sig.name) {
+                    // Try to resolve the source definition
+                    let source_name = sig.source.as_ref().unwrap_or(&sig.name);
+
+                    if let Some(defn) = defns.get(source_name) {
+                        // Use Feature C assertion verification
+                        match crate::assertion_verify::verify_true_assertion(sig, defn) {
+                            Ok(()) => {
+                                // Assertion verified successfully
+                            }
+                            Err(err_msg) => {
+                                let mut proof_err =
+                                    ProofError::new("C001", "true assertion verification failed");
+                                proof_err.explanation = format!(
+                                    "Signature '{}' asserts '-> true' but verification failed: {}",
+                                    sig.name, err_msg
+                                );
+                                proof_err.proof_chain.push(format!(
+                                    "1. Signature '{}' declares it returns Bool = true",
+                                    sig.name
+                                ));
+                                proof_err.proof_chain.push(format!(
+                                    "2. Definition '{}' was analyzed for this assertion",
+                                    defn.name
+                                ));
+                                proof_err
+                                    .proof_chain
+                                    .push(format!("3. Verification failure: {}", err_msg));
+                                proof_err.hints.push(
+                                    "ensure all execution paths produce Bool = true".to_string(),
+                                );
+                                self.errors.push(proof_err);
+                            }
+                        }
+
+                        // Also run the old verification logic for compatibility
                         self.verify_true_assertion(&sig.name, defn);
                     }
                 }
