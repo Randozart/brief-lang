@@ -1,5 +1,5 @@
 # Brief Language Specification
-**Version:** 6.0 Multi-Output Functions & Sig Polymorphism  
+**Version:** 6.1 Multi-Output Functions, Sig Polymorphism & Adaptive Reactor Scheduling  
 **Date:** 2026-04-05  
 **Status:** Authoritative Reference
 
@@ -222,6 +222,103 @@ Brief programs have no `main()` function. They execute using a **Blackboard Arch
 A transaction in Brief is atomic. If a transaction reaches an `escape` statement, fails an inline guard, or fails to satisfy its `[post]` condition upon `term`, it acts as a **No-Op**.
 
 Any mutations to `&variables` made during the failed transaction are instantly rolled back to their original state, keeping the Blackboard pristine.
+
+### 3.3 Adaptive Reactor Scheduling with `@Hz` Declarations
+
+Brief uses a **single global reactor** that adapts to the polling needs of all loaded files. This optimization eliminates unnecessary polling while maintaining reactive responsiveness.
+
+#### 3.3.1 Default Polling Rate
+
+```brief
+reactor @10Hz;
+```
+
+The file-level `reactor` directive sets the **default polling speed** for all `rct` blocks in that file. If not specified, the default is `@10Hz`.
+
+**Rules:**
+- `@10Hz` means the reactor evaluates preconditions 10 times per second
+- This applies to all `rct` blocks in the file that don't have explicit speed declarations
+- Pure files without `rct` blocks never activate the reactor (zero CPU cost)
+
+#### 3.3.2 Per-rct Speed Declaration
+
+```brief
+rct [condition] txn name [pre][post] { ... } @60Hz;
+```
+
+Individual reactive transactions can declare their own polling speed, overriding the file-level default.
+
+**Examples:**
+```brief
+reactor @10Hz;  // File default: 10Hz
+
+rct [data_ready] txn process [pre][post] { ... };      // Uses @10Hz
+rct [frame_tick] txn render [pre][post] { ... } @60Hz;  // Overrides to @60Hz
+rct [event] txn handle [pre][post] { ... } @5Hz;        // Overrides to @5Hz
+```
+
+#### 3.3.3 Global Reactor Adaptation
+
+When multiple files are loaded, Brief uses a **single global reactor** that adapts to requirements:
+
+1. **Collector phase:** Compiler collects all `@Hz` declarations from all files
+2. **Adaptation:** Global reactor runs at `max(@Hz)` across all files
+3. **Intelligent skipping:** Files declaring slower speeds are checked only when needed
+   - Example: If global runs at `@60Hz` but file needs `@10Hz`, that file is checked every 6 ticks
+   - Zero overhead for slower files
+
+**Example:**
+```
+File A (mainMenu.rbv):     reactor @10Hz;
+File B (gameLogic.bv):     reactor @60Hz;
+File C (counter.bv):       no rct blocks (no reactor)
+
+Global reactor: Runs at @60Hz
+- mainMenu.rbv preconditions checked every 6 ticks (60/10)
+- gameLogic.bv preconditions checked every tick
+- counter.bv never participates (pure library)
+```
+
+#### 3.3.4 R.rbv Optimization
+
+Components without `rct` blocks have **zero reactor overhead**:
+
+```brief
+<script type="brief">
+  // No rct blocks = no reactor = no connection overhead
+  let count: Int = 0;
+  
+  txn increment [true][count == @count + 1] {
+    &count = count + 1;
+    term;
+  };
+</script>
+```
+
+This is critical for R.rbv files served over connections (browsers, mobile). Passive components consume zero polling bandwidth.
+
+#### 3.3.5 Compiler Warnings
+
+The compiler emits warnings for suspicious polling rates:
+
+```
+⚠️ WARNING: Reactor speed @10000Hz is extremely aggressive
+   Did you intend to set your PC aflame or crash to desktop?
+   Consider using a more reasonable speed (e.g., @60Hz for games, @10Hz for UI)
+```
+
+**Warning thresholds:**
+- `@10000Hz` and above: Aggressive warning
+- Suggests reasonable alternatives based on use case
+
+#### 3.3.6 Performance Characteristics
+
+| Scenario | Reactor Speed | CPU Cost | Notes |
+|----------|---------------|----------|-------|
+| Pure library (defn only) | Inactive | ~0% | No rct blocks |
+| UI app + passive display | @10Hz | Low | Most browser apps |
+| Game with logic + render | @60Hz | Medium | gameLogic + render |
+| Real-time system | @1000Hz | High | Requires careful tuning |
 
 ---
 
