@@ -1,8 +1,0 @@
-#!/bin/bash
-# Simplest possible command to run the shopping cart
-
-cd "$(dirname "$0")" || exit 1
-
-# Just delegate to the existing compiler
-./target/release/brief-compiler rbv examples/shopping_cart.rbv --out .shopping_cart_build &&\
-echo "" && echo "Ready to serve! Run:" && echo "  cd .shopping_cart_build && brief serve ."

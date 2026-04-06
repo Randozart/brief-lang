@@ -73,4 +73,3 @@ dist/
 .env
 .env.local
 *.log
-counter-build/
