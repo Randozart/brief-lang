@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# Rebuild Compiler Script
+# Rebuilds the Brief compiler and reinstalls the VSIX extension
+#
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "=== Building Brief Compiler ==="
+cargo build --release
+
+echo ""
+echo "=== Building VSIX Extension ==="
+cd syntax-highlighter
+export PATH="$HOME/.local/share/fnm:$PATH"
+eval "$(fnm env)"
+fnm use 20
+rm -f *.vsix
+npx vsce package --allow-missing-repository 2>&1 | tail -5
+
+echo ""
+echo "=== Installing Extension ==="
+cp brief-language-0.1.0.vsix ../brief-language.vsix
+flatpak run com.vscodium.codium --install-extension ../brief-language.vsix 2>&1 | grep -E "(Installing|successfully installed|Error)" || true
+
+cd ..
+rm -f syntax-highlighter/brief-language-0.1.0.vsix
+
+echo ""
+echo "=== Done ==="
+echo "Reload VSCode/VSCodium: Ctrl+Shift+P → Developer: Reload Window"
