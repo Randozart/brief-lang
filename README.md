@@ -2,6 +2,28 @@
 
 <img src="https://raw.githubusercontent.com/anomalyco/brief-compiler/main/assets/brief-logo.svg" alt="Brief" width="200"/> <img src="https://raw.githubusercontent.com/anomalyco/brief-compiler/main/assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/>
 
+## Brief Doesn't Break
+
+Brief is a declarative language that proves your code works before it runs.
+
+Instead of commanding the computer through a sequence of steps (imperative),
+Brief asks: what should be true before this code runs, and what must be true after?
+The compiler verifies that all logical paths actually lead to the postcondition.
+
+This catches bugs that imperative languages let slip through:
+
+- **Race conditions**: Through a Rust-inspired borrow checker, async transactions
+  cannot run simultaneously if any writes to a variable the other might be reading.
+- **Unintended side effects**: Every mutation is declared in a precondition/postcondition pair.
+  Side effects outside declared boundaries are impossible.
+- **Logic errors**: The proof engine traces every path through a transaction and
+  verifies each reaches the intended postcondition.
+- **Type errors**: Full type checking prevents mismatches before runtime.
+
+If a bug still occurs, it's because the contract didn't fully express the intent.
+But that makes the bug easy to find — the contract shows exactly where expectation
+and code diverged.
+
 ## Quick Start (5 minutes)
 
 ### 1. Install Brief
@@ -60,93 +82,108 @@ brief run
 
 Opens http://localhost:8080 in your browser with your app running.
 
----
+## Why Declarative?
 
-## What Brief Actually Is
+Declarative logic is inspired by several domains:
 
-A compiled language for building reactive systems where the compiler proves all state transitions work correctly.
+- **Prolog** showed that logical inference can replace explicit control flow
+- **Dialog & Inform** (interactive fiction languages) demonstrated how declarative
+  state machines elegantly express complex behavior
+- **Rust** influenced how Brief handles state and correctness through strict
+  boundaries (similar to borrow checking, but for logical contracts)
+- **React** inspired Rendered Brief's component model
+- **SQL transactions** inspired Brief's transaction syntax and atomicity semantics
 
-## What Brief Actually Is
+The insight: if you declare what must be true before and after a code block
+(a Hoare triple), the compiler can verify the transition is valid. This turns
+assertions from optional boilerplate into mandatory first-class citizens.
 
-Brief is a reactive, declarative, blackboard-based language. You declare state as global variables. You write transactions (blocks of code) that specify what conditions must be true before they can run, and what must be true after. The runtime continuously checks if transaction conditions are met and fires them automatically.
+## How the Reactor Works
 
-The compiler verifies two things:
-1. Every transaction will actually reach its termination condition
-2. When a transaction runs, the postcondition will be satisfied
+Brief runs on a reactor loop that continuously checks if transactions are ready to fire:
 
-## Example
+1. Reactive transactions declare preconditions (what must be true to run)
+2. When a variable changes, the reactor re-evaluates affected transactions
+3. Any transaction with a satisfied precondition fires automatically
+4. Each firing updates state, potentially triggering more transactions
+5. When nothing can fire, the reactor reaches equilibrium and waits
+
+This replaces manual polling and event dispatchers with logical evaluation.
+Instead of: "check this condition, then fire this handler, then check that condition..."
+Brief says: "When A is true, do B. When B is true, do C." The reactor figures out the rest.
+
+## Example: A Complete Lifecycle
 
 ```brief
-let balance: Int = 100;
+let counter: Int = 0;
 let ready: Bool = false;
 
-txn initialize [~ready] {
+// Passive transaction (must be explicitly called)
+txn initialize [~ready][ready] {
   &ready = true;
   term;
 };
 
-rct txn process [ready && balance > 0] {
-  &balance = balance - 10;
+// Reactive transaction (fires automatically when precondition met)
+rct txn increment [ready && counter < 5][counter > @counter] {
+  &counter = counter + 1;
+  term;
+};
+
+// Another reactive that depends on the first
+rct txn notify_complete [ready && counter == 5][true] {
+  log("Count complete!");
   term;
 };
 ```
 
-- `initialize` is a passive transaction. It runs when called.
-- `process` is reactive (`rct`). It fires automatically whenever `ready` is true and `balance > 0`.
-- `[~ready]` means: fire when `ready` is false, and must make it true.
-- `[ready && balance > 0]` means: only fire when both conditions hold.
+Walkthrough:
+- `initialize` must be explicitly called. Its contract `[~ready][ready]` means
+  "precondition: ready is false, postcondition: ready is true"
+- Once `initialize` fires, `ready` becomes true
+- This satisfies `increment`'s precondition: `ready && counter < 5`
+- When `increment` fires, `counter` increases by 1. Its postcondition `[counter > @counter]`
+  verifies the compiler that counter actually increased (@ refers to the value at transaction start)
+- After 5 increments, `counter == 5`, satisfying `notify_complete`'s precondition
+- The reactor handles the cascade automatically
 
-The compiler proves `balance` will actually decrease, and that the postcondition will be satisfied.
+Each transaction's postcondition is a guarantee the compiler verifies.
+If any path through the transaction could violate it, compilation fails.
 
-## How It Works
+Example of caught error:
+```brief
+rct txn bad_increment [ready && counter < 5][counter > 5] {
+  &counter = counter + 1;
+  term;  // Counter is only guaranteed to be > 0, not > 5
+};
+```
+The compiler rejects this because the postcondition is impossible to satisfy.
+Counter can only increase by 1, so if it starts below 4, it can never be > 5.
+The contract forces you to be precise about what the code actually does.
 
-Brief runs on a reactor loop. The runtime:
-1. Tracks which variables each reactive transaction cares about
-2. When a variable changes, marks only the affected transactions as dirty
-3. Re-evaluates their preconditions
-4. Fires any that now have true preconditions
-5. When nothing can fire, the program is at equilibrium and the reactor sleeps
+## Implementation Status
 
-This means polling and event dispatchers are replaced by simple logical evaluation. The state changes → check affected transactions → fire them if their preconditions hold.
-
-## Current Status
-
-This is an early implementation. Core features work:
-- Transactions with pre/post conditions
-- Reactive (`rct`) auto-firing transactions
-- Proof engine verifies termination and postconditions
-- Type checking
-- FFI (call Rust functions)
-- 59 stdlib functions included
-
-Known incomplete:
+Core features (working):
+- Transactions with pre/post conditions (required on all)
+- Reactive (`rct txn`) auto-firing based on contracts
+- Proof engine: termination and postcondition verification
+- Type checking and inference
+- FFI bindings to Rust (with contract boundary enforcement)
+- 59+ standard library functions
+- Pattern matching and unification
+- Imports and modular code organization
+- Borrow-checker-inspired race condition prevention
 - Rendered Brief (web UI framework)
-- Some edge cases in termination proofs
-- Complex generics
 
-## Install
+Edge cases and limitations:
+- Some complex termination proofs remain unresolved
+- Complex generic type inference has gaps
+- WASM compilation is functional but not optimized
 
-### Option 1: Download & Run (Recommended)
-
-**Linux / macOS:**
-```bash
-git clone https://github.com/anomalyco/brief-compiler.git
-cd brief-compiler
-chmod +x scripts/brief-install
-./scripts/brief-install
-```
-
-**Windows:**
-```powershell
-git clone https://github.com/anomalyco/brief-compiler.git
-cd brief-compiler
-.\scripts\brief-install.bat
-```
-
-### Option 2: From Source (Requires Rust)
-```bash
-cargo install --path .
-```
+Note on AI Integration:
+If using an LLM to write Brief code, the language is designed with that in mind.
+Contracts make intent explicit, helping LLMs generate more correct code.
+A system prompt for Brief can be provided to guide model behavior.
 
 ## Usage
 
