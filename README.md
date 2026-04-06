@@ -1,6 +1,6 @@
 # Brief
 
-<img src="https://raw.githubusercontent.com/anomalyco/brief-compiler/main/assets/brief-logo.svg" alt="Brief" width="200"/> <img src="https://raw.githubusercontent.com/anomalyco/brief-compiler/main/assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/>
+![Brief Logo](assets/brief-logo.svg) ![Rendered Brief Logo](assets/r-brief-logo.svg)
 
 ## Brief Doesn't Break
 
@@ -176,7 +176,7 @@ rct txn notify_complete [counter == 5][true] {
   term;
 };
 
-// THIS BREAKS THE CASCADE:
+// This is where we get offending code:
 rct txn bad_reset [counter > 0][counter == 0] {
   &counter = 0;
   term;
