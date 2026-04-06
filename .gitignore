@@ -26,6 +26,12 @@ test-project/
 Cargo.lock
 
 # ============================================
+# FFI NATIVE LIBRARY (generated build artifacts)
+# ============================================
+lib/ffi/native/target/
+lib/ffi/native/Cargo.lock
+
+# ============================================
 # GENERATED FILES
 # ============================================
 *.bc.json
