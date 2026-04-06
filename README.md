@@ -7,7 +7,7 @@
 Brief is a declarative language that tries to prove your code works before it runs.
 
 Instead of commanding the computer through a sequence of steps like most imperative languages,
-Brief asks: what should be true before this code runs, and what must be true after?
+Brief asks: what should be true before this code runs, what must be true after, and where do we stand now?
 The compiler verifies that all logical paths actually lead to the conditions defined in the function's _contract_, a short declaration of what the function is expected to do under which conditions.
 
 This catches bugs that many imperative languages let slip through:
