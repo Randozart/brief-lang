@@ -138,6 +138,9 @@ impl ImportResolver {
                     TopLevel::Signature(s) => Some(s.name.as_str()),
                     TopLevel::ForeignSig(f) => Some(f.name.as_str()),
                     TopLevel::Constant(c) => Some(c.name.as_str()),
+                    TopLevel::Struct(s) => Some(s.name.as_str()),
+                    TopLevel::RStruct(r) => Some(r.name.as_str()),
+                    TopLevel::RenderBlock(rb) => Some(rb.struct_name.as_str()),
                     _ => None,
                 };
                 name.map(|n| item_names.contains(&n)).unwrap_or(false)
