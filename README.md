@@ -24,7 +24,7 @@ If a bug still occurs, it's because the contract didn't fully express the intent
 But that makes the bug easy to find, as the contract shows exactly where expectation
 and code diverged.
 
-## Quick Start (5 minutes)
+## Quick Start
 
 ### 1. Install Brief
 
@@ -84,7 +84,7 @@ Opens http://localhost:8080 in your browser with your app running.
 
 ## Why Declarative?
 
-Declarative logic is inspired by several domains:
+The specific declarative logic in Brief is inspired by several domains:
 
 - **Prolog** and other pure logic languages showed that logical inference can replace explicit control flow
 - **Dialog & Inform** (both interactive fiction languages) demonstrated how declarative
