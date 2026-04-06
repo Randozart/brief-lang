@@ -3,6 +3,7 @@
   "displayName": "Brief Language",
   "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv) and Rendered Brief (.rbv) files",
   "version": "0.1.0",
+  "icon": "./images/brief-logo.svg",
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -16,12 +17,20 @@
         "id": "brief",
         "aliases": ["Brief", "brief"],
         "extensions": [".bv"],
+        "icon": {
+          "light": "./images/brief-logo.svg",
+          "dark": "./images/brief-logo.svg"
+        },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "rbv",
         "aliases": ["Rendered Brief", "rendered-brief"],
         "extensions": [".rbv"],
+        "icon": {
+          "light": "./images/r-brief-logo.svg",
+          "dark": "./images/r-brief-logo.svg"
+        },
         "configuration": "./language-configuration.json"
       }
     ],

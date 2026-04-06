@@ -1,6 +1,6 @@
 # Brief
 
-<img src="brief-logo-draft.jpg" alt="Brief" width="200"/> <img src="r-brief-logo-draft.jpg" alt="Brief" width="200"/>
+<img src="logo/brief-logo.svg" alt="Brief" width="200"/> <img src="logo/r-brief-logo.svg" alt="Rendered Brief" width="200"/>
 
 ---
 
