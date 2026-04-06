@@ -8,6 +8,7 @@
 
 ### 1. Install Brief
 
+**Linux / macOS:**
 ```bash
 # Clone this repository
 git clone https://github.com/anomalyco/brief-compiler.git
@@ -18,9 +19,26 @@ chmod +x brief-install
 ./brief-install
 ```
 
-The installer will copy the compiler to `~/.local/bin/brief`. Add this to your PATH if needed:
+**Windows:**
+```powershell
+# Clone this repository (or download ZIP)
+git clone https://github.com/anomalyco/brief-compiler.git
+cd brief-compiler
+
+# Run the installer
+.\brief-install.bat
+```
+
+The installer will copy the compiler to your user bin directory:
+- Linux/macOS: `~/.local/bin/brief`
+- Windows: `%LOCALAPPDATA%\brief\brief.exe`
+
+Add to your PATH if needed:
 ```bash
+# Linux/macOS
 export PATH="$HOME/.local/bin:$PATH"
+
+# Windows: Add %LOCALAPPDATA%\brief to your PATH via System Properties
 ```
 
 ### 2. Create a Project
@@ -111,11 +129,20 @@ Known incomplete:
 ## Install
 
 ### Option 1: Download & Run (Recommended)
+
+**Linux / macOS:**
 ```bash
 git clone https://github.com/anomalyco/brief-compiler.git
 cd brief-compiler
 chmod +x brief-install
 ./brief-install
+```
+
+**Windows:**
+```powershell
+git clone https://github.com/anomalyco/brief-compiler.git
+cd brief-compiler
+.\brief-install.bat
 ```
 
 ### Option 2: From Source (Requires Rust)
