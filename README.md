@@ -2,8 +2,51 @@
 
 <img src="brief-logo-draft.jpg" alt="Brief" width="200"/> <img src="r-brief-logo-draft.jpg" alt="Brief" width="200"/>
 
+---
 
-**Brief doesn't break.**
+## Quick Start (5 minutes)
+
+### 1. Install Brief
+
+```bash
+# Clone this repository
+git clone https://github.com/anomalyco/brief-compiler.git
+cd brief-compiler
+
+# Run the installer
+chmod +x brief-install
+./brief-install
+```
+
+The installer will copy the compiler to `~/.local/bin/brief`. Add this to your PATH if needed:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### 2. Create a Project
+
+```bash
+brief init my-app
+cd my-app
+```
+
+This creates two files:
+- `main.bv` - Pure Brief (specification only)
+- `main.rbv` - Rendered Brief (with web UI)
+
+Feel free to delete whichever one you don't need.
+
+### 3. Run Your App
+
+```bash
+brief run
+```
+
+Opens http://localhost:8080 in your browser with your app running.
+
+---
+
+## What Brief Actually Is
 
 A compiled language for building reactive systems where the compiler proves all state transitions work correctly.
 
@@ -67,6 +110,15 @@ Known incomplete:
 
 ## Install
 
+### Option 1: Download & Run (Recommended)
+```bash
+git clone https://github.com/anomalyco/brief-compiler.git
+cd brief-compiler
+chmod +x brief-install
+./brief-install
+```
+
+### Option 2: From Source (Requires Rust)
 ```bash
 cargo install --path .
 ```

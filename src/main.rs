@@ -397,7 +397,7 @@ fn run_init(name: Option<&str>, verbose: bool) -> Result<(), Box<dyn std::error:
         r#"[project]
 name = "{}"
 version = "0.1.0"
-entry = "main.bv"
+entry = "main.rbv"
 
 [dependencies]
 "#,
@@ -406,29 +406,135 @@ entry = "main.bv"
 
     std::fs::write(project_dir.join("brief.toml"), manifest_content)?;
 
-    let main_content = r#"# Welcome to Brief!
-# Your main entry point
+    // Pure Brief - Specification only (no UI)
+    let main_bv_content = r#"# =============================================================================
+# Welcome to Brief!
+# =============================================================================
+# This is a pure Brief file - state and transactions without UI.
+# Use this for: business logic, state machines, reactive systems.
+#
+# To delete this file and use only .rbv: rm main.bv
+# =============================================================================
 
-let ready: Bool = false;
+let count: Int = 0;
 
-rct txn init [true][ready == true] {
-  &ready = true;
+# A reactive transaction that fires automatically
+rct txn auto_increment [count < 10][count == @count + 1] {
+  &count = count + 1;
+  term;
+};
+
+# Transaction triggered by external events
+txn increment [true][count == @count + 1] {
+  &count = count + 1;
   term;
 };
 "#;
 
-    std::fs::write(project_dir.join("main.bv"), main_content)?;
+    // Rendered Brief - With Web UI
+    let main_rbv_content = r#"# =============================================================================
+# Welcome to Brief!
+# =============================================================================
+# This is a Rendered Brief file - state + transactions + web UI.
+# Use this for: web apps, interactive UIs.
+#
+# To delete this file and use only .bv: rm main.rbv
+# =============================================================================
+
+<script type="brief">
+rstruct Counter {
+  count: Int;
+
+  txn Counter.increment [true][count == @count + 1] {
+    &count = count + 1;
+    term;
+  };
+
+  txn Counter.decrement [count > 0][count == @count - 1] {
+    &count = count - 1;
+    term;
+  };
+
+  txn Counter.reset [true][count == 0] {
+    &count = 0;
+    term;
+  };
+
+  <div class="counter">
+    <h2>Brief Counter</h2>
+    <span class="count" b-text="count">0</span>
+    <div class="buttons">
+      <button b-trigger:click="increment">+</button>
+      <button b-trigger:click="decrement">-</button>
+      <button b-trigger:click="reset">Reset</button>
+    </div>
+  </div>
+}
+</script>
+
+<view>
+  <Counter />
+</view>
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .counter {
+    background: white;
+    padding: 40px;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    text-align: center;
+  }
+  .counter h2 { color: #333; margin-bottom: 20px; }
+  .count {
+    display: block;
+    font-size: 72px;
+    font-weight: bold;
+    color: #667eea;
+    margin: 20px 0;
+  }
+  .buttons { display: flex; gap: 10px; justify-content: center; }
+  .buttons button {
+    padding: 12px 24px;
+    font-size: 24px;
+    border: none;
+    border-radius: 8px;
+    background: #667eea;
+    color: white;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  .buttons button:hover { transform: scale(1.1); }
+</style>
+"#;
+
+    std::fs::write(project_dir.join("main.bv"), main_bv_content)?;
+    std::fs::write(project_dir.join("main.rbv"), main_rbv_content)?;
 
     if verbose {
         println!("Created project structure:");
         println!("  {}/", project_name);
         println!("  {}/brief.toml", project_name);
         println!("  {}/main.bv", project_name);
+        println!("  {}/main.rbv", project_name);
         println!("  {}/lib/", project_name);
     }
 
     println!("✓ Project '{}' created successfully", project_name);
-    println!("  Run: cd {} && brief check main.bv", project_name);
+    println!("  Files created:");
+    println!("    main.bv  - Pure Brief (specification only, no UI)");
+    println!("    main.rbv - Rendered Brief (with web UI)");
+    println!("  Delete whichever you don't need.");
+    println!("");
+    println!("  Run: cd {} && brief run", project_name);
 
     Ok(())
 }
@@ -822,9 +928,13 @@ fn run_rbv(
     fs::create_dir_all(&src_dir)?;
 
     let wasm_rs = output.rust_code.clone();
-    fs::write(src_dir.join(format!("{}.rs", stem)), wasm_rs)?;
+    let module_name = if stem == "main" { "app" } else { stem };
+    fs::write(src_dir.join(format!("{}.rs", module_name)), wasm_rs)?;
 
-    let lib_rs = format!("mod {};\npub use {}::{{State}};\n", stem, stem);
+    let lib_rs = format!(
+        "mod {};\npub use {}::{{State}};\n",
+        module_name, module_name
+    );
     fs::write(src_dir.join("lib.rs"), lib_rs)?;
 
     fs::write(src_dir.join("main.rs"), "fn main() {}\n")?;

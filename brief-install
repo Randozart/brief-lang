@@ -1,0 +1,98 @@
+#!/bin/bash
+#
+# Brief Compiler Installer
+# Usage: ./brief-install [--prefix <directory>]
+#
+# This script installs the Brief compiler to your local bin directory.
+# After installation, you can run: brief init <project-name>
+#
+
+set -e
+
+INSTALL_PREFIX="${HOME}/.local/bin"
+BIN_NAME="brief"
+BINARY_NAME="brief-compiler"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --prefix)
+            INSTALL_PREFIX="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Brief Compiler Installer"
+            echo ""
+            echo "Usage: $0 [--prefix <directory>]"
+            echo ""
+            echo "Options:"
+            echo "  --prefix <dir>  Installation directory (default: ~/.local/bin)"
+            echo "  -h, --help      Show this help message"
+            echo ""
+            echo "After installation, add the following to your shell profile:"
+            echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+echo "Installing Brief compiler..."
+echo "  Target: ${INSTALL_PREFIX}/${BIN_NAME}"
+
+# Find the script's directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Find the binary
+BINARY_PATH=""
+if [ -f "${SCRIPT_DIR}/target/release/${BINARY_NAME}" ]; then
+    BINARY_PATH="${SCRIPT_DIR}/target/release/${BINARY_NAME}"
+elif [ -f "${SCRIPT_DIR}/target/debug/${BINARY_NAME}" ]; then
+    BINARY_PATH="${SCRIPT_DIR}/target/debug/${BINARY_NAME}"
+elif [ -f "${SCRIPT_DIR}/${BINARY_NAME}" ]; then
+    BINARY_PATH="${SCRIPT_DIR}/${BINARY_NAME}"
+else
+    echo ""
+    echo "Error: Could not find Brief compiler binary."
+    echo "Expected locations:"
+    echo "  - ${SCRIPT_DIR}/target/release/${BINARY_NAME}"
+    echo "  - ${SCRIPT_DIR}/target/debug/${BINARY_NAME}"
+    echo ""
+    echo "If you haven't built the compiler yet, run:"
+    echo "  cargo build --release"
+    exit 1
+fi
+
+# Create install directory if needed
+mkdir -p "${INSTALL_PREFIX}"
+
+# Install the binary
+cp "${BINARY_PATH}" "${INSTALL_PREFIX}/${BIN_NAME}"
+chmod +x "${INSTALL_PREFIX}/${BIN_NAME}"
+
+# Verify installation
+if [ -f "${INSTALL_PREFIX}/${BIN_NAME}" ]; then
+    echo ""
+    echo "✓ Brief installed successfully!"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Add to your PATH if needed:"
+    echo "       export PATH=\"\${HOME}/.local/bin:\${PATH}\""
+    echo ""
+    echo "  2. Create a new project:"
+    echo "       brief init my-app"
+    echo "       cd my-app"
+    echo ""
+    echo "  3. Run your app:"
+    echo "       brief run"
+    echo ""
+    echo "  4. Open http://localhost:8080 in your browser"
+else
+    echo ""
+    echo "Error: Installation failed"
+    exit 1
+fi
