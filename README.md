@@ -1,6 +1,6 @@
 # Brief
 
-![Brief Logo](assets/brief-logo.svg) ![Rendered Brief Logo](assets/r-brief-logo.svg)
+<img src="assets/brief-logo.svg" alt="Brief" width="200"/> <img src="assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/>
 
 ## Brief Doesn't Break
 
