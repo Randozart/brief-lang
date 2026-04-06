@@ -3,7 +3,7 @@
   "displayName": "Brief Language",
   "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv) and Rendered Brief (.rbv) files",
   "version": "0.1.0",
-  "icon": "./images/brief-logo.svg",
+  "publisher": "anomalyco",
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -15,8 +15,13 @@
     "languages": [
       {
         "id": "brief",
-        "aliases": ["Brief", "brief"],
-        "extensions": [".bv"],
+        "aliases": [
+          "Brief",
+          "brief"
+        ],
+        "extensions": [
+          ".bv"
+        ],
         "icon": {
           "light": "./images/brief-logo.svg",
           "dark": "./images/brief-logo.svg"
@@ -25,8 +30,13 @@
       },
       {
         "id": "rbv",
-        "aliases": ["Rendered Brief", "rendered-brief"],
-        "extensions": [".rbv"],
+        "aliases": [
+          "Rendered Brief",
+          "rendered-brief"
+        ],
+        "extensions": [
+          ".rbv"
+        ],
         "icon": {
           "light": "./images/r-brief-logo.svg",
           "dark": "./images/r-brief-logo.svg"
@@ -61,7 +71,10 @@
     "folding": [
       {
         "language": "brief",
-        "boundaries": ["// === PATH ANALYSIS ===", "// === END PATH ANALYSIS ==="]
+        "boundaries": [
+          "// === PATH ANALYSIS ===",
+          "// === END PATH ANALYSIS ==="
+        ]
       }
     ],
     "brackets": [
@@ -85,29 +98,53 @@
       {
         "open": "{",
         "close": "}",
-        "notIn": ["string", "comment"]
+        "notIn": [
+          "string",
+          "comment"
+        ]
       },
       {
         "open": "[",
         "close": "]",
-        "notIn": ["string", "comment"]
+        "notIn": [
+          "string",
+          "comment"
+        ]
       },
       {
         "open": "(",
         "close": ")",
-        "notIn": ["string", "comment"]
+        "notIn": [
+          "string",
+          "comment"
+        ]
       },
       {
         "open": "\"",
         "close": "\"",
-        "notIn": ["string", "comment"]
+        "notIn": [
+          "string",
+          "comment"
+        ]
       }
     ],
     "surroundingPairs": [
-      { "open": "{", "close": "}" },
-      { "open": "[", "close": "]" },
-      { "open": "(", "close": ")" },
-      { "open": "\"", "close": "\"" }
+      {
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "open": "[",
+        "close": "]"
+      },
+      {
+        "open": "(",
+        "close": ")"
+      },
+      {
+        "open": "\"",
+        "close": "\""
+      }
     ],
     "comments": {
       "lineComment": "#"
@@ -116,5 +153,8 @@
       "increaseIndentPattern": "\\{[^}]*${|\\[([^\\]]*${|\\([^)]*${",
       "decreaseIndentPattern": "^\\s*\\]|\\}\\s*$|\\)\\s*$"
     }
+  },
+  "devDependencies": {
+    "vsce": "^2.15.0"
   }
 }
