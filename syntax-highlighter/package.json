@@ -52,8 +52,8 @@
       },
       {
         "language": "rbv",
-        "scopeName": "source.brief",
-        "path": "./syntaxes/brief.tmLanguage.json"
+        "scopeName": "source.rbv",
+        "path": "./syntaxes/rbv.tmLanguage.json"
       }
     ],
     "themes": [

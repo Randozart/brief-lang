@@ -1,0 +1,58 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Rendered Brief",
+  "fileTypes": ["rbv"],
+  "firstLineMatch": "^<script type=\"brief\">",
+  "patterns": [
+    {
+      "include": "#script-brief"
+    },
+    {
+      "include": "#view-html"
+    },
+    {
+      "include": "#style-css"
+    }
+  ],
+  "repository": {
+    "script-brief": {
+      "begin": "<script type=\"brief\">",
+      "end": "</script>",
+      "patterns": [
+        {
+          "include": "source.brief"
+        }
+      ]
+    },
+    "view-html": {
+      "begin": "<view>",
+      "end": "</view>",
+      "patterns": [
+        {
+          "include": "text.html.basic"
+        },
+        {
+          "include": "#brief-bindings"
+        }
+      ]
+    },
+    "brief-bindings": {
+      "patterns": [
+        {
+          "name": "meta.attribute.brief-binding",
+          "match": "b-\\w+=\"[^\"]*\""
+        }
+      ]
+    },
+    "style-css": {
+      "begin": "<style>",
+      "end": "</style>",
+      "patterns": [
+        {
+          "include": "source.css"
+        }
+      ]
+    }
+  },
+  "scopeName": "source.rbv"
+}

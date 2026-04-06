@@ -2,8 +2,6 @@
 
 <img src="logo/brief-logo.svg" alt="Brief" width="200"/> <img src="logo/r-brief-logo.svg" alt="Rendered Brief" width="200"/>
 
----
-
 ## Quick Start (5 minutes)
 
 ### 1. Install Brief
