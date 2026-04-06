@@ -42,7 +42,7 @@ rstruct ShoppingCart {
     term; 
   };
 
-  # Checkout flow - preserves contracts
+  // Checkout flow - preserves contracts
   txn ShoppingCart.checkout [items > 0 && step == 0][step == 1] { &step = 1; term; };
   txn ShoppingCart.confirm [step == 1][step == 2] { &step = 2; term; };
   txn ShoppingCart.reset [step > 0][step == 0] { &step = 0; &items = 0; &total = 0; &product = 0; term; };

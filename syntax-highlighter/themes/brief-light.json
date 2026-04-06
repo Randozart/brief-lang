@@ -105,6 +105,26 @@
     {
       "scope": "punctuation.separator.comma.brief",
       "settings": { "foreground": "#000000" }
+    },
+    {
+      "scope": "meta.attribute.brief-binding",
+      "settings": { "foreground": "#D04CA0" }
+    },
+    {
+      "scope": "tag.embedded.script.brief",
+      "settings": { "foreground": "#0000FF" }
+    },
+    {
+      "scope": "tag.embedded.view.brief",
+      "settings": { "foreground": "#0000FF" }
+    },
+    {
+      "scope": "tag.embedded.style.brief",
+      "settings": { "foreground": "#0000FF" }
+    },
+    {
+      "scope": "text.plain",
+      "settings": { "foreground": "#000000" }
     }
   ]
 }

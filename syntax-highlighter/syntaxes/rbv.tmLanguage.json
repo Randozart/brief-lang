@@ -37,7 +37,24 @@
       },
       "patterns": [
         {
+          "include": "#brief-with-html"
+        }
+      ]
+    },
+    "brief-with-html": {
+      "patterns": [
+        {
           "include": "source.brief"
+        },
+        {
+          "include": "#inline-html"
+        }
+      ]
+    },
+    "inline-html": {
+      "patterns": [
+        {
+          "include": "text.html.basic"
         }
       ]
     },
@@ -65,11 +82,11 @@
     "html-components": {
       "patterns": [
         {
-          "name": "entity.name.tag.custom.brief",
+          "name": "entity.name.type.custom.brief",
           "match": "<[A-Z][a-zA-Z0-9_]*(\\s+[^>]*)?/?>"
         },
         {
-          "name": "entity.name.tag.custom.brief",
+          "name": "entity.name.type.custom.brief",
           "match": "</[A-Z][a-zA-Z0-9_]*>"
         }
       ]
@@ -101,7 +118,7 @@
       "patterns": [
         {
           "name": "text.plain",
-          "match": ".+"
+          "match": "[^<]+"
         }
       ]
     }

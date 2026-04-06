@@ -8,6 +8,9 @@
       "include": "#block-comments"
     },
     {
+      "include": "#line-comments"
+    },
+    {
       "include": "#annotations"
     },
     {
@@ -45,6 +48,14 @@
           "name": "comment.block.brief",
           "begin": "#\\[",
           "end": "\\]#"
+        }
+      ]
+    },
+    "line-comments": {
+      "patterns": [
+        {
+          "name": "comment.line.brief",
+          "match": "//.*$"
         }
       ]
     },
