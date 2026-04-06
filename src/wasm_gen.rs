@@ -901,27 +901,6 @@ impl WasmGenerator {
         output.push_str("        }\n");
         output.push_str("    }\n\n");
 
-        output.push_str("    function applyInstructions(instructions) {\n");
-        output.push_str("        for (const inst of instructions) {\n");
-        output.push_str("            const el = document.querySelector(ELEMENT_MAP[inst.el]);\n");
-        output.push_str("            if (!el) continue;\n");
-        output.push_str("            switch (inst.op) {\n");
-        output.push_str("                case 'text':\n");
-        output.push_str("                    el.textContent = inst.value;\n");
-        output.push_str("                    break;\n");
-        output.push_str("                case 'show':\n");
-        output.push_str("                    el.hidden = !inst.visible;\n");
-        output.push_str("                    break;\n");
-        output.push_str("                case 'class_add':\n");
-        output.push_str("                    el.classList.add(inst.class);\n");
-        output.push_str("                    break;\n");
-        output.push_str("                case 'class_remove':\n");
-        output.push_str("                    el.classList.remove(inst.class);\n");
-        output.push_str("                    break;\n");
-        output.push_str("            }\n");
-        output.push_str("        }\n");
-        output.push_str("    }\n\n");
-
         if !each_configs.is_empty() {
             output.push_str("    attachEachListeners();\n");
         }

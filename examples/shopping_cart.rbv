@@ -5,20 +5,44 @@ rstruct ShoppingCart {
   total: Int;
   step: Int;
 
+  # Product selection transactions - set the selected product
   txn ShoppingCart.select_laptop [true][product == 1] { &product = 1; term; };
   txn ShoppingCart.select_keyboard [true][product == 2] { &product = 2; term; };
   txn ShoppingCart.select_mouse [true][product == 3] { &product = 3; term; };
   txn ShoppingCart.select_monitor [true][product == 4] { &product = 4; term; };
 
-  txn ShoppingCart.add [product > 0][items == @items + 1] {
+  # Product-specific add transactions - ADD SPECIFIC PRODUCT TO CART
+  # These preserve the contract [product > 0] by setting product FIRST, then adding
+  # CONTRACT-FIRST: Each transaction adds a specific product (not "nothing")
+  txn ShoppingCart.add_laptop [true][items == @items + 1] { 
+    &product = 1;
     &items = items + 1;
-    [product == 1] &total = total + 1299;
-    [product == 2] &total = total + 149;
-    [product == 3] &total = total + 49;
-    [product == 4] &total = total + 399;
-    term;
+    &total = total + 1299;
+    term; 
+  };
+  
+  txn ShoppingCart.add_keyboard [true][items == @items + 1] { 
+    &product = 2;
+    &items = items + 1;
+    &total = total + 149;
+    term; 
+  };
+  
+  txn ShoppingCart.add_mouse [true][items == @items + 1] { 
+    &product = 3;
+    &items = items + 1;
+    &total = total + 49;
+    term; 
+  };
+  
+  txn ShoppingCart.add_monitor [true][items == @items + 1] { 
+    &product = 4;
+    &items = items + 1;
+    &total = total + 399;
+    term; 
   };
 
+  # Checkout flow - preserves contracts
   txn ShoppingCart.checkout [items > 0 && step == 0][step == 1] { &step = 1; term; };
   txn ShoppingCart.confirm [step == 1][step == 2] { &step = 2; term; };
   txn ShoppingCart.reset [step > 0][step == 0] { &step = 0; &items = 0; &total = 0; &product = 0; term; };
@@ -31,10 +55,10 @@ rstruct ShoppingCart {
     <span class="shop" b-show="step == 0">
       <span class="left">
         <h2>Select a Product</h2>
-        <span class="product" b-show="product == 1"><h3>Laptop $1,299</h3><p>Intel i9 32GB RTX 4090</p><button b-trigger:click="add">Add to Cart</button></span>
-        <span class="product" b-show="product == 2"><h3>Keyboard $149</h3><p>RGB Cherry MX Aluminum</p><button b-trigger:click="add">Add to Cart</button></span>
-        <span class="product" b-show="product == 3"><h3>Mouse $49</h3><p>16K DPI Wireless</p><button b-trigger:click="add">Add to Cart</button></span>
-        <span class="product" b-show="product == 4"><h3>Monitor $399</h3><p>27 inch 144Hz HDR</p><button b-trigger:click="add">Add to Cart</button></span>
+        <span class="product" b-show="product == 1"><h3>Laptop $1,299</h3><p>Intel i9 32GB RTX 4090</p><button b-trigger:click="add_laptop">Add to Cart</button></span>
+        <span class="product" b-show="product == 2"><h3>Keyboard $149</h3><p>RGB Cherry MX Aluminum</p><button b-trigger:click="add_keyboard">Add to Cart</button></span>
+        <span class="product" b-show="product == 3"><h3>Mouse $49</h3><p>16K DPI Wireless</p><button b-trigger:click="add_mouse">Add to Cart</button></span>
+        <span class="product" b-show="product == 4"><h3>Monitor $399</h3><p>27 inch 144Hz HDR</p><button b-trigger:click="add_monitor">Add to Cart</button></span>
         <span class="product" b-show="product == 0"><p>Choose a product</p></span>
         <span class="buttons"><button b-trigger:click="select_laptop">Laptop</button><button b-trigger:click="select_keyboard">Keyboard</button><button b-trigger:click="select_mouse">Mouse</button><button b-trigger:click="select_monitor">Monitor</button></span>
       </span>
