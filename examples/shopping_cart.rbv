@@ -1,4 +1,4 @@
-<script type="brief">
+<script>
 rstruct ShoppingCart {
   product: Int;
   items: Int;

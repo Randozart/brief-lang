@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Brief Compiler
+Comment=Rebuild Brief compiler and VSIX extension
+Exec=/home/randozart/Desktop/Projects/brief-compiler/rebuild-compiler
+Icon=/home/randozart/Desktop/Projects/brief-compiler/syntax-highlighter/images/brief-logo.svg
+Terminal=true
+Type=Application
+Categories=Development;
