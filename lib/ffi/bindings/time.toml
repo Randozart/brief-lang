@@ -1,0 +1,457 @@
+// Standard Time Bindings
+// Provides time and date operations
+
+[[functions]]
+name = "__now"
+location = "brief_ffi_native::__now"
+target = "native"
+mapper = "rust"
+description = "Get current timestamp (seconds)"
+
+[functions.input]
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__now_millis"
+location = "brief_ffi_native::__now_millis"
+target = "native"
+mapper = "rust"
+description = "Get current timestamp (milliseconds)"
+
+[functions.input]
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__now_micros"
+location = "brief_ffi_native::__now_micros"
+target = "native"
+mapper = "rust"
+description = "Get current timestamp (microseconds)"
+
+[functions.input]
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__year"
+location = "brief_ffi_native::__year"
+target = "native"
+mapper = "rust"
+description = "Get year from timestamp"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__month"
+location = "brief_ffi_native::__month"
+target = "native"
+mapper = "rust"
+description = "Get month from timestamp"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__day"
+location = "brief_ffi_native::__day"
+target = "native"
+mapper = "rust"
+description = "Get day from timestamp"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__hour"
+location = "brief_ffi_native::__hour"
+target = "native"
+mapper = "rust"
+description = "Get hour from timestamp"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__minute"
+location = "brief_ffi_native::__minute"
+target = "native"
+mapper = "rust"
+description = "Get minute from timestamp"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__second"
+location = "brief_ffi_native::__second"
+target = "native"
+mapper = "rust"
+description = "Get second from timestamp"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__weekday"
+location = "brief_ffi_native::__weekday"
+target = "native"
+mapper = "rust"
+description = "Get weekday from timestamp"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__yearday"
+location = "brief_ffi_native::__yearday"
+target = "native"
+mapper = "rust"
+description = "Get day of year from timestamp"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__timestamp"
+location = "brief_ffi_native::__timestamp"
+target = "native"
+mapper = "rust"
+description = "Create timestamp from date"
+
+[functions.input]
+year = "Int"
+month = "Int"
+day = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__timestamp_full"
+location = "brief_ffi_native::__timestamp_full"
+target = "native"
+mapper = "rust"
+description = "Create timestamp from full date/time"
+
+[functions.input]
+year = "Int"
+month = "Int"
+day = "Int"
+hour = "Int"
+minute = "Int"
+second = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__format_timestamp"
+location = "brief_ffi_native::__format_timestamp"
+target = "native"
+mapper = "rust"
+description = "Format timestamp with custom format"
+
+[functions.input]
+timestamp = "Int"
+format = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__format_date"
+location = "brief_ffi_native::__format_date"
+target = "native"
+mapper = "rust"
+description = "Format as date string"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__format_time"
+location = "brief_ffi_native::__format_time"
+target = "native"
+mapper = "rust"
+description = "Format as time string"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__format_datetime"
+location = "brief_ffi_native::__format_datetime"
+target = "native"
+mapper = "rust"
+description = "Format as datetime string"
+
+[functions.input]
+timestamp = "Int"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__parse_timestamp"
+location = "brief_ffi_native::__parse_timestamp"
+target = "native"
+mapper = "rust"
+description = "Parse timestamp from string"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__parse_datetime"
+location = "brief_ffi_native::__parse_datetime"
+target = "native"
+mapper = "rust"
+description = "Parse datetime from string"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__seconds_per_minute"
+location = "brief_ffi_native::__seconds_per_minute"
+target = "native"
+mapper = "rust"
+description = "Constant: seconds per minute"
+
+[functions.input]
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__seconds_per_hour"
+location = "brief_ffi_native::__seconds_per_hour"
+target = "native"
+mapper = "rust"
+description = "Constant: seconds per hour"
+
+[functions.input]
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__seconds_per_day"
+location = "brief_ffi_native::__seconds_per_day"
+target = "native"
+mapper = "rust"
+description = "Constant: seconds per day"
+
+[functions.input]
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__millis_per_second"
+location = "brief_ffi_native::__millis_per_second"
+target = "native"
+mapper = "rust"
+description = "Constant: milliseconds per second"
+
+[functions.input]
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__micros_per_second"
+location = "brief_ffi_native::__micros_per_second"
+target = "native"
+mapper = "rust"
+description = "Constant: microseconds per second"
+
+[functions.input]
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "TimeError"
+code = "Int"
+message = "String"

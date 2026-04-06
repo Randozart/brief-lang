@@ -1,70 +1,70 @@
-# Standard String Library
-#
-# Functions marked with 'frgn' require foreign implementation.
-# Functions with 'defn' are implemented natively in Brief.
+// Standard String Library
+//
+// Functions marked with 'frgn' require foreign implementation.
+// Functions with 'defn' are implemented natively in Brief.
 
-# ===== PURE FOREIGN (requires external implementation) =====
+// ===== PURE FOREIGN (requires external implementation) =====
 
-# Case conversion
-frgn sig to_lower(s: String) -> String;
-frgn sig to_upper(s: String) -> String;
-frgn sig to_title(s: String) -> String;
-frgn sig is_lower(s: String) -> Bool;
-frgn sig is_upper(s: String) -> Bool;
+// Case conversion
+frgn sig __to_lower(s: String) -> String;
+frgn sig __to_upper(s: String) -> String;
+frgn sig __to_title(s: String) -> String;
+frgn sig __is_lower(s: String) -> Bool;
+frgn sig __is_upper(s: String) -> Bool;
 
-# Whitespace checking
-frgn sig is_whitespace(s: String) -> Bool;
-frgn sig is_alpha(s: String) -> Bool;
-frgn sig is_alphanumeric(s: String) -> Bool;
-frgn sig is_numeric(s: String) -> Bool;
+// Whitespace checking
+frgn sig __is_whitespace(s: String) -> Bool;
+frgn sig __is_alpha(s: String) -> Bool;
+frgn sig __is_alphanumeric(s: String) -> Bool;
+frgn sig __is_numeric(s: String) -> Bool;
 
-# Complex search (requires iteration)
-frgn sig contains_at(haystack: String, needle: String, start: Int) -> Bool;
-frgn sig find_from(s: String, needle: String, start: Int) -> Int;
-frgn sig rfind(s: String, needle: String) -> Int;
+// Complex search (requires iteration)
+frgn sig __contains_at(haystack: String, needle: String, start: Int) -> Bool;
+frgn sig __find_from(s: String, needle: String, start: Int) -> Int;
+frgn sig __rfind(s: String, needle: String) -> Int;
 
-# Character operations
-frgn sig get_chars(s: String) -> List<String>;
-frgn sig utf8_len(s: String) -> Int;
+// Character operations
+frgn sig __get_chars(s: String) -> List<String>;
+frgn sig __utf8_len(s: String) -> Int;
 
-# Escaping
-frgn sig escape(s: String) -> String;
-frgn sig unescape(s: String) -> String;
-frgn sig quote(s: String) -> String;
-frgn sig unquote(s: String) -> String;
+// Escaping
+frgn sig __escape(s: String) -> String;
+frgn sig __unescape(s: String) -> String;
+frgn sig __quote(s: String) -> String;
+frgn sig __unquote(s: String) -> String;
 
-# Encoding
-frgn sig bytes(s: String) -> List<Int>;
-frgn sig from_bytes(list: List<Int>) -> String;
+// Encoding
+frgn sig __bytes(s: String) -> List<Int>;
+frgn sig __from_bytes(list: List<Int>) -> String;
 
-# Complex replacement
-frgn sig replace_all(s: String, old: String, new: String) -> String;
+// Complex replacement
+frgn sig __replace_all(s: String, old: String, new: String) -> String;
 
-# Split variations
-frgn sig splitn(s: String, delim: String, n: Int) -> List<String>;
-frgn sig rsplit(s: String, delim: String) -> List<String>;
-frgn sig words(s: String) -> List<String>;
+// Split variations
+frgn sig __splitn(s: String, delim: String, n: Int) -> List<String>;
+frgn sig __rsplit(s: String, delim: String) -> List<String>;
+frgn sig __words(s: String) -> List<String>;
 
-# Truncation
-frgn sig truncate(s: String, max_len: Int) -> String;
-frgn sig truncate_with(s: String, max_len: Int, suffix: String) -> String;
+// Truncation
+frgn sig __truncate(s: String, max_len: Int) -> String;
+frgn sig __truncate_with(s: String, max_len: Int, suffix: String) -> String;
 
-# Comparison
-frgn sig eq_ignore_case(a: String, b: String) -> Bool;
-frgn sig cmp(s1: String, s2: String) -> Int;
+// Comparison
+frgn sig __eq_ignore_case(a: String, b: String) -> Bool;
+frgn sig __cmp(s1: String, s2: String) -> Int;
 
-# Parsing
-frgn sig parse_float(s: String) -> Float;
-frgn sig to_bool(s: String) -> Bool;
+// Parsing
+frgn sig __parse_float(s: String) -> Float;
+frgn sig __to_bool(s: String) -> Bool;
 
-# ===== NATIVE DEFINITIONS =====
+// ===== NATIVE DEFINITIONS =====
 
-# Length
+// Length
 defn len(s: String) [s.len() >= 0][result == s.len()] -> Int {
   term s.len();
 };
 
-# Basic concatenation
+// Basic concatenation
 defn concat(a: String, b: String) [true][result.len() == a.len() + b.len()] -> String {
   let result: String = a + b;
   term result;
@@ -80,7 +80,7 @@ defn prepend(c: String, s: String) [true][result.len() == c.len() + s.len()] -> 
   term result;
 };
 
-# Trim operations
+// Trim operations
 defn trim(s: String) [true][result.len() <= s.len()] -> String {
   term s;
 };
@@ -101,7 +101,7 @@ defn trim_end(s: String) [true][result.len() <= s.len()] -> String {
   term s;
 };
 
-# Basic search
+// Basic search
 defn contains(haystack: String, needle: String) [true][result == true || result == false] -> Bool {
   let found: Bool = false;
   let i: Int = 0;
@@ -144,12 +144,12 @@ defn find(s: String, needle: String) [true][result >= -1] -> Int {
   term idx;
 };
 
-# Character access
+// Character access
 defn char_at(s: String, index: Int) [index >= 0 && index < s.len()][result.len() == 1] -> String {
   term s[index..index+1];
 };
 
-# Substring operations
+// Substring operations
 defn substr(s: String, start: Int) [start >= 0 && start <= s.len()][result.len() == s.len() - start] -> String {
   term s[start..s.len()];
 };
@@ -158,7 +158,7 @@ defn substr_range(s: String, start: Int, end: Int) [start >= 0 && end >= start &
   term s[start..end];
 };
 
-# Single replace (native)
+// Single replace (native)
 defn replace(s: String, old: String, new: String) [true][result.len() >= 0] -> String {
   let idx: Int = find(s, old);
   [idx >= 0] {
@@ -169,7 +169,7 @@ defn replace(s: String, old: String, new: String) [true][result.len() >= 0] -> S
   term s;
 };
 
-# Split (basic version)
+// Split (basic version)
 defn split(s: String, delim: String) [delim.len() > 0][true] -> List<String> {
   let result: List<String> = [];
   let i: Int = 0;
@@ -188,13 +188,13 @@ defn split(s: String, delim: String) [delim.len() > 0][true] -> List<String> {
   term result;
 };
 
-# Lines
+// Lines
 defn lines(s: String) [true][result.len() >= 0] -> List<String> {
   let result: List<String> = split(s, "\n");
   term result;
 };
 
-# Join
+// Join
 defn join(list: List<String>, delim: String) [true][result.len() >= 0] -> String {
   [list.len() == 0] {
     term "";
@@ -208,7 +208,7 @@ defn join(list: List<String>, delim: String) [true][result.len() >= 0] -> String
   term result;
 };
 
-# Padding (basic)
+// Padding (basic)
 defn pad_left(s: String, width: Int) [width >= s.len()][result.len() == width.max(s.len())] -> String {
   let spaces: Int = width - s.len();
   [spaces > 0] {
@@ -259,7 +259,7 @@ defn pad_both(s: String, width: Int) [width >= s.len()][result.len() == width.ma
   term s;
 };
 
-# Repeat
+// Repeat
 defn repeat(s: String, count: Int) [count >= 0][result.len() == s.len() * count] -> String {
   [count == 0] {
     term "";
@@ -273,7 +273,7 @@ defn repeat(s: String, count: Int) [count >= 0][result.len() == s.len() * count]
   term result;
 };
 
-# Type conversions
+// Type conversions
 defn to_string(n: Int) [true][result.len() >= 0] -> String {
   term n;
 };

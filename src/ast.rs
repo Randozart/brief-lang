@@ -42,7 +42,12 @@ pub enum ResultType {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ForeignTarget {
     Native, // Rust FFI (v6.2)
-    Wasm,   // WebAssembly (future)
+    Wasm,   // WebAssembly
+    C,      // C library
+    Python, // Python extension
+    Js,     // JavaScript
+    Swift,  // Swift
+    Go,     // Go
 }
 
 impl std::fmt::Display for ForeignTarget {
@@ -50,6 +55,11 @@ impl std::fmt::Display for ForeignTarget {
         match self {
             ForeignTarget::Native => write!(f, "native"),
             ForeignTarget::Wasm => write!(f, "wasm"),
+            ForeignTarget::C => write!(f, "c"),
+            ForeignTarget::Python => write!(f, "python"),
+            ForeignTarget::Js => write!(f, "js"),
+            ForeignTarget::Swift => write!(f, "swift"),
+            ForeignTarget::Go => write!(f, "go"),
         }
     }
 }
@@ -72,9 +82,11 @@ pub struct ForeignBinding {
     pub description: Option<String>,
     pub location: String, // Rust module path: std::fs::read_to_string
     pub target: ForeignTarget,
+    pub mapper: Option<String>, // Mapper name (e.g., "rust", "c", "wasm")
+    pub path: Option<String>,   // Explicit path to mapper (optional)
     pub inputs: Vec<(String, Type)>, // Parameter names and types
     pub success_output: Vec<(String, Type)>, // Success output shape
-    pub error_type: String,          // Error type name
+    pub error_type: String,     // Error type name
     pub error_fields: Vec<(String, Type)>, // Error fields
 }
 

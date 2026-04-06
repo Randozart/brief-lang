@@ -1,8 +1,20 @@
-# Standard I/O Library
-# Foreign function declarations
+// Standard I/O Library
+// Foreign function declarations
 
-frgn sig print(msg: String) -> Bool;
+frgn sig __print(msg: String) -> Bool;
 
-frgn sig println(msg: String) -> Bool;
+frgn sig __println(msg: String) -> Bool;
 
-frgn sig input() -> String;
+frgn sig __input() -> String;
+
+defn print(msg: String) -> Bool [true][true] {
+  term true;
+};
+
+defn println(msg: String) -> Bool [true][true] {
+  term true;
+};
+
+defn input() -> String [true][true] {
+  term "";
+};

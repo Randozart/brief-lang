@@ -1,42 +1,42 @@
-# Standard Time Library
-#
-# Functions marked with 'frgn' require foreign implementation.
-# Functions with 'defn' are implemented natively in Brief.
+// Standard Time Library
+//
+// Functions marked with 'frgn' require foreign implementation.
+// Functions with 'defn' are implemented natively in Brief.
 
-# ===== PURE FOREIGN (requires system time) =====
+// ===== PURE FOREIGN (requires system time) =====
 
-# Current time
-frgn sig now() -> Int;
-frgn sig now_millis() -> Int;
-frgn sig now_micros() -> Int;
+// Current time
+frgn sig __now() -> Int;
+frgn sig __now_millis() -> Int;
+frgn sig __now_micros() -> Int;
 
-# Time component extraction
-frgn sig year(timestamp: Int) -> Int;
-frgn sig month(timestamp: Int) -> Int;
-frgn sig day(timestamp: Int) -> Int;
-frgn sig hour(timestamp: Int) -> Int;
-frgn sig minute(timestamp: Int) -> Int;
-frgn sig second(timestamp: Int) -> Int;
-frgn sig weekday(timestamp: Int) -> Int;
-frgn sig yearday(timestamp: Int) -> Int;
+// Time component extraction
+frgn sig __year(timestamp: Int) -> Int;
+frgn sig __month(timestamp: Int) -> Int;
+frgn sig __day(timestamp: Int) -> Int;
+frgn sig __hour(timestamp: Int) -> Int;
+frgn sig __minute(timestamp: Int) -> Int;
+frgn sig __second(timestamp: Int) -> Int;
+frgn sig __weekday(timestamp: Int) -> Int;
+frgn sig __yearday(timestamp: Int) -> Int;
 
-# Time creation
-frgn sig timestamp(year: Int, month: Int, day: Int) -> Int;
-frgn sig timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int;
+// Time creation
+frgn sig __timestamp(year: Int, month: Int, day: Int) -> Int;
+frgn sig __timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int;
 
-# Formatting
-frgn sig format_timestamp(timestamp: Int, format: String) -> String;
-frgn sig format_date(timestamp: Int) -> String;
-frgn sig format_time(timestamp: Int) -> String;
-frgn sig format_datetime(timestamp: Int) -> String;
+// Formatting
+frgn sig __format_timestamp(timestamp: Int, format: String) -> String;
+frgn sig __format_date(timestamp: Int) -> String;
+frgn sig __format_time(timestamp: Int) -> String;
+frgn sig __format_datetime(timestamp: Int) -> String;
 
-# Parsing
-frgn sig parse_timestamp(s: String) -> Int;
-frgn sig parse_datetime(s: String) -> Int;
+// Parsing
+frgn sig __parse_timestamp(s: String) -> Int;
+frgn sig __parse_datetime(s: String) -> Int;
 
-# ===== NATIVE DEFINITIONS =====
+// ===== NATIVE DEFINITIONS =====
 
-# Duration helpers - native arithmetic
+// Duration helpers - native arithmetic
 defn duration_seconds(secs: Int) [result == secs] -> Int {
   term secs;
 };
@@ -57,7 +57,7 @@ defn duration_days(days: Int) [result == days * 86400] -> Int {
   term days * 86400;
 };
 
-# Time arithmetic - native
+// Time arithmetic - native
 defn add_seconds(timestamp: Int, secs: Int) [true][result == timestamp + secs] -> Int {
   term timestamp + secs;
 };
@@ -74,7 +74,7 @@ defn add_days(timestamp: Int, days: Int) [true][result == timestamp + days * 864
   term timestamp + days * 86400;
 };
 
-# Time differences - native
+// Time differences - native
 defn diff_seconds(t1: Int, t2: Int) [true][result == t1 - t2] -> Int {
   term t1 - t2;
 };
@@ -83,9 +83,9 @@ defn diff_days(t1: Int, t2: Int) [result == (t1 - t2) / 86400] -> Int {
   term (t1 - t2) / 86400;
 };
 
-# Constants - these could be frgn or defn
-frgn sig seconds_per_minute() -> Int;
-frgn sig seconds_per_hour() -> Int;
-frgn sig seconds_per_day() -> Int;
-frgn sig millis_per_second() -> Int;
-frgn sig micros_per_second() -> Int;
+// Constants - these could be frgn or defn
+frgn sig __seconds_per_minute() -> Int;
+frgn sig __seconds_per_hour() -> Int;
+frgn sig __seconds_per_day() -> Int;
+frgn sig __millis_per_second() -> Int;
+frgn sig __micros_per_second() -> Int;

@@ -2,9 +2,8 @@
 //!
 //! Loads and parses TOML binding files into ForeignBinding structures
 
-use super::{types::*, FfiError};
+use super::FfiError;
 use crate::ast::{ForeignBinding, ForeignTarget, Type};
-use std::collections::HashMap;
 use std::path::Path;
 
 /// Parse a TOML binding file and extract all function bindings
@@ -56,6 +55,11 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
         let target = match target_str {
             "native" => ForeignTarget::Native,
             "wasm" => ForeignTarget::Wasm,
+            "c" => ForeignTarget::C,
+            "python" => ForeignTarget::Python,
+            "js" => ForeignTarget::Js,
+            "swift" => ForeignTarget::Swift,
+            "go" => ForeignTarget::Go,
             _ => {
                 return Err(FfiError::TomlParseError(format!(
                     "Unknown target: {}",
@@ -66,6 +70,18 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
 
         let description = func
             .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Parse optional mapper field (required for FFI bindings)
+        let mapper = func
+            .get("mapper")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Parse optional path field for explicit mapper location
+        let path = func
+            .get("path")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
@@ -112,6 +128,8 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             description,
             location,
             target,
+            mapper,
+            path,
             inputs,
             success_output,
             error_type,

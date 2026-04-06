@@ -1,0 +1,579 @@
+// Standard JSON Bindings
+// Provides JSON parsing and manipulation
+
+[[functions]]
+name = "__parse"
+location = "brief_ffi_native::__parse"
+target = "native"
+mapper = "rust"
+description = "Parse JSON string"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__stringify"
+location = "brief_ffi_native::__stringify"
+target = "native"
+mapper = "rust"
+description = "Convert to JSON string"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__to_json"
+location = "brief_ffi_native::__to_json"
+target = "native"
+mapper = "rust"
+description = "Convert to JSON"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__from_json"
+location = "brief_ffi_native::__from_json"
+target = "native"
+mapper = "rust"
+description = "Parse from JSON"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_null"
+location = "brief_ffi_native::__is_null"
+target = "native"
+mapper = "rust"
+description = "Check if null"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_bool"
+location = "brief_ffi_native::__is_bool"
+target = "native"
+mapper = "rust"
+description = "Check if boolean"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_number"
+location = "brief_ffi_native::__is_number"
+target = "native"
+mapper = "rust"
+description = "Check if number"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_string"
+location = "brief_ffi_native::__is_string"
+target = "native"
+mapper = "rust"
+description = "Check if string"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_array"
+location = "brief_ffi_native::__is_array"
+target = "native"
+mapper = "rust"
+description = "Check if array"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_object"
+location = "brief_ffi_native::__is_object"
+target = "native"
+mapper = "rust"
+description = "Check if object"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__get_bool"
+location = "brief_ffi_native::__get_bool"
+target = "native"
+mapper = "rust"
+description = "Get boolean value"
+
+[functions.input]
+data = "Data"
+key = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__get_number"
+location = "brief_ffi_native::__get_number"
+target = "native"
+mapper = "rust"
+description = "Get number value"
+
+[functions.input]
+data = "Data"
+key = "String"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__get_string"
+location = "brief_ffi_native::__get_string"
+target = "native"
+mapper = "rust"
+description = "Get string value"
+
+[functions.input]
+data = "Data"
+key = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__get_array"
+location = "brief_ffi_native::__get_array"
+target = "native"
+mapper = "rust"
+description = "Get array value"
+
+[functions.input]
+data = "Data"
+key = "String"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__get_object"
+location = "brief_ffi_native::__get_object"
+target = "native"
+mapper = "rust"
+description = "Get object value"
+
+[functions.input]
+data = "Data"
+key = "String"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__get_index"
+location = "brief_ffi_native::__get_index"
+target = "native"
+mapper = "rust"
+description = "Get array element"
+
+[functions.input]
+data = "Data"
+index = "Int"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__array_len"
+location = "brief_ffi_native::__array_len"
+target = "native"
+mapper = "rust"
+description = "Get array length"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__array_push"
+location = "brief_ffi_native::__array_push"
+target = "native"
+mapper = "rust"
+description = "Push to array"
+
+[functions.input]
+data = "Data"
+item = "Data"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__array_pop"
+location = "brief_ffi_native::__array_pop"
+target = "native"
+mapper = "rust"
+description = "Pop from array"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__array_shift"
+location = "brief_ffi_native::__array_shift"
+target = "native"
+mapper = "rust"
+description = "Shift from array"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__keys"
+location = "brief_ffi_native::__keys"
+target = "native"
+mapper = "rust"
+description = "Get object keys"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "List"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__values"
+location = "brief_ffi_native::__values"
+target = "native"
+mapper = "rust"
+description = "Get object values"
+
+[functions.input]
+data = "Data"
+
+[functions.output.success]
+result = "List"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__has_key"
+location = "brief_ffi_native::__has_key"
+target = "native"
+mapper = "rust"
+description = "Check if key exists"
+
+[functions.input]
+data = "Data"
+key = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__null"
+location = "brief_ffi_native::__null"
+target = "native"
+mapper = "rust"
+description = "Create null value"
+
+[functions.input]
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__bool_val"
+location = "brief_ffi_native::__bool_val"
+target = "native"
+mapper = "rust"
+description = "Create boolean value"
+
+[functions.input]
+b = "Bool"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__number_val"
+location = "brief_ffi_native::__number_val"
+target = "native"
+mapper = "rust"
+description = "Create number value"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__string_val"
+location = "brief_ffi_native::__string_val"
+target = "native"
+mapper = "rust"
+description = "Create string value"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__array_val"
+location = "brief_ffi_native::__array_val"
+target = "native"
+mapper = "rust"
+description = "Create array value"
+
+[functions.input]
+list = "List"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__object_val"
+location = "brief_ffi_native::__object_val"
+target = "native"
+mapper = "rust"
+description = "Create object value"
+
+[functions.input]
+map = "Data"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__merge"
+location = "brief_ffi_native::__merge"
+target = "native"
+mapper = "rust"
+description = "Merge two JSON objects"
+
+[functions.input]
+a = "Data"
+b = "Data"
+
+[functions.output.success]
+result = "Data"
+
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"

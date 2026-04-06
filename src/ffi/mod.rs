@@ -7,16 +7,20 @@
 //! - Type mapping
 
 pub mod loader;
+pub mod mapper;
+pub mod mappers;
 pub mod resolver;
 pub mod types;
 pub mod validator;
 
 pub use loader::load_binding;
+pub use mapper::{create_mapper_registry, find_mapper};
+pub use mappers::{MapperInfo, MapperRegistry, MapperType};
 pub use resolver::resolve_binding_path;
 pub use types::*;
 pub use validator::validate_frgn_against_binding;
 
-use crate::ast::{ForeignBinding, ForeignSignature};
+use crate::ast::ForeignBinding;
 use std::path::PathBuf;
 
 /// Error types for FFI operations
@@ -39,6 +43,9 @@ pub enum FfiError {
 
     /// Path resolution failed
     PathResolutionError(String),
+
+    /// Mapper not found
+    MapperNotFound(String),
 }
 
 impl std::fmt::Display for FfiError {
@@ -50,6 +57,7 @@ impl std::fmt::Display for FfiError {
             FfiError::TypeParseError(err) => write!(f, "Type parse error: {}", err),
             FfiError::ValidationError(err) => write!(f, "Binding validation error: {}", err),
             FfiError::PathResolutionError(err) => write!(f, "Path resolution error: {}", err),
+            FfiError::MapperNotFound(name) => write!(f, "Mapper not found: {}", name),
         }
     }
 }

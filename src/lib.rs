@@ -22,3 +22,4 @@ pub mod typechecker;
 pub mod view_compiler;
 pub mod wasm_gen;
 pub mod watch;
+pub mod wrapper;

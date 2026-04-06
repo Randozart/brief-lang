@@ -1,56 +1,59 @@
-# Standard List/Collection Library
-#
-# Functions marked with 'frgn' require foreign implementation.
-# Functions with 'defn' are implemented natively in Brief.
+// Standard List/Collection Library
+//
+// Functions marked with 'frgn' require foreign implementation.
+// Functions with 'defn' are implemented natively in Brief.
 
-# ===== PURE FOREIGN (truly generic, requires runtime) =====
+// ===== PURE FOREIGN (truly generic, requires runtime) =====
 
-# Filter - requires predicate function (can't be native)
-frgn sig filter<T>(list: List<T>, pred: T -> Bool) -> List<T>;
+// Filter - requires predicate function (can't be native)
+frgn sig __filter<T>(list: List<T>, pred: T -> Bool) -> List<T>;
 
-# Map - requires transform function (can't be native)
-frgn sig map<T, U>(list: List<T>, transform: T -> U) -> List<U>;
+// Map - requires transform function (can't be native)
+frgn sig __map<T, U>(list: List<T>, transform: T -> U) -> List<U>;
 
-# Reduce - requires reducer function (can't be native)
-frgn sig reduce<T, U>(list: List<T>, initial: U, reducer: (U, T) -> U) -> U;
+// Reduce - requires reducer function (can't be native)
+frgn sig __reduce<T, U>(list: List<T>, initial: U, reducer: (U, T) -> U) -> U;
 
-# Unique - requires comparison (can't be native without Eq trait)
-frgn sig unique<T>(list: List<T>) -> List<T>;
+// Unique - requires comparison (can't be native without Eq trait)
+frgn sig __unique<T>(list: List<T>) -> List<T>;
 
-# Sort - requires comparison (can't be native without Ord trait)
-frgn sig sort<T>(list: List<T>) -> List<T>;
+// Sort - requires comparison (can't be native without Ord trait)
+frgn sig __sort<T>(list: List<T>) -> List<T>;
 
-# ===== NATIVE DEFINITIONS =====
+// Reverse - requires iteration
+frgn sig __reverse<T>(list: List<T>) -> List<T>;
 
-# Length - uses built-in .len()
+// ===== NATIVE DEFINITIONS =====
+
+// Length - uses built-in .len()
 defn len<T>(list: List<T>) [list.len() >= 0][result == list.len()] -> Int {
   term list.len();
 };
 
-# Append - uses list concatenation (+)
+// Append - uses list concatenation (+)
 defn append<T>(list: List<T>, item: T) [true][result.len() == list.len() + 1] -> List<T> {
   let result: List<T> = list + [item];
   term result;
 };
 
-# Prepend - uses list concatenation (+)
+// Prepend - uses list concatenation (+)
 defn prepend<T>(item: T, list: List<T>) [true][result.len() == list.len() + 1] -> List<T> {
   let result: List<T> = [item] + list;
   term result;
 };
 
-# Concat - uses list concatenation (+)
+// Concat - uses list concatenation (+)
 defn concat<T>(a: List<T>, b: List<T>) [true][result.len() == a.len() + b.len()] -> List<T> {
   let result: List<T> = a + b;
   term result;
 };
 
-# Get - uses list indexing
+// Get - uses list indexing
 defn get<T>(list: List<T>, index: Int) [index >= 0 && index < list.len()][true] -> T {
   term list[index];
 };
 
-# Set - uses list indexing and concatenation
+// Set - uses list indexing and concatenation
 defn set<T>(list: List<T>, index: Int, item: T) [index >= 0 && index < list.len()][result.len() == list.len()] -> List<T> {
   let before: List<T> = list[0..index];
   let after: List<T> = list[index+1..list.len()];
@@ -58,7 +61,7 @@ defn set<T>(list: List<T>, index: Int, item: T) [index >= 0 && index < list.len(
   term result;
 };
 
-# Remove - uses list slicing
+// Remove - uses list slicing
 defn remove<T>(list: List<T>, index: Int) [index >= 0 && index < list.len()][result.len() == list.len() - 1] -> List<T> {
   let before: List<T> = list[0..index];
   let after: List<T> = list[index+1..list.len()];
@@ -66,13 +69,13 @@ defn remove<T>(list: List<T>, index: Int) [index >= 0 && index < list.len()][res
   term result;
 };
 
-# Slice - uses list slicing
+// Slice - uses list slicing
 defn slice<T>(list: List<T>, start: Int, end: Int) [start >= 0 && end >= start && end <= list.len()][result.len() == end - start] -> List<T> {
   let result: List<T> = list[start..end];
   term result;
 };
 
-# Contains - use iteration
+// Contains - use iteration
 defn contains<T>(list: List<T>, item: T) [true][result == true || result == false] -> Bool {
   let i: Int = 0;
   let found: Bool = false;
@@ -85,7 +88,7 @@ defn contains<T>(list: List<T>, item: T) [true][result == true || result == fals
   term found;
 };
 
-# Find index - use iteration
+// Find index - use iteration
 defn find<T>(list: List<T>, item: T) [true][result >= -1] -> Int {
   let i: Int = 0;
   let idx: Int = -1;
@@ -98,24 +101,21 @@ defn find<T>(list: List<T>, item: T) [true][result >= -1] -> Int {
   term idx;
 };
 
-# Reverse - uses list slicing with step (if supported)
-frgn sig reverse<T>(list: List<T>) -> List<T>;
-
-# Take first n items
+// Take first n items
 defn take<T>(list: List<T>, n: Int) [n >= 0][result.len() == n.min(list.len())] -> List<T> {
   let count: Int = n.min(list.len());
   let result: List<T> = list[0..count];
   term result;
 };
 
-# Drop first n items
+// Drop first n items
 defn drop<T>(list: List<T>, n: Int) [n >= 0][result.len() == (list.len() - n).max(0)] -> List<T> {
   let count: Int = n.max(0).min(list.len());
   let result: List<T> = list[count..list.len()];
   term result;
 };
 
-# Empty check
+// Empty check
 defn is_empty<T>(list: List<T>) [true][result == (list.len() == 0)] -> Bool {
   term list.len() == 0;
 };

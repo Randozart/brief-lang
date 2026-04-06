@@ -1,11 +1,11 @@
-# Brief Core Standard Library
-# 
-# Native Brief implementations - no FFI needed.
-# These are provably correct state and computation patterns.
+// Brief Core Standard Library
+// 
+// Native Brief implementations - no FFI needed.
+// These are provably correct state and computation patterns.
 
-# ============================================================================
-# Integer Math
-# ============================================================================
+// ============================================================================
+// Integer Math
+// ============================================================================
 
 defn absolute(x: Int) 
   -> Int 
@@ -80,9 +80,9 @@ defn is_zero(x: Int)
   term false;
 };
 
-# ============================================================================
-# Float Comparison (since Brief has basic float ops)
-# ============================================================================
+// ============================================================================
+// Float Comparison (since Brief has basic float ops)
+// ============================================================================
 
 defn float_is_positive(x: Float) 
   -> Bool 
@@ -111,11 +111,11 @@ defn float_is_zero(x: Float)
   term false;
 };
 
-# ============================================================================
-# State Management Patterns
-# ============================================================================
+// ============================================================================
+// State Management Patterns
+// ============================================================================
 
-# Lazy initialization pattern
+// Lazy initialization pattern
 defn get_or_init_with_default(initialized: Bool, default_value: Int) 
   -> Int, Bool 
   [true]
@@ -125,7 +125,7 @@ defn get_or_init_with_default(initialized: Bool, default_value: Int)
   [!initialized] term default_value, true;
 };
 
-# State validation
+// State validation
 defn is_valid_state(state: Int, min_state: Int, max_state: Int) 
   -> Bool 
   [min_state <= max_state]
@@ -135,11 +135,11 @@ defn is_valid_state(state: Int, min_state: Int, max_state: Int)
   term false;
 };
 
-# ============================================================================
-# Conditional Results
-# ============================================================================
+// ============================================================================
+// Conditional Results
+// ============================================================================
 
-# Choose between two values based on condition
+// Choose between two values based on condition
 defn choose_if(condition: Bool, true_val: Int, false_val: Int) 
   -> Int 
   [true]
@@ -149,11 +149,11 @@ defn choose_if(condition: Bool, true_val: Int, false_val: Int)
   term false_val;
 };
 
-# ============================================================================
-# Guards and Precondition Helpers
-# ============================================================================
+// ============================================================================
+// Guards and Precondition Helpers
+// ============================================================================
 
-# Always-valid guard (useful for explicit guards)
+// Always-valid guard (useful for explicit guards)
 defn always_true() 
   -> Bool 
   [true]
@@ -162,7 +162,7 @@ defn always_true()
   term true;
 };
 
-# Always-invalid guard
+// Always-invalid guard
 defn always_false() 
   -> Bool 
   [true]
@@ -171,7 +171,7 @@ defn always_false()
   term false;
 };
 
-# Negation helper
+// Negation helper
 defn not_equal(a: Int, b: Int) 
   -> Bool 
   [true]

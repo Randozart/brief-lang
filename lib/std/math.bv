@@ -1,69 +1,69 @@
-# Standard Math Library
-#
-# Functions marked with 'frgn' require foreign implementation.
-# Functions with 'defn' are implemented natively in Brief.
+// Standard Math Library
+//
+// Functions marked with 'frgn' require foreign implementation.
+// Functions with 'defn' are implemented natively in Brief.
 
-# ===== PURE FOREIGN (requires external implementation) =====
+// ===== PURE FOREIGN (requires external implementation) =====
 
-# Trigonometry
-frgn sig sin(n: Float) -> Float;
-frgn sig cos(n: Float) -> Float;
-frgn sig tan(n: Float) -> Float;
+// Trigonometry
+frgn sig __sin(n: Float) -> Float;
+frgn sig __cos(n: Float) -> Float;
+frgn sig __tan(n: Float) -> Float;
 
-frgn sig asin(n: Float) -> Float;
-frgn sig acos(n: Float) -> Float;
-frgn sig atan(n: Float) -> Float;
-frgn sig atan2(y: Float, x: Float) -> Float;
+frgn sig __asin(n: Float) -> Float;
+frgn sig __acos(n: Float) -> Float;
+frgn sig __atan(n: Float) -> Float;
+frgn sig __atan2(y: Float, x: Float) -> Float;
 
-frgn sig sinh(n: Float) -> Float;
-frgn sig cosh(n: Float) -> Float;
-frgn sig tanh(n: Float) -> Float;
+frgn sig __sinh(n: Float) -> Float;
+frgn sig __cosh(n: Float) -> Float;
+frgn sig __tanh(n: Float) -> Float;
 
-# Advanced math
-frgn sig sqrt(n: Float) -> Float;
-frgn sig cbrt(n: Float) -> Float;
-frgn sig pow(base: Float, exp: Float) -> Float;
-frgn sig powi(base: Float, exp: Int) -> Float;
+// Advanced math
+frgn sig __sqrt(n: Float) -> Float;
+frgn sig __cbrt(n: Float) -> Float;
+frgn sig __pow(base: Float, exp: Float) -> Float;
+frgn sig __powi(base: Float, exp: Int) -> Float;
 
-frgn sig exp(n: Float) -> Float;
-frgn sig exp2(n: Float) -> Float;
-frgn sig ln(n: Float) -> Float;
-frgn sig log(n: Float, base: Float) -> Float;
-frgn sig log2(n: Float) -> Float;
-frgn sig log10(n: Float) -> Float;
+frgn sig __exp(n: Float) -> Float;
+frgn sig __exp2(n: Float) -> Float;
+frgn sig __ln(n: Float) -> Float;
+frgn sig __log(n: Float, base: Float) -> Float;
+frgn sig __log2(n: Float) -> Float;
+frgn sig __log10(n: Float) -> Float;
 
-# Float-specific rounding
-frgn sig floor(n: Float) -> Float;
-frgn sig ceil(n: Float) -> Float;
-frgn sig round(n: Float) -> Float;
-frgn sig trunc(n: Float) -> Float;
-frgn sig fract(n: Float) -> Float;
+// Float-specific rounding
+frgn sig __floor(n: Float) -> Float;
+frgn sig __ceil(n: Float) -> Float;
+frgn sig __round(n: Float) -> Float;
+frgn sig __trunc(n: Float) -> Float;
+frgn sig __fract(n: Float) -> Float;
 
-# Float checks
-frgn sig is_nan(n: Float) -> Bool;
-frgn sig is_infinite(n: Float) -> Bool;
-frgn sig is_finite(n: Float) -> Bool;
-frgn sig is_normal(n: Float) -> Bool;
+// Float checks
+frgn sig __is_nan(n: Float) -> Bool;
+frgn sig __is_infinite(n: Float) -> Bool;
+frgn sig __is_finite(n: Float) -> Bool;
+frgn sig __is_normal(n: Float) -> Bool;
 
-# Float operations
-frgn sig signum_float(n: Float) -> Float;
-frgn sig clamp_float(val: Float, min: Float, max: Float) -> Float;
-frgn sig min_float(a: Float, b: Float) -> Float;
-frgn sig max_float(a: Float, b: Float) -> Float;
+// Float operations
+frgn sig __signum_float(n: Float) -> Float;
+frgn sig __clamp_float(val: Float, min: Float, max: Float) -> Float;
+frgn sig __min_float(a: Float, b: Float) -> Float;
+frgn sig __max_float(a: Float, b: Float) -> Float;
 
-# Integer-specific
-frgn sig div_rem(a: Int, b: Int) -> Int;
-frgn sig gcd(a: Int, b: Int) -> Int;
-frgn sig lcm(a: Int, b: Int) -> Int;
-frgn sig signum(n: Int) -> Int;
+// Integer-specific
+frgn sig __div_rem(a: Int, b: Int) -> Int;
+frgn sig __gcd(a: Int, b: Int) -> Int;
+frgn sig __lcm(a: Int, b: Int) -> Int;
+frgn sig __signum(n: Int) -> Int;
 
-# Random
-frgn sig random() -> Float;
-frgn sig random_int(min: Int, max: Int) -> Int;
+// Random
+frgn sig __random() -> Float;
+frgn sig __random_int(min: Int, max: Int) -> Int;
 
-# ===== NATIVE DEFINITIONS =====
+// ===== NATIVE DEFINITIONS =====
 
-# Absolute value (Int)
+// Absolute value (Int)
 defn abs(n: Int) [true][result >= 0] -> Int {
   [n < 0] {
     term -n;
@@ -71,7 +71,7 @@ defn abs(n: Int) [true][result >= 0] -> Int {
   term n;
 };
 
-# Absolute value (Float) - simple version
+// Absolute value (Float) - simple version
 defn abs_float(n: Float) [result >= 0.0] -> Float {
   [n < 0.0] {
     term -n;
@@ -79,7 +79,7 @@ defn abs_float(n: Float) [result >= 0.0] -> Float {
   term n;
 };
 
-# Min/Max (Int) - native comparisons
+// Min/Max (Int) - native comparisons
 defn min(a: Int, b: Int) [true][result == a || result == b] -> Int {
   [a <= b] {
     term a;
@@ -94,7 +94,7 @@ defn max(a: Int, b: Int) [true][result == a || result == b] -> Int {
   term b;
 };
 
-# Clamp (Int)
+// Clamp (Int)
 defn clamp(val: Int, min_val: Int, max_val: Int) [min_val <= max_val][result >= min_val && result <= max_val] -> Int {
   [val < min_val] {
     term min_val;
@@ -105,17 +105,17 @@ defn clamp(val: Int, min_val: Int, max_val: Int) [min_val <= max_val][result >= 
   term val;
 };
 
-# Integer division (native)
+// Integer division (native)
 defn div(a: Int, b: Int) [b != 0][result == a / b] -> Int {
   term a / b;
 };
 
-# Integer modulo (native)
+// Integer modulo (native)
 defn mod(a: Int, b: Int) [b != 0][result >= 0 && result < b.abs()] -> Int {
   term a % b;
 };
 
-# Power (Int) - native
+// Power (Int) - native
 defn powi_int(base: Int, exp: Int) [exp >= 0][result >= 0 || base != 0] -> Int {
   [exp == 0] {
     term 1;
@@ -129,62 +129,62 @@ defn powi_int(base: Int, exp: Int) [exp >= 0][result >= 0 || base != 0] -> Int {
   term result;
 };
 
-# Square (native)
+// Square (native)
 defn square(n: Int) [true][result == n * n] -> Int {
   term n * n;
 };
 
-# Cube (native)
+// Cube (native)
 defn cube(n: Int) [true][result == n * n * n] -> Int {
   term n * n * n;
 };
 
-# Is even
+// Is even
 defn is_even(n: Int) [true][result == true || result == false] -> Bool {
   term n % 2 == 0;
 };
 
-# Is odd
+// Is odd
 defn is_odd(n: Int) [true][result == true || result == false] -> Bool {
   term n % 2 != 0;
 };
 
-# Is positive
+// Is positive
 defn is_positive(n: Int) [true][result == true || result == false] -> Bool {
   term n > 0;
 };
 
-# Is negative
+// Is negative
 defn is_negative(n: Int) [true][result == true || result == false] -> Bool {
   term n < 0;
 };
 
-# Is zero
+// Is zero
 defn is_zero(n: Int) [true][result == true || result == false] -> Bool {
   term n == 0;
 };
 
-# Negate
+// Negate
 defn negate(n: Int) [true][result == -n] -> Int {
   term -n;
 };
 
-# Double
+// Double
 defn double(n: Int) [true][result == n * 2] -> Int {
   term n * 2;
 };
 
-# Triple
+// Triple
 defn triple(n: Int) [true][result == n * 3] -> Int {
   term n * 3;
 };
 
-# Half (integer division)
+// Half (integer division)
 defn half(n: Int) [true][result == n / 2] -> Int {
   term n / 2;
 };
 
-# Absolute difference
+// Absolute difference
 defn abs_diff(a: Int, b: Int) [result >= 0] -> Int {
   [a > b] {
     term a - b;
@@ -192,13 +192,13 @@ defn abs_diff(a: Int, b: Int) [result >= 0] -> Int {
   term b - a;
 };
 
-# Sum of range
+// Sum of range
 defn sum_range(start: Int, end: Int) [start <= end][result >= 0] -> Int {
   let n: Int = end - start + 1;
   term (start + end) * n / 2;
 };
 
-# Factorial (basic, small numbers)
+// Factorial (basic, small numbers)
 defn factorial(n: Int) [n >= 0 && n <= 20][result >= 1] -> Int {
   [n == 0 || n == 1] {
     term 1;
@@ -212,7 +212,7 @@ defn factorial(n: Int) [n >= 0 && n <= 20][result >= 1] -> Int {
   term result;
 };
 
-# Fibonacci (basic, small numbers)
+// Fibonacci (basic, small numbers)
 defn fibonacci(n: Int) [n >= 0][result >= 0] -> Int {
   [n == 0] {
     term 0;
@@ -232,7 +232,7 @@ defn fibonacci(n: Int) [n >= 0][result >= 0] -> Int {
   term b;
 };
 
-# GCD (Euclidean algorithm) - native
+// GCD (Euclidean algorithm) - native
 defn gcd_native(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] -> Int {
   [b == 0] {
     term a.abs();
@@ -247,7 +247,7 @@ defn gcd_native(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] -> Int {
   term x;
 };
 
-# LCM - native
+// LCM - native
 defn lcm_native(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] -> Int {
   [a == 0 || b == 0] {
     term 0;

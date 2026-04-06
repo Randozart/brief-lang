@@ -155,6 +155,8 @@ fn print_usage(program: &str) {
     eprintln!("  serve [dir]      Serve static files (default: .)");
     eprintln!("  rbv <file>       Compile RBV to browser-ready files");
     eprintln!("  run <file>       Compile, build WASM, serve, and open browser");
+    eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
+    eprintln!("  wrap <lib>       Generate FFI bindings for a library");
     eprintln!("  install          Install 'brief' to ~/.local/bin");
     eprintln!("  lsp              Start Language Server (for IDE integration)");
     eprintln!();
@@ -197,6 +199,114 @@ fn run_install() {
     println!("\nAdd to your PATH if needed:");
     println!("  export PATH=\"$PATH:{}\"", install_dir.display());
     println!("\nAdd this line to your ~/.bashrc or ~/.zshrc to make it permanent.");
+}
+
+fn run_map_or_wrap(
+    lib_path: &Path,
+    mapper: Option<&str>,
+    output_dir: Option<&Path>,
+    force: bool,
+    is_wrap: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use brief_compiler::ffi::{MapperInfo, MapperRegistry};
+    use brief_compiler::wrapper::{
+        analyze_library,
+        generator::{
+            generate_bindings_toml, generate_lib_bv, preview_generated, write_generated_files,
+        },
+    };
+
+    let lib_name = lib_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+
+    let mapper_name = mapper.unwrap_or_else(|| {
+        if lib_path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            "rust"
+        } else if lib_path.extension().and_then(|e| e.to_str()) == Some("h") {
+            "c"
+        } else if lib_path.extension().and_then(|e| e.to_str()) == Some("wasm") {
+            "wasm"
+        } else {
+            "rust"
+        }
+    });
+
+    let registry = MapperRegistry::new();
+    let mapper_info = registry.find_mapper(mapper_name, None);
+
+    println!("  Library: {}", lib_name);
+    println!("  Mapper: {}", mapper_name);
+
+    if let Some(info) = mapper_info {
+        println!("  Mapper path: {}", info.path.display());
+    } else {
+        eprintln!("  Warning: Mapper '{}' not found", mapper_name);
+        eprintln!("  Available mappers: rust, c, wasm");
+    }
+
+    // Try to analyze the library
+    let analysis_result = match analyze_library(lib_path, Some(mapper_name)) {
+        Ok(result) => {
+            println!("  Analyzed {} functions", result.functions.len());
+            Some(result)
+        }
+        Err(e) => {
+            eprintln!("  Analysis warning: {}", e);
+            eprintln!("  Generating template files instead");
+            None
+        }
+    };
+
+    if is_wrap {
+        let out_dir = output_dir
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("lib/ffi/generated").join(lib_name));
+
+        if !out_dir.exists() {
+            fs::create_dir_all(&out_dir)?;
+        }
+
+        if let Some(result) = analysis_result {
+            write_generated_files(&result, &out_dir, force)?;
+        } else {
+            // Generate template files
+            let lib_bv_path = out_dir.join("lib.bv");
+            let toml_path = out_dir.join("bindings.toml");
+
+            let lib_bv_content = format!(
+                "// Auto-generated wrapper for {}\n// Mapper: {}\n\n// Foreign function declarations (frgn sig)\n// TODO: Add frgn sig declarations\n\n// User MUST define these manually:\n// defn function_name(args) -> ResultType [\n//   true  // precondition - TODO: refine\n// ][\n//   result.valid()  // postcondition - TODO: refine\n// ] {{\n//   __raw_function_name(args)\n// }};\n",
+                lib_name, mapper_name
+            );
+
+            let toml_content = format!(
+                "# Auto-generated bindings for {}\n# Mapper: {}\n\n[[functions]]\nname = \"TODO\"\nlocation = \"{}\"\ntarget = \"native\"\nmapper = \"{}\"\n\n[functions.input]\n# TODO: Add input parameters\n\n[functions.output.success]\n# TODO: Add success output\n\n[functions.output.error]\ntype = \"Error\"\ncode = \"Int\"\nmessage = \"String\"\n",
+                lib_name, mapper_name, lib_name, mapper_name
+            );
+
+            fs::write(&lib_bv_path, lib_bv_content)?;
+            fs::write(&toml_path, toml_content)?;
+        }
+
+        println!("\n  Generated files:");
+        println!("    {}/lib.bv", out_dir.display());
+        println!("    {}/bindings.toml", out_dir.display());
+    } else {
+        // Dry-run mode - show preview
+        if let Some(result) = analysis_result {
+            println!("\n=== lib.bv (preview) ===\n");
+            println!("{}", generate_lib_bv(&result));
+            println!("\n=== bindings.toml (preview) ===\n");
+            println!("{}", generate_bindings_toml(&result));
+        } else {
+            println!("\n  Would generate:");
+            println!("    lib/ffi/generated/{}/lib.bv", lib_name);
+            println!("    lib/ffi/generated/{}/bindings.toml", lib_name);
+        }
+    }
+
+    Ok(())
 }
 
 fn run_check(
@@ -1320,6 +1430,61 @@ fn main() {
                 errors::ErrorMode::Verbose
             };
             lsp::run_lsp_server(mode);
+        }
+
+        "map" | "wrap" => {
+            let is_wrap = command == "wrap";
+            let mut mapper = None;
+            let mut output_dir = None;
+            let mut force = false;
+            let mut lib_path = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--mapper" && i + 1 < args.len() {
+                    mapper = Some(args[i + 1].clone());
+                    i += 2;
+                } else if arg == "--out" && i + 1 < args.len() {
+                    output_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--force" {
+                    force = true;
+                    i += 1;
+                } else if !arg.starts_with('-') {
+                    lib_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = lib_path {
+                match run_map_or_wrap(
+                    &path,
+                    mapper.as_deref(),
+                    output_dir.as_deref(),
+                    force,
+                    is_wrap,
+                ) {
+                    Ok(_) => {
+                        if !is_wrap {
+                            println!("  (dry-run complete - no files written)");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No library path specified");
+                eprintln!(
+                    "Usage: {} {} <library_path> [--mapper <name>] [--out <dir>] [--force]",
+                    args[0], command
+                );
+                std::process::exit(1);
+            }
         }
 
         "install" => {

@@ -1,0 +1,753 @@
+// Standard Math Bindings
+// Provides mathematical operations
+
+[[functions]]
+name = "__sin"
+location = "brief_ffi_native::__sin"
+target = "native"
+mapper = "rust"
+description = "Sine of angle in radians"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__cos"
+location = "brief_ffi_native::__cos"
+target = "native"
+mapper = "rust"
+description = "Cosine of angle in radians"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__tan"
+location = "brief_ffi_native::__tan"
+target = "native"
+mapper = "rust"
+description = "Tangent of angle in radians"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__asin"
+location = "brief_ffi_native::__asin"
+target = "native"
+mapper = "rust"
+description = "Arcsine"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__acos"
+location = "brief_ffi_native::__acos"
+target = "native"
+mapper = "rust"
+description = "Arccosine"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__atan"
+location = "brief_ffi_native::__atan"
+target = "native"
+mapper = "rust"
+description = "Arctangent"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__atan2"
+location = "brief_ffi_native::__atan2"
+target = "native"
+mapper = "rust"
+description = "Arctangent of y/x"
+
+[functions.input]
+y = "Float"
+x = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__sinh"
+location = "brief_ffi_native::__sinh"
+target = "native"
+mapper = "rust"
+description = "Hyperbolic sine"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__cosh"
+location = "brief_ffi_native::__cosh"
+target = "native"
+mapper = "rust"
+description = "Hyperbolic cosine"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__tanh"
+location = "brief_ffi_native::__tanh"
+target = "native"
+mapper = "rust"
+description = "Hyperbolic tangent"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__sqrt"
+location = "brief_ffi_native::__sqrt"
+target = "native"
+mapper = "rust"
+description = "Square root"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__cbrt"
+location = "brief_ffi_native::__cbrt"
+target = "native"
+mapper = "rust"
+description = "Cube root"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__pow"
+location = "brief_ffi_native::__pow"
+target = "native"
+mapper = "rust"
+description = "Raise to power (float)"
+
+[functions.input]
+base = "Float"
+exp = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__powi"
+location = "brief_ffi_native::__powi"
+target = "native"
+mapper = "rust"
+description = "Raise to power (int)"
+
+[functions.input]
+base = "Float"
+exp = "Int"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__exp"
+location = "brief_ffi_native::__exp"
+target = "native"
+mapper = "rust"
+description = "e raised to power"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__exp2"
+location = "brief_ffi_native::__exp2"
+target = "native"
+mapper = "rust"
+description = "2 raised to power"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__ln"
+location = "brief_ffi_native::__ln"
+target = "native"
+mapper = "rust"
+description = "Natural logarithm"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__log"
+location = "brief_ffi_native::__log"
+target = "native"
+mapper = "rust"
+description = "Logarithm with base"
+
+[functions.input]
+n = "Float"
+base = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__log2"
+location = "brief_ffi_native::__log2"
+target = "native"
+mapper = "rust"
+description = "Base 2 logarithm"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__log10"
+location = "brief_ffi_native::__log10"
+target = "native"
+mapper = "rust"
+description = "Base 10 logarithm"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__floor"
+location = "brief_ffi_native::__floor"
+target = "native"
+mapper = "rust"
+description = "Round down"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__ceil"
+location = "brief_ffi_native::__ceil"
+target = "native"
+mapper = "rust"
+description = "Round up"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__round"
+location = "brief_ffi_native::__round"
+target = "native"
+mapper = "rust"
+description = "Round to nearest"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__trunc"
+location = "brief_ffi_native::__trunc"
+target = "native"
+mapper = "rust"
+description = "Truncate decimal"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__fract"
+location = "brief_ffi_native::__fract"
+target = "native"
+mapper = "rust"
+description = "Fractional part"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_nan"
+location = "brief_ffi_native::__is_nan"
+target = "native"
+mapper = "rust"
+description = "Check if NaN"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_infinite"
+location = "brief_ffi_native::__is_infinite"
+target = "native"
+mapper = "rust"
+description = "Check if infinite"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_finite"
+location = "brief_ffi_native::__is_finite"
+target = "native"
+mapper = "rust"
+description = "Check if finite"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_normal"
+location = "brief_ffi_native::__is_normal"
+target = "native"
+mapper = "rust"
+description = "Check if normal"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__signum_float"
+location = "brief_ffi_native::__signum_float"
+target = "native"
+mapper = "rust"
+description = "Sign of float"
+
+[functions.input]
+n = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__clamp_float"
+location = "brief_ffi_native::__clamp_float"
+target = "native"
+mapper = "rust"
+description = "Clamp float value"
+
+[functions.input]
+val = "Float"
+min = "Float"
+max = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__min_float"
+location = "brief_ffi_native::__min_float"
+target = "native"
+mapper = "rust"
+description = "Minimum of two floats"
+
+[functions.input]
+a = "Float"
+b = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__max_float"
+location = "brief_ffi_native::__max_float"
+target = "native"
+mapper = "rust"
+description = "Maximum of two floats"
+
+[functions.input]
+a = "Float"
+b = "Float"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__div_rem"
+location = "brief_ffi_native::__div_rem"
+target = "native"
+mapper = "rust"
+description = "Division remainder"
+
+[functions.input]
+a = "Int"
+b = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__gcd"
+location = "brief_ffi_native::__gcd"
+target = "native"
+mapper = "rust"
+description = "Greatest common divisor"
+
+[functions.input]
+a = "Int"
+b = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__lcm"
+location = "brief_ffi_native::__lcm"
+target = "native"
+mapper = "rust"
+description = "Least common multiple"
+
+[functions.input]
+a = "Int"
+b = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__signum"
+location = "brief_ffi_native::__signum"
+target = "native"
+mapper = "rust"
+description = "Sign of integer"
+
+[functions.input]
+n = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__random"
+location = "brief_ffi_native::__random"
+target = "native"
+mapper = "rust"
+description = "Random float 0-1"
+
+[functions.input]
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__random_int"
+location = "brief_ffi_native::__random_int"
+target = "native"
+mapper = "rust"
+description = "Random integer in range"
+
+[functions.input]
+min = "Int"
+max = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"

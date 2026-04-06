@@ -1,146 +1,146 @@
-# Standard JSON Library
-#
-# Functions marked with 'frgn' require foreign implementation.
-# Functions with 'defn' are implemented natively in Brief.
-#
-# Note: JSON requires a Data type which is inherently foreign,
-# but we can provide helper functions natively.
+// Standard JSON Library
+//
+// Functions marked with 'frgn' require foreign implementation.
+// Functions with 'defn' are implemented natively in Brief.
+//
+// Note: JSON requires a Data type which is inherently foreign,
+// but we can provide helper functions natively.
 
-# ===== PURE FOREIGN (requires Data type implementation) =====
+// ===== PURE FOREIGN (requires Data type implementation) =====
 
-# Parse & Serialize
-frgn sig parse(s: String) -> Data;
-frgn sig stringify(data: Data) -> String;
-frgn sig to_json(data: Data) -> String;
-frgn sig from_json(s: String) -> Data;
+// Parse & Serialize
+frgn sig __parse(s: String) -> Data;
+frgn sig __stringify(data: Data) -> String;
+frgn sig __to_json(data: Data) -> String;
+frgn sig __from_json(s: String) -> Data;
 
-# Type Check
-frgn sig is_null(data: Data) -> Bool;
-frgn sig is_bool(data: Data) -> Bool;
-frgn sig is_number(data: Data) -> Bool;
-frgn sig is_string(data: Data) -> Bool;
-frgn sig is_array(data: Data) -> Bool;
-frgn sig is_object(data: Data) -> Bool;
+// Type Check
+frgn sig __is_null(data: Data) -> Bool;
+frgn sig __is_bool(data: Data) -> Bool;
+frgn sig __is_number(data: Data) -> Bool;
+frgn sig __is_string(data: Data) -> Bool;
+frgn sig __is_array(data: Data) -> Bool;
+frgn sig __is_object(data: Data) -> Bool;
 
-# Get Values
-frgn sig get_bool(data: Data, key: String) -> Bool;
-frgn sig get_number(data: Data, key: String) -> Float;
-frgn sig get_string(data: Data, key: String) -> String;
-frgn sig get_array(data: Data, key: String) -> Data;
-frgn sig get_object(data: Data, key: String) -> Data;
+// Get Values
+frgn sig __get_bool(data: Data, key: String) -> Bool;
+frgn sig __get_number(data: Data, key: String) -> Float;
+frgn sig __get_string(data: Data, key: String) -> String;
+frgn sig __get_array(data: Data, key: String) -> Data;
+frgn sig __get_object(data: Data, key: String) -> Data;
 
-# Array Access
-frgn sig get_index(data: Data, index: Int) -> Data;
-frgn sig array_len(data: Data) -> Int;
-frgn sig array_push(data: Data, item: Data) -> Data;
-frgn sig array_pop(data: Data) -> Data;
-frgn sig array_shift(data: Data) -> Data;
+// Array Access
+frgn sig __get_index(data: Data, index: Int) -> Data;
+frgn sig __array_len(data: Data) -> Int;
+frgn sig __array_push(data: Data, item: Data) -> Data;
+frgn sig __array_pop(data: Data) -> Data;
+frgn sig __array_shift(data: Data) -> Data;
 
-# Object Operations
-frgn sig keys(data: Data) -> List<String>;
-frgn sig values(data: Data) -> List<Data>;
-frgn sig has_key(data: Data, key: String) -> Bool;
+// Object Operations
+frgn sig __keys(data: Data) -> List<String>;
+frgn sig __values(data: Data) -> List<Data>;
+frgn sig __has_key(data: Data, key: String) -> Bool;
 
-# Create Values
-frgn sig null() -> Data;
-frgn sig bool_val(b: Bool) -> Data;
-frgn sig number_val(n: Float) -> Data;
-frgn sig string_val(s: String) -> Data;
-frgn sig array_val(list: List<Data>) -> Data;
-frgn sig object_val(map: Data) -> Data;
+// Create Values
+frgn sig __null() -> Data;
+frgn sig __bool_val(b: Bool) -> Data;
+frgn sig __number_val(n: Float) -> Data;
+frgn sig __string_val(s: String) -> Data;
+frgn sig __array_val(list: List<Data>) -> Data;
+frgn sig __object_val(map: Data) -> Data;
 
-# Merge
-frgn sig merge(a: Data, b: Data) -> Data;
+// Merge
+frgn sig __merge(a: Data, b: Data) -> Data;
 
-# ===== NATIVE DEFINITIONS =====
+// ===== NATIVE DEFINITIONS =====
 
-# Pretty Print - simple version
+// Pretty Print - simple version
 defn pretty_print(data: Data) [result.len() >= 0] -> String {
-  term stringify(data);
+  term __stringify(data);
 };
 
-# Helper: Check if data exists and is not null
+// Helper: Check if data exists and is not null
 defn exists(data: Data) [true][result == true || result == false] -> Bool {
-  term !is_null(data);
+  term !__is_null(data);
 };
 
-# Helper: Get value with default
+// Helper: Get value with default
 defn get_or_default(data: Data, key: String, default: String) [true][result.len() >= 0] -> String {
-  [has_key(data, key)] {
-    term get_string(data, key);
+  [__has_key(data, key)] {
+    term __get_string(data, key);
   };
   term default;
 };
 
-# Helper: Get number with default
+// Helper: Get number with default
 defn get_number_or(data: Data, key: String, default: Float) [true][result >= 0.0 || result < 0.0] -> Float {
-  [has_key(data, key) && is_number(get_object(data, key))] {
-    term get_number(data, key);
+  [__has_key(data, key) && __is_number(__get_object(data, key))] {
+    term __get_number(data, key);
   };
   term default;
 };
 
-# Helper: Get number with default (Int)
+// Helper: Get number with default (Int)
 defn get_int_or(data: Data, key: String, default: Int) [true][result == default || result != default] -> Int {
-  [has_key(data, key) && is_number(get_object(data, key))] {
-    let n: Float = get_number(data, key);
+  [__has_key(data, key) && __is_number(__get_object(data, key))] {
+    let n: Float = __get_number(data, key);
     term n;
   };
   term default;
 };
 
-# Helper: Get bool with default
+// Helper: Get bool with default
 defn get_bool_or(data: Data, key: String, default: Bool) [true][result == true || result == false] -> Bool {
-  [has_key(data, key) && is_bool(get_object(data, key))] {
-    term get_bool(data, key);
+  [__has_key(data, key) && __is_bool(__get_object(data, key))] {
+    term __get_bool(data, key);
   };
   term default;
 };
 
-# Helper: Safe array access with bounds check
+// Helper: Safe array access with bounds check
 defn array_get(data: Data, index: Int) [true][true] -> Data {
-  [index < 0 || index >= array_len(data)] {
-    term null();
+  [index < 0 || index >= __array_len(data)] {
+    term __null();
   };
-  term get_index(data, index);
+  term __get_index(data, index);
 };
 
-# Helper: Array to list of strings (if strings)
-defn array_to_strings(data: Data) [is_array(data)][result.len() == array_len(data)] -> List<String> {
-  let len: Int = array_len(data);
+// Helper: Array to list of strings (if strings)
+defn array_to_strings(data: Data) [__is_array(data)][result.len() == __array_len(data)] -> List<String> {
+  let len: Int = __array_len(data);
   [len == 0] {
     term [];
   };
   let result: List<String> = [];
   let i: Int = 0;
   [i < len] {
-    let item: Data = get_index(data, i);
-    [is_string(item)] {
-      &result = result + [get_string(data, "__item")];  # Note: need proper way to get from temp
+    let item: Data = __get_index(data, i);
+    [__is_string(item)] {
+      &result = result + [__get_string(data, "__item")];  // Note: need proper way to get from temp
     };
     &i = i + 1;
   };
   term result;
 };
 
-# Helper: Get array item count safely
-defn array_count(data: Data) [is_array(data)][result >= 0] -> Int {
-  term array_len(data);
+// Helper: Get array item count safely
+defn array_count(data: Data) [__is_array(data)][result >= 0] -> Int {
+  term __array_len(data);
 };
 
-# Helper: Check if array is empty
-defn array_empty(data: Data) [is_array(data)][result == true || result == false] -> Bool {
-  term array_len(data) == 0;
+// Helper: Check if array is empty
+defn array_empty(data: Data) [__is_array(data)][result == true || result == false] -> Bool {
+  term __array_len(data) == 0;
 };
 
-# Helper: Object to list count
-defn object_count(data: Data) [is_object(data)][result >= 0] -> Int {
-  let k: List<String> = keys(data);
+// Helper: Object to list count
+defn object_count(data: Data) [__is_object(data)][result >= 0] -> Int {
+  let k: List<String> = __keys(data);
   term k.len();
 };
 
-# Helper: Object is empty
-defn object_empty(data: Data) [is_object(data)][result == true || result == false] -> Bool {
-  let k: List<String> = keys(data);
+// Helper: Object is empty
+defn object_empty(data: Data) [__is_object(data)][result == true || result == false] -> Bool {
+  let k: List<String> = __keys(data);
   term k.len() == 0;
 };

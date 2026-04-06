@@ -1,59 +1,59 @@
-# Standard Encoding Library
-#
-# Functions marked with 'frgn' require foreign implementation.
-# Functions with 'defn' are implemented natively in Brief.
-#
-# Note: Most encoding functions require bit manipulation 
-# and complex algorithms, so they are mostly foreign.
+// Standard Encoding Library
+//
+// Functions marked with 'frgn' require foreign implementation.
+// Functions with 'defn' are implemented natively in Brief.
+//
+// Note: Most encoding functions require bit manipulation 
+// and complex algorithms, so they are mostly foreign.
 
-# ===== PURE FOREIGN (requires bit manipulation/complex algorithms) =====
+// ===== PURE FOREIGN (requires bit manipulation/complex algorithms) =====
 
-# Base64
-frgn sig base64_encode(data: String) -> String;
-frgn sig base64_decode(s: String) -> String;
-frgn sig base64_url_encode(data: String) -> String;
-frgn sig base64_url_decode(s: String) -> String;
+// Base64
+frgn sig __base64_encode(data: String) -> String;
+frgn sig __base64_decode(s: String) -> String;
+frgn sig __base64_url_encode(data: String) -> String;
+frgn sig __base64_url_decode(s: String) -> String;
 
-# Hex
-frgn sig hex_encode(data: String) -> String;
-frgn sig hex_decode(s: String) -> String;
-frgn sig hex_encode_bytes(list: List<Int>) -> String;
-frgn sig hex_decode_bytes(s: String) -> List<Int>;
+// Hex
+frgn sig __hex_encode(data: String) -> String;
+frgn sig __hex_decode(s: String) -> String;
+frgn sig __hex_encode_bytes(list: List<Int>) -> String;
+frgn sig __hex_decode_bytes(s: String) -> List<Int>;
 
-# URL Encoding
-frgn sig url_encode(s: String) -> String;
-frgn sig url_decode(s: String) -> String;
-frgn sig url_encode_component(s: String) -> String;
-frgn sig url_decode_component(s: String) -> String;
+// URL Encoding
+frgn sig __url_encode(s: String) -> String;
+frgn sig __url_decode(s: String) -> String;
+frgn sig __url_encode_component(s: String) -> String;
+frgn sig __url_decode_component(s: String) -> String;
 
-# HTML Encoding
-frgn sig html_escape(s: String) -> String;
-frgn sig html_unescape(s: String) -> String;
+// HTML Encoding
+frgn sig __html_escape(s: String) -> String;
+frgn sig __html_unescape(s: String) -> String;
 
-# Unicode
-frgn sig utf8_encode(s: String) -> List<Int>;
-frgn sig utf8_decode(list: List<Int>) -> String;
-frgn sig codepoint_to_char(code: Int) -> String;
-frgn sig char_to_codepoint(c: String) -> Int;
+// Unicode
+frgn sig __utf8_encode(s: String) -> List<Int>;
+frgn sig __utf8_decode(list: List<Int>) -> String;
+frgn sig __codepoint_to_char(code: Int) -> String;
+frgn sig __char_to_codepoint(c: String) -> Int;
 
-# Hashing
-frgn sig md5(s: String) -> String;
-frgn sig sha1(s: String) -> String;
-frgn sig sha256(s: String) -> String;
-frgn sig sha512(s: String) -> String;
+// Hashing
+frgn sig __md5(s: String) -> String;
+frgn sig __sha1(s: String) -> String;
+frgn sig __sha256(s: String) -> String;
+frgn sig __sha512(s: String) -> String;
 
-# UUID
-frgn sig uuid_v4() -> String;
-frgn sig is_uuid(s: String) -> Bool;
+// UUID
+frgn sig __uuid_v4() -> String;
+frgn sig __is_uuid(s: String) -> Bool;
 
-# URI Components
-frgn sig uri_parse(s: String) -> Data;
-frgn sig uri_build(data: Data) -> String;
-frgn sig uri_get_param(url: String, key: String) -> String;
+// URI Components
+frgn sig __uri_parse(s: String) -> Data;
+frgn sig __uri_build(data: Data) -> String;
+frgn sig __uri_get_param(url: String, key: String) -> String;
 
-# ===== NATIVE DEFINITIONS =====
+// ===== NATIVE DEFINITIONS =====
 
-# Simple hex digit to int
+// Simple hex digit to int
 defn hex_digit_to_int(c: String) [c.len() == 1][result >= 0 && result <= 15] -> Int {
   [c == "0"] { term 0; };
   [c == "1"] { term 1; };
@@ -74,7 +74,7 @@ defn hex_digit_to_int(c: String) [c.len() == 1][result >= 0 && result <= 15] -> 
   term 0;
 };
 
-# Int to hex digit
+// Int to hex digit
 defn int_to_hex_digit(n: Int) [n >= 0 && n <= 15][result.len() == 1] -> String {
   [n == 0] { term "0"; };
   [n == 1] { term "1"; };
@@ -95,14 +95,14 @@ defn int_to_hex_digit(n: Int) [n >= 0 && n <= 15][result.len() == 1] -> String {
   term "0";
 };
 
-# Simple byte to hex (for single byte)
+// Simple byte to hex (for single byte)
 defn byte_to_hex(b: Int) [b >= 0 && b <= 255][result.len() == 2] -> String {
   let high: Int = b / 16;
   let low: Int = b % 16;
   term int_to_hex_digit(high) + int_to_hex_digit(low);
 };
 
-# Simple URL encode (basic version - only encodes spaces)
+// Simple URL encode (basic version - only encodes spaces)
 defn url_encode_simple(s: String) [true][result.len() >= s.len()] -> String {
   let result: String = "";
   let i: Int = 0;
@@ -118,7 +118,7 @@ defn url_encode_simple(s: String) [true][result.len() >= s.len()] -> String {
   term result;
 };
 
-# Simple URL decode (basic version - only decodes %20)
+// Simple URL decode (basic version - only decodes %20)
 defn url_decode_simple(s: String) [true][result.len() <= s.len()] -> String {
   let result: String = "";
   let i: Int = 0;
@@ -134,7 +134,7 @@ defn url_decode_simple(s: String) [true][result.len() <= s.len()] -> String {
   term result;
 };
 
-# Check if char is hex digit
+// Check if char is hex digit
 defn is_hex_digit(c: String) [c.len() == 1][result == true || result == false] -> Bool {
   [c >= "0" && c <= "9"] { term true; };
   [c >= "a" && c <= "f"] { term true; };
@@ -142,7 +142,7 @@ defn is_hex_digit(c: String) [c.len() == 1][result == true || result == false] -
   term false;
 };
 
-# Check if string is valid hex
+// Check if string is valid hex
 defn is_hex_string(s: String) [true][result == true || result == false] -> Bool {
   [s.len() == 0] { term false; };
   let i: Int = 0;
@@ -158,7 +158,7 @@ defn is_hex_string(s: String) [true][result == true || result == false] -> Bool 
   term valid;
 };
 
-# Reverse string (useful for some encodings)
+// Reverse string (useful for some encodings)
 defn reverse_string(s: String) [true][result.len() == s.len()] -> String {
   [s.len() <= 1] { term s; };
   let result: String = "";
@@ -170,7 +170,7 @@ defn reverse_string(s: String) [true][result.len() == s.len()] -> String {
   term result;
 };
 
-# Count occurrences (useful for validation)
+// Count occurrences (useful for validation)
 defn count_char(s: String, c: String) [c.len() == 1][result >= 0] -> Int {
   let count: Int = 0;
   let i: Int = 0;

@@ -1,0 +1,586 @@
+// Standard String Bindings
+// Provides string manipulation operations
+
+[[functions]]
+name = "__to_lower"
+location = "brief_ffi_native::__to_lower"
+target = "native"
+mapper = "rust"
+description = "Convert to lowercase"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__to_upper"
+location = "brief_ffi_native::__to_upper"
+target = "native"
+mapper = "rust"
+description = "Convert to uppercase"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__to_title"
+location = "brief_ffi_native::__to_title"
+target = "native"
+mapper = "rust"
+description = "Convert to title case"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_lower"
+location = "brief_ffi_native::__is_lower"
+target = "native"
+mapper = "rust"
+description = "Check if lowercase"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_upper"
+location = "brief_ffi_native::__is_upper"
+target = "native"
+mapper = "rust"
+description = "Check if uppercase"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_whitespace"
+location = "brief_ffi_native::__is_whitespace"
+target = "native"
+mapper = "rust"
+description = "Check if whitespace only"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_alpha"
+location = "brief_ffi_native::__is_alpha"
+target = "native"
+mapper = "rust"
+description = "Check if alphabetic"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_alphanumeric"
+location = "brief_ffi_native::__is_alphanumeric"
+target = "native"
+mapper = "rust"
+description = "Check if alphanumeric"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__is_numeric"
+location = "brief_ffi_native::__is_numeric"
+target = "native"
+mapper = "rust"
+description = "Check if numeric"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__contains_at"
+location = "brief_ffi_native::__contains_at"
+target = "native"
+mapper = "rust"
+description = "Check if contains at position"
+
+[functions.input]
+haystack = "String"
+needle = "String"
+start = "Int"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__find_from"
+location = "brief_ffi_native::__find_from"
+target = "native"
+mapper = "rust"
+description = "Find substring from position"
+
+[functions.input]
+s = "String"
+needle = "String"
+start = "Int"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__rfind"
+location = "brief_ffi_native::__rfind"
+target = "native"
+mapper = "rust"
+description = "Find last occurrence"
+
+[functions.input]
+s = "String"
+needle = "String"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__get_chars"
+location = "brief_ffi_native::__get_chars"
+target = "native"
+mapper = "rust"
+description = "Get all characters"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "List"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__utf8_len"
+location = "brief_ffi_native::__utf8_len"
+target = "native"
+mapper = "rust"
+description = "Get UTF-8 length"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__escape"
+location = "brief_ffi_native::__escape"
+target = "native"
+mapper = "rust"
+description = "Escape special characters"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__unescape"
+location = "brief_ffi_native::__unescape"
+target = "native"
+mapper = "rust"
+description = "Unescape special characters"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__quote"
+location = "brief_ffi_native::__quote"
+target = "native"
+mapper = "rust"
+description = "Add quotes"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__unquote"
+location = "brief_ffi_native::__unquote"
+target = "native"
+mapper = "rust"
+description = "Remove quotes"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__bytes"
+location = "brief_ffi_native::__bytes"
+target = "native"
+mapper = "rust"
+description = "Get byte values"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "List"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__from_bytes"
+location = "brief_ffi_native::__from_bytes"
+target = "native"
+mapper = "rust"
+description = "Create from bytes"
+
+[functions.input]
+list = "List"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__replace_all"
+location = "brief_ffi_native::__replace_all"
+target = "native"
+mapper = "rust"
+description = "Replace all occurrences"
+
+[functions.input]
+s = "String"
+old = "String"
+new = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__splitn"
+location = "brief_ffi_native::__splitn"
+target = "native"
+mapper = "rust"
+description = "Split with limit"
+
+[functions.input]
+s = "String"
+delim = "String"
+n = "Int"
+
+[functions.output.success]
+result = "List"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__rsplit"
+location = "brief_ffi_native::__rsplit"
+target = "native"
+mapper = "rust"
+description = "Reverse split"
+
+[functions.input]
+s = "String"
+delim = "String"
+
+[functions.output.success]
+result = "List"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__words"
+location = "brief_ffi_native::__words"
+target = "native"
+mapper = "rust"
+description = "Get all words"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "List"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__truncate"
+location = "brief_ffi_native::__truncate"
+target = "native"
+mapper = "rust"
+description = "Truncate string"
+
+[functions.input]
+s = "String"
+max_len = "Int"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__truncate_with"
+location = "brief_ffi_native::__truncate_with"
+target = "native"
+mapper = "rust"
+description = "Truncate with suffix"
+
+[functions.input]
+s = "String"
+max_len = "Int"
+suffix = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__eq_ignore_case"
+location = "brief_ffi_native::__eq_ignore_case"
+target = "native"
+mapper = "rust"
+description = "Case-insensitive equal"
+
+[functions.input]
+a = "String"
+b = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__cmp"
+location = "brief_ffi_native::__cmp"
+target = "native"
+mapper = "rust"
+description = "Compare strings"
+
+[functions.input]
+s1 = "String"
+s2 = "String"
+
+[functions.output.success]
+result = "Int"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__parse_float"
+location = "brief_ffi_native::__parse_float"
+target = "native"
+mapper = "rust"
+description = "Parse as float"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Float"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__to_bool"
+location = "brief_ffi_native::__to_bool"
+target = "native"
+mapper = "rust"
+description = "Parse as bool"
+
+[functions.input]
+s = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"

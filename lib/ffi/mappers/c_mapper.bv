@@ -1,0 +1,58 @@
+// C Mapper - Handles C string null-termination, UTF-8, etc.
+
+// Convert C string to Brief String
+// Precondition: C string is valid and not null
+// Postcondition: Returns Brief String with content
+defn c_string_to_brief(c_str: CString) -> String [c_str.is_valid() && c_str.not_null()][true] {
+  term c_str.to_str();
+};
+
+// Convert Brief String to C string
+// Precondition: Brief String is valid
+// Postcondition: Returns CString (caller must free)
+defn brief_string_to_c(s: String) -> CString [true][true] {
+  term CString::new(s);
+};
+
+// Convert C int to Brief Int
+defn c_int_to_brief(c_int: CInt) -> Int [true][true] {
+  term c_int.value;
+};
+
+// Convert Brief Int to C int
+defn brief_int_to_c(n: Int) -> CInt [true][true] {
+  term CInt { value: n };
+};
+
+// Map C error to Brief error
+// Precondition: C error is valid
+// Postcondition: Returns Brief error string
+defn c_error_to_brief(c_err: CError) -> String [true][true] {
+  term c_err.message;
+};
+
+// Handle nullable C pointer
+defn c_ptr_to_maybe(ptr: CPtr) -> Bool [true][true] {
+  [ptr.is_null()] {
+    term false;
+  };
+  term true;
+};
+
+// Convert C pointer to Brief Int (as address)
+defn c_ptr_to_address(ptr: CPtr) -> Int [true][true] {
+  term ptr.address();
+};
+
+// Safe string conversion with fallback
+defn c_string_safe(c_str: CString, fallback: String) -> String [true][true] {
+  [c_str.is_valid()] {
+    term c_str.to_str();
+  };
+  term fallback;
+};
+
+// Handle C array conversion
+defn c_array_to_list(ptr: CPtr, len: Int) -> List<Int> [ptr.not_null() && len >= 0][result.len() == len] {
+  term ptr.to_list(len);
+};

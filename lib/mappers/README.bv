@@ -1,0 +1,24 @@
+// User-Defined Mappers
+// 
+// This directory is for user-created mappers.
+// Place your custom mapper files here.
+//
+// Example: lib/mappers/my_custom_mapper.bv
+//
+// Then use in TOML:
+// [[functions]]
+// name = "__my_func"
+// mapper = "my_custom_mapper"
+// target = "native"
+// location = "my_crate::my_func"
+//
+// Or with explicit path:
+// [[functions]]
+// name = "__my_func"
+// mapper = "my_custom_mapper"
+// path = "./lib/mappers/my_custom_mapper"
+// target = "native"
+// location = "my_crate::my_func"
+
+// This file is intentionally empty.
+// User mappers should be placed as separate .bv files in this directory.

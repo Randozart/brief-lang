@@ -1,0 +1,54 @@
+// Standard I/O Bindings
+// Provides console input/output operations
+
+[[functions]]
+name = "__print"
+location = "brief_ffi_native::__print"
+target = "native"
+description = "Print string to stdout without newline"
+
+[functions.input]
+msg = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__println"
+location = "brief_ffi_native::__println"
+target = "native"
+description = "Print string to stdout with newline"
+
+[functions.input]
+msg = "String"
+
+[functions.output.success]
+result = "Bool"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "__input"
+location = "brief_ffi_native::__input"
+target = "native"
+description = "Read line from stdin"
+
+[functions.input]
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"

@@ -1,4 +1,4 @@
-# Example: Native Brief Stdlib vs FFI Bindings
+// Example: Native Brief Stdlib vs FFI Bindings
 
 let x: Int = -42;
 let y: Int = 10;
@@ -6,19 +6,19 @@ let z: Int = 20;
 let initialized: Bool = false;
 let counter: Int = 0;
 
-# Native Brief: Integer Operations & Predicates
-# Brief includes these proven functions natively:
-#   absolute(n) | min(a, b) | max(a, b) | clamp(v, lo, hi)
-#   is_positive(n) | is_negative(n) | is_zero(n) | is_even(n)
-#
-# Key advantage: Proven correct at compile time, zero FFI overhead
+// Native Brief: Integer Operations & Predicates
+// Brief includes these proven functions natively:
+//   absolute(n) | min(a, b) | max(a, b) | clamp(v, lo, hi)
+//   is_positive(n) | is_negative(n) | is_zero(n) | is_even(n)
+//
+// Key advantage: Proven correct at compile time, zero FFI overhead
 
 defn demo_predicates() [true][true] -> Bool {
   term true;
 };
 
-# State Management (Brief's Core Strength)
-# Brief is designed for proving state transitions correct
+// State Management (Brief's Core Strength)
+// Brief is designed for proving state transitions correct
 
 rct txn initialize_system
   [initialized == false]

@@ -1,0 +1,22 @@
+// Rust Mapper - 1:1 mapping
+// No transformation between Rust and Brief types
+
+// Map input: 1:1 identity
+defn map_input(value: Value) -> Value [true][true] {
+  term value;
+};
+
+// Map output: 1:1 identity  
+defn map_output(value: Value) -> Value [true][true] {
+  term value;
+};
+
+// Map error: 1:1 identity
+defn map_error(err: Error) -> Error [true][true] {
+  term err;
+};
+
+// Identity mapper - for simple Rust FFI
+defn identity(value: Value) -> Value [true][true] {
+  term value;
+};
