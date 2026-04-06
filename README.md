@@ -1,6 +1,6 @@
 # Brief
 
-<img src="logo/brief-logo.svg" alt="Brief" width="200"/> <img src="logo/r-brief-logo.svg" alt="Rendered Brief" width="200"/>
+<img src="https://raw.githubusercontent.com/anomalyco/brief-compiler/main/assets/brief-logo.svg" alt="Brief" width="200"/> <img src="https://raw.githubusercontent.com/anomalyco/brief-compiler/main/assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/>
 
 ## Quick Start (5 minutes)
 
@@ -13,8 +13,8 @@ git clone https://github.com/anomalyco/brief-compiler.git
 cd brief-compiler
 
 # Run the installer
-chmod +x brief-install
-./brief-install
+chmod +x scripts/brief-install
+./scripts/brief-install
 ```
 
 **Windows:**
@@ -24,7 +24,7 @@ git clone https://github.com/anomalyco/brief-compiler.git
 cd brief-compiler
 
 # Run the installer
-.\brief-install.bat
+.\scripts\brief-install.bat
 ```
 
 The installer will copy the compiler to your user bin directory:
@@ -132,15 +132,15 @@ Known incomplete:
 ```bash
 git clone https://github.com/anomalyco/brief-compiler.git
 cd brief-compiler
-chmod +x brief-install
-./brief-install
+chmod +x scripts/brief-install
+./scripts/brief-install
 ```
 
 **Windows:**
 ```powershell
 git clone https://github.com/anomalyco/brief-compiler.git
 cd brief-compiler
-.\brief-install.bat
+.\scripts\brief-install.bat
 ```
 
 ### Option 2: From Source (Requires Rust)
