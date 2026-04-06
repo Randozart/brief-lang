@@ -441,7 +441,7 @@ txn increment [true][count == @count + 1] {
 # To delete this file and use only .bv: rm main.rbv
 # =============================================================================
 
-<script type="brief">
+<script>
 rstruct Counter {
   count: Int;
 

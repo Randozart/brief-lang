@@ -2,7 +2,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum RbvError {
-    #[error("Missing <script type=\"brief\"> block")]
+    #[error("Missing <script> block")]
     MissingScript,
     #[error("Missing <view> block")]
     MissingView,
@@ -21,7 +21,8 @@ pub struct RbvFile {
 
 impl RbvFile {
     pub fn parse(source: &str) -> Result<Self, RbvError> {
-        let script = extract_tag(source, "<script type=\"brief\">", "</script>")
+        let script = extract_tag(source, "<script>", "</script>")
+            .or_else(|| extract_tag(source, "<script type=\"brief\">", "</script>"))
             .ok_or(RbvError::MissingScript)?;
 
         let view = extract_tag(source, "<view>", "</view>").ok_or(RbvError::MissingView)?;

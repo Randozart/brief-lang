@@ -2,13 +2,10 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Brief",
   "fileTypes": ["bv"],
-  "firstLineMatch": "^#.*",
+  "firstLineMatch": "^//",
   "patterns": [
     {
       "include": "#block-comments"
-    },
-    {
-      "include": "#line-comments"
     },
     {
       "include": "#annotations"
@@ -48,14 +45,6 @@
           "name": "comment.block.brief",
           "begin": "#\\[",
           "end": "\\]#"
-        }
-      ]
-    },
-    "line-comments": {
-      "patterns": [
-        {
-          "name": "comment.line.brief",
-          "match": "#.*$"
         }
       ]
     },
