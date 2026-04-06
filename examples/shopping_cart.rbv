@@ -5,15 +5,15 @@ rstruct ShoppingCart {
   total: Int;
   step: Int;
 
-  # Product selection transactions - set the selected product
+  // Product selection transactions - set the selected product
   txn ShoppingCart.select_laptop [true][product == 1] { &product = 1; term; };
   txn ShoppingCart.select_keyboard [true][product == 2] { &product = 2; term; };
   txn ShoppingCart.select_mouse [true][product == 3] { &product = 3; term; };
   txn ShoppingCart.select_monitor [true][product == 4] { &product = 4; term; };
 
-  # Product-specific add transactions - ADD SPECIFIC PRODUCT TO CART
-  # These preserve the contract [product > 0] by setting product FIRST, then adding
-  # CONTRACT-FIRST: Each transaction adds a specific product (not "nothing")
+  // Product-specific add transactions - ADD SPECIFIC PRODUCT TO CART
+  // These preserve the contract [product > 0] by setting product FIRST, then adding
+  // CONTRACT-FIRST: Each transaction adds a specific product (not "nothing")
   txn ShoppingCart.add_laptop [true][items == @items + 1] { 
     &product = 1;
     &items = items + 1;

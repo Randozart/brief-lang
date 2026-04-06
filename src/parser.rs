@@ -30,13 +30,6 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) {
-        if let Some((Ok(Token::Comment(text)), span)) = &self.current {
-            self.comments.push(Comment {
-                line: span.start,
-                text: text.clone(),
-            });
-        }
-
         self.current = self.peek.take();
         self.peek = self.lexer.next().map(|token| (token, self.lexer.span()));
 
@@ -168,14 +161,6 @@ impl<'a> Parser<'a> {
         while self.current_token().is_some() {
             items.push(self.parse_top_level()?);
         }
-        // Collect any trailing comments
-        while let Some((Ok(Token::Comment(text)), span)) = &self.current {
-            self.comments.push(Comment {
-                line: span.start,
-                text: text.clone(),
-            });
-            self.advance();
-        }
         Ok(Program {
             items,
             comments: self.comments.clone(),
@@ -184,11 +169,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_top_level(&mut self) -> Result<TopLevel, String> {
-        // Skip standalone comments at top level
-        while let Some(Ok(Token::Comment(_))) = self.current_token() {
-            self.advance();
-        }
-
         if self.current_token().is_none() {
             return Err("Unexpected EOF".to_string());
         }
@@ -249,10 +229,6 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Render)) => {
                 let render_block = self.parse_render_block()?;
                 Ok(TopLevel::RenderBlock(render_block))
-            }
-            Some(Ok(Token::Comment(_))) => {
-                self.advance();
-                self.parse_top_level()
             }
             Some(Ok(tok)) => Err(format!("Unexpected token at top level: {:?}", tok)),
             Some(Err(_)) => Err("Lexer error at top level".to_string()),
@@ -531,9 +507,6 @@ impl<'a> Parser<'a> {
                     let txn = self.parse_transaction()?;
                     transactions.push(txn);
                 }
-                Ok(Token::Comment(_)) => {
-                    self.advance();
-                }
                 _ => {
                     return Err(format!("Unexpected token in struct: {:?}", token));
                 }
@@ -604,9 +577,6 @@ impl<'a> Parser<'a> {
                     let (html, end_pos) = self.scan_html_block(start)?;
                     view_html.push_str(&html);
                     self.advance_past_position(end_pos);
-                    self.advance();
-                }
-                Ok(Token::Comment(_)) => {
                     self.advance();
                 }
                 _ => {
