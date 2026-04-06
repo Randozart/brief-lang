@@ -7,6 +7,7 @@ use std::path::Path;
 pub mod c_analyzer;
 pub mod contracts;
 pub mod generator;
+pub mod interactive;
 pub mod rust_analyzer;
 pub mod wasm_analyzer;
 
