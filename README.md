@@ -31,7 +31,7 @@ and code diverged.
 **Linux / macOS:**
 ```bash
 # Clone this repository
-git clone https://github.com/anomalyco/brief-compiler.git
+git clone https://github.com/Randozart/brief-compiler.git
 cd brief-compiler
 
 # Run the installer
@@ -42,7 +42,7 @@ chmod +x scripts/brief-install
 **Windows:**
 ```powershell
 # Clone this repository (or download ZIP)
-git clone https://github.com/anomalyco/brief-compiler.git
+git clone https://github.com/Randozart/brief-compiler.git
 cd brief-compiler
 
 # Run the installer
