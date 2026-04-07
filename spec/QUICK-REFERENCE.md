@@ -60,7 +60,7 @@ txn name [precondition][postcondition] { body }
 [balance == @balance - amount]
 
 # Syntactic sugar
-[~flag]  →  [~flag][flag]
+[~/flag]  →  [~flag][flag]
 ```
 
 ## Common Patterns
@@ -192,7 +192,7 @@ current_timestamp() -> Result<Int, TimeError>
 sleep_ms(ms: Int) -> Result<Void, TimeError>
 ```
 
-See [FFI-STDLIB-REFERENCE.md](FFI-STDLIB-REFERENCE.md) for complete list.
+See [FFI-GUIDE.md](FFI-GUIDE.md) for FFI details.
 
 ## CLI
 

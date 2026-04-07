@@ -7,98 +7,79 @@ Complete documentation for the Brief language and compiler.
 Start here if you're new to Brief.
 
 - **[README.md](../README.md)** - What Brief is and how to install it
-- **[LANGUAGE-TUTORIAL.md](LANGUAGE-TUTORIAL.md)** - Step-by-step guide (10 parts)
+- **[LANGUAGE-TUTORIAL.md](LANGUAGE-TUTORIAL.md)** - Step-by-step guide
   - Part 1: Getting started
   - Part 2: Transactions
   - Part 3: Reactive transactions
   - Part 4: Functions
   - Part 5: Pattern matching
-  - Part 6: Using Rust (FFI)
-  - Part 7: Real example
-  - Part 8: Common patterns
-  - Part 9: Tips and gotchas
-  - Part 10: Debugging
+  - Part 6: Structs
+  - Part 7: Foreign Functions (FFI)
+  - Part 8: Real example
+  - Part 9: Common patterns
+  - Part 10: Syntactic sugar
+  - Part 11: Multi-return functions
+  - Part 12: Tips and gotchas
+  - Part 13: Debugging
 
 ## Reference Documentation
 
 Use these for detailed information about language features.
 
-- **[LANGUAGE-REFERENCE.md](LANGUAGE-REFERENCE.md)** - Complete language specification
-  - Overview and core concepts
-  - Full syntax reference
-  - Types and type system
+- **[SPEC.md](SPEC.md)** - Language specification
+  - Complete BNF grammar
+  - Formal semantics
+  - Type system
+  - Transaction model
+  - FFI system
+
+- **[LANGUAGE-REFERENCE.md](LANGUAGE-REFERENCE.md)** - Complete reference
+  - Syntax reference
+  - Types
   - State and variables
-  - Transactions (passive and reactive)
-  - Definitions and functions
-  - Contracts and verification
+  - Transactions
+  - Definitions
+  - Structs
   - Pattern matching
+  - FFI
   - Standard library
-  - Foreign functions (FFI)
-  - Working examples
+  - Error messages
 
 - **[QUICK-REFERENCE.md](QUICK-REFERENCE.md)** - Cheat sheet
   - Syntax at a glance
   - Common patterns
-  - Native stdlib
+  - Standard library
   - FFI modules
   - CLI commands
 
-## Standard Library
+## Foreign Function Interface (FFI)
 
-Learn about built-in functions.
+Learn how to call external functions from Brief.
 
-- **[std/core.bv](../std/core.bv)** - Native Brief stdlib (no FFI)
-  - Integer math: `absolute()`, `min()`, `max()`, `clamp()`
-  - Predicates: `is_positive()`, `is_negative()`, `is_zero()`, `is_even()`
-  - State patterns and helpers
-  - All functions proven at compile time
-
-- **[std/bindings/README.md](../std/bindings/README.md)** - FFI bindings guide
-  - What's native vs FFI
-  - When to use each
-  - Philosophy
-
-- **[FFI-STDLIB-REFERENCE.md](FFI-STDLIB-REFERENCE.md)** - Complete FFI reference
-  - 59 stdlib functions documented
-  - I/O module (10 functions)
-  - Math module (14 functions)
-  - String module (15 functions)
-  - Time module (5 functions)
-  - Each function with parameters, returns, error codes, examples
-
-## FFI (Foreign Functions)
-
-Use Rust functions from Brief.
-
-- **[FFI-USER-GUIDE.md](FFI-USER-GUIDE.md)** - How to use FFI
-  - Creating custom TOML bindings
-  - Using stdlib FFI functions
-  - Error handling with Result types
-  - 7 detailed examples
-  - Troubleshooting guide
-
-- **[FFI-STDLIB-REFERENCE.md](FFI-STDLIB-REFERENCE.md)** - Reference for stdlib FFI
-  - Complete list of 59 available functions
-  - Full documentation for each
+- **[FFI-GUIDE.md](FFI-GUIDE.md)** - Complete FFI guide
+  - When to use FFI
+  - TOML bindings format
+  - Brief declarations
+  - Error handling
+  - Creating custom bindings
+  - Type system
+  - Examples
 
 - **[std/bindings/](../std/bindings/)** - TOML binding files
-  - `io.toml` - File I/O operations
+  - `io.toml` - File I/O
   - `math.toml` - Math functions
   - `string.toml` - String utilities
   - `time.toml` - Time operations
 
-## Architecture and Design
+## Rendered Brief
 
-Understand how Brief works internally.
+Build reactive web interfaces with Brief.
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Compiler architecture
-  - Pipeline: Lexer → Parser → Type Checker → Proof Engine → Interpreter
-  - Design decisions
-
-- **[STDLIB-REDESIGN.md](STDLIB-REDESIGN.md)** - Why stdlib is split
-  - What Brief handles natively
-  - What needs FFI
-  - Rationale for each separation
+- **[RENDERED-BRIEF-GUIDE.md](RENDERED-BRIEF-GUIDE.md)** - Web UI guide
+  - rstruct components
+  - b-text, b-show, b-trigger directives
+  - Component composition
+  - Examples
 
 ## Examples
 
@@ -107,17 +88,15 @@ Working Brief programs.
 - **[examples/](../examples/)** - Example programs
   - `reactive_counter.bv` - Basic reactive system
   - `bank_transfer_system.bv` - Multi-account state
-  - `counter.rbv` - Web UI (Rendered Brief)
+  - `stdlib_usage.bv` - Native vs FFI examples
   - And more...
-
-- **[examples/stdlib_usage.bv](../examples/stdlib_usage.bv)** - Native vs FFI examples
 
 ## By Use Case
 
 ### I want to learn Brief
 
 1. Read [README.md](../README.md)
-2. Follow [LANGUAGE-TUTORIAL.md](LANGUAGE-TUTORIAL.md) parts 1-3
+2. Follow [LANGUAGE-TUTORIAL.md](LANGUAGE-TUTORIAL.md)
 3. Try examples from [examples/](../examples/)
 4. Reference [QUICK-REFERENCE.md](QUICK-REFERENCE.md) while coding
 
@@ -125,67 +104,69 @@ Working Brief programs.
 
 - [QUICK-REFERENCE.md](QUICK-REFERENCE.md) for quick answers
 - [LANGUAGE-REFERENCE.md](LANGUAGE-REFERENCE.md) for complete details
+- [SPEC.md](SPEC.md) for formal specification
 
 ### I want to use FFI
 
-1. Read [FFI-USER-GUIDE.md](FFI-USER-GUIDE.md) parts 1-3
-2. Check [FFI-STDLIB-REFERENCE.md](FFI-STDLIB-REFERENCE.md) for available functions
+1. Read [FFI-GUIDE.md](FFI-GUIDE.md)
+2. Check [std/bindings/](../std/bindings/) for available functions
 3. See [examples/stdlib_usage.bv](../examples/stdlib_usage.bv) for patterns
-4. Reference [FFI-USER-GUIDE.md](FFI-USER-GUIDE.md) troubleshooting section if stuck
 
 ### I want to create FFI bindings
 
-1. Read [FFI-USER-GUIDE.md](FFI-USER-GUIDE.md) "Creating Bindings" section
+1. Read [FFI-GUIDE.md](FFI-GUIDE.md) "Creating Custom Bindings" section
 2. Look at [std/bindings/](../std/bindings/) for examples
-3. Reference [STDLIB-REDESIGN.md](STDLIB-REDESIGN.md) for design philosophy
 
-### I want to understand the compiler
+### I want to build web UIs
 
-1. Read [ARCHITECTURE.md](ARCHITECTURE.md)
-2. Look at compiler pipeline in [src/](../src/)
-3. See [LANGUAGE-REFERENCE.md](LANGUAGE-REFERENCE.md) "Verification" section
+1. Read [RENDERED-BRIEF-GUIDE.md](RENDERED-BRIEF-GUIDE.md)
+2. Look at [examples/*.rbv](../examples/) for patterns
 
 ## File Organization
 
 ```
 spec/
 ├── INDEX.md (you are here)
-├── README.md                           # What is Brief?
-├── LANGUAGE-REFERENCE.md               # Complete language spec
-├── LANGUAGE-TUTORIAL.md                # Step-by-step guide (10 parts)
-├── QUICK-REFERENCE.md                  # Cheat sheet
-├── FFI-USER-GUIDE.md                  # How to use FFI
-├── FFI-STDLIB-REFERENCE.md            # Stdlib functions reference
-├── STDLIB-REDESIGN.md                 # Why stdlib is designed this way
-├── ARCHITECTURE.md                     # Compiler internals
-└── (other design docs)
+├── README.md                    # What is Brief?
+├── SPEC.md                      # Language specification
+├── LANGUAGE-REFERENCE.md        # Complete reference
+├── LANGUAGE-TUTORIAL.md         # Step-by-step guide
+├── QUICK-REFERENCE.md           # Cheat sheet
+├── FFI-GUIDE.md                # FFI guide
+├── RENDERED-BRIEF-GUIDE.md     # Web UI guide
+└── old_docs/                   # Archived documents
 
 std/
-├── core.bv                             # Native Brief stdlib
+├── core.bv                      # Native Brief stdlib
 └── bindings/
-    ├── README.md                       # FFI bindings guide
-    ├── io.toml                         # File I/O
-    ├── math.toml                       # Math functions
-    ├── string.toml                     # String utilities
-    └── time.toml                       # Time operations
+    ├── io.toml                  # File I/O
+    ├── math.toml                # Math functions
+    ├── string.toml             # String utilities
+    └── time.toml               # Time operations
+
+lib/
+├── ffi/
+│   └── mappers/                 # FFI mapper system
+└── std/
+    ├── io.bv                    # I/O module
+    ├── math.bv                   # Math module
+    └── ...
 
 examples/
-├── stdlib_usage.bv                     # Native vs FFI examples
-├── reactive_counter.bv                 # Reactive transactions
-├── bank_transfer_system.bv             # State management
-├── counter.rbv                         # Web UI
-└── (other examples)
+├── reactive_counter.bv           # Reactive transactions
+├── bank_transfer_system.bv       # State management
+├── stdlib_usage.bv               # Native vs FFI
+└── ...
 
 src/
-├── lexer.rs                            # Tokenization
-├── parser.rs                           # Parsing
-├── ast.rs                              # AST
-├── typechecker.rs                      # Type checking
-├── proof_engine.rs                     # Verification
-├── interpreter.rs                      # Execution
-├── reactor.rs                          # Event loop
-├── ffi/                                # Foreign function interface
-└── (other modules)
+├── lexer.rs                     # Tokenization
+├── parser.rs                    # Parsing
+├── ast.rs                       # AST
+├── typechecker.rs               # Type checking
+├── proof_engine.rs              # Verification
+├── interpreter.rs                # Execution
+├── ffi/                         # Foreign function interface
+└── ...
 ```
 
 ## Quick Navigation
@@ -196,54 +177,38 @@ src/
 | Learn the language | [LANGUAGE-TUTORIAL.md](LANGUAGE-TUTORIAL.md) |
 | Look up syntax | [QUICK-REFERENCE.md](QUICK-REFERENCE.md) |
 | Deep dive into features | [LANGUAGE-REFERENCE.md](LANGUAGE-REFERENCE.md) |
-| Use FFI functions | [FFI-STDLIB-REFERENCE.md](FFI-STDLIB-REFERENCE.md) |
-| Create FFI bindings | [FFI-USER-GUIDE.md](FFI-USER-GUIDE.md) |
+| Formal specification | [SPEC.md](SPEC.md) |
+| Use FFI | [FFI-GUIDE.md](FFI-GUIDE.md) |
+| Build web UIs | [RENDERED-BRIEF-GUIDE.md](RENDERED-BRIEF-GUIDE.md) |
 | See working code | [examples/](../examples/) |
-| Understand the compiler | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Understand stdlib design | [STDLIB-REDESIGN.md](STDLIB-REDESIGN.md) |
 
 ## Topics
 
 ### State Management
 - [LANGUAGE-TUTORIAL.md Part 2](LANGUAGE-TUTORIAL.md#part-2-transactions---making-changes)
-- [LANGUAGE-REFERENCE.md State and Variables](LANGUAGE-REFERENCE.md#state-and-variables)
-- [LANGUAGE-TUTORIAL.md Part 8](LANGUAGE-TUTORIAL.md#part-8-common-patterns)
+- [LANGUAGE-REFERENCE.md State](LANGUAGE-REFERENCE.md#state-and-variables)
 
 ### Reactive Systems
 - [LANGUAGE-TUTORIAL.md Part 3](LANGUAGE-TUTORIAL.md#part-3-reactive-transactions)
-- [LANGUAGE-REFERENCE.md Reactive Transactions](LANGUAGE-REFERENCE.md#reactive-transactions-rct-txn)
-- [examples/reactive_counter.bv](../examples/reactive_counter.bv)
+- [LANGUAGE-REFERENCE.md Reactive](LANGUAGE-REFERENCE.md#transactions)
 
-### Functions and Definitions
+### Functions
 - [LANGUAGE-TUTORIAL.md Part 4](LANGUAGE-TUTORIAL.md#part-4-functions-definitions)
-- [LANGUAGE-REFERENCE.md Definitions](LANGUAGE-REFERENCE.md#definitions-and-functions)
+- [LANGUAGE-REFERENCE.md Definitions](LANGUAGE-REFERENCE.md#definitions)
 
-### Error Handling
-- [LANGUAGE-TUTORIAL.md Part 6](LANGUAGE-TUTORIAL.md#part-6-using-rust-ffi)
-- [FFI-USER-GUIDE.md Error Handling](FFI-USER-GUIDE.md#error-handling)
+### Syntactic Sugar
+- [LANGUAGE-TUTORIAL.md Part 10](LANGUAGE-TUTORIAL.md#part-10-syntactic-sugar)
+- [LANGUAGE-REFERENCE.md Syntactic Sugar](LANGUAGE-REFERENCE.md#syntactic-sugar)
 
-### Pattern Matching
-- [LANGUAGE-TUTORIAL.md Part 5](LANGUAGE-TUTORIAL.md#part-5-pattern-matching)
-- [LANGUAGE-REFERENCE.md Pattern Matching](LANGUAGE-REFERENCE.md#pattern-matching)
-
-### Type System
-- [LANGUAGE-REFERENCE.md Types](LANGUAGE-REFERENCE.md#types)
-- [LANGUAGE-TUTORIAL.md Part 1](LANGUAGE-TUTORIAL.md#part-1-getting-started)
-
-### Formal Verification
-- [LANGUAGE-REFERENCE.md Contracts](LANGUAGE-REFERENCE.md#contracts-and-verification)
-- [LANGUAGE-TUTORIAL.md Part 9](LANGUAGE-TUTORIAL.md#part-9-tips-and-gotchas)
+### Foreign Functions
+- [LANGUAGE-TUTORIAL.md Part 7](LANGUAGE-TUTORIAL.md#part-7-foreign-functions-ffi)
+- [FFI-GUIDE.md](FFI-GUIDE.md)
 
 ## Version
 
 - **Language**: Brief 6.2
 - **Status**: Production-ready
-- **Last Updated**: 2026-04-05
-
-## Contributing
-
-Found an error in the docs? Have a suggestion? Open an issue at:
-https://github.com/anomalyco/brief-compiler/issues
+- **Last Updated**: 2026-04-07
 
 ---
 

@@ -1,13 +1,16 @@
 # Brief Language Tutorial
 
-**Learn Brief by building real systems, step by step.**
+Learn Brief by building real systems, step by step.
+
+---
 
 ## Part 1: Getting Started
 
 ### Installation
 
 ```bash
-cargo install --path .
+cargo build --release
+./target/release/brief --help
 ```
 
 ### Your First Program
@@ -25,7 +28,7 @@ brief check hello.bv
 brief build hello.bv
 ```
 
-That's it. Brief programs don't need a main() — they're just state.
+Brief programs don't need `main()` - they declare state, and transactions describe how state changes.
 
 ### State is Everything
 
@@ -38,8 +41,8 @@ let balance: Float = 1000.50;
 
 State is declared with `let`. You can:
 - Give it a type and initial value
-- Give it a type with no value (defaults to 0, "", false, 0.0)
-- Let Brief infer the type
+- Give it a type without a value (defaults to 0, "", false)
+- Brief infers types where possible
 
 ---
 
@@ -51,55 +54,53 @@ State is declared with `let`. You can:
 let count: Int = 0;
 
 txn increment [count < 100][count == @count + 1] {
-  &count = count + 1;
-  term;
+    &count = count + 1;
+    term;
 };
 ```
 
 **Breaking this down:**
 
-- `txn` - transaction (a named state change)
+- `txn` - declares a transaction
 - `increment` - the name
-- `[count < 100]` - precondition (when can this run?)
-- `[count == @count + 1]` - postcondition (what must be true after?)
-- `&count = count + 1;` - mutate state (& prefix required)
+- `[count < 100]` - precondition: when can this run?
+- `[count == @count + 1]` - postcondition: what must be true after?
+- `&count = count + 1;` - mutate state (the `&` is required)
 - `term;` - complete successfully
 
-**Key insight**: You're not just describing code that runs. You're declaring:
+**The key insight**: You're not describing code that runs. You're declaring:
 - When it's allowed to run (precondition)
 - What must be true after it runs (postcondition)
 
 The compiler proves the code actually satisfies the postcondition.
 
-### The Prior-State Operator `@`
+### The Prior State Operator
 
 ```brief
 let balance: Int = 100;
 
 txn withdraw(amount: Int) 
-  [amount > 0 && amount <= balance]
-  [balance == @balance - amount]
+    [amount > 0 && amount <= balance]
+    [balance == @balance - amount]
 {
-  &balance = balance - amount;
-  term;
+    &balance = balance - amount;
+    term;
 };
 ```
 
 `@balance` means "the value of balance when this transaction started".
 
-The postcondition says: "balance must equal what it was minus the amount".
-
 ### Guards: Conditional Execution
 
 ```brief
 txn process [true][true] {
-  let value: Int = compute();
-  
-  [value > 0] &positive = true;
-  [value < 0] &negative = true;
-  [value == 0] escape;              # Rollback if zero
-  
-  term;
+    let value = compute();
+    
+    [value > 0] &positive = true;
+    [value < 0] &negative = true;
+    [value == 0] escape;  // Rollback if zero
+    
+    term;
 };
 ```
 
@@ -109,13 +110,13 @@ txn process [true][true] {
 
 ```brief
 txn validate(x: Int) 
-  [x >= 0][state == @state]
+    [x >= 0][state == @state]
 {
-  [x > 100] {
-    escape;                        # Rollback, nothing changes
-  };
-  &state = x;
-  term;
+    [x > 1000] {
+        escape;  // Rollback, nothing changes
+    };
+    &state = x;
+    term;
 };
 ```
 
@@ -132,17 +133,17 @@ let count: Int = 0;
 let done: Bool = false;
 
 rct txn increment [count < 10 && !done]
-  [count == @count + 1]
+    [count == @count + 1]
 {
-  &count = count + 1;
-  term;
+    &count = count + 1;
+    term;
 };
 
 rct txn finish [count >= 10 && !done]
-  [done == true]
+    [done == true]
 {
-  &done = true;
-  term;
+    &done = true;
+    term;
 };
 ```
 
@@ -164,18 +165,18 @@ This is Brief's superpower - describe state transitions, compiler handles the re
 let state: Int = 0;
 
 rct txn step_1 [state == 0][state == 1] {
-  &state = 1;
-  term;
+    &state = 1;
+    term;
 };
 
 rct txn step_2 [state == 1][state == 2] {
-  &state = 2;
-  term;
+    &state = 2;
+    term;
 };
 
-rct txn step_3 [state == 2][state == 0] {
-  &state = 0;
-  term;
+rct txn reset [state == 2][state == 0] {
+    &state = 0;
+    term;
 };
 ```
 
@@ -188,12 +189,8 @@ When you set `state = 0`, the machine automatically cycles through all three ste
 ### Writing Functions
 
 ```brief
-defn double(x: Int) 
-  -> Int 
-  [true]
-  [result == x * 2]
-{
-  term x * 2;
+defn double(x: Int) -> Int [true][result == x * 2] {
+    term x * 2;
 };
 ```
 
@@ -203,60 +200,49 @@ defn double(x: Int)
 - `(x: Int)` - parameter
 - `-> Int` - return type
 - `[true]` - precondition (always runnable)
-- `[result == x * 2]` - postcondition (what must be true about result)
+- `[result == x * 2]` - postcondition
 - `term x * 2;` - return the value
 
 ### Multiple Return Values
 
 ```brief
-defn split_name(full: String) 
-  -> String, String 
-  [true][true]
-{
-  # In real Brief, you'd parse the string
-  # For now, just return placeholders
-  term "first", "last";
+defn divide(a: Int, b: Int) -> Int, Int, Bool [b != 0][true] {
+    term a / b, a % b, true;
 };
 ```
 
 **Using it:**
 ```brief
-let first: String, last: String;
-first, last = split_name("Alice Smith");
+let quotient, remainder, ok = divide(17, 5);
 ```
 
 ### Functions Can Call Other Functions
 
 ```brief
-defn absolute(x: Int) 
-  -> Int 
-  [true]
-  [result >= 0]
-{
-  [x < 0] term -x;
-  [x >= 0] term x;
+defn absolute(x: Int) -> Int [true][result >= 0] {
+    [x < 0] term -x;
+    [x >= 0] term x;
 };
 
-defn is_positive(x: Int) 
-  -> Bool 
-  [true][true]
-{
-  let abs_x: Int = absolute(x);
-  [abs_x > 0] term true;
-  term false;
+defn is_positive(x: Int) -> Bool [true][true] {
+    let abs_x = absolute(x);
+    [abs_x > 0] term true;
+    term false;
 };
 ```
 
-### Using Native Stdlib Functions
+### Pure Brief vs FFI
+
+Pure functions that Brief can express should use `defn`:
 
 ```brief
-import std.core;
-
-let x: Int = -42;
-let abs_x: Int = absolute(x);        # From stdlib
-let smaller: Int = min(10, 5);       # From stdlib
-let bounded: Int = clamp(x, -50, 50); # From stdlib
+defn min(a: Int, b: Int) -> Int [true][result == a || result == b] {
+    [a <= b] term a;
+    [a > b] term b;
+};
 ```
+
+Functions requiring system access use `frgn` (see Part 7).
 
 ---
 
@@ -265,147 +251,178 @@ let bounded: Int = clamp(x, -50, 50); # From stdlib
 ### Handling Multiple Outcomes
 
 ```brief
-# Define what the function returns
-sig fetch_user: Int -> User | Error;
+let result: Int | String;
 
-txn load_user [true][true] {
-  let result = fetch_user(123);
-  
-  # Handle the success case
-  User(name, age) = result;
-  &active_user = result;
-  term;
-  
-  # Handle the error case (MUST be handled)
-  Error(msg) = result;
-  escape;
-};
+[Int(n) = result] &int_val = n;
+[String(s) = result] &str_val = s;
 ```
 
-**Key**: Compiler forces you to handle every possible outcome.
-
-### Union Types
+### Guards for Branches
 
 ```brief
-let result: Int | String | Error;
+let value: Int = get_value();
 
-[result == Int(x)] {
-  # It's an integer
-};
-
-[result == String(s)] {
-  # It's a string
-};
-
-[result == Error(e)] {
-  # It's an error
-};
+[value > 0] &positive = true;
+[value == 0] &zero = true;
+[value < 0] &negative = true;
 ```
 
 ---
 
-## Part 6: Using Rust (FFI)
+## Part 6: Structs
 
-### Calling Rust Functions
+### Plain Struct
 
 ```brief
-# Declare the function
-frgn read_file(path: String) -> Result<String, IoError> from "std::io";
-
-# Use it in a transaction
-defn load_config(path: String) 
-  -> String 
-  [true][true]
-{
-  let content: String = read_file(path);
-  content;
+struct BankAccount {
+    balance: Int;
+    overdraft_limit: Int;
+    
+    txn deposit(amount: Int)
+        [amount > 0]
+        [balance == @balance + amount]
+    {
+        &balance = balance + amount;
+        term;
+    };
+    
+    txn withdraw(amount: Int)
+        [amount > 0 && amount <= balance + overdraft_limit]
+        [balance == @balance - amount]
+    {
+        &balance = balance - amount;
+        term;
+    };
 };
 ```
 
-**Result type**: `Result<Success, Error>` means the function can succeed or fail.
-
-### Handling Errors from Rust
+### Using Structs
 
 ```brief
-frgn parse_number(text: String) -> Result<Int, ParseError> from "std::string";
-
-defn parse_age(text: String) 
-  -> Int 
-  [true][true]
-{
-  let result = parse_number(text);
-  
-  # Success case
-  Int(age) = result;
-  [age >= 0 && age < 150] term age;
-  escape;                            # Out of range
-  
-  # Error case
-  ParseError(code, msg) = result;
-  escape;
-};
+let account: BankAccount;
+account.deposit(100);
+account.withdraw(50);
 ```
 
-### Available FFI Functions
+### Render Struct
 
-From `std/core.bv` (native Brief - no FFI):
-- `absolute()`, `min()`, `max()`, `clamp()`
-- `is_positive()`, `is_negative()`, `is_zero()`, `is_even()`
-
-From `std/bindings/` (FFI to Rust):
-- I/O: `read_file()`, `write_file()`
-- Math: `sqrt()`, `sin()`, `pow()`, etc.
-- String: `string_length()`, `string_to_upper()`, `parse_int()`
-- Time: `current_timestamp()`, `sleep_ms()`
-
-See [FFI-STDLIB-REFERENCE.md](FFI-STDLIB-REFERENCE.md) for complete list.
+```brief
+rstruct Counter {
+    count: Int;
+    
+    rct txn increment [count < 100][count == @count + 1] {
+        &count = count + 1;
+        term;
+    };
+} -> "
+<div class='counter'>
+    <span>{count}</span>
+    <button onclick='increment()'>+</button>
+</div>
+";
+```
 
 ---
 
-## Part 7: Real Example - Bank System
+## Part 7: Foreign Functions (FFI)
+
+### When to Use FFI
+
+FFI is for operations Brief genuinely cannot do:
+- File I/O
+- Network access
+- Console input/output
+- Hardware math (sqrt, sin, etc.)
+
+FFI is NOT for things Brief can express natively:
+- Arithmetic
+- Comparisons
+- String operations Brief can handle
+
+### TOML Binding
+
+Create a file `lib/std/io.toml`:
+
+```toml
+[[functions]]
+name = "read_file"
+description = "Read file contents"
+location = "std::fs::read_to_string"
+target = "native"
+mapper = "rust"
+
+[functions.input]
+path = "String"
+
+[functions.output.success]
+content = "String"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+```
+
+### Brief Declaration
 
 ```brief
-# State
-let alice: Int = 1000;
-let bob: Int = 500;
+frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
+```
+
+### Using FFI
+
+```brief
+frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
+
+defn load_config() -> String [true][result.len() >= 0] {
+    let result = read_file("config.txt");
+    term "default";
+};
+```
+
+### Generic FFI
+
+```brief
+frgn<T> identity(value: T) -> Result<T, Error> from "lib/std/util.toml";
+```
+
+---
+
+## Part 8: Real Example - Bank System
+
+```brief
+// State
+let alice_balance: Int = 1000;
+let bob_balance: Int = 500;
 let in_transfer: Bool = false;
 
-# Passive transaction - must be called explicitly
-txn transfer_alice_to_bob(amount: Int)
-  [!in_transfer && alice >= amount]
-  [alice == @alice - amount && bob == @bob + amount && !in_transfer]
+txn transfer_to_bob(amount: Int)
+    [!in_transfer && alice_balance >= amount]
+    [alice_balance == @alice_balance - amount && bob_balance == @bob_balance + amount && !in_transfer]
 {
-  &in_transfer = true;
-  &alice = alice - amount;
-  &bob = bob + amount;
-  &in_transfer = false;
-  term;
+    &in_transfer = true;
+    &alice_balance = alice_balance - amount;
+    &bob_balance = bob_balance + amount;
+    &in_transfer = false;
+    term;
 };
 
-# Reactive transactions - fire when conditions are met
-rct txn alert_low_balance [alice < 100][alice == @alice]
-{
-  # In real code, you'd call an FFI function to send an alert
-  term;
-};
-
-rct txn alert_high_balance [bob > 1000][bob == @bob]
-{
-  # Send another alert
-  term;
+rct txn alert_low_balance [alice_balance < 100][alice_balance == @alice_balance] {
+    // Send alert
+    term;
 };
 ```
 
 **How it works:**
-1. You call `transfer_alice_to_bob(100)`
+1. You call `transfer_to_bob(100)`
 2. If precondition is true, code executes
 3. If postcondition is satisfied, state changes
 4. If postcondition fails, entire transaction rolls back
-5. Reactive transactions automatically fire based on new state
+5. Reactive transactions fire automatically based on state
 
 ---
 
-## Part 8: Common Patterns
+## Part 9: Common Patterns
 
 ### Lazy Initialization
 
@@ -414,37 +431,34 @@ let initialized: Bool = false;
 let value: Int = 0;
 
 txn initialize [~initialized][initialized] {
-  &initialized = true;
-  &value = 100;
-  term;
+    &initialized = true;
+    &value = 100;
+    term;
 };
 
 rct txn use_value [initialized][initialized] {
-  # Use value
-  term;
+    term;
 };
 ```
 
 ### State Machine
 
 ```brief
-let state: Int = 0;  # 0=idle, 1=processing, 2=done
+let state: Int = 0;  // 0=idle, 1=processing, 2=done
 
 rct txn process [state == 0][state == 1] {
-  # Do work
-  &state = 1;
-  term;
+    &state = 1;
+    term;
 };
 
 rct txn complete [state == 1][state == 2] {
-  # Finish up
-  &state = 2;
-  term;
+    &state = 2;
+    term;
 };
 
 rct txn reset [state == 2][state == 0] {
-  &state = 0;
-  term;
+    &state = 0;
+    term;
 };
 ```
 
@@ -455,66 +469,213 @@ let ready: Bool = false;
 let busy: Bool = false;
 
 txn start_work [ready && !busy][busy == true] {
-  &busy = true;
-  term;
+    &busy = true;
+    term;
 };
 
 txn finish_work [busy][busy == false] {
-  &busy = false;
-  term;
+    &busy = false;
+    term;
 };
 ```
 
 ---
 
-## Part 9: Tips and Gotchas
+## Part 10: Syntactic Sugar
 
-### Postconditions Must Be Satisfiable
+Brief provides several syntactic shortcuts that make code more concise.
+
+### Boolean Toggle (`~/`)
+
+`~/condition` is shorthand for `[~condition][condition]`:
 
 ```brief
-# ✓ GOOD - postcondition CAN be true
+// These are equivalent:
+txn initialize [~/ready] {
+    &ready = true;
+    term;
+};
+
+txn initialize [~ready][ready] {
+    &ready = true;
+    term;
+};
+```
+
+This reads as: "Fire when ready is false, ensure ready becomes true."
+
+### Implicit State Declaration
+
+When you use `~/condition`, the variable is automatically declared:
+
+```brief
+// No need to write: let ready: Bool = false;
+// Brief infers it from the contract
+rct txn start [~/ready] {
+    &ready = true;
+    term;
+};
+```
+
+### Implicit Termination
+
+Transactions continue until the postcondition is satisfied. If the postcondition establishes a Bool value, use `term true;`:
+
+```brief
+// term true; implicitly sets the flag in the postcondition
+txn set_flag [true][flag == true] {
+    term true;  // implicitly: &flag = true; then term;
+};
+```
+
+Note: `term true;` must obey borrowing rules since it implicitly performs a state mutation.
+
+### Lambda-Style Declarations
+
+For simple transactions where the body is just `term`, you can omit the body:
+
+```brief
+// Full form:
 txn increment [count < 100][count == @count + 1] {
-  &count = count + 1;
-  term;
+    &count = count + 1;
+    term;
 };
 
-# ✗ BAD - postcondition can NEVER be true
-txn bad_increment [count < 100][count == @count + 2] {
-  &count = count + 1;    # Only adds 1, not 2
-  term;                   # Compiler will reject this
+// Lambda form - body is just term:
+txn inc [count < 100][count == @count + 1];
+
+// Full form:
+defn double(x: Int) -> Int [true][result == x * 2] {
+    term x * 2;
 };
+
+// Lambda form:
+defn double(x: Int) -> Int [true][result == x * 2];
 ```
 
-### All Outcomes Must Be Handled
+### Term with Function Call
+
+`term functionCall();` means "call the function and use its return value in the postcondition":
 
 ```brief
-sig fetch: Int -> User | Error;
-
-txn load [true][true] {
-  let result = fetch(1);
-  User(u) = result;
-  &user = u;
-  term;
-  
-  # ✗ MISSING ERROR CASE
-  # Compiler will reject: "Unhandled outcome: Error"
+defn addOne(x: Int) -> Int [true][result == x + 1] {
+    term x + 1;
 };
+
+// The compiler verifies that addOne() produces exactly what the postcondition requires
+txn increment [count < 100][count == @count + 1] {
+    term addOne(@count);  // Compiler checks: addOne(@count) == @count + 1
+};
+
+// If addOne() does NOT satisfy the postcondition, compiler throws error
 ```
 
-### Use Guards Instead of If/Else
+---
+
+## Part 11: Multi-Return Functions
+
+Brief supports powerful multi-return functions with union types.
+
+### Single Return
 
 ```brief
-# ✓ BRIEF WAY
-[value > 0] &positive = true;
-[value < 0] &negative = true;
-[value == 0] escape;
+defn get_value() -> Int [true][result >= 0] {
+    term 42;
+};
 
-# ✗ C-LIKE WAY (doesn't exist in Brief)
-if (value > 0) {
-  &positive = true;
-} else if (value < 0) {
-  &negative = true;
-}
+let x: Int = get_value();  // x = 42
+```
+
+### Multi-Return with Accumulation
+
+A function can have multiple `term` statements. Each `term` adds to the accumulated return type:
+
+```brief
+defn try_parse(s: String) -> Int | Bool | String [true][true] {
+    term 1;        // Can return Int
+    term true;     // Can return Bool
+    term "error";  // Can return String
+};
+
+let result: Int | Bool | String = try_parse("hello");
+```
+
+The function returns a union type containing all possible termination values.
+
+### Type Inference with Multi-Return
+
+When calling a multi-return function, the type determines which term is used:
+
+```brief
+defn try_parse(s: String) -> Int | Bool | String [true][true] {
+    term 1;        // Int term
+    term true;     // Bool term
+    term "error";  // String term
+};
+
+// Type inference selects the appropriate term:
+let integer: Int = try_parse("hello");  // Returns 1
+let boolean: Bool = try_parse("hello");  // Returns true
+let str: String = try_parse("hello");  // Returns "error"
+```
+
+### Accumulating Multi-Return with Tuples
+
+For multiple return slots, use explicit tuple type notation:
+
+```brief
+defn multi() -> Int | Int, Int | Int, Int, Int [true][true] {
+    term 1;        // Slot 1: returns Int
+    term 2;        // Slot 2: returns Int
+    term 3;        // Slot 3: returns Int
+};
+
+// How many slots you request determines which term is used:
+let n1: Int = multi();              // Returns 1
+let n1, n2: Int, Int = multi();    // Returns 1, 2
+let n1, n2, n3: Int, Int, Int = multi();  // Returns 1, 2, 3
+```
+
+### Tuple Returns
+
+Functions can return tuples:
+
+```brief
+defn divide(a: Int, b: Int) -> Int, Int, Bool [b != 0][true] {
+    term a / b, a % b, true;
+};
+
+let quotient, remainder, ok = divide(17, 5);
+```
+
+---
+
+## Part 12: Tips and Gotchas
+
+### Transaction Loop Behavior
+
+Transactions loop until the postcondition is satisfied. They continue mutating until the postcondition holds.
+
+```brief
+// This terminates - each iteration accumulates until postcondition is met
+txn increment_by_2 [count < 100][count == @count + 2] {
+    &count = count + 1;
+    term;
+};
+// Starting at count=99, @count=99: 99->100->101->102 (stops at 102)
+```
+
+### The @ Operator
+
+The `@` operator captures the value at the START of the transaction:
+
+```brief
+txn increment [count < 100][count == @count + 1] {
+    &count = count + 1;
+    term;
+};
+// @count is captured once at start. As transaction loops, @count stays the same
+// but &count accumulates: 99->100->101->102...
 ```
 
 ### Mutations Need `&`
@@ -522,30 +683,48 @@ if (value > 0) {
 ```brief
 let count: Int = 0;
 
-&count = count + 1;    # ✓ Correct - use &
-
-count = count + 1;     # ✗ Error - & required
+&count = count + 1;    // Correct - use &
+count = count + 1;     // Wrong - & required
 ```
 
-### Reactive Transactions Don't Return Values
+### Reactive vs Passive Transactions
 
 ```brief
-# ✓ Reactive transaction
+// Reactive transaction - fires automatically when preconditions are met
+// Return values are meaningless (no caller to receive them)
 rct txn process [ready][done] {
-  # Do work
-  &done = true;
-  term;                # No value, just success
+    &done = true;
+    term;
 };
 
-# ✓ Passive transaction CAN return values
+// Passive transaction with no return value
+txn do_work [true][true] {
+    // do something
+    term;
+};
+
+// Passive transaction with return value
 txn compute() -> Int [true][true] {
-  term 42;            # Return 42
+    term 42;  // Caller receives this value
+};
+
+// Lambda-style passive transaction
+txn increment [count < 100][count == @count + 1];  // No body needed
+```
+
+### Guards Skip Execution
+
+```brief
+txn example [true][true] {
+    [false] &never_runs = true;  // This never executes
+    [true] &always_runs = true;   // This always executes
+    term;
 };
 ```
 
 ---
 
-## Part 10: Debugging
+## Part 13: Debugging
 
 ### Type Checking
 
@@ -558,214 +737,60 @@ Shows all type errors before running.
 ### Proof Verification
 
 The proof engine checks:
-1. Can the precondition be false? (If not, always runs)
-2. Does code reach `term` or `escape`? (Termination)
-3. Is the postcondition satisfiable? (Correctness)
+1. Precondition can be true (satisfiable)
+2. Code reaches `term` or `escape` (termination)
+3. Postcondition is satisfied (correctness)
 
-### Clear Error Messages
+### Common Errors
 
-```
-error[B001]: Postcondition not satisfiable
-  → transaction 'increment' at line 5
-  → postcondition: count == @count + 2
-  → code: &count = count + 1;
-  = Hint: postcondition requires +2, but code does +1
-```
+#### "Precondition not satisfiable"
 
-### Common Errors and How to Fix Them
-
-#### Error: "Postcondition not satisfiable"
-
-**What it means**: Your transaction claims to achieve something in the postcondition, but the code doesn't actually do it.
-
-**Example**:
 ```brief
-txn bad_increment [count < 100]
-  [count == @count + 2]  # Claims to add 2
-{
-  &count = count + 1;     # But only adds 1
-  term;
+// Precondition is contradictory
+txn bad [x > 0 && x < 0][...] {
+    term;
 };
 ```
 
-**Fix**: Make the postcondition match what you actually do:
+#### "Postcondition violation"
+
 ```brief
-txn good_increment [count < 100]
-  [count == @count + 1]  # Now matches code
-{
-  &count = count + 1;
-  term;
+// Code doesn't achieve postcondition
+txn bad [true][count == @count + 1] {
+    &count = count;  // Doesn't change count
+    term;
 };
 ```
 
-#### Error: "Contract cannot be satisfied"
+#### "Termination unreachable"
 
-**What it means**: The precondition and postcondition are contradictory - there's no state where both can be true.
-
-**Example**:
 ```brief
-txn impossible [x == 0]
-  [x == 5]  # Started at 0, ends at 5...but need @x reference!
-{
-  &x = 5;
-  term;
+// No path to term
+txn bad [true][false] {
+    escape;  // Always escapes
 };
 ```
-
-**Fix**: Use `@variable` to reference prior state:
-```brief
-txn fixed [x == 0]
-  [x == 5 && @x == 0]  # "x is now 5, and it was 0"
-{
-  &x = 5;
-  term;
-};
-```
-
-#### Error: "Unhandled outcome"
-
-**What it means**: You have a pattern match or conditional that doesn't cover all possibilities.
-
-**Example**:
-```brief
-let is_valid: Bool = true;
-
-defn check_status() [true] [true] -> String {
-  [is_valid] term "Valid";
-  # Missing: what if is_valid is false?
-};
-```
-
-**Fix**: Add all branches:
-```brief
-defn check_status() [true] [true] -> String {
-  [is_valid] term "Valid";
-  [~is_valid] term "Invalid";
-};
-```
-
-#### Error: "Termination cannot be proven"
-
-**What it means**: Your code might loop infinitely. Brief requires all code paths to provably terminate.
-
-**Why it happens**: Brief doesn't allow recursion or unbounded loops. Every code path must reach `term` or `escape`.
-
-**Example** (invalid):
-```brief
-# This won't compile - infinite loop
-txn spin [true] [false] {
-  [true] &counter = counter + 1;  # Always true, cycles infinitely
-  term;
-};
-```
-
-**Fix**: Use a bounded loop counter or guard that eventually becomes false:
-```brief
-txn count_once [counter < 100]
-  [counter == @counter + 1]
-{
-  [counter < 100] &counter = counter + 1;
-  term;
-};
-```
-
-#### Error: "Type mismatch"
-
-**What it means**: You're using the wrong type somewhere.
-
-**Example**:
-```brief
-let x: Int = "hello";  # String assigned to Int!
-```
-
-**Fix**: Use the correct type:
-```brief
-let x: String = "hello";
-```
-
-#### Error: "Cannot mutate in definition"
-
-**What it means**: You tried to use `&variable` in a `defn` (which isn't a transaction).
-
-**Example**:
-```brief
-defn try_modify() [true] [true] -> Void {
-  &x = x + 1;  # Can't do this in a function!
-  term;
-};
-```
-
-**Fix**: Only use `&` in transactions:
-```brief
-txn do_modify [x < 100]
-  [x == @x + 1]
-{
-  &x = x + 1;
-  term;
-};
-```
-
-#### Error: "Binding validation failed"
-
-**What it means**: Your FFI function signature doesn't match the TOML binding.
-
-**Example**:
-```brief
-# Brief code
-frgn read_file(path: String) -> Result<String, IoError> from "io.toml";
-
-# But io.toml has:
-# [[functions]]
-# name = "read_file_v2"  # Name doesn't match!
-```
-
-**Fix**: Make sure the function name in Brief matches the name in TOML:
-```toml
-[[functions]]
-name = "read_file"  # Must match Brief code
-```
-
-### Debugging Workflow
-
-1. **Run the type checker first**:
-   ```bash
-   brief check program.bv
-   ```
-   This catches most errors quickly.
-
-2. **Read proof engine output** if type checking passes:
-   - "Postcondition not satisfiable" → Code doesn't match postcondition
-   - "Unhandled outcome" → Missing pattern case
-   - "Contract cannot be satisfied" → Precondition conflicts with postcondition
-
-3. **Check your invariants**: Ask yourself:
-   - "Do I reference `@old_value` correctly?"
-   - "Have I covered all guards `[condition]`?"
-   - "Can this code path terminate?"
-
-4. **Simplify to isolate**: Remove unrelated code to see if error still occurs
-
-5. **Review the examples**: Look at `examples/*.bv` for similar patterns that work
 
 ---
 
 ## Next Steps
 
-1. **Try the examples**: `brief examples/reactive_counter.bv`
-2. **Read the reference**: [LANGUAGE-REFERENCE.md](LANGUAGE-REFERENCE.md)
-3. **Learn FFI**: [FFI-USER-GUIDE.md](FFI-USER-GUIDE.md)
-4. **Build something**: Create your own reactive system
+1. Try the examples in `examples/`
+2. Read the language reference
+3. Learn FFI for system access
+4. Build your own reactive system
 
 ---
 
 ## Key Takeaways
 
 - **State first**: Everything is about state transitions
-- **Transactions have contracts**: Preconditions and postconditions
+- **Contracts**: Preconditions and postconditions on transactions
 - **Reactive**: Transactions fire automatically when conditions are met
-- **Proven**: Compiler verifies your state machine is correct
-- **Atomic**: Transactions either complete or rollback completely
-- **No recursion**: Compiler must be able to prove termination
-- **FFI for external stuff**: Use Rust for I/O and complex operations
-
-**The goal**: Build systems you can prove are correct.
+- **Atomic**: Transactions complete or roll back completely
+- **Loop until satisfied**: Transactions continue until postcondition is met
+- **Syntactic sugar**: `~/`, implicit `term`, lambda-style declarations
+- **Multi-return**: Functions can return union types via multiple `term` statements
+- **Native when possible**: Use `defn` for things Brief can do
+- **FFI when needed**: Use `frgn` for system access
+- **Compiler verifies**: If it compiles, the state machine is correct
