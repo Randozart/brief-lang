@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::ffi::FFI_REGISTRY;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -64,26 +65,12 @@ impl Interpreter {
 
     fn load_ffi_functions() -> HashMap<String, ForeignFn> {
         let mut functions = HashMap::new();
+        let registry = &*FFI_REGISTRY;
 
-        functions.insert("__print".to_string(), print_impl as ForeignFn);
-        functions.insert("__println".to_string(), println_impl as ForeignFn);
-        functions.insert("__input".to_string(), input_impl as ForeignFn);
-        functions.insert("__abs".to_string(), abs_impl as ForeignFn);
-        functions.insert("__sqrt".to_string(), sqrt_impl as ForeignFn);
-        functions.insert("__pow".to_string(), pow_impl as ForeignFn);
-        functions.insert("__sin".to_string(), sin_impl as ForeignFn);
-        functions.insert("__cos".to_string(), cos_impl as ForeignFn);
-        functions.insert("__floor".to_string(), floor_impl as ForeignFn);
-        functions.insert("__ceil".to_string(), ceil_impl as ForeignFn);
-        functions.insert("__round".to_string(), round_impl as ForeignFn);
-        functions.insert("__random".to_string(), random_impl as ForeignFn);
-        functions.insert("__len".to_string(), len_impl as ForeignFn);
-        functions.insert("__concat".to_string(), concat_impl as ForeignFn);
-        functions.insert("__to_string".to_string(), to_string_impl as ForeignFn);
-        functions.insert("__to_float".to_string(), to_float_impl as ForeignFn);
-        functions.insert("__to_int".to_string(), to_int_impl as ForeignFn);
-        functions.insert("__trim".to_string(), trim_impl as ForeignFn);
-        functions.insert("__contains".to_string(), contains_impl as ForeignFn);
+        for (name, func) in registry.functions.iter() {
+            let short_name = name.replace("std::", "__");
+            functions.insert(short_name, *func);
+        }
 
         functions
     }

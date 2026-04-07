@@ -5,10 +5,12 @@
 //! - Binding validation
 //! - Path resolution
 //! - Type mapping
+//! - Function registry
 
 pub mod loader;
 pub mod mapper;
 pub mod mappers;
+pub mod registry;
 pub mod resolver;
 pub mod types;
 pub mod validator;
@@ -16,6 +18,7 @@ pub mod validator;
 pub use loader::load_binding;
 pub use mapper::{create_mapper_registry, find_mapper};
 pub use mappers::{MapperInfo, MapperRegistry, MapperType};
+pub use registry::{FunctionRegistry, FFI_REGISTRY};
 pub use resolver::resolve_binding_path;
 pub use types::*;
 pub use validator::validate_frgn_against_binding;

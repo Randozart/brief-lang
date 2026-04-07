@@ -1,10 +1,18 @@
 use crate::ast::*;
 use crate::errors::{Diagnostic, Severity, Span};
 use crate::ffi;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub use crate::errors::TypeError;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResultCheckStatus {
+    Unchecked,
+    CheckedOk,
+    CheckedErr,
+}
 
 pub struct TypeChecker {
     scopes: Vec<HashMap<String, Type>>,
@@ -12,6 +20,7 @@ pub struct TypeChecker {
     diagnostics: Vec<Diagnostic>,
     source: String,
     signatures: HashMap<String, Signature>,
+    ffi_results: RefCell<HashMap<String, ResultCheckStatus>>,
 }
 
 impl TypeChecker {
@@ -22,6 +31,7 @@ impl TypeChecker {
             diagnostics: Vec::new(),
             source: String::new(),
             signatures: HashMap::new(),
+            ffi_results: RefCell::new(HashMap::new()),
         }
     }
 
@@ -398,6 +408,7 @@ impl TypeChecker {
                 name,
                 expr,
             } => {
+                self.check_expr_for_ffi_errors(expr);
                 let expr_ty = self.infer_expression(expr);
                 if let Some(var_ty) = self.lookup_variable(name) {
                     if !self.types_compatible(&expr_ty, &var_ty) {
@@ -423,10 +434,11 @@ impl TypeChecker {
                         }
                     }
                 } else {
-                    self.declare_variable(name, expr_ty);
+                    self.declare_variable(name, expr_ty.clone());
                 }
                 
                 if self.is_ffi_call(expr) {
+                    self.ffi_results.borrow_mut().insert(name.clone(), ResultCheckStatus::Unchecked);
                     self.diagnostics.push(
                         Diagnostic::new("F101", Severity::Warning, "FFI call result not handled")
                             .with_explanation(&format!(
@@ -439,35 +451,48 @@ impl TypeChecker {
                 }
             }
             Statement::Let { name, ty, expr } => {
-                let inferred_ty = expr.as_ref().map(|e| self.infer_expression(e));
-                let final_ty = ty.clone().or(inferred_ty);
+                let mut inferred_expr_ty: Option<Type> = None;
+                
+                if let Some(e) = expr {
+                    self.check_expr_for_ffi_errors(e);
+                    inferred_expr_ty = Some(self.infer_expression(e));
+                }
+                
+                let final_ty = ty.clone().or(inferred_expr_ty.clone());
 
-                if let Some(ty) = final_ty {
+                if let Some(final_type) = final_ty {
                     if let Some(e) = expr {
-                        let expr_ty = self.infer_expression(e);
-                        if !self.types_compatible(&expr_ty, &ty) {
-                            self.errors.push(TypeError::TypeMismatch {
-                                expected: self.type_to_string(&ty),
-                                found: self.type_to_string(&expr_ty),
-                                context: format!("let {}", name),
-                            });
+                        if let Some(expr_ty) = &inferred_expr_ty {
+                            if !self.types_compatible(expr_ty, &final_type) {
+                                self.errors.push(TypeError::TypeMismatch {
+                                    expected: self.type_to_string(&final_type),
+                                    found: self.type_to_string(expr_ty),
+                                    context: format!("let {}", name),
+                                });
+                            }
+                        }
+                        if self.is_ffi_call(e) {
+                            self.ffi_results.borrow_mut().insert(name.clone(), ResultCheckStatus::Unchecked);
                         }
                     }
-                    self.declare_variable(name, ty);
+                    self.declare_variable(name, final_type);
                 }
             }
             Statement::Expression(expr) => {
+                self.check_expr_for_ffi_errors(expr);
                 self.infer_expression(expr);
             }
             Statement::Term(outputs) => {
                 for expr_opt in outputs {
                     if let Some(expr) = expr_opt {
+                        self.check_expr_for_ffi_errors(expr);
                         self.infer_expression(expr);
                     }
                 }
             }
             Statement::Escape(expr_opt) => {
                 if let Some(expr) = expr_opt {
+                    self.check_expr_for_ffi_errors(expr);
                     self.infer_expression(expr);
                 }
             }
@@ -475,6 +500,7 @@ impl TypeChecker {
                 condition,
                 statements,
             } => {
+                self.check_expr_for_ffi_errors(condition);
                 let cond_ty = self.infer_expression(condition);
                 if !self.types_compatible(&cond_ty, &Type::Bool) {
                     self.errors.push(TypeError::TypeMismatch {
@@ -483,6 +509,20 @@ impl TypeChecker {
                         context: "guard condition".to_string(),
                     });
                 }
+                
+                if let Expr::FieldAccess(obj, field) = condition {
+                    if field == "is_ok" || field == "is_err" {
+                        if let Expr::Identifier(var_name) = obj.as_ref() {
+                            let status = if field == "is_ok" {
+                                ResultCheckStatus::CheckedOk
+                            } else {
+                                ResultCheckStatus::CheckedErr
+                            };
+                            self.ffi_results.borrow_mut().insert(var_name.clone(), status);
+                        }
+                    }
+                }
+                
                 for stmt in statements {
                     self.check_statement(stmt, is_async);
                 }
@@ -492,6 +532,7 @@ impl TypeChecker {
                 pattern,
                 expr,
             } => {
+                self.check_expr_for_ffi_errors(expr);
                 self.infer_expression(expr);
                 self.declare_variable(name, Type::Custom(pattern.clone()));
             }
@@ -691,5 +732,46 @@ impl TypeChecker {
             });
         }
         false
+    }
+
+    fn check_expr_for_ffi_errors(&self, expr: &Expr) {
+        match expr {
+            Expr::FieldAccess(obj, field) => {
+                if field == "value" || field == "error" {
+                    if let Expr::Identifier(var_name) = obj.as_ref() {
+                        if let Some(status) = self.ffi_results.borrow().get(var_name) {
+                            if *status == ResultCheckStatus::Unchecked {
+                                self.errors.push(TypeError::FFIError {
+                                    message: format!(
+                                        "FFI result '{}' accessed with .{} before checking .is_ok() or .is_err()",
+                                        var_name,
+                                        field
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+                self.check_expr_for_ffi_errors(obj);
+            }
+            Expr::Call(_, args) => {
+                for arg in args {
+                    self.check_expr_for_ffi_errors(arg);
+                }
+            }
+            Expr::BinaryOp(_, left, right) => {
+                self.check_expr_for_ffi_errors(left);
+                self.check_expr_for_ffi_errors(right);
+            }
+            Expr::UnaryOp(_, inner) => {
+                self.check_expr_for_ffi_errors(inner);
+            }
+            Expr::ListLiteral(elems) => {
+                for elem in elems {
+                    self.check_expr_for_ffi_errors(elem);
+                }
+            }
+            _ => {}
+        }
     }
 }

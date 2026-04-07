@@ -12,7 +12,8 @@
 | Implicit `term true;` | desugarer.rs | 5.3.1 |
 | Multi-field FFI outputs | parser.rs | 7.4.1 |
 | Multi-return validation | typechecker.rs | Part 11 |
-| FFI error warning | typechecker.rs | 7.7 |
+| FFI error enforcement | typechecker.rs | 7.7 |
+| Dynamic FFI registry | ffi/registry.rs | 7 |
 | R-Brief syntax fix | SPEC.md, refs | 9.2 |
 | Reactor throttling | SPEC.md | 8.4 |
 | Mutual exclusion fix | SPEC.md | 8.3 |
@@ -60,22 +61,23 @@ Added `check_statement_with_outputs()` to validate that term outputs match defin
 
 ---
 
-### 4. FFI Error Enforcement (Partial)
+### 4. FFI Error Enforcement
 **File:** `src/typechecker.rs`
 **SPEC Section:** 7.7 Error Handling Requirements
 
-Added warning when FFI result is assigned without error handling:
-```
-F101: FFI call result not handled
-```
+Complete implementation:
+- Tracks FFI Result variables using `ResultCheckStatus` enum
+- Records when variables are checked with `.is_ok()` or `.is_err()`
+- Emits error when `.value` or `.error` accessed without prior check
+- Warning (F101) when FFI result assigned without immediate handling
 
 ```brief
 let result = read_file(path);  // Warning: should use is_ok()/is_err()
+[result.is_ok()] { ... }
+term result.value;  // OK - was checked
 ```
 
-**Commits:** `a1277fc`
-
-**Note:** Full enforcement requires tracking variable state through guards. Current implementation provides a warning foundation.
+**Commits:** `a1277fc`, `<current>`
 
 ---
 
@@ -125,26 +127,6 @@ txn increment [count < 100][count == @count + 1] {
     term addOne(@count);  // Compiler verifies: addOne(@count) == @count + 1
 };
 ```
-
-**Status:** Not started
-
----
-
-### 2. Complete FFI Error Enforcement
-**SPEC Section:** 7.7
-
-Track Result variables and enforce:
-- `.value` only accessible after `.is_ok()` or `.is_err()` check
-- Compiler should reject unsafe access, not just warn
-
-**Status:** Partial (warning only)
-
----
-
-### 3. Dynamic FFI Registry
-**SPEC Section:** 7
-
-Replace hardcoded builtins in interpreter with dynamic registry loaded from TOML.
 
 **Status:** Not started
 
