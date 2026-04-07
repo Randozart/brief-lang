@@ -502,43 +502,58 @@ The compiler enforces that FFI errors must be handled:
 
 ## Rendered Brief
 
-### View Syntax
+### rstruct (Render Struct)
+
+Combines state with HTML view:
 
 ```brief
-rstruct MyComponent {
-    message: String;
-} -> "<div>{message}</div>";
+import "./styles.css";
+
+rstruct Counter {
+    count: Int;
+    
+    rct txn increment [count < 100][count == @count + 1] @30Hz {
+        &count = count + 1;
+        term;
+    };
+
+    <button>{count}</button>
+}
 ```
+
+HTML is embedded inline using `<` at the start of a tag.
 
 ### Multi-Element Output
 
-Render structs can produce multiple root elements:
+Render structs can include multiple HTML elements:
 
 ```brief
 rstruct Form {
     name: String;
     email: String;
-} -> "<div>{name}</div><div>{email}</div>";
+
+    <div class="name-field">{name}</div>
+    <div class="email-field">{email}</div>
+}
+```
+
+### Standalone Render
+
+A `render` block provides HTML without state:
+
+```brief
+render Button {
+    <button class="primary">Click me</button>
+}
 ```
 
 ### CSS Import
 
-Views can import external CSS:
+CSS files are imported at the top:
 
 ```brief
-rstruct Dashboard {
-    title: String;
-} -> @css("styles/dashboard.css") -> "
-    <div class='dashboard'>
-        <h1>{title}</h1>
-    </div>
-";
-```
-
-### Rendered Output
-
-```brief
-render MyComponent { message: "Hello" };
+import "./styles/main.css";
+import "./styles/theme.css";
 ```
 
 ---

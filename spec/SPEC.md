@@ -491,7 +491,35 @@ rct async txn write_b [ready && !busy][busy == true] {
 };
 ```
 
-The compiler verifies preconditions are mutually exclusive.
+The compiler verifies preconditions are mutually exclusive **when they write to overlapping state**. Preconditions that only read variables, or write to completely different variables, can coexist.
+
+### 8.4 Reactor Throttling
+
+Reactor polling frequency can be controlled at file and transaction level:
+
+**File-level default:**
+```brief
+reactor @10Hz;  // Default if not specified
+```
+
+**Per-transaction override:**
+```brief
+rct txn fast [condition][post] { ... } @60Hz;
+rct txn slow [condition][post] { ... } @5Hz;
+```
+
+**Rules:**
+- Default: `@10Hz` if not specified
+- Global speed: `max(@Hz)` across all files
+- Adaptive scheduling: slower files are checked less frequently
+- Compiler warns for `@10000Hz+` (usually unintended)
+
+**Common speeds:**
+| Use case | Speed | Description |
+|----------|-------|-------------|
+| Browser UI | `@10Hz` | Smooth interaction, low CPU |
+| Game logic | `@60Hz` | Frame-synchronized |
+| Data sync | `@1Hz` | Occasional polling |
 
 ---
 
@@ -516,45 +544,57 @@ struct BankAccount {
 
 ### 9.2 Render Structs
 
-Render structs include HTML views for UI:
+Render structs combine state with HTML views for UI components:
 
 ```brief
+import "./styles.css";
+
 rstruct Counter {
     count: Int;
     
-    rct txn increment [count < 100][count == @count + 1] {
+    rct txn increment [count < 100][count == @count + 1] @30Hz {
         &count = count + 1;
         term;
     };
-} -> "<button>{count}</button>";
+
+    <button>{count}</button>
+}
 ```
+
+HTML is embedded inline using `<` at the start of a tag.
 
 ### 9.2.1 Multi-Element HTML
 
-Render structs can produce multiple root elements by wrapping them in a fragment:
+Render structs can produce multiple elements - just include multiple HTML blocks:
 
 ```brief
 rstruct Form {
     name: String;
     email: String;
-} -> "<div>{name}</div><div>{email}</div>";
+
+    <div class="name-field">{name}</div>
+    <div class="email-field">{email}</div>
+}
 ```
 
-### 9.2.2 CSS Import
+### 9.2.2 Standalone Render
 
-R-Brief views can import external CSS files:
+A `render` block provides HTML without associated state:
 
 ```brief
-rstruct Dashboard {
-    title: String;
-} -> @css("styles/dashboard.css") -> "
-    <div class='dashboard'>
-        <h1>{title}</h1>
-    </div>
-";
+render Button {
+    <button class="primary">Click me</button>
+}
 ```
 
-The `@css()` directive loads the specified stylesheet for the rendered component.
+### 9.2.3 CSS Import
+
+CSS files are imported at the top of the file with standard imports:
+
+```brief
+import "./styles/main.css";
+import "./styles/theme.css";
+```
 
 ---
 

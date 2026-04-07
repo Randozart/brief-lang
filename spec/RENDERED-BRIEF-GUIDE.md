@@ -1,6 +1,6 @@
 # Rendered Brief Guide
 
-**Version:** 7.0  
+**Version:** 7.0 (revised)  
 **Purpose:** Building reactive web interfaces with Brief  
 
 ---
@@ -82,10 +82,12 @@ Note: `<script type="brief">` is also valid, but for `.rbv` files, plain `<scrip
 The view is declared inside an `rstruct`, which combines state with HTML:
 
 ```brief
+import "./styles.css";
+
 rstruct Counter {
     count: Int;
     
-    txn increment [true][count == @count + 1] {
+    rct txn increment [count < 100][count == @count + 1] @30Hz {
         &count = count + 1;
         term;
     };
@@ -98,7 +100,7 @@ rstruct Counter {
 
 ### Multi-Element HTML
 
-Render structs can produce multiple root elements by wrapping them in a fragment:
+Render structs can produce multiple elements:
 
 ```brief
 rstruct Form {
@@ -116,7 +118,15 @@ rstruct Form {
 }
 ```
 
-The multiple root elements are automatically wrapped in a fragment during compilation.
+### Standalone Render
+
+A `render` block provides HTML without state:
+
+```brief
+render Button {
+    <button class="primary">Click me</button>
+}
+```
 
 ---
 
@@ -340,6 +350,28 @@ rstruct Button {
     <button class="btn btn-primary">Click</button>
 }
 ```
+
+### Reactor Throttling
+
+Control polling frequency for reactive transactions:
+
+**File-level default:**
+```brief
+reactor @10Hz;  // Default if not specified
+```
+
+**Per-transaction override:**
+```brief
+rct txn fast [condition][post] { ... } @60Hz;
+rct txn slow [condition][post] { ... } @5Hz;
+```
+
+**Common speeds:**
+| Use case | Speed |
+|----------|-------|
+| Browser UI | `@10Hz` |
+| Game logic | `@60Hz` |
+| Occasional sync | `@1Hz` |
 
 ---
 
