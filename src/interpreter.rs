@@ -67,7 +67,7 @@ impl Interpreter {
         let mut functions = HashMap::new();
         let registry = &*FFI_REGISTRY;
 
-        for (name, func) in registry.functions.iter() {
+        for (name, func) in registry.iter() {
             let short_name = name.replace("std::", "__");
             functions.insert(short_name, *func);
         }
@@ -460,7 +460,7 @@ impl Interpreter {
     }
 }
 
-fn print_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn print_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(s) = &args[0] {
         print!("{}", s);
         Ok(Value::Bool(true))
@@ -471,7 +471,7 @@ fn print_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn println_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn println_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(s) = &args[0] {
         println!("{}", s);
         Ok(Value::Bool(true))
@@ -482,7 +482,7 @@ fn println_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn input_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn input_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     use std::io::{self, BufRead};
     let stdin = io::stdin();
     let mut line = String::new();
@@ -494,7 +494,7 @@ fn input_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn abs_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn abs_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Int(n) = &args[0] {
         Ok(Value::Int(n.abs()))
     } else {
@@ -502,7 +502,7 @@ fn abs_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn sqrt_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn sqrt_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Float(n) = &args[0] {
         Ok(Value::Float(n.sqrt()))
     } else if let Value::Int(n) = &args[0] {
@@ -514,7 +514,7 @@ fn sqrt_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn pow_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn pow_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Float(base) = &args[0] {
         if let Value::Float(exp) = &args[1] {
             Ok(Value::Float(base.powf(*exp)))
@@ -526,7 +526,7 @@ fn pow_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn sin_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn sin_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Float(n) = &args[0] {
         Ok(Value::Float(n.sin()))
     } else {
@@ -534,7 +534,7 @@ fn sin_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn cos_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn cos_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Float(n) = &args[0] {
         Ok(Value::Float(n.cos()))
     } else {
@@ -542,7 +542,7 @@ fn cos_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn floor_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn floor_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Float(n) = &args[0] {
         Ok(Value::Float(n.floor()))
     } else {
@@ -552,7 +552,7 @@ fn floor_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn ceil_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn ceil_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Float(n) = &args[0] {
         Ok(Value::Float(n.ceil()))
     } else {
@@ -560,7 +560,7 @@ fn ceil_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn round_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn round_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Float(n) = &args[0] {
         Ok(Value::Float(n.round()))
     } else {
@@ -570,7 +570,7 @@ fn round_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn random_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn random_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -579,7 +579,7 @@ fn random_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     Ok(Value::Float((nanos as f64) / (u32::MAX as f64)))
 }
 
-fn len_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn len_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(s) = &args[0] {
         Ok(Value::Int(s.len() as i64))
     } else {
@@ -587,7 +587,7 @@ fn len_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn concat_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn concat_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(a) = &args[0] {
         if let Value::String(b) = &args[1] {
             Ok(Value::String(format!("{}{}", a, b)))
@@ -603,7 +603,7 @@ fn concat_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn to_string_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn to_string_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match &args[0] {
         Value::Int(n) => Ok(Value::String(n.to_string())),
         Value::Float(n) => Ok(Value::String(n.to_string())),
@@ -613,7 +613,7 @@ fn to_string_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn to_float_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn to_float_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(s) = &args[0] {
         match s.parse::<f64>() {
             Ok(n) => Ok(Value::Float(n)),
@@ -626,7 +626,7 @@ fn to_float_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn to_int_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn to_int_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(s) = &args[0] {
         match s.parse::<i64>() {
             Ok(n) => Ok(Value::Int(n)),
@@ -639,7 +639,7 @@ fn to_int_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn trim_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn trim_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(s) = &args[0] {
         Ok(Value::String(s.trim().to_string()))
     } else {
@@ -649,7 +649,7 @@ fn trim_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
-fn contains_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub(crate) fn contains_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(haystack) = &args[0] {
         if let Value::String(needle) = &args[1] {
             Ok(Value::Bool(haystack.contains(needle)))

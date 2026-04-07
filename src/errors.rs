@@ -132,6 +132,7 @@ impl Diagnostic {
             Severity::Error => "error",
             Severity::Warning => "warning",
             Severity::Note => "note",
+            Severity::Info => "info",
         };
 
         if let Some(span) = &self.span {
@@ -226,6 +227,7 @@ impl Diagnostic {
             Severity::Error => "error",
             Severity::Warning => "warning",
             Severity::Note => "note",
+            Severity::Info => "info",
         };
 
         let mut parts = Vec::new();
@@ -272,6 +274,7 @@ pub enum Severity {
     Error,
     Warning,
     Note,
+    Info,
 }
 
 #[derive(Debug, Clone)]

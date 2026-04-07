@@ -207,6 +207,46 @@ The shopping cart now works but demonstrates lazy contract patterns. Fix it by:
 
 ---
 
+# RESEARCH, PLAN, EXECUTE
+
+Three-phase problem solving framework used for all significant tasks.
+
+## Phase 1: Research
+
+Investigate and understand the problem before acting:
+- Gather all relevant information
+- Read existing code, tests, and documentation
+- Understand the current state and context
+- Ask questions if anything is unclear
+
+**Never start coding until you understand what you're building.**
+
+## Phase 2: Plan
+
+Develop a clear roadmap before implementation:
+- Break down the task into specific, actionable steps
+- Identify dependencies and potential issues
+- Define success criteria (how will you know it's done?)
+- Create a todo list to track progress
+
+**Never execute without a clear plan.**
+
+## Phase 3: Execute
+
+Implement the solution:
+- Follow the plan
+- Run tests frequently to verify progress
+- Update the plan if new information emerges
+- Document changes
+
+## Application to This Project
+
+1. **Research** - Read CLAUDE.md, IMPLEMENTATION-*.md, and relevant source files
+2. **Plan** - Create a todo list, identify what needs to change
+3. **Execute** - Make changes, run tests (`cargo test`), update documentation
+
+---
+
 ## Contact
 
 This file is used by AI coding assistants (Claude Code, OpenCode) when working in the Brief compiler project. All changes should maintain the Contract-First Philosophy.

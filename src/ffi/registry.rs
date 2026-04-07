@@ -39,6 +39,10 @@ impl FunctionRegistry {
         self.functions.contains_key(name)
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &ForeignFn)> {
+        self.functions.iter()
+    }
+
     pub fn load_stdlib(&mut self) {
         self.register("std::io::print".to_string(), print_impl as ForeignFn);
         self.register("std::io::println".to_string(), println_impl as ForeignFn);
@@ -54,11 +58,20 @@ impl FunctionRegistry {
         self.register("std::math::random".to_string(), random_impl as ForeignFn);
         self.register("std::string::len".to_string(), len_impl as ForeignFn);
         self.register("std::string::concat".to_string(), concat_impl as ForeignFn);
-        self.register("std::string::to_string".to_string(), to_string_impl as ForeignFn);
-        self.register("std::string::to_float".to_string(), to_float_impl as ForeignFn);
+        self.register(
+            "std::string::to_string".to_string(),
+            to_string_impl as ForeignFn,
+        );
+        self.register(
+            "std::string::to_float".to_string(),
+            to_float_impl as ForeignFn,
+        );
         self.register("std::string::to_int".to_string(), to_int_impl as ForeignFn);
         self.register("std::string::trim".to_string(), trim_impl as ForeignFn);
-        self.register("std::string::contains".to_string(), contains_impl as ForeignFn);
+        self.register(
+            "std::string::contains".to_string(),
+            contains_impl as ForeignFn,
+        );
     }
 
     pub fn register_from_binding(&mut self, location: &str, func: ForeignFn) {

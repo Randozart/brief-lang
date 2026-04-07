@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::errors::{Diagnostic, Severity, Span};
 use crate::ffi;
+use crate::symbolic;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -248,57 +249,118 @@ impl TypeChecker {
                                 });
                             }
                         }
-                        
-                        if let Expr::Call(func_name, args) = expr {
-                            self.verify_term_function_call(func_name, args);
-                        }
+
+                        self.check_expr_for_function_calls(expr);
                     }
                 }
             }
             _ => self.check_statement(stmt, is_async),
         }
     }
-    
-    fn verify_term_function_call(&self, func_name: &str, args: &[Expr]) {
+
+    fn check_expr_for_function_calls(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Call(func_name, args) => {
+                eprintln!("DEBUG: Found function call to {}", func_name);
+                self.verify_term_function_call(func_name, args);
+                for arg in args {
+                    self.check_expr_for_function_calls(arg);
+                }
+            }
+            Expr::Add(left, right)
+            | Expr::Sub(left, right)
+            | Expr::Mul(left, right)
+            | Expr::Div(left, right)
+            | Expr::Eq(left, right)
+            | Expr::Ne(left, right)
+            | Expr::Lt(left, right)
+            | Expr::Le(left, right)
+            | Expr::Gt(left, right)
+            | Expr::Ge(left, right)
+            | Expr::Or(left, right)
+            | Expr::And(left, right) => {
+                self.check_expr_for_function_calls(left);
+                self.check_expr_for_function_calls(right);
+            }
+            Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) => {
+                self.check_expr_for_function_calls(inner);
+            }
+            Expr::FieldAccess(obj, _) => {
+                self.check_expr_for_function_calls(obj);
+            }
+            Expr::ListLiteral(elems) => {
+                for elem in elems {
+                    self.check_expr_for_function_calls(elem);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn verify_term_function_call(&mut self, func_name: &str, args: &[Expr]) {
         let defn = match self.definitions.get(func_name) {
             Some(d) => d,
             None => return,
         };
-        
+
         let postcond = &defn.contract.post_condition;
-        
-        if let Expr::Eq(box_expr, box_result) = postcond {
-            if let Expr::Identifier(name) = box_result.as_ref() {
-                if name == "result" {
-                    let substitution = self.build_argument_substitution(&defn.parameters, args);
-                    if let Some(Expr::Identifier(arg_name)) = args.first() {
-                        let simplified = self.simplify_substituted_postcondition(
-                            box_expr.as_ref(),
-                            &defn.parameters,
-                            args,
-                        );
-                        
-                        let postcond_str = format!("{:?}", postcond);
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                "V101",
-                                Severity::Info,
-                                "Function call postcondition verified"
-                            )
-                            .with_explanation(&format!(
-                                "term {} uses function '{}' which guarantees {}",
-                                func_name,
-                                func_name,
-                                postcond_str
-                            ))
-                        );
+
+        if let Expr::Eq(box_left, box_right) = postcond {
+            // Check both sides - result could be on left or right
+            let is_result_expr = |expr: &Expr| {
+                if let Expr::Identifier(name) = expr {
+                    name == "result"
+                } else {
+                    false
+                }
+            };
+
+            if is_result_expr(box_left.as_ref()) || is_result_expr(box_right.as_ref()) {
+                let mut state = symbolic::SymbolicState::new(&defn.contract.pre_condition);
+
+                for (i, (param_name, _)) in defn.parameters.iter().enumerate() {
+                    if i < args.len() {
+                        state.assign(param_name, &args[i]);
                     }
+                }
+
+                let verified = symbolic::satisfies_postcondition(postcond, &state);
+
+                let postcond_str = format!("{:?}", postcond);
+                if verified {
+                    self.diagnostics.push(
+                        Diagnostic::new(
+                            "V101",
+                            Severity::Info,
+                            "Function call postcondition verified",
+                        )
+                        .with_explanation(&format!(
+                            "term {} uses function '{}' which guarantees {} (symbolically verified)",
+                            func_name, func_name, postcond_str
+                        )),
+                    );
+                } else {
+                    self.diagnostics.push(
+                        Diagnostic::new(
+                            "V102",
+                            Severity::Warning,
+                            "Function call postcondition may not be satisfied",
+                        )
+                        .with_explanation(&format!(
+                            "term {} uses function '{}' with postcondition {} - could not verify symbolically",
+                            func_name, func_name, postcond_str
+                        )),
+                    );
                 }
             }
         }
     }
-    
-    fn build_argument_substitution(&self, params: &[(String, Type)], args: &[Expr]) -> HashMap<String, Expr> {
+
+    fn build_argument_substitution(
+        &self,
+        params: &[(String, Type)],
+        args: &[Expr],
+    ) -> HashMap<String, Expr> {
         let mut subst = HashMap::new();
         for (i, (param_name, _)) in params.iter().enumerate() {
             if i < args.len() {
@@ -307,8 +369,13 @@ impl TypeChecker {
         }
         subst
     }
-    
-    fn simplify_substituted_postcondition(&self, expr: &Expr, _params: &[(String, Type)], _args: &[Expr]) -> Expr {
+
+    fn simplify_substituted_postcondition(
+        &self,
+        expr: &Expr,
+        _params: &[(String, Type)],
+        _args: &[Expr],
+    ) -> Expr {
         expr.clone()
     }
 
@@ -501,9 +568,11 @@ impl TypeChecker {
                 } else {
                     self.declare_variable(name, expr_ty.clone());
                 }
-                
+
                 if self.is_ffi_call(expr) {
-                    self.ffi_results.borrow_mut().insert(name.clone(), ResultCheckStatus::Unchecked);
+                    self.ffi_results
+                        .borrow_mut()
+                        .insert(name.clone(), ResultCheckStatus::Unchecked);
                     self.diagnostics.push(
                         Diagnostic::new("F101", Severity::Warning, "FFI call result not handled")
                             .with_explanation(&format!(
@@ -511,18 +580,18 @@ impl TypeChecker {
                                  Use .is_ok() or .is_err() to handle potential errors.",
                                 name
                             ))
-                            .with_hint("Wrap the FFI call with is_ok()/is_err() guards")
+                            .with_hint("Wrap the FFI call with is_ok()/is_err() guards"),
                     );
                 }
             }
             Statement::Let { name, ty, expr } => {
                 let mut inferred_expr_ty: Option<Type> = None;
-                
+
                 if let Some(e) = expr {
                     self.check_expr_for_ffi_errors(e);
                     inferred_expr_ty = Some(self.infer_expression(e));
                 }
-                
+
                 let final_ty = ty.clone().or(inferred_expr_ty.clone());
 
                 if let Some(final_type) = final_ty {
@@ -537,7 +606,9 @@ impl TypeChecker {
                             }
                         }
                         if self.is_ffi_call(e) {
-                            self.ffi_results.borrow_mut().insert(name.clone(), ResultCheckStatus::Unchecked);
+                            self.ffi_results
+                                .borrow_mut()
+                                .insert(name.clone(), ResultCheckStatus::Unchecked);
                         }
                     }
                     self.declare_variable(name, final_type);
@@ -574,7 +645,7 @@ impl TypeChecker {
                         context: "guard condition".to_string(),
                     });
                 }
-                
+
                 if let Expr::FieldAccess(obj, field) = condition {
                     if field == "is_ok" || field == "is_err" {
                         if let Expr::Identifier(var_name) = obj.as_ref() {
@@ -583,11 +654,13 @@ impl TypeChecker {
                             } else {
                                 ResultCheckStatus::CheckedErr
                             };
-                            self.ffi_results.borrow_mut().insert(var_name.clone(), status);
+                            self.ffi_results
+                                .borrow_mut()
+                                .insert(var_name.clone(), status);
                         }
                     }
                 }
-                
+
                 for stmt in statements {
                     self.check_statement(stmt, is_async);
                 }
@@ -799,7 +872,7 @@ impl TypeChecker {
         false
     }
 
-    fn check_expr_for_ffi_errors(&self, expr: &Expr) {
+    fn check_expr_for_ffi_errors(&mut self, expr: &Expr) {
         match expr {
             Expr::FieldAccess(obj, field) => {
                 if field == "value" || field == "error" {
@@ -824,11 +897,22 @@ impl TypeChecker {
                     self.check_expr_for_ffi_errors(arg);
                 }
             }
-            Expr::BinaryOp(_, left, right) => {
+            Expr::Add(left, right)
+            | Expr::Sub(left, right)
+            | Expr::Mul(left, right)
+            | Expr::Div(left, right)
+            | Expr::Eq(left, right)
+            | Expr::Ne(left, right)
+            | Expr::Lt(left, right)
+            | Expr::Le(left, right)
+            | Expr::Gt(left, right)
+            | Expr::Ge(left, right)
+            | Expr::Or(left, right)
+            | Expr::And(left, right) => {
                 self.check_expr_for_ffi_errors(left);
                 self.check_expr_for_ffi_errors(right);
             }
-            Expr::UnaryOp(_, inner) => {
+            Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) => {
                 self.check_expr_for_ffi_errors(inner);
             }
             Expr::ListLiteral(elems) => {
@@ -838,5 +922,71 @@ impl TypeChecker {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_verify_term_function_call_simple() {
+        let code = r#"
+            defn get_value() [true][result == 42] -> Int {
+                term 42;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut tc = TypeChecker::new();
+        let errors = tc.check_program(&program);
+
+        println!("Errors: {:?}", errors);
+
+        // First check if there are type errors - there shouldn't be
+        assert!(
+            errors.is_empty(),
+            "Expected no type errors, got: {:?}",
+            errors
+        );
+
+        let diagnostics = tc.get_diagnostics();
+        println!("Diagnostics: {:?}", diagnostics);
+    }
+
+    #[test]
+    fn test_verify_term_function_call_with_param() {
+        // Test with an actual function call in the term
+        let code = r#"
+            defn five() [true][result == 5] -> Int {
+                term 5;
+            };
+            
+            defn double(x: Int) [true][result == x * 2] -> Int {
+                term five() * 2;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut tc = TypeChecker::new();
+        tc.check_program(&program);
+
+        let diagnostics = tc.get_diagnostics();
+        println!("Diagnostics: {:?}", diagnostics);
+
+        // We should see the verification attempt
+        let has_verification = diagnostics
+            .iter()
+            .any(|d| d.code == "V101" || d.code == "V102");
+
+        assert!(
+            has_verification,
+            "Expected verification diagnostic, got: {:?}",
+            diagnostics
+        );
     }
 }

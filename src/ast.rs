@@ -32,7 +32,7 @@ pub enum TypeBound {
     HasTrait(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ResultType {
     Projection(Vec<Type>),
     TrueAssertion,

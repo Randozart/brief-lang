@@ -23,7 +23,9 @@ impl Desugarer {
                         let (new_txn, sigs, state) = self.desugar_reactive_txn(txn);
                         items.extend(state.into_iter().map(TopLevel::StateDecl));
                         items.extend(sigs.into_iter().map(TopLevel::Signature));
-                        items.push(TopLevel::Transaction(self.expand_implicit_terms_txn(&new_txn)));
+                        items.push(TopLevel::Transaction(
+                            self.expand_implicit_terms_txn(&new_txn),
+                        ));
                     } else {
                         items.push(TopLevel::Transaction(self.expand_implicit_terms_txn(txn)));
                     }
@@ -281,16 +283,13 @@ impl Desugarer {
     /// Expand implicit term statements:
     /// - `term;` with no outputs becomes `term true;` when the postcondition is a Bool expression
     fn expand_implicit_terms_defn(&mut self, defn: &Definition) -> Definition {
-        let postcond_is_bool = matches!(
-            defn.contract.post_condition,
-            Expr::Bool(_)
-        );
+        let postcond_is_bool = matches!(defn.contract.post_condition, Expr::Bool(_));
 
         let new_body: Vec<Statement> = defn
             .body
             .iter()
             .map(|stmt| {
-                if let Statement::Term(ref outputs) = stmt {
+                if let Statement::Term(outputs) = stmt {
                     if outputs.is_empty() && postcond_is_bool {
                         return Statement::Term(vec![Some(Expr::Bool(true))]);
                     }
@@ -306,16 +305,13 @@ impl Desugarer {
     }
 
     fn expand_implicit_terms_txn(&mut self, txn: &Transaction) -> Transaction {
-        let postcond_is_bool = matches!(
-            txn.contract.post_condition,
-            Expr::Bool(_)
-        );
+        let postcond_is_bool = matches!(txn.contract.post_condition, Expr::Bool(_));
 
         let new_body: Vec<Statement> = txn
             .body
             .iter()
             .map(|stmt| {
-                if let Statement::Term(ref outputs) = stmt {
+                if let Statement::Term(outputs) = stmt {
                     if outputs.is_empty() && postcond_is_bool {
                         return Statement::Term(vec![Some(Expr::Bool(true))]);
                     }
@@ -334,5 +330,102 @@ impl Desugarer {
 impl Default for Desugarer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+
+    #[test]
+    fn test_expand_implicit_term_true_in_defn() {
+        let defn = Definition {
+            name: "test".to_string(),
+            type_params: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+            },
+            body: vec![Statement::Term(vec![])],
+        };
+
+        let mut desugarer = Desugarer::new();
+        let result = desugarer.expand_implicit_terms_defn(&defn);
+
+        if let Statement::Term(outputs) = &result.body[0] {
+            assert_eq!(outputs.len(), 1, "Should have 1 output after desugaring");
+            if let Some(Expr::Bool(true)) = &outputs[0] {
+                println!("✓ Implicit term true correctly added");
+            } else {
+                panic!("Expected Bool(true)");
+            }
+        } else {
+            panic!("Expected Term statement");
+        }
+    }
+
+    #[test]
+    fn test_expand_implicit_term_true_in_txn() {
+        let txn = Transaction {
+            is_async: false,
+            is_reactive: false,
+            name: "test".to_string(),
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+            },
+            body: vec![Statement::Term(vec![])],
+            reactor_speed: None,
+            span: None,
+        };
+
+        let mut desugarer = Desugarer::new();
+        let result = desugarer.expand_implicit_terms_txn(&txn);
+
+        if let Statement::Term(outputs) = &result.body[0] {
+            assert_eq!(outputs.len(), 1, "Should have 1 output after desugaring");
+            if let Some(Expr::Bool(true)) = &outputs[0] {
+                println!("✓ Implicit term true correctly added in txn");
+            } else {
+                panic!("Expected Bool(true)");
+            }
+        } else {
+            panic!("Expected Term statement");
+        }
+    }
+
+    #[test]
+    fn test_no_expansion_when_postcond_not_bool() {
+        let defn = Definition {
+            name: "test".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Integer(42),
+                span: None,
+            },
+            body: vec![Statement::Term(vec![])],
+        };
+
+        let mut desugarer = Desugarer::new();
+        let result = desugarer.expand_implicit_terms_defn(&defn);
+
+        if let Statement::Term(outputs) = &result.body[0] {
+            assert!(
+                outputs.is_empty(),
+                "Should not expand when postcondition is not Bool"
+            );
+        }
     }
 }
