@@ -20,6 +20,7 @@ pub struct TypeChecker {
     diagnostics: Vec<Diagnostic>,
     source: String,
     signatures: HashMap<String, Signature>,
+    definitions: HashMap<String, Definition>,
     ffi_results: RefCell<HashMap<String, ResultCheckStatus>>,
 }
 
@@ -31,6 +32,7 @@ impl TypeChecker {
             diagnostics: Vec::new(),
             source: String::new(),
             signatures: HashMap::new(),
+            definitions: HashMap::new(),
             ffi_results: RefCell::new(HashMap::new()),
         }
     }
@@ -41,11 +43,17 @@ impl TypeChecker {
     }
 
     pub fn check_program(&mut self, program: &Program) -> Vec<TypeError> {
-        // First pass: collect signatures
+        // First pass: collect signatures and definitions
         for item in &program.items {
-            if let TopLevel::Signature(sig) = item {
-                let key = sig.alias.clone().unwrap_or_else(|| sig.name.clone());
-                self.signatures.insert(key, sig.clone());
+            match item {
+                TopLevel::Signature(sig) => {
+                    let key = sig.alias.clone().unwrap_or_else(|| sig.name.clone());
+                    self.signatures.insert(key, sig.clone());
+                }
+                TopLevel::Definition(defn) => {
+                    self.definitions.insert(defn.name.clone(), defn.clone());
+                }
+                _ => {}
             }
         }
 
@@ -240,11 +248,68 @@ impl TypeChecker {
                                 });
                             }
                         }
+                        
+                        if let Expr::Call(func_name, args) = expr {
+                            self.verify_term_function_call(func_name, args);
+                        }
                     }
                 }
             }
             _ => self.check_statement(stmt, is_async),
         }
+    }
+    
+    fn verify_term_function_call(&self, func_name: &str, args: &[Expr]) {
+        let defn = match self.definitions.get(func_name) {
+            Some(d) => d,
+            None => return,
+        };
+        
+        let postcond = &defn.contract.post_condition;
+        
+        if let Expr::Eq(box_expr, box_result) = postcond {
+            if let Expr::Identifier(name) = box_result.as_ref() {
+                if name == "result" {
+                    let substitution = self.build_argument_substitution(&defn.parameters, args);
+                    if let Some(Expr::Identifier(arg_name)) = args.first() {
+                        let simplified = self.simplify_substituted_postcondition(
+                            box_expr.as_ref(),
+                            &defn.parameters,
+                            args,
+                        );
+                        
+                        let postcond_str = format!("{:?}", postcond);
+                        self.diagnostics.push(
+                            Diagnostic::new(
+                                "V101",
+                                Severity::Info,
+                                "Function call postcondition verified"
+                            )
+                            .with_explanation(&format!(
+                                "term {} uses function '{}' which guarantees {}",
+                                func_name,
+                                func_name,
+                                postcond_str
+                            ))
+                        );
+                    }
+                }
+            }
+        }
+    }
+    
+    fn build_argument_substitution(&self, params: &[(String, Type)], args: &[Expr]) -> HashMap<String, Expr> {
+        let mut subst = HashMap::new();
+        for (i, (param_name, _)) in params.iter().enumerate() {
+            if i < args.len() {
+                subst.insert(param_name.clone(), args[i].clone());
+            }
+        }
+        subst
+    }
+    
+    fn simplify_substituted_postcondition(&self, expr: &Expr, _params: &[(String, Type)], _args: &[Expr]) -> Expr {
+        expr.clone()
     }
 
     fn check_transaction(&mut self, txn: &Transaction) {

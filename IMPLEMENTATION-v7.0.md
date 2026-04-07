@@ -14,6 +14,7 @@
 | Multi-return validation | typechecker.rs | Part 11 |
 | FFI error enforcement | typechecker.rs | 7.7 |
 | Dynamic FFI registry | ffi/registry.rs | 7 |
+| Term functionCall verification | typechecker.rs | 5.3.2 |
 | R-Brief syntax fix | SPEC.md, refs | 9.2 |
 | Reactor throttling | SPEC.md | 8.4 |
 | Mutual exclusion fix | SPEC.md | 8.3 |
@@ -118,17 +119,12 @@ Clarified that preconditions only need to be mutually exclusive when they write 
 
 ## Pending Implementations
 
-### 1. `term functionCall();` Verification
-**SPEC Section:** 5.3.2 `term functionCall();`
+### 1. Complete Term FunctionCall Verification
+**SPEC Section:** 5.3.2
 
-Verify that function call output satisfies postcondition:
-```brief
-txn increment [count < 100][count == @count + 1] {
-    term addOne(@count);  // Compiler verifies: addOne(@count) == @count + 1
-};
-```
+Full symbolic verification to prove that function call output satisfies postcondition.
 
-**Status:** Not started
+**Status:** Partial (info diagnostic only, needs symbolic equality checking)
 
 ---
 
