@@ -31,8 +31,8 @@ and code diverged.
 **Linux / macOS:**
 ```bash
 # Clone this repository
-git clone https://github.com/Randozart/brief-compiler.git
-cd brief-compiler
+git clone https://github.com/Randozart/brief-lang.git
+cd brief-lang
 
 # Run the installer
 chmod +x scripts/brief-install
@@ -42,8 +42,8 @@ chmod +x scripts/brief-install
 **Windows:**
 ```powershell
 # Clone this repository (or download ZIP)
-git clone https://github.com/Randozart/brief-compiler.git
-cd brief-compiler
+git clone https://github.com/Randozart/brief-lang.git
+cd brief-lang
 
 # Run the installer
 .\scripts\brief-install.bat
