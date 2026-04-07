@@ -5,6 +5,20 @@
 
 ---
 
+## Quick Reference
+
+| Feature | File | SPEC Section |
+|---------|------|--------------|
+| Implicit `term true;` | desugarer.rs | 5.3.1 |
+| Multi-field FFI outputs | parser.rs | 7.4.1 |
+| Multi-return validation | typechecker.rs | Part 11 |
+| FFI error warning | typechecker.rs | 7.7 |
+| R-Brief syntax fix | SPEC.md, refs | 9.2 |
+| Reactor throttling | SPEC.md | 8.4 |
+| Mutual exclusion fix | SPEC.md | 8.3 |
+
+---
+
 ## Completed Implementations
 
 ### 1. Implicit `term true;` Desugaring
@@ -155,6 +169,7 @@ All documentation updated to v7.0:
 ## Git History
 
 ```
+c0b52a0 docs: add v7.0 implementation summary
 a1277fc impl: add FFI error enforcement warning
 5616fa1 impl: Phase 1 core language features
 a6929ad docs: fix rstruct syntax and add reactor throttling
