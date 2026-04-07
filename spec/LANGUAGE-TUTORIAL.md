@@ -519,12 +519,22 @@ rct txn start [~/ready] {
 
 ### Implicit Termination
 
-Transactions continue until the postcondition is satisfied. If the postcondition establishes a Bool value, use `term true;`:
+When the postcondition is literal `true`, `term;` is implicitly treated as `term true;`:
 
 ```brief
-// term true; implicitly sets the flag in the postcondition
+// Postcondition is literal true - term; becomes term true;
+txn activate [ready][true] {
+    term;  // implicitly: term true;
+};
+```
+
+When the postcondition is a Bool expression, `term;` checks if it is satisfied:
+
+```brief
+// Postcondition is an expression - term; checks if it is met
 txn set_flag [true][flag == true] {
-    term true;  // implicitly: &flag = true; then term;
+    &flag = true;
+    term;  // checks: is flag == true satisfied?
 };
 ```
 

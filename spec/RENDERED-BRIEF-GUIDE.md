@@ -1,6 +1,6 @@
 # Rendered Brief Guide
 
-**Version:** 6.2  
+**Version:** 7.0  
 **Purpose:** Building reactive web interfaces with Brief  
 
 ---
@@ -95,6 +95,28 @@ rstruct Counter {
     </div>
 }
 ```
+
+### Multi-Element HTML
+
+Render structs can produce multiple root elements by wrapping them in a fragment:
+
+```brief
+rstruct Form {
+    name: String;
+    email: String;
+    
+    <div class="name-field">
+        <label>Name</label>
+        <span b-text="name">-</span>
+    </div>
+    <div class="email-field">
+        <label>Email</label>
+        <span b-text="email">-</span>
+    </div>
+}
+```
+
+The multiple root elements are automatically wrapped in a fragment during compilation.
 
 ---
 

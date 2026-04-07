@@ -1,6 +1,6 @@
 # Brief Language Reference Manual
 
-**Version:** 6.2  
+**Version:** 7.0  
 **Status:** Authoritative Reference  
 
 ---
@@ -193,6 +193,37 @@ txn name [precondition][postcondition] {
 
 - **Precondition**: When the transaction can fire
 - **Postcondition**: What must be true after `term`
+
+#### Implicit `term true;`
+
+When a definition or transaction has a Bool postcondition (`true`), `term;` is implicitly treated as `term true;`:
+
+```brief
+// Postcondition is literal true - term; becomes term true;
+txn activate [ready][true] {
+    term;  // implicitly: term true;
+};
+
+// Postcondition is a Bool expression - term; checks if postcondition is met
+txn set_flag [true][flag == true] {
+    &flag = true;
+    term;  // checks: is flag == true satisfied? Yes, so terminates
+};
+```
+
+#### `term functionCall();`
+
+When `term` contains a function call, the compiler verifies the call's output satisfies the postcondition:
+
+```brief
+defn addOne(x: Int) -> Int [true][result == x + 1] {
+    term x + 1;
+};
+
+txn increment [count < 100][count == @count + 1] {
+    term addOne(@count);  // Verifies: addOne(@count) == @count + 1
+};
+```
 
 ### Prior State
 
@@ -420,6 +451,20 @@ message = "String"
 frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 ```
 
+### Multi-Field Success Outputs
+
+FFI functions can return multiple fields on success:
+
+```toml
+[functions.output.success]
+quotient = "Int"
+remainder = "Int"
+```
+
+```brief
+frgn divide(a: Int, b: Int) -> Result<(quotient: Int, remainder: Int), MathError> from "lib/std/math.toml";
+```
+
 ### Generic FFI
 
 ```brief
@@ -433,9 +478,25 @@ frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 
 defn load_config() -> String [true][result.len() >= 0] {
     let result = read_file("config.txt");
-    term "default";
+    if result.is_ok() {
+        term result.value;
+    } else {
+        term "default";
+    }
 };
 ```
+
+### Error Handling Requirements
+
+The compiler enforces that FFI errors must be handled:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `.is_ok()` | `Bool` | True if success |
+| `.is_err()` | `Bool` | True if error |
+| `.value` | `T` | Success value |
+| `.error.code` | `E.code` | Error code |
+| `.error.message` | `E.message` | Error message |
 
 ---
 
@@ -447,6 +508,31 @@ defn load_config() -> String [true][result.len() >= 0] {
 rstruct MyComponent {
     message: String;
 } -> "<div>{message}</div>";
+```
+
+### Multi-Element Output
+
+Render structs can produce multiple root elements:
+
+```brief
+rstruct Form {
+    name: String;
+    email: String;
+} -> "<div>{name}</div><div>{email}</div>";
+```
+
+### CSS Import
+
+Views can import external CSS:
+
+```brief
+rstruct Dashboard {
+    title: String;
+} -> @css("styles/dashboard.css") -> "
+    <div class='dashboard'>
+        <h1>{title}</h1>
+    </div>
+";
 ```
 
 ### Rendered Output

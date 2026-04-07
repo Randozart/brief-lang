@@ -1,6 +1,6 @@
 # Brief Language Specification
 
-**Version:** 6.2  
+**Version:** 7.0  
 **Date:** 2026-04-07  
 **Status:** Authoritative Reference  
 
@@ -36,7 +36,8 @@ program ::= (definition | transaction | state_decl | constant | import | struct_
 definition ::= "defn" identifier type_params? parameters? contract "->" output_types "{" body "}" ";"
 transaction ::= ("async")? "txn" identifier contract "{" body "}" ";"
 rct_transaction ::= "rct" ("async")? "txn" identifier contract "{" body "}" ";"
-foreign_binding ::= "frgn" identifier type_params? parameters "->" "Result<" success_type "," error_type ">" "from" string ";"
+foreign_binding ::= "frgn" identifier type_params? parameters "->" "Result<" (success_type | "(" success_fields ")") "," error_type ">" "from" string ";"
+success_fields ::= identifier ":" type ("," identifier ":" type)*
 foreign_sig ::= "frgn" "sig" identifier "(" parameters? ")" "->" output_types ";"
 
 state_decl ::= "let" identifier ":" type ("=" expression)? ";"
@@ -229,6 +230,39 @@ txn example [pre_condition][post_condition] {
 };
 ```
 
+### 5.3.1 Implicit `term true;`
+
+When a definition or transaction has a literal Bool `true` postcondition, `term;` is implicitly treated as `term true;`:
+
+```brief
+// Postcondition is literal true - term; becomes term true;
+txn activate [ready][true] {
+    term;  // implicitly: term true;
+};
+
+// Postcondition is a Bool expression - term; checks if postcondition is met
+txn set_flag [true][flag == true] {
+    &flag = true;
+    term;  // checks: is flag == true satisfied?
+};
+```
+
+### 5.3.2 `term functionCall();`
+
+When `term` contains a function call, the compiler verifies that the function's output satisfies the postcondition:
+
+```brief
+defn addOne(x: Int) -> Int [true][result == x + 1] {
+    term x + 1;
+};
+
+txn increment [count < 100][count == @count + 1] {
+    term addOne(@count);  // Compiler verifies: addOne(@count) == @count + 1
+};
+```
+
+If the function does not satisfy the postcondition, the compiler reports an error.
+
 ### 5.4 Prior State
 
 The `@` operator references the value at transaction start:
@@ -345,6 +379,27 @@ message = "String"
 frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 ```
 
+### 7.4.1 Multi-Field Success Outputs
+
+FFI functions can return multiple fields on success using tuple syntax:
+
+```toml
+[functions.output.success]
+x = "Int"
+y = "Int"
+```
+
+```brief
+frgn divide(a: Int, b: Int) -> Result<(quotient: Int, remainder: Int), MathError> from "lib/std/math.toml";
+
+txn safe_divide [b != 0][result.quotient >= 0] {
+    let (q, r) = divide(10, 3);
+    term (q, r);
+};
+```
+
+The brief declaration uses `(field1: Type1, field2: Type2)` syntax for multi-field returns.
+
 ### 7.5 Supported Types
 
 | Brief Type | Description |
@@ -364,14 +419,40 @@ frgn<T> identity(value: T) -> Result<T, Error> from "lib/std/util.toml";
 
 ### 7.7 Error Handling
 
+FFI functions return `Result<T, E>` types. The compiler enforces that FFI errors must be handled - code that ignores errors is rejected.
+
 ```brief
 frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 
 defn safe_read(path: String) -> String [true][result.len() >= 0] {
     let result = read_file(path);
-    term "default";
+    if result.is_ok() {
+        term result.value;
+    } else {
+        term "default";
+    }
 };
 ```
+
+#### Error Projection Methods
+
+Result types support these projection methods:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `.is_ok()` | `Bool` | True if success |
+| `.is_err()` | `Bool` | True if error |
+| `.value` | `T` | Success value (fields as declared) |
+| `.error.code` | `E.code` | Error code |
+| `.error.message` | `E.message` | Error message |
+
+#### FFI Error Contract Enforcement
+
+The compiler rejects code that:
+- Calls an FFI function without handling the Result
+- Accesses `.value` without first checking `.is_ok()`
+
+This ensures all error paths are explicitly handled.
 
 ---
 
@@ -447,6 +528,33 @@ rstruct Counter {
     };
 } -> "<button>{count}</button>";
 ```
+
+### 9.2.1 Multi-Element HTML
+
+Render structs can produce multiple root elements by wrapping them in a fragment:
+
+```brief
+rstruct Form {
+    name: String;
+    email: String;
+} -> "<div>{name}</div><div>{email}</div>";
+```
+
+### 9.2.2 CSS Import
+
+R-Brief views can import external CSS files:
+
+```brief
+rstruct Dashboard {
+    title: String;
+} -> @css("styles/dashboard.css") -> "
+    <div class='dashboard'>
+        <h1>{title}</h1>
+    </div>
+";
+```
+
+The `@css()` directive loads the specified stylesheet for the rendered component.
 
 ---
 

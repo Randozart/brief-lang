@@ -1,6 +1,6 @@
 # Brief FFI Guide
 
-**Version:** 6.2  
+**Version:** 7.0  
 **Purpose:** How to use and create Foreign Function Interface bindings  
 
 ---
@@ -212,6 +212,42 @@ frgn sqrt(value: Float) -> Result<Float, MathError> from "lib/std/math.toml";
 frgn now() -> Result<Int, TimeError> from "lib/std/time.toml";
 ```
 
+### Multi-Field Success Outputs
+
+FFI functions can return multiple fields on success using tuple syntax:
+
+**TOML:**
+```toml
+[[functions]]
+name = "divide"
+location = "lib::math::divide"
+target = "native"
+
+[functions.input]
+a = "Int"
+b = "Int"
+
+[functions.output.success]
+quotient = "Int"
+remainder = "Int"
+
+[functions.output.error]
+type = "MathError"
+code = "Int"
+message = "String"
+```
+
+**Brief Declaration:**
+```brief
+frgn divide(a: Int, b: Int) -> Result<(quotient: Int, remainder: Int), MathError> from "lib/math.toml";
+
+// Usage:
+txn safe_divide [b != 0][result.quotient >= 0] {
+    let (q, r) = divide(10, 3);
+    term (q, r);
+};
+```
+
 ### Generic Functions
 
 ```brief
@@ -303,6 +339,33 @@ message = "String"
 
 ```brief
 // Error fields: code: Int, message: String
+```
+
+### Result Projection Methods
+
+Result types support these methods for accessing success/error values:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `.is_ok()` | `Bool` | True if the call succeeded |
+| `.is_err()` | `Bool` | True if the call failed |
+| `.value` | `T` | The success value (access only after checking `.is_ok()`) |
+| `.error.code` | `E.code` | The error code field |
+| `.error.message` | `E.message` | The error message field |
+
+**Example:**
+```brief
+defn read_config(path: String) -> String [true][result.len() >= 0] {
+    let result = read_file(path);
+    if result.is_ok() {
+        term result.value;
+    } else {
+        let err_code = result.error.code;
+        let err_msg = result.error.message;
+        // Log error, return default
+        term "default_config";
+    }
+};
 ```
 
 ---
