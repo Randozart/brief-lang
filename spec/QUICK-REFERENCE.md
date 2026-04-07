@@ -1,6 +1,15 @@
 # Brief Quick Reference
 
 **Cheat sheet for Brief syntax and patterns.**
+**Version: 7.0**
+
+## New in v7.0
+
+- **Implicit term true**: `term;` becomes `term true;` when postcondition is `true`
+- **Term verification**: Compiler verifies function calls satisfy postconditions (V101/V102)
+- **FFI error enforcement**: Must check `.is_ok()` or `.is_err()` before accessing `.value`
+- **Reactor throttling**: `@Hz` controls polling frequency
+- **Async mutual exclusion**: Compiler verifies async txns with overlapping writes
 
 ## Basics
 
@@ -36,10 +45,19 @@ Type1 | Type2                    # Union
 let local: Type = expr;          # Local var
 [condition] statement;           # Guard
 Pattern(x, y) = expr;           # Unification
-term;                           # Success
-term value;                     # Return
+term;                           # Success (or term true if postcondition is true)
+term value;                     # Return value(s)
+term (a, b);                    # Return multiple values
 escape;                         # Rollback
 escape value;                   # Return error
+```
+
+### Implicit term true (v7.0)
+```brief
+# When postcondition is literal true, term; is implicit
+txn activate [ready][true] {
+    term;  # becomes: term true;
+};
 ```
 
 ## Operators
@@ -110,21 +128,30 @@ defn load(path: String) -> String [true][true] {
 };
 ```
 
-### Error Handling
+### Error Handling (v7.0 - FFI Error Enforcement)
 
 ```brief
 sig compute: Int -> Int | Error;
 
+# MUST check .is_ok() or .is_err() before accessing .value
 txn process [true][true] {
   let result = compute(42);
   
-  Int(x) = result;
-  &value = x;
-  term;
-  
-  Error(e) = result;
-  escape;
+  [result.is_ok()] {
+    &value = result.value;
+    term;
+  }
+  [result.is_err()] {
+    escape;
+  }
 };
+```
+
+### Reactor Throttling (v7.0)
+```brief
+reactor @10Hz;                    # File-level default
+
+rct txn fast [cond][post] { } @60Hz;  # Per-txn override
 ```
 
 ## Native Stdlib
@@ -229,17 +256,28 @@ txn fail [true][x == 42] {
   term;
 };
 
-# ✗ Fails: Error not handled
+# ✗ Fails: FFI Error not handled (v7.0)
 txn fail [true][true] {
   let r = fetch(1);
-  Int(x) = r;        # Missing: Error(e) = r;
-  term;
+  term r.value;      # ERROR: must check .is_ok() or .is_err() first
+};
+
+# Works: Check error first
+txn ok [true][true] {
+  let r = fetch(1);
+  [r.is_ok()] term r.value;
+  [r.is_err()] escape;
 };
 
 # ✗ Fails: Missing mutation
 txn fail [true][count == 1] {
   term;              # count never changed
 };
+
+# ✓ Async mutual exclusion (v7.0)
+rct async txn write_a [ready][data == "A"] { &data = "A"; term; };
+rct async txn write_b [!ready][data == "B"] { &data = "B"; term; };
+# Different preconditions, no conflict
 ```
 
 ## Philosophy
@@ -250,7 +288,7 @@ txn fail [true][count == 1] {
 - **Rollback**: If post fails, undo all mutations
 - **Reactive**: Transactions fire when conditions become true
 - **Native**: Use `std.core` for proven functions
-- **FFI**: Use `std.bindings` for I/O and Rust operations
+- **FFI**: Must handle all error cases (v7.0 requirement)
 
 ---
 

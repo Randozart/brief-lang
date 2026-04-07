@@ -259,9 +259,11 @@ brief lsp                       # Start language server
 
 ## Documentation
 
-- [SPEC-v6.2.md](spec/SPEC-v6.2.md) - Full language spec
-- [FFI-USER-GUIDE.md](spec/FFI-USER-GUIDE.md) - Writing FFI interfaces
-- [FFI-STDLIB-REFERENCE.md](spec/FFI-STDLIB-REFERENCE.md) - Available functions
+- [SPEC.md](spec/SPEC.md) - Full language spec (v7.0)
+- [LANGUAGE-REFERENCE.md](spec/LANGUAGE-REFERENCE.md) - Detailed language manual
+- [FFI-GUIDE.md](spec/FFI-GUIDE.md) - Writing FFI interfaces
+- [RENDERED-BRIEF-GUIDE.md](spec/RENDERED-BRIEF-GUIDE.md) - Web UI framework
+- [QUICK-REFERENCE.md](spec/QUICK-REFERENCE.md) - Syntax cheat sheet
 - [examples/](examples/) - Example programs
 
 ## Building and Testing

@@ -8,6 +8,9 @@
 spec/*.pdf
 spec/*.html
 
+# Old docs drafts (not authoritative)
+spec/old_docs/
+
 # ============================================
 # TESTS
 # ============================================

@@ -1359,3 +1359,102 @@ impl ProofEngine {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mutual_exclusion_detects_conflict() {
+        let code = r#"
+            let data: String = "";
+            let busy: Bool = false;
+
+            rct async txn write_a [ready && !busy][busy == true] {
+                &data = "A";
+                &busy = false;
+                term;
+            };
+
+            rct async txn write_b [ready && !busy][busy == true] {
+                &data = "B";
+                &busy = false;
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_ownership_conflict = errors.iter().any(|e| e.code == "P001");
+        assert!(
+            has_ownership_conflict,
+            "Expected P001 ownership conflict error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_mutual_exclusion_no_conflict_different_vars() {
+        let code = r#"
+            let a: Int = 0;
+            let b: Int = 0;
+
+            rct async txn inc_a [true][a == @a + 1] {
+                &a = a + 1;
+                term;
+            };
+
+            rct async txn inc_b [true][b == @b + 1] {
+                &b = b + 1;
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_ownership_conflict = errors.iter().any(|e| e.code == "P001");
+        assert!(
+            !has_ownership_conflict,
+            "Should NOT have ownership conflict for different variables, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_mutual_exclusion_no_conflict_non_async() {
+        let code = r#"
+            let data: String = "";
+
+            txn write_a [true] {
+                &data = "A";
+                term;
+            };
+
+            txn write_b [true] {
+                &data = "B";
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_ownership_conflict = errors.iter().any(|e| e.code == "P001");
+        assert!(
+            !has_ownership_conflict,
+            "Should NOT have ownership conflict for non-async txns, got: {:?}",
+            errors
+        );
+    }
+}

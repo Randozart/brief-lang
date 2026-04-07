@@ -41,9 +41,16 @@ The project consists of:
 
 ### Key Source Files
 - `src/parser.rs` - Brief language parser (handles both .br and .rbv)
+- `src/lexer.rs` - Tokenization
+- `src/ast.rs` - Abstract syntax tree definitions
+- `src/typechecker.rs` - Type checking, contract verification, FFI error enforcement
+- `src/desugarer.rs` - Desugaring (implicit term true, etc.)
+- `src/symbolic.rs` - Symbolic execution for contract verification
+- `src/proof_engine.rs` - Proof generation, mutual exclusion checking, contract proofs
 - `src/wasm_gen.rs` - WASM code generation
 - `src/rbv.rs` - .rbv file parsing (Rendered Brief view extraction)
-- `src/view_compiler.rs` - View/HTML compilation with bindings (Rendered Brief specific)
+- `src/view_compiler.rs` - View/HTML compilation with bindings
+- `src/reactor.rs` - Reactor runtime
 
 ### Generated Output
 - WASM artifacts go to `/tmp/brief-run-<name>/`
