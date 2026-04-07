@@ -116,7 +116,7 @@ message = "String"
 | `name` | Yes | Brief function name |
 | `description` | No | Human-readable description |
 | `location` | Yes | Rust module path |
-| `target` | Yes | Platform: `native` |
+| `target` | Yes | Platform: `native`, `wasm` |
 | `mapper` | No | Mapper name (default: `rust`) |
 | `input` | Yes | Parameter name-type pairs |
 | `output.success` | Yes | Success output fields |
@@ -142,6 +142,33 @@ type = "IoError"
 code = "Int"
 message = "String"
 ```
+
+### Example: Web Target (WASM)
+
+For browser/web targets, use `wasm` as the target:
+
+```toml
+[[functions]]
+name = "crypto_hash"
+description = "SHA-256 hash in browser"
+location = "wasm/crypto.wasm"
+target = "wasm"
+mapper = "wasm"
+
+[functions.input]
+data = "String"
+
+[functions.output.success]
+hash = "String"
+
+[functions.output.error]
+type = "WasmError"
+message = "String"
+```
+
+The same TOML contract works for native and WASM targets - only the `target` field changes.
+
+---
 
 ### Example: Math
 
