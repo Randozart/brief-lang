@@ -425,6 +425,18 @@ impl TypeChecker {
                 } else {
                     self.declare_variable(name, expr_ty);
                 }
+                
+                if self.is_ffi_call(expr) {
+                    self.diagnostics.push(
+                        Diagnostic::new("F101", Severity::Warning, "FFI call result not handled")
+                            .with_explanation(&format!(
+                                "FFI function result assigned to '{}' without checking for errors. \
+                                 Use .is_ok() or .is_err() to handle potential errors.",
+                                name
+                            ))
+                            .with_hint("Wrap the FFI call with is_ok()/is_err() guards")
+                    );
+                }
             }
             Statement::Let { name, ty, expr } => {
                 let inferred_ty = expr.as_ref().map(|e| self.infer_expression(e));
@@ -670,5 +682,14 @@ impl TypeChecker {
                 format!("Option<{}>", self.type_to_string(inner))
             }
         }
+    }
+
+    fn is_ffi_call(&self, expr: &Expr) -> bool {
+        if let Expr::Call(name, _) = expr {
+            return self.signatures.iter().any(|(sig_name, sig)| {
+                sig_name == name && sig.result_type == ResultType::Projection(vec![])
+            });
+        }
+        false
     }
 }
