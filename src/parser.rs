@@ -421,15 +421,35 @@ impl<'a> Parser<'a> {
             return Err("Expected Result type for frgn binding".to_string());
         }
 
-        // Parse <T, E>
+        // Parse <SuccessType, E>
         self.expect(Token::Lt)?;
 
-        // Parse success type (as simple identifier for now)
-        let success_type_name = self.expect_identifier()?;
-        let success_type = self.string_to_type(&success_type_name)?;
-
+        // Parse success type - could be simple identifier or tuple syntax (field1: T1, field2: T2)
         let mut success_output = Vec::new();
-        success_output.push(("value".to_string(), success_type));
+
+        if let Some(Ok(Token::LParen)) = self.current_token() {
+            // Multi-field success output: (field1: T1, field2: T2)
+            self.advance();
+            loop {
+                let field_name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let field_type_name = self.expect_identifier()?;
+                let field_type = self.string_to_type(&field_type_name)?;
+                success_output.push((field_name, field_type));
+
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RParen)?;
+        } else {
+            // Single-field success output: T -> becomes (value: T)
+            let success_type_name = self.expect_identifier()?;
+            let success_type = self.string_to_type(&success_type_name)?;
+            success_output.push(("value".to_string(), success_type));
+        }
 
         self.expect(Token::Comma)?;
 

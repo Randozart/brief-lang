@@ -180,11 +180,61 @@ impl TypeChecker {
             self.declare_variable(param_name, resolved_ty);
         }
 
+        let expected_output_types = self.get_expected_output_types(defn);
         for stmt in &defn.body {
-            self.check_statement(stmt, None);
+            self.check_statement_with_outputs(stmt, None, &expected_output_types);
         }
 
         self.pop_scope();
+    }
+
+    fn get_expected_output_types(&self, defn: &Definition) -> Vec<Type> {
+        if let Some(ref output_type) = defn.output_type {
+            output_type.all_types()
+        } else if !defn.outputs.is_empty() {
+            defn.outputs.clone()
+        } else {
+            vec![]
+        }
+    }
+
+    fn check_statement_with_outputs(
+        &mut self,
+        stmt: &Statement,
+        is_async: Option<&bool>,
+        expected_outputs: &[Type],
+    ) {
+        match stmt {
+            Statement::Term(outputs) => {
+                let actual_count = outputs.len();
+                let expected_count = expected_outputs.len();
+
+                if expected_count > 0 && actual_count != expected_count {
+                    self.errors.push(TypeError::TypeMismatch {
+                        expected: format!("{} outputs", expected_count),
+                        found: format!("{} outputs", actual_count),
+                        context: "term statement output count".to_string(),
+                    });
+                }
+
+                for (i, expr_opt) in outputs.iter().enumerate() {
+                    if let Some(expr) = expr_opt {
+                        let actual_ty = self.infer_expression(expr);
+                        if i < expected_outputs.len() {
+                            let expected_ty = &expected_outputs[i];
+                            if !self.types_compatible(&actual_ty, expected_ty) {
+                                self.errors.push(TypeError::TypeMismatch {
+                                    expected: self.type_to_string(expected_ty),
+                                    found: self.type_to_string(&actual_ty),
+                                    context: format!("term output {}", i),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            _ => self.check_statement(stmt, is_async),
+        }
     }
 
     fn check_transaction(&mut self, txn: &Transaction) {

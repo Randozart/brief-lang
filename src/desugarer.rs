@@ -23,10 +23,13 @@ impl Desugarer {
                         let (new_txn, sigs, state) = self.desugar_reactive_txn(txn);
                         items.extend(state.into_iter().map(TopLevel::StateDecl));
                         items.extend(sigs.into_iter().map(TopLevel::Signature));
-                        items.push(TopLevel::Transaction(new_txn));
+                        items.push(TopLevel::Transaction(self.expand_implicit_terms_txn(&new_txn)));
                     } else {
-                        items.push(item.clone());
+                        items.push(TopLevel::Transaction(self.expand_implicit_terms_txn(txn)));
                     }
+                }
+                TopLevel::Definition(defn) => {
+                    items.push(TopLevel::Definition(self.expand_implicit_terms_defn(defn)));
                 }
                 TopLevel::Struct(s) => {
                     for field in &s.fields {
@@ -273,6 +276,58 @@ impl Desugarer {
             }
         }
         vec![]
+    }
+
+    /// Expand implicit term statements:
+    /// - `term;` with no outputs becomes `term true;` when the postcondition is a Bool expression
+    fn expand_implicit_terms_defn(&mut self, defn: &Definition) -> Definition {
+        let postcond_is_bool = matches!(
+            defn.contract.post_condition,
+            Expr::Bool(_)
+        );
+
+        let new_body: Vec<Statement> = defn
+            .body
+            .iter()
+            .map(|stmt| {
+                if let Statement::Term(ref outputs) = stmt {
+                    if outputs.is_empty() && postcond_is_bool {
+                        return Statement::Term(vec![Some(Expr::Bool(true))]);
+                    }
+                }
+                stmt.clone()
+            })
+            .collect();
+
+        Definition {
+            body: new_body,
+            ..defn.clone()
+        }
+    }
+
+    fn expand_implicit_terms_txn(&mut self, txn: &Transaction) -> Transaction {
+        let postcond_is_bool = matches!(
+            txn.contract.post_condition,
+            Expr::Bool(_)
+        );
+
+        let new_body: Vec<Statement> = txn
+            .body
+            .iter()
+            .map(|stmt| {
+                if let Statement::Term(ref outputs) = stmt {
+                    if outputs.is_empty() && postcond_is_bool {
+                        return Statement::Term(vec![Some(Expr::Bool(true))]);
+                    }
+                }
+                stmt.clone()
+            })
+            .collect();
+
+        Transaction {
+            body: new_body,
+            ..txn.clone()
+        }
     }
 }
 
