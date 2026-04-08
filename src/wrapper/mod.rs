@@ -1,6 +1,6 @@
 //! Library Analyzer - Analyzes foreign libraries to extract function signatures
 //!
-//! Supports: C headers, Rust crates, WASM modules
+//! Supports: C, Rust, WASM, JavaScript/TypeScript, Python
 
 use std::path::Path;
 
@@ -8,6 +8,8 @@ pub mod c_analyzer;
 pub mod contracts;
 pub mod generator;
 pub mod interactive;
+pub mod js_analyzer;
+pub mod python_analyzer;
 pub mod rust_analyzer;
 pub mod wasm_analyzer;
 
@@ -34,10 +36,24 @@ pub fn detect_library_type(path: &Path) -> &'static str {
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     match extension {
-        "h" | "c" => "c",
+        // C/C++
+        "h" | "c" | "cpp" | "cxx" | "cc" => "c",
+        
+        // Rust
         "rs" => "rust",
+        
+        // WebAssembly
         "wasm" | "wat" => "wasm",
+        
+        // JavaScript/TypeScript
+        "js" | "mjs" | "jsx" | "ts" | "tsx" | "d.ts" => "js",
+        
+        // Python
+        "py" | "pyi" => "python",
+        
+        // Native libraries
         "so" | "dylib" | "dll" => "native",
+        
         _ => {
             // Check if it's a directory with Cargo.toml
             if path.join("Cargo.toml").exists() {
@@ -88,6 +104,22 @@ pub fn analyze_library(
             Ok(AnalysisResult {
                 library_name,
                 mapper: "wasm".to_string(),
+                functions,
+            })
+        }
+        "js" | "JS" => {
+            let functions = js_analyzer::analyze_js(path)?;
+            Ok(AnalysisResult {
+                library_name,
+                mapper: "js".to_string(),
+                functions,
+            })
+        }
+        "python" | "Python" => {
+            let functions = python_analyzer::analyze_python(path)?;
+            Ok(AnalysisResult {
+                library_name,
+                mapper: "python".to_string(),
                 functions,
             })
         }

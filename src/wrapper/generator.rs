@@ -1,6 +1,8 @@
 //! File Generator - Generates Brief FFI files from analysis results
 
 use super::c_analyzer::{c_func_to_frgn_sig, suggest_postconditions, suggest_preconditions};
+use super::js_analyzer::js_func_to_frgn_sig;
+use super::python_analyzer::py_func_to_frgn_sig;
 use super::rust_analyzer::rust_func_to_frgn_sig;
 use super::wasm_analyzer::wasm_func_to_frgn_sig;
 use super::{AnalysisResult, AnalyzedFunction};
@@ -25,6 +27,8 @@ pub fn generate_lib_bv(result: &AnalysisResult) -> String {
             "c" => c_func_to_frgn_sig(func),
             "rust" => rust_func_to_frgn_sig(func),
             "wasm" => wasm_func_to_frgn_sig(func),
+            "js" => js_func_to_frgn_sig(func),
+            "python" => py_func_to_frgn_sig(func),
             _ => format!("// Unknown mapper: {}", result.mapper),
         };
 
@@ -137,6 +141,8 @@ fn detect_target(mapper: &str) -> &str {
         "wasm" => "wasm",
         "c" => "native",
         "rust" => "native",
+        "js" => "native",     // JavaScript uses native FFI via Node.js or WASM
+        "python" => "native", // Python uses native FFI via CPython
         _ => "native",
     }
 }
