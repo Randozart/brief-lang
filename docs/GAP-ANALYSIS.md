@@ -382,10 +382,55 @@ true    false             # Literals
 
 | # | Item | Status | Priority |
 |---|------|--------|----------|
-| 1 | Lambda-style verification | Not implemented | HIGH |
-| 2 | `result` variable redesign | Not implemented | HIGH |
-| 3 | Two failing tests (ContractBound) | Needs investigation | MEDIUM |
-| 4 | Struct/RStruct/Render instances | Not implemented | HIGH |
+| 1 | Lambda-style verification | ✅ Complete | HIGH |
+| 2 | `result` variable redesign | ✅ Complete | HIGH |
+| 3 | Two failing tests (ContractBound) | ✅ Complete | MEDIUM |
+| 4 | Struct/RStruct/Render instances | ✅ Design Complete | HIGH |
+
+---
+
+## Design Decisions for Struct/RStruct Instances
+
+### Syntax
+
+```brief
+// Single instance (default values)
+let counter = Counter {};
+
+// Single instance (partial init)
+let counter = Counter { count: 5 };
+
+// List of instances
+let counters = [Counter {}, Counter {}];
+
+// Default for empty struct literal uses struct's default values
+```
+
+### Method Resolution
+
+| Syntax | Behavior |
+|--------|----------|
+| `Counter.increment()` | Call on global state (current) |
+| `counter.increment()` | Call on instance (requires init) |
+| `counters[0].increment()` | Call on list element (requires bounds check) |
+
+### Safety Rules
+
+1. **Compile error** if calling method on uninitialized instance
+2. **Compile error** if index out of bounds
+3. **Type error** if calling method on wrong type
+
+### Transaction Field Access
+
+- Inside instance transaction: `&count` = instance field
+- Unless external variable passed: `txn process(data)` - data is external input
+
+### Implementation Phases
+
+1. **Phase 1**: AST + Parser (StructInstance, List<T>)
+2. **Phase 2**: Type System (instance types, method resolution)
+3. **Phase 3**: Instance methods + field access
+4. **Phase 4**: Runtime (interpreter/WASM)
 
 ---
 

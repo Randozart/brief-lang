@@ -1069,6 +1069,12 @@ impl<'a> Parser<'a> {
         let mut seen_names = std::collections::HashSet::new();
 
         loop {
+            // Check if we're at the contract section (next token is [)
+            // If so, we're done parsing output types
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                break;
+            }
+
             // Check if next token is an identifier followed by colon (indicates a name)
             let name = if let Some(Ok(Token::Identifier(id))) = self.current_token() {
                 let id = id.clone();
@@ -1214,11 +1220,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_contract(&mut self) -> Result<Contract, String> {
-        // Contract is enclosed in [].
-        // Sample: [~/data] -> expands to [~data][data]
-        // Sample: [data != null][count == @count + 1]
-        // ast::Contract has pre_condition and post_condition.
-
         let mut pre_condition = Expr::Bool(true);
         let mut post_condition = Expr::Bool(true);
 
@@ -1234,14 +1235,10 @@ impl<'a> Parser<'a> {
                 // For ~/identifier, we need to generate two conditions:
                 // pre_condition = ~identifier (logical NOT)
                 // post_condition = identifier
-                // Note: We use Expr::Not for logical NOT, even though ~ is bitwise NOT in expressions
-                // This is because the spec uses ~/ as a shorthand for logical NOT in contracts
                 if count == 0 {
-                    // This is the first bracket, and it's ~/identifier
-                    // So we set pre_condition = ~identifier and post_condition = identifier
                     pre_condition = Expr::Not(Box::new(Expr::Identifier(identifier.clone())));
                     post_condition = Expr::Identifier(identifier);
-                    count = 2; // Mark that we've processed both conditions
+                    count = 2;
                 } else {
                     return Err("Unexpected ~/ in non-first contract bracket".to_string());
                 }
@@ -1251,18 +1248,14 @@ impl<'a> Parser<'a> {
                     pre_condition = cond;
                 } else if count == 1 {
                     post_condition = cond;
+                } else {
+                    return Err("Too many contract brackets (max 2)".to_string());
                 }
                 count += 1;
             }
 
             self.expect(Token::RBracket)?;
         }
-
-        // After processing brackets, ensure we have both conditions
-        // If count == 1, it means we only saw one bracket pair without ~/ shorthand
-        // This is invalid for a full contract (needs both pre and post)
-        // But for type bounds (like Int[expr]), this is handled in parse_type
-        // So we just return what we have
 
         let span = self.current_span();
         Ok(Contract {
@@ -1459,14 +1452,6 @@ impl<'a> Parser<'a> {
                 },
                 type_args,
             );
-        }
-
-        // Check for contract bound: Type[Expr]
-        if let Some(Ok(Token::LBracket)) = self.current_token() {
-            self.advance();
-            let contract = self.parse_expression()?;
-            self.expect(Token::RBracket)?;
-            ty = Type::ContractBound(Box::new(ty), Box::new(contract));
         }
 
         // Check for union: Type | Type

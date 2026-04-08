@@ -281,6 +281,11 @@ impl TypeChecker {
                 self.check_expr_for_function_calls(left);
                 self.check_expr_for_function_calls(right);
             }
+            Expr::Call(_, args) => {
+                for arg in args {
+                    self.check_expr_for_function_calls(arg);
+                }
+            }
             Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) => {
                 self.check_expr_for_function_calls(inner);
             }
@@ -304,54 +309,67 @@ impl TypeChecker {
 
         let postcond = &defn.contract.post_condition;
 
-        if let Expr::Eq(box_left, box_right) = postcond {
-            // Check both sides - result could be on left or right
-            let is_result_expr = |expr: &Expr| {
-                if let Expr::Identifier(name) = expr {
-                    name == "result"
-                } else {
-                    false
-                }
-            };
+        // Handle any postcondition that references 'result'
+        let has_result = self.expr_has_result(postcond);
+        if !has_result {
+            return;
+        }
 
-            if is_result_expr(box_left.as_ref()) || is_result_expr(box_right.as_ref()) {
-                let mut state = symbolic::SymbolicState::new(&defn.contract.pre_condition);
+        let precond = &defn.contract.pre_condition;
+        let mut state = symbolic::SymbolicState::new(precond);
 
-                for (i, (param_name, _)) in defn.parameters.iter().enumerate() {
-                    if i < args.len() {
-                        state.assign(param_name, &args[i]);
-                    }
-                }
-
-                let verified = symbolic::satisfies_postcondition(postcond, &state);
-
-                let postcond_str = format!("{:?}", postcond);
-                if verified {
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            "V101",
-                            Severity::Info,
-                            "Function call postcondition verified",
-                        )
-                        .with_explanation(&format!(
-                            "term {} uses function '{}' which guarantees {} (symbolically verified)",
-                            func_name, func_name, postcond_str
-                        )),
-                    );
-                } else {
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            "V102",
-                            Severity::Warning,
-                            "Function call postcondition may not be satisfied",
-                        )
-                        .with_explanation(&format!(
-                            "term {} uses function '{}' with postcondition {} - could not verify symbolically",
-                            func_name, func_name, postcond_str
-                        )),
-                    );
-                }
+        for (i, (param_name, _)) in defn.parameters.iter().enumerate() {
+            if i < args.len() {
+                state.assign(param_name, &args[i]);
             }
+        }
+
+        let verified = symbolic::satisfies_postcondition(postcond, &state);
+
+        let postcond_str = format!("{:?}", postcond);
+        if verified {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "V101",
+                    Severity::Info,
+                    "Function call postcondition verified",
+                )
+                .with_explanation(&format!(
+                    "term {} uses function '{}' which guarantees {} (symbolically verified)",
+                    func_name, func_name, postcond_str
+                )),
+            );
+        } else {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "V102",
+                    Severity::Warning,
+                    "Function call postcondition may not be satisfied",
+                )
+                .with_explanation(&format!(
+                    "term {} uses function '{}' with postcondition {} - could not verify symbolically",
+                    func_name, func_name, postcond_str
+                )),
+            );
+        }
+    }
+
+    fn expr_has_result(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier(name) => name == "result",
+            Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r) => self.expr_has_result(l) || self.expr_has_result(r),
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.expr_has_result(l) || self.expr_has_result(r)
+            }
+            Expr::And(l, r) | Expr::Or(l, r) => self.expr_has_result(l) || self.expr_has_result(r),
+            Expr::Not(inner) => self.expr_has_result(inner),
+            Expr::Call(_, args) => args.iter().any(|a| self.expr_has_result(a)),
+            _ => false,
         }
     }
 
@@ -788,6 +806,13 @@ impl TypeChecker {
             {
                 true
             }
+            // ContractBound: compare inner types, ignore the contract
+            (Type::ContractBound(inner_a, _), Type::ContractBound(inner_b, _)) => {
+                self.types_compatible(inner_a, inner_b)
+            }
+            (Type::ContractBound(inner, _), t) | (t, Type::ContractBound(inner, _)) => {
+                self.types_compatible(inner, t)
+            }
             _ => false,
         }
     }
@@ -940,6 +965,10 @@ mod tests {
         let mut parser = crate::parser::Parser::new(code);
         let program = parser.parse().expect("Failed to parse");
 
+        // Must desugar to fix contract order
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let program = desugarer.desugar(&program);
+
         let mut tc = TypeChecker::new();
         let errors = tc.check_program(&program);
 
@@ -971,6 +1000,10 @@ mod tests {
 
         let mut parser = crate::parser::Parser::new(code);
         let program = parser.parse().expect("Failed to parse");
+
+        // Must desugar to fix contract order
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let program = desugarer.desugar(&program);
 
         let mut tc = TypeChecker::new();
         tc.check_program(&program);
