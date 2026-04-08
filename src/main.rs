@@ -471,7 +471,11 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
         println!("[Interpreter] Running program...");
     }
 
+    eprintln!("[MAIN] Creating interpreter...");
     let mut interp = interpreter::Interpreter::new();
+    eprintln!("[MAIN] Interpreter created, loading program...");
+    interp.load_program(&program);
+    eprintln!("[MAIN] Program loaded, running program...");
     match interp.run(&program) {
         Ok(_) => {
             if verbose {

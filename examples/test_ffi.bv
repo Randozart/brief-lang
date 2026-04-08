@@ -1,0 +1,66 @@
+// Pure Brief FFI Test
+// New pattern: FFI functions return Result<T, Error> 
+// Success: value is extracted directly, error is empty
+// Failure: transaction escapes automatically
+
+// Declare FFI functions - names must match TOML binding names
+// Error type names must match TOML: MathError, StringError, IoError
+// Note: void must be lowercase
+frgn println(msg: String) -> Result<void, IoError> from "std/bindings/io.toml";
+frgn sqrt(x: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn sin(x: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn pow(base: Float, exp: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn string_length(s: String) -> Result<Int, StringError> from "std/bindings/string.toml";
+frgn string_concat(a: String, b: String) -> Result<String, StringError> from "std/bindings/string.toml";
+
+// Test 1: println - returns void on success, escapes on error
+txn test1 [true][result == void] {
+    term println("Hello from Brief FFI!");
+};
+
+// Test 2: sqrt - directly returns Float, escapes on error  
+txn test2 [true][result == 4.0] {
+    term sqrt(16.0);
+};
+
+// Test 3: sin - directly returns Float
+txn test3 [true][result == 0.0] {
+    term sin(0.0);
+};
+
+// Test 4: pow - directly returns Float
+txn test4 [true][result == 8.0] {
+    term pow(2.0, 3.0);
+};
+
+// Test 5: string length - directly returns Int
+txn test5 [result == 5] {
+    term string_length("hello");
+};
+
+// Test 6: string concat - directly returns String
+txn test6 [result == "helloworld"] {
+    term string_concat("hello", "world");
+};
+
+// Run all tests
+txn run_all [true][all_passed] {
+    let t1 = test1();
+    let t2 = test2();
+    let t3 = test3();
+    let t4 = test4();
+    let t5 = test5();
+    let t6 = test6();
+    
+    let all_passed = t1 && t2 && t3 && t4 && t5 && t6;
+    
+    [all_passed] {
+        println("ALL FFI TESTS PASSED!");
+    };
+    
+    [~all_passed] {
+        println("SOME TESTS FAILED!");
+    };
+    
+    term all_passed;
+};

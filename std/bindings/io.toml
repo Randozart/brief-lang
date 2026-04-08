@@ -1,6 +1,65 @@
 # Standard Library I/O Bindings
 # Provides file system and stream operations
 
+[meta]
+name = "io"
+version = "1.0.0"
+
+# Console I/O Functions
+[[functions]]
+name = "print"
+location = "std::io::print"
+target = "native"
+description = "Print string to stdout without newline"
+
+[functions.input]
+text = "String"
+
+[functions.output.success]
+result = "void"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "println"
+location = "std::io::println"
+target = "native"
+description = "Print string to stdout with newline"
+
+[functions.input]
+text = "String"
+
+[functions.output.success]
+result = "void"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+[[functions]]
+name = "input"
+location = "std::io::input"
+target = "native"
+description = "Read line from stdin"
+
+[functions.input]
+
+[functions.output.success]
+line = "String"
+
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+
+# File System Functions
 [[functions]]
 name = "read_file"
 location = "std::fs::read_to_string"

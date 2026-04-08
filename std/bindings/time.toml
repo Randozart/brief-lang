@@ -1,6 +1,10 @@
 # Standard Library Time Bindings
 # Provides time and date operations
 
+[meta]
+name = "time"
+version = "1.0.0"
+
 [[functions]]
 name = "current_timestamp"
 location = "std::time::SystemTime::now"

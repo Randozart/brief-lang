@@ -445,10 +445,10 @@ impl<'a> Parser<'a> {
             }
             self.expect(Token::RParen)?;
         } else {
-            // Single-field success output: T -> becomes (value: T)
+            // Single-field success output: T -> becomes (result: T)
             let success_type_name = self.expect_identifier()?;
             let success_type = self.string_to_type(&success_type_name)?;
-            success_output.push(("value".to_string(), success_type));
+            success_output.push(("result".to_string(), success_type));
         }
 
         self.expect(Token::Comma)?;
@@ -477,6 +477,7 @@ impl<'a> Parser<'a> {
 
         let frgn_sig = ForeignSignature {
             name: name.clone(),
+            location: String::new(), // Populated by typechecker from TOML
             inputs,
             success_output,
             error_type_name: error_type_name.clone(),

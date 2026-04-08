@@ -140,7 +140,7 @@ impl WatcherState {
         let debouncer = Debouncer::new(WatchCallback::new());
 
         let watcher = RecommendedWatcher::new(
-            move |res: Result<Event, notify::Error>| {},
+            move |_res: Result<Event, notify::Error>| {},
             Config::default().with_poll_interval(Duration::from_millis(100)),
         )?;
 

@@ -461,6 +461,7 @@ impl TypeChecker {
         // Create a mutable copy of the signature to populate error_fields from the binding
         let mut sig = signature.clone();
         sig.error_fields = binding.error_fields.clone();
+        sig.location = binding.location.clone();
 
         // Validate the frgn signature against the TOML binding
         if let Err(err) = ffi::validator::validate_frgn_against_binding(&sig, binding) {

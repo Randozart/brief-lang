@@ -111,6 +111,7 @@ mod tests {
     fn test_validate_matching_signatures() {
         let frgn = ForeignSignature {
             name: "read_file".to_string(),
+            location: "std::fs::read_to_string".to_string(),
             inputs: vec![("path".to_string(), Type::String)],
             success_output: vec![("content".to_string(), Type::String)],
             error_type_name: "IoError".to_string(),
@@ -144,6 +145,7 @@ mod tests {
     fn test_validate_name_mismatch() {
         let mut frgn = ForeignSignature {
             name: "read_file".to_string(),
+            location: "test".to_string(),
             inputs: vec![],
             success_output: vec![],
             error_type_name: "Error".to_string(),

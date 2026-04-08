@@ -49,27 +49,91 @@ pub struct Interpreter {
     pub prior_state: HashMap<String, Value>,
     pub foreign_functions: HashMap<String, ForeignFn>,
     pub definitions: HashMap<String, Definition>,
+    pub ffi_bindings: HashMap<String, ForeignSignature>,
+    pub ffi_name_to_location: HashMap<String, String>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         let foreign_functions = Self::load_ffi_functions();
+        eprintln!(
+            "[DEBUG Interpreter::new] Loaded {} foreign functions",
+            foreign_functions.len()
+        );
+        for (name, _) in &foreign_functions {
+            eprintln!("[DEBUG]   FFI function: {}", name);
+        }
 
         Interpreter {
             state: HashMap::new(),
             prior_state: HashMap::new(),
             foreign_functions,
             definitions: HashMap::new(),
+            ffi_bindings: HashMap::new(),
+            ffi_name_to_location: HashMap::new(),
         }
+    }
+
+    pub fn load_program(&mut self, program: &Program) {
+        self.ffi_bindings.clear();
+        self.ffi_name_to_location.clear();
+
+        for item in &program.items {
+            if let TopLevel::ForeignBinding {
+                name,
+                signature,
+                toml_path,
+                ..
+            } = item
+            {
+                self.ffi_bindings.insert(name.clone(), signature.clone());
+
+                let location = if !signature.location.is_empty() {
+                    signature.location.clone()
+                } else {
+                    Self::lookup_location_from_toml(&name, toml_path)
+                        .unwrap_or_else(|_| signature.location.clone())
+                };
+                self.ffi_name_to_location.insert(name.clone(), location);
+            }
+        }
+
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                self.definitions.insert(defn.name.clone(), defn.clone());
+            }
+        }
+
+        eprintln!(
+            "[DEBUG] Loaded {} FFI bindings, {} definitions",
+            self.ffi_bindings.len(),
+            self.definitions.len()
+        );
+    }
+
+    fn lookup_location_from_toml(name: &str, toml_path: &str) -> Result<String, String> {
+        use crate::ffi::loader;
+        use std::path::Path;
+
+        let path = Path::new(toml_path);
+        let bindings =
+            loader::load_binding(path).map_err(|e| format!("Failed to load TOML: {}", e))?;
+
+        for binding in bindings {
+            if binding.name == name {
+                return Ok(binding.location);
+            }
+        }
+
+        Err(format!("Binding '{}' not found in '{}'", name, toml_path))
     }
 
     fn load_ffi_functions() -> HashMap<String, ForeignFn> {
         let mut functions = HashMap::new();
         let registry = &*FFI_REGISTRY;
 
-        for (name, func) in registry.iter() {
-            let short_name = name.replace("std::", "__");
-            functions.insert(short_name, *func);
+        for (location, func) in registry.iter() {
+            functions.insert(location.clone(), *func);
         }
 
         functions
@@ -230,6 +294,87 @@ impl Interpreter {
             Statement::Unification { .. } => {}
         }
         Ok(())
+    }
+
+    fn handle_ffi_result(&self, fn_name: &str, mut result: Value) -> Result<Value, RuntimeError> {
+        let sig = match self.ffi_bindings.get(fn_name) {
+            Some(s) => s,
+            None => return Ok(result),
+        };
+
+        let success_output = &sig.success_output;
+        let error_fields = &sig.error_fields;
+
+        if success_output.is_empty() {
+            return Ok(result);
+        }
+
+        let is_void = success_output.len() == 1
+            && success_output
+                .first()
+                .map(|(_, t)| t == &Type::Void)
+                .unwrap_or(false);
+
+        if is_void {
+            if let Value::Struct(fields) = &result {
+                let has_error = error_fields.iter().any(|(field_name, _)| {
+                    if let Some(val) = fields.get(field_name) {
+                        !Self::is_empty_value(val)
+                    } else {
+                        false
+                    }
+                });
+
+                if has_error {
+                    return Err(RuntimeError::ContractViolation(format!(
+                        "FFI function '{}' returned error",
+                        fn_name
+                    )));
+                }
+            }
+            return Ok(Value::Void);
+        }
+
+        if let Value::Struct(mut fields) = result {
+            let has_error = error_fields.iter().any(|(field_name, _)| {
+                if let Some(val) = fields.get(field_name) {
+                    !Self::is_empty_value(val)
+                } else {
+                    false
+                }
+            });
+
+            if has_error {
+                return Err(RuntimeError::ContractViolation(format!(
+                    "FFI function '{}' returned error",
+                    fn_name
+                )));
+            }
+
+            if let Some((first_field, _)) = success_output.first() {
+                if let Some(value) = fields.remove(first_field) {
+                    return Ok(value);
+                }
+            }
+
+            Ok(Value::Struct(fields))
+        } else {
+            Ok(result)
+        }
+    }
+
+    fn is_empty_value(value: &Value) -> bool {
+        match value {
+            Value::Int(0) => true,
+            Value::Float(0.0) => true,
+            Value::String(s) => s.is_empty(),
+            Value::Bool(false) => true,
+            Value::List(l) => l.is_empty(),
+            Value::Struct(fields) => fields.is_empty(),
+            Value::Void => true,
+            Value::Data(d) => d.is_empty(),
+            _ => false,
+        }
     }
 
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
@@ -407,8 +552,11 @@ impl Interpreter {
                     arg_values.push(self.eval_expr(arg)?);
                 }
 
-                if let Some(frgn_fn) = self.foreign_functions.get(&fn_name) {
-                    return frgn_fn(arg_values);
+                if let Some(location) = self.ffi_name_to_location.get(&fn_name) {
+                    if let Some(frgn_fn) = self.foreign_functions.get(location) {
+                        let result = frgn_fn(arg_values)?;
+                        return self.handle_ffi_result(&fn_name, result);
+                    }
                 }
 
                 Err(RuntimeError::UndefinedForeignFunction(fn_name))
@@ -661,6 +809,182 @@ pub(crate) fn contains_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     } else {
         Err(RuntimeError::TypeMismatch(
             "contains expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn to_lower_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        Ok(Value::String(s.to_lowercase()))
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "to_lowercase expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn to_upper_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        Ok(Value::String(s.to_uppercase()))
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "to_uppercase expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn replace_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        if let Value::String(from) = &args[1] {
+            if let Value::String(to) = &args[2] {
+                Ok(Value::String(s.replace(from, to)))
+            } else {
+                Err(RuntimeError::TypeMismatch(
+                    "replace expects String".to_string(),
+                ))
+            }
+        } else {
+            Err(RuntimeError::TypeMismatch(
+                "replace expects String".to_string(),
+            ))
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "replace expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn chars_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        Ok(Value::String(s.chars().take(1).collect()))
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "chars expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn starts_with_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        if let Value::String(prefix) = &args[1] {
+            Ok(Value::Bool(s.starts_with(prefix)))
+        } else {
+            Err(RuntimeError::TypeMismatch(
+                "starts_with expects String".to_string(),
+            ))
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "starts_with expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn ends_with_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        if let Value::String(suffix) = &args[1] {
+            Ok(Value::Bool(s.ends_with(suffix)))
+        } else {
+            Err(RuntimeError::TypeMismatch(
+                "ends_with expects String".to_string(),
+            ))
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "ends_with expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn from_str_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        match s.parse::<i64>() {
+            Ok(n) => Ok(Value::Int(n)),
+            Err(_) => Ok(Value::Int(0)),
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "from_str expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn now_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => Ok(Value::Int(d.as_millis() as i64)),
+        Err(_) => Ok(Value::Int(0)),
+    }
+}
+
+pub(crate) fn read_file_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(path) = &args[0] {
+        match std::fs::read_to_string(path) {
+            Ok(content) => Ok(Value::String(content)),
+            Err(e) => Ok(Value::String(format!("Error: {}", e))),
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "read_file expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn write_file_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(path) = &args[0] {
+        if let Value::String(content) = &args[1] {
+            match std::fs::write(path, content) {
+                Ok(_) => Ok(Value::String("OK".to_string())),
+                Err(e) => Ok(Value::String(format!("Error: {}", e))),
+            }
+        } else {
+            Err(RuntimeError::TypeMismatch(
+                "write_file expects String".to_string(),
+            ))
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "write_file expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn delete_file_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(path) = &args[0] {
+        match std::fs::remove_file(path) {
+            Ok(_) => Ok(Value::String("OK".to_string())),
+            Err(e) => Ok(Value::String(format!("Error: {}", e))),
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "delete_file expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn create_dir_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(path) = &args[0] {
+        match std::fs::create_dir(path) {
+            Ok(_) => Ok(Value::String("OK".to_string())),
+            Err(e) => Ok(Value::String(format!("Error: {}", e))),
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "create_dir expects String".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn delete_dir_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(path) = &args[0] {
+        match std::fs::remove_dir(path) {
+            Ok(_) => Ok(Value::String("OK".to_string())),
+            Err(e) => Ok(Value::String(format!("Error: {}", e))),
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "delete_dir expects String".to_string(),
         ))
     }
 }

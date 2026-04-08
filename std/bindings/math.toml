@@ -1,6 +1,10 @@
 # Standard Library Math Bindings
 # Provides mathematical operations and functions
 
+[meta]
+name = "math"
+version = "1.0.0"
+
 [[functions]]
 name = "sqrt"
 location = "std::f64::sqrt"

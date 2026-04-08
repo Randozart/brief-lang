@@ -206,9 +206,9 @@ src/
 
 ## Version
 
-- **Language**: Brief 6.2
+- **Language**: Brief 8.0
 - **Status**: Production-ready
-- **Last Updated**: 2026-04-07
+- **Last Updated**: 2026-04-08
 
 ---
 

@@ -1,6 +1,10 @@
 # Standard Library String Bindings
 # Provides string manipulation and conversion functions
 
+[meta]
+name = "string"
+version = "1.0.0"
+
 [[functions]]
 name = "string_length"
 location = "std::string::String::len"
