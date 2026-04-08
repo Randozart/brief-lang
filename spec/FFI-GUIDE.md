@@ -15,6 +15,20 @@
 6. [Creating Custom Bindings](#creating-custom-bindings)
 7. [Type System](#type-system)
 8. [Examples](#examples)
+9. [Creating Mappers](#creating-mappers)
+
+---
+
+## Creating Mappers
+
+For detailed instructions on creating language-specific FFI mappers, see [MAPPER-GUIDE.md](MAPPER-GUIDE.md).
+
+Brief supports mappers for:
+- **Rust** - 1:1 identity mapping (native)
+- **C** - Null-terminated strings, pointer handling
+- **WebAssembly** - Linear memory, JS value conversion
+- **Python** - Via CPython (placeholder)
+- **...and more** - Create your own using the template!
 
 
 ## Overview
@@ -363,6 +377,8 @@ txn test_print [true] {
 
 ## Creating Custom Bindings
 
+For detailed information on creating language-specific mappers, see [MAPPER-GUIDE.md](MAPPER-GUIDE.md).
+
 ### Step 1: Create TOML File
 
 Create `lib/my_bindings.toml`:
@@ -444,7 +460,9 @@ fn resolve_location_to_impl(location: &str) -> Option<ForeignFn> {
 
 ### Type Mapping
 
-The mapper system handles conversion. For native functions:
+The mapper system handles conversion. For detailed type mapping per language, see [MAPPER-GUIDE.md](MAPPER-GUIDE.md#type-conversions).
+
+For native functions:
 
 - Brief `String` ↔ Rust `String`
 - Brief `Int` ↔ Rust `i64`

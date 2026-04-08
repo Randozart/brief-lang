@@ -1,0 +1,176 @@
+// Python Mapper
+//
+// Brief FFI mapper for Python via CPython.
+// Transforms between Python types and Brief types.
+//
+// STATUS: Placeholder - requires CPython integration
+//
+// For documentation, see: spec/MAPPER-GUIDE.md
+//
+// Python type mappings:
+//   str     -> String
+//   int     -> Int
+//   float   -> Float
+//   bytes   -> Data
+//   list    -> List<Value>
+//   tuple   -> List<Value>
+//   dict    -> Struct/Map
+//   None    -> Void
+//   Exception -> Error
+
+// ============================================================
+// Required Functions
+// ============================================================
+
+defn map_input(value: Value) -> Value [true][true] {
+    term value;
+};
+
+defn map_output(value: Value) -> Value [true][true] {
+    term value;
+};
+
+defn map_error(err: Error) -> Error [true][true] {
+    term err;
+};
+
+// ============================================================
+// String Conversions
+// ============================================================
+
+// Convert Python str to Brief String
+// Precondition: py_str is a Python str object
+// Postcondition: Returns Brief String with same UTF-8 content
+// defn py_string_to_brief(py_str: PyString) -> String [py_str.is_valid()][true] {
+//     term py_str.to_string();
+// };
+
+// Convert Brief String to Python str
+// Precondition: Brief String is valid
+// Postcondition: Returns Python str object
+// defn brief_string_to_py(s: String) -> PyString [true][py_str.is_valid()] {
+//     term PyString::from_string(s);
+// };
+
+// ============================================================
+// Numeric Conversions
+// ============================================================
+
+// Convert Python int to Brief Int
+defn py_int_to_brief(py_int: PyInt) -> Int [true][true] {
+    term py_int.value;
+};
+
+// Convert Brief Int to Python int
+defn brief_int_to_py(n: Int) -> PyInt [true][true] {
+    term PyInt::from_int(n);
+};
+
+// Convert Python float to Brief Float
+defn py_float_to_brief(py_float: PyFloat) -> Float [true][true] {
+    term py_float.value;
+};
+
+// Convert Brief Float to Python float
+defn brief_float_to_py(f: Float) -> PyFloat [true][true] {
+    term PyFloat::from_float(f);
+};
+
+// ============================================================
+// Complex Type Conversions
+// ============================================================
+
+// Convert Python bytes to Brief Data
+// Precondition: py_bytes is a Python bytes object
+// Postcondition: Returns Brief Data with same content
+// defn py_bytes_to_brief(py_bytes: PyBytes) -> Data [py_bytes.is_valid()][result.len() == py_bytes.len()] {
+//     term py_bytes.to_data();
+// };
+
+// Convert Brief Data to Python bytes
+// defn brief_data_to_py(data: Data) -> PyBytes [data.is_valid()][result.len() == data.len()] {
+//     term PyBytes::from_data(data);
+// };
+
+// Convert Python list to Brief List
+// defn py_list_to_brief(py_list: PyList) -> List<Value> [py_list.is_valid()][result.len() == py_list.len()] {
+//     term py_list.to_list();
+// };
+
+// Convert Brief List to Python list
+// defn brief_list_to_py(list: List<Value>) -> PyList [list.is_valid()][result.len() == list.len()] {
+//     term PyList::from_list(list);
+// };
+
+// ============================================================
+// None/Null Handling
+// ============================================================
+
+// Check if Python object is None
+// defn py_is_none(py_obj: PyObject) -> Bool [true][result == true || result == false] {
+//     term py_obj.is_none();
+// };
+
+// Convert Python None to Brief Void
+// defn py_none_to_void() -> Void [true][true] {
+//     term;
+// };
+
+// Convert Brief Void to Python None
+// defn brief_void_to_py_none() -> PyNone [true][true] {
+//     term PyNone;
+// };
+
+// ============================================================
+// Error Handling
+// ============================================================
+
+// Convert Python Exception to Brief Error
+// Precondition: py_exc is a Python Exception object
+// Postcondition: Returns Brief Error with exception message
+// defn py_error_to_brief(py_exc: PyException) -> Error [true][true] {
+//     term Error { message: py_exc.message };
+// };
+
+// Check if Python object is an exception
+// defn py_is_exception(py_obj: PyObject) -> Bool [true][result == true || result == false] {
+//     term py_obj.is_exception();
+// };
+
+// ============================================================
+// Object Type Checks
+// ============================================================
+
+// Check Python object type
+// defn py_type_name(py_obj: PyObject) -> String [true][true] {
+//     term py_obj.type_name();
+// };
+
+// Check if Python object is callable
+// defn py_is_callable(py_obj: PyObject) -> Bool [true][result == true || result == false] {
+//     term py_obj.is_callable();
+// };
+
+// ============================================================
+// Reference Counting (for CPython)
+// ============================================================
+
+// Increment Python object reference count
+// defn py_incref(py_obj: PyObject) -> Void [py_obj.is_valid()][true] {
+//     term py_obj.inc_ref();
+// };
+
+// Decrement Python object reference count
+// defn py_decref(py_obj: PyObject) -> Void [py_obj.is_valid()][true] {
+//     term py_obj.dec_ref();
+// };
+
+// ============================================================
+// TODO: Implementation requires
+// ============================================================
+
+// - CPython API bindings (Python.h)
+// - GIL (Global Interpreter Lock) handling
+// - PyObject* to Value conversion
+// - Reference counting management
+// - Exception propagation

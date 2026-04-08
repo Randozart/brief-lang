@@ -1,0 +1,146 @@
+// Language Mapper Template
+//
+// Brief FFI mapper for <LANGUAGE>.
+// Transforms between <LANGUAGE> types and Brief types.
+//
+// For documentation, see: spec/MAPPER-GUIDE.md
+//
+// HOW TO USE THIS TEMPLATE:
+// 1. Copy this file to lib/ffi/mappers/<lang>_mapper.bv
+// 2. Replace all <LANG_*> placeholders with actual types
+// 3. Implement the required functions
+// 4. Add type-specific conversion functions
+// 5. Write tests
+
+// ============================================================
+// Required Functions (Identity by default)
+// ============================================================
+
+defn map_input(value: Value) -> Value [true][true] {
+    term value;
+};
+
+defn map_output(value: Value) -> Value [true][true] {
+    term value;
+};
+
+defn map_error(err: Error) -> Error [true][true] {
+    term err;
+};
+
+// ============================================================
+// String Conversions
+// ============================================================
+
+// Convert <LANG> string to Brief String
+// Precondition: <lang>_str is valid and not null
+// Postcondition: Returns Brief String with same content
+// defn <lang>_string_to_brief(<lang>_str: <LangString>) -> String [<lang>_str.is_valid() && <lang>_str.not_null()][true] {
+//     term <lang>_str.to_string();
+// };
+
+// Convert Brief String to <LANG> string
+// Precondition: Brief String is valid UTF-8
+// Postcondition: Returns <LANG> string (caller must free if applicable)
+// defn brief_string_to_<lang>(s: String) -> <LangString> [true][true] {
+//     term <LangString>::new(s);
+// };
+
+// ============================================================
+// Numeric Conversions
+// ============================================================
+
+// Convert <LANG> integer to Brief Int
+// defn <lang>_int_to_brief(<lang>_int: <LangInt>) -> Int [true][true] {
+//     term <lang>_int.value;
+// };
+
+// Convert Brief Int to <LANG> integer
+// defn brief_int_to_<lang>(n: Int) -> <LangInt> [true][true] {
+//     term <LangInt> { value: n };
+// };
+
+// Convert <LANG> float to Brief Float
+// defn <lang>_float_to_brief(<lang>_float: <LangFloat>) -> Float [true][true] {
+//     term <lang>_float.value;
+// };
+
+// Convert Brief Float to <LANG> float
+// defn brief_float_to_<lang>(f: Float) -> <LangFloat> [true][true] {
+//     term <LangFloat> { value: f };
+// };
+
+// ============================================================
+// Complex Type Conversions
+// ============================================================
+
+// Convert <LANG> bytes/buffer to Brief Data
+// defn <lang>_bytes_to_brief(<lang>_bytes: <LangBytes>) -> Data [<lang>_bytes.is_valid()][result.len() == <lang>_bytes.len()] {
+//     term <lang>_bytes.to_data();
+// };
+
+// Convert Brief Data to <LANG> bytes/buffer
+// defn brief_data_to_<lang>(data: Data) -> <LangBytes> [data.is_valid()][result.len() == data.len()] {
+//     term <LangBytes>::from_data(data);
+// };
+
+// Convert <LANG> list to Brief List
+// defn <lang>_list_to_brief(<lang>_list: <LangList>, elem_type: Type) -> List<Value> [<lang>_list.is_valid()][result.len() == <lang>_list.len()] {
+//     term <lang>_list.to_list();
+// };
+
+// Convert Brief List to <LANG> list
+// defn brief_list_to_<lang>(list: List<Value>) -> <LangList> [list.is_valid()][result.len() == list.len()] {
+//     term <LangList>::from_list(list);
+// };
+
+// ============================================================
+// Memory Management
+// ============================================================
+
+// Check if <LANG> pointer is null
+// defn <lang>_ptr_is_null(ptr: <LangPtr>) -> Bool [true][result == true || result == false] {
+//     [ptr.is_null()] { term true; };
+//     term false;
+// };
+
+// Get <LANG> pointer address as Int
+// defn <lang>_ptr_to_address(ptr: <LangPtr>) -> Int [true][result >= 0] {
+//     term ptr.address();
+// };
+
+// ============================================================
+// Error Handling
+// ============================================================
+
+// Convert <LANG> error to Brief Error
+// defn <lang>_error_to_brief(<lang>_err: <LangError>) -> Error [true][true] {
+//     term Error { message: <lang>_err.message };
+// };
+
+// Convert Brief Error to <LANG> error
+// defn brief_error_to_<lang>(err: Error) -> <LangError> [true][true] {
+//     term <LangError>::new(err.message);
+// };
+
+// Safe conversion with fallback
+// defn <lang>_string_safe(<lang>_str: <LangString>, fallback: String) -> String [true][result == fallback || <lang>_str.is_valid()] {
+//     [<lang>_str.is_valid()] {
+//         term <lang>_str.to_string();
+//     };
+//     term fallback;
+// };
+
+// ============================================================
+// Type Checks
+// ============================================================
+
+// Check if <LANG> value is null
+// defn <lang>_is_null(val: <LangValue>) -> Bool [true][result == true || result == false] {
+//     term val.is_null();
+// };
+
+// Check if <LANG> value is valid
+// defn <lang>_is_valid(val: <LangValue>) -> Bool [true][result == true || result == false] {
+//     term val.is_valid();
+// };
