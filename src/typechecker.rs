@@ -261,7 +261,6 @@ impl TypeChecker {
     fn check_expr_for_function_calls(&mut self, expr: &Expr) {
         match expr {
             Expr::Call(func_name, args) => {
-                eprintln!("DEBUG: Found function call to {}", func_name);
                 self.verify_term_function_call(func_name, args);
                 for arg in args {
                     self.check_expr_for_function_calls(arg);
@@ -933,7 +932,7 @@ mod tests {
     #[test]
     fn test_verify_term_function_call_simple() {
         let code = r#"
-            defn get_value() [true][result == 42] -> Int {
+            defn get_value() -> Int [true][result == 42] {
                 term 42;
             };
         "#;
@@ -961,11 +960,11 @@ mod tests {
     fn test_verify_term_function_call_with_param() {
         // Test with an actual function call in the term
         let code = r#"
-            defn five() [true][result == 5] -> Int {
+            defn five() -> Int [true][result == 5] {
                 term 5;
             };
             
-            defn double(x: Int) [true][result == x * 2] -> Int {
+            defn double(x: Int) -> Int [true][result == x * 2] {
                 term five() * 2;
             };
         "#;

@@ -95,31 +95,111 @@ impl SymbolicExecutor {
     }
 
     pub fn verify_transaction(&mut self, txn: &Transaction) -> Vec<ProofError> {
-        let mut state = self.init_state_from_precondition(&txn.contract.pre_condition);
+        // Lambda-style: verify postcondition is provable from precondition alone
+        if txn.is_lambda {
+            let pre = &txn.contract.pre_condition;
+            let post = &txn.contract.post_condition;
 
-        self.verify_contract_implication(
-            &txn.contract.pre_condition,
-            &txn.contract.post_condition,
-            &txn.body,
-            state,
-            format!("transaction '{}'", txn.name),
-        );
+            let state = self.init_state_from_precondition(pre);
+            self.verify_contract_implication(
+                pre,
+                post,
+                &[],
+                state,
+                format!("lambda transaction '{}'", txn.name),
+            );
+
+            // Check if (pre && !post) is satisfiable
+            let mut state = self.init_state_from_precondition(pre);
+            if let Some(neg_post) = self.negate_expr(post) {
+                // Simplified check: if both pre and !post reference same variables, warn
+                let pre_vars = self.extract_vars(pre);
+                let post_vars = self.extract_vars(post);
+                if !pre_vars.is_empty() && !post_vars.is_empty() {
+                    // Variables exist in both - need actual verification
+                    // For now, add a warning that lambda requires manual proof
+                    self.errors.push(
+                        ProofError::new("P016", "Lambda transaction requires provable postcondition")
+                            .with_explanation(&format!(
+                                "Lambda transaction '{}' has no body. Ensure the postcondition can be proven from the precondition alone.",
+                                txn.name
+                            ))
+                            .with_hint("Consider adding a body or simplifying the postcondition")
+                    );
+                }
+            }
+        } else {
+            let mut state = self.init_state_from_precondition(&txn.contract.pre_condition);
+
+            self.verify_contract_implication(
+                &txn.contract.pre_condition,
+                &txn.contract.post_condition,
+                &txn.body,
+                state,
+                format!("transaction '{}'", txn.name),
+            );
+        }
 
         self.errors.clone()
     }
 
     pub fn verify_definition(&mut self, defn: &Definition) -> Vec<ProofError> {
-        let mut state = self.init_state_from_precondition(&defn.contract.pre_condition);
+        // Lambda-style: verify postcondition is provable from precondition alone
+        if defn.is_lambda {
+            let pre = &defn.contract.pre_condition;
+            let post = &defn.contract.post_condition;
 
-        self.verify_contract_implication(
-            &defn.contract.pre_condition,
-            &defn.contract.post_condition,
-            &defn.body,
-            state,
-            format!("definition '{}'", defn.name),
-        );
+            // Check if post is entailed by pre (pre => post is always true)
+            let state = self.init_state_from_precondition(pre);
+            self.verify_contract_implication(
+                pre,
+                post,
+                &[], // No body - just check if post follows from pre
+                state,
+                format!("lambda definition '{}'", defn.name),
+            );
+
+            // Additional check: if pre is true, post must be true (no counterexample possible)
+            // We do this by checking that (pre && !post) is unsatisfiable
+            let mut state = self.init_state_from_precondition(pre);
+            if let Some(neg_post) = self.negate_expr(post) {
+                // Simplified check: if both pre and !post reference same variables, warn
+                let pre_vars = self.extract_vars(pre);
+                let post_vars = self.extract_vars(post);
+                if !pre_vars.is_empty() && !post_vars.is_empty() {
+                    // Variables exist in both - need actual verification
+                    // For now, add a warning that lambda requires manual proof
+                    self.errors.push(
+                        ProofError::new("P015", "Lambda definition requires provable postcondition")
+                            .with_explanation(&format!(
+                                "Lambda definition '{}' has no body. Ensure the postcondition can be proven from the precondition alone.",
+                                defn.name
+                            ))
+                            .with_hint("Consider adding a body or simplifying the postcondition")
+                    );
+                }
+            }
+        } else {
+            let mut state = self.init_state_from_precondition(&defn.contract.pre_condition);
+
+            self.verify_contract_implication(
+                &defn.contract.pre_condition,
+                &defn.contract.post_condition,
+                &defn.body,
+                state,
+                format!("definition '{}'", defn.name),
+            );
+        }
 
         self.errors.clone()
+    }
+
+    fn negate_expr(&self, expr: &Expr) -> Option<Expr> {
+        match expr {
+            Expr::Bool(b) => Some(Expr::Bool(!b)),
+            Expr::Identifier(name) => Some(Expr::Not(Box::new(Expr::Identifier(name.clone())))),
+            _ => None,
+        }
     }
 
     fn init_state_from_precondition(&self, pre: &Expr) -> SymbolicState {
@@ -762,13 +842,16 @@ impl ProofEngine {
                             "transaction '{}' has precondition '[true]' which is always satisfied",
                             txn.name
                         );
-                        err.proof_chain.push("1. '[true]' accepts any state".to_string());
-                        err.proof_chain.push("2. this provides no compile-time safety".to_string());
+                        err.proof_chain
+                            .push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain
+                            .push("2. this provides no compile-time safety".to_string());
                         err.hints.push(format!(
                             "specify what state is required before '{}' runs",
                             txn.name
                         ));
-                        err.hints.push("e.g., '[count > 0]' instead of '[true]'".to_string());
+                        err.hints
+                            .push("e.g., '[count > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     }
                     if let Expr::Bool(true) = &txn.contract.post_condition {
@@ -777,13 +860,16 @@ impl ProofEngine {
                             "transaction '{}' has postcondition '[true]' which is always satisfied",
                             txn.name
                         );
-                        err.proof_chain.push("1. '[true]' accepts any state".to_string());
-                        err.proof_chain.push("2. this provides no compile-time safety".to_string());
+                        err.proof_chain
+                            .push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain
+                            .push("2. this provides no compile-time safety".to_string());
                         err.hints.push(format!(
                             "specify what state '{}' guarantees after running",
                             txn.name
                         ));
-                        err.hints.push("e.g., '[count == @count + 1]' instead of '[true]'".to_string());
+                        err.hints
+                            .push("e.g., '[count == @count + 1]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     }
                 }
@@ -794,13 +880,16 @@ impl ProofEngine {
                             "definition '{}' has precondition '[true]' which is always satisfied",
                             defn.name
                         );
-                        err.proof_chain.push("1. '[true]' accepts any state".to_string());
-                        err.proof_chain.push("2. this provides no compile-time safety".to_string());
+                        err.proof_chain
+                            .push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain
+                            .push("2. this provides no compile-time safety".to_string());
                         err.hints.push(format!(
                             "specify what state is required before '{}' runs",
                             defn.name
                         ));
-                        err.hints.push("e.g., '[x > 0]' instead of '[true]'".to_string());
+                        err.hints
+                            .push("e.g., '[x > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     }
                     if let Expr::Bool(true) = &defn.contract.post_condition {
@@ -809,13 +898,16 @@ impl ProofEngine {
                             "definition '{}' has postcondition '[true]' which is always satisfied",
                             defn.name
                         );
-                        err.proof_chain.push("1. '[true]' accepts any state".to_string());
-                        err.proof_chain.push("2. this provides no compile-time safety".to_string());
+                        err.proof_chain
+                            .push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain
+                            .push("2. this provides no compile-time safety".to_string());
                         err.hints.push(format!(
                             "specify what state '{}' guarantees after running",
                             defn.name
                         ));
-                        err.hints.push("e.g., '[result > 0]' instead of '[true]'".to_string());
+                        err.hints
+                            .push("e.g., '[result > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     }
                 }
@@ -1636,8 +1728,8 @@ mod tests {
     #[test]
     fn test_trivial_contracts_in_definition() {
         let code = r#"
-            def double(x: Int) [true][true] => Int {
-                ret x * 2;
+            defn double(x: Int) -> Int [true][true] {
+                term x * 2;
             };
         "#;
 

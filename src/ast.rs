@@ -191,6 +191,8 @@ pub struct Signature {
     pub result_type: ResultType,
     pub source: Option<String>,
     pub alias: Option<String>,
+    /// NEW: Bind sig to a specific defn for path verification
+    pub bound_defn: Option<String>,
 }
 
 /// Multi-output type structure for Feature A
@@ -241,11 +243,12 @@ pub struct Definition {
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub parameters: Vec<(String, Type)>,
-    pub outputs: Vec<Type>, // Kept for backward compat during transition
-    pub output_type: Option<OutputType>, // NEW: Feature A - multi-output support
-    pub output_names: Vec<Option<String>>, // NEW: optional names for each output (parallel to outputs)
+    pub outputs: Vec<Type>,
+    pub output_type: Option<OutputType>,
+    pub output_names: Vec<Option<String>>,
     pub contract: Contract,
     pub body: Vec<Statement>,
+    pub is_lambda: bool, // Lambda-style: no body, postcondition must be provable
 }
 
 #[derive(Debug, Clone)]
@@ -253,10 +256,12 @@ pub struct Transaction {
     pub is_async: bool,
     pub is_reactive: bool,
     pub name: String,
+    pub parameters: Vec<(String, Type)>,
     pub contract: Contract,
     pub body: Vec<Statement>,
-    pub reactor_speed: Option<u32>, // NEW: @Hz speed declaration for rct blocks
+    pub reactor_speed: Option<u32>,
     pub span: Option<Span>,
+    pub is_lambda: bool, // Lambda-style: no body, postcondition must be provable
 }
 
 #[derive(Debug, Clone)]

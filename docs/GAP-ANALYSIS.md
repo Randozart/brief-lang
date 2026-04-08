@@ -49,7 +49,7 @@ defn double(n: Int) -> Int [true][result == n * 2] {
     term n * 2;
 };
 
-// Lambda syntax (no body needed)
+// Lambda syntax which mutates an out of scope var called "result"(no body needed)
 defn double(n: Int) -> Int [true][result == n * 2];
 // OR with implicit return:
 // defn double(n: Int) -> Int [true][n * 2];
@@ -375,6 +375,17 @@ true    false             # Literals
 | 11 | Keywords list | Update | Low | LOW |
 | 12 | # comments | Remove # | Low | LOW |
 | NEW | P009/P010 docs | Document | Low | MEDIUM |
+
+---
+
+## Remaining Implementation Work
+
+| # | Item | Status | Priority |
+|---|------|--------|----------|
+| 1 | Lambda-style verification | Not implemented | HIGH |
+| 2 | `result` variable redesign | Not implemented | HIGH |
+| 3 | Two failing tests (ContractBound) | Needs investigation | MEDIUM |
+| 4 | Struct/RStruct/Render instances | Not implemented | HIGH |
 
 ---
 

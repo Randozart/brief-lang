@@ -13,12 +13,145 @@ impl Desugarer {
         }
     }
 
+    fn extract_vars_from_expr(&self, expr: &Expr) -> Vec<String> {
+        let mut vars = Vec::new();
+        self.collect_vars(expr, &mut vars);
+        vars
+    }
+
+    fn collect_vars(&self, expr: &Expr, vars: &mut Vec<String>) {
+        match expr {
+            Expr::Identifier(name) => {
+                // Skip 'result' - that's a special output variable for definitions
+                if name != "result" && !vars.contains(name) {
+                    vars.push(name.clone());
+                }
+            }
+            Expr::PriorState(name) => {
+                // Don't create state for prior state references - that's just reading
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.collect_vars(l, vars);
+                self.collect_vars(r, vars);
+            }
+            Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r) => {
+                self.collect_vars(l, vars);
+                self.collect_vars(r, vars);
+            }
+            Expr::And(l, r) | Expr::Or(l, r) => {
+                self.collect_vars(l, vars);
+                self.collect_vars(r, vars);
+            }
+            Expr::Not(inner) => self.collect_vars(inner, vars),
+            Expr::Call(_, args) => {
+                // Function calls in postcondition - don't extract as state vars
+                for arg in args {
+                    self.collect_vars(arg, vars);
+                }
+            }
+            Expr::Bool(_) | Expr::Integer(_) | Expr::Float(_) | Expr::String(_) => {}
+            _ => {}
+        }
+    }
+
+    fn infer_type_from_expr(&self, expr: &Expr, var_name: &str) -> Type {
+        match expr {
+            Expr::Identifier(name) if name == var_name => Type::Bool,
+            Expr::PriorState(name) if name == var_name => Type::Bool,
+            Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r) => {
+                let left_type = self.infer_type_from_expr(l, var_name);
+                let right_type = self.infer_type_from_expr(r, var_name);
+                if right_type != Type::Bool {
+                    right_type
+                } else {
+                    left_type
+                }
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                let left_type = self.infer_type_from_expr(l, var_name);
+                let right_type = self.infer_type_from_expr(r, var_name);
+                if right_type != Type::Int {
+                    right_type
+                } else {
+                    left_type
+                }
+            }
+            Expr::And(_, _) | Expr::Or(_, _) => Type::Bool,
+            Expr::Not(_) => Type::Bool,
+            Expr::Integer(_) => Type::Int,
+            Expr::Float(_) => Type::Float,
+            Expr::String(_) => Type::String,
+            Expr::Bool(_) => Type::Bool,
+            Expr::Call(_, args) => {
+                for arg in args {
+                    let ty = self.infer_type_from_expr(arg, var_name);
+                    if ty != Type::Bool {
+                        return ty;
+                    }
+                }
+                Type::Bool
+            }
+            _ => Type::Bool,
+        }
+    }
+
     pub fn desugar(&mut self, program: &Program) -> Program {
         let mut items = Vec::new();
+
+        // First pass: collect all existing state declarations
+        let existing_state: std::collections::HashSet<String> = program
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let TopLevel::StateDecl(s) = item {
+                    Some(s.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
+                    // Infer state from postcondition variables
+                    let post_vars = self.extract_vars_from_expr(&txn.contract.post_condition);
+                    for var_name in post_vars {
+                        if !existing_state.contains(&var_name)
+                            && !self
+                                .generated_state
+                                .iter()
+                                .any(|s: &StateDecl| s.name == var_name)
+                        {
+                            // Infer type from postcondition expression
+                            let ty =
+                                self.infer_type_from_expr(&txn.contract.post_condition, &var_name);
+                            let default_val = match &ty {
+                                Type::Int => Expr::Integer(0),
+                                Type::Float => Expr::Float(0.0),
+                                Type::Bool => Expr::Bool(false),
+                                Type::String => Expr::String(String::new()),
+                                _ => Expr::Bool(false),
+                            };
+                            self.generated_state.push(StateDecl {
+                                name: var_name,
+                                ty,
+                                expr: Some(default_val),
+                                span: None,
+                            });
+                        }
+                    }
+
                     if txn.is_reactive && self.needs_desugaring(txn) {
                         let (new_txn, sigs, state) = self.desugar_reactive_txn(txn);
                         items.extend(state.into_iter().map(TopLevel::StateDecl));
@@ -72,10 +205,12 @@ impl Desugarer {
                             is_async: txn.is_async,
                             is_reactive: txn.is_reactive,
                             name: txn_name,
+                            parameters: txn.parameters.clone(),
                             contract: txn.contract.clone(),
                             body: txn.body.clone(),
                             reactor_speed: txn.reactor_speed,
                             span: txn.span,
+                            is_lambda: txn.is_lambda,
                         }));
                     }
                     items.push(item.clone());
@@ -119,10 +254,12 @@ impl Desugarer {
                             is_async: txn.is_async,
                             is_reactive: txn.is_reactive,
                             name: txn_name,
+                            parameters: txn.parameters.clone(),
                             contract: txn.contract.clone(),
                             body: txn.body.clone(),
                             reactor_speed: txn.reactor_speed,
                             span: txn.span,
+                            is_lambda: txn.is_lambda,
                         }));
                     }
                     items.push(TopLevel::Struct(StructDefinition {
@@ -241,6 +378,7 @@ impl Desugarer {
             is_async: txn.is_async,
             is_reactive: txn.is_reactive,
             name: txn.name.clone(),
+            parameters: txn.parameters.clone(),
             contract: Contract {
                 pre_condition: Expr::Not(Box::new(Expr::Identifier("done".to_string()))),
                 post_condition: Expr::Identifier("done".to_string()),
@@ -249,6 +387,7 @@ impl Desugarer {
             body: new_body_items,
             reactor_speed: txn.reactor_speed,
             span: None,
+            is_lambda: txn.is_lambda,
         };
 
         (new_txn, sigs, state)
@@ -266,6 +405,7 @@ impl Desugarer {
                     result_type: ResultType::Projection(vec![Type::Bool]),
                     source: None,
                     alias: None,
+                    bound_defn: None,
                 };
                 self.generated_signatures.push(Signature {
                     name: name.clone(),
@@ -273,6 +413,7 @@ impl Desugarer {
                     result_type: ResultType::TrueAssertion,
                     source: None,
                     alias: None,
+                    bound_defn: None,
                 });
                 return vec![sig];
             }
@@ -353,6 +494,7 @@ mod tests {
                 span: None,
             },
             body: vec![Statement::Term(vec![])],
+            is_lambda: false,
         };
 
         let mut desugarer = Desugarer::new();
@@ -376,6 +518,7 @@ mod tests {
             is_async: false,
             is_reactive: false,
             name: "test".to_string(),
+            parameters: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
@@ -384,6 +527,7 @@ mod tests {
             body: vec![Statement::Term(vec![])],
             reactor_speed: None,
             span: None,
+            is_lambda: false,
         };
 
         let mut desugarer = Desugarer::new();
@@ -416,6 +560,7 @@ mod tests {
                 span: None,
             },
             body: vec![Statement::Term(vec![])],
+            is_lambda: false,
         };
 
         let mut desugarer = Desugarer::new();

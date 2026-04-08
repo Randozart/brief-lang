@@ -194,10 +194,7 @@ impl<'a> Parser<'a> {
                 let txn = self.parse_transaction()?;
                 Ok(TopLevel::Transaction(txn))
             }
-            Some(Ok(Token::Txc)) => {
-                let txn = self.parse_tx_c_transaction()?;
-                Ok(TopLevel::Transaction(txn))
-            }
+
             Some(Ok(Token::Defn)) => {
                 let defn = self.parse_definition()?;
                 Ok(TopLevel::Definition(defn))
@@ -303,6 +300,28 @@ impl<'a> Parser<'a> {
 
         let result_type = self.parse_result_type()?;
 
+        // NEW: Parse optional defn binding: sig name: Input -> Output = defn_name;
+        let bound_defn = if let Some(Ok(Token::Eq)) = self.current_token() {
+            self.advance();
+            let defn_name = self.expect_identifier()?;
+            // Optionally parse arguments if present (e.g., = complex(x))
+            if let Some(Ok(Token::LParen)) = self.current_token() {
+                self.advance();
+                let mut depth = 1;
+                while depth > 0 {
+                    match self.current_token() {
+                        Some(Ok(Token::LParen)) => depth += 1,
+                        Some(Ok(Token::RParen)) => depth -= 1,
+                        _ => {}
+                    }
+                    self.advance();
+                }
+            }
+            Some(defn_name)
+        } else {
+            None
+        };
+
         let source = if let Some(Ok(Token::From)) = self.current_token() {
             self.advance();
             let mut path = Vec::new();
@@ -330,6 +349,7 @@ impl<'a> Parser<'a> {
             result_type,
             source,
             alias,
+            bound_defn,
         })
     }
 
@@ -825,10 +845,48 @@ impl<'a> Parser<'a> {
         } else {
             name
         };
+
+        // Parse optional parameters - NOT allowed for rct transactions
+        let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
+            self.advance();
+            let mut params = Vec::new();
+            while let Some(Ok(Token::Identifier(_))) = self.current_token() {
+                let param_name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let param_type = self.parse_type()?;
+                params.push((param_name, param_type));
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RParen)?;
+            params
+        } else {
+            Vec::new()
+        };
+
+        // Validate: rct transactions cannot have parameters
+        if is_reactive && !parameters.is_empty() {
+            return Err("rct transactions cannot have parameters".to_string());
+        }
+
         let contract = self.parse_contract()?;
-        self.expect(Token::LBrace)?;
-        let body = self.parse_body()?;
-        self.expect(Token::RBrace)?;
+
+        // Lambda-style: allow ; termination (no body)
+        let body = if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            // Lambda-style transaction: no body, just contract
+            Vec::new()
+        } else {
+            self.expect(Token::LBrace)?;
+            let body = self.parse_body()?;
+            self.expect(Token::RBrace)?;
+            body
+        };
+
+        let is_lambda = body.is_empty();
+
         let span = self.current_span();
 
         // NEW: Check for @Hz speed declaration after closing brace (for rct blocks)
@@ -869,114 +927,17 @@ impl<'a> Parser<'a> {
             is_async,
             is_reactive,
             name,
+            parameters,
             contract,
             body,
             reactor_speed,
             span,
+            is_lambda,
         })
-    }
-
-    fn parse_tx_c_transaction(&mut self) -> Result<Transaction, String> {
-        self.expect(Token::Txc)?;
-        let name = self.expect_identifier()?;
-
-        let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
-            self.advance();
-            let mut params = Vec::new();
-            while let Some(Ok(Token::Identifier(_))) = self.current_token() {
-                let param_name = self.expect_identifier()?;
-                self.expect(Token::Colon)?;
-                let param_type = self.parse_type_for_tx_c()?;
-                params.push((param_name, param_type));
-                if let Some(Ok(Token::Comma)) = self.current_token() {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            self.expect(Token::RParen)?;
-            params
-        } else {
-            return Err("txc requires parameters in parentheses".to_string());
-        };
-
-        let output_type = if let Some(Ok(Token::Arrow)) = self.current_token() {
-            self.advance();
-            Some(self.parse_type_for_tx_c()?)
-        } else {
-            None
-        };
-
-        let post_condition = if let Some(Ok(Token::LBracket)) = self.current_token() {
-            self.advance();
-            let cond = self.parse_expression()?;
-            self.expect(Token::RBracket)?;
-            cond
-        } else {
-            return Err("txc requires post-condition in brackets".to_string());
-        };
-
-        let span = self.current_span();
-        self.expect(Token::Semicolon)?;
-
-        let body_expr = post_condition.clone();
-
-        let mut body_statements = Vec::new();
-        body_statements.push(Statement::Expression(body_expr));
-        body_statements.push(Statement::Term(Vec::new()));
-
-        Ok(Transaction {
-            is_async: false,
-            is_reactive: true,
-            name,
-            contract: Contract {
-                pre_condition: Expr::Bool(true),
-                post_condition,
-                span: None,
-            },
-            body: body_statements,
-            reactor_speed: None, // NEW: No explicit speed for txc
-            span,
-        })
-    }
-
-    fn parse_type_for_tx_c(&mut self) -> Result<Type, String> {
-        match self.current_token() {
-            Some(Ok(Token::TypeInt)) => {
-                self.advance();
-                Ok(Type::Int)
-            }
-            Some(Ok(Token::TypeFloat)) => {
-                self.advance();
-                Ok(Type::Float)
-            }
-            Some(Ok(Token::TypeString)) => {
-                self.advance();
-                Ok(Type::String)
-            }
-            Some(Ok(Token::TypeBool)) => {
-                self.advance();
-                Ok(Type::Bool)
-            }
-            Some(Ok(Token::TypeVoid)) => {
-                self.advance();
-                Ok(Type::Void)
-            }
-            Some(Ok(Token::TypeData)) => {
-                self.advance();
-                Ok(Type::Data)
-            }
-            Some(Ok(Token::Identifier(_))) => {
-                let name = self.expect_identifier()?;
-                Ok(Type::Custom(name))
-            }
-            Some(Ok(tok)) => return Err(format!("Expected type, found {:?}", tok)),
-            Some(Err(_)) => return Err("Lexer error".to_string()),
-            None => return Err("Expected type, found EOF".to_string()),
-        }
     }
 
     fn parse_definition(&mut self) -> Result<Definition, String> {
+        // def/defn/definition all map to Token::Defn via lexer aliases
         self.expect(Token::Defn)?;
         let name = self.expect_identifier()?;
 
@@ -1034,8 +995,6 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
-        let contract = self.parse_contract()?;
-
         let (outputs, output_names, output_type) =
             if let Some(Ok(Token::Arrow)) = self.current_token() {
                 self.advance();
@@ -1049,9 +1008,6 @@ impl<'a> Parser<'a> {
                     None
                 } else {
                     // Multiple outputs - need to determine if union or tuple
-                    // For now: If we encounter pipes, it's a union; if only commas, it's a tuple
-                    // This is a simplified detection - ideally we'd track separators during parsing
-                    // For now we'll use a heuristic: assume tuple (comma-separated is most common)
                     Some(crate::ast::OutputType::Tuple(outputs.clone()))
                 };
 
@@ -1060,20 +1016,33 @@ impl<'a> Parser<'a> {
                 (Vec::new(), Vec::new(), None)
             };
 
-        self.expect(Token::LBrace)?;
-        let body = self.parse_body()?;
-        self.expect(Token::RBrace)?;
-        self.expect(Token::Semicolon)?;
+        // Contract comes AFTER output types for defn
+        let contract = self.parse_contract()?;
+
+        // Lambda-style: allow ; termination (no body)
+        let body = if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            // Lambda-style definition: no body
+            Vec::new()
+        } else {
+            self.expect(Token::LBrace)?;
+            let body = self.parse_body()?;
+            self.expect(Token::RBrace)?;
+            self.expect(Token::Semicolon)?;
+            body
+        };
+
+        let is_lambda = body.is_empty();
 
         Ok(Definition {
             name,
             type_params,
             parameters,
             outputs,
-            output_type,  // Feature A: multi-output support
-            output_names, // NEW
+            output_type,
+            output_names,
             contract,
             body,
+            is_lambda,
         })
     }
 

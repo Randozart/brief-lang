@@ -14,21 +14,26 @@
 ## Basics
 
 ```brief
-# State
+// State
 let name: Type = value;
 const MAX: Int = 100;
 
-# Passive transaction
-txn name [pre][post] { body };
+// Passive transaction
+txn name(params) [pre][post] { body };
 
-# Reactive transaction
+// Reactive transaction
 rct txn name [pre][post] { body };
 
-# Function
+// Function
 defn name(params) -> Type [pre][post] { body };
 
-# FFI
-frgn name(params) -> Result<T, E> from "file.toml";
+// Lambda-style (no body)
+defn name(params) -> Type [pre][post];
+
+// Sig binding
+sig toString: Bool -> String = complex(x);
+
+// Keyword aliases supported: defn/def/definition, txn/transact/transaction, sig/sign/signature, const/constant
 ```
 
 ## Types

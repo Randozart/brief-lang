@@ -4,22 +4,38 @@ use logos::Logos;
 #[logos(skip r"[ \t\n\r]+")]
 #[logos(skip r"//[^\n]*")] // Skip // comments entirely
 pub enum Token {
+    // Sig aliases: sig, sign, signature
     #[token("sig")]
+    #[token("sign")]
+    #[token("signature")]
     Sig,
+
+    // Defn aliases: defn, def, definition
     #[token("defn")]
+    #[token("def")]
+    #[token("definition")]
     Defn,
+
     #[token("let")]
     Let,
+
+    // Const aliases: const, constant
     #[token("const")]
+    #[token("constant")]
     Const,
+
+    // Txn aliases: txn, transact, transaction
     #[token("txn")]
+    #[token("transact")]
+    #[token("transaction")]
     Txn,
+
     #[token("rct")]
     Rct,
-    #[token("txc")]
-    Txc,
+
     #[token("async")]
     Async,
+
     #[token("term")]
     Term,
     #[token("escape")]

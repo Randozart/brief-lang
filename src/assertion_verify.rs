@@ -165,6 +165,7 @@ mod tests {
             result_type: ResultType::TrueAssertion,
             source: Some("always_true_defn".to_string()),
             alias: None,
+            bound_defn: None,
         };
 
         let defn = Definition {
@@ -180,6 +181,7 @@ mod tests {
                 span: None,
             },
             body: vec![Statement::Term(vec![Some(Expr::Bool(true))])],
+            is_lambda: false,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -193,6 +195,7 @@ mod tests {
             result_type: ResultType::TrueAssertion,
             source: Some("always_false_defn".to_string()),
             alias: None,
+            bound_defn: None,
         };
 
         let defn = Definition {
@@ -208,6 +211,7 @@ mod tests {
                 span: None,
             },
             body: vec![Statement::Term(vec![Some(Expr::Bool(false))])],
+            is_lambda: false,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -221,6 +225,7 @@ mod tests {
             result_type: ResultType::TrueAssertion,
             source: Some("check_x_defn".to_string()),
             alias: None,
+            bound_defn: None,
         };
 
         let defn = Definition {
@@ -243,6 +248,7 @@ mod tests {
                 },
                 Statement::Term(vec![Some(Expr::Identifier("result".to_string()))]),
             ],
+            is_lambda: false,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -256,6 +262,7 @@ mod tests {
             result_type: ResultType::TrueAssertion,
             source: Some("not_bool_defn".to_string()),
             alias: None,
+            bound_defn: None,
         };
 
         let defn = Definition {
@@ -273,6 +280,7 @@ mod tests {
             body: vec![Statement::Term(vec![Some(Expr::String(
                 "not bool".to_string(),
             ))])],
+            is_lambda: false,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -286,6 +294,7 @@ mod tests {
             result_type: ResultType::Projection(vec![Type::Bool]),
             source: Some("regular_sig_defn".to_string()),
             alias: None,
+            bound_defn: None,
         };
 
         let defn = Definition {
@@ -301,6 +310,7 @@ mod tests {
                 span: None,
             },
             body: vec![Statement::Term(vec![Some(Expr::Bool(false))])],
+            is_lambda: false,
         };
 
         // Should be OK because this is not a TrueAssertion

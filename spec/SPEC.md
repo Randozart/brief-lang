@@ -33,15 +33,11 @@ Brief source files use the `.bv` extension.
 ```bnf
 program ::= (definition | transaction | state_decl | constant | import | struct_def | rstruct_def | render_block)*
 
-definition ::= "defn" identifier type_params? parameters? contract "->" output_types "{" body "}" ";"
-transaction ::= ("async")? "txn" identifier contract "{" body "}" ";"
-rct_transaction ::= "rct" ("async")? "txn" identifier contract "{" body "}" ";"
-foreign_binding ::= "frgn" identifier type_params? parameters "->" "Result<" (success_type | "(" success_fields ")") "," error_type ">" "from" string ";"
-success_fields ::= identifier ":" type ("," identifier ":" type)*
-foreign_sig ::= "frgn" "sig" identifier "(" parameters? ")" "->" output_types ";"
+definition ::= ("defn" | "def" | "definition") identifier type_params? parameters? "->" output_types contract ("{" body "}" ";" | ";")
+transaction ::= ("async")? "rct"? "txn" identifier "(" parameters? ")" contract ("{" body "}" ";" | ";")
+signature ::= ("sig" | "sign" | "signature") identifier ":" type "->" result_type ("=" identifier "(" arguments? ")" | "from" path)? ";"
 
-state_decl ::= "let" identifier ":" type ("=" expression)? ";"
-constant ::= "const" identifier ":" type "=" expression ";"
+constant ::= ("const" | "constant") identifier ":" type "=" expression ";"
 
 struct_def ::= "struct" identifier "{" struct_member* "}"
 struct_member ::= field_decl | transaction
@@ -52,7 +48,7 @@ rstruct_def ::= "rstruct" identifier "{" struct_member* view_body "}"
 import_stmt ::= "import" ("{" import_item ("," import_item)* "}")? (("from" namespace_path) | namespace_path)? ";"
 import_item ::= identifier ("as" identifier)?
 
-render_block ::= "view" identifier "->" view_body
+render_block ::= "render" identifier "{" view_body "}"
 ```
 
 ### 2.2 Parameters and Types
