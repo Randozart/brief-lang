@@ -555,6 +555,7 @@ impl<'a> Parser<'a> {
         }
 
         let span = self.current_span();
+        self.expect(Token::Semicolon)?;
         Ok(StructDefinition {
             name,
             fields,
@@ -1228,6 +1229,7 @@ impl<'a> Parser<'a> {
             self.advance();
 
             // Check for ~/ syntax - this is a shorthand for [~identifier][identifier]
+            // It expands to TWO conditions, so if we use it, we're done
             if let Some(Ok(Token::TildeSlash)) = self.current_token() {
                 self.advance(); // Consume ~/
                 let identifier = self.expect_identifier()?;
@@ -1235,24 +1237,21 @@ impl<'a> Parser<'a> {
                 // For ~/identifier, we need to generate two conditions:
                 // pre_condition = ~identifier (logical NOT)
                 // post_condition = identifier
-                if count == 0 {
-                    pre_condition = Expr::Not(Box::new(Expr::Identifier(identifier.clone())));
-                    post_condition = Expr::Identifier(identifier);
-                    count = 2;
-                } else {
-                    return Err("Unexpected ~/ in non-first contract bracket".to_string());
-                }
-            } else {
-                let cond = self.parse_expression()?;
-                if count == 0 {
-                    pre_condition = cond;
-                } else if count == 1 {
-                    post_condition = cond;
-                } else {
-                    return Err("Too many contract brackets (max 2)".to_string());
-                }
-                count += 1;
+                pre_condition = Expr::Not(Box::new(Expr::Identifier(identifier.clone())));
+                post_condition = Expr::Identifier(identifier);
+                self.expect(Token::RBracket)?;
+                break; // ~/ uses the only bracket, we're done
             }
+
+            let cond = self.parse_expression()?;
+            if count == 0 {
+                pre_condition = cond;
+            } else if count == 1 {
+                post_condition = cond;
+            } else {
+                return Err("Too many contract brackets (max 2)".to_string());
+            }
+            count += 1;
 
             self.expect(Token::RBracket)?;
         }
@@ -1732,8 +1731,29 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Identifier(name))) => {
                 let name = name.clone();
                 self.advance();
+                // Check if it's a struct literal: TypeName { field: value, ... }
+                if let Some(Ok(Token::LBrace)) = self.current_token() {
+                    self.advance();
+                    let mut fields = Vec::new();
+                    if let Some(Ok(Token::RBrace)) = self.current_token() {
+                        // Empty struct
+                    } else {
+                        loop {
+                            let field_name = self.expect_identifier()?;
+                            self.expect(Token::Colon)?;
+                            let field_value = self.parse_expression()?;
+                            fields.push((field_name, field_value));
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RBrace)?;
+                    Ok(Expr::StructInstance(name, fields))
                 // Check if it's a function call
-                if let Some(Ok(Token::LParen)) = self.current_token() {
+                } else if let Some(Ok(Token::LParen)) = self.current_token() {
                     self.advance();
                     let mut args = Vec::new();
                     if let Some(Ok(Token::RParen)) = self.current_token() {

@@ -746,6 +746,7 @@ impl TypeChecker {
             }
             Expr::ListLen(_) => Type::Int,
             Expr::FieldAccess(_, _) => Type::Custom("unknown".to_string()),
+            Expr::StructInstance(typename, _fields) => Type::Custom(typename.clone()),
         }
     }
 
@@ -799,12 +800,6 @@ impl TypeChecker {
                         .iter()
                         .zip(args_b.iter())
                         .all(|(x, y)| self.types_compatible(x, y))
-            }
-            (Type::Applied(a, _), Type::Applied(b, _))
-            | (Type::Applied(b, _), Type::Applied(a, _))
-                if a == b =>
-            {
-                true
             }
             // ContractBound: compare inner types, ignore the contract
             (Type::ContractBound(inner_a, _), Type::ContractBound(inner_b, _)) => {

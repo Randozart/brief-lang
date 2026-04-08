@@ -385,7 +385,9 @@ true    false             # Literals
 | 1 | Lambda-style verification | ✅ Complete | HIGH |
 | 2 | `result` variable redesign | ✅ Complete | HIGH |
 | 3 | Two failing tests (ContractBound) | ✅ Complete | MEDIUM |
-| 4 | Struct/RStruct/Render instances | ✅ Design Complete | HIGH |
+| 4 | Struct/RStruct/Render instances | ✅ Implemented | HIGH |
+| 5 | clone() function | ✅ Implemented | HIGH |
+| 6 | List<T> generic type | ✅ Already Supported | HIGH |
 
 ---
 
@@ -425,12 +427,21 @@ let counters = [Counter {}, Counter {}];
 - Inside instance transaction: `&count` = instance field
 - Unless external variable passed: `txn process(data)` - data is external input
 
-### Implementation Phases
+### Implementation Status
 
-1. **Phase 1**: AST + Parser (StructInstance, List<T>)
-2. **Phase 2**: Type System (instance types, method resolution)
-3. **Phase 3**: Instance methods + field access
-4. **Phase 4**: Runtime (interpreter/WASM)
+✅ **Phase 1**: AST + Parser (StructInstance, List<T>) - COMPLETE
+✅ **Phase 2**: Type System (instance types, method resolution) - COMPLETE
+✅ **Phase 3**: Instance methods + field access - COMPLETE
+✅ **Phase 4**: Runtime (interpreter/WASM) - COMPLETE
+
+**Implementation Details:**
+- `Value::Instance { typename, fields }` replaces `Value::Struct(fields)`
+- `clone()` function implemented - clones any value
+- Instance method resolution: `counter.increment()` → `Counter.increment(counter)`
+- Field access: `counter.count` works via `Expr::FieldAccess`
+- Parser fix: struct definitions now correctly consume trailing semicolon
+
+**Test File:** `tests/instances_test.bv`
 
 ---
 

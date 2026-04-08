@@ -706,6 +706,14 @@ impl Annotator {
             Expr::FieldAccess(obj, field) => {
                 format!("{}.{}", self.format_expr(obj), field)
             }
+            Expr::StructInstance(typename, fields) => {
+                let fields_str = fields
+                    .iter()
+                    .map(|(f, v)| format!("{}: {}", f, self.format_expr(v)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} {{{}}}", typename, fields_str)
+            }
         }
     }
 }

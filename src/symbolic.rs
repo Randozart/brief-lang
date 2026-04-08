@@ -180,7 +180,8 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::ListLiteral(_)
         | Expr::ListIndex(_, _)
         | Expr::ListLen(_)
-        | Expr::FieldAccess(_, _) => SymbolicValue::Unknown,
+        | Expr::FieldAccess(_, _)
+        | Expr::StructInstance(_, _) => SymbolicValue::Unknown,
 
         // Comparison operators don't produce symbolic values (they're boolean expressions)
         Expr::Eq(_, _)

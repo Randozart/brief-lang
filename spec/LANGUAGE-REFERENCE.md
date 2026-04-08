@@ -370,9 +370,37 @@ rstruct Counter {
 ### Using Structs
 
 ```brief
-let account: BankAccount;
-account.balance;           // Field access
-account.withdraw(100);     // Call struct method
+// Create instances
+let counter1 = Counter {};           // Default values
+let counter2 = Counter { count: 5 }; // Partial init
+
+// Access fields
+let n = counter1.count;
+
+// Clone instance
+let counter3 = clone(counter2);
+
+// List of instances
+let counters = [Counter {}, Counter {}];
+let first = counters[0];
+let first_count = first.count;
+```
+
+### Instance Method Resolution
+
+When you call `counter.increment()`:
+
+1. If `counter` is an instance of type `Counter`, the compiler resolves it to `Counter.increment(counter)`
+2. The method operates on the instance's fields, not global state
+3. Method calls are verified against the instance's contract
+
+### clone() Function
+
+The built-in `clone()` function duplicates any value:
+
+```brief
+let original = Counter { count: 42 };
+let copy = clone(original);  // copy.count == 42
 ```
 
 ---

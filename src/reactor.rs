@@ -148,6 +148,11 @@ impl Reactor {
             Expr::FieldAccess(obj, _) => {
                 self.collect_identifiers(obj, deps);
             }
+            Expr::StructInstance(_, fields) => {
+                for (_, expr) in fields {
+                    self.collect_identifiers(expr, deps);
+                }
+            }
         }
     }
 

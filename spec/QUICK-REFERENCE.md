@@ -133,6 +133,34 @@ defn load(path: String) -> String [true][true] {
 };
 ```
 
+### Struct Instances
+
+```brief
+// Define a struct with methods
+struct Counter {
+    count: Int;
+    
+    txn Counter.increment [count < 100][count == @count + 1] {
+        &count = count + 1;
+        term;
+    };
+};
+
+// Create instances
+let counter1 = Counter {};           // Default values
+let counter2 = Counter { count: 5 }; // Partial init
+
+// Access fields
+let n = counter1.count;
+
+// Clone instance
+let counter3 = clone(counter2);
+
+// List of instances
+let counters = [Counter {}, Counter {}, Counter {}];
+let first = counters[0];
+```
+
 ### Error Handling (v7.0 - FFI Error Enforcement)
 
 ```brief

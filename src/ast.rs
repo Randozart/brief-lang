@@ -120,6 +120,7 @@ pub enum Expr {
     ListIndex(Box<Expr>, Box<Expr>),
     ListLen(Box<Expr>),
     FieldAccess(Box<Expr>, String),
+    StructInstance(String, Vec<(String, Expr)>),
 }
 
 impl Expr {

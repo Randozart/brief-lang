@@ -11,7 +11,10 @@ pub enum Value {
     Bool(bool),
     Data(Vec<u8>),
     List(Vec<Value>),
-    Struct(HashMap<String, Value>),
+    Instance {
+        typename: String,
+        fields: HashMap<String, Value>,
+    },
     Defn(String),
     Void,
 }
@@ -25,7 +28,9 @@ impl fmt::Display for Value {
             Value::Bool(v) => write!(f, "{}", v),
             Value::Data(_) => write!(f, "<data>"),
             Value::List(items) => write!(f, "[{}]", items.len()),
-            Value::Struct(fields) => write!(f, "{{{} fields}}", fields.len()),
+            Value::Instance { typename, fields } => {
+                write!(f, "<{} {{}}>", typename)
+            }
             Value::Defn(name) => write!(f, "<defn {}>", name),
             Value::Void => write!(f, "void"),
         }
@@ -316,7 +321,11 @@ impl Interpreter {
                 .unwrap_or(false);
 
         if is_void {
-            if let Value::Struct(fields) = &result {
+            if let Value::Instance {
+                typename: _,
+                fields,
+            } = &result
+            {
                 let has_error = error_fields.iter().any(|(field_name, _)| {
                     if let Some(val) = fields.get(field_name) {
                         !Self::is_empty_value(val)
@@ -335,7 +344,11 @@ impl Interpreter {
             return Ok(Value::Void);
         }
 
-        if let Value::Struct(mut fields) = result {
+        if let Value::Instance {
+            typename,
+            mut fields,
+        } = result
+        {
             let has_error = error_fields.iter().any(|(field_name, _)| {
                 if let Some(val) = fields.get(field_name) {
                     !Self::is_empty_value(val)
@@ -357,7 +370,7 @@ impl Interpreter {
                 }
             }
 
-            Ok(Value::Struct(fields))
+            Ok(Value::Instance { typename, fields })
         } else {
             Ok(result)
         }
@@ -370,7 +383,10 @@ impl Interpreter {
             Value::String(s) => s.is_empty(),
             Value::Bool(false) => true,
             Value::List(l) => l.is_empty(),
-            Value::Struct(fields) => fields.is_empty(),
+            Value::Instance {
+                typename: _,
+                fields,
+            } => fields.is_empty(),
             Value::Void => true,
             Value::Data(d) => d.is_empty(),
             _ => false,
@@ -552,6 +568,21 @@ impl Interpreter {
                     arg_values.push(self.eval_expr(arg)?);
                 }
 
+                if fn_name == "clone" && !arg_values.is_empty() {
+                    return Ok(arg_values[0].clone());
+                }
+
+                if let Some(first_arg) = arg_values.first() {
+                    if let Value::Instance { typename, fields } = first_arg {
+                        let method_name = format!("{}.{}", typename, fn_name);
+                        if self.definitions.contains_key(&method_name) {
+                            let mut method_args = args[1..].to_vec();
+                            method_args.insert(0, args[0].clone());
+                            return self.call_defn(&method_name, &method_args);
+                        }
+                    }
+                }
+
                 if let Some(location) = self.ffi_name_to_location.get(&fn_name) {
                     if let Some(frgn_fn) = self.foreign_functions.get(location) {
                         let result = frgn_fn(arg_values)?;
@@ -596,13 +627,26 @@ impl Interpreter {
             Expr::FieldAccess(obj_expr, field_name) => {
                 let obj_val = self.eval_expr(obj_expr)?;
                 match obj_val {
-                    Value::Struct(fields) => fields.get(field_name).cloned().ok_or_else(|| {
+                    Value::Instance {
+                        typename: _,
+                        fields,
+                    } => fields.get(field_name).cloned().ok_or_else(|| {
                         RuntimeError::UndefinedVariable(format!("field '{}'", field_name))
                     }),
                     _ => Err(RuntimeError::TypeMismatch(
-                        "field access requires Struct".to_string(),
+                        "field access requires Instance".to_string(),
                     )),
                 }
+            }
+            Expr::StructInstance(typename, fields) => {
+                let mut instance_fields = HashMap::new();
+                for (field_name, field_expr) in fields {
+                    instance_fields.insert(field_name.clone(), self.eval_expr(field_expr)?);
+                }
+                Ok(Value::Instance {
+                    typename: typename.clone(),
+                    fields: instance_fields,
+                })
             }
         }
     }
