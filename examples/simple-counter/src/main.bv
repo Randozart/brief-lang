@@ -1,0 +1,34 @@
+// Simple Counter - A Brief program with state
+//
+// This program demonstrates:
+// - State variables that persist between transactions
+// - Contracts that prevent invalid operations
+// - The @ symbol for referencing previous values
+
+// State variable: the current count
+// This value persists across all transactions
+let count: Int = 0;
+
+// Increment the counter by 1
+// Precondition: count must be less than 100
+// Postcondition: count increases by exactly 1
+txn increment [count < 100][count == @count + 1] {
+    &count = count + 1;
+    term;
+};
+
+// Decrement the counter by 1
+// Precondition: count must be greater than 0
+// Postcondition: count decreases by exactly 1
+txn decrement [count > 0][count == @count - 1] {
+    &count = count - 1;
+    term;
+};
+
+// Reset counter to zero
+// Precondition: count must not be zero
+// Postcondition: count equals zero
+txn reset [count != 0][count == 0] {
+    &count = 0;
+    term;
+};

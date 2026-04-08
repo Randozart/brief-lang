@@ -1,0 +1,8 @@
+// Hello World - Your first Brief program
+//
+// This is the simplest possible Brief program.
+// It just returns a greeting when run.
+
+txn greet [true][result == "Hello, World!"] {
+    term "Hello, World!";
+};
