@@ -551,6 +551,7 @@ impl ProofEngine {
         self.check_total_path(program);
         self.check_true_assertions(program);
         self.check_postcondition_contradictions(program);
+        self.check_trivial_contracts(program);
         self.check_sig_projections(program);
         self.check_ffi_error_handling(program);
         self.verify_contracts(program);
@@ -747,6 +748,78 @@ impl ProofEngine {
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
                 self.analyze_postcondition(txn);
+            }
+        }
+    }
+
+    fn check_trivial_contracts(&mut self, program: &Program) {
+        for item in &program.items {
+            match item {
+                TopLevel::Transaction(txn) => {
+                    if let Expr::Bool(true) = &txn.contract.pre_condition {
+                        let mut err = ProofError::new("P009", "trivial precondition");
+                        err.explanation = format!(
+                            "transaction '{}' has precondition '[true]' which is always satisfied",
+                            txn.name
+                        );
+                        err.proof_chain.push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain.push("2. this provides no compile-time safety".to_string());
+                        err.hints.push(format!(
+                            "specify what state is required before '{}' runs",
+                            txn.name
+                        ));
+                        err.hints.push("e.g., '[count > 0]' instead of '[true]'".to_string());
+                        self.errors.push(err);
+                    }
+                    if let Expr::Bool(true) = &txn.contract.post_condition {
+                        let mut err = ProofError::new("P010", "trivial postcondition");
+                        err.explanation = format!(
+                            "transaction '{}' has postcondition '[true]' which is always satisfied",
+                            txn.name
+                        );
+                        err.proof_chain.push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain.push("2. this provides no compile-time safety".to_string());
+                        err.hints.push(format!(
+                            "specify what state '{}' guarantees after running",
+                            txn.name
+                        ));
+                        err.hints.push("e.g., '[count == @count + 1]' instead of '[true]'".to_string());
+                        self.errors.push(err);
+                    }
+                }
+                TopLevel::Definition(defn) => {
+                    if let Expr::Bool(true) = &defn.contract.pre_condition {
+                        let mut err = ProofError::new("P009", "trivial precondition");
+                        err.explanation = format!(
+                            "definition '{}' has precondition '[true]' which is always satisfied",
+                            defn.name
+                        );
+                        err.proof_chain.push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain.push("2. this provides no compile-time safety".to_string());
+                        err.hints.push(format!(
+                            "specify what state is required before '{}' runs",
+                            defn.name
+                        ));
+                        err.hints.push("e.g., '[x > 0]' instead of '[true]'".to_string());
+                        self.errors.push(err);
+                    }
+                    if let Expr::Bool(true) = &defn.contract.post_condition {
+                        let mut err = ProofError::new("P010", "trivial postcondition");
+                        err.explanation = format!(
+                            "definition '{}' has postcondition '[true]' which is always satisfied",
+                            defn.name
+                        );
+                        err.proof_chain.push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain.push("2. this provides no compile-time safety".to_string());
+                        err.hints.push(format!(
+                            "specify what state '{}' guarantees after running",
+                            defn.name
+                        ));
+                        err.hints.push("e.g., '[result > 0]' instead of '[true]'".to_string());
+                        self.errors.push(err);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -1454,6 +1527,131 @@ mod tests {
         assert!(
             !has_ownership_conflict,
             "Should NOT have ownership conflict for non-async txns, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_trivial_precondition_detected() {
+        let code = r#"
+            let count: Int = 0;
+
+            txn increment [true][count == @count + 1] {
+                &count = count + 1;
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_trivial_pre = errors.iter().any(|e| e.code == "P009");
+        assert!(
+            has_trivial_pre,
+            "Expected P009 trivial precondition error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_trivial_postcondition_detected() {
+        let code = r#"
+            let count: Int = 0;
+
+            txn increment [count >= 0][true] {
+                &count = count + 1;
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_trivial_post = errors.iter().any(|e| e.code == "P010");
+        assert!(
+            has_trivial_post,
+            "Expected P010 trivial postcondition error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_trivial_contracts_both_true() {
+        let code = r#"
+            let count: Int = 0;
+
+            txn increment [true][true] {
+                &count = count + 1;
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_trivial_pre = errors.iter().any(|e| e.code == "P009");
+        let has_trivial_post = errors.iter().any(|e| e.code == "P010");
+        assert!(
+            has_trivial_pre && has_trivial_post,
+            "Expected both P009 and P010 errors, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_non_trivial_contracts_no_error() {
+        let code = r#"
+            let count: Int = 0;
+
+            txn increment [count >= 0][count == @count + 1] {
+                &count = count + 1;
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_trivial_pre = errors.iter().any(|e| e.code == "P009");
+        let has_trivial_post = errors.iter().any(|e| e.code == "P010");
+        assert!(
+            !has_trivial_pre && !has_trivial_post,
+            "Should NOT have trivial contract errors, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_trivial_contracts_in_definition() {
+        let code = r#"
+            def double(x: Int) [true][true] => Int {
+                ret x * 2;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_trivial_pre = errors.iter().any(|e| e.code == "P009");
+        let has_trivial_post = errors.iter().any(|e| e.code == "P010");
+        assert!(
+            has_trivial_pre && has_trivial_post,
+            "Expected both P009 and P010 errors for definition, got: {:?}",
             errors
         );
     }

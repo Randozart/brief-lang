@@ -401,6 +401,16 @@ pub enum ProofError {
         explanation: String,
         span: Span,
     },
+    TrivialPrecondition {
+        item_name: String,
+        item_type: String,
+        span: Span,
+    },
+    TrivialPostcondition {
+        item_name: String,
+        item_type: String,
+        span: Span,
+    },
 }
 
 impl fmt::Display for ProofError {
@@ -447,6 +457,20 @@ impl fmt::Display for ProofError {
                     f,
                     "transaction '{}' postcondition references mutated state incorrectly",
                     transaction
+                )
+            }
+            ProofError::TrivialPrecondition { item_name, item_type, .. } => {
+                write!(
+                    f,
+                    "{} '{}' has a trivial precondition '[true]'",
+                    item_type, item_name
+                )
+            }
+            ProofError::TrivialPostcondition { item_name, item_type, .. } => {
+                write!(
+                    f,
+                    "{} '{}' has a trivial postcondition '[true]'",
+                    item_type, item_name
                 )
             }
         }
