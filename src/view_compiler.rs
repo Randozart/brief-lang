@@ -187,13 +187,7 @@ impl ViewCompiler {
                                 .filter(|s| !s.starts_with("b-"))
                                 .collect::<Vec<_>>()
                                 .join(" ");
-                            let opening_tag = if tag_attrs.is_empty() {
-                                format!("<{}>", elem_name)
-                            } else {
-                                format!("<{} {}>", elem_name, tag_attrs)
-                            };
-                            let template_html =
-                                format!("{} {}</{}>", opening_tag, inner_html, elem_name);
+                            let template_html = inner_html.clone();
 
                             let container_id =
                                 if let Some((_, parent_pos)) = element_stack.iter().rev().nth(0) {
@@ -218,12 +212,12 @@ impl ViewCompiler {
                                 };
 
                             self.bindings.push(Binding {
-                                element_id: elem_id,
+                                element_id: elem_id.clone(),
                                 directive: Directive::Each {
                                     iterable: iterable,
                                     item_name: item_name,
                                     template_html: template_html,
-                                    container_id: container_id,
+                                    container_id: elem_id,
                                 },
                             });
                             let total_len = end_pos + inner_html.len() + elem_name.len() + 3;

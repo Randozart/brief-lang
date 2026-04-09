@@ -195,7 +195,10 @@ impl WasmGenerator {
         output.push_str("    #[wasm_bindgen(constructor)]\n");
         output.push_str("    pub fn new() -> Self {\n");
         output.push_str("        let signals = vec![\n");
-        for (name, &id) in &self.signal_map {
+        let mut sorted_signals: Vec<(&String, &usize)> = self.signal_map.iter().collect();
+        sorted_signals.sort_by_key(|&(_, &id)| id);
+
+        for (name, &id) in sorted_signals {
             let init = self
                 .signal_initializers
                 .get(name)
