@@ -843,6 +843,20 @@ impl WasmGenerator {
                     args.iter().map(|a| self.expr_to_js_value(a)).collect();
                 format!("{}({})", name, args_vals.join(", "))
             }
+            Expr::StructInstance(typename, fields) => {
+                let mut sets = String::new();
+                for (field_name, field_value) in fields {
+                    let value_js = self.expr_to_js_value(field_value);
+                    sets.push_str(&format!(
+                        r#"js_sys::Reflect::set(&__obj, &JsValue::from("{}"), &{}).ok(); "#,
+                        field_name, value_js
+                    ));
+                }
+                format!(
+                    "JsValue::from({{ let mut __obj = js_sys::Object::new(); {} __obj }})",
+                    sets
+                )
+            }
             _ => "JsValue::TRUE".to_string(),
         }
     }
