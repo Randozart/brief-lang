@@ -263,3 +263,15 @@ let items: List<Item> = [
 - Currently works for initial render only (not reactive)
 - Single-level property access (item.name works, item.address.city does not)
 - Requires items to be JS objects with properties
+
+---
+
+## Summary
+
+Recent changes implement:
+
+1. **@Hz timing** - Reactive transactions now respect file-level reactor speed (default 10Hz). Add `@60` to transaction for custom speed.
+
+2. **Property access** - Uses `js_sys::Reflect::get()` for property access in b-each templates.
+
+3. **Struct parsing** - Added `let` keyword support in struct definitions.

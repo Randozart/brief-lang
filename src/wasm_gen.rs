@@ -315,13 +315,14 @@ impl WasmGenerator {
             );
             output.push_str("                                    if let Some(end_tag) = after_prop[end_quote..].find('>') {\n");
             output.push_str(
-                "                                        // Access property on JS object\n",
+                "                                        // Access property on JS object using Reflect\n",
             );
-            output.push_str("                                        let prop_val = js_sys::Object::from(item.clone()).get(prop_name);\n");
+            output.push_str("                                        let prop_key = JsValue::from_str(prop_name);\n");
+            output.push_str("                                        let prop_val = js_sys::Reflect::get(&item, &prop_key).unwrap_or_else(|_| JsValue::UNDEFINED);\n");
             output.push_str("                                        let prop_str = if prop_val.is_string() {\n");
             output.push_str("                                            prop_val.as_string().unwrap_or_default()\n");
             output.push_str(
-                "                                        } else if prop_val.is_f64() {\n",
+                "                                        } else if prop_val.as_f64().is_some() {\n",
             );
             output.push_str("                                            format!(\"{}\", prop_val.as_f64().unwrap_or(0.0))\n");
             output.push_str("                                        } else {\n");
