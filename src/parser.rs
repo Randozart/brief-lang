@@ -543,6 +543,7 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.current_token() {
             match token {
                 Ok(Token::RBrace) => {
+                    eprintln!("DEBUG_struct: found RBrace");
                     self.advance();
                     break;
                 }
@@ -578,6 +579,38 @@ impl<'a> Parser<'a> {
                 Ok(Token::Txn) | Ok(Token::Rct) | Ok(Token::Async) => {
                     let txn = self.parse_transaction()?;
                     transactions.push(txn);
+                }
+                Ok(Token::Let) => {
+                    // Handle "let field: Type;" syntax explicitly
+                    self.advance(); // Consume 'let' keyword
+
+                    if let Some(Ok(Token::Colon)) = self.peek() {
+                        let field_name = self.expect_identifier()?;
+                        self.expect(Token::Colon)?;
+                        let field_type = self.parse_type()?;
+
+                        // Parse optional initializer - check current token
+                        let default = if let Some(Ok(Token::Eq)) = self.current_token() {
+                            self.advance(); // consume '='
+                            Some(self.parse_expression()?)
+                        } else {
+                            return Err(format!(
+                                "struct field '{}' must have initial value (e.g., let {} = 0;)",
+                                field_name, field_name
+                            ));
+                        };
+
+                        self.expect(Token::Semicolon)?;
+                        fields.push(StructField {
+                            name: field_name,
+                            ty: field_type,
+                            default,
+                        });
+                    } else {
+                        // Not a field, treat as transaction
+                        let txn = self.parse_transaction()?;
+                        transactions.push(txn);
+                    }
                 }
                 _ => {
                     return Err(format!("Unexpected token in struct: {:?}", token));
