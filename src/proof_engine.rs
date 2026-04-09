@@ -1133,6 +1133,9 @@ impl ProofEngine {
                     self.collect_identifiers(expr, vars);
                 }
             }
+            Expr::ObjectLiteral(fields) => {
+                for (_, v) in fields { self.collect_identifiers(v, vars); }
+            }
         }
     }
 

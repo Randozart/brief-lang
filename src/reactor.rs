@@ -153,6 +153,9 @@ impl Reactor {
                     self.collect_identifiers(expr, deps);
                 }
             }
+            Expr::ObjectLiteral(fields) => {
+                for (_, v) in fields { self.collect_identifiers(v, deps); }
+            }
         }
     }
 

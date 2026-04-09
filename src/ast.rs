@@ -121,6 +121,7 @@ pub enum Expr {
     ListLen(Box<Expr>),
     FieldAccess(Box<Expr>, String),
     StructInstance(String, Vec<(String, Expr)>),
+    ObjectLiteral(Vec<(String, Expr)>),
 }
 
 impl Expr {

@@ -720,6 +720,9 @@ impl Annotator {
                     .join(", ");
                 format!("{} {{{}}}", typename, fields_str)
             }
+            Expr::ObjectLiteral(fields) => {
+                format!("{}", fields.iter().map(|(n,v)| format!("{}: {}", n, self.format_expr(v))).collect::<Vec<_>>().join(", "))
+            }
         }
     }
 }

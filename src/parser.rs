@@ -543,7 +543,7 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.current_token() {
             match token {
                 Ok(Token::RBrace) => {
-                    eprintln!("DEBUG_struct: found RBrace");
+                    
                     self.advance();
                     break;
                 }
@@ -2053,6 +2053,28 @@ impl<'a> Parser<'a> {
                 } else {
                     Ok(Expr::Identifier("Void".to_string()))
                 }
+            }
+            Some(Ok(Token::LBrace)) => {
+                // Object literal: { field: value, ... }
+                self.advance();
+                let mut fields = Vec::new();
+                if let Some(Ok(Token::RBrace)) = self.current_token() {
+                    // Empty object
+                } else {
+                    loop {
+                        let field_name = self.expect_identifier()?;
+                        self.expect(Token::Colon)?;
+                        let field_value = self.parse_expression()?;
+                        fields.push((field_name, field_value));
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.expect(Token::RBrace)?;
+                Ok(Expr::ObjectLiteral(fields))
             }
             Some(Ok(Token::LParen)) => {
                 self.advance();

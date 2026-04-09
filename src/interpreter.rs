@@ -648,6 +648,16 @@ impl Interpreter {
                     fields: instance_fields,
                 })
             }
+            Expr::ObjectLiteral(fields) => {
+                let mut instance_fields = HashMap::new();
+                for (field_name, field_expr) in fields {
+                    instance_fields.insert(field_name.clone(), self.eval_expr(field_expr)?);
+                }
+                Ok(Value::Instance {
+                    typename: String::from("ObjectLiteral"),
+                    fields: instance_fields,
+                })
+            }
         }
     }
 }

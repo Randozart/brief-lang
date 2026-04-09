@@ -749,6 +749,7 @@ impl TypeChecker {
             Expr::ListLen(_) => Type::Int,
             Expr::FieldAccess(_, _) => Type::Custom("unknown".to_string()),
             Expr::StructInstance(typename, _fields) => Type::Custom(typename.clone()),
+            Expr::ObjectLiteral(_) => Type::Custom("ObjectLiteral".to_string()),
         }
     }
 

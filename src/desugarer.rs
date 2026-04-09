@@ -121,6 +121,13 @@ impl Desugarer {
             })
             .collect();
 
+        let mut struct_defs: std::collections::HashMap<String, &StructDefinition> = std::collections::HashMap::new();
+        for item in &program.items {
+            if let TopLevel::Struct(s) = item {
+                struct_defs.insert(s.name.clone(), s);
+            }
+        }
+
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
@@ -274,6 +281,22 @@ impl Desugarer {
                         view_html: rs.view_html.clone(),
                         span: rs.span,
                     }));
+                }
+                TopLevel::StateDecl(state) => {
+                    let elem_type = Self::resolve_element_type(&state.ty);
+                    if let Some(expr) = &state.expr {
+                        let new_expr = self.transform_object_literals(
+                            expr.clone(),
+                            &struct_defs,
+                            elem_type.as_deref(),
+                        );
+                        items.push(TopLevel::StateDecl(StateDecl {
+                            expr: Some(new_expr),
+                            ..state.clone()
+                        }));
+                    } else {
+                        items.push(item.clone());
+                    }
                 }
                 _ => {
                     items.push(item.clone());
@@ -466,6 +489,61 @@ impl Desugarer {
             ..txn.clone()
         }
     }
+    fn resolve_element_type(ty: &Type) -> Option<String> {
+        match ty {
+            Type::Applied(name, inner) if name == "List" || name == "Set" => {
+                if let Some(inner_ty) = inner.first() {
+                    match inner_ty {
+                        Type::Custom(n) => Some(n.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn transform_object_literals(
+        &self,
+        expr: Expr,
+        struct_defs: &std::collections::HashMap<String, &StructDefinition>,
+        element_type: Option<&str>,
+    ) -> Expr {
+        match expr {
+            Expr::ObjectLiteral(fields) => {
+                if let Some(type_name) = element_type {
+                    if let Some(struct_def) = struct_defs.get(type_name) {
+                        let mut all_fields = Vec::new();
+                        for struct_field in &struct_def.fields {
+                            let value = fields.iter()
+                                .find(|(name, _)| name == &struct_field.name)
+                                .map(|(_, v)| v.clone())
+                                .unwrap_or_else(|| {
+                                    struct_field.default.clone().unwrap_or(Expr::Integer(0))
+                                });
+                            all_fields.push((struct_field.name.clone(), value));
+                        }
+                        Expr::StructInstance(type_name.to_string(), all_fields)
+                    } else {
+                        Expr::ObjectLiteral(fields)
+                    }
+                } else {
+                    Expr::ObjectLiteral(fields)
+                }
+            }
+            Expr::ListLiteral(elements) => {
+                let new_elements = elements
+                    .into_iter()
+                    .map(|e| self.transform_object_literals(e, struct_defs, element_type))
+                    .collect();
+                Expr::ListLiteral(new_elements)
+            }
+            other => other,
+        }
+    }
+
 }
 
 impl Default for Desugarer {

@@ -261,7 +261,6 @@ impl WasmGenerator {
         output.push_str("    pub fn render_each(&self, iterable: &str) -> String {\n");
         output.push_str("        for (iter_name, item_name, template) in &self.each_templates {\n");
         output.push_str("            if iter_name == iterable {\n");
-
         for (name, &id) in &self.signal_map {
             output.push_str(&format!("                if iterable == \"{}\" {{\n", name));
             output.push_str(&format!(
@@ -273,19 +272,15 @@ impl WasmGenerator {
             output.push_str("                        let mut result = String::new();\n");
             output.push_str("                        for i in 0..arr.length() {\n");
             output.push_str("                            let item = arr.get(i);\n");
-            output.push_str("                            let item_str = if item.is_string() {\n");
-            output
-                .push_str("                                item.as_string().unwrap_or_default()\n");
-            output.push_str("                            } else {\n");
-            output.push_str("                                format!(\"{:?}\", item)\n");
-            output.push_str("                            };\n");
+            output.push_str("                            let item_str = if item.is_string() { item.as_string().unwrap_or_default() } else { format!(\"{:?}\", item) };\n");
             output.push_str(
                 "                            let escaped = Self::html_escape(&item_str);\n",
             );
             output.push_str("                            let mut html = template.clone();\n");
 
-            // Handle simple item binding: b-text="item"
-            output.push_str("                            let search_simple = format!(\"b-text=\\\"{}\\\">\", item_name);\n");
+            output.push_str("                            // Handle b-text=\"item\"\n");
+            output.push_str("                            let search_simple = format!(\"b-text=\\\"{}\\\">\", item_name);
+");
             output.push_str(
                 "                            if let Some(pos) = html.find(&search_simple) {\n",
             );
@@ -300,48 +295,109 @@ impl WasmGenerator {
             output.push_str("                                }\n");
             output.push_str("                            }\n");
 
-            // Handle property access: b-text="item.property"
             output.push_str(
-                "                            // Check for property access like item.name\n",
+                "                            // Handle b-text=\"item.prop\" (recursive)\n",
             );
-            output.push_str("                            let prop_search = format!(\"b-text=\\\"{}.\", item_name);\n");
+            output.push_str("                            let prop_prefix = format!(\"b-text=\\\"{}.\", item_name);
+");
+            output.push_str("                            let mut search_pos = 0;\n");
+            output.push_str("                            while let Some(pos) = html[search_pos..].find(&prop_prefix) {\n");
+            output.push_str("                                let abs_pos = search_pos + pos;\n");
+            output.push_str("                                let after = &html[abs_pos + prop_prefix.len()..];\n");
             output.push_str(
-                "                            if let Some(pos) = html.find(&prop_search) {\n",
+                "                                if let Some(end_quote) = after.find('\\\"') {\n",
             );
-            output.push_str("                                let after_prop = &html[pos + prop_search.len()..];\n");
-            output.push_str("                                if let Some(end_quote) = after_prop.find('\\\"') {\n");
+            output
+                .push_str("                                    let path = &after[..end_quote];\n");
+            output
+                .push_str("                                    let mut current = item.clone();\n");
+            output.push_str("                                    for part in path.split('.') {\n");
             output.push_str(
-                "                                    let prop_name = &after_prop[..end_quote];\n",
+                "                                        let key = JsValue::from_str(part);\n",
             );
-            output.push_str("                                    if let Some(end_tag) = after_prop[end_quote..].find('>') {\n");
+            output.push_str("                                        current = js_sys::Reflect::get(&current, &key).unwrap_or(JsValue::UNDEFINED);\n");
+            output.push_str("                                    }\n");
+            output.push_str("                                    let val_str = if current.is_string() { current.as_string().unwrap_or_default() } else if let Some(n) = current.as_f64() { n.to_string() } else { format!(\"{:?}\", current) };\n");
             output.push_str(
-                "                                        // Access property on JS object using Reflect\n",
+                "                                    let val_esc = Self::html_escape(&val_str);\n",
             );
-            output.push_str("                                        let prop_key = JsValue::from_str(prop_name);\n");
-            output.push_str("                                        let prop_val = js_sys::Reflect::get(&item, &prop_key).unwrap_or_else(|_| JsValue::UNDEFINED);\n");
-            output.push_str("                                        let prop_str = if prop_val.is_string() {\n");
-            output.push_str("                                            prop_val.as_string().unwrap_or_default()\n");
+            output.push_str("                                    if let Some(tag_end) = after[end_quote..].find('>') {\n");
+            output.push_str("                                        let abs_tag_end = abs_pos + prop_prefix.len() + end_quote + tag_end;\n");
             output.push_str(
-                "                                        } else if prop_val.as_f64().is_some() {\n",
+                "                                        let rest = &html[abs_tag_end + 1..];\n",
             );
-            output.push_str("                                            format!(\"{}\", prop_val.as_f64().unwrap_or(0.0))\n");
-            output.push_str("                                        } else {\n");
+            output.push_str("                                        if let Some(content_end) = rest.find('<') {\n");
+            output.push_str("                                            html = format!(\"{}{}{}\", &html[..abs_tag_end + 1], val_esc, &rest[content_end..]);\n");
+            output.push_str("                                        }\n");
+            output.push_str("                                    }\n");
+            output.push_str("                                }\n");
+            output.push_str("                                search_pos = abs_pos + 1;\n");
+            output.push_str("                            }\n");
+
+            output.push_str("                            // Handle b-show=\"item.prop\"\n");
+            output.push_str("                            let show_prefix = format!(\"b-show=\\\"{}.\", item_name);
+");
+            output.push_str("                            search_pos = 0;\n");
+            output.push_str("                            while let Some(pos) = html[search_pos..].find(&show_prefix) {\n");
+            output.push_str("                                let abs_pos = search_pos + pos;\n");
+            output.push_str("                                let after = &html[abs_pos + show_prefix.len()..];\n");
             output.push_str(
-                "                                            format!(\"{:?}\", prop_val)\n",
+                "                                if let Some(end_quote) = after.find('\\\"') {\n",
             );
-            output.push_str("                                        };\n");
-            output.push_str("                                        let prop_escaped = Self::html_escape(&prop_str);\n");
-            output.push_str("                                        let full_search = format!(\"b-text=\\\"{}.{}\\\">\", item_name, prop_name);\n");
-            output.push_str("                                        if let Some(full_pos) = html.find(&full_search) {\n");
-            output.push_str("                                            let after_full = &html[full_pos + full_search.len()..];\n");
-            output.push_str("                                            if let Some(tag_end) = after_full.find('<') {\n");
-            output.push_str("                                                let before_full = &html[..full_pos];\n");
-            output.push_str("                                                let rest_full = &after_full[tag_end..];\n");
-            output.push_str("                                                html = format!(\"{}>{}{}\", before_full, prop_escaped, rest_full);\n");
+            output
+                .push_str("                                    let path = &after[..end_quote];\n");
+            output
+                .push_str("                                    let mut current = item.clone();\n");
+            output.push_str("                                    for part in path.split('.') {\n");
+            output.push_str(
+                "                                        let key = JsValue::from_str(part);\n",
+            );
+            output.push_str("                                        current = js_sys::Reflect::get(&current, &key).unwrap_or(JsValue::UNDEFINED);\n");
+            output.push_str("                                    }\n");
+            output.push_str("                                    if !current.is_truthy() {\n");
+            output.push_str("                                        if let Some(tag_start) = html[..abs_pos].rfind('<') {\n");
+            output.push_str("                                            let tag_after = &html[tag_start+1..];\n");
+            output.push_str("                                            if let Some(space_pos) = tag_after.find(|c: char| c.is_whitespace() || c == '>') {\n");
+            output.push_str("                                                let ins = tag_start + 1 + space_pos;\n");
+            output.push_str("                                                html = format!(\"{} style=\\\"display:none;\\\" {}\", &html[..ins], &html[ins..]);\n");
             output.push_str("                                            }\n");
             output.push_str("                                        }\n");
             output.push_str("                                    }\n");
             output.push_str("                                }\n");
+            output.push_str("                                search_pos = abs_pos + 1;\n");
+            output.push_str("                            }\n");
+
+            output.push_str("                            // Handle b-hide=\"item.prop\"\n");
+            output.push_str("                            let hide_prefix = format!(\"b-hide=\\\"{}.\", item_name);
+");
+            output.push_str("                            search_pos = 0;\n");
+            output.push_str("                            while let Some(pos) = html[search_pos..].find(&hide_prefix) {\n");
+            output.push_str("                                let abs_pos = search_pos + pos;\n");
+            output.push_str("                                let after = &html[abs_pos + hide_prefix.len()..];\n");
+            output.push_str(
+                "                                if let Some(end_quote) = after.find('\\\"') {\n",
+            );
+            output
+                .push_str("                                    let path = &after[..end_quote];\n");
+            output
+                .push_str("                                    let mut current = item.clone();\n");
+            output.push_str("                                    for part in path.split('.') {\n");
+            output.push_str(
+                "                                        let key = JsValue::from_str(part);\n",
+            );
+            output.push_str("                                        current = js_sys::Reflect::get(&current, &key).unwrap_or(JsValue::UNDEFINED);\n");
+            output.push_str("                                    }\n");
+            output.push_str("                                    if current.is_truthy() {\n");
+            output.push_str("                                        if let Some(tag_start) = html[..abs_pos].rfind('<') {\n");
+            output.push_str("                                            let tag_after = &html[tag_start+1..];\n");
+            output.push_str("                                            if let Some(space_pos) = tag_after.find(|c: char| c.is_whitespace() || c == '>') {\n");
+            output.push_str("                                                let ins = tag_start + 1 + space_pos;\n");
+            output.push_str("                                                html = format!(\"{} style=\\\"display:none;\\\" {}\", &html[..ins], &html[ins..]);\n");
+            output.push_str("                                            }\n");
+            output.push_str("                                        }\n");
+            output.push_str("                                    }\n");
+            output.push_str("                                }\n");
+            output.push_str("                                search_pos = abs_pos + 1;\n");
             output.push_str("                            }\n");
 
             output.push_str("                            result.push_str(&html);\n");
@@ -350,12 +406,10 @@ impl WasmGenerator {
             output.push_str("                    }\n");
             output.push_str("                }\n");
         }
-
         output.push_str("            }\n");
         output.push_str("        }\n");
         output.push_str("        String::new()\n");
         output.push_str("    }\n\n");
-
         output.push_str("    fn signal_map(&self) -> std::collections::HashMap<String, usize> {\n");
         output.push_str("        let mut map = std::collections::HashMap::new();\n");
         for (name, &id) in &self.signal_map {
@@ -518,6 +572,15 @@ impl WasmGenerator {
                     output.push_str(&binding.element_id);
                     output.push_str("\"), val);\n");
                     output.push_str("            parts.push(json);\n");
+                    output.push_str("        }\n");
+                }
+            } else if let Directive::Each { iterable, .. } = &binding.directive {
+                if let Some(&sig_id) = self.signal_map.get(iterable) {
+                    output.push_str(&format!("        if self.dirty_signals[{}] {{\n", sig_id));
+                    output.push_str(&format!(
+                        "            parts.push(format!(\"{{{{\\\"op\\\":\\\"each\\\",\\\"iterable\\\":\\\"{}\\\",\\\"el\\\":\\\"{}\\\"}}}}\"));\n",
+                        iterable, binding.element_id
+                    ));
                     output.push_str("        }\n");
                 }
             }
@@ -857,6 +920,20 @@ impl WasmGenerator {
                     sets
                 )
             }
+            Expr::ObjectLiteral(fields) => {
+                let mut sets = String::new();
+                for (field_name, field_value) in fields {
+                    let value_js = self.expr_to_js_value(field_value);
+                    sets.push_str(&format!(
+                        r#"js_sys::Reflect::set(&__obj, &JsValue::from("{}"), &{}).ok(); "#,
+                        field_name, value_js
+                    ));
+                }
+                format!(
+                    "JsValue::from({{ let mut __obj = js_sys::Object::new(); {} __obj }})",
+                    sets
+                )
+            }
             _ => "JsValue::TRUE".to_string(),
         }
     }
@@ -964,9 +1041,15 @@ impl WasmGenerator {
         for binding in bindings {
             if let Directive::Trigger { event, txn } = &binding.directive {
                 // Transform transaction name to invoke method name
-                // e.g., "ShoppingCart.add" -> "invoke_ShoppingCart_add"
+                // Use short name to match the generated alias
+                // e.g., "Counter.tick" -> "invoke_tick" (alias to invoke_Counter_tick)
                 // e.g., "add" -> "invoke_add"
-                let invoke_method = format!("invoke_{}", txn.replace(".", "_"));
+                let short_name = if txn.contains('.') {
+                    txn.split('.').last().unwrap_or(txn)
+                } else {
+                    txn
+                };
+                let invoke_method = format!("invoke_{}", short_name);
                 output.push_str(&format!(
                     "        '{}': {{ event: '{}', txn: '{}' }},\n",
                     binding.element_id, event, invoke_method
@@ -1062,6 +1145,9 @@ impl WasmGenerator {
         output.push_str("                    break;\n");
         output.push_str("                case 'class_remove':\n");
         output.push_str("                    el.classList.remove(inst.class);\n");
+        output.push_str("                    break;\n");
+        output.push_str("                case 'each':\n");
+        output.push_str("                    renderEach(inst.iterable, '#' + inst.el);\n");
         output.push_str("                    break;\n");
         output.push_str("            }\n");
         output.push_str("        }\n");
