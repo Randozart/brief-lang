@@ -11,6 +11,7 @@ pub struct ProofError {
     pub proof_chain: Vec<String>,
     pub examples: Vec<String>,
     pub hints: Vec<String>,
+    pub is_warning: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -584,6 +585,19 @@ impl ProofError {
             proof_chain: Vec::new(),
             examples: Vec::new(),
             hints: Vec::new(),
+            is_warning: false,
+        }
+    }
+
+    pub fn new_warning(code: &str, title: &str) -> Self {
+        ProofError {
+            code: code.to_string(),
+            title: title.to_string(),
+            explanation: String::new(),
+            proof_chain: Vec::new(),
+            examples: Vec::new(),
+            hints: Vec::new(),
+            is_warning: true,
         }
     }
 
@@ -836,7 +850,10 @@ impl ProofEngine {
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
-                    if let Expr::Bool(true) = &txn.contract.pre_condition {
+                    let pre_is_trivial = matches!(&txn.contract.pre_condition, Expr::Bool(true));
+                    let post_is_trivial = matches!(&txn.contract.post_condition, Expr::Bool(true));
+
+                    if pre_is_trivial && post_is_trivial {
                         let mut err = ProofError::new("P009", "trivial precondition");
                         err.explanation = format!(
                             "transaction '{}' has precondition '[true]' which is always satisfied",
@@ -853,8 +870,7 @@ impl ProofEngine {
                         err.hints
                             .push("e.g., '[count > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
-                    }
-                    if let Expr::Bool(true) = &txn.contract.post_condition {
+
                         let mut err = ProofError::new("P010", "trivial postcondition");
                         err.explanation = format!(
                             "transaction '{}' has postcondition '[true]' which is always satisfied",
@@ -871,10 +887,47 @@ impl ProofEngine {
                         err.hints
                             .push("e.g., '[count == @count + 1]' instead of '[true]'".to_string());
                         self.errors.push(err);
+                    } else if pre_is_trivial {
+                        let mut err = ProofError::new_warning("P009", "trivial precondition");
+                        err.explanation = format!(
+                            "transaction '{}' has precondition '[true]' which is always satisfied",
+                            txn.name
+                        );
+                        err.proof_chain
+                            .push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain
+                            .push("2. consider specifying actual preconditions".to_string());
+                        err.hints.push(format!(
+                            "specify what state is required before '{}' runs",
+                            txn.name
+                        ));
+                        err.hints
+                            .push("e.g., '[count > 0]' instead of '[true]'".to_string());
+                        self.errors.push(err);
+                    } else if post_is_trivial {
+                        let mut err = ProofError::new_warning("P010", "trivial postcondition");
+                        err.explanation = format!(
+                            "transaction '{}' has postcondition '[true]' which is always satisfied",
+                            txn.name
+                        );
+                        err.proof_chain
+                            .push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain
+                            .push("2. consider specifying actual postconditions".to_string());
+                        err.hints.push(format!(
+                            "specify what state '{}' guarantees after running",
+                            txn.name
+                        ));
+                        err.hints
+                            .push("e.g., '[count == @count + 1]' instead of '[true]'".to_string());
+                        self.errors.push(err);
                     }
                 }
                 TopLevel::Definition(defn) => {
-                    if let Expr::Bool(true) = &defn.contract.pre_condition {
+                    let pre_is_trivial = matches!(&defn.contract.pre_condition, Expr::Bool(true));
+                    let post_is_trivial = matches!(&defn.contract.post_condition, Expr::Bool(true));
+
+                    if pre_is_trivial && post_is_trivial {
                         let mut err = ProofError::new("P009", "trivial precondition");
                         err.explanation = format!(
                             "definition '{}' has precondition '[true]' which is always satisfied",
@@ -891,8 +944,7 @@ impl ProofEngine {
                         err.hints
                             .push("e.g., '[x > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
-                    }
-                    if let Expr::Bool(true) = &defn.contract.post_condition {
+
                         let mut err = ProofError::new("P010", "trivial postcondition");
                         err.explanation = format!(
                             "definition '{}' has postcondition '[true]' which is always satisfied",
@@ -902,6 +954,40 @@ impl ProofEngine {
                             .push("1. '[true]' accepts any state".to_string());
                         err.proof_chain
                             .push("2. this provides no compile-time safety".to_string());
+                        err.hints.push(format!(
+                            "specify what state '{}' guarantees after running",
+                            defn.name
+                        ));
+                        err.hints
+                            .push("e.g., '[result > 0]' instead of '[true]'".to_string());
+                        self.errors.push(err);
+                    } else if pre_is_trivial {
+                        let mut err = ProofError::new_warning("P009", "trivial precondition");
+                        err.explanation = format!(
+                            "definition '{}' has precondition '[true]' which is always satisfied",
+                            defn.name
+                        );
+                        err.proof_chain
+                            .push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain
+                            .push("2. consider specifying actual preconditions".to_string());
+                        err.hints.push(format!(
+                            "specify what state is required before '{}' runs",
+                            defn.name
+                        ));
+                        err.hints
+                            .push("e.g., '[x > 0]' instead of '[true]'".to_string());
+                        self.errors.push(err);
+                    } else if post_is_trivial {
+                        let mut err = ProofError::new_warning("P010", "trivial postcondition");
+                        err.explanation = format!(
+                            "definition '{}' has postcondition '[true]' which is always satisfied",
+                            defn.name
+                        );
+                        err.proof_chain
+                            .push("1. '[true]' accepts any state".to_string());
+                        err.proof_chain
+                            .push("2. consider specifying actual postconditions".to_string());
                         err.hints.push(format!(
                             "specify what state '{}' guarantees after running",
                             defn.name
@@ -1629,7 +1715,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trivial_precondition_detected() {
+    fn test_trivial_precondition_with_non_trivial_post_warning() {
         let code = r#"
             let count: Int = 0;
 
@@ -1645,16 +1731,17 @@ mod tests {
         let mut pe = ProofEngine::new();
         let errors = pe.verify_program(&program);
 
-        let has_trivial_pre = errors.iter().any(|e| e.code == "P009");
+        let has_trivial_pre_warning = errors.iter().any(|e| e.code == "P009" && e.is_warning);
+        let has_trivial_pre_error = errors.iter().any(|e| e.code == "P009" && !e.is_warning);
         assert!(
-            has_trivial_pre,
-            "Expected P009 trivial precondition error, got: {:?}",
+            has_trivial_pre_warning && !has_trivial_pre_error,
+            "Expected P009 warning (not error) when post is non-trivial, got: {:?}",
             errors
         );
     }
 
     #[test]
-    fn test_trivial_postcondition_detected() {
+    fn test_trivial_postcondition_with_non_trivial_pre_warning() {
         let code = r#"
             let count: Int = 0;
 
@@ -1670,10 +1757,11 @@ mod tests {
         let mut pe = ProofEngine::new();
         let errors = pe.verify_program(&program);
 
-        let has_trivial_post = errors.iter().any(|e| e.code == "P010");
+        let has_trivial_post_warning = errors.iter().any(|e| e.code == "P010" && e.is_warning);
+        let has_trivial_post_error = errors.iter().any(|e| e.code == "P010" && !e.is_warning);
         assert!(
-            has_trivial_post,
-            "Expected P010 trivial postcondition error, got: {:?}",
+            has_trivial_post_warning && !has_trivial_post_error,
+            "Expected P010 warning (not error) when pre is non-trivial, got: {:?}",
             errors
         );
     }

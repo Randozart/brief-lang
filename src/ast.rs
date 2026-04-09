@@ -318,6 +318,8 @@ pub enum TopLevel {
     Struct(StructDefinition),
     RStruct(RStructDefinition),
     RenderBlock(RenderBlock),
+    Stylesheet(String),
+    SvgComponent(String),
 }
 
 #[derive(Debug, Clone)]
@@ -333,6 +335,7 @@ pub struct StructDefinition {
 pub struct StructField {
     pub name: String,
     pub ty: Type,
+    pub default: Option<Expr>,
 }
 
 impl StructDefinition {

@@ -42,6 +42,13 @@ pub struct ViewCompiler {
     transactions: HashMap<String, usize>,
     bindings: Vec<Binding>,
     id_counter: usize,
+    each_context: Vec<EachContext>,
+}
+
+#[derive(Debug, Clone)]
+struct EachContext {
+    iterable: String,
+    item_name: String,
 }
 
 impl ViewCompiler {
@@ -51,6 +58,7 @@ impl ViewCompiler {
             transactions: HashMap::new(),
             bindings: Vec::new(),
             id_counter: 0,
+            each_context: Vec::new(),
         }
     }
 
@@ -188,7 +196,7 @@ impl ViewCompiler {
                                 format!("{} {}</{}>", opening_tag, inner_html, elem_name);
 
                             let container_id =
-                                if let Some((_, parent_pos)) = element_stack.iter().rev().nth(1) {
+                                if let Some((_, parent_pos)) = element_stack.iter().rev().nth(0) {
                                     let parent_html = &html[*parent_pos..];
                                     if let Some((parent_tag, _)) = self.parse_tag(parent_html) {
                                         if let Some(id) = self.extract_id_from_tag(&parent_tag) {
@@ -454,7 +462,15 @@ impl ViewCompiler {
             return None;
         }
         let after_eq = &after_item[1..].trim();
-        let iterable = after_eq.trim_matches('"').trim_matches('\'').to_string();
+        let mut iterable = after_eq.trim_matches('"').trim_matches('\'').to_string();
+        if iterable.ends_with('>') {
+            iterable.pop();
+            if let Some(c) = iterable.chars().last() {
+                if c == '"' || c == '\'' {
+                    iterable.pop();
+                }
+            }
+        }
         Some((item_name.to_string(), iterable))
     }
 }

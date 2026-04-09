@@ -262,13 +262,30 @@ impl<'a> Parser<'a> {
 
         let path = if let Some(Ok(Token::From)) = self.current_token() {
             self.advance();
-            let mut path = Vec::new();
-            path.push(self.expect_identifier()?);
-            while let Some(Ok(Token::Dot)) = self.current_token() {
+            // Support quoted string paths like "./landing.css" or "./icons/logo.svg"
+            if let Some(Ok(Token::String(s))) = self.current_token() {
+                let s = s.clone();
                 self.advance();
+                // Convert "./path/file.css" to ["path", "file.css"]
+                let trimmed = s.trim_start_matches("./");
+                let parts: Vec<String> = trimmed.split('/').map(String::from).collect();
+                parts
+            } else {
+                let mut path = Vec::new();
                 path.push(self.expect_identifier()?);
+                while let Some(Ok(Token::Dot)) = self.current_token() {
+                    self.advance();
+                    path.push(self.expect_identifier()?);
+                }
+                path
             }
-            path
+        } else if let Some(Ok(Token::String(s))) = self.current_token() {
+            // Support direct quoted path: import "./file.css";
+            let s = s.clone();
+            self.advance();
+            let trimmed = s.trim_start_matches("./");
+            let parts: Vec<String> = trimmed.split('/').map(String::from).collect();
+            parts
         } else if let Some(Ok(Token::Identifier(_))) = self.current_token() {
             if !items.is_empty() {
                 return Err(
@@ -534,10 +551,24 @@ impl<'a> Parser<'a> {
                         let field_name = self.expect_identifier()?;
                         self.expect(Token::Colon)?;
                         let field_type = self.parse_type()?;
+
+                        // Parse optional initializer
+                        let default = if let Some(Ok(Token::Eq)) = self.peek() {
+                            self.expect(Token::Eq)?;
+                            Some(self.parse_expression()?)
+                        } else {
+                            // No initializer - error
+                            return Err(format!(
+                                "struct field '{}' must have initial value (e.g., let {} = 0;)",
+                                field_name, field_name
+                            ));
+                        };
+
                         self.expect(Token::Semicolon)?;
                         fields.push(StructField {
                             name: field_name,
                             ty: field_type,
+                            default,
                         });
                     } else {
                         let txn = self.parse_transaction()?;
@@ -586,29 +617,104 @@ impl<'a> Parser<'a> {
                 );
             }
 
+            // rstruct closing brace handling
             match token {
                 Ok(Token::RBrace) => {
                     self.advance();
                     break;
                 }
                 Ok(Token::Identifier(_)) => {
+                    // Check if it's a field (name: Type) or transaction
                     if let Some(Ok(Token::Colon)) = self.peek() {
                         let field_name = self.expect_identifier()?;
                         self.expect(Token::Colon)?;
                         let field_type = self.parse_type()?;
+
+                        // Parse optional initializer - check current token (not peek)
+                        let default = if let Some(Ok(Token::Eq)) = self.current_token() {
+                            self.advance(); // consume '='
+                            Some(self.parse_expression()?)
+                        } else {
+                            // No initializer - error
+                            return Err(format!(
+                                "rstruct field '{}' must have initial value (e.g., let {} = 0;)",
+                                field_name, field_name
+                            ));
+                        };
+
                         self.expect(Token::Semicolon)?;
                         fields.push(StructField {
                             name: field_name,
                             ty: field_type,
+                            default,
                         });
                     } else {
+                        // This is a transaction - parse it and expand name if no dot
                         let txn = self.parse_transaction()?;
-                        transactions.push(txn);
+                        // If txn name doesn't contain '.', prepend rstruct name
+                        let expanded_txn = if !txn.name.contains('.') {
+                            Transaction {
+                                name: format!("{}.{}", name, txn.name),
+                                ..txn
+                            }
+                        } else {
+                            txn
+                        };
+                        transactions.push(expanded_txn);
+                    }
+                }
+                Ok(Token::Let) => {
+                    // Handle "let field: Type;" syntax explicitly
+                    self.advance(); // Consume 'let' keyword
+
+                    if let Some(Ok(Token::Colon)) = self.peek() {
+                        let field_name = self.expect_identifier()?;
+                        self.expect(Token::Colon)?;
+                        let field_type = self.parse_type()?;
+
+                        // Parse optional initializer - check current token (not peek)
+                        let default = if let Some(Ok(Token::Eq)) = self.current_token() {
+                            self.advance(); // consume '='
+                            Some(self.parse_expression()?)
+                        } else {
+                            return Err(format!(
+                                "rstruct field '{}' must have initial value (e.g., let {} = 0;)",
+                                field_name, field_name
+                            ));
+                        };
+
+                        self.expect(Token::Semicolon)?;
+                        fields.push(StructField {
+                            name: field_name,
+                            ty: field_type,
+                            default,
+                        });
+                    } else {
+                        // Not a field, treat as transaction - parse and expand name
+                        let txn = self.parse_transaction()?;
+                        let expanded_txn = if !txn.name.contains('.') {
+                            Transaction {
+                                name: format!("{}.{}", name, txn.name),
+                                ..txn
+                            }
+                        } else {
+                            txn
+                        };
+                        transactions.push(expanded_txn);
                     }
                 }
                 Ok(Token::Txn) | Ok(Token::Rct) | Ok(Token::Async) => {
+                    // Parse transaction and expand name if no dot
                     let txn = self.parse_transaction()?;
-                    transactions.push(txn);
+                    let expanded_txn = if !txn.name.contains('.') {
+                        Transaction {
+                            name: format!("{}.{}", name, txn.name),
+                            ..txn
+                        }
+                    } else {
+                        txn
+                    };
+                    transactions.push(expanded_txn);
                 }
                 Ok(Token::Lt) => {
                     let start = if let Some((_, span)) = &self.current {
@@ -635,6 +741,9 @@ impl<'a> Parser<'a> {
                     .to_string(),
             );
         }
+
+        let span = self.current_span();
+        self.expect(Token::Semicolon)?;
 
         Ok(RStructDefinition {
             name,

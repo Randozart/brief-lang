@@ -123,6 +123,8 @@ impl TypeChecker {
                 TopLevel::Struct(_) => {}
                 TopLevel::RStruct(_) => {}
                 TopLevel::RenderBlock(_) => {}
+                TopLevel::Stylesheet(_) => {}
+                TopLevel::SvgComponent(_) => {}
             }
         }
         self.errors.clone()

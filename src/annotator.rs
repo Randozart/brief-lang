@@ -407,6 +407,12 @@ impl Annotator {
                 TopLevel::RenderBlock(rb) => {
                     output.push_str(&format!("render {} {{ ... }}\n", rb.struct_name));
                 }
+                TopLevel::Stylesheet(css) => {
+                    output.push_str(&format!("// Stylesheet ({} chars)\n", css.len()));
+                }
+                TopLevel::SvgComponent(svg) => {
+                    output.push_str(&format!("// SvgComponent ({} chars)\n", svg.len()));
+                }
             }
             output.push('\n');
         }

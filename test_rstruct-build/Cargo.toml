@@ -1,0 +1,20 @@
+[package]
+name = "test_rstruct"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

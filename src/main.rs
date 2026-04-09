@@ -85,9 +85,10 @@ fn format_type_errors(errors: &[typechecker::TypeError], file_name: &str) -> Str
 fn format_proof_errors(errors: &[proof_engine::ProofError], file_name: &str) -> String {
     let mut output = String::new();
     for err in errors {
+        let severity = if err.is_warning { "warning" } else { "error" };
         output.push_str(&format!(
-            "error[{}]: {}\n --> {}:?:?\n",
-            err.code, err.title, file_name
+            "{}[{}]: {}\n --> {}:?:?\n",
+            severity, err.code, err.title, file_name
         ));
         if !err.explanation.is_empty() {
             output.push_str(&format!("  |\n  = {}\n", err.explanation));
@@ -163,6 +164,7 @@ fn print_usage(program: &str) {
     eprintln!("RBV Options:");
     eprintln!("  --out <dir>      Output directory (default: <name>-build)");
     eprintln!("  --no-build       Skip wasm-pack build");
+    eprintln!("  --no-cache       Clear build cache before compiling");
     eprintln!("  --port <port>    Port for server (default: 8080)");
     eprintln!("  --no-open        Don't open browser (for 'run' command)");
     eprintln!("  --watch, -w      Watch for changes and rebuild (for 'run' command)");
@@ -377,12 +379,19 @@ fn run_check(
     }
     let mut pe = proof_engine::ProofEngine::new();
     let proof_errors = pe.verify_program(&program);
-    if !proof_errors.is_empty() {
+    let has_errors = proof_errors.iter().any(|e| !e.is_warning);
+    if has_errors {
         eprintln!(
             "{}",
             format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
         );
         return Err("Proof errors".into());
+    }
+    if !proof_errors.is_empty() {
+        eprintln!(
+            "{}",
+            format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
+        );
     }
     if verbose {
         println!("[ProofEngine] All proofs verified");
@@ -400,7 +409,7 @@ fn run_check(
         println!("// === END ANNOTATED PROGRAM ===");
     }
 
-    println!("✓ All checks passed");
+    println!("All checks passed");
     Ok(())
 }
 
@@ -459,12 +468,19 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
     }
     let mut pe = proof_engine::ProofEngine::new();
     let proof_errors = pe.verify_program(&program);
-    if !proof_errors.is_empty() {
+    let has_errors = proof_errors.iter().any(|e| !e.is_warning);
+    if has_errors {
         eprintln!(
             "{}",
             format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
         );
         return Err("Proof errors".into());
+    }
+    if !proof_errors.is_empty() {
+        eprintln!(
+            "{}",
+            format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
+        );
     }
 
     if verbose {
@@ -642,7 +658,7 @@ rstruct Counter {
         println!("  {}/lib/", project_name);
     }
 
-    println!("✓ Project '{}' created successfully", project_name);
+    println!("Project '{}' created successfully", project_name);
     println!("  Files created:");
     println!("    main.bv  - Pure Brief (specification only, no UI)");
     println!("    main.rbv - Rendered Brief (with web UI)");
@@ -714,7 +730,7 @@ fn run_import(
         println!("Added dependency '{}' = '{}'", name, dep_path.display());
     }
 
-    println!("✓ Added '{}' to dependencies", name);
+    println!("Added '{}' to dependencies", name);
 
     Ok(())
 }
@@ -758,15 +774,22 @@ fn run_watch(file_path: PathBuf, verbose: bool) -> Result<(), Box<dyn std::error
 
     let mut pe = proof_engine::ProofEngine::new();
     let proof_errors = pe.verify_program(&program);
-    if !proof_errors.is_empty() {
+    let has_errors = proof_errors.iter().any(|e| !e.is_warning);
+    if has_errors {
         eprintln!(
             "{}",
             format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
         );
         return Err("Proof errors".into());
     }
+    if !proof_errors.is_empty() {
+        eprintln!(
+            "{}",
+            format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
+        );
+    }
 
-    println!("✓ Initial check passed - watching for changes...");
+    println!("Initial check passed - watching for changes...");
 
     let watch_path = file_path.clone();
     let mut watcher =
@@ -912,9 +935,24 @@ fn run_rbv(
     println!("  Parsed {} items", program.items.len());
 
     let mut import_resolver = import_resolver::ImportResolver::new();
-    let program = import_resolver
+    let mut program = import_resolver
         .resolve_imports(&program, file_path)
         .map_err(|e| format!("Import error: {}", e))?;
+
+    // Extract CSS from Stylesheet imports
+    let mut css_content = String::new();
+    let mut stylesheet_items: Vec<usize> = Vec::new();
+    for (i, item) in program.items.iter().enumerate() {
+        if let ast::TopLevel::Stylesheet(css) = item {
+            css_content.push_str(css);
+            css_content.push('\n');
+            stylesheet_items.push(i);
+        }
+    }
+    // Remove stylesheet items from program (they're not Brief code)
+    for i in stylesheet_items.iter().rev() {
+        program.items.remove(*i);
+    }
 
     println!("  Resolved imports");
 
@@ -978,12 +1016,19 @@ fn run_rbv(
     println!("  Proof engine running...");
     let proof_errors = pe.verify_program(&program);
     println!("  Proof engine done");
-    if !proof_errors.is_empty() {
+    let has_errors = proof_errors.iter().any(|e| !e.is_warning);
+    if has_errors {
         eprintln!(
             "{}",
             format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.rbv"))
         );
         return Err("Proof errors".into());
+    }
+    if !proof_errors.is_empty() {
+        eprintln!(
+            "{}",
+            format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.rbv"))
+        );
     }
 
     let mut view_compiler = view_compiler::ViewCompiler::new();
@@ -1027,7 +1072,20 @@ fn run_rbv(
     fs::write(&js_path, &output.js_glue)?;
     println!("  Generated: {}", js_path.display());
 
-    if let Some(css) = &rbv_file.style_css {
+    // Write CSS file (combine inline styles + imported stylesheets)
+    let final_css = if let Some(inline_css) = &rbv_file.style_css {
+        if css_content.is_empty() {
+            Some(inline_css.clone())
+        } else {
+            Some(format!("{}\n{}", inline_css, css_content))
+        }
+    } else if !css_content.is_empty() {
+        Some(css_content)
+    } else {
+        None
+    };
+
+    if let Some(css) = &final_css {
         let css_path = output_path.join(format!("{}.css", stem));
         fs::write(&css_path, css)?;
         println!("  Generated: {}", css_path.display());
@@ -1058,6 +1116,8 @@ fn run_rbv(
 name = "{}"
 version = "0.1.0"
 edition = "2021"
+
+[workspace]
 
 [lib]
 crate-type = ["cdylib"]
@@ -1133,7 +1193,7 @@ wasm-opt = false
         }
     }
 
-    println!("\n✓ RBV compiled successfully");
+    println!("\nRBV compiled successfully");
     println!(
         "  Signals: {}, Transactions: {}",
         output.signal_count, output.txn_count
@@ -1303,9 +1363,10 @@ fn main() {
         }
 
         "rbv" => {
-            let mut out_dir = None;
             let mut file_path = None;
+            let mut out_dir = None;
             let mut build_wasm = true;
+            let mut no_cache = false;
 
             let mut i = 2;
             while i < args.len() {
@@ -1316,11 +1377,28 @@ fn main() {
                 } else if arg == "--no-build" {
                     build_wasm = false;
                     i += 1;
+                } else if arg == "--no-cache" {
+                    no_cache = true;
+                    i += 1;
                 } else if arg.ends_with(".rbv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
                     i += 1;
+                }
+            }
+
+            // Clear cache if --no-cache is specified
+            if no_cache {
+                if let Some(ref path) = file_path {
+                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("app");
+                    let build_dir = out_dir
+                        .clone()
+                        .unwrap_or_else(|| PathBuf::from(format!("{}-build", stem)));
+                    if build_dir.exists() {
+                        println!("Clearing cache: {}", build_dir.display());
+                        let _ = std::fs::remove_dir_all(&build_dir);
+                    }
                 }
             }
 
@@ -1352,6 +1430,7 @@ fn main() {
             let mut port = None::<u16>;
             let mut open_browser = true;
             let mut watch_mode = false;
+            let mut no_cache = false;
 
             let mut i = 2;
             while i < args.len() {
@@ -1372,6 +1451,9 @@ fn main() {
                 } else if arg == "--watch" || arg == "-w" {
                     watch_mode = true;
                     i += 1;
+                } else if arg == "--no-cache" {
+                    no_cache = true;
+                    i += 1;
                 } else if arg.ends_with(".rbv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -1381,6 +1463,16 @@ fn main() {
             }
 
             if let Some(path) = file_path {
+                // Clear cache if --no-cache is specified
+                if no_cache {
+                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("app");
+                    let build_dir = std::env::temp_dir().join(format!("brief-run-{}", stem));
+                    if build_dir.exists() {
+                        println!("Clearing cache: {}", build_dir.display());
+                        let _ = std::fs::remove_dir_all(&build_dir);
+                    }
+                }
+
                 let out_dir = std::env::temp_dir().join(format!(
                     "brief-run-{}",
                     path.file_stem().and_then(|s| s.to_str()).unwrap_or("app")

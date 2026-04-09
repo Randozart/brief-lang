@@ -75,6 +75,65 @@ impl ImportResolver {
             return self.filter_items(cached, &import.items);
         }
 
+        // Check for CSS import
+        if path_str.ends_with(".css") {
+            let css_path = source_file
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(&path_str);
+
+            if css_path.exists() {
+                let css_content = std::fs::read_to_string(&css_path)
+                    .map_err(|e| format!("Failed to read CSS '{}': {}", css_path.display(), e))?;
+                let css_for_cache = css_content.clone();
+                let css_for_return = css_content.clone();
+                self.loaded_modules.insert(
+                    path_str.clone(),
+                    Program {
+                        items: vec![TopLevel::Stylesheet(css_for_cache)],
+                        comments: vec![],
+                        reactor_speed: None,
+                    },
+                );
+                return Ok(Program {
+                    items: vec![TopLevel::Stylesheet(css_for_return)],
+                    comments: vec![],
+                    reactor_speed: None,
+                });
+            }
+        }
+
+        // Check for SVG import
+        if path_str.ends_with(".svg") {
+            let svg_path = source_file
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(&path_str);
+
+            if svg_path.exists() {
+                let svg_content = std::fs::read_to_string(&svg_path)
+                    .map_err(|e| format!("Failed to read SVG '{}': {}", svg_path.display(), e))?;
+                let svg_for_cache = svg_content.clone();
+                let svg_for_return = svg_content.clone();
+                self.loaded_modules.insert(
+                    path_str.clone(),
+                    Program {
+                        items: vec![TopLevel::SvgComponent(svg_for_cache)],
+                        comments: vec![],
+                        reactor_speed: None,
+                    },
+                );
+                return Ok(Program {
+                    items: vec![TopLevel::SvgComponent(svg_content)],
+                    comments: vec![],
+                    reactor_speed: None,
+                });
+            }
+        }
+
+        // Default: Brief module (.bv)
         let file_name = format!("{}.bv", path_str.replace('.', "/"));
         let source_dir = source_file
             .parent()

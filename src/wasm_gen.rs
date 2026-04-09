@@ -1,4 +1,4 @@
-use crate::ast::{Contract, Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{Contract, Expr, Program, Statement, TopLevel, Transaction, Type};
 use crate::view_compiler::{Binding, Directive};
 use std::collections::HashMap;
 
@@ -19,6 +19,8 @@ pub struct WasmGenerator {
     signal_types: HashMap<String, SignalType>,
     signal_initializers: HashMap<String, String>,
     txn_map: HashMap<String, usize>,
+    reactive_txns: Vec<Transaction>,
+    reactive_dependency_map: HashMap<String, Vec<usize>>,
 }
 
 impl WasmGenerator {
@@ -30,6 +32,8 @@ impl WasmGenerator {
             signal_types: HashMap::new(),
             signal_initializers: HashMap::new(),
             txn_map: HashMap::new(),
+            reactive_txns: Vec::new(),
+            reactive_dependency_map: HashMap::new(),
         }
     }
 
@@ -88,9 +92,78 @@ impl WasmGenerator {
                 TopLevel::Transaction(txn) => {
                     self.txn_map.insert(txn.name.clone(), self.txn_counter);
                     self.txn_counter += 1;
+
+                    // Track reactive transactions
+                    if txn.is_reactive {
+                        let txn_idx = self.reactive_txns.len();
+                        self.reactive_txns.push(txn.clone());
+                        let deps = self.extract_dependencies(&txn.contract.pre_condition);
+                        for dep in deps {
+                            self.reactive_dependency_map
+                                .entry(dep)
+                                .or_insert_with(Vec::new)
+                                .push(txn_idx);
+                        }
+                    }
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn extract_dependencies(&self, expr: &Expr) -> Vec<String> {
+        let mut deps = Vec::new();
+        self.extract_identifiers(expr, &mut deps);
+        deps
+    }
+
+    fn extract_identifiers(&self, expr: &Expr, deps: &mut Vec<String>) {
+        match expr {
+            Expr::Identifier(name) => {
+                if !deps.contains(name) {
+                    deps.push(name.clone());
+                }
+            }
+            Expr::Add(l, r)
+            | Expr::Sub(l, r)
+            | Expr::Mul(l, r)
+            | Expr::Div(l, r)
+            | Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r)
+            | Expr::Or(l, r)
+            | Expr::And(l, r) => {
+                self.extract_identifiers(l, deps);
+                self.extract_identifiers(r, deps);
+            }
+            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+                self.extract_identifiers(e, deps);
+            }
+            Expr::PriorState(name) => {
+                if !deps.contains(name) {
+                    deps.push(name.clone());
+                }
+            }
+            Expr::FieldAccess(e, _) => self.extract_identifiers(e, deps),
+            Expr::Call(_, args) => {
+                for arg in args {
+                    self.extract_identifiers(arg, deps);
+                }
+            }
+            Expr::ListLiteral(items) => {
+                for item in items {
+                    self.extract_identifiers(item, deps);
+                }
+            }
+            Expr::ListIndex(e, i) => {
+                self.extract_identifiers(e, deps);
+                self.extract_identifiers(i, deps);
+            }
+            Expr::ListLen(e) => self.extract_identifiers(e, deps),
+            _ => {}
         }
     }
 
@@ -307,6 +380,24 @@ impl WasmGenerator {
         }
 
         output.push_str("    pub fn poll_dispatch(&mut self) -> JsValue {\n");
+
+        // Add reactive transaction execution
+        if !self.reactive_txns.is_empty() {
+            output.push_str("        // Run reactive transactions\n");
+            output.push_str("        let mut changed = false;\n");
+            output.push_str("        for _ in 0..1000 {\n");
+            output.push_str("            changed = false;\n");
+            for txn in &self.reactive_txns {
+                let method_name = txn.name.replace(".", "_");
+                output.push_str(&format!("            self.invoke_{}();\n", method_name));
+                output.push_str(
+                    "            if self.dirty_signals.iter().any(|&d| d) { changed = true; }\n",
+                );
+            }
+            output.push_str("            if !changed { break; }\n");
+            output.push_str("        }\n");
+        }
+
         output.push_str("        let mut parts: Vec<String> = vec![];\n");
 
         output.push_str("        fn json_text(el: &str, val: JsValue) -> String {\n");
