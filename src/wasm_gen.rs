@@ -276,11 +276,14 @@ impl WasmGenerator {
                 "                            let escaped = Self::html_escape(&item_str);\n",
             );
             output.push_str("                            let mut html = template.clone();\n");
-            output.push_str("                            let search = format!(\"b-text=\\\"{}\\\">\", item_name);\n");
-            output
-                .push_str("                            if let Some(pos) = html.find(&search) {\n");
+
+            // Handle simple item binding: b-text="item"
+            output.push_str("                            let search_simple = format!(\"b-text=\\\"{}\\\">\", item_name);\n");
             output.push_str(
-                "                                let after = &html[pos + search.len()..];\n",
+                "                            if let Some(pos) = html.find(&search_simple) {\n",
+            );
+            output.push_str(
+                "                                let after = &html[pos + search_simple.len()..];\n",
             );
             output
                 .push_str("                                if let Some(end) = after.find('<') {\n");
@@ -289,6 +292,50 @@ impl WasmGenerator {
             output.push_str("                                    html = format!(\"{}>{}{}\", before, escaped, rest);\n");
             output.push_str("                                }\n");
             output.push_str("                            }\n");
+
+            // Handle property access: b-text="item.property"
+            output.push_str(
+                "                            // Check for property access like item.name\n",
+            );
+            output.push_str("                            let prop_search = format!(\"b-text=\\\"{}.\", item_name);\n");
+            output.push_str(
+                "                            if let Some(pos) = html.find(&prop_search) {\n",
+            );
+            output.push_str("                                let after_prop = &html[pos + prop_search.len()..];\n");
+            output.push_str("                                if let Some(end_quote) = after_prop.find('\\\"') {\n");
+            output.push_str(
+                "                                    let prop_name = &after_prop[..end_quote];\n",
+            );
+            output.push_str("                                    if let Some(end_tag) = after_prop[end_quote..].find('>') {\n");
+            output.push_str(
+                "                                        // Access property on JS object\n",
+            );
+            output.push_str("                                        let prop_val = js_sys::Object::from(item.clone()).get(prop_name);\n");
+            output.push_str("                                        let prop_str = if prop_val.is_string() {\n");
+            output.push_str("                                            prop_val.as_string().unwrap_or_default()\n");
+            output.push_str(
+                "                                        } else if prop_val.is_f64() {\n",
+            );
+            output.push_str("                                            format!(\"{}\", prop_val.as_f64().unwrap_or(0.0))\n");
+            output.push_str("                                        } else {\n");
+            output.push_str(
+                "                                            format!(\"{:?}\", prop_val)\n",
+            );
+            output.push_str("                                        };\n");
+            output.push_str("                                        let prop_escaped = Self::html_escape(&prop_str);\n");
+            output.push_str("                                        let full_search = format!(\"b-text=\\\"{}.{}\\\">\", item_name, prop_name);\n");
+            output.push_str("                                        if let Some(full_pos) = html.find(&full_search) {\n");
+            output.push_str("                                            let after_full = &html[full_pos + full_search.len()..];\n");
+            output.push_str("                                            if let Some(tag_end) = after_full.find('<') {\n");
+            output.push_str("                                                let before_full = &html[..full_pos];\n");
+            output.push_str("                                                let rest_full = &after_full[tag_end..];\n");
+            output.push_str("                                                html = format!(\"{}>{}{}\", before_full, prop_escaped, rest_full);\n");
+            output.push_str("                                            }\n");
+            output.push_str("                                        }\n");
+            output.push_str("                                    }\n");
+            output.push_str("                                }\n");
+            output.push_str("                            }\n");
+
             output.push_str("                            result.push_str(&html);\n");
             output.push_str("                        }\n");
             output.push_str("                        return result;\n");

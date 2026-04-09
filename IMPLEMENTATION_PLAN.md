@@ -215,3 +215,51 @@ Removed checkmark emoji from success messages in `main.rs`:
 - `✓ RBV compiled successfully` → `RBV compiled successfully`
 
 Note: wasm-pack still outputs emoji (🎯🌀⚡✨📦) - that's external to the compiler.
+
+---
+
+## 8. Property Access in Directives
+
+**Location**: `brief-compiler/src/wasm_gen.rs` - `render_each` function
+
+### Implementation
+
+Extended b-each rendering to support property access like `item.name`:
+
+```rust
+// Detect pattern: b-text="item.property"
+// Access property on JS object using js_sys::Object::from(item).get(prop_name)
+```
+
+### Usage
+
+```brief
+struct Item {
+    let name: String = "";
+    let color: String = "#fff";
+};
+
+let items: List<Item> = [
+    Item { name: "Contracts" },
+    Item { name: "Reactivity" },
+    Item { name: "Type Safety" }
+];
+
+// In template:
+<ul b-each:item="items">
+    <li b-text="item.name">Item</li>
+</ul>
+```
+
+### How It Works
+
+1. During render_each, detect `b-text="item.property">` patterns
+2. Convert item to JS object: `js_sys::Object::from(item)`
+3. Access property: `.get("property")`
+4. Convert to string and escape for HTML
+
+### Limitations
+
+- Currently works for initial render only (not reactive)
+- Single-level property access (item.name works, item.address.city does not)
+- Requires items to be JS objects with properties
