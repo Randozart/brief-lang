@@ -1062,6 +1062,9 @@ fn run_rbv(
         .unwrap_or("output");
 
     let mut wasm_gen = wasm_gen::WasmGenerator::new();
+    if let Some(speed) = program.reactor_speed {
+        wasm_gen.set_reactor_speed(speed);
+    }
     println!("  Generating WASM...");
     let output = wasm_gen.generate(&program, &bindings, stem);
     println!("  WASM generated");

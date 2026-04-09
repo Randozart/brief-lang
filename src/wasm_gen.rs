@@ -21,6 +21,7 @@ pub struct WasmGenerator {
     txn_map: HashMap<String, usize>,
     reactive_txns: Vec<Transaction>,
     reactive_dependency_map: HashMap<String, Vec<usize>>,
+    reactor_speed: u32,
 }
 
 impl WasmGenerator {
@@ -34,7 +35,12 @@ impl WasmGenerator {
             txn_map: HashMap::new(),
             reactive_txns: Vec::new(),
             reactive_dependency_map: HashMap::new(),
+            reactor_speed: 10, // Default 10Hz
         }
+    }
+
+    pub fn set_reactor_speed(&mut self, speed: u32) {
+        self.reactor_speed = speed;
     }
 
     pub fn generate(
@@ -181,6 +187,7 @@ impl WasmGenerator {
         output.push_str("    dirty_signals: Vec<bool>,\n");
         output.push_str("    each_templates: Vec<(String, String, String)>,\n");
         output.push_str("    show_bindings: Vec<(String, String, bool)>,\n");
+        output.push_str("    last_reactive_run: u64,\n");
         output.push_str("}\n\n");
 
         output.push_str("#[wasm_bindgen]\n");
@@ -240,7 +247,7 @@ impl WasmGenerator {
         }
 
         output
-            .push_str("        State { signals, dirty_signals, each_templates, show_bindings }\n");
+            .push_str("        State { signals, dirty_signals, each_templates, show_bindings, last_reactive_run: 0 }\n");
         output.push_str("    }\n\n");
 
         output.push_str("    pub fn get_signal(&self, id: usize) -> JsValue {\n");
@@ -430,18 +437,24 @@ impl WasmGenerator {
 
         // Add reactive transaction execution
         if !self.reactive_txns.is_empty() {
-            output.push_str("        // Run reactive transactions\n");
-            output.push_str("        let mut changed = false;\n");
-            output.push_str("        for _ in 0..1000 {\n");
-            output.push_str("            changed = false;\n");
+            let interval_ms = (1000.0 / self.reactor_speed as f64) as u64;
+            output.push_str("        // Run reactive transactions with timing\n");
+            output.push_str(&format!("        let interval_ms = {}u64;\n", interval_ms));
+            output.push_str("        let now = js_sys::Date::now() as u64;\n");
+            output.push_str("        if now - self.last_reactive_run >= interval_ms {\n");
+            output.push_str("            self.last_reactive_run = now;\n");
+            output.push_str("            let mut changed = false;\n");
+            output.push_str("            for _ in 0..1000 {\n");
+            output.push_str("                changed = false;\n");
             for txn in &self.reactive_txns {
                 let method_name = txn.name.replace(".", "_");
-                output.push_str(&format!("            self.invoke_{}();\n", method_name));
+                output.push_str(&format!("                self.invoke_{}();\n", method_name));
                 output.push_str(
-                    "            if self.dirty_signals.iter().any(|&d| d) { changed = true; }\n",
+                    "                if self.dirty_signals.iter().any(|&d| d) { changed = true; }\n",
                 );
             }
-            output.push_str("            if !changed { break; }\n");
+            output.push_str("                if !changed { break; }\n");
+            output.push_str("            }\n");
             output.push_str("        }\n");
         }
 
