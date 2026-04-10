@@ -121,7 +121,8 @@ impl Desugarer {
             })
             .collect();
 
-        let mut struct_defs: std::collections::HashMap<String, &StructDefinition> = std::collections::HashMap::new();
+        let mut struct_defs: std::collections::HashMap<String, &StructDefinition> =
+            std::collections::HashMap::new();
         for item in &program.items {
             if let TopLevel::Struct(s) = item {
                 struct_defs.insert(s.name.clone(), s);
@@ -209,15 +210,8 @@ impl Desugarer {
                             format!("{}.{}", s.name, txn.name)
                         };
                         items.push(TopLevel::Transaction(Transaction {
-                            is_async: txn.is_async,
-                            is_reactive: txn.is_reactive,
                             name: txn_name,
-                            parameters: txn.parameters.clone(),
-                            contract: txn.contract.clone(),
-                            body: txn.body.clone(),
-                            reactor_speed: txn.reactor_speed,
-                            span: txn.span,
-                            is_lambda: txn.is_lambda,
+                            ..txn.clone()
                         }));
                     }
                     items.push(item.clone());
@@ -258,15 +252,8 @@ impl Desugarer {
                             format!("{}.{}", rs.name, txn.name)
                         };
                         items.push(TopLevel::Transaction(Transaction {
-                            is_async: txn.is_async,
-                            is_reactive: txn.is_reactive,
                             name: txn_name,
-                            parameters: txn.parameters.clone(),
-                            contract: txn.contract.clone(),
-                            body: txn.body.clone(),
-                            reactor_speed: txn.reactor_speed,
-                            span: txn.span,
-                            is_lambda: txn.is_lambda,
+                            ..txn.clone()
                         }));
                     }
                     items.push(TopLevel::Struct(StructDefinition {
@@ -397,20 +384,29 @@ impl Desugarer {
             new_body_items.push(stmt.clone());
         }
 
+        let contract = Contract {
+            pre_condition: Expr::Not(Box::new(Expr::Identifier("done".to_string()))),
+            post_condition: Expr::Identifier("done".to_string()),
+            span: None,
+        };
+
+        let dependencies = contract
+            .pre_condition
+            .extract_dependencies()
+            .into_iter()
+            .collect();
+
         let new_txn = Transaction {
             is_async: txn.is_async,
             is_reactive: txn.is_reactive,
             name: txn.name.clone(),
             parameters: txn.parameters.clone(),
-            contract: Contract {
-                pre_condition: Expr::Not(Box::new(Expr::Identifier("done".to_string()))),
-                post_condition: Expr::Identifier("done".to_string()),
-                span: None,
-            },
+            contract,
             body: new_body_items,
             reactor_speed: txn.reactor_speed,
             span: None,
             is_lambda: txn.is_lambda,
+            dependencies,
         };
 
         (new_txn, sigs, state)
@@ -517,7 +513,8 @@ impl Desugarer {
                     if let Some(struct_def) = struct_defs.get(type_name) {
                         let mut all_fields = Vec::new();
                         for struct_field in &struct_def.fields {
-                            let value = fields.iter()
+                            let value = fields
+                                .iter()
                                 .find(|(name, _)| name == &struct_field.name)
                                 .map(|(_, v)| v.clone())
                                 .unwrap_or_else(|| {
@@ -543,7 +540,6 @@ impl Desugarer {
             other => other,
         }
     }
-
 }
 
 impl Default for Desugarer {
@@ -606,6 +602,7 @@ mod tests {
             reactor_speed: None,
             span: None,
             is_lambda: false,
+            dependencies: vec![],
         };
 
         let mut desugarer = Desugarer::new();

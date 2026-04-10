@@ -1,4 +1,5 @@
 use crate::errors::Span;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -71,6 +72,7 @@ pub struct ForeignSignature {
     pub name: String,
     pub location: String,            // TOML location (e.g., "std::f64::sqrt")
     pub wasm_impl: Option<String>,   // WASM JavaScript implementation
+    pub wasm_setup: Option<String>,  // WASM JavaScript setup/imports
     pub inputs: Vec<(String, Type)>, // param_name -> type
     pub success_output: Vec<(String, Type)>, // named fields (can be empty for void)
     pub error_type_name: String,     // e.g., "IoError"
@@ -88,6 +90,7 @@ pub struct ForeignBinding {
     pub mapper: Option<String>, // Mapper name (e.g., "rust", "c", "wasm")
     pub path: Option<String>,   // Explicit path to mapper (optional)
     pub wasm_impl: Option<String>, // WASM JavaScript implementation (for wasm target)
+    pub wasm_setup: Option<String>, // WASM JavaScript setup/imports
     pub inputs: Vec<(String, Type)>, // Parameter names and types
     pub success_output: Vec<(String, Type)>, // Success output shape
     pub error_type: String,     // Error type name
@@ -136,6 +139,65 @@ pub enum Expr {
 impl Expr {
     pub fn span(&self) -> Option<Span> {
         None
+    }
+
+    pub fn extract_dependencies(&self) -> HashSet<String> {
+        let mut deps = HashSet::new();
+        self.extract_deps_recursive(&mut deps);
+        deps
+    }
+
+    fn extract_deps_recursive(&self, deps: &mut HashSet<String>) {
+        match self {
+            Expr::Identifier(name) => {
+                deps.insert(name.clone());
+            }
+            Expr::OwnedRef(name) => {
+                deps.insert(name.clone());
+            }
+            Expr::PriorState(name) => {
+                deps.insert(name.clone());
+            }
+            Expr::Add(l, r)
+            | Expr::Sub(l, r)
+            | Expr::Mul(l, r)
+            | Expr::Div(l, r)
+            | Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r)
+            | Expr::Or(l, r)
+            | Expr::And(l, r) => {
+                l.extract_deps_recursive(deps);
+                r.extract_deps_recursive(deps);
+            }
+            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::ListLen(e) => {
+                e.extract_deps_recursive(deps);
+            }
+            Expr::Call(_, args) | Expr::ListLiteral(args) => {
+                for arg in args {
+                    arg.extract_deps_recursive(deps);
+                }
+            }
+            Expr::ListIndex(l, i) => {
+                l.extract_deps_recursive(deps);
+                i.extract_deps_recursive(deps);
+            }
+            Expr::FieldAccess(e, _) => {
+                e.extract_deps_recursive(deps);
+            }
+            Expr::StructInstance(_, fields) | Expr::ObjectLiteral(fields) => {
+                for (_, expr) in fields {
+                    expr.extract_deps_recursive(deps);
+                }
+            }
+            Expr::PatternMatch { value, .. } => {
+                value.extract_deps_recursive(deps);
+            }
+            _ => {} // Float, String, Bool don't add dependencies
+        }
     }
 }
 
@@ -273,6 +335,7 @@ pub struct Transaction {
     pub reactor_speed: Option<u32>,
     pub span: Option<Span>,
     pub is_lambda: bool, // Lambda-style: no body, postcondition must be provable
+    pub dependencies: Vec<String>, // Variables read in preconditions
 }
 
 #[derive(Debug, Clone)]

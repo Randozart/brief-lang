@@ -31,7 +31,7 @@ impl Reactor {
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
                 if txn.is_reactive {
-                    let deps = self.extract_dependencies(&txn.contract.pre_condition);
+                    let deps: HashSet<String> = txn.dependencies.iter().cloned().collect();
                     let rtxn = ReactiveTransaction {
                         name: txn.name.clone(),
                         contract: txn.contract.clone(),
@@ -49,117 +49,6 @@ impl Reactor {
                     }
                     self.dirty_preconditions.insert(txn_idx);
                 }
-            }
-        }
-    }
-
-    fn extract_dependencies(&self, expr: &Expr) -> HashSet<String> {
-        let mut deps = HashSet::new();
-        self.collect_identifiers(expr, &mut deps);
-        deps
-    }
-
-    fn collect_identifiers(&self, expr: &Expr, deps: &mut HashSet<String>) {
-        match expr {
-            Expr::Identifier(name) => {
-                deps.insert(name.clone());
-            }
-            Expr::OwnedRef(name) => {
-                deps.insert(name.clone());
-            }
-            Expr::PriorState(name) => {
-                deps.insert(name.clone());
-            }
-            Expr::Add(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Sub(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Mul(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Div(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Eq(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Ne(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Lt(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Le(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Gt(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Ge(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Or(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::And(l, r) => {
-                self.collect_identifiers(l, deps);
-                self.collect_identifiers(r, deps);
-            }
-            Expr::Not(inner) => {
-                self.collect_identifiers(inner, deps);
-            }
-            Expr::Neg(inner) => {
-                self.collect_identifiers(inner, deps);
-            }
-            Expr::BitNot(inner) => {
-                self.collect_identifiers(inner, deps);
-            }
-            Expr::Call(_, args) => {
-                for arg in args {
-                    self.collect_identifiers(arg, deps);
-                }
-            }
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Bool(_) => {}
-            Expr::ListLiteral(elements) => {
-                for elem in elements {
-                    self.collect_identifiers(elem, deps);
-                }
-            }
-            Expr::ListIndex(list_expr, index_expr) => {
-                self.collect_identifiers(list_expr, deps);
-                self.collect_identifiers(index_expr, deps);
-            }
-            Expr::ListLen(inner) => {
-                self.collect_identifiers(inner, deps);
-            }
-            Expr::FieldAccess(obj, _) => {
-                self.collect_identifiers(obj, deps);
-            }
-            Expr::StructInstance(_, fields) => {
-                for (_, expr) in fields {
-                    self.collect_identifiers(expr, deps);
-                }
-            }
-            Expr::ObjectLiteral(fields) => {
-                for (_, v) in fields {
-                    self.collect_identifiers(v, deps);
-                }
-            }
-            Expr::PatternMatch { value, .. } => {
-                self.collect_identifiers(value, deps);
             }
         }
     }

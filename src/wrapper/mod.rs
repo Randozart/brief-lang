@@ -38,22 +38,22 @@ pub fn detect_library_type(path: &Path) -> &'static str {
     match extension {
         // C/C++
         "h" | "c" | "cpp" | "cxx" | "cc" => "c",
-        
+
         // Rust
         "rs" => "rust",
-        
+
         // WebAssembly
         "wasm" | "wat" => "wasm",
-        
+
         // JavaScript/TypeScript
         "js" | "mjs" | "jsx" | "ts" | "tsx" | "d.ts" => "js",
-        
+
         // Python
         "py" | "pyi" => "python",
-        
+
         // Native libraries
         "so" | "dylib" | "dll" => "native",
-        
+
         _ => {
             // Check if it's a directory with Cargo.toml
             if path.join("Cargo.toml").exists() {

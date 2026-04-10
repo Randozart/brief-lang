@@ -135,28 +135,24 @@ impl<'a> Parser<'a> {
                     let speed = *speed_num as u32;
                     self.advance();
 
-                    // Expect 'Hz' (as identifier, since logos doesn't tokenize it specially)
+                    // Optional 'Hz' (as identifier)
                     if let Some(Ok(Token::Identifier(hz))) = self.current_token() {
                         if hz == "Hz" {
                             self.advance();
-
-                            // Validate speed
-                            if speed == 0 {
-                                return Err("Reactor speed must be positive (> 0)".to_string());
-                            }
-                            if speed >= 10000 {
-                                // Warn but allow
-                                eprintln!("warning: Unusually high reactor speed @{}Hz", speed);
-                            }
-
-                            reactor_speed = Some(speed);
-                            self.expect(Token::Semicolon)?;
-                        } else {
-                            return Err("Expected 'Hz' after reactor speed".to_string());
                         }
-                    } else {
-                        return Err("Expected 'Hz' after reactor speed".to_string());
                     }
+
+                    // Validate speed
+                    if speed == 0 {
+                        return Err("Reactor speed must be positive (> 0)".to_string());
+                    }
+                    if speed >= 10000 {
+                        // Warn but allow
+                        eprintln!("warning: Unusually high reactor speed @{}Hz", speed);
+                    }
+
+                    reactor_speed = Some(speed);
+                    self.expect(Token::Semicolon)?;
                 } else {
                     return Err("Expected numeric speed after 'reactor @'".to_string());
                 }
@@ -488,6 +484,7 @@ impl<'a> Parser<'a> {
             name: name.clone(),
             location: String::new(), // Populated by typechecker from TOML
             wasm_impl: None,         // Populated by typechecker from TOML
+            wasm_setup: None,        // Populated by typechecker from TOML
             inputs,
             success_output,
             error_type_name: error_type_name.clone(),
@@ -1095,23 +1092,20 @@ impl<'a> Parser<'a> {
                 let speed = *speed_num as u32;
                 self.advance();
 
-                // Expect 'Hz'
+                // Optional 'Hz'
                 if let Some(Ok(Token::Identifier(hz))) = self.current_token() {
                     if hz == "Hz" {
                         self.advance();
-                        if speed == 0 {
-                            return Err("Reactor speed must be positive".to_string());
-                        }
-                        if speed >= 10000 {
-                            eprintln!("warning: Unusually high reactor speed @{}Hz", speed);
-                        }
-                        Some(speed)
-                    } else {
-                        return Err("Expected 'Hz' after reactor speed".to_string());
                     }
-                } else {
-                    return Err("Expected 'Hz' after reactor speed".to_string());
                 }
+
+                if speed == 0 {
+                    return Err("Reactor speed must be positive".to_string());
+                }
+                if speed >= 10000 {
+                    eprintln!("warning: Unusually high reactor speed @{}Hz", speed);
+                }
+                Some(speed)
             } else {
                 return Err("Expected numeric speed after '@'".to_string());
             }
@@ -1120,6 +1114,12 @@ impl<'a> Parser<'a> {
         };
 
         self.expect(Token::Semicolon)?;
+
+        let dependencies = contract
+            .pre_condition
+            .extract_dependencies()
+            .into_iter()
+            .collect();
 
         Ok(Transaction {
             is_async,
@@ -1131,6 +1131,7 @@ impl<'a> Parser<'a> {
             reactor_speed,
             span,
             is_lambda,
+            dependencies,
         })
     }
 

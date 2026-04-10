@@ -23,6 +23,13 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
 
     let mut bindings = Vec::new();
 
+    // Extract optional metadata
+    let meta = parsed.get("meta").and_then(|v| v.as_table());
+    let wasm_setup = meta
+        .and_then(|m| m.get("wasm_setup"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
     // Extract functions array
     let functions = parsed
         .get("functions")
@@ -137,6 +144,7 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             mapper,
             path,
             wasm_impl,
+            wasm_setup: wasm_setup.clone(),
             inputs,
             success_output,
             error_type,

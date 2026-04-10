@@ -459,14 +459,22 @@ impl fmt::Display for ProofError {
                     transaction
                 )
             }
-            ProofError::TrivialPrecondition { item_name, item_type, .. } => {
+            ProofError::TrivialPrecondition {
+                item_name,
+                item_type,
+                ..
+            } => {
                 write!(
                     f,
                     "{} '{}' has a trivial precondition '[true]'",
                     item_type, item_name
                 )
             }
-            ProofError::TrivialPostcondition { item_name, item_type, .. } => {
+            ProofError::TrivialPostcondition {
+                item_name,
+                item_type,
+                ..
+            } => {
                 write!(
                     f,
                     "{} '{}' has a trivial postcondition '[true]'",

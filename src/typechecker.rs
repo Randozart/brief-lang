@@ -153,6 +153,7 @@ impl TypeChecker {
                     // Update the stored signature with populated wasm_impl from TOML
                     if let Some(stored_sig) = self.foreign_bindings.get_mut(name) {
                         stored_sig.wasm_impl = signature.wasm_impl.clone();
+                        stored_sig.wasm_setup = signature.wasm_setup.clone();
                     }
                 }
                 _ => {}
@@ -513,9 +514,11 @@ impl TypeChecker {
             .find(|b| b.name == name && b.target == ForeignTarget::Wasm);
         if let Some(wb) = wasm_binding {
             signature.wasm_impl = wb.wasm_impl.clone();
+            signature.wasm_setup = wb.wasm_setup.clone();
         } else {
             // Fallback to primary binding's wasm_impl if it exists
             signature.wasm_impl = binding.wasm_impl.clone();
+            signature.wasm_setup = binding.wasm_setup.clone();
         }
 
         // Validate the frgn signature against the TOML binding

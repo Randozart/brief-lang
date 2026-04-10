@@ -17,6 +17,7 @@ pub mod reactor;
 pub mod resolver;
 pub mod scheduler;
 pub mod sig_casting;
+pub mod signal_graph;
 pub mod symbolic;
 pub mod typechecker;
 pub mod view_compiler;

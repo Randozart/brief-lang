@@ -1,6 +1,6 @@
 use crate::ast::{Contract, Expr, ForeignTarget, Program, Statement, TopLevel, Transaction, Type};
 use crate::view_compiler::{Binding, Directive};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 enum SignalType {
@@ -24,6 +24,7 @@ pub struct WasmGenerator {
     reactor_speed: u32,
     ffi_bindings: HashMap<String, usize>, // function name -> arg count
     ffi_wasm_impl: HashMap<String, String>, // function name -> WASM JS implementation
+    ffi_wasm_setups: HashSet<String>,     // global WASM JS setup/imports
     local_vars: HashMap<String, ()>,      // track local let-bound variables
 }
 
@@ -41,6 +42,7 @@ impl WasmGenerator {
             reactor_speed: 10, // Default 10Hz
             ffi_bindings: HashMap::new(),
             ffi_wasm_impl: HashMap::new(),
+            ffi_wasm_setups: HashSet::new(),
             local_vars: HashMap::new(),
         }
     }
@@ -127,6 +129,10 @@ impl WasmGenerator {
                     // Track WASM implementations
                     if let Some(impl_code) = &signature.wasm_impl {
                         self.ffi_wasm_impl.insert(name.clone(), impl_code.clone());
+                    }
+                    // Track WASM setup/imports
+                    if let Some(setup_code) = &signature.wasm_setup {
+                        self.ffi_wasm_setups.insert(setup_code.clone());
                     }
                 }
                 _ => {}
@@ -260,6 +266,8 @@ impl WasmGenerator {
         output.push_str("    each_templates: Vec<(String, String, String)>,\n");
         output.push_str("    show_bindings: Vec<(String, String, bool)>,\n");
         output.push_str("    last_reactive_run: u64,\n");
+        output.push_str("    signal_graph: std::collections::HashMap<String, Vec<usize>>,\n");
+        output.push_str("    dirty_transactions: Vec<bool>,\n");
         output.push_str("}\n\n");
 
         output.push_str("#[wasm_bindgen]\n");
@@ -321,8 +329,22 @@ impl WasmGenerator {
             }
         }
 
-        output
-            .push_str("        State { signals, dirty_signals, each_templates, show_bindings, last_reactive_run: 0 }\n");
+        output.push_str("        let mut signal_graph = std::collections::HashMap::new();\n");
+        for (i, txn) in self.reactive_txns.iter().enumerate() {
+            for dep in &txn.dependencies {
+                output.push_str(&format!(
+                    "        signal_graph.entry(\"{}\".to_string()).or_insert_with(Vec::new).push({});\n",
+                    dep, i
+                ));
+            }
+        }
+
+        output.push_str(&format!(
+            "        let dirty_transactions = vec![true; {}];\n",
+            self.reactive_txns.len()
+        ));
+
+        output.push_str("        State { signals, dirty_signals, each_templates, show_bindings, last_reactive_run: 0, signal_graph, dirty_transactions }\n");
         output.push_str("    }\n\n");
 
         output.push_str("    pub fn get_signal(&self, id: usize) -> JsValue {\n");
@@ -499,6 +521,22 @@ impl WasmGenerator {
         output.push_str("    fn mark_dirty(&mut self, id: usize) {\n");
         output.push_str("        if id < SIGNALS {\n");
         output.push_str("            self.dirty_signals[id] = true;\n");
+        // Mark dependent transactions as dirty
+        output.push_str("            let signal_name = match id {\n");
+        for (name, &id) in &self.signal_map {
+            output.push_str(&format!("                {} => Some(\"{}\"),\n", id, name));
+        }
+        output.push_str("                _ => None,\n");
+        output.push_str("            };\n");
+        output.push_str("            if let Some(name) = signal_name {\n");
+        output.push_str("                if let Some(txns) = self.signal_graph.get(name) {\n");
+        output.push_str("                    for &txn_idx in txns {\n");
+        output.push_str("                        if txn_idx < self.dirty_transactions.len() {\n");
+        output.push_str("                            self.dirty_transactions[txn_idx] = true;\n");
+        output.push_str("                        }\n");
+        output.push_str("                    }\n");
+        output.push_str("                }\n");
+        output.push_str("            }\n");
         output.push_str("        }\n");
         output.push_str("    }\n\n");
 
@@ -564,28 +602,58 @@ impl WasmGenerator {
         }
 
         output.push_str("    pub fn poll_dispatch(&mut self) -> JsValue {\n");
+        output.push_str("        let mut any_executed = false;\n");
 
-        // Add reactive transaction execution
         if !self.reactive_txns.is_empty() {
-            let interval_ms = (1000.0 / self.reactor_speed as f64) as u64;
-            output.push_str("        // Run reactive transactions with timing\n");
-            output.push_str(&format!("        let interval_ms = {}u64;\n", interval_ms));
             output.push_str("        let now = js_sys::Date::now() as u64;\n");
-            output.push_str("        if now - self.last_reactive_run >= interval_ms {\n");
-            output.push_str("            self.last_reactive_run = now;\n");
-            output.push_str("            let mut changed = false;\n");
-            output.push_str("            for _ in 0..1000 {\n");
-            output.push_str("                changed = false;\n");
-            for txn in &self.reactive_txns {
+            output.push_str("        let mut changed = true;\n");
+            output.push_str("        let mut loop_count = 0;\n");
+            output.push_str("        while changed && loop_count < 100 {\n");
+            output.push_str("            changed = false;\n");
+            output.push_str("            loop_count += 1;\n");
+
+            for (i, txn) in self.reactive_txns.iter().enumerate() {
                 let method_name = txn.name.replace(".", "_");
-                output.push_str(&format!("                self.invoke_{}();\n", method_name));
-                output.push_str(
-                    "                if self.dirty_signals.iter().any(|&d| d) { changed = true; }\n",
-                );
+
+                if let Some(speed) = txn.reactor_speed {
+                    // Polling-driven (@Hz)
+                    let interval = (1000.0 / speed as f64) as u64;
+                    // We need a way to track per-transaction last run time
+                    // For now, let's just use the global reactor_speed logic if it matches
+                    // or just run it if dirty.
+                    // Actually, @Hz means it should run REGULARLY.
+                    output.push_str(&format!("            // @{}Hz transaction\n", speed));
+                    output.push_str(&format!("            if now - self.last_reactive_run >= {} || self.dirty_transactions[{}] {{\n", (1000/self.reactor_speed), i));
+                    output.push_str(&format!(
+                        "                let old_dirty = self.dirty_signals.iter().any(|&d| d);\n"
+                    ));
+                    output.push_str(&format!("                self.invoke_{}();\n", method_name));
+                    output.push_str(&format!(
+                        "                self.dirty_transactions[{}] = false;\n",
+                        i
+                    ));
+                    output.push_str("                if !old_dirty && self.dirty_signals.iter().any(|&d| d) { changed = true; any_executed = true; }\n");
+                    output.push_str("            }\n");
+                } else {
+                    // Signal-driven (default)
+                    output.push_str(&format!(
+                        "            if self.dirty_transactions[{}] {{\n",
+                        i
+                    ));
+                    output.push_str(&format!(
+                        "                self.dirty_transactions[{}] = false;\n",
+                        i
+                    ));
+                    output.push_str(&format!(
+                        "                let old_dirty = self.dirty_signals.iter().any(|&d| d);\n"
+                    ));
+                    output.push_str(&format!("                self.invoke_{}();\n", method_name));
+                    output.push_str("                if !old_dirty && self.dirty_signals.iter().any(|&d| d) { changed = true; any_executed = true; }\n");
+                    output.push_str("            }\n");
+                }
             }
-            output.push_str("                if !changed { break; }\n");
-            output.push_str("            }\n");
             output.push_str("        }\n");
+            output.push_str("        self.last_reactive_run = now;\n");
         }
 
         output.push_str("        let mut parts: Vec<String> = vec![];\n");
@@ -1197,6 +1265,11 @@ impl WasmGenerator {
     fn generate_js_glue(&self, program_name: &str, bindings: &[Binding]) -> String {
         let mut output = String::new();
 
+        // Generate FFI setup/imports
+        for setup_code in &self.ffi_wasm_setups {
+            output.push_str(&format!("    {}\n\n", setup_code));
+        }
+
         // Generate FFI functions from TOML wasm_impl metadata
         for (name, impl_code) in &self.ffi_wasm_impl {
             output.push_str(&format!("    {}\n\n", impl_code));
@@ -1305,9 +1378,10 @@ impl WasmGenerator {
         output.push_str("            }\n");
         output.push_str("            console.log('Attaching', config.event, 'handler to', elId, '->', config.txn);\n");
         output.push_str("            el.addEventListener(config.event, () => {\n");
-        output.push_str("                console.log('Trigger clicked:', config.txn, 'typeof:', typeof wasm[config.txn]);\n");
+        output.push_str("                console.log('Trigger clicked:', config.txn);\n");
         output.push_str("                try {\n");
         output.push_str("                    wasm[config.txn]();\n");
+        output.push_str("                    checkUpdates();\n");
         output.push_str("                } catch(e) {\n");
         output
             .push_str("                    console.error('Error calling', config.txn, ':', e);\n");
@@ -1317,17 +1391,22 @@ impl WasmGenerator {
         output.push_str("        console.log('All listeners attached');\n");
         output.push_str("    }\n\n");
 
+        output.push_str("    function checkUpdates() {\n");
+        output.push_str("        const dispatch = wasm.poll_dispatch();\n");
+        output.push_str("        if (dispatch && dispatch !== '[]') {\n");
+        output.push_str("            console.log('Applying instructions:', dispatch);\n");
+        output.push_str("            applyInstructions(JSON.parse(dispatch));\n");
+        output.push_str("            return true;\n");
+        output.push_str("        }\n");
+        output.push_str("        return false;\n");
+        output.push_str("    }\n\n");
+
         output.push_str("    function startPollLoop() {\n");
         output.push_str("        function poll() {\n");
-        output.push_str("            const dispatch = wasm.poll_dispatch();\n");
-        output.push_str("            console.log('Poll loop, dispatch:', dispatch);\n");
-        output.push_str("            if (dispatch && dispatch !== '[]') {\n");
-        output.push_str("                console.log('Applying instructions:', dispatch);\n");
-        output.push_str("                applyInstructions(JSON.parse(dispatch));\n");
-        output.push_str("            }\n");
+        output.push_str("            checkUpdates();\n");
         output.push_str("            requestAnimationFrame(poll);\n");
         output.push_str("        }\n");
-        output.push_str("        console.log('Starting poll loop');\n");
+        output.push_str("        console.log('Starting poll loop (quiet mode)');\n");
         output.push_str("        requestAnimationFrame(poll);\n");
         output.push_str("    }\n\n");
 
