@@ -38,6 +38,11 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn put_back(&mut self, token: Token, span: logos::Span) {
+        self.peek = self.current.take();
+        self.current = Some((Ok(token), span));
+    }
+
     fn current_token(&self) -> Option<&Result<Token, ()>> {
         self.current.as_ref().map(|(t, _)| t)
     }
@@ -1555,143 +1560,69 @@ impl<'a> Parser<'a> {
                 // Also supports pattern matching: [value Pattern(field)] { statements };
                 self.advance(); // consume [
 
-                // Try to parse pattern match: variable Variant(field1, field2)
-                // We need to look ahead to detect this pattern
-                let condition = match self.current_token() {
-                    Some(Ok(Token::Identifier(var_name))) => {
+                // Check for pattern match structure before consuming tokens:
+                // Pattern: identifier Variant(fields) where Variant starts with uppercase
+                let is_pattern = matches!(self.current_token(), Some(Ok(Token::Identifier(_))))
+                    && matches!(self.peek(), Some(Ok(Token::Identifier(v))) if v.chars().next().map_or(false, |c| c.is_uppercase()))
+                    || matches!(self.peek(), Some(Ok(Token::Ok | Token::Err)));
+
+                let condition = if is_pattern {
+                    // Parse as pattern match: variable Variant(field1, field2)
+                    if let Some(Ok(Token::Identifier(var_name))) = self.current_token() {
                         let var_name_clone = var_name.clone();
                         self.advance(); // consume variable name
 
-                        // Check for pattern: variant_name ( field1, field2, ... )
-                        // Variant names can be identifiers OR special tokens like Ok, Err
-                        match self.current_token() {
-                            Some(Ok(Token::Identifier(variant_name))) => {
-                                let variant_clone = variant_name.clone();
-                                self.advance(); // consume variant name
-
-                                match self.current_token() {
-                                    Some(Ok(Token::LParen)) => {
-                                        // This is a pattern match
-                                        self.advance(); // consume (
-                                        let mut fields = Vec::new();
-
-                                        // Parse field names: (field1, field2, ...)
-                                        while let Some(Ok(Token::Identifier(field_name))) =
-                                            self.current_token()
-                                        {
-                                            fields.push(field_name.clone());
-                                            self.advance();
-
-                                            if let Some(Ok(Token::Comma)) = self.current_token() {
-                                                self.advance();
-                                            } else {
-                                                break;
-                                            }
-                                        }
-
-                                        self.expect(Token::RParen)?;
-
-                                        // Create pattern match expression
-                                        Expr::PatternMatch {
-                                            value: Box::new(Expr::Identifier(var_name_clone)),
-                                            variant: variant_clone,
-                                            fields,
-                                        }
-                                    }
-                                    _ => {
-                                        // Not a pattern match, parse as regular expression
-                                        // We consumed var_name, need to include it in expression parsing
-                                        // For simplicity, reconstruct by parsing the remainder
-                                        // This is a limitation - we'd need better token handling
-                                        Expr::Identifier(var_name_clone)
-                                    }
-                                }
+                        let variant_name = match self.current_token() {
+                            Some(Ok(Token::Identifier(v))) => {
+                                let name = v.clone();
+                                self.advance();
+                                name
                             }
-                            // Handle special tokens like Ok, Err as variant names
                             Some(Ok(Token::Ok)) => {
-                                self.advance(); // consume Ok
-                                match self.current_token() {
-                                    Some(Ok(Token::LParen)) => {
-                                        // This is a pattern match
-                                        self.advance(); // consume (
-                                        let mut fields = Vec::new();
-
-                                        // Parse field names: (field1, field2, ...)
-                                        while let Some(Ok(Token::Identifier(field_name))) =
-                                            self.current_token()
-                                        {
-                                            fields.push(field_name.clone());
-                                            self.advance();
-
-                                            if let Some(Ok(Token::Comma)) = self.current_token() {
-                                                self.advance();
-                                            } else {
-                                                break;
-                                            }
-                                        }
-
-                                        self.expect(Token::RParen)?;
-
-                                        // Create pattern match expression
-                                        Expr::PatternMatch {
-                                            value: Box::new(Expr::Identifier(var_name_clone)),
-                                            variant: "Ok".to_string(),
-                                            fields,
-                                        }
-                                    }
-                                    _ => {
-                                        // Not a pattern match
-                                        Expr::Identifier(var_name_clone)
-                                    }
-                                }
+                                self.advance();
+                                "Ok".to_string()
                             }
                             Some(Ok(Token::Err)) => {
-                                self.advance(); // consume Err
-                                match self.current_token() {
-                                    Some(Ok(Token::LParen)) => {
-                                        // This is a pattern match
-                                        self.advance(); // consume (
-                                        let mut fields = Vec::new();
+                                self.advance();
+                                "Err".to_string()
+                            }
+                            _ => unreachable!(),
+                        };
 
-                                        // Parse field names: (field1, field2, ...)
-                                        while let Some(Ok(Token::Identifier(field_name))) =
-                                            self.current_token()
-                                        {
-                                            fields.push(field_name.clone());
-                                            self.advance();
-
-                                            if let Some(Ok(Token::Comma)) = self.current_token() {
-                                                self.advance();
-                                            } else {
-                                                break;
-                                            }
-                                        }
-
-                                        self.expect(Token::RParen)?;
-
-                                        // Create pattern match expression
-                                        Expr::PatternMatch {
-                                            value: Box::new(Expr::Identifier(var_name_clone)),
-                                            variant: "Err".to_string(),
-                                            fields,
-                                        }
-                                    }
-                                    _ => {
-                                        // Not a pattern match
-                                        Expr::Identifier(var_name_clone)
-                                    }
+                        // Expect ( for pattern fields
+                        if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+                            self.advance(); // consume (
+                            let mut fields = Vec::new();
+                            while let Some(Ok(Token::Identifier(field_name))) = self.current_token()
+                            {
+                                fields.push(field_name.clone());
+                                self.advance();
+                                if let Some(Ok(Token::Comma)) = self.current_token() {
+                                    self.advance();
+                                } else {
+                                    break;
                                 }
                             }
-                            _ => {
-                                // Not a pattern match
-                                Expr::Identifier(var_name_clone)
+                            self.expect(Token::RParen)?;
+                            Expr::PatternMatch {
+                                value: Box::new(Expr::Identifier(var_name_clone)),
+                                variant: variant_name,
+                                fields,
+                            }
+                        } else {
+                            // Variant without parens - still a pattern match
+                            Expr::PatternMatch {
+                                value: Box::new(Expr::Identifier(var_name_clone)),
+                                variant: variant_name,
+                                fields: vec![],
                             }
                         }
-                    }
-                    _ => {
-                        // Not starting with identifier, parse as regular expression
+                    } else {
                         self.parse_expression()?
                     }
+                } else {
+                    // Not a pattern - parse as regular expression
+                    self.parse_expression()?
                 };
 
                 self.expect(Token::RBracket)?;
