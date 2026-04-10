@@ -1134,7 +1134,12 @@ impl ProofEngine {
                 }
             }
             Expr::ObjectLiteral(fields) => {
-                for (_, v) in fields { self.collect_identifiers(v, vars); }
+                for (_, v) in fields {
+                    self.collect_identifiers(v, vars);
+                }
+            }
+            Expr::PatternMatch { value, .. } => {
+                self.collect_identifiers(value, vars);
             }
         }
     }
@@ -1211,6 +1216,7 @@ impl ProofEngine {
             Type::Option(inner) => {
                 format!("Option<{}>", self.type_name(inner))
             }
+            Type::Enum(name) => name.clone(),
         }
     }
 

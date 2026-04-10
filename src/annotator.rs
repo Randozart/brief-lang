@@ -410,8 +410,43 @@ impl Annotator {
                 TopLevel::Stylesheet(css) => {
                     output.push_str(&format!("// Stylesheet ({} chars)\n", css.len()));
                 }
-                TopLevel::SvgComponent(svg) => {
-                    output.push_str(&format!("// SvgComponent ({} chars)\n", svg.len()));
+                TopLevel::SvgComponent { name, content } => {
+                    output.push_str(&format!(
+                        "// SvgComponent {} ({} chars)\n",
+                        name,
+                        content.len()
+                    ));
+                }
+                TopLevel::Enum(enum_def) => {
+                    let variants: Vec<String> = enum_def
+                        .variants
+                        .iter()
+                        .map(|v| match v {
+                            EnumVariant::Unit(name) => name.clone(),
+                            EnumVariant::Tuple(name, types) => format!(
+                                "{}({})",
+                                name,
+                                types
+                                    .iter()
+                                    .map(|t| self.type_to_string(t))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            EnumVariant::Struct(name, fields) => format!(
+                                "{{ {} }}",
+                                fields
+                                    .iter()
+                                    .map(|(n, t)| format!("{}: {}", n, self.type_to_string(t)))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        })
+                        .collect();
+                    output.push_str(&format!(
+                        "enum {} {{ {} }}\n",
+                        enum_def.name,
+                        variants.join(", ")
+                    ));
                 }
             }
             output.push('\n');
@@ -461,9 +496,8 @@ impl Annotator {
                         .join(", ")
                 )
             }
-            Type::Option(inner) => {
-                format!("Option<{}>", self.type_to_string(inner))
-            }
+            Type::Option(inner) => format!("Option<{}>", self.type_to_string(inner)),
+            Type::Enum(name) => name.clone(),
         }
     }
 
@@ -721,7 +755,26 @@ impl Annotator {
                 format!("{} {{{}}}", typename, fields_str)
             }
             Expr::ObjectLiteral(fields) => {
-                format!("{}", fields.iter().map(|(n,v)| format!("{}: {}", n, self.format_expr(v))).collect::<Vec<_>>().join(", "))
+                format!(
+                    "{}",
+                    fields
+                        .iter()
+                        .map(|(n, v)| format!("{}: {}", n, self.format_expr(v)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Expr::PatternMatch {
+                value,
+                variant,
+                fields,
+            } => {
+                format!(
+                    "{} {}({})",
+                    self.format_expr(value),
+                    variant,
+                    fields.join(", ")
+                )
             }
         }
     }

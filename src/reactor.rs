@@ -154,7 +154,12 @@ impl Reactor {
                 }
             }
             Expr::ObjectLiteral(fields) => {
-                for (_, v) in fields { self.collect_identifiers(v, deps); }
+                for (_, v) in fields {
+                    self.collect_identifiers(v, deps);
+                }
+            }
+            Expr::PatternMatch { value, .. } => {
+                self.collect_identifiers(value, deps);
             }
         }
     }

@@ -182,7 +182,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         | Expr::ListLen(_)
         | Expr::FieldAccess(_, _)
         | Expr::StructInstance(_, _) => SymbolicValue::Unknown,
-        | Expr::ObjectLiteral(_) => SymbolicValue::Unknown,
+        Expr::ObjectLiteral(_) => SymbolicValue::Unknown,
 
         // Comparison operators don't produce symbolic values (they're boolean expressions)
         Expr::Eq(_, _)
@@ -193,6 +193,12 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         | Expr::Ge(_, _)
         | Expr::And(_, _)
         | Expr::Or(_, _) => SymbolicValue::Unknown,
+        Expr::PatternMatch { value, .. } => {
+            // For symbolic execution, pattern matching returns Unknown
+            // The actual binding of variables happens at runtime
+            let _ = eval_symbolic(value, state);
+            SymbolicValue::Unknown
+        }
     }
 }
 

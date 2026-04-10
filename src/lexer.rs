@@ -54,6 +54,14 @@ pub enum Token {
     Rstruct,
     #[token("render")]
     Render,
+    #[token("enum")]
+    Enum,
+    #[token("Ok")]
+    Ok,
+    #[token("Err")]
+    Err,
+    #[token("match")]
+    Match,
 
     #[token("some")]
     Some,

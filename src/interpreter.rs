@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::ffi::FFI_REGISTRY;
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -15,6 +16,7 @@ pub enum Value {
         typename: String,
         fields: HashMap<String, Value>,
     },
+    Enum(String, String, HashMap<String, Value>), // (enum_name, variant_name, fields)
     Defn(String),
     Void,
 }
@@ -31,6 +33,9 @@ impl fmt::Display for Value {
             Value::Instance { typename, fields } => {
                 write!(f, "<{} {{}}>", typename)
             }
+            Value::Enum(name, variant, _) => {
+                write!(f, "<{}::{}>", name, variant)
+            }
             Value::Defn(name) => write!(f, "<defn {}>", name),
             Value::Void => write!(f, "void"),
         }
@@ -45,6 +50,64 @@ pub enum RuntimeError {
     ContractViolation(String),
     UnhandledOutcome(String),
     UndefinedForeignFunction(String),
+}
+
+// Helper functions for JSON serialization stdlib
+fn value_to_json_value(v: &Value) -> JsonValue {
+    match v {
+        Value::Int(i) => JsonValue::Number((*i).into()),
+        Value::Float(f) => serde_json::json!(*f),
+        Value::Bool(b) => JsonValue::Bool(*b),
+        Value::String(s) => JsonValue::String(s.clone()),
+        Value::List(items) => JsonValue::Array(items.iter().map(value_to_json_value).collect()),
+        Value::Instance { fields, .. } => {
+            let map: serde_json::Map<String, JsonValue> = fields
+                .iter()
+                .map(|(k, v)| (k.clone(), value_to_json_value(v)))
+                .collect();
+            JsonValue::Object(map)
+        }
+        Value::Enum(name, variant, fields) => {
+            let mut map = serde_json::Map::new();
+            map.insert("_enum".to_string(), JsonValue::String(name.clone()));
+            map.insert("_variant".to_string(), JsonValue::String(variant.clone()));
+            for (k, v) in fields {
+                map.insert(k.clone(), value_to_json_value(v));
+            }
+            JsonValue::Object(map)
+        }
+        Value::Data(_) => JsonValue::Null,
+        Value::Defn(_) => JsonValue::Null,
+        Value::Void => JsonValue::Null,
+    }
+}
+
+fn json_value_to_value(v: JsonValue) -> Value {
+    match v {
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i)
+            } else if let Some(f) = n.as_f64() {
+                Value::Float(f)
+            } else {
+                Value::Int(0)
+            }
+        }
+        JsonValue::String(s) => Value::String(s),
+        JsonValue::Bool(b) => Value::Bool(b),
+        JsonValue::Array(arr) => Value::List(arr.into_iter().map(json_value_to_value).collect()),
+        JsonValue::Object(map) => {
+            let fields: HashMap<String, Value> = map
+                .into_iter()
+                .map(|(k, v)| (k, json_value_to_value(v)))
+                .collect();
+            Value::Instance {
+                typename: "Object".to_string(),
+                fields,
+            }
+        }
+        JsonValue::Null => Value::Void,
+    }
 }
 
 pub type ForeignFn = fn(Vec<Value>) -> Result<Value, RuntimeError>;
@@ -572,6 +635,78 @@ impl Interpreter {
                     return Ok(arg_values[0].clone());
                 }
 
+                // Built-in stdlib functions: to_json and from_json
+                if fn_name == "to_json" {
+                    let arg = arg_values.first().ok_or_else(|| {
+                        RuntimeError::TypeMismatch("to_json requires 1 argument".into())
+                    })?;
+
+                    let json_str = match arg {
+                        Value::Instance { fields, .. } => {
+                            let mut map = serde_json::Map::new();
+                            for (k, v) in fields {
+                                map.insert(k.clone(), value_to_json_value(v));
+                            }
+                            JsonValue::Object(map).to_string()
+                        }
+                        Value::String(s) => s.clone(),
+                        Value::List(items) => {
+                            let arr: Vec<_> = items.iter().map(value_to_json_value).collect();
+                            JsonValue::Array(arr).to_string()
+                        }
+                        Value::Int(i) => JsonValue::Number((*i).into()).to_string(),
+                        Value::Float(f) => serde_json::json!(*f).to_string(),
+                        Value::Bool(b) => JsonValue::Bool(*b).to_string(),
+                        _ => "{}".to_string(),
+                    };
+                    return Ok(Value::String(json_str));
+                }
+
+                if fn_name == "from_json" {
+                    let arg = arg_values.first().ok_or_else(|| {
+                        RuntimeError::TypeMismatch("from_json requires 1 argument".into())
+                    })?;
+
+                    let json_str = match arg {
+                        Value::String(s) => s.clone(),
+                        _ => {
+                            // Return Err("Invalid JSON string")
+                            return Ok(Value::Enum(
+                                "Result".to_string(),
+                                "Err".to_string(),
+                                HashMap::from([(
+                                    "error".to_string(),
+                                    Value::String("Invalid JSON string".to_string()),
+                                )]),
+                            ));
+                        }
+                    };
+
+                    let result = match serde_json::from_str::<JsonValue>(&json_str) {
+                        Ok(v) => {
+                            let parsed_value = json_value_to_value(v);
+                            // Return Ok(parsed_value)
+                            Ok(Value::Enum(
+                                "Result".to_string(),
+                                "Ok".to_string(),
+                                HashMap::from([("value".to_string(), parsed_value)]),
+                            ))
+                        }
+                        Err(e) => {
+                            // Return Err(error_message)
+                            Ok(Value::Enum(
+                                "Result".to_string(),
+                                "Err".to_string(),
+                                HashMap::from([(
+                                    "error".to_string(),
+                                    Value::String(e.to_string()),
+                                )]),
+                            ))
+                        }
+                    };
+                    return result;
+                }
+
                 if let Some(first_arg) = arg_values.first() {
                     if let Value::Instance { typename, fields } = first_arg {
                         let method_name = format!("{}.{}", typename, fn_name);
@@ -657,6 +792,40 @@ impl Interpreter {
                     typename: String::from("ObjectLiteral"),
                     fields: instance_fields,
                 })
+            }
+            Expr::PatternMatch {
+                value,
+                variant,
+                fields,
+            } => {
+                // Evaluate the value being matched
+                let matched_value = self.eval_expr(value)?;
+
+                // Check if it's an Enum with the matching variant
+                match matched_value {
+                    Value::Enum(enum_name, matched_variant, enum_fields) => {
+                        // Check if the variant matches
+                        if matched_variant == *variant {
+                            // Bind the pattern variables to the enum fields
+                            // For a pattern like Ok(h), we bind the first field to h
+                            // For a pattern like Ok(a, b), we bind first two fields to a and b
+                            let enum_field_values: Vec<_> = enum_fields.values().cloned().collect();
+
+                            for (i, pattern_var) in fields.iter().enumerate() {
+                                if let Some(field_value) = enum_field_values.get(i) {
+                                    self.state.insert(pattern_var.clone(), field_value.clone());
+                                }
+                            }
+
+                            // Return true - the pattern matched
+                            Ok(Value::Bool(true))
+                        } else {
+                            // Variant doesn't match
+                            Ok(Value::Bool(false))
+                        }
+                    }
+                    _ => Ok(Value::Bool(false)),
+                }
             }
         }
     }

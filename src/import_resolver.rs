@@ -68,7 +68,14 @@ impl ImportResolver {
                 reactor_speed: None,
             });
         } else {
-            import.path.join(".")
+            // Check if this is a file-based import (ends with .css, .svg, etc.)
+            // If so, use slashes instead of dots to preserve the file path
+            let last_component = import.path.last().unwrap();
+            if last_component.ends_with(".css") || last_component.ends_with(".svg") {
+                import.path.join("/")
+            } else {
+                import.path.join(".")
+            }
         };
 
         if let Some(cached) = self.loaded_modules.get(&path_str) {
@@ -115,18 +122,51 @@ impl ImportResolver {
             if svg_path.exists() {
                 let svg_content = std::fs::read_to_string(&svg_path)
                     .map_err(|e| format!("Failed to read SVG '{}': {}", svg_path.display(), e))?;
+                // Extract alias name from import items
+                let component_name = import
+                    .items
+                    .first()
+                    .map(|item| item.alias.as_ref().unwrap_or(&item.name).clone())
+                    .unwrap_or_else(|| {
+                        // Fallback: sanitize filename
+                        // Extract just the filename from the path (e.g., "assets/logo.svg" -> "logo")
+                        let file_name = if let Some(last_slash) = path_str.rfind('/') {
+                            &path_str[last_slash + 1..]
+                        } else {
+                            &path_str
+                        };
+                        let file_name = file_name.trim_end_matches(".svg");
+                        file_name
+                            .split('-')
+                            .map(|s| {
+                                let mut chars = s.chars();
+                                match chars.next() {
+                                    Some(c) => {
+                                        c.to_uppercase().collect::<String>() + chars.as_str()
+                                    }
+                                    None => String::new(),
+                                }
+                            })
+                            .collect::<String>()
+                    });
                 let svg_for_cache = svg_content.clone();
                 let svg_for_return = svg_content.clone();
                 self.loaded_modules.insert(
                     path_str.clone(),
                     Program {
-                        items: vec![TopLevel::SvgComponent(svg_for_cache)],
+                        items: vec![TopLevel::SvgComponent {
+                            name: component_name.clone(),
+                            content: svg_for_cache,
+                        }],
                         comments: vec![],
                         reactor_speed: None,
                     },
                 );
                 return Ok(Program {
-                    items: vec![TopLevel::SvgComponent(svg_content)],
+                    items: vec![TopLevel::SvgComponent {
+                        name: component_name,
+                        content: svg_for_return,
+                    }],
                     comments: vec![],
                     reactor_speed: None,
                 });

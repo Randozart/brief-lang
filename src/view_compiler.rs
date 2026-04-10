@@ -29,6 +29,10 @@ pub enum Directive {
         name: String,
         value: String,
     },
+    Style {
+        name: String,
+        value: String,
+    },
     Each {
         iterable: String,
         item_name: String,
@@ -108,6 +112,7 @@ impl ViewCompiler {
                         || tag_lower.contains("b-trigger")
                         || tag_lower.contains("b-class")
                         || tag_lower.contains("b-attr")
+                        || tag_lower.contains("b-style")
                         || tag_lower.contains("b-each");
 
                     if has_directive && !tag_lower.contains("id=") {
@@ -333,6 +338,16 @@ impl ViewCompiler {
                         self.bindings.push(Binding {
                             element_id: elem_id,
                             directive: Directive::Attr { name, value },
+                        });
+                    }
+                }
+            } else if attr.starts_with("b-style") {
+                if let Some(expr) = self.extract_attr_value(tag, "b-style") {
+                    let elem_id = self.generate_element_id(tag);
+                    if let Some((name, value)) = self.parse_attr_expr(&expr) {
+                        self.bindings.push(Binding {
+                            element_id: elem_id,
+                            directive: Directive::Style { name, value },
                         });
                     }
                 }

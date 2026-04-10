@@ -586,6 +586,40 @@ impl WasmGenerator {
                     ));
                     output.push_str("        }\n");
                 }
+            } else if let Directive::Attr { name, value } = &binding.directive {
+                // For static attributes, we need to generate the update logic
+                // Note: value might be a signal reference or static string
+                // For simplicity, assume value is a signal name for now
+                if let Some(&sig_id) = self.signal_map.get(value) {
+                    output.push_str(&format!("        if self.dirty_signals[{}] {{\n", sig_id));
+                    output.push_str(&format!(
+                        "            let val = self.signals[{}].clone();\n",
+                        sig_id
+                    ));
+                    output.push_str("            let val_str = if val.is_string() { val.as_string().unwrap_or_default() } else { format!(\"{:?}\", val) };\n");
+                    output.push_str(&format!(
+                        "            parts.push(format!(\"{{{{\\\"op\\\":\\\"attr\\\",\\\"el\\\":\\\"{}\\\",\\\"name\\\":\\\"{}\\\",\\\"value\\\":\\\"{{}}\\\"}}}}\", val_str));\n",
+                        binding.element_id, name
+                    ));
+                    output.push_str("        }\n");
+                }
+            } else if let Directive::Style { name, value } = &binding.directive {
+                // For static styles, we need to generate the update logic
+                // Note: value might be a signal reference or static string
+                // For simplicity, assume value is a signal name for now
+                if let Some(&sig_id) = self.signal_map.get(value) {
+                    output.push_str(&format!("        if self.dirty_signals[{}] {{\n", sig_id));
+                    output.push_str(&format!(
+                        "            let val = self.signals[{}].clone();\n",
+                        sig_id
+                    ));
+                    output.push_str("            let val_str = if val.is_string() { val.as_string().unwrap_or_default() } else { format!(\"{:?}\", val) };\n");
+                    output.push_str(&format!(
+                        "            parts.push(format!(\"{{{{\\\"op\\\":\\\"style\\\",\\\"el\\\":\\\"{}\\\",\\\"name\\\":\\\"{}\\\",\\\"value\\\":\\\"{{}}\\\"}}}}\", val_str));\n",
+                        binding.element_id, name
+                    ));
+                    output.push_str("        }\n");
+                }
             }
         }
 
@@ -1019,6 +1053,63 @@ impl WasmGenerator {
         output.push_str("(async function() {\n");
         output.push_str("    'use strict';\n\n");
 
+        // FFI: JSON operations
+        output.push_str("    function __json_decode(str) {\n");
+        output.push_str("        try {\n");
+        output.push_str("            return JSON.parse(str);\n");
+        output.push_str("        } catch(e) {\n");
+        output.push_str("            console.error('JSON decode error:', e.message);\n");
+        output.push_str("            return null;\n");
+        output.push_str("        }\n");
+        output.push_str("    }\n\n");
+
+        output.push_str("    function __json_get_string(data, key) {\n");
+        output.push_str("        if (data && data[key]) {\n");
+        output.push_str("            return String(data[key]);\n");
+        output.push_str("        }\n");
+        output.push_str("        return '';\n");
+        output.push_str("    }\n\n");
+
+        output.push_str("    function __json_encode(val) {\n");
+        output.push_str("        try {\n");
+        output.push_str("            return JSON.stringify(val);\n");
+        output.push_str("        } catch(e) {\n");
+        output.push_str("            console.error('JSON encode error:', e.message);\n");
+        output.push_str("            return '';\n");
+        output.push_str("        }\n");
+        output.push_str("    }\n\n");
+
+        // FFI: HTTP operations (for lib/std/http.bv)
+        output.push_str("    function __http_get(url) {\n");
+        output.push_str("        try {\n");
+        output.push_str("            const xhr = new XMLHttpRequest();\n");
+        output.push_str("            xhr.open('GET', url, false);\n");
+        output.push_str("            xhr.send();\n");
+        output.push_str("            if (xhr.status >= 200 && xhr.status < 300) {\n");
+        output.push_str("                return xhr.responseText;\n");
+        output.push_str("            }\n");
+        output.push_str("            return '';\n");
+        output.push_str("        } catch(e) {\n");
+        output.push_str("            console.error('HTTP GET error:', e.message);\n");
+        output.push_str("            return '';\n");
+        output.push_str("        }\n");
+        output.push_str("    }\n\n");
+
+        output.push_str("    function __http_post(url, body) {\n");
+        output.push_str("        try {\n");
+        output.push_str("            const xhr = new XMLHttpRequest();\n");
+        output.push_str("            xhr.open('POST', url, false);\n");
+        output.push_str("            xhr.send(body);\n");
+        output.push_str("            if (xhr.status >= 200 && xhr.status < 300) {\n");
+        output.push_str("                return xhr.responseText;\n");
+        output.push_str("            }\n");
+        output.push_str("            return '';\n");
+        output.push_str("        } catch(e) {\n");
+        output.push_str("            console.error('HTTP POST error:', e.message);\n");
+        output.push_str("            return '';\n");
+        output.push_str("        }\n");
+        output.push_str("    }\n\n");
+
         output.push_str("    const ELEMENT_MAP = {\n");
         for binding in bindings {
             output.push_str(&format!(
@@ -1151,6 +1242,12 @@ impl WasmGenerator {
         output.push_str("                    break;\n");
         output.push_str("                case 'each':\n");
         output.push_str("                    renderEach(inst.iterable, '#' + inst.el);\n");
+        output.push_str("                    break;\n");
+        output.push_str("                case 'attr':\n");
+        output.push_str("                    el.setAttribute(inst.name, inst.value);\n");
+        output.push_str("                    break;\n");
+        output.push_str("                case 'style':\n");
+        output.push_str("                    el.style[inst.name] = inst.value;\n");
         output.push_str("                    break;\n");
         output.push_str("            }\n");
         output.push_str("        }\n");

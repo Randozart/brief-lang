@@ -954,6 +954,22 @@ fn run_rbv(
         program.items.remove(*i);
     }
 
+    // Initialize render_blocks early for SVG extraction
+    let mut render_blocks: HashMap<String, String> = HashMap::new();
+
+    // Extract SVG from SvgComponent imports
+    let mut svg_items: Vec<usize> = Vec::new();
+    for (i, item) in program.items.iter().enumerate() {
+        if let ast::TopLevel::SvgComponent { name, content } = item {
+            render_blocks.insert(name.clone(), content.clone());
+            svg_items.push(i);
+        }
+    }
+    // Remove SVG items from program (they're not Brief code)
+    for i in svg_items.iter().rev() {
+        program.items.remove(*i);
+    }
+
     println!("  Resolved imports");
 
     let mut desug = desugarer::Desugarer::new();
@@ -973,7 +989,6 @@ fn run_rbv(
 
     // Merge RenderBlock into corresponding StructDefinition
     let mut program = program;
-    let mut render_blocks: HashMap<String, String> = HashMap::new();
     program.items.retain(|item| {
         if let ast::TopLevel::RenderBlock(rb) = item {
             render_blocks.insert(rb.struct_name.clone(), rb.view_html.clone());

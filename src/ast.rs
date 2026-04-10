@@ -16,6 +16,7 @@ pub enum Type {
     Applied(String, Vec<Type>),
     Sig(String),       // Signature used as function type: sig name -> ...
     Option(Box<Type>), // Option<T> - Some(T) or None
+    Enum(String),      // Enum type: Result, Color, etc.
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +123,12 @@ pub enum Expr {
     FieldAccess(Box<Expr>, String),
     StructInstance(String, Vec<(String, Expr)>),
     ObjectLiteral(Vec<(String, Expr)>),
+    // Pattern matching in guards: [value Variant(field1, field2)] { ... }
+    PatternMatch {
+        value: Box<Expr>,
+        variant: String,
+        fields: Vec<String>,
+    },
 }
 
 impl Expr {
@@ -318,9 +325,13 @@ pub enum TopLevel {
     },
     Struct(StructDefinition),
     RStruct(RStructDefinition),
+    Enum(EnumDefinition),
     RenderBlock(RenderBlock),
     Stylesheet(String),
-    SvgComponent(String),
+    SvgComponent {
+        name: String,
+        content: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -337,6 +348,21 @@ pub struct StructField {
     pub name: String,
     pub ty: Type,
     pub default: Option<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumDefinition {
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    pub variants: Vec<EnumVariant>,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub enum EnumVariant {
+    Unit(String),
+    Tuple(String, Vec<Type>),
+    Struct(String, Vec<(String, Type)>),
 }
 
 impl StructDefinition {

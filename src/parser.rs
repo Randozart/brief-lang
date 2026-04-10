@@ -223,6 +223,10 @@ impl<'a> Parser<'a> {
                 let rstruct_def = self.parse_rstruct()?;
                 Ok(TopLevel::RStruct(rstruct_def))
             }
+            Some(Ok(Token::Enum)) => {
+                let enum_def = self.parse_enum()?;
+                Ok(TopLevel::Enum(enum_def))
+            }
             Some(Ok(Token::Render)) => {
                 let render_block = self.parse_render_block()?;
                 Ok(TopLevel::RenderBlock(render_block))
@@ -236,7 +240,7 @@ impl<'a> Parser<'a> {
     fn parse_import(&mut self) -> Result<Import, String> {
         self.expect(Token::Import)?;
 
-        let items = if let Some(Ok(Token::LBrace)) = self.current_token() {
+        let mut items = if let Some(Ok(Token::LBrace)) = self.current_token() {
             self.advance();
             let mut items = Vec::new();
             while let Some(Ok(Token::Identifier(_))) = self.current_token() {
@@ -281,10 +285,20 @@ impl<'a> Parser<'a> {
             }
         } else if let Some(Ok(Token::String(s))) = self.current_token() {
             // Support direct quoted path: import "./file.css";
+            // Also support: import "./file.svg" as Name;
             let s = s.clone();
             self.advance();
             let trimmed = s.trim_start_matches("./");
             let parts: Vec<String> = trimmed.split('/').map(String::from).collect();
+
+            // Check for 'as Name' after the path
+            if let Some(Ok(Token::As)) = self.current_token() {
+                self.advance();
+                let name = self.expect_identifier()?;
+                // For imports like `import "./logo.svg" as Logo;`, create an import item
+                items.push(ImportItem { name, alias: None });
+            }
+
             parts
         } else if let Some(Ok(Token::Identifier(_))) = self.current_token() {
             if !items.is_empty() {
@@ -543,7 +557,6 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.current_token() {
             match token {
                 Ok(Token::RBrace) => {
-                    
                     self.advance();
                     break;
                 }
@@ -784,6 +797,89 @@ impl<'a> Parser<'a> {
             transactions,
             view_html,
             span,
+        })
+    }
+
+    fn parse_enum(&mut self) -> Result<EnumDefinition, String> {
+        self.expect(Token::Enum)?;
+        let name = self.expect_identifier()?;
+
+        // Parse optional type parameters: <T, E>
+        let mut type_params = Vec::new();
+        if let Some(Ok(Token::Lt)) = self.peek() {
+            self.expect(Token::Lt)?;
+            loop {
+                let param_name = self.expect_identifier()?;
+                type_params.push(TypeParam {
+                    name: param_name,
+                    bounds: vec![],
+                });
+                match self.current_token() {
+                    Some(Ok(Token::Comma)) => {
+                        self.advance(); // consume comma
+                    }
+                    Some(Ok(Token::Gt)) => {
+                        self.advance(); // consume >
+                        break;
+                    }
+                    _ => return Err("Expected ',' or '>' in enum type parameters".to_string()),
+                }
+            }
+        }
+
+        self.expect(Token::LBrace)?;
+
+        let mut variants = Vec::new();
+
+        while let Some(token) = self.current_token() {
+            match token {
+                Ok(Token::RBrace) => {
+                    self.advance();
+                    break;
+                }
+                Ok(Token::Identifier(variant_name)) => {
+                    let variant_name_str = variant_name.to_string();
+                    self.advance();
+
+                    // Check for tuple variant: Ok(T) or Err(E)
+                    let variant = if let Some(Ok(Token::LParen)) = self.peek() {
+                        self.expect(Token::LParen)?;
+                        let mut inner_types = Vec::new();
+                        loop {
+                            let inner_type = self.parse_type()?;
+                            inner_types.push(inner_type);
+                            match self.current_token() {
+                                Some(Ok(Token::Comma)) => {
+                                    self.advance();
+                                }
+                                Some(Ok(Token::RParen)) => {
+                                    self.advance();
+                                    break;
+                                }
+                                _ => return Err("Expected ',' or ')' in enum variant".to_string()),
+                            }
+                        }
+                        EnumVariant::Tuple(variant_name_str, inner_types)
+                    } else {
+                        EnumVariant::Unit(variant_name_str)
+                    };
+
+                    variants.push(variant);
+
+                    // Consume optional comma
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                }
+                _ => return Err(format!("Unexpected token in enum: {:?}", token)),
+            }
+        }
+
+        Ok(EnumDefinition {
+            name,
+            type_params,
+            variants,
+            span: self.current_span(),
         })
     }
 
@@ -1456,8 +1552,148 @@ impl<'a> Parser<'a> {
             }
             Some(Ok(Token::LBracket)) => {
                 // Guarded statement: [condition] statement or [condition] { statements }
+                // Also supports pattern matching: [value Pattern(field)] { statements };
                 self.advance(); // consume [
-                let condition = self.parse_expression()?;
+
+                // Try to parse pattern match: variable Variant(field1, field2)
+                // We need to look ahead to detect this pattern
+                let condition = match self.current_token() {
+                    Some(Ok(Token::Identifier(var_name))) => {
+                        let var_name_clone = var_name.clone();
+                        self.advance(); // consume variable name
+
+                        // Check for pattern: variant_name ( field1, field2, ... )
+                        // Variant names can be identifiers OR special tokens like Ok, Err
+                        match self.current_token() {
+                            Some(Ok(Token::Identifier(variant_name))) => {
+                                let variant_clone = variant_name.clone();
+                                self.advance(); // consume variant name
+
+                                match self.current_token() {
+                                    Some(Ok(Token::LParen)) => {
+                                        // This is a pattern match
+                                        self.advance(); // consume (
+                                        let mut fields = Vec::new();
+
+                                        // Parse field names: (field1, field2, ...)
+                                        while let Some(Ok(Token::Identifier(field_name))) =
+                                            self.current_token()
+                                        {
+                                            fields.push(field_name.clone());
+                                            self.advance();
+
+                                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                                self.advance();
+                                            } else {
+                                                break;
+                                            }
+                                        }
+
+                                        self.expect(Token::RParen)?;
+
+                                        // Create pattern match expression
+                                        Expr::PatternMatch {
+                                            value: Box::new(Expr::Identifier(var_name_clone)),
+                                            variant: variant_clone,
+                                            fields,
+                                        }
+                                    }
+                                    _ => {
+                                        // Not a pattern match, parse as regular expression
+                                        // We consumed var_name, need to include it in expression parsing
+                                        // For simplicity, reconstruct by parsing the remainder
+                                        // This is a limitation - we'd need better token handling
+                                        Expr::Identifier(var_name_clone)
+                                    }
+                                }
+                            }
+                            // Handle special tokens like Ok, Err as variant names
+                            Some(Ok(Token::Ok)) => {
+                                self.advance(); // consume Ok
+                                match self.current_token() {
+                                    Some(Ok(Token::LParen)) => {
+                                        // This is a pattern match
+                                        self.advance(); // consume (
+                                        let mut fields = Vec::new();
+
+                                        // Parse field names: (field1, field2, ...)
+                                        while let Some(Ok(Token::Identifier(field_name))) =
+                                            self.current_token()
+                                        {
+                                            fields.push(field_name.clone());
+                                            self.advance();
+
+                                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                                self.advance();
+                                            } else {
+                                                break;
+                                            }
+                                        }
+
+                                        self.expect(Token::RParen)?;
+
+                                        // Create pattern match expression
+                                        Expr::PatternMatch {
+                                            value: Box::new(Expr::Identifier(var_name_clone)),
+                                            variant: "Ok".to_string(),
+                                            fields,
+                                        }
+                                    }
+                                    _ => {
+                                        // Not a pattern match
+                                        Expr::Identifier(var_name_clone)
+                                    }
+                                }
+                            }
+                            Some(Ok(Token::Err)) => {
+                                self.advance(); // consume Err
+                                match self.current_token() {
+                                    Some(Ok(Token::LParen)) => {
+                                        // This is a pattern match
+                                        self.advance(); // consume (
+                                        let mut fields = Vec::new();
+
+                                        // Parse field names: (field1, field2, ...)
+                                        while let Some(Ok(Token::Identifier(field_name))) =
+                                            self.current_token()
+                                        {
+                                            fields.push(field_name.clone());
+                                            self.advance();
+
+                                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                                self.advance();
+                                            } else {
+                                                break;
+                                            }
+                                        }
+
+                                        self.expect(Token::RParen)?;
+
+                                        // Create pattern match expression
+                                        Expr::PatternMatch {
+                                            value: Box::new(Expr::Identifier(var_name_clone)),
+                                            variant: "Err".to_string(),
+                                            fields,
+                                        }
+                                    }
+                                    _ => {
+                                        // Not a pattern match
+                                        Expr::Identifier(var_name_clone)
+                                    }
+                                }
+                            }
+                            _ => {
+                                // Not a pattern match
+                                Expr::Identifier(var_name_clone)
+                            }
+                        }
+                    }
+                    _ => {
+                        // Not starting with identifier, parse as regular expression
+                        self.parse_expression()?
+                    }
+                };
+
                 self.expect(Token::RBracket)?;
 
                 // Check for block syntax

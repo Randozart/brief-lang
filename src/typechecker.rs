@@ -23,6 +23,7 @@ pub struct TypeChecker {
     signatures: HashMap<String, Signature>,
     definitions: HashMap<String, Definition>,
     ffi_results: RefCell<HashMap<String, ResultCheckStatus>>,
+    foreign_sigs: HashMap<String, ForeignSig>,
 }
 
 impl TypeChecker {
@@ -35,6 +36,7 @@ impl TypeChecker {
             signatures: HashMap::new(),
             definitions: HashMap::new(),
             ffi_results: RefCell::new(HashMap::new()),
+            foreign_sigs: HashMap::new(),
         }
     }
 
@@ -43,8 +45,43 @@ impl TypeChecker {
         self
     }
 
+    fn register_stdlib_signatures(&mut self) {
+        // Add stdlib function signatures for type checking
+        // to_json(value: Object) -> String
+        self.signatures.insert(
+            "to_json".to_string(),
+            Signature {
+                name: "to_json".to_string(),
+                input_types: vec![Type::Custom("Object".to_string())],
+                result_type: ResultType::Projection(vec![Type::String]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        // from_json(json_str: String) -> Result<Object, String>
+        self.signatures.insert(
+            "from_json".to_string(),
+            Signature {
+                name: "from_json".to_string(),
+                input_types: vec![Type::String],
+                result_type: ResultType::Projection(vec![Type::Applied(
+                    "Result".to_string(),
+                    vec![Type::Custom("Object".to_string()), Type::String],
+                )]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+    }
+
     pub fn check_program(&mut self, program: &Program) -> Vec<TypeError> {
-        // First pass: collect signatures and definitions
+        // Add stdlib signatures (to_json, from_json, etc.)
+        self.register_stdlib_signatures();
+
+        // First pass: collect signatures, definitions, and foreign sigs
         for item in &program.items {
             match item {
                 TopLevel::Signature(sig) => {
@@ -53,6 +90,10 @@ impl TypeChecker {
                 }
                 TopLevel::Definition(defn) => {
                     self.definitions.insert(defn.name.clone(), defn.clone());
+                }
+                TopLevel::ForeignSig(frgn_sig) => {
+                    self.foreign_sigs
+                        .insert(frgn_sig.name.clone(), frgn_sig.clone());
                 }
                 _ => {}
             }
@@ -111,7 +152,10 @@ impl TypeChecker {
                     self.check_transaction(txn);
                 }
                 TopLevel::Import(_) => {}
-                TopLevel::ForeignSig(_) => {}
+                TopLevel::ForeignSig(sig) => {
+                    // Foreign signatures are already collected in the first pass
+                    let _ = sig; // Use the variable to avoid unused warning
+                }
                 TopLevel::ForeignBinding {
                     name,
                     toml_path,
@@ -122,9 +166,10 @@ impl TypeChecker {
                 }
                 TopLevel::Struct(_) => {}
                 TopLevel::RStruct(_) => {}
+                TopLevel::Enum(_) => {}
                 TopLevel::RenderBlock(_) => {}
                 TopLevel::Stylesheet(_) => {}
-                TopLevel::SvgComponent(_) => {}
+                TopLevel::SvgComponent { .. } => {}
             }
         }
         self.errors.clone()
@@ -725,7 +770,34 @@ impl TypeChecker {
             | Expr::Or(_, _)
             | Expr::And(_, _) => Type::Bool,
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.infer_expression(e),
-            Expr::Call(name, _args) => Type::Custom(name.clone()),
+            Expr::Call(name, _args) => {
+                // Check if it's a foreign sig
+                if let Some(frgn_sig) = self.foreign_sigs.get(name) {
+                    // Return the first output type (ForeignSig supports multiple outputs)
+                    frgn_sig
+                        .outputs
+                        .first()
+                        .cloned()
+                        .unwrap_or(Type::Custom(name.clone()))
+                } else if let Some(sig) = self.signatures.get(name) {
+                    // Check signature return type
+                    match &sig.result_type {
+                        crate::ast::ResultType::Projection(types) => {
+                            types.first().cloned().unwrap_or(Type::Custom(name.clone()))
+                        }
+                        crate::ast::ResultType::TrueAssertion => Type::Bool,
+                    }
+                } else if let Some(defn) = self.definitions.get(name) {
+                    // Return defn's return type
+                    defn.outputs
+                        .first()
+                        .cloned()
+                        .unwrap_or(Type::Custom(name.clone()))
+                } else {
+                    // Unknown function, return custom type
+                    Type::Custom(name.clone())
+                }
+            }
             Expr::ListLiteral(elements) => {
                 if elements.is_empty() {
                     Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])
@@ -750,6 +822,7 @@ impl TypeChecker {
             Expr::FieldAccess(_, _) => Type::Custom("unknown".to_string()),
             Expr::StructInstance(typename, _fields) => Type::Custom(typename.clone()),
             Expr::ObjectLiteral(_) => Type::Custom("ObjectLiteral".to_string()),
+            Expr::PatternMatch { .. } => Type::Bool,
         }
     }
 
@@ -811,6 +884,8 @@ impl TypeChecker {
             (Type::ContractBound(inner, _), t) | (t, Type::ContractBound(inner, _)) => {
                 self.types_compatible(inner, t)
             }
+            (Type::Enum(a), Type::Enum(b)) => a == b,
+            (Type::Enum(_), _) | (_, Type::Enum(_)) => false,
             _ => false,
         }
     }
@@ -883,6 +958,7 @@ impl TypeChecker {
             Type::Option(inner) => {
                 format!("Option<{}>", self.type_to_string(inner))
             }
+            Type::Enum(name) => name.clone(),
         }
     }
 

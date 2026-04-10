@@ -1,0 +1,15 @@
+// Standard HTTP Library
+// Foreign function declarations for WASM target
+
+frgn sig __http_get(url: String) -> String;
+frgn sig __http_post(url: String, body: String) -> String;
+
+defn http_get(url: String) -> Result<String, String> [true][true] {
+    let body = __http_get(url);
+    term Ok(body);
+};
+
+defn http_post(url: String, body: String) -> Result<String, String> [true][true] {
+    let response = __http_post(url, body);
+    term Ok(response);
+};

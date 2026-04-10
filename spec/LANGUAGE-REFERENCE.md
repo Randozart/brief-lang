@@ -108,6 +108,50 @@ struct User {
 };
 ```
 
+### Enums
+
+Enums allow you to define a type that can be one of several variants.
+
+#### Basic Enum Declaration
+
+```brief
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+```
+
+#### Enums with Data
+
+Enums can carry data in their variants:
+
+```brief
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
+}
+
+enum Option<T> {
+    Some(T),
+    None
+}
+```
+
+#### Using Enums
+
+```brief
+// Create enum values
+let color: Color = Color.Red;
+let result: Result<Int, String> = Result.Ok(42);
+let maybe: Option<String> = Option.Some("hello");
+
+// Use pattern matching to handle enum variants
+[color Red] {
+    term "Red color";
+};
+```
+
 ### Type Parameters
 
 ```brief
@@ -426,6 +470,91 @@ let value: Int;
 [value < 0] &negative = true;
 ```
 
+### Enum Pattern Matching
+
+Pattern matching is used to destructure enum variants and bind their fields to variables.
+
+#### Basic Enum Pattern Matching
+
+```brief
+// Define an enum
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
+}
+
+// Parse JSON and match on result
+let result: Result<Object, String> = from_json("{\"message\": \"test\"}");
+
+// Match on Ok variant - bind inner value to 'obj'
+[result Ok(obj)] {
+    // 'obj' is now bound to the parsed object
+    term to_json({success: obj.message});
+};
+
+// Match on Err variant - bind error to 'e'
+[result Err(e)] {
+    term to_json({error: e});
+};
+```
+
+#### Pattern Syntax
+
+The pattern matching syntax is `[value Variant(field1, field2, ...)]`:
+
+- `value` - The variable being matched (must be an enum type)
+- `Variant` - The enum variant name (e.g., `Ok`, `Err`, or custom variant names)
+- `(field1, field2, ...)` - Field names to bind to the variant's inner values
+
+#### Example with Custom Enums
+
+```brief
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+enum Option<T> {
+    Some(T),
+    None
+}
+
+let color: Color = Color.Red;
+let maybe_value: Option<Int> = Option.Some(42);
+
+// Match on enum variants
+[color Red] {
+    term "Red color";
+};
+
+[maybe_value Some(value)] {
+    term to_json({value: value});
+};
+
+[maybe_value None] {
+    term "No value";
+};
+```
+
+#### Result Type Pattern Matching
+
+The standard `Result<T, E>` type is built-in and follows this pattern:
+
+```brief
+let result: Result<Object, String> = from_json(json_str);
+
+[result Ok(data)] {
+    // Success case - 'data' contains the parsed object
+    term to_json({received: data});
+};
+
+[result Err(error_message)] {
+    // Error case - 'error_message' contains the error string
+    term to_json({error: error_message});
+};
+```
+
 ---
 
 ## Imports
@@ -614,6 +743,38 @@ defn clamp(value: Int, min_val: Int, max_val: Int) -> Int [min_val <= max_val][r
     [value >= min_val && value <= max_val] term value;
 };
 ```
+
+### JSON Serialization
+
+#### to_json
+
+Converts Brief values to JSON strings:
+
+```brief
+let obj: Object = {message: "Hello", count: 42};
+let json_str: String = to_json(obj);
+// json_str = '{"message":"Hello","count":42}'
+```
+
+#### from_json
+
+Parses JSON strings into Brief values, returning `Result<Object, String>`:
+
+```brief
+let result: Result<Object, String> = from_json("{\"name\": \"Alice\"}");
+
+[result Ok(obj)] {
+    // obj contains the parsed object
+    term to_json({received: obj.name});
+};
+
+[result Err(error)] {
+    // error contains the error message
+    term to_json({error: error});
+};
+```
+
+The `from_json` function returns a `Result<Object, String>` to handle parsing errors safely. Always use pattern matching to handle both success and error cases.
 
 ### FFI Functions
 
