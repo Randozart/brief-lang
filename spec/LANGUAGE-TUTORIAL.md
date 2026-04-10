@@ -267,6 +267,31 @@ let value: Int = get_value();
 [value < 0] &negative = true;
 ```
 
+### Enum Pattern Matching
+
+Enums let you define types with named variants. Pattern matching in guards destructures them:
+
+```brief
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
+}
+
+let result: Result<Int, String> = from_json("42");
+
+// Match on Ok - bind inner value to 'n'
+[result Ok(n)] {
+    &parsed_value = n;
+};
+
+// Match on Err - bind error to 'e'
+[result Err(e)] {
+    &error_msg = e;
+};
+```
+
+The syntax is `[variable Variant(field1, field2)]` where the fields bind to the variant's inner values.
+
 ---
 
 ## Part 6: Structs

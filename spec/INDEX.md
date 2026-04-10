@@ -77,7 +77,8 @@ Build reactive web interfaces with Brief.
 
 - **[RENDERED-BRIEF-GUIDE.md](RENDERED-BRIEF-GUIDE.md)** - Web UI guide
   - rstruct components
-  - b-text, b-show, b-trigger directives
+  - b-text, b-show, b-trigger, b-style directives
+  - SVG component imports
   - Component composition
   - Examples
 
@@ -204,11 +205,16 @@ src/
 - [LANGUAGE-TUTORIAL.md Part 7](LANGUAGE-TUTORIAL.md#part-7-foreign-functions-ffi)
 - [FFI-GUIDE.md](FFI-GUIDE.md)
 
+### Enums and Pattern Matching
+- [LANGUAGE-TUTORIAL.md Part 5](LANGUAGE-TUTORIAL.md#part-5-pattern-matching)
+- [LANGUAGE-REFERENCE.md Enums](LANGUAGE-REFERENCE.md#enums)
+- [SPEC.md Types](SPEC.md#33-enums)
+
 ## Version
 
 - **Language**: Brief 8.0
 - **Status**: Production-ready
-- **Last Updated**: 2026-04-08
+- **Last Updated**: 2026-04-10
 
 ---
 

@@ -1,7 +1,16 @@
 # Brief Quick Reference
 
 **Cheat sheet for Brief syntax and patterns.**
-**Version: 7.0**
+**Version: 8.0**
+
+## New in v8.0
+
+- **Enums**: `enum` declarations with Unit, Tuple, and Struct variants
+- **Pattern matching**: `[value Variant(field)]` guard syntax for destructuring enums
+- **JSON serialization**: Built-in `to_json` and `from_json` with `Result` return
+- **HTTP stdlib**: `lib/std/http.bv` with `http_get`/`http_post`
+- **b-style directive**: Reactive style bindings in views
+- **SVG named imports**: `import "./logo.svg" as Logo;`
 
 ## New in v7.0
 
@@ -43,12 +52,23 @@ Int, Float, String, Bool, Void, Data
 Type1 | Type2                    # Union
 ```
 
+## Enums
+
+```brief
+enum Color { Red, Green, Blue }
+
+enum Result<T, E> { Ok(T), Err(E) }
+
+enum Option<T> { Some(T), None }
+```
+
 ## Statements
 
 ```brief
 &var = expr;                     # Mutate state
 let local: Type = expr;          # Local var
 [condition] statement;           # Guard
+[value Variant(field)] { ... };  # Enum pattern match
 Pattern(x, y) = expr;           # Unification
 term;                           # Success (or term true if postcondition is true)
 term value;                     # Return value(s)
@@ -221,6 +241,10 @@ is_valid_state(state, min, max)             # true if min <= state <= max
 
 # String Utilities
 string_is_empty(s)                      # true if s == ""
+
+# JSON Serialization
+to_json(value)                          # Convert value to JSON string
+from_json(json_str)                     # Parse JSON -> Result<Object, String>
 ```
 
 ## FFI Modules
@@ -252,6 +276,12 @@ current_timestamp() -> Result<Int, TimeError>
 sleep_ms(ms: Int) -> Result<Void, TimeError>
 ```
 
+### HTTP
+```brief
+http_get(url: String) -> Result<String, String>
+http_post(url: String, body: String) -> Result<String, String>
+```
+
 See [FFI-GUIDE.md](FFI-GUIDE.md) for FFI details.
 
 ## CLI
@@ -273,6 +303,23 @@ brief lsp                    # Language server
 - `@variable` is prior state
 - `&variable` is mutation
 - Comments: `# comment`
+
+## View Directives (.rbv)
+
+```brief
+b-text="expr"                      # Reactive text content
+b-show="cond"                      # Show/hide based on condition
+b-trigger:event="txn"              # Bind event to transaction
+b-each:item="list"                 # Iterate over list
+b-attr:name="value"                # Dynamic attribute
+b-style:name="value"               # Dynamic style property
+```
+
+### SVG Imports
+```brief
+import "./logo.svg" as Logo;       # Import SVG as component
+# Use: <Logo /> in view
+```
 
 ## What Compiles
 

@@ -1,7 +1,7 @@
 # Brief Language Specification
 
-**Version:** 7.0  
-**Date:** 2026-04-07  
+**Version:** 8.0  
+**Date:** 2026-04-10  
 **Status:** Authoritative Reference  
 
 ---
@@ -31,7 +31,7 @@ Brief source files use the `.bv` extension.
 ### 2.1 Program Structure
 
 ```bnf
-program ::= (definition | transaction | state_decl | constant | import | struct_def | rstruct_def | render_block)*
+program ::= (definition | transaction | state_decl | constant | import | struct_def | rstruct_def | enum_def | render_block)*
 
 definition ::= ("defn" | "def" | "definition") identifier type_params? parameters? "->" output_types contract ("{" body "}" ";" | ";")
 transaction ::= ("async")? "rct"? "txn" identifier "(" parameters? ")" contract ("{" body "}" ";" | ";")
@@ -45,7 +45,10 @@ field_decl ::= identifier ":" type ";"
 
 rstruct_def ::= "rstruct" identifier "{" struct_member* view_body "}"
 
-import_stmt ::= "import" ("{" import_item ("," import_item)* "}")? (("from" namespace_path) | namespace_path)? ";"
+enum_def ::= "enum" identifier type_params? "{" enum_variant ("," enum_variant)* ","? "}"
+enum_variant ::= identifier ("(" type ("," type)* ")")?
+
+import_stmt ::= "import" ("{" import_item ("," import_item)* "}")? (("from" namespace_path) | namespace_path | string_literal ("as" identifier)?)? ";"
 import_item ::= identifier ("as" identifier)?
 
 render_block ::= "render" identifier "{" view_body "}"
@@ -78,6 +81,8 @@ statement ::=
 assignment ::= ("&")? identifier "=" expression
 unification ::= identifier "(" pattern ")" "=" expression
 guarded_stmt ::= "[" expression "]" (statement | "{" statement* "}")
+guarded_stmt ::= "[" identifier variant_pattern "]" (statement | "{" statement* "}")
+variant_pattern ::= identifier ("(" identifier ("," identifier)* ")")?
 term_stmt ::= "term" expression? ("," expression?)*
 escape_stmt ::= "escape" expression?
 ```
@@ -148,7 +153,29 @@ rstruct Counter {
 } -> "<div>{count}</div>";
 ```
 
-### 3.3 Type Parameters (Generics)
+### 3.3 Enums
+
+Enums define types that can be one of several variants. Variants can be Unit (no data), Tuple (positional data), or Struct (named fields).
+
+```brief
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
+}
+
+enum Option<T> {
+    Some(T),
+    None
+}
+```
+
+### 3.4 Type Parameters (Generics)
 
 ```brief
 defn identity<T>(value: T) -> T [true][result == value] {
@@ -293,6 +320,26 @@ txn process [true][true] {
     term;
 };
 ```
+
+### 5.7 Enum Pattern Matching
+
+Guards support pattern matching on enum variants. The syntax `[value Variant(field1, field2)]` destructures the variant and binds fields:
+
+```brief
+let result: Result<Object, String> = from_json("{\"msg\": \"hello\"}");
+
+[result Ok(obj)] {
+    // obj is bound to the Ok variant's inner value
+    term to_json({received: obj});
+};
+
+[result Err(e)] {
+    // e is bound to the Err variant's inner value
+    term to_json({error: e});
+};
+```
+
+### 5.8 Escape
 
 ### 5.7 Escape
 
@@ -614,6 +661,15 @@ import { print, println } from std.io;
 import { println as log } from std.io;
 ```
 
+### 10.4 File Imports
+
+CSS and SVG files are imported directly. SVG imports support aliasing to create named components:
+
+```brief
+import "./styles/main.css";
+import "./icons/logo.svg" as Logo;
+```
+
 ---
 
 ## 11. Standard Library
@@ -642,6 +698,41 @@ defn min(a: Int, b: Int) -> Int [true][result == a || result == b] {
 ```brief
 frgn print(msg: String) -> Result<Bool, IoError> from "lib/std/io.toml";
 frgn sqrt(x: Float) -> Result<Float, MathError> from "lib/std/math.toml";
+```
+
+### 11.4 JSON Serialization
+
+Built-in functions for JSON encoding and decoding:
+
+```brief
+// Convert a value to a JSON string
+let json_str: String = to_json({message: "hello", count: 42});
+
+// Parse a JSON string, returning Result<Object, String>
+let result: Result<Object, String> = from_json("{\"key\": \"value\"}");
+
+[result Ok(data)] {
+    // data contains the parsed object
+    term data;
+};
+
+[result Err(error)] {
+    // error contains the parse error message
+    term to_json({error: error});
+};
+```
+
+### 11.5 HTTP
+
+The `lib/std/http.bv` module provides HTTP operations:
+
+```brief
+import std.http;
+
+defn fetch_data(url: String) -> String [true][true] {
+    let response = http_get(url);
+    term response;
+};
 ```
 
 ---
@@ -735,4 +826,4 @@ rct txn reset [state == 2][state == 0] {
 
 ---
 
-*End of Specification v6.2*
+*End of Specification v8.0*

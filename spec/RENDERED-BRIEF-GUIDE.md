@@ -1,6 +1,6 @@
 # Rendered Brief Guide
 
-**Version:** 7.0 (revised)  
+**Version:** 8.0  
 **Purpose:** Building reactive web interfaces with Brief  
 
 ---
@@ -187,6 +187,32 @@ Iterates over lists:
     <span b-text="item">Item</span>
 </div>
 ```
+
+---
+
+## b-style Directive
+
+Dynamically sets CSS style properties based on state:
+
+```html
+<div b-style:background="theme_color">Styled content</div>
+<span b-style:font-size="text_size">Dynamic size</span>
+<div b-style:display="visible ? 'block' : 'none'">Conditional style</div>
+```
+
+### Available Style Properties
+
+Any valid CSS property can be bound using camelCase:
+
+| Directive | CSS Property |
+|-----------|-------------|
+| `b-style:background` | `background` |
+| `b-style:color` | `color` |
+| `b-style:fontSize` | `font-size` |
+| `b-style:display` | `display` |
+| `b-style:opacity` | `opacity` |
+| `b-style:width` | `width` |
+| `b-style:height` | `height` |
 
 ---
 
@@ -516,4 +542,6 @@ brief serve counter.rbv
 2. **Transactions are methods**: `b-trigger:click="method"` calls transactions
 3. **Reactive expressions**: `b-text="count * 2"` updates when count changes
 4. **Conditional rendering**: `b-show="condition"` toggles visibility
-5. **Component composition**: Components can contain other components
+5. **Dynamic styles**: `b-style:property="value"` sets CSS properties reactively
+6. **Component composition**: Components can contain other components
+7. **SVG components**: Import SVG files as named components with `import "./icon.svg" as Icon;`
