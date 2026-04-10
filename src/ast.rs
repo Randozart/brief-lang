@@ -70,6 +70,7 @@ impl std::fmt::Display for ForeignTarget {
 pub struct ForeignSignature {
     pub name: String,
     pub location: String,            // TOML location (e.g., "std::f64::sqrt")
+    pub wasm_impl: Option<String>,   // WASM JavaScript implementation
     pub inputs: Vec<(String, Type)>, // param_name -> type
     pub success_output: Vec<(String, Type)>, // named fields (can be empty for void)
     pub error_type_name: String,     // e.g., "IoError"
@@ -86,6 +87,7 @@ pub struct ForeignBinding {
     pub target: ForeignTarget,
     pub mapper: Option<String>, // Mapper name (e.g., "rust", "c", "wasm")
     pub path: Option<String>,   // Explicit path to mapper (optional)
+    pub wasm_impl: Option<String>, // WASM JavaScript implementation (for wasm target)
     pub inputs: Vec<(String, Type)>, // Parameter names and types
     pub success_output: Vec<(String, Type)>, // Success output shape
     pub error_type: String,     // Error type name

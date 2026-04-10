@@ -1,4 +1,4 @@
-use crate::ast::{Contract, Expr, Program, Statement, TopLevel, Transaction, Type};
+use crate::ast::{Contract, Expr, ForeignTarget, Program, Statement, TopLevel, Transaction, Type};
 use crate::view_compiler::{Binding, Directive};
 use std::collections::HashMap;
 
@@ -23,6 +23,7 @@ pub struct WasmGenerator {
     reactive_dependency_map: HashMap<String, Vec<usize>>,
     reactor_speed: u32,
     ffi_bindings: HashMap<String, usize>, // function name -> arg count
+    ffi_wasm_impl: HashMap<String, String>, // function name -> WASM JS implementation
     local_vars: HashMap<String, ()>,      // track local let-bound variables
 }
 
@@ -39,6 +40,7 @@ impl WasmGenerator {
             reactive_dependency_map: HashMap::new(),
             reactor_speed: 10, // Default 10Hz
             ffi_bindings: HashMap::new(),
+            ffi_wasm_impl: HashMap::new(),
             local_vars: HashMap::new(),
         }
     }
@@ -116,10 +118,16 @@ impl WasmGenerator {
                         }
                     }
                 }
-                TopLevel::ForeignBinding { signature, .. } => {
+                TopLevel::ForeignBinding {
+                    name, signature, ..
+                } => {
                     // Track FFI bindings for code generation
                     self.ffi_bindings
                         .insert(signature.name.clone(), signature.inputs.len());
+                    // Track WASM implementations
+                    if let Some(impl_code) = &signature.wasm_impl {
+                        self.ffi_wasm_impl.insert(name.clone(), impl_code.clone());
+                    }
                 }
                 _ => {}
             }
@@ -1189,72 +1197,26 @@ impl WasmGenerator {
     fn generate_js_glue(&self, program_name: &str, bindings: &[Binding]) -> String {
         let mut output = String::new();
 
-        // FFI: JSON operations
-        output.push_str("    function __parse(str) {\n");
-        output.push_str("        try {\n");
-        output.push_str("            return JSON.parse(str);\n");
-        output.push_str("        } catch(e) {\n");
-        output.push_str("            console.error('JSON parse error:', e.message);\n");
-        output.push_str("            return null;\n");
-        output.push_str("        }\n");
-        output.push_str("    }\n\n");
+        // Generate FFI functions from TOML wasm_impl metadata
+        for (name, impl_code) in &self.ffi_wasm_impl {
+            output.push_str(&format!("    {}\n\n", impl_code));
+        }
 
-        output.push_str("    function __get_string(data, key) {\n");
-        output.push_str("        if (data && data[key]) {\n");
-        output.push_str("            return String(data[key]);\n");
-        output.push_str("        }\n");
-        output.push_str("        return '';\n");
-        output.push_str("    }\n\n");
-
-        output.push_str("    function __json_encode(val) {\n");
-        output.push_str("        try {\n");
-        output.push_str("            return JSON.stringify(val);\n");
-        output.push_str("        } catch(e) {\n");
-        output.push_str("            console.error('JSON encode error:', e.message);\n");
-        output.push_str("            return '';\n");
-        output.push_str("        }\n");
-        output.push_str("    }\n\n");
-
-        // FFI: HTTP operations (for lib/std/http.bv)
-        output.push_str("    function __http_get(url) {\n");
-        output.push_str("        try {\n");
-        output.push_str("            console.log('__http_get called with:', url);\n");
-        output.push_str("            const xhr = new XMLHttpRequest();\n");
-        output.push_str("            xhr.open('GET', url, false);\n");
-        output.push_str("            xhr.send();\n");
-        output.push_str("            console.log('__http_get status:', xhr.status, 'response:', xhr.responseText);\n");
-        output.push_str("            if (xhr.status >= 200 && xhr.status < 300) {\n");
-        output.push_str("                return xhr.responseText;\n");
-        output.push_str("            }\n");
-        output.push_str("            return '';\n");
-        output.push_str("        } catch(e) {\n");
-        output.push_str("            console.error('HTTP GET error:', e.message);\n");
-        output.push_str("            return '';\n");
-        output.push_str("        }\n");
-        output.push_str("    }\n\n");
-
-        output.push_str("    function __http_post(url, body) {\n");
-        output.push_str("        try {\n");
-        output.push_str("            const xhr = new XMLHttpRequest();\n");
-        output.push_str("            xhr.open('POST', url, false);\n");
-        output.push_str("            xhr.send(body);\n");
-        output.push_str("            if (xhr.status >= 200 && xhr.status < 300) {\n");
-        output.push_str("                return xhr.responseText;\n");
-        output.push_str("            }\n");
-        output.push_str("            return '';\n");
-        output.push_str("        } catch(e) {\n");
-        output.push_str("            console.error('HTTP POST error:', e.message);\n");
-        output.push_str("            return '';\n");
-        output.push_str("        }\n");
-        output.push_str("    }\n\n");
+        // If no wasm_impl was provided (e.g., pure Rust FFI), generate minimal function wrappers
+        // that will be looked up via Reflect::get
+        for (name, _arg_count) in &self.ffi_bindings {
+            if !self.ffi_wasm_impl.contains_key(name) {
+                // This function is native-only or uses Reflect to find the implementation
+                // It should have been provided in wasm_impl field of TOML
+                // For backwards compatibility, we skip it here
+            }
+        }
 
         // Expose FFI functions on window for WASM interop
-        output.push_str("    window.__parse = __parse;\n");
-        output.push_str("    window.__get_string = __get_string;\n");
-        output.push_str("    window.__json_encode = __json_encode;\n");
-        output.push_str("    window.__http_get = __http_get;\n");
-        output.push_str("    window.__http_post = __http_post;\n");
-        output.push_str("    console.log('FFI functions exposed:', typeof window.__http_get, typeof window.__parse);\n\n");
+        for (name, _impl_code) in &self.ffi_wasm_impl {
+            output.push_str(&format!("    window.{} = {};\n", name, name));
+        }
+        output.push_str("\n");
 
         output.push_str("    const ELEMENT_MAP = {\n");
         for binding in bindings {

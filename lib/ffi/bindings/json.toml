@@ -30,6 +30,15 @@ location = "__parse"
 target = "wasm"
 mapper = "wasm"
 description = "Parse JSON string (WASM)"
+wasm_impl = """function __parse(s) {
+    try {
+        return JSON.parse(s);
+    } catch(e) {
+        console.error('JSON parse error:', e.message);
+        return null;
+    }
+}"""
+
 [functions.input]
 s = "String"
 [functions.output.success]
@@ -67,6 +76,15 @@ location = "__stringify"
 target = "wasm"
 mapper = "wasm"
 description = "Convert to JSON string (WASM)"
+wasm_impl = """function __stringify(data) {
+    try {
+        return JSON.stringify(data);
+    } catch(e) {
+        console.error('JSON stringify error:', e.message);
+        return '';
+    }
+}"""
+
 [functions.input]
 data = "Data"
 [functions.output.success]
@@ -104,6 +122,15 @@ location = "__to_json"
 target = "wasm"
 mapper = "wasm"
 description = "Convert to JSON (WASM)"
+wasm_impl = """function __to_json(data) {
+    try {
+        return JSON.stringify(data);
+    } catch(e) {
+        console.error('JSON to_json error:', e.message);
+        return '';
+    }
+}"""
+
 [functions.input]
 data = "Data"
 [functions.output.success]
@@ -141,6 +168,15 @@ location = "__from_json"
 target = "wasm"
 mapper = "wasm"
 description = "Parse from JSON (WASM)"
+wasm_impl = """function __from_json(s) {
+    try {
+        return JSON.parse(s);
+    } catch(e) {
+        console.error('JSON from_json error:', e.message);
+        return null;
+    }
+}"""
+
 [functions.input]
 s = "String"
 [functions.output.success]
@@ -178,6 +214,10 @@ location = "__is_null"
 target = "wasm"
 mapper = "wasm"
 description = "Check if null (WASM)"
+wasm_impl = """function __is_null(data) {
+    return data === null || data === undefined;
+}"""
+
 [functions.input]
 data = "Data"
 [functions.output.success]
@@ -215,6 +255,10 @@ location = "__is_bool"
 target = "wasm"
 mapper = "wasm"
 description = "Check if boolean (WASM)"
+wasm_impl = """function __is_bool(data) {
+    return typeof data === 'boolean';
+}"""
+
 [functions.input]
 data = "Data"
 [functions.output.success]
@@ -252,6 +296,10 @@ location = "__is_number"
 target = "wasm"
 mapper = "wasm"
 description = "Check if number (WASM)"
+wasm_impl = """function __is_number(data) {
+    return typeof data === 'number' && !isNaN(data);
+}"""
+
 [functions.input]
 data = "Data"
 [functions.output.success]
@@ -289,6 +337,10 @@ location = "__is_string"
 target = "wasm"
 mapper = "wasm"
 description = "Check if string (WASM)"
+wasm_impl = """function __is_string(data) {
+    return typeof data === 'string';
+}"""
+
 [functions.input]
 data = "Data"
 [functions.output.success]
@@ -326,6 +378,10 @@ location = "__is_array"
 target = "wasm"
 mapper = "wasm"
 description = "Check if array (WASM)"
+wasm_impl = """function __is_array(data) {
+    return Array.isArray(data);
+}"""
+
 [functions.input]
 data = "Data"
 [functions.output.success]
@@ -363,6 +419,10 @@ location = "__is_object"
 target = "wasm"
 mapper = "wasm"
 description = "Check if object (WASM)"
+wasm_impl = """function __is_object(data) {
+    return data !== null && typeof data === 'object' && !Array.isArray(data);
+}"""
+
 [functions.input]
 data = "Data"
 [functions.output.success]
@@ -401,6 +461,13 @@ location = "__get_bool"
 target = "wasm"
 mapper = "wasm"
 description = "Get boolean value (WASM)"
+wasm_impl = """function __get_bool(data, key) {
+    if (data && typeof data[key] === 'boolean') {
+        return data[key];
+    }
+    return false;
+}"""
+
 [functions.input]
 data = "Data"
 key = "String"
@@ -440,6 +507,13 @@ location = "__get_number"
 target = "wasm"
 mapper = "wasm"
 description = "Get number value (WASM)"
+wasm_impl = """function __get_number(data, key) {
+    if (data && typeof data[key] === 'number') {
+        return data[key];
+    }
+    return 0.0;
+}"""
+
 [functions.input]
 data = "Data"
 key = "String"
@@ -479,6 +553,13 @@ location = "__get_string"
 target = "wasm"
 mapper = "wasm"
 description = "Get string value (WASM)"
+wasm_impl = """function __get_string(data, key) {
+    if (data && data[key]) {
+        return String(data[key]);
+    }
+    return '';
+}"""
+
 [functions.input]
 data = "Data"
 key = "String"
@@ -518,6 +599,13 @@ location = "__get_array"
 target = "wasm"
 mapper = "wasm"
 description = "Get array value (WASM)"
+wasm_impl = """function __get_array(data, key) {
+    if (data && Array.isArray(data[key])) {
+        return data[key];
+    }
+    return [];
+}"""
+
 [functions.input]
 data = "Data"
 key = "String"
@@ -557,6 +645,13 @@ location = "__get_object"
 target = "wasm"
 mapper = "wasm"
 description = "Get object value (WASM)"
+wasm_impl = """function __get_object(data, key) {
+    if (data && typeof data[key] === 'object' && !Array.isArray(data[key])) {
+        return data[key];
+    }
+    return {};
+}"""
+
 [functions.input]
 data = "Data"
 key = "String"
@@ -859,6 +954,10 @@ location = "__has_key"
 target = "wasm"
 mapper = "wasm"
 description = "Check if key exists (WASM)"
+wasm_impl = """function __has_key(data, key) {
+    return data && data.hasOwnProperty(key);
+}"""
+
 [functions.input]
 data = "Data"
 key = "String"

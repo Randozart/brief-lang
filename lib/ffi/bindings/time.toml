@@ -29,6 +29,10 @@ location = "__now"
 target = "wasm"
 mapper = "wasm"
 description = "Get current timestamp (seconds) (WASM)"
+wasm_impl = """function __now() {
+    return Date.now();
+}"""
+
 [functions.input]
 [functions.output.success]
 result = "Int"
@@ -135,6 +139,10 @@ location = "__year"
 target = "wasm"
 mapper = "wasm"
 description = "Get year from timestamp (WASM)"
+wasm_impl = """function __year(timestamp) {
+    return new Date(timestamp).getFullYear();
+}"""
+
 [functions.input]
 timestamp = "Int"
 [functions.output.success]
@@ -172,6 +180,10 @@ location = "__month"
 target = "wasm"
 mapper = "wasm"
 description = "Get month from timestamp (WASM)"
+wasm_impl = """function __month(timestamp) {
+    return new Date(timestamp).getMonth() + 1;
+}"""
+
 [functions.input]
 timestamp = "Int"
 [functions.output.success]
@@ -209,6 +221,10 @@ location = "__day"
 target = "wasm"
 mapper = "wasm"
 description = "Get day from timestamp (WASM)"
+wasm_impl = """function __day(timestamp) {
+    return new Date(timestamp).getDate();
+}"""
+
 [functions.input]
 timestamp = "Int"
 [functions.output.success]
@@ -246,6 +262,10 @@ location = "__hour"
 target = "wasm"
 mapper = "wasm"
 description = "Get hour from timestamp (WASM)"
+wasm_impl = """function __hour(timestamp) {
+    return new Date(timestamp).getHours();
+}"""
+
 [functions.input]
 timestamp = "Int"
 [functions.output.success]
@@ -283,6 +303,10 @@ location = "__minute"
 target = "wasm"
 mapper = "wasm"
 description = "Get minute from timestamp (WASM)"
+wasm_impl = """function __minute(timestamp) {
+    return new Date(timestamp).getMinutes();
+}"""
+
 [functions.input]
 timestamp = "Int"
 [functions.output.success]
@@ -320,6 +344,10 @@ location = "__second"
 target = "wasm"
 mapper = "wasm"
 description = "Get second from timestamp (WASM)"
+wasm_impl = """function __second(timestamp) {
+    return new Date(timestamp).getSeconds();
+}"""
+
 [functions.input]
 timestamp = "Int"
 [functions.output.success]
@@ -520,6 +548,10 @@ location = "__format_timestamp"
 target = "wasm"
 mapper = "wasm"
 description = "Format timestamp with custom format (WASM)"
+wasm_impl = """function __format_timestamp(timestamp, format) {
+    return new Date(timestamp).toISOString();
+}"""
+
 [functions.input]
 timestamp = "Int"
 format = "String"

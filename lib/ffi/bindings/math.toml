@@ -30,6 +30,8 @@ location = "__sin"
 target = "wasm"
 mapper = "wasm"
 description = "Sine of angle in radians (WASM)"
+wasm_impl = """function __sin(x) { return Math.sin(x); }"""
+
 [functions.input]
 n = "Float"
 [functions.output.success]
@@ -67,6 +69,8 @@ location = "__cos"
 target = "wasm"
 mapper = "wasm"
 description = "Cosine of angle in radians (WASM)"
+wasm_impl = """function __cos(x) { return Math.cos(x); }"""
+
 [functions.input]
 n = "Float"
 [functions.output.success]
@@ -104,6 +108,8 @@ location = "__tan"
 target = "wasm"
 mapper = "wasm"
 description = "Tangent of angle in radians (WASM)"
+wasm_impl = """function __tan(x) { return Math.tan(x); }"""
+
 [functions.input]
 n = "Float"
 [functions.output.success]
@@ -402,6 +408,8 @@ location = "__sqrt"
 target = "wasm"
 mapper = "wasm"
 description = "Square root (WASM)"
+wasm_impl = """function __sqrt(x) { return Math.sqrt(x); }"""
+
 [functions.input]
 n = "Float"
 [functions.output.success]
@@ -477,6 +485,8 @@ location = "__pow"
 target = "wasm"
 mapper = "wasm"
 description = "Raise to power (float) (WASM)"
+wasm_impl = """function __pow(base, exp) { return Math.pow(base, exp); }"""
+
 [functions.input]
 base = "Float"
 exp = "Float"
@@ -666,6 +676,8 @@ location = "__log"
 target = "wasm"
 mapper = "wasm"
 description = "Logarithm with base (WASM)"
+wasm_impl = """function __log(x) { return Math.log(x); }"""
+
 [functions.input]
 n = "Float"
 base = "Float"
@@ -1420,6 +1432,8 @@ location = "__random"
 target = "wasm"
 mapper = "wasm"
 description = "Random float 0-1 (WASM)"
+wasm_impl = """function __random() { return Math.random(); }"""
+
 [functions.input]
 [functions.output.success]
 result = "Float"

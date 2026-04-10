@@ -336,7 +336,7 @@ fn run_check(
         println!("[Resolver] Resolving imports...");
     }
     let mut import_resolver = import_resolver::ImportResolver::new();
-    let program = match import_resolver.resolve_imports(&program, file_path) {
+    let mut program = match import_resolver.resolve_imports(&program, file_path) {
         Ok(resolved) => resolved,
         Err(e) => {
             eprintln!("Import error: {}", e);
@@ -345,24 +345,17 @@ fn run_check(
     };
 
     if verbose {
-        println!("[Desugarer] Processing sugared syntax...");
+        println!("[Desugar] Desugaring...");
     }
     let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
-
-    for item in &program.items {
-        if let ast::TopLevel::RStruct(_) = item {
-            return Err("rstruct can only be used in .rbv files, not .bv files. Use .rbv for files with HTML/CSS.".into());
-        }
-    }
+    let mut program = desug.desugar(&program);
 
     if verbose {
-        println!("[Parser] Successfully parsed {} items", program.items.len());
         println!("[TypeChecker] Running type checks...");
     }
 
     let mut tc = typechecker::TypeChecker::new();
-    let type_errors = tc.check_program(&program);
+    let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
         eprintln!(
             "{}",
@@ -446,7 +439,7 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
         println!("[Desugarer] Processing sugared syntax...");
     }
     let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
+    let mut program = desug.desugar(&program);
 
     if verbose {
         println!("[Parser] Successfully parsed {} items", program.items.len());
@@ -454,7 +447,7 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
     }
 
     let mut tc = typechecker::TypeChecker::new();
-    let type_errors = tc.check_program(&program);
+    let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
         eprintln!(
             "{}",
@@ -760,10 +753,26 @@ fn run_watch(file_path: PathBuf, verbose: bool) -> Result<(), Box<dyn std::error
     };
 
     let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
+    let mut program = desug.desugar(&program);
+
+    // Check for rstruct usage in .bv files
+    if file_path.extension().map_or(false, |ext| ext == "bv") {
+        let has_rstruct = program
+            .items
+            .iter()
+            .any(|item| matches!(item, ast::TopLevel::RStruct(_)));
+        if has_rstruct {
+            return Err("rstruct can only be used in .rbv files, not .bv files. Use .rbv for files with HTML/CSS.".into());
+        }
+    }
+
+    if verbose {
+        println!("[Parser] Successfully parsed {} items", program.items.len());
+        println!("[TypeChecker] Running type checks...");
+    }
 
     let mut tc = typechecker::TypeChecker::new();
-    let type_errors = tc.check_program(&program);
+    let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
         eprintln!(
             "{}",
@@ -973,11 +982,11 @@ fn run_rbv(
     println!("  Resolved imports");
 
     let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
+    let mut program = desug.desugar(&program);
 
     let mut tc = typechecker::TypeChecker::new();
     println!("  Type checking...");
-    let type_errors = tc.check_program(&program);
+    let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
         eprintln!(
             "{}",

@@ -30,6 +30,10 @@ location = "__to_lower"
 target = "wasm"
 mapper = "wasm"
 description = "Convert to lowercase (WASM)"
+wasm_impl = """function __to_lower(s) {
+    return s.toLowerCase();
+}"""
+
 [functions.input]
 s = "String"
 [functions.output.success]
@@ -67,6 +71,10 @@ location = "__to_upper"
 target = "wasm"
 mapper = "wasm"
 description = "Convert to uppercase (WASM)"
+wasm_impl = """function __to_upper(s) {
+    return s.toUpperCase();
+}"""
+
 [functions.input]
 s = "String"
 [functions.output.success]
@@ -365,6 +373,10 @@ location = "__contains_at"
 target = "wasm"
 mapper = "wasm"
 description = "Check if contains at position (WASM)"
+wasm_impl = """function __contains_at(s, sub, pos) {
+    return s.indexOf(sub, pos) !== -1;
+}"""
+
 [functions.input]
 haystack = "String"
 needle = "String"
@@ -1096,6 +1108,10 @@ location = "__parse_float"
 target = "wasm"
 mapper = "wasm"
 description = "Parse as float (WASM)"
+wasm_impl = """function __parse_float(s) {
+    return parseFloat(s) || 0.0;
+}"""
+
 [functions.input]
 s = "String"
 [functions.output.success]

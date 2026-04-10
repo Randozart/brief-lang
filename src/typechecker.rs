@@ -84,7 +84,7 @@ impl TypeChecker {
         );
     }
 
-    pub fn check_program(&mut self, program: &Program) -> Vec<TypeError> {
+    pub fn check_program(&mut self, program: &mut Program) -> Vec<TypeError> {
         // Add stdlib signatures (to_json, from_json, etc.)
         self.register_stdlib_signatures();
 
@@ -109,7 +109,7 @@ impl TypeChecker {
             }
         }
 
-        for item in &program.items {
+        for item in &mut program.items {
             match item {
                 TopLevel::StateDecl(decl) => {
                     self.declare_variable(&decl.name, decl.ty.clone());
@@ -131,26 +131,8 @@ impl TypeChecker {
                         );
                     }
                 }
-                TopLevel::Constant(const_decl) => {
-                    self.declare_variable(&const_decl.name, const_decl.ty.clone());
-                    let expr_ty = self.infer_expression(&const_decl.expr);
-                    if !self.types_compatible(&expr_ty, &const_decl.ty) {
-                        let diag = Diagnostic::new("B001", Severity::Error, "type mismatch")
-                            .with_explanation(&format!(
-                                "expected {} for constant '{}', but found {}",
-                                self.type_to_string(&const_decl.ty),
-                                const_decl.name,
-                                self.type_to_string(&expr_ty)
-                            ))
-                            .with_hint("ensure the expression type matches the declared type");
-
-                        self.diagnostics.push(diag);
-                        self.errors.push(TypeError::TypeMismatch {
-                            expected: self.type_to_string(&const_decl.ty),
-                            found: self.type_to_string(&expr_ty),
-                            context: format!("const {}", const_decl.name),
-                        });
-                    }
+                TopLevel::Constant(cons) => {
+                    self.declare_variable(&cons.name, cons.ty.clone());
                 }
                 TopLevel::Signature(sig) => {
                     self.check_signature(sig);
@@ -161,42 +143,23 @@ impl TypeChecker {
                 TopLevel::Transaction(txn) => {
                     self.check_transaction(txn);
                 }
-                TopLevel::Import(_) => {}
                 TopLevel::ForeignBinding {
                     name,
                     toml_path,
                     signature,
                     ..
                 } => {
-                    // Collect foreign binding and check it
-                    self.foreign_bindings
-                        .insert(name.clone(), signature.clone());
                     self.check_frgn_binding(name, toml_path, signature);
+                    // Update the stored signature with populated wasm_impl from TOML
+                    if let Some(stored_sig) = self.foreign_bindings.get_mut(name) {
+                        stored_sig.wasm_impl = signature.wasm_impl.clone();
+                    }
                 }
-                TopLevel::Struct(_) => {}
-                TopLevel::RStruct(_) => {}
-                TopLevel::Enum(_) => {}
-                TopLevel::RenderBlock(_) => {}
-                TopLevel::Stylesheet(_) => {}
-                TopLevel::SvgComponent { .. } => {}
+                _ => {}
             }
         }
         self.errors.clone()
     }
-
-    pub fn get_diagnostics(&self) -> &[Diagnostic] {
-        &self.diagnostics
-    }
-
-    fn format_diagnostics(&self) -> String {
-        let mut output = String::new();
-        for diag in &self.diagnostics {
-            output.push_str(&diag.format(&self.source, "main.bv"));
-            output.push('\n');
-        }
-        output
-    }
-
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
@@ -462,7 +425,12 @@ impl TypeChecker {
         self.pop_scope();
     }
 
-    fn check_frgn_binding(&mut self, name: &str, toml_path: &str, signature: &ForeignSignature) {
+    fn check_frgn_binding(
+        &mut self,
+        name: &str,
+        toml_path: &str,
+        signature: &mut ForeignSignature,
+    ) {
         // Resolve the TOML path using the FFI resolver
         let resolved_path = match ffi::resolver::resolve_binding_path(
             toml_path,
@@ -508,9 +476,9 @@ impl TypeChecker {
         };
 
         // Find the matching binding for this frgn
-        let matching_binding = bindings.iter().find(|b| b.name == name);
+        let primary_binding = bindings.iter().find(|b| b.name == name);
 
-        let binding = match matching_binding {
+        let binding = match primary_binding {
             Some(b) => b,
             None => {
                 let diag = Diagnostic::new("F003", Severity::Error, "FFI binding not found")
@@ -535,13 +503,23 @@ impl TypeChecker {
             }
         };
 
-        // Create a mutable copy of the signature to populate error_fields from the binding
-        let mut sig = signature.clone();
-        sig.error_fields = binding.error_fields.clone();
-        sig.location = binding.location.clone();
+        // Populate signature fields from the binding
+        signature.error_fields = binding.error_fields.clone();
+        signature.location = binding.location.clone();
+
+        // Also look for a WASM-specific implementation if available
+        let wasm_binding = bindings
+            .iter()
+            .find(|b| b.name == name && b.target == ForeignTarget::Wasm);
+        if let Some(wb) = wasm_binding {
+            signature.wasm_impl = wb.wasm_impl.clone();
+        } else {
+            // Fallback to primary binding's wasm_impl if it exists
+            signature.wasm_impl = binding.wasm_impl.clone();
+        }
 
         // Validate the frgn signature against the TOML binding
-        if let Err(err) = ffi::validator::validate_frgn_against_binding(&sig, binding) {
+        if let Err(err) = ffi::validator::validate_frgn_against_binding(signature, binding) {
             let diag = Diagnostic::new("F004", Severity::Error, "FFI binding validation failed")
                 .with_explanation(&format!(
                     "The frgn declaration for '{}' does not match its TOML binding: {}",
@@ -556,7 +534,7 @@ impl TypeChecker {
         }
 
         // Validate that all FFI types are supported
-        for (_, ty) in &sig.inputs {
+        for (_, ty) in &signature.inputs {
             if !ffi::validator::is_valid_ffi_type(ty) {
                 let diag = Diagnostic::new("F005", Severity::Error, "Invalid FFI type")
                     .with_explanation(&format!(
@@ -574,7 +552,7 @@ impl TypeChecker {
             }
         }
 
-        for (_, ty) in &sig.success_output {
+        for (_, ty) in &signature.success_output {
             if !ffi::validator::is_valid_ffi_type(ty) {
                 let diag = Diagnostic::new("F005", Severity::Error, "Invalid FFI type")
                     .with_explanation(&format!(
@@ -592,7 +570,7 @@ impl TypeChecker {
             }
         }
 
-        for (_, ty) in &sig.error_fields {
+        for (_, ty) in &signature.error_fields {
             if !ffi::validator::is_valid_ffi_type(ty) {
                 let diag = Diagnostic::new("F005", Severity::Error, "Invalid FFI type")
                     .with_explanation(&format!(

@@ -32,6 +32,21 @@ location = "__http_get"
 target = "wasm"
 mapper = "wasm"
 description = "HTTP GET request (WASM - synchronous XMLHttpRequest)"
+wasm_impl = """
+function __http_get(url) {
+    try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url, false);
+        xhr.send();
+        if (xhr.status >= 200 && xhr.status < 300) {
+            return xhr.responseText;
+        }
+        return '';
+    } catch(e) {
+        console.error('HTTP GET error:', e.message);
+        return '';
+    }
+}"""
 
 [functions.input]
 url = "String"
@@ -76,7 +91,22 @@ name = "__http_post"
 location = "__http_post"
 target = "wasm"
 mapper = "wasm"
-description = "HTTP POST request (WASM - synchronous XMLHttpRequest)"
+description = "HTTP POST request (WASM)"
+wasm_impl = """
+function __http_post(url, body) {
+    try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url, false);
+        xhr.send(body);
+        if (xhr.status >= 200 && xhr.status < 300) {
+            return xhr.responseText;
+        }
+        return '';
+    } catch(e) {
+        console.error('HTTP POST error:', e.message);
+        return '';
+    }
+}"""
 
 [functions.input]
 url = "String"

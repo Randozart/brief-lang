@@ -487,6 +487,7 @@ impl<'a> Parser<'a> {
         let frgn_sig = ForeignSignature {
             name: name.clone(),
             location: String::new(), // Populated by typechecker from TOML
+            wasm_impl: None,         // Populated by typechecker from TOML
             inputs,
             success_output,
             error_type_name: error_type_name.clone(),

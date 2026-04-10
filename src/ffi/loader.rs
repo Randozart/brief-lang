@@ -85,6 +85,12 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        // Parse WASM implementation (for wasm target)
+        let wasm_impl = func
+            .get("wasm_impl")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         // Parse input parameters
         let inputs = parse_toml_table(func.get("input").and_then(|v| v.as_table()))?;
 
@@ -130,6 +136,7 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             target,
             mapper,
             path,
+            wasm_impl,
             inputs,
             success_output,
             error_type,

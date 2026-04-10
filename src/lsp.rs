@@ -198,7 +198,7 @@ impl LspServer {
 
     fn run_type_check(&self, source: &str) -> Vec<Value> {
         let mut parser = parser::Parser::new(source);
-        let program = match parser.parse() {
+        let mut program = match parser.parse() {
             Ok(p) => p,
             Err(e) => {
                 return vec![serde_json::json!({
@@ -213,7 +213,7 @@ impl LspServer {
         };
 
         let mut tc = typechecker::TypeChecker::new();
-        let type_errors = tc.check_program(&program);
+        let type_errors = tc.check_program(&mut program);
 
         let mut pe = proof_engine::ProofEngine::new();
         let proof_errors = pe.verify_program(&program);
