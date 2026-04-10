@@ -20,10 +20,11 @@ pub struct TypeChecker {
     errors: Vec<crate::errors::TypeError>,
     diagnostics: Vec<Diagnostic>,
     source: String,
+    current_file: PathBuf,
     signatures: HashMap<String, Signature>,
     definitions: HashMap<String, Definition>,
     ffi_results: RefCell<HashMap<String, ResultCheckStatus>>,
-    foreign_sigs: HashMap<String, ForeignSig>,
+    foreign_bindings: HashMap<String, ForeignSignature>,
 }
 
 impl TypeChecker {
@@ -33,15 +34,21 @@ impl TypeChecker {
             errors: Vec::new(),
             diagnostics: Vec::new(),
             source: String::new(),
+            current_file: PathBuf::from("main.bv"),
             signatures: HashMap::new(),
             definitions: HashMap::new(),
             ffi_results: RefCell::new(HashMap::new()),
-            foreign_sigs: HashMap::new(),
+            foreign_bindings: HashMap::new(),
         }
     }
 
     pub fn with_source(mut self, source: String) -> Self {
         self.source = source;
+        self
+    }
+
+    pub fn with_file(mut self, file: PathBuf) -> Self {
+        self.current_file = file;
         self
     }
 
@@ -91,9 +98,12 @@ impl TypeChecker {
                 TopLevel::Definition(defn) => {
                     self.definitions.insert(defn.name.clone(), defn.clone());
                 }
-                TopLevel::ForeignSig(frgn_sig) => {
-                    self.foreign_sigs
-                        .insert(frgn_sig.name.clone(), frgn_sig.clone());
+                TopLevel::ForeignBinding {
+                    name, signature, ..
+                } => {
+                    // Collect foreign binding signature for type inference
+                    self.foreign_bindings
+                        .insert(name.clone(), signature.clone());
                 }
                 _ => {}
             }
@@ -152,16 +162,15 @@ impl TypeChecker {
                     self.check_transaction(txn);
                 }
                 TopLevel::Import(_) => {}
-                TopLevel::ForeignSig(sig) => {
-                    // Foreign signatures are already collected in the first pass
-                    let _ = sig; // Use the variable to avoid unused warning
-                }
                 TopLevel::ForeignBinding {
                     name,
                     toml_path,
                     signature,
                     ..
                 } => {
+                    // Collect foreign binding and check it
+                    self.foreign_bindings
+                        .insert(name.clone(), signature.clone());
                     self.check_frgn_binding(name, toml_path, signature);
                 }
                 TopLevel::Struct(_) => {}
@@ -455,7 +464,11 @@ impl TypeChecker {
 
     fn check_frgn_binding(&mut self, name: &str, toml_path: &str, signature: &ForeignSignature) {
         // Resolve the TOML path using the FFI resolver
-        let resolved_path = match ffi::resolver::resolve_binding_path(toml_path, &None) {
+        let resolved_path = match ffi::resolver::resolve_binding_path(
+            toml_path,
+            &None,
+            &Some(self.current_file.clone()),
+        ) {
             Ok(path) => path,
             Err(err) => {
                 let diag = Diagnostic::new(
@@ -771,13 +784,13 @@ impl TypeChecker {
             | Expr::And(_, _) => Type::Bool,
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.infer_expression(e),
             Expr::Call(name, _args) => {
-                // Check if it's a foreign sig
-                if let Some(frgn_sig) = self.foreign_sigs.get(name) {
-                    // Return the first output type (ForeignSig supports multiple outputs)
-                    frgn_sig
-                        .outputs
+                // Check if it's a foreign binding
+                if let Some(frgn_binding) = self.foreign_bindings.get(name) {
+                    // Return the first output type from success_output
+                    frgn_binding
+                        .success_output
                         .first()
-                        .cloned()
+                        .map(|(_, ty)| ty.clone())
                         .unwrap_or(Type::Custom(name.clone()))
                 } else if let Some(sig) = self.signatures.get(name) {
                     // Check signature return type

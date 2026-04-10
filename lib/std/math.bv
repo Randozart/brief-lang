@@ -6,61 +6,51 @@
 // ===== PURE FOREIGN (requires external implementation) =====
 
 // Trigonometry
-frgn sig __sin(n: Float) -> Float;
-frgn sig __cos(n: Float) -> Float;
-frgn sig __tan(n: Float) -> Float;
-
-frgn sig __asin(n: Float) -> Float;
-frgn sig __acos(n: Float) -> Float;
-frgn sig __atan(n: Float) -> Float;
-frgn sig __atan2(y: Float, x: Float) -> Float;
-
-frgn sig __sinh(n: Float) -> Float;
-frgn sig __cosh(n: Float) -> Float;
-frgn sig __tanh(n: Float) -> Float;
-
+frgn __sin(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __cos(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __tan(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __asin(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __acos(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __atan(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __atan2(y: Float, x: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __sinh(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __cosh(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __tanh(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
 // Advanced math
-frgn sig __sqrt(n: Float) -> Float;
-frgn sig __cbrt(n: Float) -> Float;
-frgn sig __pow(base: Float, exp: Float) -> Float;
-frgn sig __powi(base: Float, exp: Int) -> Float;
-
-frgn sig __exp(n: Float) -> Float;
-frgn sig __exp2(n: Float) -> Float;
-frgn sig __ln(n: Float) -> Float;
-frgn sig __log(n: Float, base: Float) -> Float;
-frgn sig __log2(n: Float) -> Float;
-frgn sig __log10(n: Float) -> Float;
-
+frgn __sqrt(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __cbrt(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __pow(base: Float, exp: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __powi(base: Float, exp: Int) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __exp(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __exp2(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __ln(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __log(n: Float, base: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __log2(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __log10(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
 // Float-specific rounding
-frgn sig __floor(n: Float) -> Float;
-frgn sig __ceil(n: Float) -> Float;
-frgn sig __round(n: Float) -> Float;
-frgn sig __trunc(n: Float) -> Float;
-frgn sig __fract(n: Float) -> Float;
-
+frgn __floor(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __ceil(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __round(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __trunc(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __fract(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
 // Float checks
-frgn sig __is_nan(n: Float) -> Bool;
-frgn sig __is_infinite(n: Float) -> Bool;
-frgn sig __is_finite(n: Float) -> Bool;
-frgn sig __is_normal(n: Float) -> Bool;
-
+frgn __is_nan(n: Float) -> Result<Bool, MathError> from "std/bindings/math.toml";
+frgn __is_infinite(n: Float) -> Result<Bool, MathError> from "std/bindings/math.toml";
+frgn __is_finite(n: Float) -> Result<Bool, MathError> from "std/bindings/math.toml";
+frgn __is_normal(n: Float) -> Result<Bool, MathError> from "std/bindings/math.toml";
 // Float operations
-frgn sig __signum_float(n: Float) -> Float;
-frgn sig __clamp_float(val: Float, min: Float, max: Float) -> Float;
-frgn sig __min_float(a: Float, b: Float) -> Float;
-frgn sig __max_float(a: Float, b: Float) -> Float;
-
+frgn __signum_float(n: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __clamp_float(val: Float, min: Float, max: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __min_float(a: Float, b: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __max_float(a: Float, b: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
 // Integer-specific
-frgn sig __div_rem(a: Int, b: Int) -> Int;
-frgn sig __gcd(a: Int, b: Int) -> Int;
-frgn sig __lcm(a: Int, b: Int) -> Int;
-frgn sig __signum(n: Int) -> Int;
-
+frgn __div_rem(a: Int, b: Int) -> Result<Int, MathError> from "std/bindings/math.toml";
+frgn __gcd(a: Int, b: Int) -> Result<Int, MathError> from "std/bindings/math.toml";
+frgn __lcm(a: Int, b: Int) -> Result<Int, MathError> from "std/bindings/math.toml";
+frgn __signum(n: Int) -> Result<Int, MathError> from "std/bindings/math.toml";
 // Random
-frgn sig __random() -> Float;
-frgn sig __random_int(min: Int, max: Int) -> Int;
-
+frgn __random() -> Result<Float, MathError> from "std/bindings/math.toml";
+frgn __random_int(min: Int, max: Int) -> Result<Int, MathError> from "std/bindings/math.toml";
 // ===== NATIVE DEFINITIONS =====
 
 // Absolute value (Int)

@@ -1,5 +1,5 @@
-// Standard JSON Bindings
-// Provides JSON parsing and manipulation
+# Standard JSON Bindings
+# Provides JSON parsing and manipulation
 
 [[functions]]
 name = "__parse"
@@ -20,6 +20,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __parse - WASM implementation
+# ==================================================
+[[functions]]
+name = "__parse"
+location = "__parse"
+target = "wasm"
+mapper = "wasm"
+description = "Parse JSON string (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__stringify"
 location = "brief_ffi_native::__stringify"
@@ -39,6 +57,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __stringify - WASM implementation
+# ==================================================
+[[functions]]
+name = "__stringify"
+location = "__stringify"
+target = "wasm"
+mapper = "wasm"
+description = "Convert to JSON string (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__to_json"
 location = "brief_ffi_native::__to_json"
@@ -58,6 +94,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __to_json - WASM implementation
+# ==================================================
+[[functions]]
+name = "__to_json"
+location = "__to_json"
+target = "wasm"
+mapper = "wasm"
+description = "Convert to JSON (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__from_json"
 location = "brief_ffi_native::__from_json"
@@ -77,6 +131,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __from_json - WASM implementation
+# ==================================================
+[[functions]]
+name = "__from_json"
+location = "__from_json"
+target = "wasm"
+mapper = "wasm"
+description = "Parse from JSON (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_null"
 location = "brief_ffi_native::__is_null"
@@ -96,6 +168,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_null - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_null"
+location = "__is_null"
+target = "wasm"
+mapper = "wasm"
+description = "Check if null (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_bool"
 location = "brief_ffi_native::__is_bool"
@@ -115,6 +205,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_bool - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_bool"
+location = "__is_bool"
+target = "wasm"
+mapper = "wasm"
+description = "Check if boolean (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_number"
 location = "brief_ffi_native::__is_number"
@@ -134,6 +242,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_number - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_number"
+location = "__is_number"
+target = "wasm"
+mapper = "wasm"
+description = "Check if number (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_string"
 location = "brief_ffi_native::__is_string"
@@ -153,6 +279,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_string - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_string"
+location = "__is_string"
+target = "wasm"
+mapper = "wasm"
+description = "Check if string (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_array"
 location = "brief_ffi_native::__is_array"
@@ -172,6 +316,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_array - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_array"
+location = "__is_array"
+target = "wasm"
+mapper = "wasm"
+description = "Check if array (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_object"
 location = "brief_ffi_native::__is_object"
@@ -191,6 +353,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_object - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_object"
+location = "__is_object"
+target = "wasm"
+mapper = "wasm"
+description = "Check if object (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__get_bool"
 location = "brief_ffi_native::__get_bool"
@@ -211,6 +391,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __get_bool - WASM implementation
+# ==================================================
+[[functions]]
+name = "__get_bool"
+location = "__get_bool"
+target = "wasm"
+mapper = "wasm"
+description = "Get boolean value (WASM)"
+[functions.input]
+data = "Data"
+key = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__get_number"
 location = "brief_ffi_native::__get_number"
@@ -231,6 +430,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __get_number - WASM implementation
+# ==================================================
+[[functions]]
+name = "__get_number"
+location = "__get_number"
+target = "wasm"
+mapper = "wasm"
+description = "Get number value (WASM)"
+[functions.input]
+data = "Data"
+key = "String"
+[functions.output.success]
+result = "Float"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__get_string"
 location = "brief_ffi_native::__get_string"
@@ -251,6 +469,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __get_string - WASM implementation
+# ==================================================
+[[functions]]
+name = "__get_string"
+location = "__get_string"
+target = "wasm"
+mapper = "wasm"
+description = "Get string value (WASM)"
+[functions.input]
+data = "Data"
+key = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__get_array"
 location = "brief_ffi_native::__get_array"
@@ -271,6 +508,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __get_array - WASM implementation
+# ==================================================
+[[functions]]
+name = "__get_array"
+location = "__get_array"
+target = "wasm"
+mapper = "wasm"
+description = "Get array value (WASM)"
+[functions.input]
+data = "Data"
+key = "String"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__get_object"
 location = "brief_ffi_native::__get_object"
@@ -291,6 +547,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __get_object - WASM implementation
+# ==================================================
+[[functions]]
+name = "__get_object"
+location = "__get_object"
+target = "wasm"
+mapper = "wasm"
+description = "Get object value (WASM)"
+[functions.input]
+data = "Data"
+key = "String"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__get_index"
 location = "brief_ffi_native::__get_index"
@@ -311,6 +586,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __get_index - WASM implementation
+# ==================================================
+[[functions]]
+name = "__get_index"
+location = "__get_index"
+target = "wasm"
+mapper = "wasm"
+description = "Get array element (WASM)"
+[functions.input]
+data = "Data"
+index = "Int"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__array_len"
 location = "brief_ffi_native::__array_len"
@@ -330,6 +624,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __array_len - WASM implementation
+# ==================================================
+[[functions]]
+name = "__array_len"
+location = "__array_len"
+target = "wasm"
+mapper = "wasm"
+description = "Get array length (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Int"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__array_push"
 location = "brief_ffi_native::__array_push"
@@ -350,6 +662,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __array_push - WASM implementation
+# ==================================================
+[[functions]]
+name = "__array_push"
+location = "__array_push"
+target = "wasm"
+mapper = "wasm"
+description = "Push to array (WASM)"
+[functions.input]
+data = "Data"
+item = "Data"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__array_pop"
 location = "brief_ffi_native::__array_pop"
@@ -369,6 +700,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __array_pop - WASM implementation
+# ==================================================
+[[functions]]
+name = "__array_pop"
+location = "__array_pop"
+target = "wasm"
+mapper = "wasm"
+description = "Pop from array (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__array_shift"
 location = "brief_ffi_native::__array_shift"
@@ -388,6 +737,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __array_shift - WASM implementation
+# ==================================================
+[[functions]]
+name = "__array_shift"
+location = "__array_shift"
+target = "wasm"
+mapper = "wasm"
+description = "Shift from array (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__keys"
 location = "brief_ffi_native::__keys"
@@ -407,6 +774,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __keys - WASM implementation
+# ==================================================
+[[functions]]
+name = "__keys"
+location = "__keys"
+target = "wasm"
+mapper = "wasm"
+description = "Get object keys (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__values"
 location = "brief_ffi_native::__values"
@@ -426,6 +811,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __values - WASM implementation
+# ==================================================
+[[functions]]
+name = "__values"
+location = "__values"
+target = "wasm"
+mapper = "wasm"
+description = "Get object values (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__has_key"
 location = "brief_ffi_native::__has_key"
@@ -446,6 +849,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __has_key - WASM implementation
+# ==================================================
+[[functions]]
+name = "__has_key"
+location = "__has_key"
+target = "wasm"
+mapper = "wasm"
+description = "Check if key exists (WASM)"
+[functions.input]
+data = "Data"
+key = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__null"
 location = "brief_ffi_native::__null"
@@ -464,6 +886,23 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __null - WASM implementation
+# ==================================================
+[[functions]]
+name = "__null"
+location = "__null"
+target = "wasm"
+mapper = "wasm"
+description = "Create null value (WASM)"
+[functions.input]
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__bool_val"
 location = "brief_ffi_native::__bool_val"
@@ -483,6 +922,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __bool_val - WASM implementation
+# ==================================================
+[[functions]]
+name = "__bool_val"
+location = "__bool_val"
+target = "wasm"
+mapper = "wasm"
+description = "Create boolean value (WASM)"
+[functions.input]
+b = "Bool"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__number_val"
 location = "brief_ffi_native::__number_val"
@@ -502,6 +959,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __number_val - WASM implementation
+# ==================================================
+[[functions]]
+name = "__number_val"
+location = "__number_val"
+target = "wasm"
+mapper = "wasm"
+description = "Create number value (WASM)"
+[functions.input]
+n = "Float"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__string_val"
 location = "brief_ffi_native::__string_val"
@@ -521,6 +996,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __string_val - WASM implementation
+# ==================================================
+[[functions]]
+name = "__string_val"
+location = "__string_val"
+target = "wasm"
+mapper = "wasm"
+description = "Create string value (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__array_val"
 location = "brief_ffi_native::__array_val"
@@ -540,6 +1033,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __array_val - WASM implementation
+# ==================================================
+[[functions]]
+name = "__array_val"
+location = "__array_val"
+target = "wasm"
+mapper = "wasm"
+description = "Create array value (WASM)"
+[functions.input]
+list = "List"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__object_val"
 location = "brief_ffi_native::__object_val"
@@ -559,6 +1070,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __object_val - WASM implementation
+# ==================================================
+[[functions]]
+name = "__object_val"
+location = "__object_val"
+target = "wasm"
+mapper = "wasm"
+description = "Create object value (WASM)"
+[functions.input]
+map = "Data"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__merge"
 location = "brief_ffi_native::__merge"
@@ -573,6 +1102,25 @@ b = "Data"
 [functions.output.success]
 result = "Data"
 
+[functions.output.error]
+type = "JsonError"
+code = "Int"
+message = "String"
+
+# ==================================================
+# __merge - WASM implementation
+# ==================================================
+[[functions]]
+name = "__merge"
+location = "__merge"
+target = "wasm"
+mapper = "wasm"
+description = "Merge two JSON objects (WASM)"
+[functions.input]
+a = "Data"
+b = "Data"
+[functions.output.success]
+result = "Data"
 [functions.output.error]
 type = "JsonError"
 code = "Int"

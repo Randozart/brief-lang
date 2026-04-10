@@ -6,57 +6,47 @@
 // ===== PURE FOREIGN (requires external implementation) =====
 
 // Case conversion
-frgn sig __to_lower(s: String) -> String;
-frgn sig __to_upper(s: String) -> String;
-frgn sig __to_title(s: String) -> String;
-frgn sig __is_lower(s: String) -> Bool;
-frgn sig __is_upper(s: String) -> Bool;
-
+frgn __to_lower(s: String) -> Result<String, StringError> from "std/bindings/string.toml";
+frgn __to_upper(s: String) -> Result<String, StringError> from "std/bindings/string.toml";
+frgn __to_title(s: String) -> Result<String, StringError> from "std/bindings/string.toml";
+frgn __is_lower(s: String) -> Result<Bool, StringError> from "std/bindings/string.toml";
+frgn __is_upper(s: String) -> Result<Bool, StringError> from "std/bindings/string.toml";
 // Whitespace checking
-frgn sig __is_whitespace(s: String) -> Bool;
-frgn sig __is_alpha(s: String) -> Bool;
-frgn sig __is_alphanumeric(s: String) -> Bool;
-frgn sig __is_numeric(s: String) -> Bool;
-
+frgn __is_whitespace(s: String) -> Result<Bool, StringError> from "std/bindings/string.toml";
+frgn __is_alpha(s: String) -> Result<Bool, StringError> from "std/bindings/string.toml";
+frgn __is_alphanumeric(s: String) -> Result<Bool, StringError> from "std/bindings/string.toml";
+frgn __is_numeric(s: String) -> Result<Bool, StringError> from "std/bindings/string.toml";
 // Complex search (requires iteration)
-frgn sig __contains_at(haystack: String, needle: String, start: Int) -> Bool;
-frgn sig __find_from(s: String, needle: String, start: Int) -> Int;
-frgn sig __rfind(s: String, needle: String) -> Int;
-
+frgn __contains_at(haystack: String, needle: String, start: Int) -> Result<Bool, StringError> from "std/bindings/string.toml";
+frgn __find_from(s: String, needle: String, start: Int) -> Result<Int, StringError> from "std/bindings/string.toml";
+frgn __rfind(s: String, needle: String) -> Result<Int, StringError> from "std/bindings/string.toml";
 // Character operations
-frgn sig __get_chars(s: String) -> List<String>;
-frgn sig __utf8_len(s: String) -> Int;
-
+frgn __get_chars(s: String) -> Result<List<String>, StringError> from "std/bindings/string.toml"
+frgn __utf8_len(s: String) -> Result<Int, StringError> from "std/bindings/string.toml";
 // Escaping
-frgn sig __escape(s: String) -> String;
-frgn sig __unescape(s: String) -> String;
-frgn sig __quote(s: String) -> String;
-frgn sig __unquote(s: String) -> String;
-
+frgn __escape(s: String) -> Result<String, StringError> from "std/bindings/string.toml";
+frgn __unescape(s: String) -> Result<String, StringError> from "std/bindings/string.toml";
+frgn __quote(s: String) -> Result<String, StringError> from "std/bindings/string.toml";
+frgn __unquote(s: String) -> Result<String, StringError> from "std/bindings/string.toml";
 // Encoding
-frgn sig __bytes(s: String) -> List<Int>;
-frgn sig __from_bytes(list: List<Int>) -> String;
-
+frgn __bytes(s: String) -> Result<List<Int>, StringError> from "std/bindings/string.toml"
+frgn __from_bytes(list: List<Int>) -> Result<String, StringError> from "std/bindings/string.toml";
 // Complex replacement
-frgn sig __replace_all(s: String, old: String, new: String) -> String;
-
+frgn __replace_all(s: String, old: String, new: String) -> Result<String, StringError> from "std/bindings/string.toml";
 // Split variations
-frgn sig __splitn(s: String, delim: String, n: Int) -> List<String>;
-frgn sig __rsplit(s: String, delim: String) -> List<String>;
-frgn sig __words(s: String) -> List<String>;
+frgn __splitn(s: String, delim: String, n: Int) -> Result<List<String>, StringError> from "std/bindings/string.toml"
+frgn __rsplit(s: String, delim: String) -> Result<List<String>, StringError> from "std/bindings/string.toml"
+frgn __words(s: String) -> Result<List<String>, StringError> from "std/bindings/string.toml"
 
 // Truncation
-frgn sig __truncate(s: String, max_len: Int) -> String;
-frgn sig __truncate_with(s: String, max_len: Int, suffix: String) -> String;
-
+frgn __truncate(s: String, max_len: Int) -> Result<String, StringError> from "std/bindings/string.toml";
+frgn __truncate_with(s: String, max_len: Int, suffix: String) -> Result<String, StringError> from "std/bindings/string.toml";
 // Comparison
-frgn sig __eq_ignore_case(a: String, b: String) -> Bool;
-frgn sig __cmp(s1: String, s2: String) -> Int;
-
+frgn __eq_ignore_case(a: String, b: String) -> Result<Bool, StringError> from "std/bindings/string.toml";
+frgn __cmp(s1: String, s2: String) -> Result<Int, StringError> from "std/bindings/string.toml";
 // Parsing
-frgn sig __parse_float(s: String) -> Float;
-frgn sig __to_bool(s: String) -> Bool;
-
+frgn __parse_float(s: String) -> Result<Float, StringError> from "std/bindings/string.toml";
+frgn __to_bool(s: String) -> Result<Bool, StringError> from "std/bindings/string.toml";
 // ===== NATIVE DEFINITIONS =====
 
 // Length

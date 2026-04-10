@@ -1,5 +1,5 @@
-// Standard String Bindings
-// Provides string manipulation operations
+# Standard String Bindings
+# Provides string manipulation operations
 
 [[functions]]
 name = "__to_lower"
@@ -20,6 +20,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __to_lower - WASM implementation
+# ==================================================
+[[functions]]
+name = "__to_lower"
+location = "__to_lower"
+target = "wasm"
+mapper = "wasm"
+description = "Convert to lowercase (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__to_upper"
 location = "brief_ffi_native::__to_upper"
@@ -39,6 +57,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __to_upper - WASM implementation
+# ==================================================
+[[functions]]
+name = "__to_upper"
+location = "__to_upper"
+target = "wasm"
+mapper = "wasm"
+description = "Convert to uppercase (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__to_title"
 location = "brief_ffi_native::__to_title"
@@ -58,6 +94,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __to_title - WASM implementation
+# ==================================================
+[[functions]]
+name = "__to_title"
+location = "__to_title"
+target = "wasm"
+mapper = "wasm"
+description = "Convert to title case (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_lower"
 location = "brief_ffi_native::__is_lower"
@@ -77,6 +131,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_lower - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_lower"
+location = "__is_lower"
+target = "wasm"
+mapper = "wasm"
+description = "Check if lowercase (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_upper"
 location = "brief_ffi_native::__is_upper"
@@ -96,6 +168,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_upper - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_upper"
+location = "__is_upper"
+target = "wasm"
+mapper = "wasm"
+description = "Check if uppercase (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_whitespace"
 location = "brief_ffi_native::__is_whitespace"
@@ -115,6 +205,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_whitespace - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_whitespace"
+location = "__is_whitespace"
+target = "wasm"
+mapper = "wasm"
+description = "Check if whitespace only (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_alpha"
 location = "brief_ffi_native::__is_alpha"
@@ -134,6 +242,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_alpha - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_alpha"
+location = "__is_alpha"
+target = "wasm"
+mapper = "wasm"
+description = "Check if alphabetic (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_alphanumeric"
 location = "brief_ffi_native::__is_alphanumeric"
@@ -153,6 +279,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_alphanumeric - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_alphanumeric"
+location = "__is_alphanumeric"
+target = "wasm"
+mapper = "wasm"
+description = "Check if alphanumeric (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_numeric"
 location = "brief_ffi_native::__is_numeric"
@@ -172,6 +316,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_numeric - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_numeric"
+location = "__is_numeric"
+target = "wasm"
+mapper = "wasm"
+description = "Check if numeric (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__contains_at"
 location = "brief_ffi_native::__contains_at"
@@ -193,6 +355,26 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __contains_at - WASM implementation
+# ==================================================
+[[functions]]
+name = "__contains_at"
+location = "__contains_at"
+target = "wasm"
+mapper = "wasm"
+description = "Check if contains at position (WASM)"
+[functions.input]
+haystack = "String"
+needle = "String"
+start = "Int"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__find_from"
 location = "brief_ffi_native::__find_from"
@@ -214,6 +396,26 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __find_from - WASM implementation
+# ==================================================
+[[functions]]
+name = "__find_from"
+location = "__find_from"
+target = "wasm"
+mapper = "wasm"
+description = "Find substring from position (WASM)"
+[functions.input]
+s = "String"
+needle = "String"
+start = "Int"
+[functions.output.success]
+result = "Int"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__rfind"
 location = "brief_ffi_native::__rfind"
@@ -234,6 +436,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __rfind - WASM implementation
+# ==================================================
+[[functions]]
+name = "__rfind"
+location = "__rfind"
+target = "wasm"
+mapper = "wasm"
+description = "Find last occurrence (WASM)"
+[functions.input]
+s = "String"
+needle = "String"
+[functions.output.success]
+result = "Int"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__get_chars"
 location = "brief_ffi_native::__get_chars"
@@ -253,6 +474,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __get_chars - WASM implementation
+# ==================================================
+[[functions]]
+name = "__get_chars"
+location = "__get_chars"
+target = "wasm"
+mapper = "wasm"
+description = "Get all characters (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__utf8_len"
 location = "brief_ffi_native::__utf8_len"
@@ -272,6 +511,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __utf8_len - WASM implementation
+# ==================================================
+[[functions]]
+name = "__utf8_len"
+location = "__utf8_len"
+target = "wasm"
+mapper = "wasm"
+description = "Get UTF-8 length (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Int"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__escape"
 location = "brief_ffi_native::__escape"
@@ -291,6 +548,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __escape - WASM implementation
+# ==================================================
+[[functions]]
+name = "__escape"
+location = "__escape"
+target = "wasm"
+mapper = "wasm"
+description = "Escape special characters (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__unescape"
 location = "brief_ffi_native::__unescape"
@@ -310,6 +585,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __unescape - WASM implementation
+# ==================================================
+[[functions]]
+name = "__unescape"
+location = "__unescape"
+target = "wasm"
+mapper = "wasm"
+description = "Unescape special characters (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__quote"
 location = "brief_ffi_native::__quote"
@@ -329,6 +622,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __quote - WASM implementation
+# ==================================================
+[[functions]]
+name = "__quote"
+location = "__quote"
+target = "wasm"
+mapper = "wasm"
+description = "Add quotes (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__unquote"
 location = "brief_ffi_native::__unquote"
@@ -348,6 +659,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __unquote - WASM implementation
+# ==================================================
+[[functions]]
+name = "__unquote"
+location = "__unquote"
+target = "wasm"
+mapper = "wasm"
+description = "Remove quotes (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__bytes"
 location = "brief_ffi_native::__bytes"
@@ -367,6 +696,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __bytes - WASM implementation
+# ==================================================
+[[functions]]
+name = "__bytes"
+location = "__bytes"
+target = "wasm"
+mapper = "wasm"
+description = "Get byte values (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__from_bytes"
 location = "brief_ffi_native::__from_bytes"
@@ -386,6 +733,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __from_bytes - WASM implementation
+# ==================================================
+[[functions]]
+name = "__from_bytes"
+location = "__from_bytes"
+target = "wasm"
+mapper = "wasm"
+description = "Create from bytes (WASM)"
+[functions.input]
+list = "List"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__replace_all"
 location = "brief_ffi_native::__replace_all"
@@ -407,6 +772,26 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __replace_all - WASM implementation
+# ==================================================
+[[functions]]
+name = "__replace_all"
+location = "__replace_all"
+target = "wasm"
+mapper = "wasm"
+description = "Replace all occurrences (WASM)"
+[functions.input]
+s = "String"
+old = "String"
+new = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__splitn"
 location = "brief_ffi_native::__splitn"
@@ -428,6 +813,26 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __splitn - WASM implementation
+# ==================================================
+[[functions]]
+name = "__splitn"
+location = "__splitn"
+target = "wasm"
+mapper = "wasm"
+description = "Split with limit (WASM)"
+[functions.input]
+s = "String"
+delim = "String"
+n = "Int"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__rsplit"
 location = "brief_ffi_native::__rsplit"
@@ -448,6 +853,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __rsplit - WASM implementation
+# ==================================================
+[[functions]]
+name = "__rsplit"
+location = "__rsplit"
+target = "wasm"
+mapper = "wasm"
+description = "Reverse split (WASM)"
+[functions.input]
+s = "String"
+delim = "String"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__words"
 location = "brief_ffi_native::__words"
@@ -467,6 +891,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __words - WASM implementation
+# ==================================================
+[[functions]]
+name = "__words"
+location = "__words"
+target = "wasm"
+mapper = "wasm"
+description = "Get all words (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__truncate"
 location = "brief_ffi_native::__truncate"
@@ -487,6 +929,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __truncate - WASM implementation
+# ==================================================
+[[functions]]
+name = "__truncate"
+location = "__truncate"
+target = "wasm"
+mapper = "wasm"
+description = "Truncate string (WASM)"
+[functions.input]
+s = "String"
+max_len = "Int"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__truncate_with"
 location = "brief_ffi_native::__truncate_with"
@@ -508,6 +969,26 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __truncate_with - WASM implementation
+# ==================================================
+[[functions]]
+name = "__truncate_with"
+location = "__truncate_with"
+target = "wasm"
+mapper = "wasm"
+description = "Truncate with suffix (WASM)"
+[functions.input]
+s = "String"
+max_len = "Int"
+suffix = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__eq_ignore_case"
 location = "brief_ffi_native::__eq_ignore_case"
@@ -528,6 +1009,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __eq_ignore_case - WASM implementation
+# ==================================================
+[[functions]]
+name = "__eq_ignore_case"
+location = "__eq_ignore_case"
+target = "wasm"
+mapper = "wasm"
+description = "Case-insensitive equal (WASM)"
+[functions.input]
+a = "String"
+b = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__cmp"
 location = "brief_ffi_native::__cmp"
@@ -548,6 +1048,25 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __cmp - WASM implementation
+# ==================================================
+[[functions]]
+name = "__cmp"
+location = "__cmp"
+target = "wasm"
+mapper = "wasm"
+description = "Compare strings (WASM)"
+[functions.input]
+s1 = "String"
+s2 = "String"
+[functions.output.success]
+result = "Int"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__parse_float"
 location = "brief_ffi_native::__parse_float"
@@ -567,6 +1086,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __parse_float - WASM implementation
+# ==================================================
+[[functions]]
+name = "__parse_float"
+location = "__parse_float"
+target = "wasm"
+mapper = "wasm"
+description = "Parse as float (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Float"
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__to_bool"
 location = "brief_ffi_native::__to_bool"
@@ -580,6 +1117,24 @@ s = "String"
 [functions.output.success]
 result = "Bool"
 
+[functions.output.error]
+type = "StringError"
+code = "Int"
+message = "String"
+
+# ==================================================
+# __to_bool - WASM implementation
+# ==================================================
+[[functions]]
+name = "__to_bool"
+location = "__to_bool"
+target = "wasm"
+mapper = "wasm"
+description = "Parse as bool (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Bool"
 [functions.output.error]
 type = "StringError"
 code = "Int"

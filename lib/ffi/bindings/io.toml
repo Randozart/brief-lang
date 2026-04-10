@@ -1,5 +1,5 @@
-// Standard I/O Bindings
-// Provides console input/output operations
+# Standard I/O Bindings
+# Provides console input/output operations
 
 [[functions]]
 name = "__print"
@@ -19,6 +19,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __print - WASM implementation
+# ==================================================
+[[functions]]
+name = "__print"
+location = "__print"
+target = "wasm"
+mapper = "wasm"
+description = "Print string to stdout without newline (WASM)"
+[functions.input]
+msg = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__println"
 location = "brief_ffi_native::__println"
@@ -37,6 +55,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __println - WASM implementation
+# ==================================================
+[[functions]]
+name = "__println"
+location = "__println"
+target = "wasm"
+mapper = "wasm"
+description = "Print string to stdout with newline (WASM)"
+[functions.input]
+msg = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__input"
 location = "brief_ffi_native::__input"
@@ -48,6 +84,23 @@ description = "Read line from stdin"
 [functions.output.success]
 result = "String"
 
+[functions.output.error]
+type = "IoError"
+code = "Int"
+message = "String"
+
+# ==================================================
+# __input - WASM implementation
+# ==================================================
+[[functions]]
+name = "__input"
+location = "__input"
+target = "wasm"
+mapper = "wasm"
+description = "Read line from stdin (WASM)"
+[functions.input]
+[functions.output.success]
+result = "String"
 [functions.output.error]
 type = "IoError"
 code = "Int"

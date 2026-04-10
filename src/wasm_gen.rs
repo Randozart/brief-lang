@@ -22,6 +22,8 @@ pub struct WasmGenerator {
     reactive_txns: Vec<Transaction>,
     reactive_dependency_map: HashMap<String, Vec<usize>>,
     reactor_speed: u32,
+    ffi_bindings: HashMap<String, usize>, // function name -> arg count
+    local_vars: HashMap<String, ()>,      // track local let-bound variables
 }
 
 impl WasmGenerator {
@@ -36,6 +38,8 @@ impl WasmGenerator {
             reactive_txns: Vec::new(),
             reactive_dependency_map: HashMap::new(),
             reactor_speed: 10, // Default 10Hz
+            ffi_bindings: HashMap::new(),
+            local_vars: HashMap::new(),
         }
     }
 
@@ -112,9 +116,69 @@ impl WasmGenerator {
                         }
                     }
                 }
+                TopLevel::ForeignBinding { signature, .. } => {
+                    // Track FFI bindings for code generation
+                    self.ffi_bindings
+                        .insert(signature.name.clone(), signature.inputs.len());
+                }
                 _ => {}
             }
         }
+    }
+
+    /// Generate Rust code for an FFI call - calls JS function from WASM
+    fn gen_ffi_call(&self, fn_name: &str, args: &[Expr]) -> String {
+        let mut code = String::from("{\n");
+        code.push_str(&format!(
+            "            let __fn_ref = js_sys::Reflect::get(&js_sys::global(), &JsValue::from(\"{}\"));\n",
+            fn_name
+        ));
+        code.push_str("            match __fn_ref {\n");
+        code.push_str("                Ok(f) => {\n");
+        code.push_str("                    match f.dyn_into::<js_sys::Function>() {\n");
+        code.push_str("                        Ok(func) => {\n");
+
+        match args.len() {
+            0 => {
+                code.push_str("                            func.call0(&JsValue::NULL).unwrap_or(JsValue::NULL)\n");
+            }
+            1 => {
+                let arg0 = self.expr_to_js_value(&args[0]);
+                code.push_str(&format!(
+                    "                            func.call1(&JsValue::NULL, &{}).unwrap_or(JsValue::NULL)\n",
+                    arg0
+                ));
+            }
+            2 => {
+                let arg0 = self.expr_to_js_value(&args[0]);
+                let arg1 = self.expr_to_js_value(&args[1]);
+                code.push_str(&format!(
+                    "                            func.call2(&JsValue::NULL, &{}, &{}).unwrap_or(JsValue::NULL)\n",
+                    arg0, arg1
+                ));
+            }
+            _ => {
+                // For more than 2 args, build an array
+                code.push_str("                            let args = js_sys::Array::new();\n");
+                for arg in args {
+                    let arg_code = self.expr_to_js_value(arg);
+                    code.push_str(&format!(
+                        "                            args.push(&{});\n",
+                        arg_code
+                    ));
+                }
+                code.push_str("                            func.apply(&JsValue::NULL, &args).unwrap_or(JsValue::NULL)\n");
+            }
+        }
+
+        code.push_str("                        }\n");
+        code.push_str("                        Err(_) => JsValue::NULL,\n");
+        code.push_str("                    }\n");
+        code.push_str("                }\n");
+        code.push_str("                Err(_) => JsValue::NULL,\n");
+        code.push_str("            }\n");
+        code.push_str("        }");
+        code
     }
 
     fn extract_dependencies(&self, expr: &Expr) -> Vec<String> {
@@ -173,7 +237,7 @@ impl WasmGenerator {
         }
     }
 
-    fn generate_rust_code(&self, program: &Program, bindings: &[Binding]) -> String {
+    fn generate_rust_code(&mut self, program: &Program, bindings: &[Binding]) -> String {
         let mut output = String::new();
 
         output.push_str("use wasm_bindgen::prelude::*;\n\n");
@@ -452,7 +516,7 @@ impl WasmGenerator {
         for (name, sig_type) in &self.signal_types {
             let &id = self.signal_map.get(name).unwrap();
             match sig_type {
-                SignalType::List | SignalType::Struct => {
+                SignalType::List | SignalType::Struct | SignalType::String => {
                     let getter = format!("    pub fn get_{}(&self) -> JsValue {{\n", name);
                     output.push_str(&getter);
                     output.push_str(&format!("        self.signals[{}].clone()\n", id));
@@ -521,6 +585,10 @@ impl WasmGenerator {
         output.push_str("        fn json_text(el: &str, val: JsValue) -> String {\n");
         output.push_str("            if let Some(n) = val.as_f64() {\n");
         output.push_str("                format!(\"{{\\\"op\\\":\\\"text\\\",\\\"el\\\":\\\"{}\\\",\\\"value\\\":{}}}\", el, n as i32)\n");
+        output.push_str("            } else if val.is_string() {\n");
+        output.push_str("                let s = val.as_string().unwrap_or_default();\n");
+        output.push_str("                let escaped = s.replace('\\\\', \"\\\\\\\\\").replace('\"', \"\\\\\\\"\");\n");
+        output.push_str("                format!(\"{{\\\"op\\\":\\\"text\\\",\\\"el\\\":\\\"{}\\\",\\\"value\\\":\\\"{}\\\"}}\", el, escaped)\n");
         output.push_str("            } else {\n");
         output.push_str("                format!(\"{{\\\"op\\\":\\\"text\\\",\\\"el\\\":\\\"{}\\\",\\\"value\\\":0}}\", el)\n");
         output.push_str("            }\n");
@@ -638,16 +706,13 @@ impl WasmGenerator {
         output.push_str("    }\n");
         output.push_str("}\n\n");
 
-        output.push_str("impl Default for State {\n");
-        output.push_str("    fn default() -> Self {\n");
-        output.push_str("        Self::new()\n");
-        output.push_str("    }\n");
-        output.push_str("}\n");
-
         output
     }
 
-    fn generate_transaction(&self, output: &mut String, txn: &crate::ast::Transaction) {
+    fn generate_transaction(&mut self, output: &mut String, txn: &crate::ast::Transaction) {
+        // Clear local variables for this transaction
+        self.local_vars.clear();
+
         // Add wasm_bindgen attribute to export to JavaScript
         output.push_str("    #[wasm_bindgen]\n");
 
@@ -706,7 +771,7 @@ impl WasmGenerator {
         }
     }
 
-    fn statement_to_rust(&self, output: &mut String, stmt: &Statement) {
+    fn statement_to_rust(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
             Statement::Assignment {
                 is_owned,
@@ -749,7 +814,48 @@ impl WasmGenerator {
             Statement::Term(_) => {
                 output.push_str("        // term - transaction settled\n");
             }
-            _ => {}
+            Statement::Let { name, ty: _, expr } => {
+                if let Some(e) = expr {
+                    let expr_code = self.expr_to_js_value(e);
+                    output.push_str(&format!("        let {} = {};\n", name, expr_code));
+                    self.local_vars.insert(name.clone(), ());
+                }
+            }
+            Statement::Expression(expr) => {
+                let expr_code = self.expr_to_js_value(expr);
+                output.push_str(&format!("        {};\n", expr_code));
+            }
+            Statement::Guarded {
+                condition,
+                statements,
+            } => {
+                let cond_code = self.expr_to_js_value_for_condition(condition);
+                output.push_str(&format!("        if {} {{\n", cond_code));
+                for s in statements {
+                    self.statement_to_rust(output, s);
+                }
+                output.push_str("        }\n");
+            }
+            Statement::Escape(expr_opt) => {
+                if let Some(expr) = expr_opt {
+                    let expr_code = self.expr_to_js_value(expr);
+                    output.push_str(&format!("        return {};\n", expr_code));
+                } else {
+                    output.push_str("        return;\n");
+                }
+            }
+            Statement::Unification {
+                name,
+                pattern,
+                expr,
+            } => {
+                // Unification: name(pattern) = expr
+                let expr_code = self.expr_to_js_value(expr);
+                output.push_str(&format!(
+                    "        // unification: {}({}) = {}\n",
+                    name, pattern, expr_code
+                ));
+            }
         }
     }
 
@@ -776,6 +882,8 @@ impl WasmGenerator {
             Expr::Identifier(name) => {
                 if let Some(&id) = self.signal_map.get(name) {
                     format!("self.signals[{}].clone()", id)
+                } else if self.local_vars.contains_key(name) {
+                    format!("{}.clone()", name)
                 } else {
                     format!("JsValue::from(\"{}\")", name)
                 }
@@ -939,9 +1047,14 @@ impl WasmGenerator {
                 )
             }
             Expr::Call(name, args) => {
-                let args_vals: Vec<String> =
-                    args.iter().map(|a| self.expr_to_js_value(a)).collect();
-                format!("{}({})", name, args_vals.join(", "))
+                if self.ffi_bindings.contains_key(name) {
+                    // FFI call - invoke JS function from WASM
+                    self.gen_ffi_call(name, args)
+                } else {
+                    let args_vals: Vec<String> =
+                        args.iter().map(|a| self.expr_to_js_value(a)).collect();
+                    format!("{}({})", name, args_vals.join(", "))
+                }
             }
             Expr::StructInstance(typename, fields) => {
                 let mut sets = String::new();
@@ -991,14 +1104,26 @@ impl WasmGenerator {
                 format!("({} || {})", a_val, b_val)
             }
             Expr::Eq(a, b) => {
-                let a_val = self.js_value_to_f64(a);
-                let b_val = self.js_value_to_f64(b);
-                format!("({} == {})", a_val, b_val)
+                if self.is_string_expr(a) && self.is_string_expr(b) {
+                    let a_val = self.expr_to_js_value(a);
+                    let b_val = self.expr_to_js_value(b);
+                    format!("({}.as_string().unwrap_or_default() == {}.as_string().unwrap_or_default())", a_val, b_val)
+                } else {
+                    let a_val = self.js_value_to_f64(a);
+                    let b_val = self.js_value_to_f64(b);
+                    format!("({} == {})", a_val, b_val)
+                }
             }
             Expr::Ne(a, b) => {
-                let a_val = self.js_value_to_f64(a);
-                let b_val = self.js_value_to_f64(b);
-                format!("({} != {})", a_val, b_val)
+                if self.is_string_expr(a) && self.is_string_expr(b) {
+                    let a_val = self.expr_to_js_value(a);
+                    let b_val = self.expr_to_js_value(b);
+                    format!("({}.as_string().unwrap_or_default() != {}.as_string().unwrap_or_default())", a_val, b_val)
+                } else {
+                    let a_val = self.js_value_to_f64(a);
+                    let b_val = self.js_value_to_f64(b);
+                    format!("({} != {})", a_val, b_val)
+                }
             }
             Expr::Lt(a, b) => {
                 let a_val = self.js_value_to_f64(a);
@@ -1034,6 +1159,20 @@ impl WasmGenerator {
         }
     }
 
+    fn is_string_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::String(_) => true,
+            Expr::Identifier(name) => {
+                if let Some(sig_type) = self.signal_types.get(name) {
+                    matches!(sig_type, SignalType::String)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
     fn js_value_to_f64(&self, expr: &Expr) -> String {
         match expr {
             Expr::ListLen(list_expr) => self.expr_to_js_value(expr),
@@ -1050,20 +1189,17 @@ impl WasmGenerator {
     fn generate_js_glue(&self, program_name: &str, bindings: &[Binding]) -> String {
         let mut output = String::new();
 
-        output.push_str("(async function() {\n");
-        output.push_str("    'use strict';\n\n");
-
         // FFI: JSON operations
-        output.push_str("    function __json_decode(str) {\n");
+        output.push_str("    function __parse(str) {\n");
         output.push_str("        try {\n");
         output.push_str("            return JSON.parse(str);\n");
         output.push_str("        } catch(e) {\n");
-        output.push_str("            console.error('JSON decode error:', e.message);\n");
+        output.push_str("            console.error('JSON parse error:', e.message);\n");
         output.push_str("            return null;\n");
         output.push_str("        }\n");
         output.push_str("    }\n\n");
 
-        output.push_str("    function __json_get_string(data, key) {\n");
+        output.push_str("    function __get_string(data, key) {\n");
         output.push_str("        if (data && data[key]) {\n");
         output.push_str("            return String(data[key]);\n");
         output.push_str("        }\n");
@@ -1082,9 +1218,11 @@ impl WasmGenerator {
         // FFI: HTTP operations (for lib/std/http.bv)
         output.push_str("    function __http_get(url) {\n");
         output.push_str("        try {\n");
+        output.push_str("            console.log('__http_get called with:', url);\n");
         output.push_str("            const xhr = new XMLHttpRequest();\n");
         output.push_str("            xhr.open('GET', url, false);\n");
         output.push_str("            xhr.send();\n");
+        output.push_str("            console.log('__http_get status:', xhr.status, 'response:', xhr.responseText);\n");
         output.push_str("            if (xhr.status >= 200 && xhr.status < 300) {\n");
         output.push_str("                return xhr.responseText;\n");
         output.push_str("            }\n");
@@ -1109,6 +1247,14 @@ impl WasmGenerator {
         output.push_str("            return '';\n");
         output.push_str("        }\n");
         output.push_str("    }\n\n");
+
+        // Expose FFI functions on window for WASM interop
+        output.push_str("    window.__parse = __parse;\n");
+        output.push_str("    window.__get_string = __get_string;\n");
+        output.push_str("    window.__json_encode = __json_encode;\n");
+        output.push_str("    window.__http_get = __http_get;\n");
+        output.push_str("    window.__http_post = __http_post;\n");
+        output.push_str("    console.log('FFI functions exposed:', typeof window.__http_get, typeof window.__parse);\n\n");
 
         output.push_str("    const ELEMENT_MAP = {\n");
         for binding in bindings {
@@ -1258,7 +1404,6 @@ impl WasmGenerator {
         }
         output.push_str("    attachListeners();\n");
         output.push_str("    startPollLoop();\n");
-        output.push_str("})();\n");
 
         output
     }

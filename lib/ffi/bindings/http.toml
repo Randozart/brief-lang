@@ -1,0 +1,91 @@
+# HTTP Bindings
+# Provides HTTP request/response operations
+
+# ==================================================
+# __http_get - Native implementation
+# ==================================================
+[[functions]]
+name = "__http_get"
+location = "brief_ffi_native::__http_get"
+target = "native"
+mapper = "rust"
+description = "HTTP GET request (native Rust implementation)"
+
+[functions.input]
+url = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "HttpError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __http_get - WASM implementation
+# ==================================================
+[[functions]]
+name = "__http_get"
+location = "__http_get"
+target = "wasm"
+mapper = "wasm"
+description = "HTTP GET request (WASM - synchronous XMLHttpRequest)"
+
+[functions.input]
+url = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "HttpError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __http_post - Native implementation
+# ==================================================
+[[functions]]
+name = "__http_post"
+location = "brief_ffi_native::__http_post"
+target = "native"
+mapper = "rust"
+description = "HTTP POST request (native Rust implementation)"
+
+[functions.input]
+url = "String"
+body = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "HttpError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __http_post - WASM implementation
+# ==================================================
+[[functions]]
+name = "__http_post"
+location = "__http_post"
+target = "wasm"
+mapper = "wasm"
+description = "HTTP POST request (WASM - synchronous XMLHttpRequest)"
+
+[functions.input]
+url = "String"
+body = "String"
+
+[functions.output.success]
+result = "String"
+
+[functions.output.error]
+type = "HttpError"
+code = "Int"
+message = "String"

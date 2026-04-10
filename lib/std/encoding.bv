@@ -9,48 +9,41 @@
 // ===== PURE FOREIGN (requires bit manipulation/complex algorithms) =====
 
 // Base64
-frgn sig __base64_encode(data: String) -> String;
-frgn sig __base64_decode(s: String) -> String;
-frgn sig __base64_url_encode(data: String) -> String;
-frgn sig __base64_url_decode(s: String) -> String;
-
+frgn __base64_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __base64_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __base64_url_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __base64_url_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
 // Hex
-frgn sig __hex_encode(data: String) -> String;
-frgn sig __hex_decode(s: String) -> String;
-frgn sig __hex_encode_bytes(list: List<Int>) -> String;
-frgn sig __hex_decode_bytes(s: String) -> List<Int>;
+frgn __hex_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __hex_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __hex_encode_bytes(list: List<Int>) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __hex_decode_bytes(s: String) -> Result<List<Int>, EncodingError> from "std/bindings/encoding.toml"
 
 // URL Encoding
-frgn sig __url_encode(s: String) -> String;
-frgn sig __url_decode(s: String) -> String;
-frgn sig __url_encode_component(s: String) -> String;
-frgn sig __url_decode_component(s: String) -> String;
-
+frgn __url_encode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __url_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __url_encode_component(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __url_decode_component(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
 // HTML Encoding
-frgn sig __html_escape(s: String) -> String;
-frgn sig __html_unescape(s: String) -> String;
-
+frgn __html_escape(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __html_unescape(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
 // Unicode
-frgn sig __utf8_encode(s: String) -> List<Int>;
-frgn sig __utf8_decode(list: List<Int>) -> String;
-frgn sig __codepoint_to_char(code: Int) -> String;
-frgn sig __char_to_codepoint(c: String) -> Int;
-
+frgn __utf8_encode(s: String) -> Result<List<Int>, EncodingError> from "std/bindings/encoding.toml"
+frgn __utf8_decode(list: List<Int>) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __codepoint_to_char(code: Int) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __char_to_codepoint(c: String) -> Result<Int, EncodingError> from "std/bindings/encoding.toml";
 // Hashing
-frgn sig __md5(s: String) -> String;
-frgn sig __sha1(s: String) -> String;
-frgn sig __sha256(s: String) -> String;
-frgn sig __sha512(s: String) -> String;
-
+frgn __md5(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __sha1(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __sha256(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __sha512(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
 // UUID
-frgn sig __uuid_v4() -> String;
-frgn sig __is_uuid(s: String) -> Bool;
-
+frgn __uuid_v4() -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __is_uuid(s: String) -> Result<Bool, EncodingError> from "std/bindings/encoding.toml";
 // URI Components
-frgn sig __uri_parse(s: String) -> Data;
-frgn sig __uri_build(data: Data) -> String;
-frgn sig __uri_get_param(url: String, key: String) -> String;
-
+frgn __uri_parse(s: String) -> Result<Data, EncodingError> from "std/bindings/encoding.toml";
+frgn __uri_build(data: Data) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __uri_get_param(url: String, key: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
 // ===== NATIVE DEFINITIONS =====
 
 // Simple hex digit to int

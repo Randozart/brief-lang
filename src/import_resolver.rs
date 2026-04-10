@@ -235,7 +235,7 @@ impl ImportResolver {
                 let name = match item {
                     TopLevel::Definition(d) => Some(d.name.as_str()),
                     TopLevel::Signature(s) => Some(s.name.as_str()),
-                    TopLevel::ForeignSig(f) => Some(f.name.as_str()),
+                    TopLevel::ForeignBinding { name, .. } => Some(name.as_str()),
                     TopLevel::Constant(c) => Some(c.name.as_str()),
                     TopLevel::Struct(s) => Some(s.name.as_str()),
                     TopLevel::RStruct(r) => Some(r.name.as_str()),

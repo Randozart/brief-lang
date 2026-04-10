@@ -205,20 +205,9 @@ impl<'a> Parser<'a> {
                 Ok(TopLevel::Definition(defn))
             }
             Some(Ok(Token::Frgn)) => {
-                // Peek ahead to see if this is "frgn sig" or just "frgn"
-                let is_frgn_sig = if let Some((Ok(Token::Sig), _)) = &self.peek {
-                    true
-                } else {
-                    false
-                };
-
-                if is_frgn_sig {
-                    let frgn_sig = self.parse_frgn_sig()?;
-                    Ok(TopLevel::ForeignSig(frgn_sig))
-                } else {
-                    let frgn_binding = self.parse_frgn_binding()?;
-                    Ok(frgn_binding)
-                }
+                // All frgn declarations now require TOML bindings
+                let frgn_binding = self.parse_frgn_binding()?;
+                Ok(frgn_binding)
             }
             Some(Ok(Token::Struct)) => {
                 let struct_def = self.parse_struct()?;
@@ -386,42 +375,6 @@ impl<'a> Parser<'a> {
             source,
             alias,
             bound_defn,
-        })
-    }
-
-    fn parse_frgn_sig(&mut self) -> Result<ForeignSig, String> {
-        self.expect(Token::Frgn)?;
-        self.expect(Token::Sig)?;
-        let name = self.expect_identifier()?;
-
-        let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
-            self.advance();
-            let mut params = Vec::new();
-            while let Some(Ok(Token::Identifier(_))) = self.current_token() {
-                let _param_name = self.expect_identifier()?;
-                self.expect(Token::Colon)?;
-                let param_type = self.parse_type()?;
-                params.push(param_type);
-                if let Some(Ok(Token::Comma)) = self.current_token() {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            self.expect(Token::RParen)?;
-            params
-        } else {
-            Vec::new()
-        };
-
-        self.expect(Token::Arrow)?;
-        let outputs = self.parse_output_types()?;
-        self.expect(Token::Semicolon)?;
-
-        Ok(ForeignSig {
-            name,
-            input_types: parameters,
-            outputs,
         })
     }
 

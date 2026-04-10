@@ -71,9 +71,10 @@ impl std::error::Error for FfiError {}
 pub fn load_binding_file(
     path: &str,
     project_root: &Option<PathBuf>,
+    source_file_path: &Option<PathBuf>,
 ) -> Result<Vec<ForeignBinding>, FfiError> {
     // Resolve the path
-    let resolved_path = resolver::resolve_binding_path(path, project_root)?;
+    let resolved_path = resolver::resolve_binding_path(path, project_root, source_file_path)?;
 
     // Load and parse TOML
     loader::load_binding(&resolved_path)

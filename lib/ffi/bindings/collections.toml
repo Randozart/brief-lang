@@ -1,0 +1,273 @@
+# Collections Bindings
+# Provides collection operations that require foreign implementation
+
+# ==================================================
+# __filter - Native implementation
+# ==================================================
+[[functions]]
+name = "__filter"
+location = "brief_ffi_native::__filter"
+target = "native"
+mapper = "rust"
+description = "Filter list elements by predicate"
+
+[functions.input]
+list = "List<T>"
+pred = "T -> Bool"
+
+[functions.output.success]
+result = "List<T>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __filter - WASM implementation
+# ==================================================
+[[functions]]
+name = "__filter"
+location = "__filter"
+target = "wasm"
+mapper = "wasm"
+description = "Filter list elements by predicate (WASM)"
+
+[functions.input]
+list = "List<T>"
+pred = "T -> Bool"
+
+[functions.output.success]
+result = "List<T>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __map - Native implementation
+# ==================================================
+[[functions]]
+name = "__map"
+location = "brief_ffi_native::__map"
+target = "native"
+mapper = "rust"
+description = "Transform list elements"
+
+[functions.input]
+list = "List<T>"
+transform = "T -> U"
+
+[functions.output.success]
+result = "List<U>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __map - WASM implementation
+# ==================================================
+[[functions]]
+name = "__map"
+location = "__map"
+target = "wasm"
+mapper = "wasm"
+description = "Transform list elements (WASM)"
+
+[functions.input]
+list = "List<T>"
+transform = "T -> U"
+
+[functions.output.success]
+result = "List<U>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __reduce - Native implementation
+# ==================================================
+[[functions]]
+name = "__reduce"
+location = "brief_ffi_native::__reduce"
+target = "native"
+mapper = "rust"
+description = "Reduce list to single value"
+
+[functions.input]
+list = "List<T>"
+initial = "U"
+reducer = "(U, T) -> U"
+
+[functions.output.success]
+result = "U"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __reduce - WASM implementation
+# ==================================================
+[[functions]]
+name = "__reduce"
+location = "__reduce"
+target = "wasm"
+mapper = "wasm"
+description = "Reduce list to single value (WASM)"
+
+[functions.input]
+list = "List<T>"
+initial = "U"
+reducer = "(U, T) -> U"
+
+[functions.output.success]
+result = "U"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __unique - Native implementation
+# ==================================================
+[[functions]]
+name = "__unique"
+location = "brief_ffi_native::__unique"
+target = "native"
+mapper = "rust"
+description = "Remove duplicates from list"
+
+[functions.input]
+list = "List<T>"
+
+[functions.output.success]
+result = "List<T>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __unique - WASM implementation
+# ==================================================
+[[functions]]
+name = "__unique"
+location = "__unique"
+target = "wasm"
+mapper = "wasm"
+description = "Remove duplicates from list (WASM)"
+
+[functions.input]
+list = "List<T>"
+
+[functions.output.success]
+result = "List<T>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __sort - Native implementation
+# ==================================================
+[[functions]]
+name = "__sort"
+location = "brief_ffi_native::__sort"
+target = "native"
+mapper = "rust"
+description = "Sort list elements"
+
+[functions.input]
+list = "List<T>"
+
+[functions.output.success]
+result = "List<T>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __sort - WASM implementation
+# ==================================================
+[[functions]]
+name = "__sort"
+location = "__sort"
+target = "wasm"
+mapper = "wasm"
+description = "Sort list elements (WASM)"
+
+[functions.input]
+list = "List<T>"
+
+[functions.output.success]
+result = "List<T>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __reverse - Native implementation
+# ==================================================
+[[functions]]
+name = "__reverse"
+location = "brief_ffi_native::__reverse"
+target = "native"
+mapper = "rust"
+description = "Reverse list order"
+
+[functions.input]
+list = "List<T>"
+
+[functions.output.success]
+result = "List<T>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"
+
+
+# ==================================================
+# __reverse - WASM implementation
+# ==================================================
+[[functions]]
+name = "__reverse"
+location = "__reverse"
+target = "wasm"
+mapper = "wasm"
+description = "Reverse list order (WASM)"
+
+[functions.input]
+list = "List<T>"
+
+[functions.output.success]
+result = "List<T>"
+
+[functions.output.error]
+type = "CollectionsError"
+code = "Int"
+message = "String"

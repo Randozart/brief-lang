@@ -9,49 +9,42 @@
 // ===== PURE FOREIGN (requires Data type implementation) =====
 
 // Parse & Serialize
-frgn sig __parse(s: String) -> Data;
-frgn sig __stringify(data: Data) -> String;
-frgn sig __to_json(data: Data) -> String;
-frgn sig __from_json(s: String) -> Data;
-
+frgn __parse(s: String) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __stringify(data: Data) -> Result<String, JsonError> from "std/bindings/json.toml";
+frgn __to_json(data: Data) -> Result<String, JsonError> from "std/bindings/json.toml";
+frgn __from_json(s: String) -> Result<Data, JsonError> from "std/bindings/json.toml";
 // Type Check
-frgn sig __is_null(data: Data) -> Bool;
-frgn sig __is_bool(data: Data) -> Bool;
-frgn sig __is_number(data: Data) -> Bool;
-frgn sig __is_string(data: Data) -> Bool;
-frgn sig __is_array(data: Data) -> Bool;
-frgn sig __is_object(data: Data) -> Bool;
-
+frgn __is_null(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.toml";
+frgn __is_bool(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.toml";
+frgn __is_number(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.toml";
+frgn __is_string(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.toml";
+frgn __is_array(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.toml";
+frgn __is_object(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.toml";
 // Get Values
-frgn sig __get_bool(data: Data, key: String) -> Bool;
-frgn sig __get_number(data: Data, key: String) -> Float;
-frgn sig __get_string(data: Data, key: String) -> String;
-frgn sig __get_array(data: Data, key: String) -> Data;
-frgn sig __get_object(data: Data, key: String) -> Data;
-
+frgn __get_bool(data: Data, key: String) -> Result<Bool, JsonError> from "std/bindings/json.toml";
+frgn __get_number(data: Data, key: String) -> Result<Float, JsonError> from "std/bindings/json.toml";
+frgn __get_string(data: Data, key: String) -> Result<String, JsonError> from "std/bindings/json.toml";
+frgn __get_array(data: Data, key: String) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __get_object(data: Data, key: String) -> Result<Data, JsonError> from "std/bindings/json.toml";
 // Array Access
-frgn sig __get_index(data: Data, index: Int) -> Data;
-frgn sig __array_len(data: Data) -> Int;
-frgn sig __array_push(data: Data, item: Data) -> Data;
-frgn sig __array_pop(data: Data) -> Data;
-frgn sig __array_shift(data: Data) -> Data;
-
+frgn __get_index(data: Data, index: Int) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __array_len(data: Data) -> Result<Int, JsonError> from "std/bindings/json.toml";
+frgn __array_push(data: Data, item: Data) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __array_pop(data: Data) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __array_shift(data: Data) -> Result<Data, JsonError> from "std/bindings/json.toml";
 // Object Operations
-frgn sig __keys(data: Data) -> List<String>;
-frgn sig __values(data: Data) -> List<Data>;
-frgn sig __has_key(data: Data, key: String) -> Bool;
-
+frgn __keys(data: Data) -> Result<List<String>, JsonError> from "std/bindings/json.toml"
+frgn __values(data: Data) -> Result<List<Data>, JsonError> from "std/bindings/json.toml"
+frgn __has_key(data: Data, key: String) -> Result<Bool, JsonError> from "std/bindings/json.toml";
 // Create Values
-frgn sig __null() -> Data;
-frgn sig __bool_val(b: Bool) -> Data;
-frgn sig __number_val(n: Float) -> Data;
-frgn sig __string_val(s: String) -> Data;
-frgn sig __array_val(list: List<Data>) -> Data;
-frgn sig __object_val(map: Data) -> Data;
-
+frgn __null() -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __bool_val(b: Bool) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __number_val(n: Float) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __string_val(s: String) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __array_val(list: List<Data>) -> Result<Data, JsonError> from "std/bindings/json.toml";
+frgn __object_val(map: Data) -> Result<Data, JsonError> from "std/bindings/json.toml";
 // Merge
-frgn sig __merge(a: Data, b: Data) -> Data;
-
+frgn __merge(a: Data, b: Data) -> Result<Data, JsonError> from "std/bindings/json.toml";
 // ===== NATIVE DEFINITIONS =====
 
 // Pretty Print - simple version

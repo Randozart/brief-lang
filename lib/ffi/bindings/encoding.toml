@@ -1,5 +1,5 @@
-// Standard Encoding Bindings
-// Provides encoding/decoding operations
+# Standard Encoding Bindings
+# Provides encoding/decoding operations
 
 [[functions]]
 name = "__base64_encode"
@@ -20,6 +20,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __base64_encode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__base64_encode"
+location = "__base64_encode"
+target = "wasm"
+mapper = "wasm"
+description = "Encode to base64 (WASM)"
+[functions.input]
+data = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__base64_decode"
 location = "brief_ffi_native::__base64_decode"
@@ -39,6 +57,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __base64_decode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__base64_decode"
+location = "__base64_decode"
+target = "wasm"
+mapper = "wasm"
+description = "Decode from base64 (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__base64_url_encode"
 location = "brief_ffi_native::__base64_url_encode"
@@ -58,6 +94,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __base64_url_encode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__base64_url_encode"
+location = "__base64_url_encode"
+target = "wasm"
+mapper = "wasm"
+description = "Encode to base64url (WASM)"
+[functions.input]
+data = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__base64_url_decode"
 location = "brief_ffi_native::__base64_url_decode"
@@ -77,6 +131,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __base64_url_decode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__base64_url_decode"
+location = "__base64_url_decode"
+target = "wasm"
+mapper = "wasm"
+description = "Decode from base64url (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__hex_encode"
 location = "brief_ffi_native::__hex_encode"
@@ -96,6 +168,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __hex_encode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__hex_encode"
+location = "__hex_encode"
+target = "wasm"
+mapper = "wasm"
+description = "Encode to hex (WASM)"
+[functions.input]
+data = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__hex_decode"
 location = "brief_ffi_native::__hex_decode"
@@ -115,6 +205,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __hex_decode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__hex_decode"
+location = "__hex_decode"
+target = "wasm"
+mapper = "wasm"
+description = "Decode from hex (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__hex_encode_bytes"
 location = "brief_ffi_native::__hex_encode_bytes"
@@ -134,6 +242,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __hex_encode_bytes - WASM implementation
+# ==================================================
+[[functions]]
+name = "__hex_encode_bytes"
+location = "__hex_encode_bytes"
+target = "wasm"
+mapper = "wasm"
+description = "Encode bytes to hex (WASM)"
+[functions.input]
+list = "List"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__hex_decode_bytes"
 location = "brief_ffi_native::__hex_decode_bytes"
@@ -153,6 +279,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __hex_decode_bytes - WASM implementation
+# ==================================================
+[[functions]]
+name = "__hex_decode_bytes"
+location = "__hex_decode_bytes"
+target = "wasm"
+mapper = "wasm"
+description = "Decode hex to bytes (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__url_encode"
 location = "brief_ffi_native::__url_encode"
@@ -172,6 +316,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __url_encode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__url_encode"
+location = "__url_encode"
+target = "wasm"
+mapper = "wasm"
+description = "URL encode (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__url_decode"
 location = "brief_ffi_native::__url_decode"
@@ -191,6 +353,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __url_decode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__url_decode"
+location = "__url_decode"
+target = "wasm"
+mapper = "wasm"
+description = "URL decode (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__url_encode_component"
 location = "brief_ffi_native::__url_encode_component"
@@ -210,6 +390,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __url_encode_component - WASM implementation
+# ==================================================
+[[functions]]
+name = "__url_encode_component"
+location = "__url_encode_component"
+target = "wasm"
+mapper = "wasm"
+description = "URL encode component (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__url_decode_component"
 location = "brief_ffi_native::__url_decode_component"
@@ -229,6 +427,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __url_decode_component - WASM implementation
+# ==================================================
+[[functions]]
+name = "__url_decode_component"
+location = "__url_decode_component"
+target = "wasm"
+mapper = "wasm"
+description = "URL decode component (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__html_escape"
 location = "brief_ffi_native::__html_escape"
@@ -248,6 +464,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __html_escape - WASM implementation
+# ==================================================
+[[functions]]
+name = "__html_escape"
+location = "__html_escape"
+target = "wasm"
+mapper = "wasm"
+description = "HTML escape (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__html_unescape"
 location = "brief_ffi_native::__html_unescape"
@@ -267,6 +501,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __html_unescape - WASM implementation
+# ==================================================
+[[functions]]
+name = "__html_unescape"
+location = "__html_unescape"
+target = "wasm"
+mapper = "wasm"
+description = "HTML unescape (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__utf8_encode"
 location = "brief_ffi_native::__utf8_encode"
@@ -286,6 +538,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __utf8_encode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__utf8_encode"
+location = "__utf8_encode"
+target = "wasm"
+mapper = "wasm"
+description = "Encode to UTF-8 codepoints (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "List"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__utf8_decode"
 location = "brief_ffi_native::__utf8_decode"
@@ -305,6 +575,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __utf8_decode - WASM implementation
+# ==================================================
+[[functions]]
+name = "__utf8_decode"
+location = "__utf8_decode"
+target = "wasm"
+mapper = "wasm"
+description = "Decode from UTF-8 codepoints (WASM)"
+[functions.input]
+list = "List"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__codepoint_to_char"
 location = "brief_ffi_native::__codepoint_to_char"
@@ -324,6 +612,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __codepoint_to_char - WASM implementation
+# ==================================================
+[[functions]]
+name = "__codepoint_to_char"
+location = "__codepoint_to_char"
+target = "wasm"
+mapper = "wasm"
+description = "Convert codepoint to char (WASM)"
+[functions.input]
+code = "Int"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__char_to_codepoint"
 location = "brief_ffi_native::__char_to_codepoint"
@@ -343,6 +649,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __char_to_codepoint - WASM implementation
+# ==================================================
+[[functions]]
+name = "__char_to_codepoint"
+location = "__char_to_codepoint"
+target = "wasm"
+mapper = "wasm"
+description = "Convert char to codepoint (WASM)"
+[functions.input]
+c = "String"
+[functions.output.success]
+result = "Int"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__md5"
 location = "brief_ffi_native::__md5"
@@ -362,6 +686,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __md5 - WASM implementation
+# ==================================================
+[[functions]]
+name = "__md5"
+location = "__md5"
+target = "wasm"
+mapper = "wasm"
+description = "MD5 hash (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__sha1"
 location = "brief_ffi_native::__sha1"
@@ -381,6 +723,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __sha1 - WASM implementation
+# ==================================================
+[[functions]]
+name = "__sha1"
+location = "__sha1"
+target = "wasm"
+mapper = "wasm"
+description = "SHA-1 hash (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__sha256"
 location = "brief_ffi_native::__sha256"
@@ -400,6 +760,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __sha256 - WASM implementation
+# ==================================================
+[[functions]]
+name = "__sha256"
+location = "__sha256"
+target = "wasm"
+mapper = "wasm"
+description = "SHA-256 hash (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__sha512"
 location = "brief_ffi_native::__sha512"
@@ -419,6 +797,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __sha512 - WASM implementation
+# ==================================================
+[[functions]]
+name = "__sha512"
+location = "__sha512"
+target = "wasm"
+mapper = "wasm"
+description = "SHA-512 hash (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__uuid_v4"
 location = "brief_ffi_native::__uuid_v4"
@@ -437,6 +833,23 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __uuid_v4 - WASM implementation
+# ==================================================
+[[functions]]
+name = "__uuid_v4"
+location = "__uuid_v4"
+target = "wasm"
+mapper = "wasm"
+description = "Generate UUID v4 (WASM)"
+[functions.input]
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__is_uuid"
 location = "brief_ffi_native::__is_uuid"
@@ -456,6 +869,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __is_uuid - WASM implementation
+# ==================================================
+[[functions]]
+name = "__is_uuid"
+location = "__is_uuid"
+target = "wasm"
+mapper = "wasm"
+description = "Check if valid UUID (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Bool"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__uri_parse"
 location = "brief_ffi_native::__uri_parse"
@@ -475,6 +906,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __uri_parse - WASM implementation
+# ==================================================
+[[functions]]
+name = "__uri_parse"
+location = "__uri_parse"
+target = "wasm"
+mapper = "wasm"
+description = "Parse URI (WASM)"
+[functions.input]
+s = "String"
+[functions.output.success]
+result = "Data"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__uri_build"
 location = "brief_ffi_native::__uri_build"
@@ -494,6 +943,24 @@ code = "Int"
 message = "String"
 
 
+
+# ==================================================
+# __uri_build - WASM implementation
+# ==================================================
+[[functions]]
+name = "__uri_build"
+location = "__uri_build"
+target = "wasm"
+mapper = "wasm"
+description = "Build URI (WASM)"
+[functions.input]
+data = "Data"
+[functions.output.success]
+result = "String"
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
 [[functions]]
 name = "__uri_get_param"
 location = "brief_ffi_native::__uri_get_param"
@@ -508,6 +975,25 @@ key = "String"
 [functions.output.success]
 result = "String"
 
+[functions.output.error]
+type = "EncodingError"
+code = "Int"
+message = "String"
+
+# ==================================================
+# __uri_get_param - WASM implementation
+# ==================================================
+[[functions]]
+name = "__uri_get_param"
+location = "__uri_get_param"
+target = "wasm"
+mapper = "wasm"
+description = "Get URI parameter (WASM)"
+[functions.input]
+url = "String"
+key = "String"
+[functions.output.success]
+result = "String"
 [functions.output.error]
 type = "EncodingError"
 code = "Int"

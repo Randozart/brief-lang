@@ -1,19 +1,65 @@
 //! FFI Binding Path Resolution
 //!
 //! Resolves TOML binding file paths from various sources:
+//! - Relative to declaring source file
 //! - Absolute paths: /path/to/binding.toml
-//! - Project-relative: bindings/custom.toml or ./bindings/custom.toml
 //! - Standard library: std/bindings/io.toml
+//! - Project-relative: bindings/custom.toml or ./bindings/custom.toml
 
 use super::FfiError;
 use std::path::{Path, PathBuf};
+
+/// Standard library bindings directory
+/// This is resolved at runtime based on the compiler's installation location
+fn std_lib_path() -> Option<PathBuf> {
+    // Try environment variable first (explicit override)
+    if let Ok(path) = std::env::var("BRIEF_STDLIB_PATH") {
+        let stdlib_path = PathBuf::from(path);
+        if stdlib_path.exists() {
+            return Some(stdlib_path);
+        }
+    }
+
+    // Try to find the standard library relative to the running executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            // Check for typical installation layouts
+            let possible_paths = vec![
+                // Development: brief-compiler/target/release/
+                exe_dir.join("../../lib/ffi/bindings"),
+                exe_dir.join("../lib/ffi/bindings"),
+                // Installed: ~/.local/bin/
+                exe_dir.join("../share/brief/ffi/bindings"),
+            ];
+
+            for path in possible_paths {
+                if path.exists() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+
+    None
+}
 
 /// Resolve a binding path to an actual file path
 pub fn resolve_binding_path(
     binding_path: &str,
     project_root: &Option<PathBuf>,
+    source_file_path: &Option<PathBuf>,
 ) -> Result<PathBuf, FfiError> {
     let binding_path = Path::new(binding_path);
+
+    // Case 0: Relative to the declaring source file
+    if let Some(source_path) = source_file_path {
+        if let Some(source_dir) = source_path.parent() {
+            let resolved = source_dir.join(binding_path);
+            if resolved.exists() {
+                return Ok(resolved);
+            }
+        }
+    }
 
     // Case 1: Absolute path
     if binding_path.is_absolute() {
@@ -25,23 +71,40 @@ pub fn resolve_binding_path(
     }
 
     // Case 2: Standard library binding (std/bindings/*)
-    if binding_path.starts_with("std/bindings/") || binding_path.starts_with("std\\bindings\\") {
-        // In the context of the compiler, this would be resolved relative to the crate root
-        // For now, check relative to current directory
-        if binding_path.exists() {
-            return Ok(binding_path.to_path_buf());
-        }
-        // Try with various prefixes
-        let test_paths = vec![
-            binding_path.to_path_buf(),
-            PathBuf::from("../").join(binding_path),
-            PathBuf::from("./").join(binding_path),
-        ];
-        for path in test_paths {
-            if path.exists() {
-                return Ok(path);
+    let is_std_path =
+        binding_path.starts_with("std/bindings/") || binding_path.starts_with("std\\bindings\\");
+
+    if is_std_path {
+        // Strip the std/bindings/ prefix to get just the filename
+        let stripped = if let Ok(stripped) = binding_path.strip_prefix("std/bindings/") {
+            Some(stripped)
+        } else if let Ok(stripped) = binding_path.strip_prefix("std\\bindings\\") {
+            Some(stripped)
+        } else {
+            None
+        };
+
+        if let Some(filename) = stripped {
+            // Try standard library path
+            if let Some(stdlib_dir) = std_lib_path() {
+                let resolved = stdlib_dir.join(filename);
+                if resolved.exists() {
+                    return Ok(resolved);
+                }
+            }
+
+            // Try relative to current directory (for development)
+            if binding_path.exists() {
+                return Ok(binding_path.to_path_buf());
+            }
+
+            // Try with ./ prefix
+            let with_dot = PathBuf::from("./").join(binding_path);
+            if with_dot.exists() {
+                return Ok(with_dot);
             }
         }
+
         return Err(FfiError::FileNotFound(binding_path.display().to_string()));
     }
 
@@ -76,13 +139,13 @@ mod tests {
         // Create a temporary file to test
         let test_path = PathBuf::from("/tmp/test_binding.toml");
         // This will fail because the file doesn't exist, but that's the point
-        let result = resolve_binding_path("/tmp/nonexistent.toml", &None);
+        let result = resolve_binding_path("/tmp/nonexistent.toml", &None, &None);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_resolve_relative_path_nonexistent() {
-        let result = resolve_binding_path("bindings/nonexistent.toml", &None);
+        let result = resolve_binding_path("bindings/nonexistent.toml", &None, &None);
         assert!(result.is_err());
     }
 
@@ -90,6 +153,6 @@ mod tests {
     fn test_resolve_std_binding() {
         // This might succeed or fail depending on working directory
         // The important thing is it doesn't panic
-        let _ = resolve_binding_path("std/bindings/io.toml", &None);
+        let _ = resolve_binding_path("std/bindings/io.toml", &None, &None);
     }
 }

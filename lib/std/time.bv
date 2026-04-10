@@ -6,34 +6,29 @@
 // ===== PURE FOREIGN (requires system time) =====
 
 // Current time
-frgn sig __now() -> Int;
-frgn sig __now_millis() -> Int;
-frgn sig __now_micros() -> Int;
-
+frgn __now() -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __now_millis() -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __now_micros() -> Result<Int, TimeError> from "std/bindings/time.toml";
 // Time component extraction
-frgn sig __year(timestamp: Int) -> Int;
-frgn sig __month(timestamp: Int) -> Int;
-frgn sig __day(timestamp: Int) -> Int;
-frgn sig __hour(timestamp: Int) -> Int;
-frgn sig __minute(timestamp: Int) -> Int;
-frgn sig __second(timestamp: Int) -> Int;
-frgn sig __weekday(timestamp: Int) -> Int;
-frgn sig __yearday(timestamp: Int) -> Int;
-
+frgn __year(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __month(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __day(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __hour(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __minute(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __second(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __weekday(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __yearday(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
 // Time creation
-frgn sig __timestamp(year: Int, month: Int, day: Int) -> Int;
-frgn sig __timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int;
-
+frgn __timestamp(year: Int, month: Int, day: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
 // Formatting
-frgn sig __format_timestamp(timestamp: Int, format: String) -> String;
-frgn sig __format_date(timestamp: Int) -> String;
-frgn sig __format_time(timestamp: Int) -> String;
-frgn sig __format_datetime(timestamp: Int) -> String;
-
+frgn __format_timestamp(timestamp: Int, format: String) -> Result<String, TimeError> from "std/bindings/time.toml";
+frgn __format_date(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.toml";
+frgn __format_time(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.toml";
+frgn __format_datetime(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.toml";
 // Parsing
-frgn sig __parse_timestamp(s: String) -> Int;
-frgn sig __parse_datetime(s: String) -> Int;
-
+frgn __parse_timestamp(s: String) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __parse_datetime(s: String) -> Result<Int, TimeError> from "std/bindings/time.toml";
 // ===== NATIVE DEFINITIONS =====
 
 // Duration helpers - native arithmetic
@@ -84,8 +79,8 @@ defn diff_days(t1: Int, t2: Int) [result == (t1 - t2) / 86400] -> Int {
 };
 
 // Constants - these could be frgn or defn
-frgn sig __seconds_per_minute() -> Int;
-frgn sig __seconds_per_hour() -> Int;
-frgn sig __seconds_per_day() -> Int;
-frgn sig __millis_per_second() -> Int;
-frgn sig __micros_per_second() -> Int;
+frgn __seconds_per_minute() -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __seconds_per_hour() -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __seconds_per_day() -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __millis_per_second() -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __micros_per_second() -> Result<Int, TimeError> from "std/bindings/time.toml";
