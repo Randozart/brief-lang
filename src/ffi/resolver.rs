@@ -28,7 +28,7 @@ fn std_lib_path() -> Option<PathBuf> {
                 // Development: brief-compiler/target/release/
                 exe_dir.join("../../lib/ffi/bindings"),
                 exe_dir.join("../lib/ffi/bindings"),
-                // Installed: ~/.local/bin/
+                // Installed: ~/.local/bin/ -> ~/.local/share/brief/ffi/bindings
                 exe_dir.join("../share/brief/ffi/bindings"),
             ];
 
@@ -40,6 +40,14 @@ fn std_lib_path() -> Option<PathBuf> {
         }
     }
 
+    // Try OS-specific data directory
+    if let Some(data_dir) = dirs::data_dir() {
+        let brief_data = data_dir.join("brief").join("ffi").join("bindings");
+        if brief_data.exists() {
+            return Some(brief_data);
+        }
+    }
+
     None
 }
 
@@ -48,6 +56,8 @@ pub fn resolve_binding_path(
     binding_path: &str,
     project_root: &Option<PathBuf>,
     source_file_path: &Option<PathBuf>,
+    no_stdlib: bool,
+    custom_stdlib_path: &Option<PathBuf>,
 ) -> Result<PathBuf, FfiError> {
     let binding_path = Path::new(binding_path);
 
@@ -75,6 +85,13 @@ pub fn resolve_binding_path(
         binding_path.starts_with("std/bindings/") || binding_path.starts_with("std\\bindings\\");
 
     if is_std_path {
+        if no_stdlib {
+            return Err(FfiError::FileNotFound(format!(
+                "{} (standard library disabled)",
+                binding_path.display()
+            )));
+        }
+
         // Strip the std/bindings/ prefix to get just the filename
         let stripped = if let Ok(stripped) = binding_path.strip_prefix("std/bindings/") {
             Some(stripped)
@@ -85,6 +102,14 @@ pub fn resolve_binding_path(
         };
 
         if let Some(filename) = stripped {
+            // Try custom stdlib path first
+            if let Some(custom_path) = custom_stdlib_path {
+                let resolved = custom_path.join(filename);
+                if resolved.exists() {
+                    return Ok(resolved);
+                }
+            }
+
             // Try standard library path
             if let Some(stdlib_dir) = std_lib_path() {
                 let resolved = stdlib_dir.join(filename);
@@ -139,13 +164,13 @@ mod tests {
         // Create a temporary file to test
         let test_path = PathBuf::from("/tmp/test_binding.toml");
         // This will fail because the file doesn't exist, but that's the point
-        let result = resolve_binding_path("/tmp/nonexistent.toml", &None, &None);
+        let result = resolve_binding_path("/tmp/nonexistent.toml", &None, &None, false, &None);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_resolve_relative_path_nonexistent() {
-        let result = resolve_binding_path("bindings/nonexistent.toml", &None, &None);
+        let result = resolve_binding_path("bindings/nonexistent.toml", &None, &None, false, &None);
         assert!(result.is_err());
     }
 
@@ -153,6 +178,6 @@ mod tests {
     fn test_resolve_std_binding() {
         // This might succeed or fail depending on working directory
         // The important thing is it doesn't panic
-        let _ = resolve_binding_path("std/bindings/io.toml", &None, &None);
+        let _ = resolve_binding_path("std/bindings/io.toml", &None, &None, false, &None);
     }
 }

@@ -72,9 +72,17 @@ pub fn load_binding_file(
     path: &str,
     project_root: &Option<PathBuf>,
     source_file_path: &Option<PathBuf>,
+    no_stdlib: bool,
+    custom_stdlib_path: &Option<PathBuf>,
 ) -> Result<Vec<ForeignBinding>, FfiError> {
     // Resolve the path
-    let resolved_path = resolver::resolve_binding_path(path, project_root, source_file_path)?;
+    let resolved_path = resolver::resolve_binding_path(
+        path,
+        project_root,
+        source_file_path,
+        no_stdlib,
+        custom_stdlib_path,
+    )?;
 
     // Load and parse TOML
     loader::load_binding(&resolved_path)

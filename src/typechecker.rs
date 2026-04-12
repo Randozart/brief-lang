@@ -21,6 +21,8 @@ pub struct TypeChecker {
     diagnostics: Vec<Diagnostic>,
     source: String,
     current_file: PathBuf,
+    no_stdlib: bool,
+    custom_stdlib_path: Option<PathBuf>,
     signatures: HashMap<String, Signature>,
     definitions: HashMap<String, Definition>,
     ffi_results: RefCell<HashMap<String, ResultCheckStatus>>,
@@ -35,6 +37,8 @@ impl TypeChecker {
             diagnostics: Vec::new(),
             source: String::new(),
             current_file: PathBuf::from("main.bv"),
+            no_stdlib: false,
+            custom_stdlib_path: None,
             signatures: HashMap::new(),
             definitions: HashMap::new(),
             ffi_results: RefCell::new(HashMap::new()),
@@ -49,6 +53,12 @@ impl TypeChecker {
 
     pub fn with_file(mut self, file: PathBuf) -> Self {
         self.current_file = file;
+        self
+    }
+
+    pub fn with_stdlib_config(mut self, no_stdlib: bool, custom_path: Option<PathBuf>) -> Self {
+        self.no_stdlib = no_stdlib;
+        self.custom_stdlib_path = custom_path;
         self
     }
 
@@ -437,6 +447,8 @@ impl TypeChecker {
             toml_path,
             &None,
             &Some(self.current_file.clone()),
+            self.no_stdlib,
+            &self.custom_stdlib_path,
         ) {
             Ok(path) => path,
             Err(err) => {

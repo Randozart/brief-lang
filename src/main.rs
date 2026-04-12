@@ -172,10 +172,32 @@ fn print_usage(program: &str) {
     eprintln!("Options:");
     eprintln!("  -a, --annotate       Generate path annotations");
     eprintln!("  --skip-proof         Skip proof verification");
+    eprintln!("  --no-stdlib          Disable standard library bindings");
+    eprintln!("  --stdlib-path <path> Use custom standard library path");
     eprintln!("  -v, --verbose        Verbose output");
     eprintln!("  --quiet, --whisper   Minimal output (for CI/automated use)");
     eprintln!("  -h, --help           Show this help");
 }
+
+const STDLIB_BINDINGS: &[(&str, &str)] = &[
+    (
+        "collections.toml",
+        include_str!("../lib/ffi/bindings/collections.toml"),
+    ),
+    (
+        "encoding.toml",
+        include_str!("../lib/ffi/bindings/encoding.toml"),
+    ),
+    ("http.toml", include_str!("../lib/ffi/bindings/http.toml")),
+    ("io.toml", include_str!("../lib/ffi/bindings/io.toml")),
+    ("json.toml", include_str!("../lib/ffi/bindings/json.toml")),
+    ("math.toml", include_str!("../lib/ffi/bindings/math.toml")),
+    (
+        "string.toml",
+        include_str!("../lib/ffi/bindings/string.toml"),
+    ),
+    ("time.toml", include_str!("../lib/ffi/bindings/time.toml")),
+];
 
 fn run_install() {
     let install_dir = dirs::home_dir()
@@ -198,6 +220,32 @@ fn run_install() {
     .expect("Failed to set permissions");
 
     println!("Installed 'brief' to {}", install_path.display());
+
+    // Metropolitan Installation: Unpack standard library TOMLs to share directory
+    if let Some(data_dir) = dirs::data_dir() {
+        let brief_data_dir = data_dir.join("brief").join("ffi").join("bindings");
+        if let Err(e) = fs::create_dir_all(&brief_data_dir) {
+            eprintln!(
+                "Warning: Failed to create standard library directory: {}",
+                e
+            );
+        } else {
+            println!(
+                "Unpacking standard library to {}...",
+                brief_data_dir.display()
+            );
+            for (filename, content) in STDLIB_BINDINGS {
+                let file_path = brief_data_dir.join(filename);
+                if let Err(e) = fs::write(&file_path, content) {
+                    eprintln!(
+                        "Warning: Failed to write standard library file {}: {}",
+                        filename, e
+                    );
+                }
+            }
+        }
+    }
+
     println!("\nAdd to your PATH if needed:");
     println!("  export PATH=\"$PATH:{}\"", install_dir.display());
     println!("\nAdd this line to your ~/.bashrc or ~/.zshrc to make it permanent.");
@@ -315,6 +363,8 @@ fn run_check(
     file_path: &PathBuf,
     verbose: bool,
     annotate: bool,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
@@ -354,7 +404,7 @@ fn run_check(
         println!("[TypeChecker] Running type checks...");
     }
 
-    let mut tc = typechecker::TypeChecker::new();
+    let mut tc = typechecker::TypeChecker::new().with_stdlib_config(no_stdlib, stdlib_path);
     let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
         eprintln!(
@@ -406,7 +456,12 @@ fn run_check(
     Ok(())
 }
 
-fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn run_build(
+    file_path: &PathBuf,
+    verbose: bool,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
 
@@ -427,7 +482,7 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
         println!("[Resolver] Resolving imports...");
     }
     let mut import_resolver = import_resolver::ImportResolver::new();
-    let program = match import_resolver.resolve_imports(&program, file_path) {
+    let mut program = match import_resolver.resolve_imports(&program, file_path) {
         Ok(resolved) => resolved,
         Err(e) => {
             eprintln!("Import error: {}", e);
@@ -436,17 +491,16 @@ fn run_build(file_path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::erro
     };
 
     if verbose {
-        println!("[Desugarer] Processing sugared syntax...");
+        println!("[Desugar] Desugaring...");
     }
     let mut desug = desugarer::Desugarer::new();
     let mut program = desug.desugar(&program);
 
     if verbose {
-        println!("[Parser] Successfully parsed {} items", program.items.len());
         println!("[TypeChecker] Running type checks...");
     }
 
-    let mut tc = typechecker::TypeChecker::new();
+    let mut tc = typechecker::TypeChecker::new().with_stdlib_config(no_stdlib, stdlib_path);
     let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
         eprintln!(
@@ -728,99 +782,32 @@ fn run_import(
     Ok(())
 }
 
-fn run_watch(file_path: PathBuf, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Watching for changes... (Ctrl+C to stop)");
+fn run_watch(
+    file_path: PathBuf,
+    verbose: bool,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (tx, rx) = std::sync::mpsc::channel();
 
-    let source = fs::read_to_string(&file_path)?;
-    let clean_source = strip_annotations(&source);
+    let mut watcher = notify::RecommendedWatcher::new(tx, notify::Config::default())?;
 
-    let mut parser = parser::Parser::new(&clean_source);
-    let program = match parser.parse() {
-        Ok(prog) => prog,
-        Err(e) => {
-            eprintln!("Parse error: {}", e);
-            return Err("Parse error".into());
-        }
-    };
+    watcher.watch(&file_path, notify::RecursiveMode::NonRecursive)?;
 
-    let mut import_resolver = import_resolver::ImportResolver::new();
-    let program = match import_resolver.resolve_imports(&program, &file_path) {
-        Ok(resolved) => resolved,
-        Err(e) => {
-            eprintln!("Import error: {}", e);
-            return Err("Import error".into());
-        }
-    };
-
-    let mut desug = desugarer::Desugarer::new();
-    let mut program = desug.desugar(&program);
-
-    // Check for rstruct usage in .bv files
-    if file_path.extension().map_or(false, |ext| ext == "bv") {
-        let has_rstruct = program
-            .items
-            .iter()
-            .any(|item| matches!(item, ast::TopLevel::RStruct(_)));
-        if has_rstruct {
-            return Err("rstruct can only be used in .rbv files, not .bv files. Use .rbv for files with HTML/CSS.".into());
-        }
-    }
-
-    if verbose {
-        println!("[Parser] Successfully parsed {} items", program.items.len());
-        println!("[TypeChecker] Running type checks...");
-    }
-
-    let mut tc = typechecker::TypeChecker::new();
-    let type_errors = tc.check_program(&mut program);
-    if !type_errors.is_empty() {
-        eprintln!(
-            "{}",
-            format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))
-        );
-        return Err("Type errors".into());
-    }
-
-    let mut pe = proof_engine::ProofEngine::new();
-    let proof_errors = pe.verify_program(&program);
-    let has_errors = proof_errors.iter().any(|e| !e.is_warning);
-    if has_errors {
-        eprintln!(
-            "{}",
-            format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
-        );
-        return Err("Proof errors".into());
-    }
-    if !proof_errors.is_empty() {
-        eprintln!(
-            "{}",
-            format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
-        );
-    }
-
-    println!("Initial check passed - watching for changes...");
-
-    let watch_path = file_path.clone();
-    let mut watcher =
-        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
-            Ok(event) => {
-                if event.kind.is_modify() || event.kind.is_create() {
-                    println!("\n[Change detected] Rebuilding...");
-                    if let Err(e) = run_check(&watch_path, true, false) {
-                        eprintln!("Build failed: {}", e);
-                    } else {
-                        println!("Watch mode active");
-                    }
-                }
-            }
-            Err(e) => eprintln!("Watch error: {:?}", e),
-        })?;
-
-    let source_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
-    watcher.watch(source_dir, notify::RecursiveMode::Recursive)?;
+    println!("Watching {} for changes...", file_path.display());
 
     loop {
-        std::thread::sleep(Duration::from_secs(1));
+        match rx.recv() {
+            Ok(_) => {
+                println!("File changed, rebuilding...");
+                if let Err(e) =
+                    run_check(&file_path, verbose, false, no_stdlib, stdlib_path.clone())
+                {
+                    eprintln!("Rebuild failed: {}", e);
+                }
+            }
+            Err(e) => eprintln!("Watch error: {}", e),
+        }
     }
 }
 
@@ -927,6 +914,8 @@ fn run_rbv(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
     build_wasm: bool,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling RBV: {}", file_path.display());
 
@@ -937,7 +926,7 @@ fn run_rbv(
     println!("  Brief source: {} chars", rbv_file.brief_source.len());
 
     let mut parser = parser::Parser::new(&rbv_file.brief_source);
-    let program = parser
+    let mut program = parser
         .parse()
         .map_err(|e| format!("Brief parse error: {}", e))?;
 
@@ -953,6 +942,7 @@ fn run_rbv(
     let mut stylesheet_items: Vec<usize> = Vec::new();
     for (i, item) in program.items.iter().enumerate() {
         if let ast::TopLevel::Stylesheet(css) = item {
+            println!("  Found stylesheet import");
             css_content.push_str(css);
             css_content.push('\n');
             stylesheet_items.push(i);
@@ -963,10 +953,8 @@ fn run_rbv(
         program.items.remove(*i);
     }
 
-    // Initialize render_blocks early for SVG extraction
-    let mut render_blocks: HashMap<String, String> = HashMap::new();
-
-    // Extract SVG from SvgComponent imports
+    // Process SvgComponent items
+    let mut render_blocks = HashMap::new();
     let mut svg_items: Vec<usize> = Vec::new();
     for (i, item) in program.items.iter().enumerate() {
         if let ast::TopLevel::SvgComponent { name, content } = item {
@@ -984,7 +972,7 @@ fn run_rbv(
     let mut desug = desugarer::Desugarer::new();
     let mut program = desug.desugar(&program);
 
-    let mut tc = typechecker::TypeChecker::new();
+    let mut tc = typechecker::TypeChecker::new().with_stdlib_config(no_stdlib, stdlib_path);
     println!("  Type checking...");
     let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
@@ -1260,10 +1248,16 @@ fn main() {
 
     let command = &args[1];
 
+    let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
+    let no_stdlib = args.contains(&"--no-stdlib".to_string());
+    let stdlib_path = args
+        .iter()
+        .position(|a| a == "--stdlib-path")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from);
+
     match command.as_str() {
         "check" | "c" => {
-            let verbose =
-                args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
             let annotate =
                 args.contains(&"-a".to_string()) || args.contains(&"--annotate".to_string());
 
@@ -1274,7 +1268,7 @@ fn main() {
                 .map(PathBuf::from);
 
             if let Some(path) = file_path {
-                if let Err(_e) = run_check(&path, verbose, annotate) {
+                if let Err(_e) = run_check(&path, verbose, annotate, no_stdlib, stdlib_path) {
                     std::process::exit(1);
                 }
             } else {
@@ -1285,9 +1279,6 @@ fn main() {
         }
 
         "build" | "b" => {
-            let verbose =
-                args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
-
             let file_path = args
                 .iter()
                 .skip(2)
@@ -1295,7 +1286,7 @@ fn main() {
                 .map(PathBuf::from);
 
             if let Some(path) = file_path {
-                if let Err(_e) = run_build(&path, verbose) {
+                if let Err(_e) = run_build(&path, verbose, no_stdlib, stdlib_path) {
                     std::process::exit(1);
                 }
             } else {
@@ -1316,7 +1307,7 @@ fn main() {
                 .map(PathBuf::from);
 
             if let Some(path) = file_path {
-                if let Err(e) = run_watch(path, verbose) {
+                if let Err(e) = run_watch(path, verbose, no_stdlib, stdlib_path.clone()) {
                     eprintln!("Watch error: {}", e);
                     std::process::exit(1);
                 }
@@ -1430,7 +1421,13 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                match run_rbv(&path, out_dir.as_deref(), build_wasm) {
+                match run_rbv(
+                    &path,
+                    out_dir.as_deref(),
+                    build_wasm,
+                    no_stdlib,
+                    stdlib_path.clone(),
+                ) {
                     Ok(output_path) => {
                         if build_wasm {
                             println!("\n  Ready to serve! Run:");
@@ -1505,7 +1502,7 @@ fn main() {
                     path.file_stem().and_then(|s| s.to_str()).unwrap_or("app")
                 ));
 
-                match run_rbv(&path, Some(&out_dir), true) {
+                match run_rbv(&path, Some(&out_dir), true, no_stdlib, stdlib_path.clone()) {
                     Ok(output_path) => {
                         let port = port.unwrap_or(8080);
                         let html_file = path
@@ -1620,11 +1617,11 @@ fn main() {
 
         _ => {
             if command.ends_with(".bv") {
-                if let Err(_e) = run_check(&PathBuf::from(command), false, false) {
+                if let Err(_e) = run_check(&PathBuf::from(command), false, false, false, None) {
                     std::process::exit(1);
                 }
             } else if command.ends_with(".rbv") {
-                if let Err(_e) = run_rbv(&PathBuf::from(command), None, true) {
+                if let Err(_e) = run_rbv(&PathBuf::from(command), None, true, false, None) {
                     std::process::exit(1);
                 }
             } else {

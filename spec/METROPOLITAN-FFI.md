@@ -13,47 +13,19 @@ Brief 8.5 introduces the **Metropolitan FFI** system. This architecture ensures 
 
 ## 1. The TOML Structure
 
-Every FFI function requires a TOML binding. For universal support, you define a `native` target (usually Rust) and a `wasm` target (JavaScript).
+Every FFI function requires a TOML binding. You can define a library-level `wasm_setup` in the `[meta]` section for shared imports, and specific `native` (Rust) and `wasm` (JS) targets for each function.
 
 ### Example: `storage.toml`
 ```toml
+[meta]
+name = "storage"
+version = "1.0.0"
+# This code is placed ONCE at the top of the glue file
+wasm_setup = "console.log('Storage library initialized');"
+
 # Native implementation (Local File)
 [[functions]]
-name = "save_config"
-location = "std::fs::write" 
-target = "native"
-[functions.input]
-path = "String"
-content = "String"
-[functions.output.success]
-result = "void"
-[functions.output.error]
-type = "StorageError"
-message = "String"
-
-# Web implementation (LocalStorage)
-[[functions]]
-name = "save_config"
-location = "__js_save_config" # Internal name in JS glue
-target = "wasm"
-wasm_impl = """
-function __js_save_config(path, content) {
-    try {
-        localStorage.setItem(path, content);
-        return { message: "" }; // Success: empty error field
-    } catch(e) {
-        return { message: "Quota exceeded" };
-    }
-}
-"""
-[functions.input]
-path = "String"
-content = "String"
-[functions.output.success]
-result = "void"
-[functions.output.error]
-type = "StorageError"
-message = "String"
+# ...
 ```
 
 ---
