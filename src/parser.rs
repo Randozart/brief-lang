@@ -200,6 +200,10 @@ impl<'a> Parser<'a> {
                 let defn = self.parse_definition()?;
                 Ok(TopLevel::Definition(defn))
             }
+            Some(Ok(Token::Trg)) => {
+                let trg = self.parse_trigger()?;
+                Ok(TopLevel::Trigger(trg))
+            }
             Some(Ok(Token::Frgn)) => {
                 // All frgn declarations now require TOML bindings
                 let frgn_binding = self.parse_frgn_binding()?;
@@ -1079,6 +1083,63 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
+    fn parse_trigger(&mut self) -> Result<TriggerDeclaration, String> {
+        self.expect(Token::Trg)?;
+        let name = self.expect_identifier()?;
+        self.expect(Token::Colon)?;
+        let ty = self.parse_type()?;
+
+        let mut address: u64 = 0;
+        let mut bit_range: Option<BitRange> = None;
+
+        if let Some(Ok(Token::At)) = self.current_token() {
+            self.advance();
+            if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                address = *n as u64;
+                self.advance();
+            } else {
+                return Err("Expected address after '@'".to_string());
+            }
+
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance();
+                bit_range = Some(self.parse_bit_range()?);
+                self.expect(Token::RBracket)?;
+            }
+        }
+
+        let mut stages = Vec::new();
+        if let Some(Ok(Token::On)) = self.current_token() {
+            self.advance();
+            self.expect(Token::Stage)?;
+            stages.push(self.expect_identifier()?);
+            while let Some(Ok(Token::Comma)) = self.current_token() {
+                self.advance();
+                stages.push(self.expect_identifier()?);
+            }
+        }
+
+        let mut condition = None;
+        if let Some(Ok(Token::LBracket)) = self.current_token() {
+            self.advance();
+            condition = Some(self.parse_expression()?);
+            self.expect(Token::RBracket)?;
+        }
+
+        let span = self.current_span();
+        self.expect(Token::Semicolon)?;
+
+        Ok(TriggerDeclaration {
+            name,
+            ty,
+            address,
+            bit_range,
+            stages,
+            condition,
+            span,
+        })
+    }
+
     fn parse_constant(&mut self) -> Result<Constant, String> {
         self.expect(Token::Const)?;
         let name = self.expect_identifier()?;
@@ -1813,6 +1874,16 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Type::Int
             }
+            Some(Ok(Token::TypeUInt))
+            | Some(Ok(Token::TypeUnsigned))
+            | Some(Ok(Token::TypeUSgn)) => {
+                self.advance();
+                Type::UInt
+            }
+            Some(Ok(Token::TypeSigned)) | Some(Ok(Token::TypeSgn)) => {
+                self.advance();
+                Type::Int
+            }
             Some(Ok(Token::TypeFloat)) => {
                 self.advance();
                 Type::Float
@@ -1827,6 +1898,11 @@ impl<'a> Parser<'a> {
             }
             Some(Ok(Token::TypeVoid)) => {
                 self.advance();
+                Type::Void
+            }
+            Some(Ok(Token::LParen)) => {
+                self.advance();
+                self.expect(Token::RParen)?;
                 Type::Void
             }
             Some(Ok(tok)) => return Err(format!("Expected type, found {:?}", tok)),
@@ -1854,6 +1930,19 @@ impl<'a> Parser<'a> {
                 },
                 type_args,
             );
+        }
+
+        // Check for vector dimension: Type[N]
+        while let Some(Ok(Token::LBracket)) = self.current_token() {
+            self.advance();
+            if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                let size = *n as usize;
+                self.advance();
+                self.expect(Token::RBracket)?;
+                ty = Type::Vector(Box::new(ty), size);
+            } else {
+                return Err("Expected vector size".to_string());
+            }
         }
 
         // Check for union: Type | Type

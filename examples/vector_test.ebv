@@ -1,0 +1,7 @@
+let pixels: UInt[1024] = 0;
+let enabled: Bool = true;
+
+rct txn update [enabled][true] {
+    &pixels = pixels + 1;
+    term;
+};

@@ -212,14 +212,38 @@ The compiler forces you to think about the entire reactive system as a coherent 
 not just individual transactions. Every transaction's postcondition must flow logically 
 into the next, or compilation fails.
 
+## Software-Defined Silicon: Embedded Brief
+
+Embedded Brief allows you to write code that *is* the hardware. By targeting SystemVerilog, you can "print" your declarative logic directly to an FPGA or ASIC:
+
+```brief
+// Physical wide bus (1024 registers + 1024 ALUs)
+let pixels: UInt[1024] = 0;
+
+// Hardware trigger mapped to physical pin
+trg button: Bool @ 0x4000;
+
+// Cycle-accurate watchdog timer
+sensor_val = read_spi() within 10 cycles;
+
+// Parallel SIMD update
+rct txn update [button][true] {
+  &pixels = pixels + 1; // 1024 parallel additions in 1 clock cycle
+  term;
+};
+```
+
+The Brief compiler ensures **Spatial Isomorphism**, mapping your logical structures to physical gates, wires, and parallel hardware units.
+
 ## Implementation Status
 
 Core features (working):
 - Transactions with pre/post conditions (required on all)
 - Reactive transactions (`rct txn`) auto-firing based on contracts
 - Proof engine: termination and postcondition verification
-- Type checking and inference
-- FFI bindings to Rust and an open FFI system for other languages (with contract boundary enforcement)
+- Type checking and inference (including Vector lifting and Union handling)
+- SystemVerilog backend: Software-defined silicon with SIMD unrolling
+- FFI bindings to Rust and an open FFI system for other languages
 - 59+ standard library functions
 - Pattern matching and unification
 - Imports and modular code organization
@@ -228,8 +252,9 @@ Core features (working):
 
 Edge cases and limitations:
 - Some complex termination proofs remain unresolved
-- Complex generic type inference has gaps
+- SystemVerilog: Floating point is currently prohibited for synthesis
 - WASM compilation is functional but not optimized
+- Multi-clock domain synthesis is in early development
 
 Note on AI Integration:
 If using an LLM to write Brief code, the language is designed with that in mind.
@@ -249,9 +274,10 @@ brief lsp                       # Start language server
 
 - **Transactions**: `txn` and `rct txn` blocks with contracts
 - **State**: Global variables (`let`, `const`)
-- **Types**: String, Int, Float, Bool, Void, custom structs
+- **Types**: String, Int, UInt, Float, Bool, Void, Vector, custom structs
 - **Contracts**: Preconditions `[pre]` and postconditions `[post]`
 - **Prior state**: `@variable` references the value at transaction start
+- **Silicon Target**: `brief verilog program.ebv --hw hardware.toml` (Software-Defined Silicon)
 - **Pattern matching**: Unification for handling multiple outcomes
 - **Imports**: Modular code
 - **Definitions**: Named functions with contracts (`defn`)

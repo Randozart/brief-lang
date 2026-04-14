@@ -15,10 +15,17 @@ pub enum ResultCheckStatus {
     CheckedErr,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompilationTarget {
+    Interpreter,
+    Wasm,
+    Verilog,
+}
+
 pub struct TypeChecker {
     scopes: Vec<HashMap<String, Type>>,
-    errors: Vec<crate::errors::TypeError>,
-    diagnostics: Vec<Diagnostic>,
+    errors: RefCell<Vec<crate::errors::TypeError>>,
+    diagnostics: RefCell<Vec<Diagnostic>>,
     source: String,
     current_file: PathBuf,
     no_stdlib: bool,
@@ -27,14 +34,15 @@ pub struct TypeChecker {
     definitions: HashMap<String, Definition>,
     ffi_results: RefCell<HashMap<String, ResultCheckStatus>>,
     foreign_bindings: HashMap<String, ForeignSignature>,
+    pub target: CompilationTarget,
 }
 
 impl TypeChecker {
     pub fn new() -> Self {
         TypeChecker {
             scopes: vec![HashMap::new()],
-            errors: Vec::new(),
-            diagnostics: Vec::new(),
+            errors: RefCell::new(Vec::new()),
+            diagnostics: RefCell::new(Vec::new()),
             source: String::new(),
             current_file: PathBuf::from("main.bv"),
             no_stdlib: false,
@@ -43,7 +51,13 @@ impl TypeChecker {
             definitions: HashMap::new(),
             ffi_results: RefCell::new(HashMap::new()),
             foreign_bindings: HashMap::new(),
+            target: CompilationTarget::Interpreter,
         }
+    }
+
+    pub fn with_target(mut self, target: CompilationTarget) -> Self {
+        self.target = target;
+        self
     }
 
     pub fn with_source(mut self, source: String) -> Self {
@@ -124,7 +138,7 @@ impl TypeChecker {
                 TopLevel::StateDecl(decl) => {
                     self.declare_variable(&decl.name, decl.ty.clone());
                     if decl.expr.is_none() {
-                        self.diagnostics.push(
+                        self.diagnostics.borrow_mut().push(
                             Diagnostic::new("B002", Severity::Warning, "uninitialized signal")
                                 .with_explanation(&format!(
                                     "signal '{}' has no initial value specified",
@@ -169,7 +183,7 @@ impl TypeChecker {
                 _ => {}
             }
         }
-        self.errors.clone()
+        self.errors.borrow().clone()
     }
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
@@ -259,7 +273,7 @@ impl TypeChecker {
                 let expected_count = expected_outputs.len();
 
                 if expected_count > 0 && actual_count != expected_count {
-                    self.errors.push(TypeError::TypeMismatch {
+                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
                         expected: format!("{} outputs", expected_count),
                         found: format!("{} outputs", actual_count),
                         context: "term statement output count".to_string(),
@@ -272,7 +286,7 @@ impl TypeChecker {
                         if i < expected_outputs.len() {
                             let expected_ty = &expected_outputs[i];
                             if !self.types_compatible(&actual_ty, expected_ty) {
-                                self.errors.push(TypeError::TypeMismatch {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
                                     expected: self.type_to_string(expected_ty),
                                     found: self.type_to_string(&actual_ty),
                                     context: format!("term output {}", i),
@@ -358,7 +372,7 @@ impl TypeChecker {
 
         let postcond_str = format!("{:?}", postcond);
         if verified {
-            self.diagnostics.push(
+            self.diagnostics.borrow_mut().push(
                 Diagnostic::new(
                     "V101",
                     Severity::Info,
@@ -370,7 +384,7 @@ impl TypeChecker {
                 )),
             );
         } else {
-            self.diagnostics.push(
+            self.diagnostics.borrow_mut().push(
                 Diagnostic::new(
                     "V102",
                     Severity::Warning,
@@ -462,8 +476,8 @@ impl TypeChecker {
                     toml_path, err
                 ))
                 .with_hint("Ensure the path is correct and the file exists");
-                self.diagnostics.push(diag);
-                self.errors.push(TypeError::FFIError {
+                self.diagnostics.borrow_mut().push(diag);
+                self.errors.borrow_mut().push(TypeError::FFIError {
                     message: format!("Path resolution failed for '{}': {}", name, err),
                 });
                 return;
@@ -480,8 +494,8 @@ impl TypeChecker {
                         toml_path, err
                     ))
                     .with_hint("Ensure the TOML file is valid");
-                self.diagnostics.push(diag);
-                self.errors.push(TypeError::FFIError {
+                self.diagnostics.borrow_mut().push(diag);
+                self.errors.borrow_mut().push(TypeError::FFIError {
                     message: format!("Failed to load binding file for '{}': {}", name, err),
                 });
                 return;
@@ -508,8 +522,8 @@ impl TypeChecker {
                             .collect::<Vec<_>>()
                             .join(", ")
                     ));
-                self.diagnostics.push(diag);
-                self.errors.push(TypeError::FFIError {
+                self.diagnostics.borrow_mut().push(diag);
+                self.errors.borrow_mut().push(TypeError::FFIError {
                     message: format!("Binding '{}' not found in '{}'", name, toml_path),
                 });
                 return;
@@ -541,8 +555,8 @@ impl TypeChecker {
                     name, err
                 ))
                 .with_hint("Ensure the frgn signature matches the binding definition");
-            self.diagnostics.push(diag);
-            self.errors.push(TypeError::FFIError {
+            self.diagnostics.borrow_mut().push(diag);
+            self.errors.borrow_mut().push(TypeError::FFIError {
                 message: format!("Binding validation failed for '{}': {}", name, err),
             });
             return;
@@ -559,8 +573,8 @@ impl TypeChecker {
                     .with_hint(
                         "FFI supports: String, Int, Float, Bool, Void, Data, and custom structs",
                     );
-                self.diagnostics.push(diag);
-                self.errors.push(TypeError::FFIError {
+                self.diagnostics.borrow_mut().push(diag);
+                self.errors.borrow_mut().push(TypeError::FFIError {
                     message: format!("Invalid FFI type in input for '{}'", name),
                 });
                 return;
@@ -577,8 +591,8 @@ impl TypeChecker {
                     .with_hint(
                         "FFI supports: String, Int, Float, Bool, Void, Data, and custom structs",
                     );
-                self.diagnostics.push(diag);
-                self.errors.push(TypeError::FFIError {
+                self.diagnostics.borrow_mut().push(diag);
+                self.errors.borrow_mut().push(TypeError::FFIError {
                     message: format!("Invalid FFI type in output for '{}'", name),
                 });
                 return;
@@ -595,8 +609,8 @@ impl TypeChecker {
                     .with_hint(
                         "FFI supports: String, Int, Float, Bool, Void, Data, and custom structs",
                     );
-                self.diagnostics.push(diag);
-                self.errors.push(TypeError::FFIError {
+                self.diagnostics.borrow_mut().push(diag);
+                self.errors.borrow_mut().push(TypeError::FFIError {
                     message: format!("Invalid FFI type in error for '{}'", name),
                 });
                 return;
@@ -610,13 +624,26 @@ impl TypeChecker {
                 is_owned,
                 name,
                 expr,
-                timeout: _,
+                timeout,
             } => {
                 self.check_expr_for_ffi_errors(expr);
                 let expr_ty = self.infer_expression(expr);
+
+                // If timeout is used, the type must be a Union containing Error
+                if let Some((_t_expr, _unit)) = timeout {
+                    let var_ty = self.lookup_variable(name).unwrap_or(expr_ty.clone());
+                    if !self.is_error_union(&var_ty) {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: "Union type containing Error".to_string(),
+                            found: self.type_to_string(&var_ty),
+                            context: format!("assignment with timeout to {}", name),
+                        });
+                    }
+                }
+
                 if let Some(var_ty) = self.lookup_variable(name) {
                     if !self.types_compatible(&expr_ty, &var_ty) {
-                        self.errors.push(TypeError::TypeMismatch {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
                             expected: self.type_to_string(&var_ty),
                             found: self.type_to_string(&expr_ty),
                             context: format!("assignment to {}", name),
@@ -630,11 +657,14 @@ impl TypeChecker {
                             .take(self.scopes.len() - 1)
                             .any(|s| s.contains_key(name));
                         if !has_lower_scope {
-                            self.errors.push(TypeError::OwnershipViolation {
-                                var: name.clone(),
-                                reason: "owned reference requires variable to exist in outer scope"
-                                    .to_string(),
-                            });
+                            self.errors
+                                .borrow_mut()
+                                .push(TypeError::OwnershipViolation {
+                                    var: name.clone(),
+                                    reason:
+                                        "owned reference requires variable to exist in outer scope"
+                                            .to_string(),
+                                });
                         }
                     }
                 } else {
@@ -645,7 +675,7 @@ impl TypeChecker {
                     self.ffi_results
                         .borrow_mut()
                         .insert(name.clone(), ResultCheckStatus::Unchecked);
-                    self.diagnostics.push(
+                    self.diagnostics.borrow_mut().push(
                         Diagnostic::new("F101", Severity::Warning, "FFI call result not handled")
                             .with_explanation(&format!(
                                 "FFI function result assigned to '{}' without checking for errors. \
@@ -677,7 +707,7 @@ impl TypeChecker {
                     if let Some(e) = expr {
                         if let Some(expr_ty) = &inferred_expr_ty {
                             if !self.types_compatible(expr_ty, &final_type) {
-                                self.errors.push(TypeError::TypeMismatch {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
                                     expected: self.type_to_string(&final_type),
                                     found: self.type_to_string(expr_ty),
                                     context: format!("let {}", name),
@@ -718,7 +748,7 @@ impl TypeChecker {
                 self.check_expr_for_ffi_errors(condition);
                 let cond_ty = self.infer_expression(condition);
                 if !self.types_compatible(&cond_ty, &Type::Bool) {
-                    self.errors.push(TypeError::TypeMismatch {
+                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
                         expected: "Bool".to_string(),
                         found: self.type_to_string(&cond_ty),
                         context: "guard condition".to_string(),
@@ -759,7 +789,16 @@ impl TypeChecker {
     fn infer_expression(&self, expr: &Expr) -> Type {
         match expr {
             Expr::Integer(_) => Type::Int,
-            Expr::Float(_) => Type::Float,
+            Expr::Float(_) => {
+                if self.target == CompilationTarget::Verilog {
+                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                        expected: "Fixed-point or Integer".to_string(),
+                        found: "Float".to_string(),
+                        context: "Verilog synthesis".to_string(),
+                    });
+                }
+                Type::Float
+            }
             Expr::String(_) => Type::String,
             Expr::Bool(_) => Type::Bool,
             Expr::Identifier(name) => self
@@ -841,13 +880,59 @@ impl TypeChecker {
         }
     }
 
+    fn is_error_union(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Union(types) => types.iter().any(|t| self.is_error_type(t)),
+            Type::Applied(name, _) | Type::Generic(name, _) => name == "Result",
+            _ => false,
+        }
+    }
+
+    fn is_error_type(&self, ty: &Type) -> bool {
+        if let Type::Custom(name) = ty {
+            name == "Error"
+        } else {
+            false
+        }
+    }
+
     fn binary_op_type(&self, l: &Expr, r: &Expr, int_type: Type, float_type: Type) -> Type {
         let l_ty = self.infer_expression(l);
         let r_ty = self.infer_expression(r);
+
+        // Handle vector lifting
         match (&l_ty, &r_ty) {
+            (Type::Vector(inner_l, size_l), Type::Vector(inner_r, size_r)) => {
+                if size_l != size_r {
+                    // Geometry mismatch - return unknown or error
+                    return Type::Custom("GeometryMismatch".to_string());
+                }
+                let res_inner = self.binary_op_type_scalar(inner_l, inner_r, int_type, float_type);
+                return Type::Vector(Box::new(res_inner), *size_l);
+            }
+            (Type::Vector(inner, size), scalar) | (scalar, Type::Vector(inner, size)) => {
+                let res_inner = self.binary_op_type_scalar(inner, scalar, int_type, float_type);
+                return Type::Vector(Box::new(res_inner), *size);
+            }
+            _ => self.binary_op_type_scalar(&l_ty, &r_ty, int_type, float_type),
+        }
+    }
+
+    fn binary_op_type_scalar(
+        &self,
+        l_ty: &Type,
+        r_ty: &Type,
+        int_type: Type,
+        float_type: Type,
+    ) -> Type {
+        match (l_ty, r_ty) {
+            (Type::UInt, Type::UInt) | (Type::Int, Type::UInt) | (Type::UInt, Type::Int) => {
+                Type::UInt
+            }
             (Type::Int, Type::Int) => int_type,
             (Type::Float, Type::Float) => float_type,
             (Type::Int, Type::Float) | (Type::Float, Type::Int) => float_type,
+            (Type::UInt, Type::Float) | (Type::Float, Type::UInt) => float_type,
             (Type::String, _) | (_, Type::String) => Type::String,
             (Type::Applied(a, _), Type::Applied(b, _))
             | (Type::Generic(a, _), Type::Generic(b, _))
@@ -863,11 +948,16 @@ impl TypeChecker {
     fn types_compatible(&self, a: &Type, b: &Type) -> bool {
         match (a, b) {
             (Type::Int, Type::Int) => true,
+            (Type::UInt, Type::UInt) => true,
+            (Type::Int, Type::UInt) | (Type::UInt, Type::Int) => true,
             (Type::Float, Type::Float) => true,
             (Type::String, Type::String) => true,
             (Type::Bool, Type::Bool) => true,
             (Type::Data, Type::Data) => true,
             (Type::Void, Type::Void) => true,
+            (Type::Vector(inner_a, size_a), Type::Vector(inner_b, size_b)) => {
+                size_a == size_b && self.types_compatible(inner_a, inner_b)
+            }
             (Type::Custom(a), Type::Custom(b)) => a == b,
             (Type::Sig(a), Type::Sig(b)) => a == b, // Sig types match by name
             (Type::Sig(_), _) | (_, Type::Sig(_)) => false, // Sig doesn't match other types
@@ -997,7 +1087,7 @@ impl TypeChecker {
                     if let Expr::Identifier(var_name) = obj.as_ref() {
                         if let Some(status) = self.ffi_results.borrow().get(var_name) {
                             if *status == ResultCheckStatus::Unchecked {
-                                self.errors.push(TypeError::FFIError {
+                                self.errors.borrow_mut().push(TypeError::FFIError {
                                     message: format!(
                                         "FFI result '{}' accessed with .{} before checking .is_ok() or .is_err()",
                                         var_name,

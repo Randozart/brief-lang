@@ -410,6 +410,8 @@ pub struct TriggerDeclaration {
     pub ty: Type,
     pub address: u64,
     pub bit_range: Option<BitRange>,
+    pub stages: Vec<String>,
+    pub condition: Option<Expr>,
     pub span: Option<Span>,
 }
 

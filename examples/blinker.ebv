@@ -1,0 +1,13 @@
+let led @ 0x4000: Bool = false;
+let counter: UInt = 0;
+
+rct txn blink [counter == 100000000][counter == 0] {
+    &led = !led;
+    &counter = 0;
+    term;
+};
+
+rct txn count [counter < 100000000][counter > @counter] {
+    &counter = counter + 1;
+    term;
+};

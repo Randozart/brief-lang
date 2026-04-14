@@ -1,6 +1,7 @@
 pub mod annotator;
 pub mod assertion_verify;
 pub mod ast;
+pub mod backend;
 pub mod cache;
 pub mod desugarer;
 pub mod errors;
@@ -21,6 +22,5 @@ pub mod signal_graph;
 pub mod symbolic;
 pub mod typechecker;
 pub mod view_compiler;
-pub mod wasm_gen;
 pub mod watch;
 pub mod wrapper;

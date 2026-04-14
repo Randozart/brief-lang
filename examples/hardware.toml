@@ -1,0 +1,6 @@
+[target]
+name = "blinker"
+clock_hz = 100_000_000
+
+[io]
+"0x4000" = { pin = "P11" }

@@ -1,6 +1,6 @@
 use brief_compiler::{
-    annotator, ast, desugarer, errors, import_resolver, interpreter, lsp, manifest, parser,
-    proof_engine, rbv, typechecker, view_compiler, wasm_gen,
+    annotator, ast, backend, desugarer, errors, import_resolver, interpreter, lsp, manifest,
+    parser, proof_engine, rbv, typechecker, view_compiler,
 };
 use notify::Watcher;
 use std::collections::HashMap;
@@ -404,7 +404,9 @@ fn run_check(
         println!("[TypeChecker] Running type checks...");
     }
 
-    let mut tc = typechecker::TypeChecker::new().with_stdlib_config(no_stdlib, stdlib_path);
+    let mut tc = typechecker::TypeChecker::new()
+        .with_stdlib_config(no_stdlib, stdlib_path)
+        .with_target(typechecker::CompilationTarget::Interpreter);
     let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
         eprintln!(
@@ -500,7 +502,9 @@ fn run_build(
         println!("[TypeChecker] Running type checks...");
     }
 
-    let mut tc = typechecker::TypeChecker::new().with_stdlib_config(no_stdlib, stdlib_path);
+    let mut tc = typechecker::TypeChecker::new()
+        .with_stdlib_config(no_stdlib, stdlib_path)
+        .with_target(typechecker::CompilationTarget::Interpreter);
     let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
         eprintln!(
@@ -910,6 +914,73 @@ fn run_serve(dir: &Path, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn run_verilog(
+    file_path: &PathBuf,
+    hw_config_path: &PathBuf,
+    out_dir: Option<&Path>,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    println!("Compiling to SystemVerilog: {}", file_path.display());
+
+    // Load HW config
+    let hw_config_content = fs::read_to_string(hw_config_path)?;
+    let hw_config: backend::verilog::HardwareConfig = toml::from_str(&hw_config_content)?;
+
+    // Standard Brief pipeline
+    let source = fs::read_to_string(file_path)?;
+    let mut parser = parser::Parser::new(&source);
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Brief parse error: {}", e))?;
+
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut program = import_resolver
+        .resolve_imports(&program, file_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    let mut desug = desugarer::Desugarer::new();
+    let mut program = desug.desugar(&program);
+
+    let mut tc = typechecker::TypeChecker::new()
+        .with_stdlib_config(no_stdlib, stdlib_path)
+        .with_target(typechecker::CompilationTarget::Verilog);
+    let type_errors = tc.check_program(&mut program);
+    if !type_errors.is_empty() {
+        eprintln!(
+            "{}",
+            format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.ebv"))
+        );
+        return Err("Type errors".into());
+    }
+
+    // Verilog generation
+    let stem = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("top");
+    let mut verilog_gen = backend::verilog::VerilogGenerator::new(stem, hw_config);
+    let verilog_code = verilog_gen.generate(&program);
+    let tb_code = verilog_gen.generate_testbench(&program);
+
+    // Write output
+    let out_path = out_dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    if !out_path.exists() {
+        fs::create_dir_all(&out_path)?;
+    }
+    let output_file = out_path.join(format!("{}.sv", stem));
+    fs::write(&output_file, verilog_code)?;
+
+    let tb_file = out_path.join(format!("{}_tb.sv", stem));
+    fs::write(&tb_file, tb_code)?;
+
+    println!("  Generated: {}", output_file.display());
+    println!("  Generated: {}", tb_file.display());
+    Ok(output_file)
+}
+
 fn run_rbv(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -972,7 +1043,9 @@ fn run_rbv(
     let mut desug = desugarer::Desugarer::new();
     let mut program = desug.desugar(&program);
 
-    let mut tc = typechecker::TypeChecker::new().with_stdlib_config(no_stdlib, stdlib_path);
+    let mut tc = typechecker::TypeChecker::new()
+        .with_stdlib_config(no_stdlib, stdlib_path)
+        .with_target(typechecker::CompilationTarget::Wasm);
     println!("  Type checking...");
     let type_errors = tc.check_program(&mut program);
     if !type_errors.is_empty() {
@@ -1073,11 +1146,11 @@ fn run_rbv(
         .and_then(|s| s.to_str())
         .unwrap_or("output");
 
-    let mut wasm_gen = wasm_gen::WasmGenerator::new();
+    let mut wasm_gen = backend::wasm::WasmGenerator::new();
     if let Some(speed) = program.reactor_speed {
         wasm_gen.set_reactor_speed(speed);
     }
-    println!("  Generating WASM...");
+
     let output = wasm_gen.generate(&program, &bindings, stem);
     println!("  WASM generated");
 
@@ -1376,6 +1449,49 @@ fn main() {
 
             if let Err(e) = run_serve(&dir, port) {
                 eprintln!("Server error: {}", e);
+                std::process::exit(1);
+            }
+        }
+
+        "verilog" | "sv" => {
+            let mut file_path = None;
+            let mut out_dir = None;
+            let mut hw_config = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--hw" && i + 1 < args.len() {
+                    hw_config = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg.ends_with(".ebv") || arg.ends_with(".bv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let (Some(path), Some(hw)) = (file_path, hw_config) {
+                if let Err(e) = run_verilog(
+                    &path,
+                    &hw,
+                    out_dir.as_deref(),
+                    no_stdlib,
+                    stdlib_path.clone(),
+                ) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: Missing .ebv file or --hw <hardware.toml>");
+                eprintln!(
+                    "Usage: {} verilog <file.ebv> --hw <hardware.toml> [--out <dir>]",
+                    args[0]
+                );
                 std::process::exit(1);
             }
         }

@@ -1,0 +1,13 @@
+sig fetch: () -> Int;
+
+let res: Int | Error = 0;
+
+rct txn fetch_data [true][true] {
+    res = fetch() within 10 cycles;
+    [res Ok(data)] {
+        term true;
+    };
+    [res Err(e)] {
+        term true;
+    };
+};
