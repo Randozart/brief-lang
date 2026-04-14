@@ -340,6 +340,7 @@ impl SymbolicExecutor {
                     name,
                     expr,
                     is_owned: _,
+                    timeout: _,
                 } => {
                     let value = SymbolicValue::from_expr(expr, &current_state.vars);
                     current_state.vars.insert(name.clone(), value);
@@ -1141,6 +1142,7 @@ impl ProofEngine {
             Expr::PatternMatch { value, .. } => {
                 self.collect_identifiers(value, vars);
             }
+            Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } => {}
         }
     }
 
@@ -1217,6 +1219,8 @@ impl ProofEngine {
                 format!("Option<{}>", self.type_name(inner))
             }
             Type::Enum(name) => name.clone(),
+            Type::UInt => "UInt".to_string(),
+            Type::Vector(inner, size) => format!("Vector<{}>[{}]", self.type_name(inner), size),
         }
     }
 
@@ -1362,6 +1366,7 @@ impl ProofEngine {
                 name,
                 expr,
                 is_owned,
+                timeout: _,
             } => {
                 self.collect_read_vars_from_expr(expr, vars);
                 if *is_owned {

@@ -150,6 +150,7 @@ impl Reactor {
                 is_owned,
                 name,
                 expr,
+                timeout: _,
             } => {
                 let value = interp.eval_expr(expr)?;
                 if *is_owned {

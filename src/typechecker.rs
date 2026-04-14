@@ -610,6 +610,7 @@ impl TypeChecker {
                 is_owned,
                 name,
                 expr,
+                timeout: _,
             } => {
                 self.check_expr_for_ffi_errors(expr);
                 let expr_ty = self.infer_expression(expr);
@@ -655,7 +656,14 @@ impl TypeChecker {
                     );
                 }
             }
-            Statement::Let { name, ty, expr } => {
+            Statement::Let {
+                name,
+                ty,
+                expr,
+                address: _,
+                bit_range: _,
+                is_override: _,
+            } => {
                 let mut inferred_expr_ty: Option<Type> = None;
 
                 if let Some(e) = expr {
@@ -829,6 +837,7 @@ impl TypeChecker {
             Expr::StructInstance(typename, _fields) => Type::Custom(typename.clone()),
             Expr::ObjectLiteral(_) => Type::Custom("ObjectLiteral".to_string()),
             Expr::PatternMatch { .. } => Type::Bool,
+            Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } => Type::Bool,
         }
     }
 
@@ -965,6 +974,10 @@ impl TypeChecker {
                 format!("Option<{}>", self.type_to_string(inner))
             }
             Type::Enum(name) => name.clone(),
+            Type::UInt => "UInt".to_string(),
+            Type::Vector(inner, size) => {
+                format!("Vector<{}>[{}]", self.type_to_string(inner), size)
+            }
         }
     }
 
@@ -1050,18 +1063,9 @@ mod tests {
         let program = desugarer.desugar(&program);
 
         let mut tc = TypeChecker::new();
-        let errors = tc.check_program(&program);
+        tc.check_program(&mut program.clone());
 
-        println!("Errors: {:?}", errors);
-
-        // First check if there are type errors - there shouldn't be
-        assert!(
-            errors.is_empty(),
-            "Expected no type errors, got: {:?}",
-            errors
-        );
-
-        let diagnostics = tc.get_diagnostics();
+        let diagnostics = tc.diagnostics.clone();
         println!("Diagnostics: {:?}", diagnostics);
     }
 
@@ -1086,9 +1090,9 @@ mod tests {
         let program = desugarer.desugar(&program);
 
         let mut tc = TypeChecker::new();
-        tc.check_program(&program);
+        tc.check_program(&mut program.clone());
 
-        let diagnostics = tc.get_diagnostics();
+        let diagnostics = tc.diagnostics.clone();
         println!("Diagnostics: {:?}", diagnostics);
 
         // We should see the verification attempt

@@ -318,6 +318,7 @@ impl Interpreter {
                 is_owned,
                 name,
                 expr,
+                timeout: _,
             } => {
                 let value = self.eval_expr(expr)?;
                 if *is_owned {
@@ -826,6 +827,11 @@ impl Interpreter {
                     }
                     _ => Ok(Value::Bool(false)),
                 }
+            }
+            Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } => {
+                Err(RuntimeError::TypeMismatch(
+                    "Slice/quantifier expressions not supported in interpreter".to_string(),
+                ))
             }
         }
     }

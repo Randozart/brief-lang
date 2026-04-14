@@ -431,6 +431,9 @@ impl Annotator {
                         variants.join(", ")
                     ));
                 }
+                TopLevel::Trigger(_) => {
+                    output.push_str("// trigger\n");
+                }
             }
             output.push('\n');
         }
@@ -481,6 +484,11 @@ impl Annotator {
             }
             Type::Option(inner) => format!("Option<{}>", self.type_to_string(inner)),
             Type::Enum(name) => name.clone(),
+            Type::UInt => "UInt".to_string(),
+            Type::Vector(inner, size) => {
+                format!("Vector<{}>[{}]", self.type_to_string(inner), size)
+            }
+            Type::Sig(name) => format!("sig {}", name),
         }
     }
 
@@ -592,7 +600,14 @@ impl Annotator {
     fn format_statement(&self, stmt: &Statement, indent: usize) -> String {
         let spaces = "  ".repeat(indent);
         match stmt {
-            Statement::Let { name, ty, expr } => {
+            Statement::Let {
+                name,
+                ty,
+                expr,
+                address,
+                bit_range,
+                is_override,
+            } => {
                 let ty_str = if let Some(t) = ty {
                     format!(": {}", self.type_to_string(t))
                 } else {
@@ -603,20 +618,51 @@ impl Annotator {
                 } else {
                     String::new()
                 };
-                format!("{}let {}{}{};\n", spaces, name, ty_str, expr_str)
+                let addr_str = if let Some(addr) = address {
+                    format!(" @ 0x{:08x}", addr)
+                } else {
+                    String::new()
+                };
+                let bit_str = if let Some(bit_range) = bit_range {
+                    match bit_range {
+                        BitRange::Single(bit) => format!("[{}]", bit),
+                        BitRange::Range(start, end) => format!("[{}:{}]", start, end),
+                        BitRange::Any(n) => format!("[*x{}]", n),
+                    }
+                } else {
+                    String::new()
+                };
+                let override_str = if *is_override { " override" } else { "" };
+                format!(
+                    "{}let {}{}{}{}{};\n",
+                    spaces, name, addr_str, bit_str, ty_str, expr_str
+                )
             }
             Statement::Assignment {
                 is_owned,
                 name,
                 expr,
+                timeout,
             } => {
                 let prefix = if *is_owned { "&" } else { "" };
+                let timeout_str = if let Some((expr, unit)) = timeout {
+                    let unit_str = match unit {
+                        TimeUnit::Cycles => "cycles",
+                        TimeUnit::Ms => "ms",
+                        TimeUnit::Seconds => "s",
+                        TimeUnit::Minutes => "min",
+                    };
+                    format!(" within {} {}", self.format_expr(expr), unit_str)
+                } else {
+                    String::new()
+                };
                 format!(
-                    "{}{}{} = {};\n",
+                    "{}{}{} = {}{};\n",
                     spaces,
                     prefix,
                     name,
-                    self.format_expr(expr)
+                    self.format_expr(expr),
+                    timeout_str
                 )
             }
             Statement::Expression(expr) => {
@@ -758,6 +804,30 @@ impl Annotator {
                     variant,
                     fields.join(", ")
                 )
+            }
+            Expr::Slice {
+                value,
+                start,
+                end,
+                stride: _,
+            } => {
+                format!(
+                    "{}[{}:{}]",
+                    self.format_expr(value),
+                    start
+                        .as_ref()
+                        .map(|e| self.format_expr(e))
+                        .unwrap_or_default(),
+                    end.as_ref()
+                        .map(|e| self.format_expr(e))
+                        .unwrap_or_default()
+                )
+            }
+            Expr::ForAll { var, expr } => {
+                format!("forall {} in {{ {} }}", var, self.format_expr(expr))
+            }
+            Expr::Exists { var, expr } => {
+                format!("exists {} in {{ {} }}", var, self.format_expr(expr))
             }
         }
     }

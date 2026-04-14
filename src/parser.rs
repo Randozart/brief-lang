@@ -985,6 +985,29 @@ impl<'a> Parser<'a> {
     fn parse_state_decl(&mut self) -> Result<StateDecl, String> {
         self.expect(Token::Let)?;
         let name = self.expect_identifier()?;
+
+        let mut address: Option<u64> = None;
+        let mut bit_range: Option<BitRange> = None;
+        let mut is_override = false;
+
+        loop {
+            if let Some(Ok(Token::At)) = self.current_token() {
+                self.advance();
+                let addr_expr = self.parse_expression()?;
+                if let Expr::Integer(n) = addr_expr {
+                    address = Some(n as u64);
+                } else {
+                    return Err("Address must be an integer".to_string());
+                }
+            } else if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance();
+                bit_range = Some(self.parse_bit_range()?);
+                self.expect(Token::RBracket)?;
+            } else {
+                break;
+            }
+        }
+
         self.expect(Token::Colon)?;
         let ty = self.parse_type()?;
         let expr = if let Some(Ok(Token::Eq)) = self.current_token() {
@@ -999,8 +1022,61 @@ impl<'a> Parser<'a> {
             name,
             ty,
             expr,
+            address,
+            bit_range,
+            is_override,
             span,
         })
+    }
+
+    fn parse_bit_range(&mut self) -> Result<BitRange, String> {
+        let result = match self.current_token() {
+            Some(Ok(Token::Identifier(name))) => {
+                if name == "x" || name == "*" {
+                    self.advance();
+                    if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                        let n = *n as usize;
+                        self.advance();
+                        BitRange::Any(n)
+                    } else {
+                        BitRange::Any(1)
+                    }
+                } else if let Ok(bit) = name.parse::<usize>() {
+                    self.advance();
+                    if let Some(Ok(Token::Colon)) = self.current_token() {
+                        self.advance();
+                        let end = self.expect_identifier()?;
+                        if let Ok(end_bit) = end.parse::<usize>() {
+                            BitRange::Range(bit, end_bit)
+                        } else {
+                            return Err(format!("Expected bit number, got {}", end));
+                        }
+                    } else {
+                        BitRange::Single(bit)
+                    }
+                } else {
+                    return Err(format!("Expected bit number or 'x', got {}", name));
+                }
+            }
+            Some(Ok(Token::Integer(n))) => {
+                let n = *n as usize;
+                self.advance();
+                if let Some(Ok(Token::Colon)) = self.current_token() {
+                    self.advance();
+                    if let Some(Ok(Token::Integer(end))) = self.current_token() {
+                        let end = *end as usize;
+                        self.advance();
+                        BitRange::Range(n, end)
+                    } else {
+                        return Err("Expected end bit number".to_string());
+                    }
+                } else {
+                    BitRange::Single(n)
+                }
+            }
+            _ => return Err("Expected bit number or 'x'".to_string()),
+        };
+        Ok(result)
     }
 
     fn parse_constant(&mut self) -> Result<Constant, String> {
@@ -1479,6 +1555,29 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Let)) => {
                 self.advance();
                 let name = self.expect_identifier()?;
+
+                let mut address: Option<u64> = None;
+                let mut bit_range: Option<BitRange> = None;
+                let mut is_override = false;
+
+                loop {
+                    if let Some(Ok(Token::At)) = self.current_token() {
+                        self.advance();
+                        let addr_expr = self.parse_expression()?;
+                        if let Expr::Integer(n) = addr_expr {
+                            address = Some(n as u64);
+                        } else {
+                            return Err("Address must be an integer".to_string());
+                        }
+                    } else if let Some(Ok(Token::LBracket)) = self.current_token() {
+                        self.advance();
+                        bit_range = Some(self.parse_bit_range()?);
+                        self.expect(Token::RBracket)?;
+                    } else {
+                        break;
+                    }
+                }
+
                 let ty = if let Some(Ok(Token::Colon)) = self.current_token() {
                     self.advance();
                     Some(self.parse_type()?)
@@ -1492,7 +1591,14 @@ impl<'a> Parser<'a> {
                     None
                 };
                 self.expect(Token::Semicolon)?;
-                Ok(Statement::Let { name, ty, expr })
+                Ok(Statement::Let {
+                    name,
+                    ty,
+                    expr,
+                    address,
+                    bit_range,
+                    is_override,
+                })
             }
             Some(Ok(Token::Term)) => {
                 self.advance();
@@ -1620,6 +1726,37 @@ impl<'a> Parser<'a> {
                 if let Some(Ok(Token::Eq)) = self.current_token() {
                     self.advance();
                     let right = self.parse_expression()?;
+
+                    let mut timeout: Option<(Expr, TimeUnit)> = None;
+                    if let Some(Ok(Token::Within)) = self.current_token() {
+                        self.advance();
+                        let expr = self.parse_expression()?;
+                        let unit = match self.current_token() {
+                            Some(Ok(Token::Cycles)) => {
+                                self.advance();
+                                TimeUnit::Cycles
+                            }
+                            Some(Ok(Token::Cyc)) => {
+                                self.advance();
+                                TimeUnit::Cycles
+                            }
+                            Some(Ok(Token::Ms)) => {
+                                self.advance();
+                                TimeUnit::Ms
+                            }
+                            Some(Ok(Token::Seconds)) => {
+                                self.advance();
+                                TimeUnit::Seconds
+                            }
+                            Some(Ok(Token::Minute)) => {
+                                self.advance();
+                                TimeUnit::Minutes
+                            }
+                            _ => TimeUnit::Cycles,
+                        };
+                        timeout = Some((expr, unit));
+                    }
+
                     self.expect(Token::Semicolon)?;
 
                     match expr {
@@ -1627,11 +1764,13 @@ impl<'a> Parser<'a> {
                             is_owned: false,
                             name,
                             expr: right,
+                            timeout,
                         }),
                         Expr::OwnedRef(name) => Ok(Statement::Assignment {
                             is_owned: true,
                             name,
                             expr: right,
+                            timeout,
                         }),
                         Expr::Call(name, args) => {
                             if args.len() == 1 {

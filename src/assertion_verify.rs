@@ -245,6 +245,7 @@ mod tests {
                     is_owned: false,
                     name: "result".to_string(),
                     expr: Expr::Bool(true),
+                    timeout: None,
                 },
                 Statement::Term(vec![Some(Expr::Identifier("result".to_string()))]),
             ],

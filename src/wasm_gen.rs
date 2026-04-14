@@ -853,6 +853,7 @@ impl WasmGenerator {
                 is_owned,
                 name,
                 expr,
+                timeout: _,
             } => {
                 if *is_owned {
                     if let Expr::Add(a, b) = expr {
@@ -890,7 +891,14 @@ impl WasmGenerator {
             Statement::Term(_) => {
                 output.push_str("        // term - transaction settled\n");
             }
-            Statement::Let { name, ty: _, expr } => {
+            Statement::Let {
+                name,
+                ty: _,
+                expr,
+                address: _,
+                bit_range: _,
+                is_override: _,
+            } => {
                 if let Some(e) = expr {
                     let expr_code = self.expr_to_js_value(e);
                     output.push_str(&format!("        let {} = {};\n", name, expr_code));

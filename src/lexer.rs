@@ -56,6 +56,18 @@ pub enum Token {
     Render,
     #[token("enum")]
     Enum,
+    #[token("trg")]
+    Trg,
+    #[token("stage")]
+    Stage,
+    #[token("forall")]
+    Forall,
+    #[token("exists")]
+    Exists,
+    #[token("within")]
+    Within,
+    #[token("bank")]
+    Bank,
     #[token("Ok")]
     Ok,
     #[token("Err")]
@@ -72,6 +84,21 @@ pub enum Token {
     BoolTrue,
     #[token("false")]
     BoolFalse,
+
+    // Time units
+    #[token("cycles")]
+    Cycles,
+    #[token("cyc")]
+    Cyc,
+    #[token("ms")]
+    Ms,
+    #[token("s")]
+    #[token("sec")]
+    #[token("seconds")]
+    Seconds,
+    #[token("min")]
+    #[token("minute")]
+    Minute,
 
     // Operators
     #[token("=")]
@@ -157,6 +184,16 @@ pub enum Token {
     // Keywords
     #[token("Int")]
     TypeInt,
+    #[token("UInt")]
+    TypeUInt,
+    #[token("Unsigned")]
+    TypeUnsigned,
+    #[token("USgn")]
+    TypeUSgn,
+    #[token("Signed")]
+    TypeSigned,
+    #[token("Sgn")]
+    TypeSgn,
     #[token("Float")]
     TypeFloat,
     #[token("String")]

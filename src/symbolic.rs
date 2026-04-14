@@ -194,11 +194,10 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         | Expr::And(_, _)
         | Expr::Or(_, _) => SymbolicValue::Unknown,
         Expr::PatternMatch { value, .. } => {
-            // For symbolic execution, pattern matching returns Unknown
-            // The actual binding of variables happens at runtime
             let _ = eval_symbolic(value, state);
             SymbolicValue::Unknown
         }
+        Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } => SymbolicValue::Unknown,
     }
 }
 
@@ -389,6 +388,7 @@ fn execute_statement(stmt: &Statement, state: &mut SymbolicState) {
             name,
             expr,
             is_owned: _,
+            timeout: _,
         } => {
             state.assign(name, expr);
         }

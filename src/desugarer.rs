@@ -155,6 +155,9 @@ impl Desugarer {
                                 name: var_name,
                                 ty,
                                 expr: Some(default_val),
+                                address: None,
+                                bit_range: None,
+                                is_override: false,
                                 span: None,
                             });
                         }
@@ -200,6 +203,9 @@ impl Desugarer {
                             name: field.name.clone(),
                             ty,
                             expr: initial_expr,
+                            address: None,
+                            bit_range: None,
+                            is_override: false,
                             span: None,
                         });
                     }
@@ -242,6 +248,9 @@ impl Desugarer {
                             name: field.name.clone(),
                             ty,
                             expr: initial_expr,
+                            address: None,
+                            bit_range: None,
+                            is_override: false,
                             span: None,
                         });
                     }
@@ -361,6 +370,9 @@ impl Desugarer {
             name: "done".to_string(),
             ty: Type::Bool,
             expr: Some(Expr::Bool(false)),
+            address: None,
+            bit_range: None,
+            is_override: false,
             span: None,
         });
 
@@ -376,6 +388,7 @@ impl Desugarer {
                         is_owned: true,
                         name: "done".to_string(),
                         expr: Expr::Bool(true),
+                        timeout: None,
                     });
                     new_body_items.push(Statement::Term(vec![]));
                     continue;

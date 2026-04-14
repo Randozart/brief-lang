@@ -2,8 +2,24 @@ use crate::errors::Span;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum TimeUnit {
+    Cycles,
+    Ms,
+    Seconds,
+    Minutes,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BitRange {
+    Single(usize),
+    Range(usize, usize),
+    Any(usize), // /xN
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Int,
+    UInt,
     Float,
     String,
     Bool,
@@ -11,6 +27,7 @@ pub enum Type {
     Void,
     Custom(String),
     Union(Vec<Type>),
+    Vector(Box<Type>, usize),
     ContractBound(Box<Type>, Box<Expr>),
     TypeVar(String),
     Generic(String, Vec<Type>),
@@ -125,6 +142,12 @@ pub enum Expr {
     ListLiteral(Vec<Expr>),
     ListIndex(Box<Expr>, Box<Expr>),
     ListLen(Box<Expr>),
+    Slice {
+        value: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        stride: Option<Box<Expr>>,
+    },
     FieldAccess(Box<Expr>, String),
     StructInstance(String, Vec<(String, Expr)>),
     ObjectLiteral(Vec<(String, Expr)>),
@@ -133,6 +156,14 @@ pub enum Expr {
         value: Box<Expr>,
         variant: String,
         fields: Vec<String>,
+    },
+    ForAll {
+        var: String,
+        expr: Box<Expr>,
+    },
+    Exists {
+        var: String,
+        expr: Box<Expr>,
     },
 }
 
@@ -185,6 +216,23 @@ impl Expr {
                 l.extract_deps_recursive(deps);
                 i.extract_deps_recursive(deps);
             }
+            Expr::Slice {
+                value,
+                start,
+                end,
+                stride,
+            } => {
+                value.extract_deps_recursive(deps);
+                if let Some(s) = start {
+                    s.extract_deps_recursive(deps);
+                }
+                if let Some(e) = end {
+                    e.extract_deps_recursive(deps);
+                }
+                if let Some(st) = stride {
+                    st.extract_deps_recursive(deps);
+                }
+            }
             Expr::FieldAccess(e, _) => {
                 e.extract_deps_recursive(deps);
             }
@@ -195,6 +243,9 @@ impl Expr {
             }
             Expr::PatternMatch { value, .. } => {
                 value.extract_deps_recursive(deps);
+            }
+            Expr::ForAll { expr, .. } | Expr::Exists { expr, .. } => {
+                expr.extract_deps_recursive(deps);
             }
             _ => {} // Float, String, Bool don't add dependencies
         }
@@ -208,6 +259,7 @@ pub enum Statement {
         is_owned: bool,
         name: String,
         expr: Expr,
+        timeout: Option<(Expr, TimeUnit)>,
     },
 
     // Unification: identifier(pattern) = expr;
@@ -237,6 +289,9 @@ pub enum Statement {
         name: String,
         ty: Option<Type>,
         expr: Option<Expr>,
+        address: Option<u64>,
+        bit_range: Option<BitRange>,
+        is_override: bool,
     },
 }
 
@@ -343,6 +398,18 @@ pub struct StateDecl {
     pub name: String,
     pub ty: Type,
     pub expr: Option<Expr>,
+    pub address: Option<u64>,
+    pub bit_range: Option<BitRange>,
+    pub is_override: bool,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TriggerDeclaration {
+    pub name: String,
+    pub ty: Type,
+    pub address: u64,
+    pub bit_range: Option<BitRange>,
     pub span: Option<Span>,
 }
 
@@ -371,6 +438,7 @@ pub enum TopLevel {
     Definition(Definition),
     Transaction(Transaction),
     StateDecl(StateDecl),
+    Trigger(TriggerDeclaration),
     Constant(Constant),
     Import(Import),
     ForeignBinding {
