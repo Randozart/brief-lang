@@ -10,6 +10,7 @@ enum SignalType {
     String,
     List,
     Struct,
+    Vector(usize),
 }
 
 pub struct WasmGenerator {
@@ -81,6 +82,14 @@ impl WasmGenerator {
                         Type::String => SignalType::String,
                         Type::Applied(name, _) if name == "List" => SignalType::List,
                         Type::Generic(name, _) if name == "List" => SignalType::List,
+                        Type::Vector(_, size) => SignalType::Vector(*size),
+                        Type::Constrained(inner, _) => match **inner {
+                            Type::Int => SignalType::Int,
+                            Type::UInt => SignalType::Int,
+                            Type::Float => SignalType::Float,
+                            Type::Bool => SignalType::Bool,
+                            _ => SignalType::Int,
+                        },
                         Type::Custom(_) => SignalType::Struct,
                         Type::TypeVar(_) => SignalType::Int,
                         _ => SignalType::Int,
@@ -92,8 +101,15 @@ impl WasmGenerator {
                         self.expr_to_js_value(expr)
                     } else {
                         match &signal_type {
-                            SignalType::Struct => "js_sys::Object::new()".to_string(),
-                            _ => "js_sys::Array::new()".to_string(),
+                            SignalType::Struct => "js_sys::Object::new().into()".to_string(),
+                            SignalType::Vector(size) => {
+                                format!("js_sys::Uint32Array::new_with_length({}).into()", size)
+                            }
+                            SignalType::List => "js_sys::Array::new().into()".to_string(),
+                            SignalType::Int | SignalType::Float | SignalType::Bool => {
+                                "JsValue::from(0)".to_string()
+                            }
+                            SignalType::String => "JsValue::from(\"\")".to_string(),
                         }
                     };
                     self.signal_initializers
@@ -256,9 +272,20 @@ impl WasmGenerator {
 
         output.push_str("use wasm_bindgen::prelude::*;\n\n");
         output.push_str(&format!(
-            "const SIGNALS: usize = {};\n\n",
+            "const SIGNALS: usize = {};\n",
             self.signal_counter
         ));
+        output.push_str("const SIGNALS_LENGTHS: [usize; SIGNALS] = [\n");
+        let mut lengths = vec!["0".to_string(); self.signal_counter];
+        let mut sorted_sigs: Vec<(&String, &usize)> = self.signal_map.iter().collect();
+        sorted_sigs.sort_by_key(|k| k.1);
+        for (name, &id) in sorted_sigs {
+            if let Some(SignalType::Vector(size)) = self.signal_types.get(name) {
+                lengths[id] = size.to_string();
+            }
+        }
+        output.push_str(&format!("    {}\n", lengths.join(", ")));
+        output.push_str("];\n\n");
         output.push_str("#[wasm_bindgen]\n");
         output.push_str("pub struct State {\n");
         output.push_str("    signals: Vec<JsValue>,\n");
@@ -847,45 +874,74 @@ impl WasmGenerator {
         }
     }
 
+    fn is_vector_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier(name) | Expr::OwnedRef(name) => {
+                if let Some(sig_type) = self.signal_types.get(name) {
+                    matches!(sig_type, SignalType::Vector(_))
+                } else {
+                    false
+                }
+            }
+            Expr::Slice { .. } => true,
+            Expr::ListLiteral(_) => true,
+            _ => false,
+        }
+    }
+
     fn statement_to_rust(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
             Statement::Assignment {
-                is_owned,
-                name,
+                lhs,
                 expr,
                 timeout: _,
             } => {
-                if *is_owned {
-                    if let Expr::Add(a, b) = expr {
-                        let a_is_list = self.is_list_signal(a);
-                        let b_is_list = self.is_list_signal(b);
-                        if a_is_list || b_is_list {
-                            if let Expr::Identifier(name) = a.as_ref() {
-                                if let Some(&id) = self.signal_map.get(name) {
-                                    let other_code = self.expr_to_js_value(b);
-                                    let other_arg = if matches!(b.as_ref(), Expr::ListLiteral(_)) {
-                                        format!("{}.into()", other_code)
+                let expr_code = self.expr_to_js_value(expr);
+                match lhs {
+                    Expr::OwnedRef(name) | Expr::Identifier(name) => {
+                        if let Some(&id) = self.signal_map.get(name) {
+                            let sig_type = self.signal_types.get(name).cloned();
+                            match sig_type {
+                                Some(SignalType::Vector(_)) => {
+                                    if !self.is_vector_expr(expr) {
+                                        // Lifting: vec.fill(scalar)
+                                        output.push_str(&format!(
+                                            "        js_sys::Uint32Array::from(&self.signals[{}]).fill({}.as_f64().unwrap_or(0.0) as u32, 0, SIGNALS_LENGTHS[{}]);\n",
+                                            id, expr_code, id
+                                        ));
                                     } else {
-                                        other_code
-                                    };
-                                    output.push_str(&format!(
-                                        "        self.signals[{}] = self.list_concat({}, {});\n",
-                                        id, id, other_arg
-                                    ));
-                                    output.push_str(&format!("        self.mark_dirty({});\n", id));
-                                    return;
+                                        // Copy: vec.set(other)
+                                        output.push_str(&format!(
+                                            "        js_sys::Uint32Array::from(&self.signals[{}]).set(&js_sys::Uint32Array::from(&{}), 0);\n",
+                                            id, expr_code
+                                        ));
+                                    }
                                 }
+                                _ => {
+                                    output.push_str(&format!(
+                                        "        self.signals[{}] = {}.into();\n",
+                                        id, expr_code
+                                    ));
+                                }
+                            }
+                            output.push_str(&format!("        self.mark_dirty({});\n", id));
+                        } else if self.local_vars.contains_key(name) {
+                            output.push_str(&format!("        {} = {};\n", name, expr_code));
+                        }
+                    }
+                    Expr::ListIndex(list_expr, index_expr) => {
+                        if let Expr::OwnedRef(name) | Expr::Identifier(name) = &**list_expr {
+                            if let Some(&id) = self.signal_map.get(name) {
+                                let idx_code = self.expr_to_js_value(index_expr);
+                                output.push_str(&format!(
+                                    "        js_sys::Reflect::set(&self.signals[{}], &{}.into(), &{}).ok();\n",
+                                    id, idx_code, expr_code
+                                ));
+                                output.push_str(&format!("        self.mark_dirty({});\n", id));
                             }
                         }
                     }
-                    let expr_code = self.expr_to_js_value(expr);
-                    if let Some(&id) = self.signal_map.get(name) {
-                        output.push_str(&format!(
-                            "        self.signals[{}] = {}.into();\n",
-                            id, expr_code
-                        ));
-                        output.push_str(&format!("        self.mark_dirty({});\n", id));
-                    }
+                    _ => {}
                 }
             }
             Statement::Term(_) => {
@@ -978,6 +1034,23 @@ impl WasmGenerator {
                 } else {
                     format!("JsValue::from(\"{}\")", name)
                 }
+            }
+            Expr::Slice {
+                value, start, end, ..
+            } => {
+                let v_val = self.expr_to_js_value(value);
+                let s_val = start
+                    .as_ref()
+                    .map(|e| self.expr_to_js_value(e))
+                    .unwrap_or("JsValue::from(0)".to_string());
+                let e_val = end
+                    .as_ref()
+                    .map(|e| self.expr_to_js_value(e))
+                    .unwrap_or(format!(
+                        "JsValue::from(js_sys::Uint32Array::from(&{}).length())",
+                        v_val
+                    ));
+                format!("js_sys::Uint32Array::from(&{}).subarray({}.as_f64().unwrap_or(0.0) as u32, {}.as_f64().unwrap_or(0.0) as u32).into()", v_val, s_val, e_val)
             }
             Expr::Add(a, b) => {
                 let a_val = self.expr_to_js_value(a);
@@ -1080,6 +1153,21 @@ impl WasmGenerator {
                 let b_val = self.expr_to_js_value_for_condition(b);
                 format!("({} && {})", a_val, b_val)
             }
+            Expr::BitAnd(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 & {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+            }
+            Expr::BitOr(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 | {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+            }
+            Expr::BitXor(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 ^ {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+            }
             Expr::Or(a, b) => {
                 let a_val = self.expr_to_js_value_for_condition(a);
                 let b_val = self.expr_to_js_value_for_condition(b);
@@ -1181,6 +1269,21 @@ impl WasmGenerator {
                 let a_val = self.expr_to_js_value_for_condition(a);
                 let b_val = self.expr_to_js_value_for_condition(b);
                 format!("({} && {})", a_val, b_val)
+            }
+            Expr::BitAnd(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 & {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+            }
+            Expr::BitOr(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 | {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+            }
+            Expr::BitXor(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 ^ {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
             }
             Expr::Or(a, b) => {
                 let a_val = self.expr_to_js_value_for_condition(a);

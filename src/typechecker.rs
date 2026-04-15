@@ -321,7 +321,10 @@ impl TypeChecker {
             | Expr::Gt(left, right)
             | Expr::Ge(left, right)
             | Expr::Or(left, right)
-            | Expr::And(left, right) => {
+            | Expr::And(left, right)
+            | Expr::BitAnd(left, right)
+            | Expr::BitOr(left, right)
+            | Expr::BitXor(left, right) => {
                 self.check_expr_for_function_calls(left);
                 self.check_expr_for_function_calls(right);
             }
@@ -620,70 +623,75 @@ impl TypeChecker {
 
     fn check_statement(&mut self, stmt: &Statement, is_async: Option<&bool>) {
         match stmt {
-            Statement::Assignment {
-                is_owned,
-                name,
-                expr,
-                timeout,
-            } => {
+            Statement::Assignment { lhs, expr, timeout } => {
+                self.check_expr_for_ffi_errors(lhs);
                 self.check_expr_for_ffi_errors(expr);
+                let lhs_ty = self.infer_expression(lhs);
                 let expr_ty = self.infer_expression(expr);
+
+                let var_name = match lhs {
+                    Expr::Identifier(n) | Expr::OwnedRef(n) => Some(n.clone()),
+                    Expr::ListIndex(list_expr, _) => {
+                        if let Expr::Identifier(n) | Expr::OwnedRef(n) = &**list_expr {
+                            Some(n.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
 
                 // If timeout is used, the type must be a Union containing Error
                 if let Some((_t_expr, _unit)) = timeout {
-                    let var_ty = self.lookup_variable(name).unwrap_or(expr_ty.clone());
-                    if !self.is_error_union(&var_ty) {
+                    if !self.is_error_union(&lhs_ty) {
                         self.errors.borrow_mut().push(TypeError::TypeMismatch {
                             expected: "Union type containing Error".to_string(),
-                            found: self.type_to_string(&var_ty),
-                            context: format!("assignment with timeout to {}", name),
+                            found: self.type_to_string(&lhs_ty),
+                            context: "assignment with timeout".to_string(),
                         });
                     }
                 }
 
-                if let Some(var_ty) = self.lookup_variable(name) {
-                    if !self.types_compatible(&expr_ty, &var_ty) {
-                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                            expected: self.type_to_string(&var_ty),
-                            found: self.type_to_string(&expr_ty),
-                            context: format!("assignment to {}", name),
-                        });
-                    }
-
-                    if *is_owned {
-                        let has_lower_scope = self
-                            .scopes
-                            .iter()
-                            .take(self.scopes.len() - 1)
-                            .any(|s| s.contains_key(name));
-                        if !has_lower_scope {
-                            self.errors
-                                .borrow_mut()
-                                .push(TypeError::OwnershipViolation {
-                                    var: name.clone(),
-                                    reason:
-                                        "owned reference requires variable to exist in outer scope"
-                                            .to_string(),
-                                });
-                        }
-                    }
-                } else {
-                    self.declare_variable(name, expr_ty.clone());
+                if !self.check_geometry(&lhs_ty, &expr_ty) {
+                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                        expected: self.type_to_string(&lhs_ty),
+                        found: self.type_to_string(&expr_ty),
+                        context: "assignment".to_string(),
+                    });
                 }
 
-                if self.is_ffi_call(expr) {
-                    self.ffi_results
-                        .borrow_mut()
-                        .insert(name.clone(), ResultCheckStatus::Unchecked);
-                    self.diagnostics.borrow_mut().push(
-                        Diagnostic::new("F101", Severity::Warning, "FFI call result not handled")
-                            .with_explanation(&format!(
-                                "FFI function result assigned to '{}' without checking for errors. \
-                                 Use .is_ok() or .is_err() to handle potential errors.",
-                                name
-                            ))
-                            .with_hint("Wrap the FFI call with is_ok()/is_err() guards"),
-                    );
+                if let Expr::OwnedRef(name) = lhs {
+                    let has_lower_scope = self
+                        .scopes
+                        .iter()
+                        .take(self.scopes.len() - 1)
+                        .any(|s| s.contains_key(name));
+                    if !has_lower_scope {
+                        self.errors
+                            .borrow_mut()
+                            .push(TypeError::OwnershipViolation {
+                                var: name.clone(),
+                                reason: "owned reference requires variable to exist in outer scope"
+                                    .to_string(),
+                            });
+                    }
+                }
+
+                if let Some(name) = var_name {
+                    if self.is_ffi_call(expr) {
+                        self.ffi_results
+                            .borrow_mut()
+                            .insert(name.clone(), ResultCheckStatus::Unchecked);
+                        self.diagnostics.borrow_mut().push(
+                            Diagnostic::new("F101", Severity::Warning, "FFI call result not handled")
+                                .with_explanation(&format!(
+                                    "FFI function result assigned to '{}' without checking for errors. \
+                                     Use .is_ok() or .is_err() to handle potential errors.",
+                                    name
+                                ))
+                                .with_hint("Wrap the FFI call with is_ok()/is_err() guards"),
+                        );
+                    }
                 }
             }
             Statement::Let {
@@ -814,6 +822,9 @@ impl TypeChecker {
             Expr::Sub(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
             Expr::Mul(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
             Expr::Div(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
+            Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r) => {
+                self.binary_op_type(l, r, Type::Int, Type::Int)
+            }
             Expr::Eq(_, _)
             | Expr::Ne(_, _)
             | Expr::Lt(_, _)
@@ -861,14 +872,36 @@ impl TypeChecker {
             }
             Expr::ListIndex(list_expr, _) => {
                 let list_type = self.infer_expression(list_expr);
-                if let Type::Applied(_, type_args) = list_type {
-                    if !type_args.is_empty() {
-                        type_args[0].clone()
-                    } else {
-                        Type::TypeVar("T".to_string())
+                match list_type {
+                    Type::Applied(_, type_args) => {
+                        if !type_args.is_empty() {
+                            type_args[0].clone()
+                        } else {
+                            Type::TypeVar("T".to_string())
+                        }
                     }
+                    Type::Vector(inner, _) => *inner,
+                    _ => Type::TypeVar("T".to_string()),
+                }
+            }
+            Expr::Slice {
+                value, start, end, ..
+            } => {
+                let base_ty = self.infer_expression(value);
+                if let Type::Vector(inner, _) = base_ty {
+                    let size = match (start, end) {
+                        (Some(s), Some(e)) => {
+                            if let (Expr::Integer(sv), Expr::Integer(ev)) = (&**s, &**e) {
+                                (*ev - *sv) as usize
+                            } else {
+                                0
+                            }
+                        }
+                        _ => 0, // Unknown size or dynamic slice
+                    };
+                    Type::Vector(inner, size)
                 } else {
-                    Type::TypeVar("T".to_string())
+                    base_ty
                 }
             }
             Expr::ListLen(_) => Type::Int,
@@ -876,7 +909,7 @@ impl TypeChecker {
             Expr::StructInstance(typename, _fields) => Type::Custom(typename.clone()),
             Expr::ObjectLiteral(_) => Type::Custom("ObjectLiteral".to_string()),
             Expr::PatternMatch { .. } => Type::Bool,
-            Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } => Type::Bool,
+            Expr::ForAll { .. } | Expr::Exists { .. } => Type::Bool,
         }
     }
 
@@ -893,6 +926,18 @@ impl TypeChecker {
             name == "Error"
         } else {
             false
+        }
+    }
+
+    fn check_geometry(&self, lhs: &Type, rhs: &Type) -> bool {
+        match (lhs, rhs) {
+            (Type::Vector(inner_lhs, size_lhs), Type::Vector(inner_rhs, size_rhs)) => {
+                (*size_lhs == 0 || *size_rhs == 0 || size_lhs == size_rhs)
+                    && self.check_geometry(inner_lhs, inner_rhs)
+            }
+            (Type::Vector(inner, _), scalar) => self.types_compatible(inner, scalar),
+            (scalar, Type::Vector(inner, _)) => self.types_compatible(scalar, inner),
+            (a, b) => self.types_compatible(a, b),
         }
     }
 
@@ -982,6 +1027,14 @@ impl TypeChecker {
                         .zip(args_b.iter())
                         .all(|(x, y)| self.types_compatible(x, y))
             }
+            // Constrained: compare inner types
+            (Type::Constrained(inner_a, _), Type::Constrained(inner_b, _)) => {
+                self.types_compatible(inner_a, inner_b)
+            }
+            (Type::Constrained(inner, _), other) | (other, Type::Constrained(inner, _)) => {
+                self.types_compatible(inner, other)
+            }
+
             // ContractBound: compare inner types, ignore the contract
             (Type::ContractBound(inner_a, _), Type::ContractBound(inner_b, _)) => {
                 self.types_compatible(inner_a, inner_b)
@@ -1068,6 +1121,7 @@ impl TypeChecker {
             Type::Vector(inner, size) => {
                 format!("Vector<{}>[{}]", self.type_to_string(inner), size)
             }
+            Type::Constrained(inner, _) => self.type_to_string(inner),
         }
     }
 
@@ -1111,6 +1165,9 @@ impl TypeChecker {
             | Expr::Div(left, right)
             | Expr::Eq(left, right)
             | Expr::Ne(left, right)
+            | Expr::BitAnd(left, right)
+            | Expr::BitOr(left, right)
+            | Expr::BitXor(left, right)
             | Expr::Lt(left, right)
             | Expr::Le(left, right)
             | Expr::Gt(left, right)

@@ -47,9 +47,13 @@ fn check_all_paths(
 
     for stmt in body {
         match stmt {
-            Statement::Assignment { name, expr, .. } => {
+            Statement::Assignment { lhs, expr, .. } => {
                 // Track assignments
-                vars.insert(name.clone(), expr.clone());
+                if let Expr::Identifier(name) = lhs {
+                    vars.insert(name.clone(), expr.clone());
+                } else if let Expr::OwnedRef(name) = lhs {
+                    vars.insert(name.clone(), expr.clone());
+                }
             }
 
             Statement::Guarded {
@@ -242,8 +246,7 @@ mod tests {
             },
             body: vec![
                 Statement::Assignment {
-                    is_owned: false,
-                    name: "result".to_string(),
+                    lhs: Expr::Identifier("result".to_string()),
                     expr: Expr::Bool(true),
                     timeout: None,
                 },

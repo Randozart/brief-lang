@@ -312,19 +312,43 @@ impl Interpreter {
         Ok(())
     }
 
-    fn exec_stmt(&mut self, stmt: &Statement) -> Result<(), RuntimeError> {
+    pub fn exec_stmt(&mut self, stmt: &Statement) -> Result<(), RuntimeError> {
         match stmt {
             Statement::Assignment {
-                is_owned,
-                name,
+                lhs,
                 expr,
                 timeout: _,
             } => {
                 let value = self.eval_expr(expr)?;
-                if *is_owned {
-                    self.state.insert(name.clone(), value);
-                } else {
-                    self.state.insert(name.clone(), value);
+                match lhs {
+                    Expr::Identifier(name) | Expr::OwnedRef(name) => {
+                        self.state.insert(name.clone(), value);
+                    }
+                    Expr::ListIndex(list_expr, index_expr) => {
+                        let list_name = match &**list_expr {
+                            Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                            _ => {
+                                return Err(RuntimeError::TypeMismatch(
+                                    "Expected identifier".to_string(),
+                                ))
+                            }
+                        };
+                        let idx_val = self.eval_expr(index_expr)?;
+                        if let Value::Int(idx) = idx_val {
+                            if let Some(target) = self.state.get_mut(&list_name) {
+                                if let Value::List(items) = target {
+                                    if idx >= 0 && (idx as usize) < items.len() {
+                                        items[idx as usize] = value;
+                                    } else {
+                                        return Err(RuntimeError::TypeMismatch(
+                                            "Index out of bounds".to_string(),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => return Err(RuntimeError::TypeMismatch("Invalid LHS".to_string())),
                 }
             }
             Statement::Let { name, expr, .. } => {
@@ -584,6 +608,30 @@ impl Interpreter {
                 match (l_val, r_val) {
                     (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l && r)),
                     _ => Err(RuntimeError::TypeMismatch("Logical AND".to_string())),
+                }
+            }
+            Expr::BitAnd(l, r) => {
+                let l_val = self.eval_expr(l)?;
+                let r_val = self.eval_expr(r)?;
+                match (l_val, r_val) {
+                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l & r)),
+                    _ => Err(RuntimeError::TypeMismatch("Bitwise AND".to_string())),
+                }
+            }
+            Expr::BitOr(l, r) => {
+                let l_val = self.eval_expr(l)?;
+                let r_val = self.eval_expr(r)?;
+                match (l_val, r_val) {
+                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l | r)),
+                    _ => Err(RuntimeError::TypeMismatch("Bitwise OR".to_string())),
+                }
+            }
+            Expr::BitXor(l, r) => {
+                let l_val = self.eval_expr(l)?;
+                let r_val = self.eval_expr(r)?;
+                match (l_val, r_val) {
+                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l ^ r)),
+                    _ => Err(RuntimeError::TypeMismatch("Bitwise XOR".to_string())),
                 }
             }
             Expr::Not(inner) => {

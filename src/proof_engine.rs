@@ -22,6 +22,9 @@ pub enum SymbolicValue {
     Add(Box<SymbolicValue>, Box<SymbolicValue>),
     Sub(Box<SymbolicValue>, Box<SymbolicValue>),
     Mul(Box<SymbolicValue>, Box<SymbolicValue>),
+    BitAnd(Box<SymbolicValue>, Box<SymbolicValue>),
+    BitOr(Box<SymbolicValue>, Box<SymbolicValue>),
+    BitXor(Box<SymbolicValue>, Box<SymbolicValue>),
     Unknown,
 }
 
@@ -45,6 +48,18 @@ impl SymbolicValue {
                 Box::new(Self::from_expr(r, vars)),
             ),
             Expr::Mul(l, r) => SymbolicValue::Mul(
+                Box::new(Self::from_expr(l, vars)),
+                Box::new(Self::from_expr(r, vars)),
+            ),
+            Expr::BitAnd(l, r) => SymbolicValue::BitAnd(
+                Box::new(Self::from_expr(l, vars)),
+                Box::new(Self::from_expr(r, vars)),
+            ),
+            Expr::BitOr(l, r) => SymbolicValue::BitOr(
+                Box::new(Self::from_expr(l, vars)),
+                Box::new(Self::from_expr(r, vars)),
+            ),
+            Expr::BitXor(l, r) => SymbolicValue::BitXor(
                 Box::new(Self::from_expr(l, vars)),
                 Box::new(Self::from_expr(r, vars)),
             ),
@@ -337,13 +352,18 @@ impl SymbolicExecutor {
 
             match stmt {
                 Statement::Assignment {
-                    name,
+                    lhs,
                     expr,
-                    is_owned: _,
                     timeout: _,
                 } => {
                     let value = SymbolicValue::from_expr(expr, &current_state.vars);
-                    current_state.vars.insert(name.clone(), value);
+                    if let Expr::Identifier(name) | Expr::OwnedRef(name) = lhs {
+                        current_state.vars.insert(name.clone(), value);
+                    } else if let Expr::ListIndex(list_expr, _) = lhs {
+                        if let Expr::Identifier(name) | Expr::OwnedRef(name) = &**list_expr {
+                            current_state.vars.insert(name.clone(), value);
+                        }
+                    }
                 }
                 Statement::Let { name, expr, .. } => {
                     if let Some(e) = expr {
@@ -781,8 +801,9 @@ impl ProofEngine {
                         self.find_ffi_calls_in_expr(e, &mut calls, ffi_bindings);
                     }
                 }
-                Statement::Assignment { expr, .. } => {
+                Statement::Assignment { expr, lhs, .. } => {
                     self.find_ffi_calls_in_expr(expr, &mut calls, ffi_bindings);
+                    self.find_ffi_calls_in_expr(lhs, &mut calls, ffi_bindings);
                 }
                 Statement::Expression(e) => {
                     self.find_ffi_calls_in_expr(e, &mut calls, ffi_bindings);
@@ -809,7 +830,13 @@ impl ProofEngine {
                     calls.push((name.clone(), "frgn call".to_string()));
                 }
             }
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+            Expr::Add(l, r)
+            | Expr::Sub(l, r)
+            | Expr::Mul(l, r)
+            | Expr::Div(l, r)
+            | Expr::BitAnd(l, r)
+            | Expr::BitOr(l, r)
+            | Expr::BitXor(l, r) => {
                 self.find_ffi_calls_in_expr(l, calls, ffi_bindings);
                 self.find_ffi_calls_in_expr(r, calls, ffi_bindings);
             }
@@ -1094,6 +1121,9 @@ impl ProofEngine {
             | Expr::Sub(l, r)
             | Expr::Mul(l, r)
             | Expr::Div(l, r)
+            | Expr::BitAnd(l, r)
+            | Expr::BitOr(l, r)
+            | Expr::BitXor(l, r)
             | Expr::Eq(l, r)
             | Expr::Ne(l, r)
             | Expr::Lt(l, r)
@@ -1221,6 +1251,7 @@ impl ProofEngine {
             Type::Enum(name) => name.clone(),
             Type::UInt => "UInt".to_string(),
             Type::Vector(inner, size) => format!("Vector<{}>[{}]", self.type_name(inner), size),
+            Type::Constrained(inner, _) => self.type_name(inner),
         }
     }
 
@@ -1363,15 +1394,12 @@ impl ProofEngine {
     fn collect_read_vars(&self, stmt: &Statement, vars: &mut HashSet<String>) {
         match stmt {
             Statement::Assignment {
-                name,
+                lhs,
                 expr,
-                is_owned,
                 timeout: _,
             } => {
                 self.collect_read_vars_from_expr(expr, vars);
-                if *is_owned {
-                    vars.insert(name.clone());
-                }
+                self.collect_read_vars_from_expr(lhs, vars);
             }
             Statement::Let { name, expr, .. } => {
                 if let Some(e) = expr {
@@ -1411,16 +1439,15 @@ impl ProofEngine {
 
     fn collect_write_vars(&self, stmt: &Statement, vars: &mut HashSet<String>) {
         match stmt {
-            Statement::Assignment {
-                is_owned: true,
-                name,
-                ..
-            } => {
-                vars.insert(name.clone());
+            Statement::Assignment { lhs, .. } => {
+                if let Expr::OwnedRef(name) = lhs {
+                    vars.insert(name.clone());
+                } else if let Expr::ListIndex(inner, _) = lhs {
+                    if let Expr::OwnedRef(name) = &**inner {
+                        vars.insert(name.clone());
+                    }
+                }
             }
-            Statement::Assignment {
-                is_owned: false, ..
-            } => {}
             Statement::Let { .. } => {}
             Statement::Expression(_) => {}
             Statement::Term(_) => {}

@@ -32,9 +32,10 @@ pub enum Type {
     TypeVar(String),
     Generic(String, Vec<Type>),
     Applied(String, Vec<Type>),
-    Sig(String),       // Signature used as function type: sig name -> ...
-    Option(Box<Type>), // Option<T> - Some(T) or None
-    Enum(String),      // Enum type: Result, Color, etc.
+    Sig(String),                      // Signature used as function type: sig name -> ...
+    Option(Box<Type>),                // Option<T> - Some(T) or None
+    Enum(String),                     // Enum type: Result, Color, etc.
+    Constrained(Box<Type>, BitRange), // Type@/N or Type@/xN
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +139,9 @@ pub enum Expr {
     Not(Box<Expr>),
     Neg(Box<Expr>),
     BitNot(Box<Expr>),
+    BitAnd(Box<Expr>, Box<Expr>),
+    BitOr(Box<Expr>, Box<Expr>),
+    BitXor(Box<Expr>, Box<Expr>),
     Call(String, Vec<Expr>),
     ListLiteral(Vec<Expr>),
     ListIndex(Box<Expr>, Box<Expr>),
@@ -193,6 +197,9 @@ impl Expr {
             | Expr::Sub(l, r)
             | Expr::Mul(l, r)
             | Expr::Div(l, r)
+            | Expr::BitAnd(l, r)
+            | Expr::BitOr(l, r)
+            | Expr::BitXor(l, r)
             | Expr::Eq(l, r)
             | Expr::Ne(l, r)
             | Expr::Lt(l, r)
@@ -204,6 +211,7 @@ impl Expr {
                 l.extract_deps_recursive(deps);
                 r.extract_deps_recursive(deps);
             }
+
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::ListLen(e) => {
                 e.extract_deps_recursive(deps);
             }
@@ -254,10 +262,9 @@ impl Expr {
 
 #[derive(Debug, Clone)]
 pub enum Statement {
-    // Assignment: &identifier = expr; or identifier = expr;
+    // Assignment: &lhs = expr; or lhs = expr;
     Assignment {
-        is_owned: bool,
-        name: String,
+        lhs: Expr,
         expr: Expr,
         timeout: Option<(Expr, TimeUnit)>,
     },

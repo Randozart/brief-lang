@@ -165,6 +165,8 @@ pub enum Token {
     RBracket,
     #[token(",")]
     Comma,
+    #[token("..")]
+    DotDot,
     #[token(".")]
     Dot,
 

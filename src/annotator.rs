@@ -1,445 +1,117 @@
 use crate::ast::*;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone)]
-pub struct CallSite {
-    pub caller: String,
-    pub callee: String,
-    pub line: usize,
-}
-
-#[derive(Debug)]
-pub struct Annotation {
-    pub paths_to: Vec<Vec<String>>,
-    pub callers: Vec<String>,
-    pub is_entry: bool,
-    pub is_recursive: bool,
-    pub call_sites: Vec<CallSite>,
-}
-
 pub struct Annotator {
-    call_graph: HashMap<String, Vec<(String, usize)>>,
-    reverse_graph: HashMap<String, Vec<String>>,
-    annotations: HashMap<String, Annotation>,
-    entry_points: Vec<String>,
+    pub call_paths: HashMap<String, Vec<String>>,
 }
 
 impl Annotator {
     pub fn new() -> Self {
         Annotator {
-            call_graph: HashMap::new(),
-            reverse_graph: HashMap::new(),
-            annotations: HashMap::new(),
-            entry_points: Vec::new(),
+            call_paths: HashMap::new(),
         }
     }
 
     pub fn analyze(&mut self, program: &Program) {
-        self.build_call_graph(program);
-        self.find_entry_points(program);
-        self.detect_recursion();
-        self.compute_annotations();
-    }
-
-    fn build_call_graph(&mut self, program: &Program) {
         for item in &program.items {
-            match item {
-                TopLevel::Definition(defn) => {
-                    let callees = self.extract_calls(&defn.body);
-                    self.call_graph.insert(defn.name.clone(), callees);
-                }
-                TopLevel::Transaction(txn) => {
-                    let callees = self.extract_calls(&txn.body);
-                    self.call_graph.insert(txn.name.clone(), callees);
-                }
-                _ => {}
-            }
-        }
-
-        for (caller, callees) in &self.call_graph {
-            for (callee, _) in callees {
-                self.reverse_graph
-                    .entry(callee.clone())
-                    .or_insert_with(Vec::new)
-                    .push(caller.clone());
+            if let TopLevel::Definition(defn) = item {
+                let mut calls = Vec::new();
+                self.collect_calls_from_body(&defn.body, &mut calls);
+                self.call_paths.insert(defn.name.clone(), calls);
             }
         }
     }
 
-    fn extract_calls(&self, statements: &[Statement]) -> Vec<(String, usize)> {
-        let mut calls = Vec::new();
-        self.collect_calls_from_stmts(statements, &mut calls);
-        calls
-    }
-
-    fn collect_calls_from_stmts(&self, statements: &[Statement], calls: &mut Vec<(String, usize)>) {
-        for stmt in statements {
+    fn collect_calls_from_body(&self, body: &[Statement], calls: &mut Vec<String>) {
+        for stmt in body {
             match stmt {
-                Statement::Expression(Expr::Call(name, _)) => {
-                    calls.push((name.clone(), 0));
+                Statement::Expression(expr) => self.collect_calls_from_expr(expr, calls),
+                Statement::Assignment { expr, lhs, .. } => {
+                    self.collect_calls_from_expr(expr, calls);
+                    self.collect_calls_from_expr(lhs, calls);
                 }
-                Statement::Guarded { statements, .. } => {
-                    self.collect_calls_from_stmts(statements, calls);
+                Statement::Guarded {
+                    condition,
+                    statements,
+                } => {
+                    self.collect_calls_from_expr(condition, calls);
+                    self.collect_calls_from_body(statements, calls);
                 }
-                Statement::Let { expr, .. } => {
-                    if let Some(e) = expr {
-                        self.collect_calls_from_expr(e, calls);
+                Statement::Term(outputs) => {
+                    for out in outputs {
+                        if let Some(expr) = out {
+                            self.collect_calls_from_expr(expr, calls);
+                        }
                     }
                 }
-                Statement::Assignment { expr, .. } => {
-                    self.collect_calls_from_expr(expr, calls);
-                }
-                Statement::Unification { expr, .. } => {
-                    self.collect_calls_from_expr(expr, calls);
-                }
                 _ => {}
             }
         }
     }
 
-    fn collect_calls_from_expr(&self, expr: &Expr, calls: &mut Vec<(String, usize)>) {
+    fn collect_calls_from_expr(&self, expr: &Expr, calls: &mut Vec<String>) {
         match expr {
             Expr::Call(name, args) => {
-                calls.push((name.clone(), 0));
+                calls.push(name.clone());
                 for arg in args {
                     self.collect_calls_from_expr(arg, calls);
                 }
             }
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
-                self.collect_calls_from_expr(l, calls);
-                self.collect_calls_from_expr(r, calls);
-            }
-            Expr::Eq(l, r)
+            Expr::Add(l, r)
+            | Expr::Sub(l, r)
+            | Expr::Mul(l, r)
+            | Expr::Div(l, r)
+            | Expr::Eq(l, r)
             | Expr::Ne(l, r)
             | Expr::Lt(l, r)
             | Expr::Le(l, r)
             | Expr::Gt(l, r)
             | Expr::Ge(l, r)
             | Expr::Or(l, r)
-            | Expr::And(l, r) => {
+            | Expr::And(l, r)
+            | Expr::BitAnd(l, r)
+            | Expr::BitOr(l, r)
+            | Expr::BitXor(l, r) => {
                 self.collect_calls_from_expr(l, calls);
                 self.collect_calls_from_expr(r, calls);
             }
-            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
-                self.collect_calls_from_expr(e, calls);
+            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.collect_calls_from_expr(e, calls),
+            Expr::ListLiteral(elems) => {
+                for e in elems {
+                    self.collect_calls_from_expr(e, calls);
+                }
+            }
+            Expr::ListIndex(list, index) => {
+                self.collect_calls_from_expr(list, calls);
+                self.collect_calls_from_expr(index, calls);
+            }
+            Expr::ListLen(list) => self.collect_calls_from_expr(list, calls),
+            Expr::FieldAccess(obj, _) => self.collect_calls_from_expr(obj, calls),
+            Expr::StructInstance(_, fields) => {
+                for (_, v) in fields {
+                    self.collect_calls_from_expr(v, calls);
+                }
+            }
+            Expr::ObjectLiteral(fields) => {
+                for (_, v) in fields {
+                    self.collect_calls_from_expr(v, calls);
+                }
             }
             _ => {}
         }
     }
 
-    fn find_entry_points(&mut self, program: &Program) {
-        for item in program.items.iter() {
-            if let TopLevel::Transaction(txn) = item {
-                if txn.is_reactive {
-                    if let Expr::Bool(true) = &txn.contract.pre_condition {
-                        self.entry_points.push(txn.name.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    fn detect_recursion(&self) {
-        // Simple recursion detection: if A calls B and B calls A (directly or indirectly)
-        // This is a simplified version
-    }
-
-    fn compute_annotations(&mut self) {
-        for name in self.call_graph.keys() {
-            let paths = self.compute_paths_to(name);
-            let callers = self.reverse_graph.get(name).cloned().unwrap_or_default();
-            let is_entry = self.entry_points.contains(name);
-            let is_recursive = self.detect_self_recursion(name);
-            let call_sites = self.get_call_sites(name);
-
-            self.annotations.insert(
-                name.clone(),
-                Annotation {
-                    paths_to: paths,
-                    callers,
-                    is_entry,
-                    is_recursive,
-                    call_sites,
-                },
-            );
-        }
-    }
-
-    fn compute_paths_to(&self, target: &str) -> Vec<Vec<String>> {
-        let mut all_paths = Vec::new();
-
-        for entry in &self.entry_points {
-            let mut visited = HashSet::new();
-            let mut path = Vec::new();
-            self.dfs_paths(entry, target, &mut visited, &mut path, &mut all_paths);
-        }
-
-        all_paths
-    }
-
-    fn dfs_paths(
-        &self,
-        current: &str,
-        target: &str,
-        visited: &mut HashSet<String>,
-        path: &mut Vec<String>,
-        all_paths: &mut Vec<Vec<String>>,
-    ) {
-        if current == target {
-            let mut full_path = path.clone();
-            full_path.push(current.to_string());
-            all_paths.push(full_path);
-            return;
-        }
-
-        if visited.contains(current) {
-            return;
-        }
-
-        visited.insert(current.to_string());
-        path.push(current.to_string());
-
-        if let Some(callees) = self.call_graph.get(current) {
-            for (callee, _) in callees {
-                self.dfs_paths(callee, target, visited, path, all_paths);
-            }
-        }
-
-        path.pop();
-        visited.remove(current);
-    }
-
-    fn detect_self_recursion(&self, name: &str) -> bool {
-        if let Some(callees) = self.call_graph.get(name) {
-            callees.iter().any(|(callee, _)| callee == name)
-        } else {
-            false
-        }
-    }
-
-    fn get_call_sites(&self, target: &str) -> Vec<CallSite> {
-        let mut sites = Vec::new();
-
-        for (caller, callees) in &self.call_graph {
-            for (callee, line) in callees {
-                if callee == target {
-                    sites.push(CallSite {
-                        caller: caller.clone(),
-                        callee: callee.clone(),
-                        line: *line,
-                    });
-                }
-            }
-        }
-
-        sites
-    }
-
-    pub fn get_annotation(&self, name: &str) -> Option<&Annotation> {
-        self.annotations.get(name)
-    }
-
-    pub fn format_path(&self, path: &[String]) -> String {
-        if path.is_empty() {
-            "→".to_string()
-        } else {
-            path.join(" → ")
-        }
-    }
-
     pub fn annotate_program(&self, program: &Program) -> String {
-        // First, strip any existing annotations from original comments
-        let cleaned_comments: Vec<&Comment> = program
-            .comments
-            .iter()
-            .filter(|c| {
-                let text = &c.text;
-                !text.contains("=== PATH ANALYSIS ===")
-                    && !text.contains("=== END PATH ANALYSIS ===")
-                    && !text.starts_with("// PATHS_TO:")
-                    && !text.starts_with("// CALLERS:")
-                    && !text.starts_with("// RESOLVES_TO:")
-                    && !text.contains("[ENTRY_POINT]")
-                    && !text.contains("[RECURSIVE]")
-            })
-            .collect();
-
         let mut output = String::new();
-
-        // Output original (non-annotation) comments first
-        for comment in cleaned_comments {
-            output.push_str(&comment.text);
-            output.push('\n');
-        }
-
-        // Add path analysis in a collapsible block
-        output.push_str("\n// === PATH ANALYSIS ===\n");
-        output.push_str("// Annotations generated by brief-compiler --annotate\n");
-        output.push_str("// These comments can be hidden or filtered out\n");
-        output.push_str("// Use: grep -v '^// ===' or editor folding\n");
-
         for item in &program.items {
             match item {
-                TopLevel::Definition(defn) => {
-                    if let Some(annot) = self.get_annotation(&defn.name) {
-                        output.push_str(&format!(
-                            "// PATHS_TO: {}\n",
-                            if annot.paths_to.is_empty() {
-                                "(unreachable)".to_string()
-                            } else {
-                                annot
-                                    .paths_to
-                                    .iter()
-                                    .map(|p| self.format_path(p))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            }
-                        ));
-                        output.push_str(&format!(
-                            "// CALLERS: {}\n",
-                            if annot.callers.is_empty() {
-                                "(none)".to_string()
-                            } else {
-                                annot.callers.join(", ")
-                            }
-                        ));
-                        if annot.is_entry {
-                            output.push_str("// [ENTRY_POINT]\n");
-                        }
-                        if annot.is_recursive {
-                            output.push_str("// [RECURSIVE]\n");
-                        }
-                    }
-                    output.push_str(&self.format_definition(defn));
-                }
-                TopLevel::Transaction(txn) => {
-                    if let Some(annot) = self.get_annotation(&txn.name) {
-                        output.push_str(&format!(
-                            "// PATHS_TO: {}\n",
-                            if annot.paths_to.is_empty() {
-                                "(unreachable)".to_string()
-                            } else {
-                                annot
-                                    .paths_to
-                                    .iter()
-                                    .map(|p| self.format_path(p))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            }
-                        ));
-                        output.push_str(&format!(
-                            "// CALLERS: {}\n",
-                            if annot.callers.is_empty() {
-                                "(none)".to_string()
-                            } else {
-                                annot.callers.join(", ")
-                            }
-                        ));
-                        if annot.is_entry {
-                            output.push_str("// [ENTRY_POINT]\n");
-                        }
-                        if annot.is_recursive {
-                            output.push_str("// [RECURSIVE]\n");
-                        }
-                    }
-                    output.push_str(&self.format_transaction(txn));
-                }
-                TopLevel::Signature(sig) => {
-                    output.push_str("// CALLERS: (external)\n");
-                    output.push_str(&format!(
-                        "// RESOLVES_TO: {}\n",
-                        self.format_result_type(&sig.result_type)
-                    ));
-                    output.push_str(&self.format_signature(sig));
-                }
-                TopLevel::StateDecl(state) => {
-                    output.push_str(&self.format_state_decl(state));
-                }
-                TopLevel::Constant(const_decl) => {
-                    output.push_str(&self.format_constant(const_decl));
-                }
-                TopLevel::Import(import) => {
-                    output.push_str(&format!("import {};\n", import.path.join(".")));
-                }
-
-                TopLevel::ForeignBinding {
-                    name, toml_path, ..
-                } => {
-                    output.push_str(&format!("frgn {} from \"{}\";\n", name, toml_path));
-                }
-                TopLevel::Struct(struct_def) => {
-                    output.push_str(&format!("struct {} {{ ", struct_def.name));
-                    let field_strs: Vec<String> = struct_def
-                        .fields
-                        .iter()
-                        .map(|f| format!("{}: {}", f.name, self.type_to_string(&f.ty)))
-                        .collect();
-                    output.push_str(&field_strs.join(", "));
-                    output.push_str(" }\n");
-                }
-                TopLevel::RStruct(rstruct_def) => {
-                    output.push_str(&format!("rstruct {} {{ ", rstruct_def.name));
-                    let field_strs: Vec<String> = rstruct_def
-                        .fields
-                        .iter()
-                        .map(|f| format!("{}: {}", f.name, self.type_to_string(&f.ty)))
-                        .collect();
-                    output.push_str(&field_strs.join(", "));
-                    output.push_str(" ...view... }\n");
-                }
-                TopLevel::RenderBlock(rb) => {
-                    output.push_str(&format!("render {} {{ ... }}\n", rb.struct_name));
-                }
-                TopLevel::Stylesheet(css) => {
-                    output.push_str(&format!("// Stylesheet ({} chars)\n", css.len()));
-                }
-                TopLevel::SvgComponent { name, content } => {
-                    output.push_str(&format!(
-                        "// SvgComponent {} ({} chars)\n",
-                        name,
-                        content.len()
-                    ));
-                }
-                TopLevel::Enum(enum_def) => {
-                    let variants: Vec<String> = enum_def
-                        .variants
-                        .iter()
-                        .map(|v| match v {
-                            EnumVariant::Unit(name) => name.clone(),
-                            EnumVariant::Tuple(name, types) => format!(
-                                "{}({})",
-                                name,
-                                types
-                                    .iter()
-                                    .map(|t| self.type_to_string(t))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                            EnumVariant::Struct(name, fields) => format!(
-                                "{{ {} }}",
-                                fields
-                                    .iter()
-                                    .map(|(n, t)| format!("{}: {}", n, self.type_to_string(t)))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                        })
-                        .collect();
-                    output.push_str(&format!(
-                        "enum {} {{ {} }}\n",
-                        enum_def.name,
-                        variants.join(", ")
-                    ));
-                }
-                TopLevel::Trigger(_) => {
-                    output.push_str("// trigger\n");
-                }
+                TopLevel::Definition(defn) => output.push_str(&self.format_definition(defn)),
+                TopLevel::Transaction(txn) => output.push_str(&self.format_transaction(txn)),
+                TopLevel::Signature(sig) => output.push_str(&self.format_signature(sig)),
+                TopLevel::StateDecl(decl) => output.push_str(&self.format_state_decl(decl)),
+                _ => {}
             }
-            output.push('\n');
         }
-
-        output.push_str("// === END PATH ANALYSIS ===\n");
-
         output
     }
 
@@ -488,7 +160,7 @@ impl Annotator {
             Type::Vector(inner, size) => {
                 format!("Vector<{}>[{}]", self.type_to_string(inner), size)
             }
-            Type::Sig(name) => format!("sig {}", name),
+            Type::Constrained(inner, _) => self.type_to_string(inner),
         }
     }
 
@@ -547,104 +219,52 @@ impl Annotator {
             .iter()
             .map(|t| self.type_to_string(t))
             .collect();
+        let results: Vec<String> = match &sig.result_type {
+            ResultType::Projection(types) => types.iter().map(|t| self.type_to_string(t)).collect(),
+            ResultType::TrueAssertion => vec!["true".to_string()],
+        };
+
         format!(
-            "sig {}: {} -> {};\n",
+            "sig {}: ({}) -> ({});\n",
             sig.name,
-            inputs.join(" -> "),
-            self.format_result_type(&sig.result_type)
+            inputs.join(", "),
+            results.join(", ")
         )
     }
 
-    fn format_result_type(&self, rt: &ResultType) -> String {
-        match rt {
-            ResultType::Projection(types) => types
-                .iter()
-                .map(|t| self.type_to_string(t))
-                .collect::<Vec<_>>()
-                .join(", "),
-            ResultType::TrueAssertion => "true".to_string(),
-        }
-    }
-
-    fn format_state_decl(&self, state: &StateDecl) -> String {
-        let init = if let Some(expr) = &state.expr {
-            format!(" = {}", self.format_expr(expr))
+    fn format_state_decl(&self, decl: &StateDecl) -> String {
+        let init = if let Some(e) = &decl.expr {
+            format!(" = {}", self.format_expr(e))
+        } else {
+            String::new()
+        };
+        let addr = if let Some(a) = decl.address {
+            format!(" @ 0x{:x}", a)
         } else {
             String::new()
         };
         format!(
-            "let {}: {}{};\n",
-            state.name,
-            self.type_to_string(&state.ty),
+            "let {}: {}{}{};\n",
+            decl.name,
+            self.type_to_string(&decl.ty),
+            addr,
             init
         )
     }
 
-    fn format_constant(&self, const_decl: &Constant) -> String {
-        format!(
-            "const {}: {} = {};\n",
-            const_decl.name,
-            self.type_to_string(&const_decl.ty),
-            self.format_expr(&const_decl.expr)
-        )
-    }
-
-    fn format_body(&self, stmts: &[Statement]) -> String {
-        stmts
-            .iter()
-            .map(|s| self.format_statement(s, 1))
-            .collect::<Vec<_>>()
-            .join("")
+    fn format_body(&self, body: &[Statement]) -> String {
+        let mut output = String::new();
+        for stmt in body {
+            output.push_str(&self.format_statement(stmt, 2));
+        }
+        output
     }
 
     fn format_statement(&self, stmt: &Statement, indent: usize) -> String {
-        let spaces = "  ".repeat(indent);
+        let spaces = " ".repeat(indent);
         match stmt {
-            Statement::Let {
-                name,
-                ty,
-                expr,
-                address,
-                bit_range,
-                is_override,
-            } => {
-                let ty_str = if let Some(t) = ty {
-                    format!(": {}", self.type_to_string(t))
-                } else {
-                    String::new()
-                };
-                let expr_str = if let Some(e) = expr {
-                    format!(" = {}", self.format_expr(e))
-                } else {
-                    String::new()
-                };
-                let addr_str = if let Some(addr) = address {
-                    format!(" @ 0x{:08x}", addr)
-                } else {
-                    String::new()
-                };
-                let bit_str = if let Some(bit_range) = bit_range {
-                    match bit_range {
-                        BitRange::Single(bit) => format!("[{}]", bit),
-                        BitRange::Range(start, end) => format!("[{}:{}]", start, end),
-                        BitRange::Any(n) => format!("[*x{}]", n),
-                    }
-                } else {
-                    String::new()
-                };
-                let override_str = if *is_override { " override" } else { "" };
-                format!(
-                    "{}let {}{}{}{}{};\n",
-                    spaces, name, addr_str, bit_str, ty_str, expr_str
-                )
-            }
-            Statement::Assignment {
-                is_owned,
-                name,
-                expr,
-                timeout,
-            } => {
-                let prefix = if *is_owned { "&" } else { "" };
+            Statement::Expression(expr) => format!("{}{};\n", spaces, self.format_expr(expr)),
+            Statement::Assignment { lhs, expr, timeout } => {
                 let timeout_str = if let Some((expr, unit)) = timeout {
                     let unit_str = match unit {
                         TimeUnit::Cycles => "cycles",
@@ -657,71 +277,39 @@ impl Annotator {
                     String::new()
                 };
                 format!(
-                    "{}{}{} = {}{};\n",
+                    "{}{} = {}{};\n",
                     spaces,
-                    prefix,
-                    name,
+                    self.format_expr(lhs),
                     self.format_expr(expr),
                     timeout_str
                 )
-            }
-            Statement::Expression(expr) => {
-                format!("{}{};\n", spaces, self.format_expr(expr))
-            }
-            Statement::Term(outputs) => {
-                let outputs_str = outputs
-                    .iter()
-                    .map(|e| match e {
-                        Some(ex) => self.format_expr(ex),
-                        None => String::new(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}term {};\n", spaces, outputs_str)
-            }
-            Statement::Escape(expr) => {
-                let e = if let Some(ex) = expr {
-                    format!(" {}", self.format_expr(ex))
-                } else {
-                    String::new()
-                };
-                format!("{}escape{};\n", spaces, e)
             }
             Statement::Guarded {
                 condition,
                 statements,
             } => {
-                if statements.len() == 1 {
-                    // Single statement: flat syntax
-                    format!(
-                        "{}[{}] {}\n",
-                        spaces,
-                        self.format_expr(condition),
-                        self.format_statement(&statements[0], 0).trim()
-                    )
-                } else {
-                    // Multiple statements: block syntax
-                    let mut result = format!("{}[{}] {{\n", spaces, self.format_expr(condition));
-                    for stmt in statements {
-                        result.push_str(&self.format_statement(stmt, indent + 2));
-                    }
-                    result.push_str(&format!("{}}}\n", spaces));
-                    result
+                let mut output = format!("{}[{}] {{\n", spaces, self.format_expr(condition));
+                for s in statements {
+                    output.push_str(&self.format_statement(s, indent + 2));
                 }
+                output.push_str(&format!("{}}}\n", spaces));
+                output
             }
-            Statement::Unification {
-                name,
-                pattern,
-                expr,
-            } => {
-                format!(
-                    "{}{}({}) = {};\n",
-                    spaces,
-                    name,
-                    pattern,
-                    self.format_expr(expr)
-                )
+            Statement::Term(outputs) => {
+                let outputs_str: Vec<String> = outputs
+                    .iter()
+                    .map(|o| o.as_ref().map(|e| self.format_expr(e)).unwrap_or_default())
+                    .collect();
+                format!("{}term {};\n", spaces, outputs_str.join(", "))
             }
+            Statement::Escape(expr) => {
+                let val = expr
+                    .as_ref()
+                    .map(|e| format!(" {}", self.format_expr(e)))
+                    .unwrap_or_default();
+                format!("{}escape{};\n", spaces, val)
+            }
+            _ => String::new(),
         }
     }
 
@@ -755,6 +343,9 @@ impl Annotator {
             Expr::Ge(l, r) => format!("({} >= {})", self.format_expr(l), self.format_expr(r)),
             Expr::Or(l, r) => format!("({} || {})", self.format_expr(l), self.format_expr(r)),
             Expr::And(l, r) => format!("({} && {})", self.format_expr(l), self.format_expr(r)),
+            Expr::BitAnd(l, r) => format!("({} & {})", self.format_expr(l), self.format_expr(r)),
+            Expr::BitOr(l, r) => format!("({} | {})", self.format_expr(l), self.format_expr(r)),
+            Expr::BitXor(l, r) => format!("({} ^ {})", self.format_expr(l), self.format_expr(r)),
             Expr::Not(e) => format!("!{}", self.format_expr(e)),
             Expr::Neg(e) => format!("-{}", self.format_expr(e)),
             Expr::BitNot(e) => format!("~{}", self.format_expr(e)),
@@ -784,14 +375,12 @@ impl Annotator {
                 format!("{} {{{}}}", typename, fields_str)
             }
             Expr::ObjectLiteral(fields) => {
-                format!(
-                    "{}",
-                    fields
-                        .iter()
-                        .map(|(n, v)| format!("{}: {}", n, self.format_expr(v)))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+                let fields_str = fields
+                    .iter()
+                    .map(|(n, v)| format!("{}: {}", n, self.format_expr(v)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{{}}}", fields_str)
             }
             Expr::PatternMatch {
                 value,
@@ -823,12 +412,8 @@ impl Annotator {
                         .unwrap_or_default()
                 )
             }
-            Expr::ForAll { var, expr } => {
-                format!("forall {} in {{ {} }}", var, self.format_expr(expr))
-            }
-            Expr::Exists { var, expr } => {
-                format!("exists {} in {{ {} }}", var, self.format_expr(expr))
-            }
+            Expr::ForAll { var, expr } => format!("forall {} in {}", var, self.format_expr(expr)),
+            Expr::Exists { var, expr } => format!("exists {} in {}", var, self.format_expr(expr)),
         }
     }
 }

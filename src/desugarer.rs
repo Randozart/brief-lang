@@ -385,8 +385,7 @@ impl Desugarer {
 
                     new_body_items.push(Statement::Expression(expr.clone()));
                     new_body_items.push(Statement::Assignment {
-                        is_owned: true,
-                        name: "done".to_string(),
+                        lhs: Expr::OwnedRef("done".to_string()),
                         expr: Expr::Bool(true),
                         timeout: None,
                     });

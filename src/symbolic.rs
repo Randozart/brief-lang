@@ -172,6 +172,24 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             }
         }
 
+        Expr::BitAnd(left, right) => {
+            let left_sym = eval_symbolic(left, state);
+            let right_sym = eval_symbolic(right, state);
+            SymbolicValue::Binary("&".to_string(), Box::new(left_sym), Box::new(right_sym))
+        }
+
+        Expr::BitOr(left, right) => {
+            let left_sym = eval_symbolic(left, state);
+            let right_sym = eval_symbolic(right, state);
+            SymbolicValue::Binary("|".to_string(), Box::new(left_sym), Box::new(right_sym))
+        }
+
+        Expr::BitXor(left, right) => {
+            let left_sym = eval_symbolic(left, state);
+            let right_sym = eval_symbolic(right, state);
+            SymbolicValue::Binary("^".to_string(), Box::new(left_sym), Box::new(right_sym))
+        }
+
         // Function calls - can't track
         Expr::Call(_, _) => SymbolicValue::Unknown,
 
@@ -385,12 +403,13 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
 fn execute_statement(stmt: &Statement, state: &mut SymbolicState) {
     match stmt {
         Statement::Assignment {
-            name,
+            lhs,
             expr,
-            is_owned: _,
             timeout: _,
         } => {
-            state.assign(name, expr);
+            if let Expr::Identifier(name) | Expr::OwnedRef(name) = lhs {
+                state.assign(name, expr);
+            }
         }
 
         Statement::Let { name, expr, .. } => {

@@ -59,6 +59,9 @@ impl VerilogGenerator {
         // Define internal signals
         self.emit_signals(program);
 
+        // Define functions (definitions)
+        self.emit_definitions(program);
+
         // Define logic
         self.emit_logic(program);
 
@@ -186,8 +189,15 @@ impl VerilogGenerator {
     fn emit_signals(&mut self, program: &Program) {
         for item in &program.items {
             if let TopLevel::StateDecl(decl) = item {
-                if decl.address.is_some() {
-                    continue;
+                // Skip if it's a pin (already in header)
+                if let Some(addr) = decl.address {
+                    let addr_str_long = format!("0x{:08x}", addr);
+                    let addr_str_short = format!("0x{:x}", addr);
+                    if self.hw_config.io.contains_key(&addr_str_long)
+                        || self.hw_config.io.contains_key(&addr_str_short)
+                    {
+                        continue;
+                    }
                 }
 
                 self.emit_type_signals(&decl.name, &decl.ty, decl.bit_range.as_ref());
@@ -213,7 +223,7 @@ impl VerilogGenerator {
                     .push_str(&format!("    logic [7:0] {}_tag;\n", name));
             }
             Type::Vector(inner, size) => {
-                let width = self.get_bit_width(inner, None);
+                let width = self.get_bit_width(inner, range);
                 let signed = if matches!(**inner, Type::Int) {
                     "signed "
                 } else {
@@ -231,6 +241,9 @@ impl VerilogGenerator {
                     name,
                     size - 1
                 ));
+            }
+            Type::Constrained(inner, r) => {
+                self.emit_type_signals(name, inner, Some(r));
             }
             _ => {
                 let width = self.get_bit_width(ty, range);
@@ -269,12 +282,86 @@ impl VerilogGenerator {
             match ty {
                 Type::Int | Type::UInt => 32,
                 Type::Bool => 1,
-                Type::Vector(inner, size) => self.get_bit_width(inner, None) * size,
+                Type::Vector(inner, _) => self.get_bit_width(inner, None),
+                Type::Constrained(inner, r) => self.get_bit_width(inner, Some(r)),
                 _ => 32,
             }
         }
     }
 
+    fn emit_definitions(&mut self, program: &Program) {
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                let ret_ty = defn.outputs.first().unwrap_or(&Type::Int);
+                let ret_width = self.get_bit_width(ret_ty, None);
+                let signed = if matches!(ret_ty, Type::Int) {
+                    "signed "
+                } else {
+                    ""
+                };
+
+                self.output.push_str(&format!(
+                    "    function automatic logic {}{}[{}:0] {}(\n",
+                    signed,
+                    "",
+                    ret_width - 1,
+                    defn.name
+                ));
+
+                for (i, (name, ty)) in defn.parameters.iter().enumerate() {
+                    let width = self.get_bit_width(ty, None);
+                    let p_signed = if matches!(ty, Type::Int) {
+                        "signed "
+                    } else {
+                        ""
+                    };
+                    self.output.push_str(&format!(
+                        "        input logic {}{} {} {}\n",
+                        p_signed,
+                        if width > 1 {
+                            format!("[{}:0]", width - 1)
+                        } else {
+                            "".to_string()
+                        },
+                        name,
+                        if i == defn.parameters.len() - 1 {
+                            ""
+                        } else {
+                            ","
+                        }
+                    ));
+                }
+                self.output.push_str("    );\n");
+                self.emit_function_body(&defn.name, &defn.body);
+                self.output.push_str("    endfunction\n\n");
+            }
+        }
+    }
+
+    fn emit_function_body(&mut self, fn_name: &str, body: &[Statement]) {
+        for stmt in body {
+            match stmt {
+                Statement::Term(outputs) => {
+                    if let Some(Some(expr)) = outputs.first() {
+                        self.output
+                            .push_str(&format!("        return {};\n", self.expr_to_verilog(expr)));
+                    }
+                }
+                Statement::Guarded {
+                    condition,
+                    statements,
+                } => {
+                    self.output.push_str(&format!(
+                        "        if ({}) begin\n",
+                        self.expr_to_verilog(condition)
+                    ));
+                    self.emit_function_body(fn_name, statements);
+                    self.output.push_str("        end\n");
+                }
+                _ => {}
+            }
+        }
+    }
     fn emit_logic(&mut self, program: &Program) {
         let mut write_map: HashMap<String, Vec<&Transaction>> = HashMap::new();
 
@@ -306,14 +393,28 @@ impl VerilogGenerator {
     fn collect_writes(&self, body: &[Statement], writes: &mut HashSet<String>) {
         for stmt in body {
             match stmt {
-                Statement::Assignment { name, .. } => {
-                    writes.insert(name.clone());
+                Statement::Assignment { lhs, .. } => {
+                    if let Some(name) = self.extract_root_var(lhs) {
+                        writes.insert(name);
+                    }
                 }
                 Statement::Guarded { statements, .. } => {
                     self.collect_writes(statements, writes);
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn extract_root_var(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => {
+                Some(name.clone())
+            }
+            Expr::ListIndex(inner, _)
+            | Expr::Slice { value: inner, .. }
+            | Expr::FieldAccess(inner, _) => self.extract_root_var(inner),
+            _ => None,
         }
     }
 
@@ -360,10 +461,9 @@ impl VerilogGenerator {
                 .push_str(&format!("    logic {}_waiting;\n", name));
         }
 
-        let (is_vector, vector_size) = if let Type::Vector(_, size) = &decl.ty {
-            (true, *size)
-        } else {
-            (false, 1)
+        let (is_vector, vector_size) = match &decl.ty {
+            Type::Vector(_, size) => (true, *size),
+            _ => (false, 1),
         };
 
         self.output
@@ -410,7 +510,7 @@ impl VerilogGenerator {
                     if idx > 0 { "else " } else { "" },
                     cond
                 ));
-                self.emit_vector_assignment_from_txn(name, &txn.body);
+                self.emit_vector_assignment_from_txn(name, &txn.body, program);
                 self.output.push_str("                    end\n");
             }
 
@@ -509,8 +609,9 @@ impl VerilogGenerator {
     fn has_timeout_for_var(&self, var_name: &str, body: &[Statement]) -> bool {
         for stmt in body {
             match stmt {
-                Statement::Assignment { name, timeout, .. } if name == var_name => {
-                    if timeout.is_some() {
+                Statement::Assignment { lhs, timeout, .. } => {
+                    if self.extract_root_var(lhs).as_deref() == Some(var_name) && timeout.is_some()
+                    {
                         return true;
                     }
                 }
@@ -544,39 +645,38 @@ impl VerilogGenerator {
     ) {
         for stmt in body {
             match stmt {
-                Statement::Assignment {
-                    name,
-                    expr,
-                    timeout,
-                    ..
-                } if name == var_name => {
-                    if let Some((t_expr, _unit)) = timeout {
-                        self.output
-                            .push_str(&format!("                {}_waiting <= 1;\n", name));
-                        self.output.push_str(&format!(
-                            "                {}_timeout_cnt <= {};\n",
-                            name,
-                            self.expr_to_verilog(t_expr)
-                        ));
-                    }
+                Statement::Assignment { lhs, expr, timeout } => {
+                    if self.extract_root_var(lhs).as_deref() == Some(var_name) {
+                        if let Some((t_expr, _unit)) = timeout {
+                            self.output
+                                .push_str(&format!("                {}_waiting <= 1;\n", var_name));
+                            self.output.push_str(&format!(
+                                "                {}_timeout_cnt <= {};\n",
+                                var_name,
+                                self.expr_to_verilog(t_expr)
+                            ));
+                        }
 
-                    let is_union = self.is_union_variable(var_name, program);
-                    let final_name = if is_union {
-                        format!("{}_data", var_name)
-                    } else {
-                        var_name.to_string()
-                    };
+                        let is_union = self.is_union_variable(var_name, program);
+                        let final_name = if is_union {
+                            format!("{}_data", var_name)
+                        } else {
+                            var_name.to_string()
+                        };
 
-                    self.output.push_str(&format!(
-                        "                {} <= {};\n",
-                        final_name,
-                        self.expr_to_verilog(expr)
-                    ));
-                    if is_union {
+                        let lhs_sv = self.lhs_to_verilog(lhs, &final_name);
+
                         self.output.push_str(&format!(
-                            "                {}_tag <= 0; // Assuming 0 is Ok\n",
-                            var_name
+                            "                {} <= {};\n",
+                            lhs_sv,
+                            self.expr_to_verilog(expr)
                         ));
+                        if is_union {
+                            self.output.push_str(&format!(
+                                "                {}_tag <= 0; // Assuming 0 is Ok\n",
+                                var_name
+                            ));
+                        }
                     }
                 }
                 Statement::Guarded {
@@ -595,16 +695,55 @@ impl VerilogGenerator {
         }
     }
 
-    fn emit_vector_assignment_from_txn(&mut self, var_name: &str, body: &[Statement]) {
+    fn lhs_to_verilog(&self, lhs: &Expr, root_name: &str) -> String {
+        match lhs {
+            Expr::Identifier(_) | Expr::OwnedRef(_) => root_name.to_string(),
+            Expr::ListIndex(inner, idx) => {
+                format!(
+                    "{}[{}]",
+                    self.lhs_to_verilog(inner, root_name),
+                    self.expr_to_verilog(idx)
+                )
+            }
+            _ => root_name.to_string(),
+        }
+    }
+
+    fn emit_vector_assignment_from_txn(
+        &mut self,
+        var_name: &str,
+        body: &[Statement],
+        program: &Program,
+    ) {
         for stmt in body {
             match stmt {
-                Statement::Assignment { name, expr, .. } if name == var_name => {
-                    let expr_str = self.expr_to_verilog(expr);
-                    let lifted_expr = expr_str.replace(var_name, &format!("{}[i]", var_name));
-                    self.output.push_str(&format!(
-                        "                        {}[i] <= {};\n",
-                        name, lifted_expr
-                    ));
+                Statement::Assignment { lhs, expr, .. } => {
+                    if self.extract_root_var(lhs).as_deref() == Some(var_name) {
+                        let expr_str = self.expr_to_verilog(expr);
+                        let lifted_expr = expr_str.replace(var_name, &format!("{}[i]", var_name));
+
+                        match lhs {
+                            Expr::Identifier(_) | Expr::OwnedRef(_) => {
+                                self.output.push_str(&format!(
+                                    "                        {}[i] <= {};\n",
+                                    var_name, lifted_expr
+                                ));
+                            }
+                            Expr::ListIndex(_, idx_expr) => {
+                                let idx_str = self.expr_to_verilog(idx_expr);
+                                self.output.push_str(&format!(
+                                    "                        if (i == {}) begin\n",
+                                    idx_str
+                                ));
+                                self.output.push_str(&format!(
+                                    "                            {}[i] <= {};\n",
+                                    var_name, lifted_expr
+                                ));
+                                self.output.push_str("                        end\n");
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 Statement::Guarded {
                     condition,
@@ -614,7 +753,7 @@ impl VerilogGenerator {
                         "                        if ({}) begin\n",
                         self.expr_to_verilog(condition)
                     ));
-                    self.emit_vector_assignment_from_txn(var_name, statements);
+                    self.emit_vector_assignment_from_txn(var_name, statements, program);
                     self.output.push_str("                        end\n");
                 }
                 _ => {}
@@ -682,6 +821,21 @@ impl VerilogGenerator {
             ),
             Expr::And(l, r) => format!(
                 "({} && {})",
+                self.expr_to_verilog(l),
+                self.expr_to_verilog(r)
+            ),
+            Expr::BitAnd(l, r) => format!(
+                "({} & {})",
+                self.expr_to_verilog(l),
+                self.expr_to_verilog(r)
+            ),
+            Expr::BitOr(l, r) => format!(
+                "({} | {})",
+                self.expr_to_verilog(l),
+                self.expr_to_verilog(r)
+            ),
+            Expr::BitXor(l, r) => format!(
+                "({} ^ {})",
                 self.expr_to_verilog(l),
                 self.expr_to_verilog(r)
             ),

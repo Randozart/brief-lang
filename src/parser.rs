@@ -994,14 +994,12 @@ impl<'a> Parser<'a> {
         let mut bit_range: Option<BitRange> = None;
         let mut is_override = false;
 
+        // Optional mapping before colon
         loop {
             if let Some(Ok(Token::At)) = self.current_token() {
                 self.advance();
-                let addr_expr = self.parse_expression()?;
-                if let Expr::Integer(n) = addr_expr {
+                if let Expr::Integer(n) = self.parse_expression()? {
                     address = Some(n as u64);
-                } else {
-                    return Err("Address must be an integer".to_string());
                 }
             } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
@@ -1014,6 +1012,32 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::Colon)?;
         let ty = self.parse_type()?;
+
+        // Hardware mapping after type (Spec 2.2 / 3.0)
+        loop {
+            if let Some(Ok(Token::At)) = self.current_token() {
+                self.advance();
+                match self.current_token() {
+                    Some(Ok(Token::Integer(n))) => {
+                        address = Some(*n as u64);
+                        self.advance();
+                    }
+                    _ => return Err("Expected integer address after '@'".to_string()),
+                }
+                // Handle slash shorthand: @0x1000/x16 or @0x1000/0
+                if let Some(Ok(Token::Slash)) = self.current_token() {
+                    self.advance();
+                    bit_range = Some(self.parse_bit_range()?);
+                }
+            } else if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance();
+                bit_range = Some(self.parse_bit_range()?);
+                self.expect(Token::RBracket)?;
+            } else {
+                break;
+            }
+        }
+
         let expr = if let Some(Ok(Token::Eq)) = self.current_token() {
             self.advance();
             Some(self.parse_expression()?)
@@ -1036,6 +1060,7 @@ impl<'a> Parser<'a> {
     fn parse_bit_range(&mut self) -> Result<BitRange, String> {
         let result = match self.current_token() {
             Some(Ok(Token::Identifier(name))) => {
+                let name = name.clone();
                 if name == "x" || name == "*" {
                     self.advance();
                     if let Some(Ok(Token::Integer(n))) = self.current_token() {
@@ -1045,15 +1070,27 @@ impl<'a> Parser<'a> {
                     } else {
                         BitRange::Any(1)
                     }
+                } else if name.starts_with('x') {
+                    if let Ok(n) = name[1..].parse::<usize>() {
+                        self.advance();
+                        BitRange::Any(n)
+                    } else {
+                        return Err(format!("Invalid bit-width shorthand: {}", name));
+                    }
                 } else if let Ok(bit) = name.parse::<usize>() {
                     self.advance();
-                    if let Some(Ok(Token::Colon)) = self.current_token() {
-                        self.advance();
-                        let end = self.expect_identifier()?;
-                        if let Ok(end_bit) = end.parse::<usize>() {
-                            BitRange::Range(bit, end_bit)
-                        } else {
-                            return Err(format!("Expected bit number, got {}", end));
+                    if let Some(Ok(token)) = self.current_token() {
+                        match token {
+                            Token::Colon | Token::DotDot => {
+                                self.advance();
+                                let end = self.expect_identifier()?;
+                                if let Ok(end_bit) = end.parse::<usize>() {
+                                    BitRange::Range(bit, end_bit)
+                                } else {
+                                    return Err(format!("Expected bit number, got {}", end));
+                                }
+                            }
+                            _ => BitRange::Single(bit),
                         }
                     } else {
                         BitRange::Single(bit)
@@ -1065,14 +1102,19 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Integer(n))) => {
                 let n = *n as usize;
                 self.advance();
-                if let Some(Ok(Token::Colon)) = self.current_token() {
-                    self.advance();
-                    if let Some(Ok(Token::Integer(end))) = self.current_token() {
-                        let end = *end as usize;
-                        self.advance();
-                        BitRange::Range(n, end)
-                    } else {
-                        return Err("Expected end bit number".to_string());
+                if let Some(Ok(token)) = self.current_token() {
+                    match token {
+                        Token::Colon | Token::DotDot => {
+                            self.advance();
+                            if let Some(Ok(Token::Integer(end))) = self.current_token() {
+                                let end = *end as usize;
+                                self.advance();
+                                BitRange::Range(n, end)
+                            } else {
+                                return Err("Expected end bit number".to_string());
+                            }
+                        }
+                        _ => BitRange::Single(n),
                     }
                 } else {
                     BitRange::Single(n)
@@ -1092,19 +1134,26 @@ impl<'a> Parser<'a> {
         let mut address: u64 = 0;
         let mut bit_range: Option<BitRange> = None;
 
-        if let Some(Ok(Token::At)) = self.current_token() {
-            self.advance();
-            if let Some(Ok(Token::Integer(n))) = self.current_token() {
-                address = *n as u64;
+        loop {
+            if let Some(Ok(Token::At)) = self.current_token() {
                 self.advance();
-            } else {
-                return Err("Expected address after '@'".to_string());
-            }
-
-            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                match self.current_token() {
+                    Some(Ok(Token::Integer(n))) => {
+                        address = *n as u64;
+                        self.advance();
+                    }
+                    _ => return Err("Expected integer address after '@'".to_string()),
+                }
+                if let Some(Ok(Token::Slash)) = self.current_token() {
+                    self.advance();
+                    bit_range = Some(self.parse_bit_range()?);
+                }
+            } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
                 bit_range = Some(self.parse_bit_range()?);
                 self.expect(Token::RBracket)?;
+            } else {
+                break;
             }
         }
 
@@ -1621,14 +1670,12 @@ impl<'a> Parser<'a> {
                 let mut bit_range: Option<BitRange> = None;
                 let mut is_override = false;
 
+                // Optional mapping before colon
                 loop {
                     if let Some(Ok(Token::At)) = self.current_token() {
                         self.advance();
-                        let addr_expr = self.parse_expression()?;
-                        if let Expr::Integer(n) = addr_expr {
+                        if let Expr::Integer(n) = self.parse_expression()? {
                             address = Some(n as u64);
-                        } else {
-                            return Err("Address must be an integer".to_string());
                         }
                     } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                         self.advance();
@@ -1641,7 +1688,28 @@ impl<'a> Parser<'a> {
 
                 let ty = if let Some(Ok(Token::Colon)) = self.current_token() {
                     self.advance();
-                    Some(self.parse_type()?)
+                    let t = self.parse_type()?;
+
+                    // Hardware mapping after type
+                    loop {
+                        if let Some(Ok(Token::At)) = self.current_token() {
+                            self.advance();
+                            if let Expr::Integer(n) = self.parse_expression()? {
+                                address = Some(n as u64);
+                            }
+                            if let Some(Ok(Token::Slash)) = self.current_token() {
+                                self.advance();
+                                bit_range = Some(self.parse_bit_range()?);
+                            }
+                        } else if let Some(Ok(Token::LBracket)) = self.current_token() {
+                            self.advance();
+                            bit_range = Some(self.parse_bit_range()?);
+                            self.expect(Token::RBracket)?;
+                        } else {
+                            break;
+                        }
+                    }
+                    Some(t)
                 } else {
                     None
                 };
@@ -1821,18 +1889,6 @@ impl<'a> Parser<'a> {
                     self.expect(Token::Semicolon)?;
 
                     match expr {
-                        Expr::Identifier(name) => Ok(Statement::Assignment {
-                            is_owned: false,
-                            name,
-                            expr: right,
-                            timeout,
-                        }),
-                        Expr::OwnedRef(name) => Ok(Statement::Assignment {
-                            is_owned: true,
-                            name,
-                            expr: right,
-                            timeout,
-                        }),
                         Expr::Call(name, args) => {
                             if args.len() == 1 {
                                 if let Expr::Identifier(pattern) = &args[0] {
@@ -1848,7 +1904,11 @@ impl<'a> Parser<'a> {
                                 Err("Unification expects one pattern argument".to_string())
                             }
                         }
-                        _ => Err("Invalid left-hand side in assignment".to_string()),
+                        _ => Ok(Statement::Assignment {
+                            lhs: expr,
+                            expr: right,
+                            timeout,
+                        }),
                     }
                 } else {
                     self.expect(Token::Semicolon)?;
@@ -1910,7 +1970,15 @@ impl<'a> Parser<'a> {
             None => return Err("Expected type, found EOF".to_string()),
         };
 
-        // Check for generic type arguments: Type<Type1, Type2, ...>
+        // Check for bit-width decorator: Type@/N or Type@/0..7 or Type@/xN
+        if let Some(Ok(Token::At)) = self.current_token() {
+            if let Some(Ok(Token::Slash)) = self.peek() {
+                self.advance(); // consume @
+                self.advance(); // consume /
+                let range = self.parse_bit_range()?;
+                ty = Type::Constrained(Box::new(ty), range);
+            }
+        }
         if let Some(Ok(Token::Lt)) = self.current_token() {
             self.advance();
             let mut type_args = Vec::new();
@@ -1934,6 +2002,9 @@ impl<'a> Parser<'a> {
 
         // Check for vector dimension: Type[N]
         while let Some(Ok(Token::LBracket)) = self.current_token() {
+            if !matches!(self.peek(), Some(Ok(Token::Integer(_)))) {
+                break;
+            }
             self.advance();
             if let Some(Ok(Token::Integer(n))) = self.current_token() {
                 let size = *n as usize;
@@ -1977,11 +2048,44 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_and(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_equality()?;
+        let mut left = self.parse_bitwise_or()?;
         while let Some(Ok(Token::AndAnd)) = self.current_token() {
             self.advance();
-            let right = self.parse_equality()?;
+            let right = self.parse_bitwise_or()?;
             left = Expr::And(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_bitwise_or(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_bitwise_xor()?;
+        while let Some(Ok(Token::Pipe)) = self.current_token() {
+            self.advance();
+            let right = self.parse_bitwise_xor()?;
+            left = Expr::BitOr(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_bitwise_xor(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_bitwise_and()?;
+        while let Some(Ok(Token::Tilde)) = self.current_token() {
+            if let Some(Ok(Token::Slash)) = self.peek() {
+                break; // ~/ shorthand
+            }
+            self.advance();
+            let right = self.parse_bitwise_and()?;
+            left = Expr::BitXor(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_bitwise_and(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_equality()?;
+        while let Some(Ok(Token::Ampersand)) = self.current_token() {
+            self.advance();
+            let right = self.parse_equality()?;
+            left = Expr::BitAnd(Box::new(left), Box::new(right));
         }
         Ok(left)
     }

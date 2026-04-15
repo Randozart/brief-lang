@@ -146,18 +146,8 @@ impl Reactor {
         stmt: &Statement,
     ) -> Result<StmtResult, crate::interpreter::RuntimeError> {
         match stmt {
-            Statement::Assignment {
-                is_owned,
-                name,
-                expr,
-                timeout: _,
-            } => {
-                let value = interp.eval_expr(expr)?;
-                if *is_owned {
-                    interp.state.insert(name.clone(), value);
-                } else {
-                    interp.state.insert(name.clone(), value);
-                }
+            Statement::Assignment { .. } => {
+                interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
             }
             Statement::Let { name, expr, .. } => {
