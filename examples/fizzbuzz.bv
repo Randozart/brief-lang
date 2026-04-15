@@ -1,0 +1,23 @@
+let n: Int = 100;
+let current: Int = 1;
+let output: String = "";
+
+rct txn fizzbuzz [current <= n][true] {
+  let is_fizz: Bool = current % 3 == 0;
+  let is_buzz: Bool = current % 5 == 0;
+  let result: String = "";
+
+  if is_fizz && is_buzz {
+    &result = "FizzBuzz";
+  } else if is_fizz {
+    &result = "Fizz";
+  } else if is_buzz {
+    &result = "Buzz";
+  } else {
+    &result = String(current);
+  };
+
+  &output = output + result + "\n";
+  &current = current + 1;
+  term;
+};

@@ -173,36 +173,61 @@ impl ImportResolver {
             }
         }
 
-        // Default: Brief module (.bv)
-        let file_name = format!("{}.bv", path_str.replace('.', "/"));
+        // Default: Brief module (.bv or .ebv)
+        let module_path = path_str.replace('.', "/");
         let source_dir = source_file
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
 
+        // Try both .bv and .ebv extensions
         let mut found_path = None;
+        let mut found_both = false;
         for search_dir in &self.search_paths {
-            let candidate = source_dir.join(search_dir).join(&file_name);
-            if candidate.exists() {
-                found_path = Some(candidate);
+            let bv_candidate = source_dir
+                .join(search_dir)
+                .join(format!("{}.bv", module_path));
+            let ebv_candidate = source_dir
+                .join(search_dir)
+                .join(format!("{}.ebv", module_path));
+
+            if bv_candidate.exists() && ebv_candidate.exists() {
+                found_both = true;
                 break;
+            } else if bv_candidate.exists() {
+                found_path = Some(bv_candidate);
+            } else if ebv_candidate.exists() {
+                found_path = Some(ebv_candidate);
             }
         }
 
-        if found_path.is_none() {
-            let direct = source_dir.join(&file_name);
-            if direct.exists() {
-                found_path = Some(direct);
+        if !found_both && found_path.is_none() {
+            let direct_bv = source_dir.join(format!("{}.bv", module_path));
+            let direct_ebv = source_dir.join(format!("{}.ebv", module_path));
+
+            if direct_bv.exists() && direct_ebv.exists() {
+                found_both = true;
+            } else if direct_bv.exists() {
+                found_path = Some(direct_bv);
+            } else if direct_ebv.exists() {
+                found_path = Some(direct_ebv);
             }
+        }
+
+        if found_both {
+            return Err(format!(
+                "Ambiguous import '{}'. Both .bv and .ebv files exist. Please specify the extension.",
+                path_str
+            ));
         }
 
         let resolved_path = found_path.ok_or_else(|| {
             format!(
-                "Cannot find module '{}'. Searched in: lib/{}.bv, imports/{}.bv, ./{}.bv",
+                "Cannot find module '{}'. Searched in: lib/{}.{{bv,ebv}}, imports/{}.{{bv,ebv}}, ./{}.{{bv,ebv}}",
                 path_str,
-                path_str.replace('.', "/"),
-                path_str.replace('.', "/"),
-                path_str.replace('.', "/")
+                module_path,
+                module_path,
+                module_path
             )
         })?;
 

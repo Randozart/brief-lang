@@ -167,6 +167,11 @@ impl TypeChecker {
                 TopLevel::Transaction(txn) => {
                     self.check_transaction(txn);
                 }
+                TopLevel::Trigger(trg) => {
+                    // Triggers are const values that can change at any time (hardware input)
+                    // Register them with their declared type so they can be used in expressions
+                    self.declare_variable(&trg.name, trg.ty.clone());
+                }
                 TopLevel::ForeignBinding {
                     name,
                     toml_path,

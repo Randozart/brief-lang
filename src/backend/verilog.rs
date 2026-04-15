@@ -9,6 +9,19 @@ pub struct HardwareConfig {
     pub bus: Option<BusConfig>,
 }
 
+impl Default for HardwareConfig {
+    fn default() -> Self {
+        HardwareConfig {
+            target: TargetConfig {
+                name: "default".to_string(),
+                clock_hz: 100_000_000,
+            },
+            io: HashMap::new(),
+            bus: None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TargetConfig {
     pub name: String,
@@ -80,20 +93,20 @@ impl VerilogGenerator {
             match item {
                 TopLevel::StateDecl(decl) => {
                     if let Some(addr) = decl.address {
-                        let addr_str_long = format!("0x{:08x}", addr);
-                        let addr_str_short = format!("0x{:x}", addr);
+                        let addr_str_upper = format!("0x{:08X}", addr);
+                        let addr_str_lower = format!("0x{:08x}", addr);
 
                         let io_cfg = self
                             .hw_config
                             .io
-                            .get(&addr_str_long)
-                            .or_else(|| self.hw_config.io.get(&addr_str_short));
+                            .get(&addr_str_upper)
+                            .or_else(|| self.hw_config.io.get(&addr_str_lower));
 
                         if let Some(io_cfg) = io_cfg {
                             let width = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
                             let direction = "output";
                             self.output.push_str(&format!(
-                                ",\n    {} logic {} {} // pin: {}",
+                                ",\n    {} logic {} {} /* pin: {} */",
                                 direction,
                                 if width > 1 {
                                     format!("[{}:0]", width - 1)
@@ -107,20 +120,20 @@ impl VerilogGenerator {
                     }
                 }
                 TopLevel::Trigger(trg) => {
-                    let addr_str_long = format!("0x{:08x}", trg.address);
-                    let addr_str_short = format!("0x{:x}", trg.address);
+                    let addr_str_upper = format!("0x{:08X}", trg.address);
+                    let addr_str_lower = format!("0x{:08x}", trg.address);
 
                     let io_cfg = self
                         .hw_config
                         .io
-                        .get(&addr_str_long)
-                        .or_else(|| self.hw_config.io.get(&addr_str_short));
+                        .get(&addr_str_upper)
+                        .or_else(|| self.hw_config.io.get(&addr_str_lower));
 
                     if let Some(io_cfg) = io_cfg {
                         let width = self.get_bit_width(&trg.ty, trg.bit_range.as_ref());
                         let direction = "input";
                         self.output.push_str(&format!(
-                            ",\n    {} logic {} {} // pin: {}",
+                            ",\n    {} logic {} {} /* pin: {} */",
                             direction,
                             if width > 1 {
                                 format!("[{}:0]", width - 1)
@@ -191,16 +204,50 @@ impl VerilogGenerator {
             if let TopLevel::StateDecl(decl) = item {
                 // Skip if it's a pin (already in header)
                 if let Some(addr) = decl.address {
-                    let addr_str_long = format!("0x{:08x}", addr);
-                    let addr_str_short = format!("0x{:x}", addr);
+                    let addr_str_long = format!("0x{:08X}", addr);
+                    let addr_str_short = format!("0x{:X}", addr);
                     if self.hw_config.io.contains_key(&addr_str_long)
                         || self.hw_config.io.contains_key(&addr_str_short)
+                        || self
+                            .hw_config
+                            .io
+                            .contains_key(&addr_str_long.to_lowercase())
+                        || self
+                            .hw_config
+                            .io
+                            .contains_key(&addr_str_short.to_lowercase())
                     {
+                        eprintln!(
+                            "DEBUG emit_signals: skipping decl {} at {}",
+                            decl.name, addr_str_long
+                        );
                         continue;
                     }
                 }
 
                 self.emit_type_signals(&decl.name, &decl.ty, decl.bit_range.as_ref());
+            }
+            if let TopLevel::Trigger(trg) = item {
+                let addr_str_long = format!("0x{:08X}", trg.address);
+                let addr_str_short = format!("0x{:X}", trg.address);
+                let in_hw = self.hw_config.io.contains_key(&addr_str_long)
+                    || self.hw_config.io.contains_key(&addr_str_short)
+                    || self
+                        .hw_config
+                        .io
+                        .contains_key(&addr_str_long.to_lowercase())
+                    || self
+                        .hw_config
+                        .io
+                        .contains_key(&addr_str_short.to_lowercase());
+                eprintln!(
+                    "DEBUG emit_signals: trigger {} at {} in_hw={}",
+                    trg.name, addr_str_long, in_hw
+                );
+                if in_hw {
+                    continue;
+                }
+                self.emit_type_signals(&trg.name, &trg.ty, trg.bit_range.as_ref());
             }
         }
         self.output.push_str("\n");
@@ -380,6 +427,27 @@ impl VerilogGenerator {
         // Emit always_ff for each state variable
         for item in &program.items {
             if let TopLevel::StateDecl(decl) = item {
+                if let Some(addr) = decl.address {
+                    let addr_str_long = format!("0x{:08X}", addr);
+                    let addr_str_short = format!("0x{:X}", addr);
+                    if self.hw_config.io.contains_key(&addr_str_long)
+                        || self.hw_config.io.contains_key(&addr_str_short)
+                        || self
+                            .hw_config
+                            .io
+                            .contains_key(&addr_str_long.to_lowercase())
+                        || self
+                            .hw_config
+                            .io
+                            .contains_key(&addr_str_short.to_lowercase())
+                    {
+                        eprintln!(
+                            "DEBUG emit_logic: skipping decl {} at {}",
+                            decl.name, addr_str_long
+                        );
+                        continue;
+                    }
+                }
                 self.emit_variable_logic(
                     &decl.name,
                     decl.expr.as_ref(),
@@ -387,7 +455,41 @@ impl VerilogGenerator {
                     program,
                 );
             }
+            if let TopLevel::Trigger(trg) = item {
+                let addr_str_long = format!("0x{:08X}", trg.address);
+                let addr_str_short = format!("0x{:X}", trg.address);
+                if self.hw_config.io.contains_key(&addr_str_long)
+                    || self.hw_config.io.contains_key(&addr_str_short)
+                    || self
+                        .hw_config
+                        .io
+                        .contains_key(&addr_str_long.to_lowercase())
+                    || self
+                        .hw_config
+                        .io
+                        .contains_key(&addr_str_short.to_lowercase())
+                {
+                    eprintln!(
+                        "DEBUG emit_logic: skipping trigger {} at {}",
+                        trg.name, addr_str_long
+                    );
+                    continue;
+                }
+                self.emit_trigger_logic(&trg.name);
+            }
         }
+    }
+
+    fn emit_trigger_logic(&mut self, name: &str) {
+        self.output
+            .push_str(&format!("    // Logic for trigger: {}\n", name));
+        self.output.push_str("    always_ff @(posedge clk) begin\n");
+        self.output.push_str("        if (!rst_n) begin\n");
+        self.output
+            .push_str(&format!("            {} <= 1'b0;\n", name));
+        self.output.push_str("        end else begin\n");
+        self.output.push_str("        end\n");
+        self.output.push_str("    end\n\n");
     }
 
     fn collect_writes(&self, body: &[Statement], writes: &mut HashSet<String>) {
@@ -470,10 +572,12 @@ impl VerilogGenerator {
             .push_str(&format!("    // Logic for variable: {}\n", name));
 
         if is_vector {
-            self.output.push_str("    genvar i;\n");
+            let genvar_name = format!("{}_i", name);
+            self.output
+                .push_str(&format!("    genvar {};\n", genvar_name));
             self.output.push_str(&format!(
-                "    generate\n        for (i = 0; i < {}; i = i + 1) begin : {}_logic\n",
-                vector_size, name
+                "    generate\n        for ({} = 0; {} < {}; {} = {} + 1) begin : {}_logic\n",
+                genvar_name, genvar_name, vector_size, genvar_name, genvar_name, name
             ));
             self.output
                 .push_str("            always_ff @(posedge clk) begin\n");
@@ -481,13 +585,16 @@ impl VerilogGenerator {
 
             if let Some(expr) = init_expr {
                 self.output.push_str(&format!(
-                    "                    {}[i] <= {};\n",
+                    "                    {}[{}] <= {};\n",
                     name,
+                    genvar_name,
                     self.expr_to_verilog(expr)
                 ));
             } else {
-                self.output
-                    .push_str(&format!("                    {}[i] <= 0;\n", name));
+                self.output.push_str(&format!(
+                    "                    {}[{}] <= 0;\n",
+                    name, genvar_name
+                ));
             }
 
             self.output.push_str("                end else begin\n");
@@ -715,29 +822,64 @@ impl VerilogGenerator {
         body: &[Statement],
         program: &Program,
     ) {
+        let genvar_name = format!("{}_i", var_name);
+
+        // Collect all vector names from program for lifting
+        let vector_names: Vec<String> = program
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let TopLevel::StateDecl(decl) = item {
+                    if let Type::Vector(_, size) = &decl.ty {
+                        if *size > 1 {
+                            return Some(decl.name.clone());
+                        }
+                    }
+                }
+                None
+            })
+            .collect();
+
         for stmt in body {
             match stmt {
                 Statement::Assignment { lhs, expr, .. } => {
                     if self.extract_root_var(lhs).as_deref() == Some(var_name) {
                         let expr_str = self.expr_to_verilog(expr);
-                        let lifted_expr = expr_str.replace(var_name, &format!("{}[i]", var_name));
+
+                        // Lift all vector references in the expression (but not already indexed ones)
+                        let mut lifted_expr = expr_str.clone();
+                        for vec_name in &vector_names {
+                            // Only replace if not already indexed in original expr
+                            let pattern = format!("{}[", vec_name);
+                            if !expr_str.contains(&pattern) {
+                                // Match only standalone word vec_name to avoid partial matches
+                                // and replace it with vec_name[genvar_name]
+                                let re = regex::Regex::new(&format!(r"\b{}\b", vec_name)).unwrap();
+                                lifted_expr = re
+                                    .replace_all(
+                                        &lifted_expr,
+                                        &format!("{}[{}]", vec_name, genvar_name),
+                                    )
+                                    .to_string();
+                            }
+                        }
 
                         match lhs {
                             Expr::Identifier(_) | Expr::OwnedRef(_) => {
                                 self.output.push_str(&format!(
-                                    "                        {}[i] <= {};\n",
-                                    var_name, lifted_expr
+                                    "                        {}[{}] <= {};\n",
+                                    var_name, genvar_name, lifted_expr
                                 ));
                             }
                             Expr::ListIndex(_, idx_expr) => {
                                 let idx_str = self.expr_to_verilog(idx_expr);
                                 self.output.push_str(&format!(
-                                    "                        if (i == {}) begin\n",
-                                    idx_str
+                                    "                        if ({} == {}) begin\n",
+                                    genvar_name, idx_str
                                 ));
                                 self.output.push_str(&format!(
-                                    "                            {}[i] <= {};\n",
-                                    var_name, lifted_expr
+                                    "                            {}[{}] <= {};\n",
+                                    var_name, genvar_name, lifted_expr
                                 ));
                                 self.output.push_str("                        end\n");
                             }

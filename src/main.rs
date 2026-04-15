@@ -923,9 +923,14 @@ fn run_verilog(
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to SystemVerilog: {}", file_path.display());
 
-    // Load HW config
-    let hw_config_content = fs::read_to_string(hw_config_path)?;
-    let hw_config: backend::verilog::HardwareConfig = toml::from_str(&hw_config_content)?;
+    // Load HW config (use default if path is /dev/null)
+    let hw_config = if hw_config_path.to_str() == Some("/dev/null") {
+        eprintln!("Note: No hardware config - using defaults.");
+        backend::verilog::HardwareConfig::default()
+    } else {
+        let hw_config_content = fs::read_to_string(hw_config_path)?;
+        toml::from_str(&hw_config_content)?
+    };
 
     // Standard Brief pipeline
     let source = fs::read_to_string(file_path)?;
@@ -1467,7 +1472,13 @@ fn main() {
                 } else if arg == "--hw" && i + 1 < args.len() {
                     hw_config = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".ebv") || arg.ends_with(".bv") {
+                } else if arg.ends_with(".ebv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else if arg.ends_with(".bv") {
+                    if hw_config.is_some() {
+                        eprintln!("Warning: --hw flag is ignored for .bv files. Use .ebv for hardware mapping.");
+                    }
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -1475,21 +1486,45 @@ fn main() {
                 }
             }
 
-            if let (Some(path), Some(hw)) = (file_path, hw_config) {
-                if let Err(e) = run_verilog(
-                    &path,
-                    &hw,
-                    out_dir.as_deref(),
-                    no_stdlib,
-                    stdlib_path.clone(),
-                ) {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
+            if let Some(path) = file_path {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "ebv" {
+                    if let Some(hw) = hw_config {
+                        if let Err(e) = run_verilog(
+                            &path,
+                            &hw,
+                            out_dir.as_deref(),
+                            no_stdlib,
+                            stdlib_path.clone(),
+                        ) {
+                            eprintln!("Error: {}", e);
+                            std::process::exit(1);
+                        }
+                    } else {
+                        eprintln!("Error: .ebv files require --hw <hardware.toml>");
+                        eprintln!(
+                            "Usage: {} verilog <file.ebv> --hw <hardware.toml> [--out <dir>]",
+                            args[0]
+                        );
+                        std::process::exit(1);
+                    }
+                } else if ext == "bv" {
+                    let hw_path = hw_config.unwrap_or_else(|| PathBuf::from("/dev/null"));
+                    if let Err(e) = run_verilog(
+                        &path,
+                        &hw_path,
+                        out_dir.as_deref(),
+                        no_stdlib,
+                        stdlib_path.clone(),
+                    ) {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             } else {
-                eprintln!("Error: Missing .ebv file or --hw <hardware.toml>");
+                eprintln!("Error: Missing .bv or .ebv file");
                 eprintln!(
-                    "Usage: {} verilog <file.ebv> --hw <hardware.toml> [--out <dir>]",
+                    "Usage: {} verilog <file.bv|file.ebv> [--hw <hardware.toml>] [--out <dir>]",
                     args[0]
                 );
                 std::process::exit(1);
