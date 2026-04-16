@@ -534,6 +534,17 @@ impl fmt::Display for SyntaxError {
     }
 }
 
+impl From<String> for SyntaxError {
+    fn from(s: String) -> Self {
+        SyntaxError::InvalidStatement {
+            reason: s,
+            span: Span::dummy(),
+        }
+    }
+}
+
+impl std::error::Error for SyntaxError {}
+
 #[derive(Debug, Clone)]
 pub enum ImportError {
     ModuleNotFound {

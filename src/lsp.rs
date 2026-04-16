@@ -186,18 +186,8 @@ impl LspServer {
         let mut program = match parser.parse() {
             Ok(p) => p,
             Err(e) => {
-                return (
-                    vec![serde_json::json!({
-                        "range": {
-                            "start": { "line": 0, "character": 0 },
-                            "end": { "line": 0, "character": 0 }
-                        },
-                        "severity": 1,
-                        "source": "brief-parser",
-                        "message": format!("Parse error: {}", e)
-                    })],
-                    None,
-                );
+                let diag = self.syntax_error_to_json(&e);
+                return (vec![diag], None);
             }
         };
 
@@ -244,11 +234,15 @@ impl LspServer {
                     if is_real_script_tag {
                         if let Some(tag_end_rel) = source[current_pos..].find('>') {
                             let tag_end = current_pos + tag_end_rel + 1;
+                            // Mask the <script ...> tag itself byte-by-byte
                             for c in source[current_pos..tag_end].chars() {
                                 if c == '\n' {
                                     output.push('\n');
                                 } else {
-                                    output.push(' ');
+                                    // Use same number of bytes as the character
+                                    for _ in 0..c.len_utf8() {
+                                        output.push(' ');
+                                    }
                                 }
                             }
                             current_pos = tag_end;
@@ -257,34 +251,72 @@ impl LspServer {
                         }
                     }
                 }
-                // Not a script start, mask it
+                // Outside script, mask everything byte-by-byte
                 let c = source[current_pos..].chars().next().unwrap();
                 if c == '\n' {
                     output.push('\n');
                 } else {
-                    output.push(' ');
+                    for _ in 0..c.len_utf8() {
+                        output.push(' ');
+                    }
                 }
                 current_pos += c.len_utf8();
             } else {
                 if source[current_pos..].starts_with("</script>") {
                     in_script = false;
+                    // Mask the </script> tag itself byte-by-byte
                     for c in "</script>".chars() {
                         if c == '\n' {
                             output.push('\n');
                         } else {
-                            output.push(' ');
+                            for _ in 0..c.len_utf8() {
+                                output.push(' ');
+                            }
                         }
                         current_pos += c.len_utf8();
                     }
                     continue;
                 }
-                // Inside script, keep it
+                // Inside script, keep characters as they are
                 let c = source[current_pos..].chars().next().unwrap();
                 output.push(c);
                 current_pos += c.len_utf8();
             }
         }
         output
+    }
+
+    fn syntax_error_to_json(&self, err: &crate::errors::SyntaxError) -> Value {
+        use crate::errors::SyntaxError;
+        let (message, span) = match err {
+            SyntaxError::UnexpectedToken {
+                expected,
+                found,
+                span,
+            } => (format!("Expected {}, found {}", expected, found), *span),
+            SyntaxError::UnexpectedEOF { expected, span } => {
+                (format!("Expected {}, found EOF", expected), *span)
+            }
+            SyntaxError::InvalidExpression { reason, span } => {
+                (format!("Invalid expression: {}", reason), *span)
+            }
+            SyntaxError::InvalidStatement { reason, span } => {
+                (format!("Invalid statement: {}", reason), *span)
+            }
+            SyntaxError::InvalidType { type_name, span } => {
+                (format!("Invalid type: {}", type_name), *span)
+            }
+        };
+
+        serde_json::json!({
+            "range": {
+                "start": { "line": span.line.saturating_sub(1), "character": span.column.saturating_sub(1) },
+                "end": { "line": span.line.saturating_sub(1), "character": span.column + 1 }
+            },
+            "severity": 1,
+            "source": "brief-parser",
+            "message": message
+        })
     }
 
     fn diagnostic_to_json(&self, diag: &Diagnostic) -> Value {
@@ -558,7 +590,7 @@ let x = 1;
     }
 
     #[test]
-    fn test_extract_brief_source_bv() {
+    fn test_extract_brief_source_rbv_byte_accuracy() {
         let lsp = LspServer {
             connection: Connection::stdio().0,
             documents: Arc::new(Mutex::new(DocumentStore {
@@ -566,8 +598,16 @@ let x = 1;
             })),
         };
 
-        let bv_source = "let x: Int = 10;";
-        let extracted = lsp.extract_brief_source(bv_source, false);
-        assert_eq!(extracted, bv_source);
+        // Source with multi-byte character (🦀 is 4 bytes)
+        let rbv_source = "🦀<script>let x = 1;</script>";
+        let extracted = lsp.extract_brief_source(rbv_source, true);
+
+        assert_eq!(rbv_source.len(), extracted.len());
+        assert!(extracted.contains("let x = 1;"));
+
+        // Find position of "let" in both
+        let original_pos = rbv_source.find("let").unwrap();
+        let extracted_pos = extracted.find("let").unwrap();
+        assert_eq!(original_pos, extracted_pos);
     }
 }
