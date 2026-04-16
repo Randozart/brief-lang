@@ -28,7 +28,7 @@ and code diverged.
 
 Brief is not so much a software language, as it tries to be a language of variable logic states.
 
-Most programming languages are built around _operations in sequence_. Temporal instructions that require a CPU to keep track of time. This creates an inherent bottleneck where logic must wait in a single-file line, and if the line needs to be wider, this must be explicitly declared.
+Most programming languages are built around _operations in sequence_. Temporal instructions that require a CPU to keep track of time. This creates an inherent bottleneck where logic must wait in a single-file line, and if the line needs to be wider, this must be explicitly declared, and all variant states resulting from that accounted for by the programmer.
 
 Brief instead describes the _sequence of operations_, the spatial connections between logical states. That which must happen is inferred automatically, and that which logically cannot will be equally found out at compile time.
 
