@@ -30,8 +30,8 @@
           ".bv"
         ],
         "icon": {
-          "light": "./images/brief-icon.svg",
-          "dark": "./images/brief-icon.svg"
+          "light": "./images/brief-logo.svg",
+          "dark": "./images/brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
@@ -45,8 +45,8 @@
           ".rbv"
         ],
         "icon": {
-          "light": "./images/r-brief-icon.svg",
-          "dark": "./images/r-brief-icon.svg"
+          "light": "./images/r-brief-logo.svg",
+          "dark": "./images/r-brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
@@ -60,8 +60,8 @@
           ".ebv"
         ],
         "icon": {
-          "light": "./images/e-brief-icon.svg",
-          "dark": "./images/e-brief-icon.svg"
+          "light": "./images/e-brief-logo.svg",
+          "dark": "./images/e-brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
       }
