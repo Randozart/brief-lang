@@ -1,6 +1,16 @@
-[target]
+[project]
 name = "blinker"
+version = "1.0.0"
+
+[target]
+fpga = "generic"
 clock_hz = 100_000_000
 
+[interface]
+name = "parallel"
+
+[memory]
+"0x4000" = { size = 1, type = "flipflop", element_bits = 1 }
+
 [io]
-"0x4000" = { pin = "P11" }
+"0x4000" = { pin = "P11", direction = "output" }

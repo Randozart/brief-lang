@@ -1,12 +1,51 @@
 use brief_compiler::{
-    annotator, ast, backend, desugarer, errors, import_resolver, interpreter, lsp, manifest,
-    parser, proof_engine, rbv, typechecker, view_compiler,
+    annotator, ast, backend, desugarer, errors, hardware_validator, import_resolver, interpreter,
+    lsp, manifest, parser, proof_engine, rbv, typechecker, view_compiler,
 };
 use notify::Watcher;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+fn format_hardware_diagnostics(
+    diags: &[errors::Diagnostic],
+    source: &str,
+    file_name: &str,
+) -> String {
+    let mut output = String::new();
+    for diag in diags {
+        let severity_prefix = match diag.severity {
+            errors::Severity::Error => "error",
+            errors::Severity::Warning => "warning",
+            errors::Severity::Info => "info",
+            errors::Severity::Note => "note",
+        };
+        output.push_str(&format!(
+            "{}[{}]: {}\n",
+            severity_prefix, diag.code, diag.title
+        ));
+        if let Some(span) = diag.span {
+            let mut s = span;
+            // The format method doesn't take a file name, so we prefix it manually if needed
+            // But span.format usually produces " --> file:line:col"
+            // We can replace "file" with the actual file name
+            let formatted = s
+                .format(source)
+                .replace(" --> file:", &format!(" --> {}:", file_name));
+            output.push_str(&formatted);
+            output.push_str("\n");
+        }
+        for explanation in &diag.explanation {
+            output.push_str(&format!("  = {}\n", explanation));
+        }
+        for hint in &diag.hints {
+            output.push_str(&format!("  = hint: {}\n", hint));
+        }
+        output.push('\n');
+    }
+    output
+}
 
 fn format_type_errors(errors: &[typechecker::TypeError], file_name: &str) -> String {
     let mut output = String::new();
@@ -955,6 +994,32 @@ fn run_verilog(
             format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.ebv"))
         );
         return Err("Type errors".into());
+    }
+
+    // Hardware validation
+    let is_ebv = file_path.extension().map(|e| e == "ebv").unwrap_or(false);
+    let hw_diagnostics = hardware_validator::HardwareValidator::validate(
+        &program,
+        Some(&hw_config),
+        "verilog",
+        is_ebv,
+    );
+
+    if !hw_diagnostics.is_empty() {
+        eprintln!(
+            "{}",
+            format_hardware_diagnostics(
+                &hw_diagnostics,
+                &source,
+                file_path.to_str().unwrap_or("main.ebv")
+            )
+        );
+        let has_errors = hw_diagnostics
+            .iter()
+            .any(|d| d.severity == errors::Severity::Error);
+        if is_ebv && has_errors {
+            return Err("Hardware validation failed for .ebv".into());
+        }
     }
 
     // Verilog generation

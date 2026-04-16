@@ -6,6 +6,7 @@ pub mod cache;
 pub mod desugarer;
 pub mod errors;
 pub mod ffi;
+pub mod hardware_validator;
 pub mod import_resolver;
 pub mod interpreter;
 pub mod lexer;

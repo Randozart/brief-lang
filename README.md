@@ -24,6 +24,22 @@ If a bug still occurs, it's because the contract didn't fully express the intent
 But that makes the bug easy to find, as the contract shows exactly where expectation
 and code diverged.
 
+## The Thesis: Topology over Timing
+
+Brief is not so much a software language, as it tries to be a language of variable logic states.
+
+Most programming languages are built around _operations in sequence_. Temporal instructions that require a CPU to keep track of time. This creates an inherent bottleneck where logic must wait in a single-file line, and if the line needs to be wider, this must be explicitly declared.
+
+Brief instead describes the _sequence of operations_, the spatial connections between logical states. That which must happen is inferred automatically, and that which logically cannot will be equally found out at compile time.
+
+*   **Logic as a Map:** Brief defines a world where roads exist all at once. The "sequence" is the _connection_, not the _timing_. 
+*   **Physical Isomorphism:** Because the logic defines a *shape* rather than a *schedule*, it adapts to the physics of its material:
+    *   **In Software:** The compiler hires a worker (the CPU) to walk these roads in order.
+    *   **In Hardware:** The compiler builds the roads directly out of copper.
+*   **Variable Logic:** The logic remains invariant while the material changes. A square is a square whether it is drawn in the sand or forged in steel.
+
+By moving from _instruction_ to _connection_, Brief allows a single logic to manifest as either a software schedule or a hardware netlist without changing its fundamental shape.
+
 ## Syntax Highlighting & Language Server
 
 VS Code / VSCodium syntax highlighting and **Language Server integration** for `.bv`, `.rbv`, and `.ebv` is available in `syntax-highlighter/`.
