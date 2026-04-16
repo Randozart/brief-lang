@@ -160,7 +160,7 @@ impl LspServer {
     }
 
     fn check_document(&self, uri: &str, text: &str) {
-        let (diagnostics, program) = self.run_type_check(text);
+        let (diagnostics, program) = self.run_type_check(uri, text);
 
         {
             let mut docs = self.documents.lock().unwrap();
@@ -178,8 +178,11 @@ impl LspServer {
         let _ = self.connection.sender.send(Message::Notification(notif));
     }
 
-    fn run_type_check(&self, source: &str) -> (Vec<Value>, Option<Program>) {
-        let mut parser = parser::Parser::new(source);
+    fn run_type_check(&self, uri: &str, text: &str) -> (Vec<Value>, Option<Program>) {
+        let is_rbv = uri.ends_with(".rbv");
+        let source = self.extract_brief_source(text, is_rbv);
+
+        let mut parser = parser::Parser::new(&source);
         let mut program = match parser.parse() {
             Ok(p) => p,
             Err(e) => {
@@ -216,6 +219,62 @@ impl LspServer {
         }
 
         (diagnostics, Some(program))
+    }
+
+    fn extract_brief_source(&self, source: &str, is_rbv: bool) -> String {
+        if !is_rbv {
+            return source.to_string();
+        }
+
+        let mut output = String::with_capacity(source.len());
+        let mut in_script = false;
+        let mut current_pos = 0;
+
+        while current_pos < source.len() {
+            if !in_script {
+                if source[current_pos..].starts_with("<script") {
+                    if let Some(tag_end_rel) = source[current_pos..].find('>') {
+                        let tag_end = current_pos + tag_end_rel + 1;
+                        for c in source[current_pos..tag_end].chars() {
+                            if c == '\n' {
+                                output.push('\n');
+                            } else {
+                                output.push(' ');
+                            }
+                        }
+                        current_pos = tag_end;
+                        in_script = true;
+                        continue;
+                    }
+                }
+                // Not a script start, mask it
+                let c = source[current_pos..].chars().next().unwrap();
+                if c == '\n' {
+                    output.push('\n');
+                } else {
+                    output.push(' ');
+                }
+                current_pos += c.len_utf8();
+            } else {
+                if source[current_pos..].starts_with("</script>") {
+                    in_script = false;
+                    for c in "</script>".chars() {
+                        if c == '\n' {
+                            output.push('\n');
+                        } else {
+                            output.push(' ');
+                        }
+                        current_pos += c.len_utf8();
+                    }
+                    continue;
+                }
+                // Inside script, keep it
+                let c = source[current_pos..].chars().next().unwrap();
+                output.push(c);
+                current_pos += c.len_utf8();
+            }
+        }
+        output
     }
 
     fn diagnostic_to_json(&self, diag: &Diagnostic) -> Value {
@@ -424,5 +483,58 @@ pub fn run_lsp_server(_mode: ErrorMode) {
     if let Err(e) = server.run() {
         eprintln!("LSP server error: {}", e);
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_brief_source_rbv() {
+        let lsp = LspServer {
+            connection: Connection::stdio().0,
+            documents: Arc::new(Mutex::new(DocumentStore {
+                docs: HashMap::new(),
+            })),
+        };
+
+        let rbv_source = r#"
+<script type="brief">
+let x: Int = 10;
+</script>
+<view>
+  <div>Test</div>
+</view>
+"#;
+        let extracted = lsp.extract_brief_source(rbv_source, true);
+
+        // The script tag should be replaced by spaces/newlines
+        assert!(extracted.contains("let x: Int = 10;"));
+        assert!(!extracted.contains("<script"));
+        assert!(!extracted.contains("<view>"));
+        assert!(!extracted.contains("<div>"));
+
+        // Lines should be preserved
+        let original_lines: Vec<&str> = rbv_source.lines().collect();
+        let extracted_lines: Vec<&str> = extracted.lines().collect();
+        assert_eq!(original_lines.len(), extracted_lines.len());
+
+        // Line 3 (1-based) should contain the code
+        assert!(extracted_lines[2].contains("let x: Int = 10;"));
+    }
+
+    #[test]
+    fn test_extract_brief_source_bv() {
+        let lsp = LspServer {
+            connection: Connection::stdio().0,
+            documents: Arc::new(Mutex::new(DocumentStore {
+                docs: HashMap::new(),
+            })),
+        };
+
+        let bv_source = "let x: Int = 10;";
+        let extracted = lsp.extract_brief_source(bv_source, false);
+        assert_eq!(extracted, bv_source);
     }
 }
