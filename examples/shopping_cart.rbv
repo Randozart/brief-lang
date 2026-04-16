@@ -1,9 +1,9 @@
 <script>
 rstruct ShoppingCart {
-  product: Int;
-  items: Int;
-  total: Int;
-  step: Int;
+  product: Int = 0;
+  items: Int = 0;
+  total: Int = 0;
+  step: Int = 0;
 
   // Product selection transactions - set the selected product
   txn ShoppingCart.select_laptop [true][product == 1] { &product = 1; term; };
@@ -87,7 +87,7 @@ rstruct ShoppingCart {
       <button b-trigger:click="reset">Shop Again</button>
     </span>
   </div>
-}
+};
 </script>
 
 <view><ShoppingCart /></view>

@@ -1,6 +1,6 @@
 <script type="brief">
 rstruct Counter {
-  count: Int;
+  count: Int = 0;
 
   txn Counter.increment [true][@count + 1 == count] {
     &count = count + 1;
@@ -23,7 +23,7 @@ rstruct Counter {
     <button b-trigger:click="decrement">-</button>
     <button b-trigger:click="reset">Reset</button>
   </div>
-}
+};
 </script>
 
 <view>
