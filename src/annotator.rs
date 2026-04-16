@@ -346,6 +346,8 @@ impl Annotator {
             Expr::BitAnd(l, r) => format!("({} & {})", self.format_expr(l), self.format_expr(r)),
             Expr::BitOr(l, r) => format!("({} | {})", self.format_expr(l), self.format_expr(r)),
             Expr::BitXor(l, r) => format!("({} ^ {})", self.format_expr(l), self.format_expr(r)),
+            Expr::Shl(l, r) => format!("({} << {})", self.format_expr(l), self.format_expr(r)),
+            Expr::Shr(l, r) => format!("({} >> {})", self.format_expr(l), self.format_expr(r)),
             Expr::Not(e) => format!("!{}", self.format_expr(e)),
             Expr::Neg(e) => format!("-{}", self.format_expr(e)),
             Expr::BitNot(e) => format!("~{}", self.format_expr(e)),

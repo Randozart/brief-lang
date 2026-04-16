@@ -2,6 +2,13 @@ use crate::ast::*;
 use crate::errors::Span;
 use crate::lexer::Token;
 use logos::{Lexer, Logos};
+use std::path::Path;
+
+pub fn parse_hardware_config(path: &Path) -> Result<HardwareConfig, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read hardware config: {}", e))?;
+    toml::from_str(&content).map_err(|e| format!("Failed to parse hardware config: {}", e))
+}
 
 pub struct Parser<'a> {
     lexer: Lexer<'a, Token>,
@@ -2069,10 +2076,7 @@ impl<'a> Parser<'a> {
 
     fn parse_bitwise_xor(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_bitwise_and()?;
-        while let Some(Ok(Token::Tilde)) = self.current_token() {
-            if let Some(Ok(Token::Slash)) = self.peek() {
-                break; // ~/ shorthand
-            }
+        while let Some(Ok(Token::BitXor)) = self.current_token() {
             self.advance();
             let right = self.parse_bitwise_and()?;
             left = Expr::BitXor(Box::new(left), Box::new(right));
@@ -2111,28 +2115,48 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_additive()?;
+        let mut left = self.parse_shift()?;
         while let Some(token) = self.current_token() {
             match token {
                 Ok(Token::Lt) => {
                     self.advance();
-                    let right = self.parse_additive()?;
+                    let right = self.parse_shift()?;
                     left = Expr::Lt(Box::new(left), Box::new(right));
                 }
                 Ok(Token::Le) => {
                     self.advance();
-                    let right = self.parse_additive()?;
+                    let right = self.parse_shift()?;
                     left = Expr::Le(Box::new(left), Box::new(right));
                 }
                 Ok(Token::Gt) => {
                     self.advance();
-                    let right = self.parse_additive()?;
+                    let right = self.parse_shift()?;
                     left = Expr::Gt(Box::new(left), Box::new(right));
                 }
                 Ok(Token::Ge) => {
                     self.advance();
-                    let right = self.parse_additive()?;
+                    let right = self.parse_shift()?;
                     left = Expr::Ge(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_additive()?;
+        while let Some(token) = self.current_token() {
+            match token {
+                Ok(Token::Shl) => {
+                    self.advance();
+                    let right = self.parse_additive()?;
+                    left = Expr::Shl(Box::new(left), Box::new(right));
+                }
+                Ok(Token::Shr) => {
+                    self.advance();
+                    let right = self.parse_additive()?;
+                    left = Expr::Shr(Box::new(left), Box::new(right));
                 }
                 _ => break,
             }

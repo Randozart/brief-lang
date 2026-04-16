@@ -634,6 +634,22 @@ impl Interpreter {
                     _ => Err(RuntimeError::TypeMismatch("Bitwise XOR".to_string())),
                 }
             }
+            Expr::Shl(l, r) => {
+                let l_val = self.eval_expr(l)?;
+                let r_val = self.eval_expr(r)?;
+                match (l_val, r_val) {
+                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l << r)),
+                    _ => Err(RuntimeError::TypeMismatch("Shift left".to_string())),
+                }
+            }
+            Expr::Shr(l, r) => {
+                let l_val = self.eval_expr(l)?;
+                let r_val = self.eval_expr(r)?;
+                match (l_val, r_val) {
+                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l >> r)),
+                    _ => Err(RuntimeError::TypeMismatch("Shift right".to_string())),
+                }
+            }
             Expr::Not(inner) => {
                 let val = self.eval_expr(inner)?;
                 match val {

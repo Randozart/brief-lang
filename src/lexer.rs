@@ -123,6 +123,10 @@ pub enum Token {
     Gt,
     #[token(">=")]
     Ge,
+    #[token("<<")]
+    Shl,
+    #[token(">>")]
+    Shr,
     #[token("|")]
     Pipe,
     #[token("||")]
@@ -143,6 +147,8 @@ pub enum Token {
     Star,
     #[token("/")]
     Slash,
+    #[token("^")]
+    BitXor,
     #[token("->")]
     Arrow,
 

@@ -1,46 +1,5 @@
 use crate::ast::*;
-use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-
-#[derive(Debug, Deserialize)]
-pub struct HardwareConfig {
-    pub target: TargetConfig,
-    pub io: HashMap<String, IoPinConfig>,
-    pub bus: Option<BusConfig>,
-}
-
-impl Default for HardwareConfig {
-    fn default() -> Self {
-        HardwareConfig {
-            target: TargetConfig {
-                name: "default".to_string(),
-                clock_hz: 100_000_000,
-            },
-            io: HashMap::new(),
-            bus: None,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TargetConfig {
-    pub name: String,
-    pub clock_hz: u32,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct IoPinConfig {
-    pub pin: String,
-    pub mode: Option<String>,
-    pub standard: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct BusConfig {
-    #[serde(rename = "type")]
-    pub bus_type: String,
-    pub burst_support: bool,
-}
 
 pub struct VerilogGenerator {
     module_name: String,
@@ -64,6 +23,11 @@ impl VerilogGenerator {
 
     pub fn generate(&mut self, program: &Program) -> String {
         self.output.clear();
+
+        if let Err(e) = self.validate_hardware(program) {
+            panic!("Hardware validation failed: {}", e);
+        }
+
         self.emit_header(program);
 
         // Emit clock dividers for reactor speeds
@@ -93,43 +57,28 @@ impl VerilogGenerator {
             match item {
                 TopLevel::StateDecl(decl) => {
                     if let Some(addr) = decl.address {
-                        let addr_str_upper = format!("0x{:08X}", addr);
-                        let addr_str_lower = format!("0x{:08x}", addr);
-
-                        let io_cfg = self
-                            .hw_config
-                            .io
-                            .get(&addr_str_upper)
-                            .or_else(|| self.hw_config.io.get(&addr_str_lower));
-
-                        if let Some(io_cfg) = io_cfg {
-                            let width = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
-                            let direction = "output";
-                            self.output.push_str(&format!(
-                                ",\n    {} logic {} {} /* pin: {} */",
-                                direction,
-                                if width > 1 {
-                                    format!("[{}:0]", width - 1)
-                                } else {
-                                    "".to_string()
-                                },
-                                decl.name,
-                                io_cfg.pin
-                            ));
+                        if let Some(io_cfg) = self.get_io_mapping(addr) {
+                            // Only emit ports for scalars (non-vectors)
+                            if !matches!(decl.ty, Type::Vector(_, _)) {
+                                let width = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
+                                let direction = "output";
+                                self.output.push_str(&format!(
+                                    ",\n    {} logic {} {} /* pin: {} */",
+                                    direction,
+                                    if width > 1 {
+                                        format!("[{}:0]", width - 1)
+                                    } else {
+                                        "".to_string()
+                                    },
+                                    decl.name,
+                                    io_cfg.pin
+                                ));
+                            }
                         }
                     }
                 }
                 TopLevel::Trigger(trg) => {
-                    let addr_str_upper = format!("0x{:08X}", trg.address);
-                    let addr_str_lower = format!("0x{:08x}", trg.address);
-
-                    let io_cfg = self
-                        .hw_config
-                        .io
-                        .get(&addr_str_upper)
-                        .or_else(|| self.hw_config.io.get(&addr_str_lower));
-
-                    if let Some(io_cfg) = io_cfg {
+                    if let Some(io_cfg) = self.get_io_mapping(trg.address) {
                         let width = self.get_bit_width(&trg.ty, trg.bit_range.as_ref());
                         let direction = "input";
                         self.output.push_str(&format!(
@@ -150,6 +99,20 @@ impl VerilogGenerator {
         }
 
         self.output.push_str("\n);\n\n");
+    }
+
+    fn get_io_mapping(&self, address: u64) -> Option<&IoMapping> {
+        let addr_str_upper = format!("0x{:08X}", address);
+        let addr_str_lower = format!("0x{:08x}", address);
+        let addr_str_hex_upper = format!("0x{:X}", address);
+        let addr_str_hex_lower = format!("0x{:x}", address);
+
+        self.hw_config.io.as_ref().and_then(|io| {
+            io.get(&addr_str_upper)
+                .or_else(|| io.get(&addr_str_lower))
+                .or_else(|| io.get(&addr_str_hex_upper))
+                .or_else(|| io.get(&addr_str_hex_lower))
+        })
     }
 
     fn emit_clock_dividers(&mut self, program: &Program) {
@@ -202,58 +165,38 @@ impl VerilogGenerator {
     fn emit_signals(&mut self, program: &Program) {
         for item in &program.items {
             if let TopLevel::StateDecl(decl) = item {
-                // Skip if it's a pin (already in header)
+                // Skip if it's a port in the header
                 if let Some(addr) = decl.address {
-                    let addr_str_long = format!("0x{:08X}", addr);
-                    let addr_str_short = format!("0x{:X}", addr);
-                    if self.hw_config.io.contains_key(&addr_str_long)
-                        || self.hw_config.io.contains_key(&addr_str_short)
-                        || self
-                            .hw_config
-                            .io
-                            .contains_key(&addr_str_long.to_lowercase())
-                        || self
-                            .hw_config
-                            .io
-                            .contains_key(&addr_str_short.to_lowercase())
+                    if self.get_io_mapping(addr).is_some() && !matches!(decl.ty, Type::Vector(_, _))
                     {
-                        eprintln!(
-                            "DEBUG emit_signals: skipping decl {} at {}",
-                            decl.name, addr_str_long
-                        );
                         continue;
                     }
                 }
 
-                self.emit_type_signals(&decl.name, &decl.ty, decl.bit_range.as_ref());
+                self.emit_type_signals(&decl.name, &decl.ty, decl.bit_range.as_ref(), decl.address);
             }
             if let TopLevel::Trigger(trg) = item {
-                let addr_str_long = format!("0x{:08X}", trg.address);
-                let addr_str_short = format!("0x{:X}", trg.address);
-                let in_hw = self.hw_config.io.contains_key(&addr_str_long)
-                    || self.hw_config.io.contains_key(&addr_str_short)
-                    || self
-                        .hw_config
-                        .io
-                        .contains_key(&addr_str_long.to_lowercase())
-                    || self
-                        .hw_config
-                        .io
-                        .contains_key(&addr_str_short.to_lowercase());
-                eprintln!(
-                    "DEBUG emit_signals: trigger {} at {} in_hw={}",
-                    trg.name, addr_str_long, in_hw
-                );
-                if in_hw {
+                if self.get_io_mapping(trg.address).is_some() {
                     continue;
                 }
-                self.emit_type_signals(&trg.name, &trg.ty, trg.bit_range.as_ref());
+                self.emit_type_signals(
+                    &trg.name,
+                    &trg.ty,
+                    trg.bit_range.as_ref(),
+                    Some(trg.address),
+                );
             }
         }
         self.output.push_str("\n");
     }
 
-    fn emit_type_signals(&mut self, name: &str, ty: &Type, range: Option<&BitRange>) {
+    fn emit_type_signals(
+        &mut self,
+        name: &str,
+        ty: &Type,
+        range: Option<&BitRange>,
+        address: Option<u64>,
+    ) {
         match ty {
             Type::Union(types) => {
                 self.output
@@ -264,7 +207,7 @@ impl VerilogGenerator {
                     } else {
                         "_data"
                     };
-                    self.emit_type_signals(&format!("{}{}", name, suffix), t, range);
+                    self.emit_type_signals(&format!("{}{}", name, suffix), t, range, address);
                 }
                 self.output
                     .push_str(&format!("    logic [7:0] {}_tag;\n", name));
@@ -281,16 +224,40 @@ impl VerilogGenerator {
                 } else {
                     "".to_string()
                 };
+
+                let mut suffix = "";
+                if let Some(addr) = address {
+                    let addr_str_upper = format!("0x{:08X}", addr);
+                    let addr_str_lower = format!("0x{:08x}", addr);
+                    let addr_str_hex_upper = format!("0x{:X}", addr);
+                    let addr_str_hex_lower = format!("0x{:x}", addr);
+
+                    let mem_cfg = self
+                        .hw_config
+                        .memory
+                        .get(&addr_str_upper)
+                        .or_else(|| self.hw_config.memory.get(&addr_str_lower))
+                        .or_else(|| self.hw_config.memory.get(&addr_str_hex_upper))
+                        .or_else(|| self.hw_config.memory.get(&addr_str_hex_lower));
+
+                    if let Some(mem_cfg) = mem_cfg {
+                        if mem_cfg.mem_type == "bram" {
+                            suffix = " /* synthesis syn_ramstyle = \"block_ram\" */";
+                        }
+                    }
+                }
+
                 self.output.push_str(&format!(
-                    "    logic {}{} {} [0:{}];\n",
+                    "    logic {}{} {} [0:{}]{};\n",
                     signed,
                     width_str,
                     name,
-                    size - 1
+                    size - 1,
+                    suffix
                 ));
             }
             Type::Constrained(inner, r) => {
-                self.emit_type_signals(name, inner, Some(r));
+                self.emit_type_signals(name, inner, Some(r), address);
             }
             _ => {
                 let width = self.get_bit_width(ty, range);
@@ -427,27 +394,6 @@ impl VerilogGenerator {
         // Emit always_ff for each state variable
         for item in &program.items {
             if let TopLevel::StateDecl(decl) = item {
-                if let Some(addr) = decl.address {
-                    let addr_str_long = format!("0x{:08X}", addr);
-                    let addr_str_short = format!("0x{:X}", addr);
-                    if self.hw_config.io.contains_key(&addr_str_long)
-                        || self.hw_config.io.contains_key(&addr_str_short)
-                        || self
-                            .hw_config
-                            .io
-                            .contains_key(&addr_str_long.to_lowercase())
-                        || self
-                            .hw_config
-                            .io
-                            .contains_key(&addr_str_short.to_lowercase())
-                    {
-                        eprintln!(
-                            "DEBUG emit_logic: skipping decl {} at {}",
-                            decl.name, addr_str_long
-                        );
-                        continue;
-                    }
-                }
                 self.emit_variable_logic(
                     &decl.name,
                     decl.expr.as_ref(),
@@ -456,25 +402,6 @@ impl VerilogGenerator {
                 );
             }
             if let TopLevel::Trigger(trg) = item {
-                let addr_str_long = format!("0x{:08X}", trg.address);
-                let addr_str_short = format!("0x{:X}", trg.address);
-                if self.hw_config.io.contains_key(&addr_str_long)
-                    || self.hw_config.io.contains_key(&addr_str_short)
-                    || self
-                        .hw_config
-                        .io
-                        .contains_key(&addr_str_long.to_lowercase())
-                    || self
-                        .hw_config
-                        .io
-                        .contains_key(&addr_str_short.to_lowercase())
-                {
-                    eprintln!(
-                        "DEBUG emit_logic: skipping trigger {} at {}",
-                        trg.name, addr_str_long
-                    );
-                    continue;
-                }
                 self.emit_trigger_logic(&trg.name);
             }
         }
@@ -744,6 +671,14 @@ impl VerilogGenerator {
         })
     }
 
+    fn extract_assignment_target(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::OwnedRef(name) => Some(name.clone()),
+            Expr::ListIndex(inner, _) => self.extract_assignment_target(inner),
+            _ => None,
+        }
+    }
+
     fn emit_var_assignment_from_txn(
         &mut self,
         var_name: &str,
@@ -753,7 +688,7 @@ impl VerilogGenerator {
         for stmt in body {
             match stmt {
                 Statement::Assignment { lhs, expr, timeout } => {
-                    if self.extract_root_var(lhs).as_deref() == Some(var_name) {
+                    if self.extract_assignment_target(lhs).as_deref() == Some(var_name) {
                         if let Some((t_expr, _unit)) = timeout {
                             self.output
                                 .push_str(&format!("                {}_waiting <= 1;\n", var_name));
@@ -843,7 +778,7 @@ impl VerilogGenerator {
         for stmt in body {
             match stmt {
                 Statement::Assignment { lhs, expr, .. } => {
-                    if self.extract_root_var(lhs).as_deref() == Some(var_name) {
+                    if self.extract_assignment_target(lhs).as_deref() == Some(var_name) {
                         let expr_str = self.expr_to_verilog(expr);
 
                         // Lift all vector references in the expression (but not already indexed ones)
@@ -981,14 +916,16 @@ impl VerilogGenerator {
                 self.expr_to_verilog(l),
                 self.expr_to_verilog(r)
             ),
-            Expr::Or(l, r) => format!(
-                "({} || {})",
+            Expr::Shl(l, r) => format!(
+                "({} << {})",
                 self.expr_to_verilog(l),
                 self.expr_to_verilog(r)
             ),
-            Expr::Not(e) => format!("!{}", self.expr_to_verilog(e)),
-            Expr::Neg(e) => format!("-{}", self.expr_to_verilog(e)),
-            Expr::BitNot(e) => format!("~{}", self.expr_to_verilog(e)),
+            Expr::Shr(l, r) => format!(
+                "({} >> {})",
+                self.expr_to_verilog(l),
+                self.expr_to_verilog(r)
+            ),
             Expr::Call(name, args) => {
                 let args_str = args
                     .iter()
@@ -1036,6 +973,54 @@ impl VerilogGenerator {
         self.output.push_str("endmodule\n");
     }
 
+    fn validate_hardware(&self, program: &Program) -> Result<(), String> {
+        for item in &program.items {
+            if let TopLevel::StateDecl(decl) = item {
+                if let Some(addr) = decl.address {
+                    let addr_str_upper = format!("0x{:08X}", addr);
+                    let addr_str_lower = format!("0x{:08x}", addr);
+                    let addr_str_hex_upper = format!("0x{:X}", addr);
+                    let addr_str_hex_lower = format!("0x{:x}", addr);
+
+                    let mem_cfg = self
+                        .hw_config
+                        .memory
+                        .get(&addr_str_upper)
+                        .or_else(|| self.hw_config.memory.get(&addr_str_lower))
+                        .or_else(|| self.hw_config.memory.get(&addr_str_hex_upper))
+                        .or_else(|| self.hw_config.memory.get(&addr_str_hex_lower));
+
+                    if let Some(mem_cfg) = mem_cfg {
+                        // Check size
+                        if let Type::Vector(_, size) = &decl.ty {
+                            if *size > mem_cfg.size {
+                                return Err(format!(
+                                    "Vector '{}' size ({}) exceeds hardware memory size ({}) at address 0x{:x}",
+                                    decl.name, size, mem_cfg.size, addr
+                                ));
+                            }
+                        }
+
+                        // Check element bits
+                        let bits = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
+                        if bits > mem_cfg.element_bits {
+                            return Err(format!(
+                                "Variable '{}' bit width ({}) exceeds hardware element bits ({}) at address 0x{:x}",
+                                decl.name, bits, mem_cfg.element_bits, addr
+                            ));
+                        }
+                    } else if self.get_io_mapping(addr).is_none() {
+                        return Err(format!(
+                            "Address 0x{:x} used by '{}' is not defined in hardware.toml memory or io",
+                            addr, decl.name
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn generate_testbench(&self, program: &Program) -> String {
         let mut tb = String::new();
         tb.push_str("`timescale 1ns/1ps\n\n");
@@ -1050,13 +1035,7 @@ impl VerilogGenerator {
             match item {
                 TopLevel::StateDecl(decl) => {
                     if let Some(addr) = decl.address {
-                        let addr_str_long = format!("0x{:08x}", addr);
-                        let addr_str_short = format!("0x{:x}", addr);
-                        let io_cfg = self
-                            .hw_config
-                            .io
-                            .get(&addr_str_long)
-                            .or_else(|| self.hw_config.io.get(&addr_str_short));
+                        let io_cfg = self.get_io_mapping(addr);
 
                         if io_cfg.is_some() {
                             let width = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
@@ -1071,13 +1050,7 @@ impl VerilogGenerator {
                     }
                 }
                 TopLevel::Trigger(trg) => {
-                    let addr_str_long = format!("0x{:08x}", trg.address);
-                    let addr_str_short = format!("0x{:x}", trg.address);
-                    let io_cfg = self
-                        .hw_config
-                        .io
-                        .get(&addr_str_long)
-                        .or_else(|| self.hw_config.io.get(&addr_str_short));
+                    let io_cfg = self.get_io_mapping(trg.address);
 
                     if io_cfg.is_some() {
                         let width = self.get_bit_width(&trg.ty, trg.bit_range.as_ref());

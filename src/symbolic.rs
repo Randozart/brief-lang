@@ -189,6 +189,16 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             let right_sym = eval_symbolic(right, state);
             SymbolicValue::Binary("^".to_string(), Box::new(left_sym), Box::new(right_sym))
         }
+        Expr::Shl(left, right) => {
+            let left_sym = eval_symbolic(left, state);
+            let right_sym = eval_symbolic(right, state);
+            SymbolicValue::Binary("<<".to_string(), Box::new(left_sym), Box::new(right_sym))
+        }
+        Expr::Shr(left, right) => {
+            let left_sym = eval_symbolic(left, state);
+            let right_sym = eval_symbolic(right, state);
+            SymbolicValue::Binary(">>".to_string(), Box::new(left_sym), Box::new(right_sym))
+        }
 
         // Function calls - can't track
         Expr::Call(_, _) => SymbolicValue::Unknown,

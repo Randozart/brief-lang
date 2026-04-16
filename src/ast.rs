@@ -1,5 +1,47 @@
 use crate::errors::Span;
-use std::collections::HashSet;
+use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HardwareConfig {
+    pub project: ProjectConfig,
+    pub target: TargetConfig,
+    pub interface: InterfaceConfig,
+    pub memory: HashMap<String, MemoryMapping>,
+    pub io: Option<HashMap<String, IoMapping>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProjectConfig {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TargetConfig {
+    pub fpga: String,
+    pub clock_hz: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InterfaceConfig {
+    pub name: String,
+    pub address_width: Option<u32>,
+    pub data_width: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryMapping {
+    pub size: usize,
+    #[serde(rename = "type")]
+    pub mem_type: String,
+    pub element_bits: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct IoMapping {
+    pub pin: String,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TimeUnit {
@@ -142,6 +184,8 @@ pub enum Expr {
     BitAnd(Box<Expr>, Box<Expr>),
     BitOr(Box<Expr>, Box<Expr>),
     BitXor(Box<Expr>, Box<Expr>),
+    Shl(Box<Expr>, Box<Expr>),
+    Shr(Box<Expr>, Box<Expr>),
     Call(String, Vec<Expr>),
     ListLiteral(Vec<Expr>),
     ListIndex(Box<Expr>, Box<Expr>),

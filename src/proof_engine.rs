@@ -1124,6 +1124,8 @@ impl ProofEngine {
             | Expr::BitAnd(l, r)
             | Expr::BitOr(l, r)
             | Expr::BitXor(l, r)
+            | Expr::Shl(l, r)
+            | Expr::Shr(l, r)
             | Expr::Eq(l, r)
             | Expr::Ne(l, r)
             | Expr::Lt(l, r)

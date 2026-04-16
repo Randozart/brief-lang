@@ -1148,25 +1148,21 @@ impl WasmGenerator {
                     a_val, b_val
                 )
             }
-            Expr::And(a, b) => {
-                let a_val = self.expr_to_js_value_for_condition(a);
-                let b_val = self.expr_to_js_value_for_condition(b);
-                format!("({} && {})", a_val, b_val)
-            }
-            Expr::BitAnd(a, b) => {
+            Expr::Shl(a, b) => {
                 let a_val = self.expr_to_js_value(a);
                 let b_val = self.expr_to_js_value(b);
-                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 & {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+                format!(
+                    "JsValue::from(({}.as_f64().unwrap_or(0.0) as i64) << ({}.as_f64().unwrap_or(0.0) as i64))",
+                    a_val, b_val
+                )
             }
-            Expr::BitOr(a, b) => {
+            Expr::Shr(a, b) => {
                 let a_val = self.expr_to_js_value(a);
                 let b_val = self.expr_to_js_value(b);
-                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 | {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
-            }
-            Expr::BitXor(a, b) => {
-                let a_val = self.expr_to_js_value(a);
-                let b_val = self.expr_to_js_value(b);
-                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 ^ {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+                format!(
+                    "JsValue::from(({}.as_f64().unwrap_or(0.0) as i64) >> ({}.as_f64().unwrap_or(0.0) as i64))",
+                    a_val, b_val
+                )
             }
             Expr::Or(a, b) => {
                 let a_val = self.expr_to_js_value_for_condition(a);

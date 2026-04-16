@@ -923,14 +923,12 @@ fn run_verilog(
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to SystemVerilog: {}", file_path.display());
 
-    // Load HW config (use default if path is /dev/null)
-    let hw_config = if hw_config_path.to_str() == Some("/dev/null") {
-        eprintln!("Note: No hardware config - using defaults.");
-        backend::verilog::HardwareConfig::default()
-    } else {
-        let hw_config_content = fs::read_to_string(hw_config_path)?;
-        toml::from_str(&hw_config_content)?
-    };
+    // Load HW config (required)
+    if hw_config_path.to_str() == Some("/dev/null") {
+        return Err("Hardware config (--hw) is REQUIRED for Verilog compilation".into());
+    }
+
+    let hw_config = parser::parse_hardware_config(hw_config_path)?;
 
     // Standard Brief pipeline
     let source = fs::read_to_string(file_path)?;

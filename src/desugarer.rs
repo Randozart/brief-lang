@@ -108,16 +108,14 @@ impl Desugarer {
     pub fn desugar(&mut self, program: &Program) -> Program {
         let mut items = Vec::new();
 
-        // First pass: collect all existing state declarations
+        // First pass: collect all existing state declarations and triggers
         let existing_state: std::collections::HashSet<String> = program
             .items
             .iter()
-            .filter_map(|item| {
-                if let TopLevel::StateDecl(s) = item {
-                    Some(s.name.clone())
-                } else {
-                    None
-                }
+            .filter_map(|item| match item {
+                TopLevel::StateDecl(s) => Some(s.name.clone()),
+                TopLevel::Trigger(t) => Some(t.name.clone()),
+                _ => None,
             })
             .collect();
 

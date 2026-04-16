@@ -329,10 +329,13 @@ impl TypeChecker {
             | Expr::And(left, right)
             | Expr::BitAnd(left, right)
             | Expr::BitOr(left, right)
-            | Expr::BitXor(left, right) => {
+            | Expr::BitXor(left, right)
+            | Expr::Shl(left, right)
+            | Expr::Shr(left, right) => {
                 self.check_expr_for_function_calls(left);
                 self.check_expr_for_function_calls(right);
             }
+
             Expr::Call(_, args) => {
                 for arg in args {
                     self.check_expr_for_function_calls(arg);
@@ -827,9 +830,11 @@ impl TypeChecker {
             Expr::Sub(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
             Expr::Mul(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
             Expr::Div(l, r) => self.binary_op_type(l, r, Type::Int, Type::Float),
-            Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r) => {
-                self.binary_op_type(l, r, Type::Int, Type::Int)
-            }
+            Expr::BitAnd(l, r)
+            | Expr::BitOr(l, r)
+            | Expr::BitXor(l, r)
+            | Expr::Shl(l, r)
+            | Expr::Shr(l, r) => self.binary_op_type(l, r, Type::Int, Type::Int),
             Expr::Eq(_, _)
             | Expr::Ne(_, _)
             | Expr::Lt(_, _)
