@@ -3,7 +3,7 @@
   "displayName": "Brief Language",
   "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv), Rendered Brief (.rbv), and Embedded Brief (.ebv) files",
   "version": "0.1.0",
-  "publisher": "anomalyco",
+  "publisher": "randozart",
   "main": "./client/extension.js",
   "activationEvents": [
     "onLanguage:brief",
