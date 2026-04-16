@@ -4,6 +4,12 @@
   "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv), Rendered Brief (.rbv), and Embedded Brief (.ebv) files",
   "version": "0.1.0",
   "publisher": "anomalyco",
+  "main": "./client/extension.js",
+  "activationEvents": [
+    "onLanguage:brief",
+    "onLanguage:rbv",
+    "onLanguage:ebv"
+  ],
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -176,5 +182,8 @@
   },
   "devDependencies": {
     "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.0.2"
   }
 }

@@ -1,4 +1,6 @@
+use crate::ast::{Program, TopLevel};
 use crate::errors::ErrorMode;
+use crate::errors::Span;
 use crate::parser;
 use crate::proof_engine;
 use crate::typechecker;
@@ -20,6 +22,7 @@ struct DocumentStore {
 struct DocumentState {
     text: String,
     version: i32,
+    program: Option<Program>,
 }
 
 impl LspServer {
@@ -55,7 +58,13 @@ impl LspServer {
                 let result = serde_json::json!({
                     "capabilities": {
                         "textDocumentSync": {
-                            "kind": "incremental"
+                            "kind": 1 // Full
+                        },
+                        "hoverProvider": true,
+                        "definitionProvider": true,
+                        "completionProvider": {
+                            "resolveProvider": false,
+                            "triggerCharacters": ["."]
                         }
                     },
                     "serverInfo": {
@@ -70,10 +79,65 @@ impl LspServer {
                 let resp = Response::new_ok(req.id, ());
                 let _ = self.connection.sender.send(Message::Response(resp));
             }
+            "textDocument/hover" => {
+                if let Ok(params) = serde_json::from_value(req.params) {
+                    self.handle_hover(req.id, params);
+                }
+            }
+            "textDocument/definition" => {
+                if let Ok(params) = serde_json::from_value(req.params) {
+                    self.handle_definition(req.id, params);
+                }
+            }
+            "textDocument/completion" => {
+                if let Ok(params) = serde_json::from_value(req.params) {
+                    self.handle_completion(req.id, params);
+                }
+            }
             _ => {
                 error!("Unknown request method: {}", req.method);
             }
         }
+    }
+
+    fn handle_did_change_json(&mut self, params: Value) {
+        let uri = params
+            .get("textDocument")
+            .and_then(|td| td.get("uri"))
+            .and_then(|u| u.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let version = params
+            .get("textDocument")
+            .and_then(|td| td.get("version"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(1) as i32;
+
+        let changes = params
+            .get("contentChanges")
+            .and_then(|cc| cc.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let new_text = {
+            let mut docs = self.documents.lock().unwrap();
+            if let Some(doc) = docs.docs.get_mut(&uri) {
+                for change in changes {
+                    doc.text = change.to_string();
+                }
+                doc.version = version;
+                doc.text.clone()
+            } else {
+                return;
+            }
+        };
+
+        self.check_document(&uri, &new_text);
     }
 
     fn handle_response(&self, _resp: Response) {}
@@ -135,6 +199,7 @@ impl LspServer {
                 DocumentState {
                     text: text.clone(),
                     version,
+                    program: None,
                 },
             );
         }
@@ -142,50 +207,17 @@ impl LspServer {
         self.check_document(&uri, &text);
     }
 
-    fn handle_did_change_json(&mut self, params: Value) {
-        let uri = params
-            .get("textDocument")
-            .and_then(|td| td.get("uri"))
-            .and_then(|u| u.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let version = params
-            .get("textDocument")
-            .and_then(|td| td.get("version"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(1) as i32;
-
-        let changes = params
-            .get("contentChanges")
-            .and_then(|cc| cc.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let new_text = {
-            let mut docs = self.documents.lock().unwrap();
-            if let Some(doc) = docs.docs.get_mut(&uri) {
-                for change in changes {
-                    doc.text = change.to_string();
-                }
-                doc.version = version;
-                doc.text.clone()
-            } else {
-                return;
-            }
-        };
-
-        self.check_document(&uri, &new_text);
-    }
-
     fn check_document(&self, uri: &str, text: &str) {
         info!("Checking document: {}", uri);
 
-        let diagnostics = self.run_type_check(text);
+        let (diagnostics, program) = self.run_type_check(text);
+
+        {
+            let mut docs = self.documents.lock().unwrap();
+            if let Some(doc) = docs.docs.get_mut(uri) {
+                doc.program = program;
+            }
+        }
 
         let params = serde_json::json!({
             "uri": uri,
@@ -196,19 +228,22 @@ impl LspServer {
         let _ = self.connection.sender.send(Message::Notification(notif));
     }
 
-    fn run_type_check(&self, source: &str) -> Vec<Value> {
+    fn run_type_check(&self, source: &str) -> (Vec<Value>, Option<Program>) {
         let mut parser = parser::Parser::new(source);
         let mut program = match parser.parse() {
             Ok(p) => p,
             Err(e) => {
-                return vec![serde_json::json!({
-                    "range": {
-                        "start": { "line": 0, "character": 0 },
-                        "end": { "line": 0, "character": 0 }
-                    },
-                    "severity": 1,
-                    "message": e
-                })];
+                return (
+                    vec![serde_json::json!({
+                        "range": {
+                            "start": { "line": 0, "character": 0 },
+                            "end": { "line": 0, "character": 0 }
+                        },
+                        "severity": 1,
+                        "message": e
+                    })],
+                    None,
+                );
             }
         };
 
@@ -230,7 +265,7 @@ impl LspServer {
             diagnostics.push(diag);
         }
 
-        diagnostics
+        (diagnostics, Some(program))
     }
 
     fn type_error_to_json(&self, err: &typechecker::TypeError) -> Value {
@@ -282,9 +317,172 @@ impl LspServer {
                 "start": { "line": 0, "character": 0 },
                 "end": { "line": 0, "character": 0 }
             },
-            "severity": 1,
+            "severity": if err.is_warning { 2 } else { 1 },
             "message": format!("[{}] {}", err.code, err.title)
         })
+    }
+
+    fn handle_completion(&self, id: lsp_server::RequestId, _params: Value) {
+        let keywords = vec![
+            "txn", "rct", "let", "const", "sig", "defn", "trg", "import", "from", "term", "escape",
+            "async", "Int", "UInt", "Float", "String", "Bool", "Data", "Void",
+        ];
+
+        let completions: Vec<Value> = keywords
+            .into_iter()
+            .map(|k| {
+                serde_json::json!({
+                    "label": k,
+                    "kind": 14, // Keyword
+                })
+            })
+            .collect();
+
+        let resp = Response::new_ok(id, completions);
+        let _ = self.connection.sender.send(Message::Response(resp));
+    }
+
+    fn handle_hover(&self, id: lsp_server::RequestId, params: Value) {
+        let uri = params
+            .get("textDocument")
+            .and_then(|td| td.get("uri"))
+            .and_then(|u| u.as_str())
+            .unwrap_or("");
+        let line = params
+            .get("position")
+            .and_then(|p| p.get("line"))
+            .and_then(|l| l.as_u64())
+            .unwrap_or(0) as usize
+            + 1;
+        let character = params
+            .get("position")
+            .and_then(|p| p.get("character"))
+            .and_then(|c| c.as_u64())
+            .unwrap_or(0) as usize
+            + 1;
+
+        let docs = self.documents.lock().unwrap();
+        if let Some(doc) = docs.docs.get(uri) {
+            if let Some(program) = &doc.program {
+                for item in &program.items {
+                    if let Some(span) = item_span(item) {
+                        if line == span.line
+                            && character >= span.column
+                            && character <= span.column + item_name(item).len()
+                        {
+                            let content =
+                                format!("**{}**\n\n{}", item_name(item), item_description(item));
+                            let result = serde_json::json!({
+                                "contents": {
+                                    "kind": "markdown",
+                                    "value": content
+                                }
+                            });
+                            let resp = Response::new_ok(id, result);
+                            let _ = self.connection.sender.send(Message::Response(resp));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        let resp = Response::new_ok(id, serde_json::Value::Null);
+        let _ = self.connection.sender.send(Message::Response(resp));
+    }
+
+    fn handle_definition(&self, id: lsp_server::RequestId, params: Value) {
+        let uri = params
+            .get("textDocument")
+            .and_then(|td| td.get("uri"))
+            .and_then(|u| u.as_str())
+            .unwrap_or("");
+        let line = params
+            .get("position")
+            .and_then(|p| p.get("line"))
+            .and_then(|l| l.as_u64())
+            .unwrap_or(0) as usize
+            + 1;
+        let character = params
+            .get("position")
+            .and_then(|p| p.get("character"))
+            .and_then(|c| c.as_u64())
+            .unwrap_or(0) as usize
+            + 1;
+
+        let docs = self.documents.lock().unwrap();
+        if let Some(doc) = docs.docs.get(uri) {
+            if let Some(program) = &doc.program {
+                for item in &program.items {
+                    if let Some(span) = item_span(item) {
+                        if line == span.line
+                            && character >= span.column
+                            && character <= span.column + item_name(item).len()
+                        {
+                            let result = serde_json::json!({
+                                "uri": uri,
+                                "range": {
+                                    "start": { "line": span.line - 1, "character": span.column - 1 },
+                                    "end": { "line": span.line - 1, "character": span.column + item_name(item).len() - 1 }
+                                }
+                            });
+                            let resp = Response::new_ok(id, result);
+                            let _ = self.connection.sender.send(Message::Response(resp));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        let resp = Response::new_ok(id, serde_json::Value::Null);
+        let _ = self.connection.sender.send(Message::Response(resp));
+    }
+}
+
+fn item_span(item: &TopLevel) -> Option<Span> {
+    match item {
+        TopLevel::Transaction(t) => t.span,
+        TopLevel::StateDecl(s) => s.span,
+        TopLevel::Trigger(t) => t.span,
+        TopLevel::Struct(s) => s.span,
+        TopLevel::Enum(e) => e.span,
+        TopLevel::ForeignBinding { span, .. } => *span,
+        _ => None,
+    }
+}
+
+fn item_name(item: &TopLevel) -> String {
+    match item {
+        TopLevel::Signature(s) => s.name.clone(),
+        TopLevel::Definition(d) => d.name.clone(),
+        TopLevel::Transaction(t) => t.name.clone(),
+        TopLevel::StateDecl(s) => s.name.clone(),
+        TopLevel::Trigger(t) => t.name.clone(),
+        TopLevel::Constant(c) => c.name.clone(),
+        TopLevel::Struct(s) => s.name.clone(),
+        TopLevel::Enum(e) => e.name.clone(),
+        TopLevel::ForeignBinding { name, .. } => name.clone(),
+        _ => "unnamed".to_string(),
+    }
+}
+
+fn item_description(item: &TopLevel) -> String {
+    match item {
+        TopLevel::Transaction(t) => format!(
+            "transaction{}{}",
+            if t.is_async { " async" } else { "" },
+            if t.is_reactive { " rct" } else { "" }
+        ),
+        TopLevel::StateDecl(_) => "state variable".to_string(),
+        TopLevel::Trigger(_) => "hardware trigger".to_string(),
+        TopLevel::Signature(_) => "function signature".to_string(),
+        TopLevel::Definition(_) => "function definition".to_string(),
+        TopLevel::Constant(_) => "constant".to_string(),
+        TopLevel::Struct(_) => "struct".to_string(),
+        TopLevel::Enum(_) => "enum".to_string(),
+        TopLevel::ForeignBinding { .. } => "foreign binding".to_string(),
+        _ => "".to_string(),
     }
 }
 

@@ -24,12 +24,19 @@ If a bug still occurs, it's because the contract didn't fully express the intent
 But that makes the bug easy to find, as the contract shows exactly where expectation
 and code diverged.
 
-## Syntax Highlighting
+## Syntax Highlighting & Language Server
 
-VS Code / VSCodium syntax highlighting for `.bv`, `.rbv`, and `.ebv` is available in `syntax-highlighter/`.
+VS Code / VSCodium syntax highlighting and **Language Server integration** for `.bv`, `.rbv`, and `.ebv` is available in `syntax-highlighter/`.
 
-You can install it by copying the directory to your extensions folder or installing the pre-packaged `.vsix` file:
+The extension automatically launches the `brief lsp` server to provide:
+- Real-time type-checking and proof verification diagnostics
+- Hover information for transactions and state declarations
+- Go to definition for top-level items
+- Keyword and type completions
 
+### Installation
+
+**1. Install the Extension:**
 ```bash
 # Install to VSCodium
 cp -r syntax-highlighter/ ~/.var/app/com.vscodium.codium/data/vscodium/extensions/brief
@@ -37,6 +44,15 @@ cp -r syntax-highlighter/ ~/.var/app/com.vscodium.codium/data/vscodium/extension
 # Or install the VSIX
 code --install-extension syntax-highlighter/brief-language-0.1.0.vsix
 ```
+
+**2. Install Dependencies:**
+Navigate to the extension folder and install the LSP client:
+```bash
+cd ~/.var/app/com.vscodium.codium/data/vscodium/extensions/brief
+npm install
+```
+
+**Note:** Ensure the `brief` compiler is in your PATH so the extension can launch it.
 
 ## Quick Start
 
