@@ -477,22 +477,7 @@ impl VerilogGenerator {
                     program,
                 );
             }
-            if let TopLevel::Trigger(trg) = item {
-                self.emit_trigger_logic(&trg.name);
-            }
         }
-    }
-
-    fn emit_trigger_logic(&mut self, name: &str) {
-        self.output
-            .push_str(&format!("    // Logic for trigger: {}\n", name));
-        self.output.push_str("    always_ff @(posedge clk) begin\n");
-        self.output.push_str("        if (!rst_n) begin\n");
-        self.output
-            .push_str(&format!("            {} <= 1'b0;\n", name));
-        self.output.push_str("        end else begin\n");
-        self.output.push_str("        end\n");
-        self.output.push_str("    end\n\n");
     }
 
     fn collect_writes(&self, body: &[Statement], writes: &mut HashSet<String>) {
