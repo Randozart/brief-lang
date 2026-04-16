@@ -233,18 +233,28 @@ impl LspServer {
         while current_pos < source.len() {
             if !in_script {
                 if source[current_pos..].starts_with("<script") {
-                    if let Some(tag_end_rel) = source[current_pos..].find('>') {
-                        let tag_end = current_pos + tag_end_rel + 1;
-                        for c in source[current_pos..tag_end].chars() {
-                            if c == '\n' {
-                                output.push('\n');
-                            } else {
-                                output.push(' ');
+                    let after_script = &source[current_pos + 7..];
+                    let next_char = after_script.chars().next();
+                    let is_real_script_tag = next_char.is_none()
+                        || next_char == Some('>')
+                        || next_char == Some(' ')
+                        || next_char == Some('\t')
+                        || next_char == Some('\n');
+
+                    if is_real_script_tag {
+                        if let Some(tag_end_rel) = source[current_pos..].find('>') {
+                            let tag_end = current_pos + tag_end_rel + 1;
+                            for c in source[current_pos..tag_end].chars() {
+                                if c == '\n' {
+                                    output.push('\n');
+                                } else {
+                                    output.push(' ');
+                                }
                             }
+                            current_pos = tag_end;
+                            in_script = true;
+                            continue;
                         }
-                        current_pos = tag_end;
-                        in_script = true;
-                        continue;
                     }
                 }
                 // Not a script start, mask it
@@ -522,6 +532,29 @@ let x: Int = 10;
 
         // Line 3 (1-based) should contain the code
         assert!(extracted_lines[2].contains("let x: Int = 10;"));
+    }
+
+    #[test]
+    fn test_extract_brief_source_rbv_with_other_tags() {
+        let lsp = LspServer {
+            connection: Connection::stdio().0,
+            documents: Arc::new(Mutex::new(DocumentStore {
+                docs: HashMap::new(),
+            })),
+        };
+
+        let rbv_source = r#"
+<p>This is <scripting> test</p>
+<script>
+let x = 1;
+</script>
+"#;
+        let extracted = lsp.extract_brief_source(rbv_source, true);
+
+        // <scripting> should be masked
+        assert!(!extracted.contains("<scripting>"));
+        // let x = 1; should be preserved
+        assert!(extracted.contains("let x = 1;"));
     }
 
     #[test]
