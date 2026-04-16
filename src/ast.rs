@@ -41,6 +41,7 @@ pub struct MemoryMapping {
 #[derive(Debug, Clone, Deserialize)]
 pub struct IoMapping {
     pub pin: String,
+    pub direction: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

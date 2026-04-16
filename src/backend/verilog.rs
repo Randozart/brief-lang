@@ -58,21 +58,67 @@ impl VerilogGenerator {
                 TopLevel::StateDecl(decl) => {
                     if let Some(addr) = decl.address {
                         if let Some(io_cfg) = self.get_io_mapping(addr) {
-                            // Only emit ports for scalars (non-vectors)
-                            if !matches!(decl.ty, Type::Vector(_, _)) {
-                                let width = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
-                                let direction = "output";
-                                self.output.push_str(&format!(
-                                    ",\n    {} logic {} {} /* pin: {} */",
-                                    direction,
-                                    if width > 1 {
-                                        format!("[{}:0]", width - 1)
+                            let width = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
+                            let direction = io_cfg.direction.as_deref().unwrap_or("output");
+
+                            match &decl.ty {
+                                Type::Vector(inner, size) => {
+                                    let element_bits =
+                                        self.get_bit_width(inner, decl.bit_range.as_ref());
+                                    let signed = if matches!(**inner, Type::Int) {
+                                        "signed "
                                     } else {
-                                        "".to_string()
-                                    },
-                                    decl.name,
-                                    io_cfg.pin
-                                ));
+                                        ""
+                                    };
+
+                                    let mut attr = "";
+                                    let addr_str_upper = format!("0x{:08X}", addr);
+                                    let addr_str_lower = format!("0x{:08x}", addr);
+                                    let addr_str_hex_upper = format!("0x{:X}", addr);
+                                    let addr_str_hex_lower = format!("0x{:x}", addr);
+
+                                    let mem_cfg = self
+                                        .hw_config
+                                        .memory
+                                        .get(&addr_str_upper)
+                                        .or_else(|| self.hw_config.memory.get(&addr_str_lower))
+                                        .or_else(|| self.hw_config.memory.get(&addr_str_hex_upper))
+                                        .or_else(|| self.hw_config.memory.get(&addr_str_hex_lower));
+
+                                    if let Some(mem_cfg) = mem_cfg {
+                                        if mem_cfg.mem_type == "bram" {
+                                            attr = " /* synthesis syn_ramstyle = \"block_ram\" */";
+                                        }
+                                    }
+
+                                    self.output.push_str(&format!(
+                                        ",\n    {} logic {}{} {} [0:{}]{} /* pin: {} */",
+                                        direction,
+                                        signed,
+                                        if element_bits > 1 {
+                                            format!("[{}:0]", element_bits - 1)
+                                        } else {
+                                            "".to_string()
+                                        },
+                                        decl.name,
+                                        size - 1,
+                                        attr,
+                                        io_cfg.pin
+                                    ));
+                                }
+                                _ => {
+                                    self.output.push_str(&format!(
+                                        ",\n    {} logic {} {} /* pin: {} */",
+                                        direction,
+                                        if width > 1 {
+                                            format!("[{}:0]", width - 1)
+                                        } else {
+                                            "".to_string()
+                                        },
+                                        decl.name,
+                                        io_cfg.pin
+                                    ));
+                                }
                             }
                         }
                     }
@@ -167,8 +213,7 @@ impl VerilogGenerator {
             if let TopLevel::StateDecl(decl) = item {
                 // Skip if it's a port in the header
                 if let Some(addr) = decl.address {
-                    if self.get_io_mapping(addr).is_some() && !matches!(decl.ty, Type::Vector(_, _))
-                    {
+                    if self.get_io_mapping(addr).is_some() {
                         continue;
                     }
                 }
@@ -242,8 +287,12 @@ impl VerilogGenerator {
 
                     if let Some(mem_cfg) = mem_cfg {
                         if mem_cfg.mem_type == "bram" {
-                            suffix = " /* synthesis syn_ramstyle = \"block_ram\" */";
+                            suffix = " /* synthesis syn_ramstyle = \"block_ram\" */ /* synthesis keep */";
+                        } else {
+                            suffix = " /* synthesis keep */";
                         }
+                    } else {
+                        suffix = " /* synthesis keep */";
                     }
                 }
 
