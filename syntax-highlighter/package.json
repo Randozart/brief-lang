@@ -1,7 +1,7 @@
 {
   "name": "brief-language",
   "displayName": "Brief Language",
-  "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv) and Rendered Brief (.rbv) files",
+  "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv), Rendered Brief (.rbv), and Embedded Brief (.ebv) files",
   "version": "0.1.0",
   "publisher": "anomalyco",
   "engines": {
@@ -42,6 +42,21 @@
           "dark": "./images/r-brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "ebv",
+        "aliases": [
+          "Embedded Brief",
+          "embedded-brief"
+        ],
+        "extensions": [
+          ".ebv"
+        ],
+        "icon": {
+          "light": "./images/e-brief-logo.svg",
+          "dark": "./images/e-brief-logo.svg"
+        },
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
@@ -54,6 +69,11 @@
         "language": "rbv",
         "scopeName": "source.rbv",
         "path": "./syntaxes/rbv.tmLanguage.json"
+      },
+      {
+        "language": "ebv",
+        "scopeName": "source.brief",
+        "path": "./syntaxes/brief.tmLanguage.json"
       }
     ],
     "themes": [

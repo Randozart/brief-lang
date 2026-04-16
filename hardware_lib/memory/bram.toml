@@ -1,0 +1,11 @@
+[memory]
+name = "bram"
+version = "1.0.0"
+description = "Block RAM for large vector storage"
+
+[synthesis]
+attribute = "syn_ramstyle = \"block_ram\""
+
+[parameters]
+size = { required = true, description = "number of elements" }
+element_bits = { required = true, description = "bits per element" }

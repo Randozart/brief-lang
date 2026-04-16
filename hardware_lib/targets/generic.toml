@@ -1,0 +1,9 @@
+[target]
+name = "generic"
+version = "1.0.0"
+description = "Generic target with no device-specific constraints"
+
+[constraints]
+max_bram_kb = 1000
+max_lut = 100000
+max_dsp = 500

@@ -24,6 +24,20 @@ If a bug still occurs, it's because the contract didn't fully express the intent
 But that makes the bug easy to find, as the contract shows exactly where expectation
 and code diverged.
 
+## Syntax Highlighting
+
+VS Code / VSCodium syntax highlighting for `.bv`, `.rbv`, and `.ebv` is available in `syntax-highlighter/`.
+
+You can install it by copying the directory to your extensions folder or installing the pre-packaged `.vsix` file:
+
+```bash
+# Install to VSCodium
+cp -r syntax-highlighter/ ~/.var/app/com.vscodium.codium/data/vscodium/extensions/brief
+
+# Or install the VSIX
+code --install-extension syntax-highlighter/brief-language-0.1.0.vsix
+```
+
 ## Quick Start
 
 ### 1. Install Brief

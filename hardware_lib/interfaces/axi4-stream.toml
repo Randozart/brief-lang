@@ -1,0 +1,13 @@
+[interface]
+name = "axi4-stream"
+version = "1.0.0"
+description = "AXI4-Stream protocol for high-throughput data"
+
+[signals]
+tvalid = { bits = 1, direction = "input" }
+tdata = { bits = "data_width", direction = "input" }
+tready = { bits = 1, direction = "output" }
+tlast = { bits = 1, direction = "input", optional = true }
+
+[parameters]
+data_width = { default = 32, min = 8, max = 512 }

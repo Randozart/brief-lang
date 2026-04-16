@@ -1,0 +1,11 @@
+[memory]
+name = "flipflop"
+version = "1.0.0"
+description = "Register (flip-flop) for small storage"
+
+[synthesis]
+attribute = "logic"
+
+[parameters]
+size = { required = true, description = "number of elements" }
+element_bits = { required = true, description = "bits per element" }

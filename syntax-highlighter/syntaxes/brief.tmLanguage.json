@@ -99,7 +99,7 @@
         },
         {
           "name": "keyword.declaration.brief",
-          "match": "\\b(sig|defn|let|const)\\b"
+          "match": "\\b(sig|defn|let|const|trg)\\b"
         },
         {
           "name": "keyword.import.brief",

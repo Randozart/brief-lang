@@ -52,6 +52,7 @@ node_modules/
 package-lock.json
 package.json
 !syntax-highlighter/package.json
+!syntax-highlighter/*.vsix
 tsconfig.json
 dist/
 

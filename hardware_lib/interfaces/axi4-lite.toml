@@ -1,0 +1,24 @@
+[interface]
+name = "axi4-lite"
+version = "1.0.0"
+description = "AXI4-Lite protocol for register access"
+
+[signals]
+awvalid = { bits = 1, direction = "input" }
+awaddr = { bits = "address_width", direction = "input" }
+wvalid = { bits = 1, direction = "input" }
+wdata = { bits = "data_width", direction = "input" }
+bready = { bits = 1, direction = "input" }
+arvalid = { bits = 1, direction = "input" }
+araddr = { bits = "address_width", direction = "input" }
+rready = { bits = 1, direction = "input" }
+rvalid = { bits = 1, direction = "output" }
+rdata = { bits = "data_width", direction = "output" }
+
+[parameters]
+address_width = { default = 16, min = 8, max = 32 }
+data_width = { default = 32, min = 8, max = 512 }
+
+[constraints]
+max_address = "2^address_width - 1"
+alignment = "data_width / 8"
