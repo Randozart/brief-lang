@@ -868,6 +868,11 @@ impl<'a> Parser<'a> {
 
         let tag_content = &self.source[start..byte_pos];
 
+        // Handle self-closing tags: <tag /> or <tag> (if it ends with />)
+        if tag_content.trim_end().ends_with("/>") {
+            return Ok((tag_content.to_string(), byte_pos));
+        }
+
         // Extract tag name from opening tag
         let mut tag_name = String::new();
         let after_lt = if tag_content.starts_with("<") {
@@ -2593,5 +2598,28 @@ impl<'a> Parser<'a> {
             Some(tok) => Err(format!("Unexpected token in expression: {:?}", tok)),
             None => Err("Unexpected EOF in expression".to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_rstruct_with_self_closing_html() {
+        let source = r#"
+rstruct Logo {
+  <svg viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="40" fill="red" />
+    <path d="M 10 10 L 90 90" />
+  </svg>
+};
+"#;
+        let mut parser = Parser::new(source);
+        let result = parser.parse_rstruct();
+        assert!(result.is_ok(), "Failed to parse rstruct with self-closing tags: {:?}", result.err());
+        let rstruct = result.unwrap();
+        assert!(rstruct.view_html.contains("<circle"));
+        assert!(rstruct.view_html.contains("/>"));
     }
 }
