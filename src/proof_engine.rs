@@ -12,6 +12,60 @@ pub struct ProofError {
     pub examples: Vec<String>,
     pub hints: Vec<String>,
     pub is_warning: bool,
+    pub span: Option<Span>,
+}
+
+impl ProofError {
+    pub fn new(code: &str, title: &str) -> Self {
+        ProofError {
+            code: code.to_string(),
+            title: title.to_string(),
+            explanation: String::new(),
+            proof_chain: Vec::new(),
+            examples: Vec::new(),
+            hints: Vec::new(),
+            is_warning: false,
+            span: None,
+        }
+    }
+
+    pub fn new_warning(code: &str, title: &str) -> Self {
+        ProofError {
+            code: code.to_string(),
+            title: title.to_string(),
+            explanation: String::new(),
+            proof_chain: Vec::new(),
+            examples: Vec::new(),
+            hints: Vec::new(),
+            is_warning: true,
+            span: None,
+        }
+    }
+
+    pub fn with_span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    pub fn with_explanation(mut self, text: &str) -> Self {
+        self.explanation = text.to_string();
+        self
+    }
+
+    pub fn with_proof_step(mut self, step: &str) -> Self {
+        self.proof_chain.push(step.to_string());
+        self
+    }
+
+    pub fn with_example(mut self, example: &str) -> Self {
+        self.examples.push(example.to_string());
+        self
+    }
+
+    pub fn with_hint(mut self, hint: &str) -> Self {
+        self.hints.push(hint.to_string());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,7 +121,6 @@ impl SymbolicValue {
         }
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct PathConstraint {
     pub condition: Expr,
@@ -141,6 +194,7 @@ impl SymbolicExecutor {
                                 txn.name
                             ))
                             .with_hint("Consider adding a body or simplifying the postcondition")
+                            .with_span(txn.span.unwrap_or(Span::dummy()))
                     );
                 }
             }
@@ -192,6 +246,7 @@ impl SymbolicExecutor {
                                 defn.name
                             ))
                             .with_hint("Consider adding a body or simplifying the postcondition")
+                            .with_span(defn.contract.span.unwrap_or(Span::dummy()))
                     );
                 }
             }
@@ -594,52 +649,6 @@ impl SymbolicExecutor {
             }
             _ => "<expr>".to_string(),
         }
-    }
-}
-
-impl ProofError {
-    pub fn new(code: &str, title: &str) -> Self {
-        ProofError {
-            code: code.to_string(),
-            title: title.to_string(),
-            explanation: String::new(),
-            proof_chain: Vec::new(),
-            examples: Vec::new(),
-            hints: Vec::new(),
-            is_warning: false,
-        }
-    }
-
-    pub fn new_warning(code: &str, title: &str) -> Self {
-        ProofError {
-            code: code.to_string(),
-            title: title.to_string(),
-            explanation: String::new(),
-            proof_chain: Vec::new(),
-            examples: Vec::new(),
-            hints: Vec::new(),
-            is_warning: true,
-        }
-    }
-
-    pub fn with_explanation(mut self, text: &str) -> Self {
-        self.explanation = text.to_string();
-        self
-    }
-
-    pub fn with_proof_step(mut self, step: &str) -> Self {
-        self.proof_chain.push(step.to_string());
-        self
-    }
-
-    pub fn with_example(mut self, example: &str) -> Self {
-        self.examples.push(example.to_string());
-        self
-    }
-
-    pub fn with_hint(mut self, hint: &str) -> Self {
-        self.hints.push(hint.to_string());
-        self
     }
 }
 

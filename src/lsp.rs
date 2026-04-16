@@ -1,6 +1,5 @@
 use crate::ast::{Program, TopLevel};
-use crate::errors::ErrorMode;
-use crate::errors::Span;
+use crate::errors::{Diagnostic, ErrorMode, Severity, Span};
 use crate::parser;
 use crate::proof_engine;
 use crate::typechecker;
@@ -38,12 +37,31 @@ impl LspServer {
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Starting Brief LSP server");
+        let server_capabilities = serde_json::json!({
+            "textDocumentSync": {
+                "openClose": true,
+                "change": 1, // Full
+            },
+            "hoverProvider": true,
+            "definitionProvider": true,
+            "completionProvider": {
+                "resolveProvider": false,
+                "triggerCharacters": ["."]
+            }
+        });
+
+        let initialization_params = self.connection.initialize(server_capabilities)?;
+        info!("LSP initialized with params: {:?}", initialization_params);
 
         loop {
             let msg = self.connection.receiver.recv()?;
             match msg {
-                Message::Request(req) => self.handle_request(req),
+                Message::Request(req) => {
+                    if self.connection.handle_shutdown(&req)? {
+                        return Ok(());
+                    }
+                    self.handle_request(req);
+                }
                 Message::Response(resp) => self.handle_response(resp),
                 Message::Notification(notif) => self.handle_notification(notif),
             }
@@ -51,34 +69,7 @@ impl LspServer {
     }
 
     fn handle_request(&self, req: Request) {
-        info!("Handling request: {:?}", req.method);
-
         match req.method.as_str() {
-            "initialize" => {
-                let result = serde_json::json!({
-                    "capabilities": {
-                        "textDocumentSync": {
-                            "kind": 1 // Full
-                        },
-                        "hoverProvider": true,
-                        "definitionProvider": true,
-                        "completionProvider": {
-                            "resolveProvider": false,
-                            "triggerCharacters": ["."]
-                        }
-                    },
-                    "serverInfo": {
-                        "name": "Brief Language Server",
-                        "version": env!("CARGO_PKG_VERSION")
-                    }
-                });
-                let resp = Response::new_ok(req.id, result);
-                let _ = self.connection.sender.send(Message::Response(resp));
-            }
-            "shutdown" => {
-                let resp = Response::new_ok(req.id, ());
-                let _ = self.connection.sender.send(Message::Response(resp));
-            }
             "textDocument/hover" => {
                 if let Ok(params) = serde_json::from_value(req.params) {
                     self.handle_hover(req.id, params);
@@ -95,60 +86,13 @@ impl LspServer {
                 }
             }
             _ => {
-                error!("Unknown request method: {}", req.method);
+                warn!("Unknown request method: {}", req.method);
             }
         }
     }
 
-    fn handle_did_change_json(&mut self, params: Value) {
-        let uri = params
-            .get("textDocument")
-            .and_then(|td| td.get("uri"))
-            .and_then(|u| u.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let version = params
-            .get("textDocument")
-            .and_then(|td| td.get("version"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(1) as i32;
-
-        let changes = params
-            .get("contentChanges")
-            .and_then(|cc| cc.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let new_text = {
-            let mut docs = self.documents.lock().unwrap();
-            if let Some(doc) = docs.docs.get_mut(&uri) {
-                for change in changes {
-                    doc.text = change.to_string();
-                }
-                doc.version = version;
-                doc.text.clone()
-            } else {
-                return;
-            }
-        };
-
-        self.check_document(&uri, &new_text);
-    }
-
-    fn handle_response(&self, _resp: Response) {}
-
     fn handle_notification(&mut self, notif: Notification) {
-        info!("Handling notification: {}", notif.method);
-
         match notif.method.as_str() {
-            "initialized" => {
-                info!("Client initialized");
-            }
             "textDocument/didOpen" => {
                 if let Ok(params) = serde_json::from_value(notif.params) {
                     self.handle_did_open_json(params);
@@ -159,38 +103,22 @@ impl LspServer {
                     self.handle_did_change_json(params);
                 }
             }
-            "exit" => {
-                info!("Received exit notification");
-                std::process::exit(0);
-            }
             _ => {
-                warn!("Unknown notification method: {}", notif.method);
+                // Ignore unknown notifications
             }
         }
     }
 
     fn handle_did_open_json(&mut self, params: Value) {
-        let uri = params
-            .get("textDocument")
-            .and_then(|td| td.get("uri"))
-            .and_then(|u| u.as_str())
+        let uri = params["textDocument"]["uri"]
+            .as_str()
             .unwrap_or("")
             .to_string();
-
-        let text = params
-            .get("textDocument")
-            .and_then(|td| td.get("text"))
-            .and_then(|t| t.as_str())
+        let text = params["textDocument"]["text"]
+            .as_str()
             .unwrap_or("")
             .to_string();
-
-        let version = params
-            .get("textDocument")
-            .and_then(|td| td.get("version"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(1) as i32;
-
-        info!("Opening document: {}", uri);
+        let version = params["textDocument"]["version"].as_i64().unwrap_or(0) as i32;
 
         {
             let mut docs = self.documents.lock().unwrap();
@@ -207,9 +135,31 @@ impl LspServer {
         self.check_document(&uri, &text);
     }
 
-    fn check_document(&self, uri: &str, text: &str) {
-        info!("Checking document: {}", uri);
+    fn handle_did_change_json(&mut self, params: Value) {
+        let uri = params["textDocument"]["uri"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let version = params["textDocument"]["version"].as_i64().unwrap_or(0) as i32;
+        let text = params["contentChanges"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
 
+        {
+            let mut docs = self.documents.lock().unwrap();
+            if let Some(doc) = docs.docs.get_mut(&uri) {
+                doc.text = text.clone();
+                doc.version = version;
+            } else {
+                return;
+            }
+        }
+
+        self.check_document(&uri, &text);
+    }
+
+    fn check_document(&self, uri: &str, text: &str) {
         let (diagnostics, program) = self.run_type_check(text);
 
         {
@@ -240,7 +190,8 @@ impl LspServer {
                             "end": { "line": 0, "character": 0 }
                         },
                         "severity": 1,
-                        "message": e
+                        "source": "brief-parser",
+                        "message": format!("Parse error: {}", e)
                     })],
                     None,
                 );
@@ -248,77 +199,83 @@ impl LspServer {
         };
 
         let mut tc = typechecker::TypeChecker::new();
-        let type_errors = tc.check_program(&mut program);
+        tc.check_program(&mut program);
+        let type_diagnostics = tc.get_diagnostics();
 
         let mut pe = proof_engine::ProofEngine::new();
         let proof_errors = pe.verify_program(&program);
 
         let mut diagnostics = Vec::new();
 
-        for err in type_errors {
-            let diag = self.type_error_to_json(&err);
-            diagnostics.push(diag);
+        for diag in type_diagnostics {
+            diagnostics.push(self.diagnostic_to_json(&diag));
         }
 
         for err in proof_errors {
-            let diag = self.proof_error_to_json(&err);
-            diagnostics.push(diag);
+            diagnostics.push(self.proof_error_to_json(&err));
         }
 
         (diagnostics, Some(program))
     }
 
-    fn type_error_to_json(&self, err: &typechecker::TypeError) -> Value {
-        use crate::errors::TypeError;
-
-        let message = match err {
-            TypeError::UndefinedVariable { name, .. } => {
-                format!("undefined variable '{}'", name)
-            }
-            TypeError::TypeMismatch {
-                expected,
-                found,
-                context,
-                ..
-            } => {
-                format!("expected {} for {}, but found {}", expected, context, found)
-            }
-            TypeError::UninitializedSignal { name, .. } => {
-                format!("signal '{}' has no initial value", name)
-            }
-            TypeError::OwnershipViolation { var, reason, .. } => {
-                format!("ownership violation on '{}': {}", var, reason)
-            }
-            TypeError::InvalidOperation {
-                operation,
-                type_name,
-                ..
-            } => {
-                format!("invalid operation '{}' on type {}", operation, type_name)
-            }
-            TypeError::FFIError { message, .. } => {
-                format!("FFI error: {}", message)
-            }
+    fn diagnostic_to_json(&self, diag: &Diagnostic) -> Value {
+        let severity = match diag.severity {
+            Severity::Error => 1,
+            Severity::Warning => 2,
+            Severity::Info => 3,
+            Severity::Note => 4,
         };
 
-        serde_json::json!({
-            "range": {
+        let range = if let Some(span) = diag.span {
+            serde_json::json!({
+                "start": { "line": span.line.saturating_sub(1), "character": span.column.saturating_sub(1) },
+                "end": { "line": span.line.saturating_sub(1), "character": span.column + 1 }
+            })
+        } else {
+            serde_json::json!({
                 "start": { "line": 0, "character": 0 },
-                "end": { "line": 0, "character": 0 }
-            },
-            "severity": 1,
+                "end": { "line": 0, "character": 1 }
+            })
+        };
+
+        let mut message = diag.title.clone();
+        if !diag.explanation.is_empty() {
+            message.push_str("\n\n");
+            message.push_str(&diag.explanation.join("\n"));
+        }
+        if !diag.hints.is_empty() {
+            message.push_str("\n\nhint: ");
+            message.push_str(&diag.hints.join("\n"));
+        }
+
+        serde_json::json!({
+            "range": range,
+            "severity": severity,
+            "code": diag.code,
+            "source": "brief",
             "message": message
         })
     }
 
     fn proof_error_to_json(&self, err: &proof_engine::ProofError) -> Value {
-        serde_json::json!({
-            "range": {
+        let range = if let Some(span) = err.span {
+            serde_json::json!({
+                "start": { "line": span.line.saturating_sub(1), "character": span.column.saturating_sub(1) },
+                "end": { "line": span.line.saturating_sub(1), "character": span.column + 1 }
+            })
+        } else {
+            serde_json::json!({
                 "start": { "line": 0, "character": 0 },
-                "end": { "line": 0, "character": 0 }
-            },
+                "end": { "line": 0, "character": 1 }
+            })
+        };
+
+        serde_json::json!({
+            "range": range,
             "severity": if err.is_warning { 2 } else { 1 },
-            "message": format!("[{}] {}", err.code, err.title)
+            "code": err.code,
+            "source": "brief-proof",
+            "message": format!("{}: {}", err.title, err.explanation)
         })
     }
 
@@ -343,35 +300,21 @@ impl LspServer {
     }
 
     fn handle_hover(&self, id: lsp_server::RequestId, params: Value) {
-        let uri = params
-            .get("textDocument")
-            .and_then(|td| td.get("uri"))
-            .and_then(|u| u.as_str())
-            .unwrap_or("");
-        let line = params
-            .get("position")
-            .and_then(|p| p.get("line"))
-            .and_then(|l| l.as_u64())
-            .unwrap_or(0) as usize
-            + 1;
-        let character = params
-            .get("position")
-            .and_then(|p| p.get("character"))
-            .and_then(|c| c.as_u64())
-            .unwrap_or(0) as usize
-            + 1;
+        let uri = params["textDocument"]["uri"].as_str().unwrap_or("");
+        let line = params["position"]["line"].as_u64().unwrap_or(0) as usize + 1;
+        let character = params["position"]["character"].as_u64().unwrap_or(0) as usize + 1;
 
         let docs = self.documents.lock().unwrap();
         if let Some(doc) = docs.docs.get(uri) {
             if let Some(program) = &doc.program {
                 for item in &program.items {
                     if let Some(span) = item_span(item) {
+                        let name = item_name(item);
                         if line == span.line
                             && character >= span.column
-                            && character <= span.column + item_name(item).len()
+                            && character <= span.column + name.len()
                         {
-                            let content =
-                                format!("**{}**\n\n{}", item_name(item), item_description(item));
+                            let content = format!("**{}**\n\n{}", name, item_description(item));
                             let result = serde_json::json!({
                                 "contents": {
                                     "kind": "markdown",
@@ -392,38 +335,25 @@ impl LspServer {
     }
 
     fn handle_definition(&self, id: lsp_server::RequestId, params: Value) {
-        let uri = params
-            .get("textDocument")
-            .and_then(|td| td.get("uri"))
-            .and_then(|u| u.as_str())
-            .unwrap_or("");
-        let line = params
-            .get("position")
-            .and_then(|p| p.get("line"))
-            .and_then(|l| l.as_u64())
-            .unwrap_or(0) as usize
-            + 1;
-        let character = params
-            .get("position")
-            .and_then(|p| p.get("character"))
-            .and_then(|c| c.as_u64())
-            .unwrap_or(0) as usize
-            + 1;
+        let uri = params["textDocument"]["uri"].as_str().unwrap_or("");
+        let line = params["position"]["line"].as_u64().unwrap_or(0) as usize + 1;
+        let character = params["position"]["character"].as_u64().unwrap_or(0) as usize + 1;
 
         let docs = self.documents.lock().unwrap();
         if let Some(doc) = docs.docs.get(uri) {
             if let Some(program) = &doc.program {
                 for item in &program.items {
                     if let Some(span) = item_span(item) {
+                        let name = item_name(item);
                         if line == span.line
                             && character >= span.column
-                            && character <= span.column + item_name(item).len()
+                            && character <= span.column + name.len()
                         {
                             let result = serde_json::json!({
                                 "uri": uri,
                                 "range": {
                                     "start": { "line": span.line - 1, "character": span.column - 1 },
-                                    "end": { "line": span.line - 1, "character": span.column + item_name(item).len() - 1 }
+                                    "end": { "line": span.line - 1, "character": span.column + name.len() - 1 }
                                 }
                             });
                             let resp = Response::new_ok(id, result);
@@ -438,6 +368,8 @@ impl LspServer {
         let resp = Response::new_ok(id, serde_json::Value::Null);
         let _ = self.connection.sender.send(Message::Response(resp));
     }
+
+    fn handle_response(&self, _resp: Response) {}
 }
 
 fn item_span(item: &TopLevel) -> Option<Span> {
@@ -448,6 +380,7 @@ fn item_span(item: &TopLevel) -> Option<Span> {
         TopLevel::Struct(s) => s.span,
         TopLevel::Enum(e) => e.span,
         TopLevel::ForeignBinding { span, .. } => *span,
+        TopLevel::Definition(d) => d.contract.span,
         _ => None,
     }
 }

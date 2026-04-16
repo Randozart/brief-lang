@@ -6,8 +6,14 @@ const os = require('os');
 
 let client;
 
-function findBrief() {
-    // 1. Try common locations
+function findBrief(context) {
+    // 1. Try bundled binary (most reliable for Flatpak/Snap)
+    const bundledPath = path.join(context.extensionPath, 'client', 'bin', 'brief');
+    if (fs.existsSync(bundledPath)) {
+        return bundledPath;
+    }
+
+    // 2. Try common locations
     const home = os.homedir();
     const commonPaths = [
         path.join(home, '.local/bin/brief'),
@@ -22,15 +28,16 @@ function findBrief() {
         }
     }
 
-    // 2. Try PATH as a last resort
+    // 3. Try PATH as a last resort
     return 'brief';
 }
 
 function activate(context) {
-    console.log('Brief extension activated');
+    const logPath = path.join(os.tmpdir(), 'brief-extension.log');
+    fs.appendFileSync(logPath, 'Brief extension activate called\n');
 
-    const briefPath = findBrief();
-    console.log(`Using Brief binary at: ${briefPath}`);
+    const briefPath = findBrief(context);
+    fs.appendFileSync(logPath, `Using Brief binary at: ${briefPath}\n`);
 
     // The server is implemented in the brief binary
     const serverOptions = {
