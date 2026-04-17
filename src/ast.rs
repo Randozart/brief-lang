@@ -1,4 +1,5 @@
 use crate::errors::Span;
+use crate::ffi::types::MemoryLayout;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
@@ -138,6 +139,11 @@ pub struct ForeignSignature {
     pub success_output: Vec<(String, Type)>, // named fields (can be empty for void)
     pub error_type_name: String,     // e.g., "IoError"
     pub error_fields: Vec<(String, Type)>, // error shape
+    pub input_layout: Option<MemoryLayout>, // Explicit layout (NEW v2)
+    pub output_layout: Option<MemoryLayout>, // Explicit layout (NEW v2)
+    pub precondition: Option<String>, // Pre-call validation (NEW v2)
+    pub postcondition: Option<String>, // Post-call validation (NEW v2)
+    pub buffer_mode: Option<String>, // stack | heap | static
     pub span: Option<Span>,
 }
 
@@ -156,6 +162,57 @@ pub struct ForeignBinding {
     pub success_output: Vec<(String, Type)>, // Success output shape
     pub error_type: String,     // Error type name
     pub error_fields: Vec<(String, Type)>, // Error fields
+    pub input_layout: Option<MemoryLayout>, // Explicit layout (NEW v2)
+    pub output_layout: Option<MemoryLayout>, // Explicit layout (NEW v2)
+    pub precondition: Option<String>, // Pre-call validation (NEW v2)
+    pub postcondition: Option<String>, // Post-call validation (NEW v2)
+    pub buffer_mode: Option<String>, // stack | heap | static
+}
+
+impl ForeignBinding {
+    pub fn new(name: String, location: String, target: ForeignTarget) -> Self {
+        Self {
+            name,
+            description: None,
+            location,
+            target,
+            mapper: None,
+            path: None,
+            wasm_impl: None,
+            wasm_setup: None,
+            inputs: Vec::new(),
+            success_output: Vec::new(),
+            error_type: "Error".to_string(),
+            error_fields: Vec::new(),
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+        }
+    }
+
+    pub fn from_signature(sig: &ForeignSignature) -> Self {
+        Self {
+            name: sig.name.clone(),
+            description: None,
+            location: sig.location.clone(),
+            target: ForeignTarget::Native, // Default
+            mapper: None,
+            path: None,
+            wasm_impl: sig.wasm_impl.clone(),
+            wasm_setup: sig.wasm_setup.clone(),
+            inputs: sig.inputs.clone(),
+            success_output: sig.success_output.clone(),
+            error_type: sig.error_type_name.clone(),
+            error_fields: sig.error_fields.clone(),
+            input_layout: sig.input_layout.clone(),
+            output_layout: sig.output_layout.clone(),
+            precondition: sig.precondition.clone(),
+            postcondition: sig.postcondition.clone(),
+            buffer_mode: sig.buffer_mode.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

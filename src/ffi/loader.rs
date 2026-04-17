@@ -2,6 +2,7 @@
 //!
 //! Loads and parses TOML binding files into ForeignBinding structures
 
+use super::types::{Endian, FieldDescriptor, MemoryLayout};
 use super::FfiError;
 use crate::ast::{ForeignBinding, ForeignTarget, Type};
 use std::path::Path;
@@ -27,6 +28,17 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
     let meta = parsed.get("meta").and_then(|v| v.as_table());
     let wasm_setup = meta
         .and_then(|m| m.get("wasm_setup"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let global_endian = meta
+        .and_then(|m| m.get("endian"))
+        .and_then(|v| v.as_str())
+        .map(parse_endian)
+        .unwrap_or(Endian::Native);
+
+    let global_buffer_mode = meta
+        .and_then(|m| m.get("buffer_mode"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
@@ -98,8 +110,41 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        // v2: buffer_mode
+        let buffer_mode = func
+            .get("buffer_mode")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| global_buffer_mode.clone());
+
+        // v2: Contracts
+        let contract = func.get("contract").and_then(|v| v.as_table());
+        let precondition = contract
+            .and_then(|c| c.get("precondition"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let postcondition = contract
+            .and_then(|c| c.get("postcondition"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         // Parse input parameters
         let inputs = parse_toml_table(func.get("input").and_then(|v| v.as_table()))?;
+
+        // v2: input_layout
+        let input_layout = func
+            .get("input_layout")
+            .and_then(|v| v.as_table())
+            .map(|t| parse_memory_layout(t, global_endian))
+            .transpose()?
+            .or_else(|| {
+                // Auto-calculate input layout if missing
+                if !inputs.is_empty() {
+                    Some(calculate_auto_layout(&inputs, global_endian))
+                } else {
+                    None
+                }
+            });
 
         // Parse success output
         let success_output = parse_toml_table(
@@ -107,6 +152,21 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
                 .and_then(|v| v.get("success"))
                 .and_then(|v| v.as_table()),
         )?;
+
+        // v2: output_layout
+        let output_layout = func
+            .get("output_layout")
+            .and_then(|v| v.as_table())
+            .map(|t| parse_memory_layout(t, global_endian))
+            .transpose()?
+            .or_else(|| {
+                // Auto-calculate output layout if missing
+                if !success_output.is_empty() {
+                    Some(calculate_auto_layout(&success_output, global_endian))
+                } else {
+                    None
+                }
+            });
 
         // Parse error type
         let error_table = func
@@ -149,12 +209,113 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             success_output,
             error_type,
             error_fields,
+            input_layout,
+            output_layout,
+            precondition,
+            postcondition,
+            buffer_mode,
         };
 
         bindings.push(binding);
     }
 
     Ok(bindings)
+}
+
+fn calculate_auto_layout(fields: &[(String, Type)], endian: Endian) -> MemoryLayout {
+    let mut layout = MemoryLayout::new();
+    layout.endian = endian;
+    let mut current_offset = 0;
+
+    for (name, ty) in fields {
+        let size = match ty {
+            Type::Bool => 1,
+            Type::Int | Type::Float | Type::String | Type::Data | Type::Custom(_) => 8,
+            Type::Void => 0,
+            _ => 8,
+        };
+
+        // Align to 8 bytes if size is 8
+        if size == 8 && current_offset % 8 != 0 {
+            current_offset += 8 - (current_offset % 8);
+        }
+
+        layout.fields.push(FieldDescriptor {
+            name: name.clone(),
+            offset: current_offset,
+            size_bytes: size,
+            element_size: None,
+            count: None,
+            endian: None,
+        });
+
+        current_offset += size;
+    }
+
+    layout.size_bytes = current_offset;
+    layout
+}
+
+fn parse_endian(s: &str) -> Endian {
+    match s.to_lowercase().as_str() {
+        "little" => Endian::Little,
+        "big" => Endian::Big,
+        _ => Endian::Native,
+    }
+}
+
+fn parse_memory_layout(
+    table: &toml::map::Map<String, toml::Value>,
+    default_endian: Endian,
+) -> Result<MemoryLayout, FfiError> {
+    let mut layout = MemoryLayout::new();
+    layout.endian = default_endian;
+
+    for (name, val) in table {
+        let field_table = val.as_table().ok_or_else(|| {
+            FfiError::TomlParseError(format!("Field layout {} must be a table", name))
+        })?;
+
+        let offset = field_table
+            .get("offset")
+            .and_then(|v| v.as_integer())
+            .ok_or_else(|| FfiError::MissingField(format!("input_layout.{}.offset", name)))?
+            as usize;
+
+        let size = field_table
+            .get("size")
+            .and_then(|v| v.as_integer())
+            .ok_or_else(|| FfiError::MissingField(format!("input_layout.{}.size", name)))?
+            as usize;
+
+        let endian = field_table
+            .get("endian")
+            .and_then(|v| v.as_str())
+            .map(parse_endian);
+
+        let element_size = field_table
+            .get("element_size")
+            .and_then(|v| v.as_integer())
+            .map(|v| v as usize);
+
+        let count = field_table
+            .get("count")
+            .and_then(|v| v.as_integer())
+            .map(|v| v as usize);
+
+        layout.fields.push(FieldDescriptor {
+            name: name.clone(),
+            offset,
+            size_bytes: size,
+            element_size,
+            count,
+            endian,
+        });
+
+        layout.size_bytes = layout.size_bytes.max(offset + size);
+    }
+
+    Ok(layout)
 }
 
 /// Parse a TOML table into (field_name, Type) pairs

@@ -522,6 +522,11 @@ impl TypeChecker {
 
         signature.error_fields = binding.error_fields.clone();
         signature.location = binding.location.clone();
+        signature.input_layout = binding.input_layout.clone();
+        signature.output_layout = binding.output_layout.clone();
+        signature.precondition = binding.precondition.clone();
+        signature.postcondition = binding.postcondition.clone();
+        signature.buffer_mode = binding.buffer_mode.clone();
 
         if let Err(err) = ffi::validator::validate_frgn_against_binding(signature, binding) {
             self.diagnostics.borrow_mut().push(

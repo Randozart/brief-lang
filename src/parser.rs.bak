@@ -538,11 +538,6 @@ impl<'a> Parser<'a> {
             success_output,
             error_type_name: error_type_name.clone(),
             error_fields,
-            input_layout: None,
-            output_layout: None,
-            precondition: None,
-            postcondition: None,
-            buffer_mode: None,
             span: None,
         };
 
@@ -668,8 +663,7 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.current_token() {
             iterations += 1;
             if iterations > MAX_ITERATIONS {
-                return self.spanned_err(
-                    "rstruct parsing exceeded iteration limit - possible infinite loop".to_string(),
+                return self.spanned_err("rstruct parsing exceeded iteration limit - possible infinite loop".to_string(),
                 );
             }
 
@@ -792,8 +786,7 @@ impl<'a> Parser<'a> {
         let span = self.current_span();
 
         if view_html.is_empty() {
-            return self.spanned_err(
-                "rstruct requires a view body (HTML). Add <div>...</div> inside the rstruct."
+            return self.spanned_err("rstruct requires a view body (HTML). Add <div>...</div> inside the rstruct."
                     .to_string(),
             );
         }
@@ -832,10 +825,7 @@ impl<'a> Parser<'a> {
                         self.advance(); // consume >
                         break;
                     }
-                    _ => {
-                        return self
-                            .spanned_err("Expected ',' or '>' in enum type parameters".to_string())
-                    }
+                    _ => return self.spanned_err("Expected ',' or '>' in enum type parameters".to_string()),
                 }
             }
         }
@@ -869,11 +859,7 @@ impl<'a> Parser<'a> {
                                     self.advance();
                                     break;
                                 }
-                                _ => {
-                                    return self.spanned_err(
-                                        "Expected ',' or ')' in enum variant".to_string(),
-                                    )
-                                }
+                                _ => return self.spanned_err("Expected ',' or ')' in enum variant".to_string()),
                             }
                         }
                         EnumVariant::Tuple(variant_name_str, inner_types)
@@ -900,7 +886,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), SyntaxError> {
+    fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
         // Find the opening tag's closing >
         let mut byte_pos = start;
         let source_bytes = self.source.as_bytes();
@@ -941,8 +927,7 @@ impl<'a> Parser<'a> {
         }
 
         if tag_name.is_empty() {
-            return self
-                .spanned_err("Could not parse HTML tag in rstruct (no tag name)".to_string());
+            return self.spanned_err("Could not parse HTML tag in rstruct (no tag name)".to_string());
         }
 
         let close_tag = format!("</{}>", tag_name);
@@ -990,7 +975,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        self.spanned_err(format!(
+        Err(format!(
             "Unclosed HTML tag in rstruct (missing </{}>)",
             tag_name
         ))
@@ -1013,8 +998,7 @@ impl<'a> Parser<'a> {
             if let Some(Ok(Token::LBrace)) = self.current_token() {
                 span.start
             } else {
-                return self
-                    .spanned_err(format!("Expected LBrace, found {:?}", self.current_token()));
+                return self.spanned_err(format!("Expected LBrace, found {:?}", self.current_token()));
             }
         } else {
             return self.spanned_err("Unexpected EOF".to_string());
@@ -1151,8 +1135,7 @@ impl<'a> Parser<'a> {
                                 if let Ok(end_bit) = end.parse::<usize>() {
                                     BitRange::Range(bit, end_bit)
                                 } else {
-                                    return self
-                                        .spanned_err(format!("Expected bit number, got {}", end));
+                                    return self.spanned_err(format!("Expected bit number, got {}", end));
                                 }
                             }
                             _ => BitRange::Single(bit),
@@ -1511,7 +1494,7 @@ impl<'a> Parser<'a> {
     fn parse_output_types_with_names(
         &mut self,
         parameters: &[(String, Type)],
-    ) -> Result<(Vec<Type>, Vec<Option<String>>), SyntaxError> {
+    ) -> Result<(Vec<Type>, Vec<Option<String>>), String> {
         let mut outputs = Vec::new();
         let mut names = Vec::new();
         let param_names: std::collections::HashSet<String> =
@@ -1963,14 +1946,10 @@ impl<'a> Parser<'a> {
                                         expr: right,
                                     })
                                 } else {
-                                    self.spanned_err(
-                                        "Unification pattern must be an identifier".to_string(),
-                                    )
+                                    self.spanned_err("Unification pattern must be an identifier".to_string())
                                 }
                             } else {
-                                self.spanned_err(
-                                    "Unification expects one pattern argument".to_string(),
-                                )
+                                self.spanned_err("Unification expects one pattern argument".to_string())
                             }
                         }
                         _ => Ok(Statement::Assignment {
@@ -2081,7 +2060,7 @@ impl<'a> Parser<'a> {
                 self.expect(Token::RBracket)?;
                 ty = Type::Vector(Box::new(ty), size);
             } else {
-                return self.spanned_err("Expected vector size".to_string());
+                return self.spanned_err("Expected vector size\".to_string());
             }
         }
 
@@ -2642,10 +2621,10 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::TildeSlash)) => {
                 self.advance();
                 let identifier = self.expect_identifier()?;
-                let path = format!("~/{}", identifier);
+                let path = format!("~/{{}}", identifier);
                 Ok(Expr::String(path))
             }
-            Some(tok) => self.spanned_err(format!("Unexpected token in expression: {:?}", tok)),
+            Some(tok) => self.spanned_err(format!("Unexpected token in expression: {{:?}}", tok)),
             None => self.spanned_err("Unexpected EOF in expression".to_string()),
         }
     }
@@ -2657,9 +2636,19 @@ mod parser_tests {
 
     #[test]
     fn test_parse_rstruct_with_self_closing_html() {
-        let s = r#"rstruct Logo { <svg> <circle /> </svg> };"#;
-        let mut parser = Parser::new(s);
+        let source = r#"
+rstruct Logo {
+  <svg viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="40" fill="red" />
+    <path d="M 10 10 L 90 90" />
+  </svg>
+};
+"#;
+        let mut parser = Parser::new(source);
         let result = parser.parse_rstruct();
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Failed to parse rstruct");
+        let rstruct = result.unwrap();
+        assert!(rstruct.view_html.contains("<circle"));
+        assert!(rstruct.view_html.contains("/>"));
     }
 }

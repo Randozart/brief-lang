@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::ffi::orchestrator::Orchestrator;
 use crate::ffi::FFI_REGISTRY;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -119,26 +120,20 @@ pub struct Interpreter {
     pub definitions: HashMap<String, Definition>,
     pub ffi_bindings: HashMap<String, ForeignSignature>,
     pub ffi_name_to_location: HashMap<String, String>,
+    pub orchestrator: Orchestrator,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         let foreign_functions = Self::load_ffi_functions();
-        eprintln!(
-            "[DEBUG Interpreter::new] Loaded {} foreign functions",
-            foreign_functions.len()
-        );
-        for (name, _) in &foreign_functions {
-            eprintln!("[DEBUG]   FFI function: {}", name);
-        }
-
-        Interpreter {
+        Self {
             state: HashMap::new(),
             prior_state: HashMap::new(),
             foreign_functions,
             definitions: HashMap::new(),
             ffi_bindings: HashMap::new(),
             ffi_name_to_location: HashMap::new(),
+            orchestrator: Orchestrator::new(),
         }
     }
 
@@ -397,6 +392,7 @@ impl Interpreter {
 
         let success_output = &sig.success_output;
         let error_fields = &sig.error_fields;
+        let error_type_name = &sig.error_type_name;
 
         if success_output.is_empty() {
             return Ok(result);
@@ -414,18 +410,26 @@ impl Interpreter {
                 fields,
             } = &result
             {
-                let has_error = error_fields.iter().any(|(field_name, _)| {
+                let mut err_fields = HashMap::new();
+                let mut has_error = false;
+
+                for (field_name, _) in error_fields {
                     if let Some(val) = fields.get(field_name) {
-                        !Self::is_empty_value(val)
-                    } else {
-                        false
+                        if !Self::is_empty_value(val) {
+                            err_fields.insert(field_name.clone(), val.clone());
+                            has_error = true;
+                        }
                     }
-                });
+                }
 
                 if has_error {
+                    // Return Result::Error(ErrorType { ... })
+                    let error_variant =
+                        Value::Enum(error_type_name.clone(), error_type_name.clone(), err_fields);
+
                     return Err(RuntimeError::ContractViolation(format!(
-                        "FFI function '{}' returned error",
-                        fn_name
+                        "FFI Error({}): {:?}",
+                        error_type_name, error_variant
                     )));
                 }
             }
@@ -437,18 +441,25 @@ impl Interpreter {
             mut fields,
         } = result
         {
-            let has_error = error_fields.iter().any(|(field_name, _)| {
+            let mut err_fields = HashMap::new();
+            let mut has_error = false;
+
+            for (field_name, _) in error_fields {
                 if let Some(val) = fields.get(field_name) {
-                    !Self::is_empty_value(val)
-                } else {
-                    false
+                    if !Self::is_empty_value(val) {
+                        err_fields.insert(field_name.clone(), val.clone());
+                        has_error = true;
+                    }
                 }
-            });
+            }
 
             if has_error {
+                let error_variant =
+                    Value::Enum(error_type_name.clone(), error_type_name.clone(), err_fields);
+
                 return Err(RuntimeError::ContractViolation(format!(
-                    "FFI function '{}' returned error",
-                    fn_name
+                    "FFI Error({}): {:?}",
+                    error_type_name, error_variant
                 )));
             }
 
@@ -458,7 +469,10 @@ impl Interpreter {
                 }
             }
 
-            Ok(Value::Instance { typename, fields })
+            Ok(Value::Instance {
+                typename: "Success".to_string(),
+                fields,
+            })
         } else {
             Ok(result)
         }
@@ -785,6 +799,13 @@ impl Interpreter {
 
                 if let Some(location) = self.ffi_name_to_location.get(&fn_name) {
                     if let Some(frgn_fn) = self.foreign_functions.get(location) {
+                        if let Some(sig) = self.ffi_bindings.get(&fn_name) {
+                            // Only use orchestrator if layouts are defined (v2)
+                            if sig.input_layout.is_some() || sig.output_layout.is_some() {
+                                let binding = ForeignBinding::from_signature(sig);
+                                return self.orchestrator.call(&binding, arg_values, *frgn_fn);
+                            }
+                        }
                         let result = frgn_fn(arg_values)?;
                         return self.handle_ffi_result(&fn_name, result);
                     }

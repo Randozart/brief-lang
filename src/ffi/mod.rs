@@ -10,16 +10,24 @@
 pub mod loader;
 pub mod mapper;
 pub mod mappers;
+pub mod native_mapper;
+pub mod orchestrator;
+pub mod protocol;
 pub mod registry;
 pub mod resolver;
+pub mod sentinel;
 pub mod types;
 pub mod validator;
 
 pub use loader::load_binding;
 pub use mapper::{create_mapper_registry, find_mapper};
 pub use mappers::{MapperInfo, MapperRegistry, MapperType};
+pub use native_mapper::NativeMapper;
+pub use orchestrator::Orchestrator;
+pub use protocol::{FfiValue, Mapper};
 pub use registry::{FunctionRegistry, FFI_REGISTRY};
 pub use resolver::resolve_binding_path;
+pub use sentinel::Sentinel;
 pub use types::*;
 pub use validator::validate_frgn_against_binding;
 

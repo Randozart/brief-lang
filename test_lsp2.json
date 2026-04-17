@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"processId":1234,"rootUri":"file:///test","capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///test.bv","version":1,"text":"let x: Int = 1;"}}}

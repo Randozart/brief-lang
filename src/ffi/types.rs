@@ -32,6 +32,121 @@ pub enum FfiType {
     Generic(String, Vec<FfiType>),
 }
 
+/// Endianness for memory mapping
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endian {
+    Native,
+    Little,
+    Big,
+}
+
+/// Memory layout for a collection of fields
+#[derive(Debug, Clone)]
+pub struct MemoryLayout {
+    pub size_bytes: usize,
+    pub alignment: usize,
+    pub fields: Vec<FieldDescriptor>,
+    pub endian: Endian,
+}
+
+/// Description of a single field in memory
+#[derive(Debug, Clone)]
+pub struct FieldDescriptor {
+    pub name: String,
+    pub offset: usize,
+    pub size_bytes: usize,
+    pub element_size: Option<usize>, // For arrays
+    pub count: Option<usize>,        // For arrays
+    pub endian: Option<Endian>,      // Per-field override
+}
+
+/// A value that can be passed through a memory pipe.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FfiValue {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    String(String),
+    Data(Vec<u8>),
+    List(Vec<FfiValue>),
+    Struct(String, std::collections::HashMap<String, FfiValue>),
+    Variant(String, String, std::collections::HashMap<String, FfiValue>), // (type_name, variant_name, fields)
+    Void,
+}
+
+impl FfiValue {
+    pub fn from_interpreter_value(v: &crate::interpreter::Value) -> Self {
+        match v {
+            crate::interpreter::Value::Int(i) => FfiValue::Int(*i),
+            crate::interpreter::Value::Float(f) => FfiValue::Float(*f),
+            crate::interpreter::Value::Bool(b) => FfiValue::Bool(*b),
+            crate::interpreter::Value::String(s) => FfiValue::String(s.clone()),
+            crate::interpreter::Value::Data(d) => FfiValue::Data(d.clone()),
+            crate::interpreter::Value::List(l) => {
+                FfiValue::List(l.iter().map(Self::from_interpreter_value).collect())
+            }
+            crate::interpreter::Value::Instance { typename, fields } => {
+                let mut ffi_fields = std::collections::HashMap::new();
+                for (k, val) in fields {
+                    ffi_fields.insert(k.clone(), Self::from_interpreter_value(val));
+                }
+                FfiValue::Struct(typename.clone(), ffi_fields)
+            }
+            crate::interpreter::Value::Enum(name, variant, fields) => {
+                let mut ffi_fields = std::collections::HashMap::new();
+                for (k, val) in fields {
+                    ffi_fields.insert(k.clone(), Self::from_interpreter_value(val));
+                }
+                FfiValue::Variant(name.clone(), variant.clone(), ffi_fields)
+            }
+            crate::interpreter::Value::Void => FfiValue::Void,
+            _ => FfiValue::Void, // Fallback for types we can't map easily
+        }
+    }
+
+    pub fn to_interpreter_value(&self) -> crate::interpreter::Value {
+        match self {
+            FfiValue::Int(i) => crate::interpreter::Value::Int(*i),
+            FfiValue::Float(f) => crate::interpreter::Value::Float(*f),
+            FfiValue::Bool(b) => crate::interpreter::Value::Bool(*b),
+            FfiValue::String(s) => crate::interpreter::Value::String(s.clone()),
+            FfiValue::Data(d) => crate::interpreter::Value::Data(d.clone()),
+            FfiValue::List(l) => crate::interpreter::Value::List(
+                l.iter().map(|v| v.to_interpreter_value()).collect(),
+            ),
+            FfiValue::Struct(name, fields) => {
+                let mut int_fields = std::collections::HashMap::new();
+                for (k, val) in fields {
+                    int_fields.insert(k.clone(), val.to_interpreter_value());
+                }
+                crate::interpreter::Value::Instance {
+                    typename: name.clone(),
+                    fields: int_fields,
+                }
+            }
+            FfiValue::Variant(name, variant, fields) => {
+                let mut int_fields = std::collections::HashMap::new();
+                for (k, val) in fields {
+                    int_fields.insert(k.clone(), val.to_interpreter_value());
+                }
+                crate::interpreter::Value::Enum(name.clone(), variant.clone(), int_fields)
+            }
+            FfiValue::Void => crate::interpreter::Value::Void,
+        }
+    }
+}
+
+impl MemoryLayout {
+    pub fn new() -> Self {
+        Self {
+            size_bytes: 0,
+            alignment: 8,
+            fields: Vec::new(),
+            endian: Endian::Native,
+        }
+    }
+}
+
 impl std::fmt::Display for FfiType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

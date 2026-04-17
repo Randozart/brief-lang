@@ -121,6 +121,11 @@ mod tests {
                 ("code".to_string(), Type::Int),
                 ("message".to_string(), Type::String),
             ],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
             span: None,
         };
 
@@ -140,6 +145,11 @@ mod tests {
                 ("code".to_string(), Type::Int),
                 ("message".to_string(), Type::String),
             ],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
         };
 
         assert!(validate_frgn_against_binding(&frgn, &binding).is_ok());
@@ -156,6 +166,11 @@ mod tests {
             success_output: vec![],
             error_type_name: "Error".to_string(),
             error_fields: vec![],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
             span: None,
         };
 
@@ -172,6 +187,11 @@ mod tests {
             success_output: vec![],
             error_type: "Error".to_string(),
             error_fields: vec![],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
         };
 
         assert!(validate_frgn_against_binding(&frgn, &binding).is_err());
