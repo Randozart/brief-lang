@@ -77,3 +77,4 @@ dist/
 .env
 .env.local
 *.log
+CODICIL_CHECKING.md

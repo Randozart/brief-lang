@@ -24,11 +24,12 @@ pub use mapper::{create_mapper_registry, find_mapper};
 pub use mappers::{MapperInfo, MapperRegistry, MapperType};
 pub use native_mapper::NativeMapper;
 pub use orchestrator::Orchestrator;
-pub use protocol::{FfiValue, Mapper};
+pub use protocol::Mapper;
 pub use registry::{FunctionRegistry, FFI_REGISTRY};
 pub use resolver::resolve_binding_path;
 pub use sentinel::Sentinel;
 pub use types::*;
+pub use types::{FfiValue, MemoryLayout};
 pub use validator::validate_frgn_against_binding;
 
 use crate::ast::ForeignBinding;

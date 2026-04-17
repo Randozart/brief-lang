@@ -363,15 +363,33 @@ impl ViewCompiler {
         let value = value_part.trim();
         if value.starts_with('"') {
             let end = value[1..].find('"')?;
-            Some(value[1..end + 1].to_string())
+            let extracted = value[1..end + 1].to_string();
+            // Handle parameterized syntax like "set_lens(lens: 'systems')"
+            if let Some(paren_pos) = extracted.find('(') {
+                Some(extracted[..paren_pos].to_string())
+            } else {
+                Some(extracted)
+            }
         } else if value.starts_with('\'') {
             let end = value[1..].find('\'')?;
-            Some(value[1..end + 1].to_string())
+            let extracted = value[1..end + 1].to_string();
+            // Handle parameterized syntax like 'set_lens(lens: "systems")'
+            if let Some(paren_pos) = extracted.find('(') {
+                Some(extracted[..paren_pos].to_string())
+            } else {
+                Some(extracted)
+            }
         } else {
             let end = value
                 .find(|c: char| c.is_whitespace() || c == '>')
                 .unwrap_or(value.len());
-            Some(value[..end].to_string())
+            let extracted = value[..end].to_string();
+            // Handle parameterized syntax like set_lens(lens: 'systems')
+            if let Some(paren_pos) = extracted.find('(') {
+                Some(extracted[..paren_pos].to_string())
+            } else {
+                Some(extracted)
+            }
         }
     }
 

@@ -182,6 +182,58 @@ fn strip_annotations(source: &str) -> String {
     output.join("\n")
 }
 
+fn strip_codicil_blocks(source: &str) -> String {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut output = Vec::new();
+    let mut in_codicil_block = false;
+
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "[route]" || trimmed == "[pre]" || trimmed == "[post]" {
+            in_codicil_block = true;
+            continue;
+        }
+        if in_codicil_block {
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if !trimmed.starts_with('[')
+                && !trimmed.starts_with("method")
+                && !trimmed.starts_with("path")
+                && !trimmed.starts_with("middleware")
+                && !trimmed.starts_with("context")
+                && !trimmed.starts_with("handler")
+                && !trimmed.starts_with("response")
+                && !trimmed.starts_with("params")
+            {
+                in_codicil_block = false;
+            } else {
+                continue;
+            }
+        }
+        if !in_codicil_block {
+            output.push(line);
+        }
+    }
+
+    while output.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        output.pop();
+    }
+
+    output.join("\n")
+}
+
+fn detect_codicil_project(file_path: &Path) -> bool {
+    let mut current = file_path.parent();
+    while let Some(dir) = current {
+        if dir.join("codicil.toml").exists() {
+            return true;
+        }
+        current = dir.parent();
+    }
+    false
+}
+
 fn print_usage(program: &str) {
     eprintln!("Brief Compiler v{}", env!("CARGO_PKG_VERSION"));
     eprintln!();
@@ -404,15 +456,23 @@ fn run_check(
     annotate: bool,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
+    codicil_mode: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
+
+    let processed_source = if codicil_mode && detect_codicil_project(file_path) {
+        println!("[Info] Codicil mode enabled - ignoring [route], [pre], [post] blocks");
+        strip_codicil_blocks(&clean_source)
+    } else {
+        clean_source
+    };
 
     if verbose {
         println!("[Lexer] Tokenizing...");
     }
 
-    let mut parser = parser::Parser::new(&clean_source);
+    let mut parser = parser::Parser::new(&processed_source);
     let program = match parser.parse() {
         Ok(prog) => prog,
         Err(e) => {
@@ -843,9 +903,15 @@ fn run_watch(
         match rx.recv() {
             Ok(_) => {
                 println!("File changed, rebuilding...");
-                if let Err(e) =
-                    run_check(&file_path, verbose, false, no_stdlib, stdlib_path.clone())
-                {
+                let codicil_mode = detect_codicil_project(&file_path);
+                if let Err(e) = run_check(
+                    &file_path,
+                    verbose,
+                    false,
+                    no_stdlib,
+                    stdlib_path.clone(),
+                    codicil_mode,
+                ) {
                     eprintln!("Rebuild failed: {}", e);
                 }
             }
@@ -1409,7 +1475,15 @@ fn main() {
                 .map(PathBuf::from);
 
             if let Some(path) = file_path {
-                if let Err(_e) = run_check(&path, verbose, annotate, no_stdlib, stdlib_path) {
+                let codicil_mode = detect_codicil_project(&path);
+                if let Err(_e) = run_check(
+                    &path,
+                    verbose,
+                    annotate,
+                    no_stdlib,
+                    stdlib_path,
+                    codicil_mode,
+                ) {
                     std::process::exit(1);
                 }
             } else {
@@ -1831,7 +1905,9 @@ fn main() {
 
         _ => {
             if command.ends_with(".bv") {
-                if let Err(_e) = run_check(&PathBuf::from(command), false, false, false, None) {
+                let path = PathBuf::from(command);
+                let codicil_mode = detect_codicil_project(&path);
+                if let Err(_e) = run_check(&path, false, false, false, None, codicil_mode) {
                     std::process::exit(1);
                 }
             } else if command.ends_with(".rbv") {

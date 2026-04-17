@@ -9,9 +9,51 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
 
+fn strip_codicil_blocks(source: &str) -> String {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut output = Vec::new();
+    let mut in_codicil_block = false;
+
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "[route]" || trimmed == "[pre]" || trimmed == "[post]" {
+            in_codicil_block = true;
+            continue;
+        }
+        if in_codicil_block {
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if !trimmed.starts_with('[')
+                && !trimmed.starts_with("method")
+                && !trimmed.starts_with("path")
+                && !trimmed.starts_with("middleware")
+                && !trimmed.starts_with("context")
+                && !trimmed.starts_with("handler")
+                && !trimmed.starts_with("response")
+                && !trimmed.starts_with("params")
+            {
+                in_codicil_block = false;
+            } else {
+                continue;
+            }
+        }
+        if !in_codicil_block {
+            output.push(line);
+        }
+    }
+
+    while output.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        output.pop();
+    }
+
+    output.join("\n")
+}
+
 pub struct LspServer {
     connection: Connection,
     documents: Arc<Mutex<DocumentStore>>,
+    codicil_mode: bool,
 }
 
 struct DocumentStore {
@@ -33,6 +75,7 @@ impl LspServer {
             documents: Arc::new(Mutex::new(DocumentStore {
                 docs: HashMap::new(),
             })),
+            codicil_mode: false,
         })
     }
 
@@ -52,6 +95,25 @@ impl LspServer {
 
         let initialization_params = self.connection.initialize(server_capabilities)?;
         info!("LSP initialized with params: {:?}", initialization_params);
+
+        // Check if we're in a Codicil project
+        if let Some(root_uri) = initialization_params
+            .get("rootUri")
+            .and_then(|v| v.as_str())
+        {
+            let root_path = root_uri.strip_prefix("file://").unwrap_or(root_uri);
+            let mut check_path = std::path::PathBuf::from(root_path);
+            while check_path.parent().is_some() {
+                if check_path.join("codicil.toml").exists() {
+                    self.codicil_mode = true;
+                    info!("Codicil project detected - Codicil mode enabled");
+                    break;
+                }
+                if !check_path.pop() {
+                    break;
+                }
+            }
+        }
 
         loop {
             let msg = self.connection.receiver.recv()?;
@@ -180,7 +242,12 @@ impl LspServer {
 
     fn run_type_check(&self, uri: &str, text: &str) -> (Vec<Value>, Option<Program>) {
         let is_rbv = uri.ends_with(".rbv");
-        let source = self.extract_brief_source(text, is_rbv);
+
+        if self.codicil_mode && !is_rbv {
+            info!("Codicil mode enabled - ignoring [route], [pre], [post] blocks");
+        }
+
+        let source = self.extract_brief_source(text, is_rbv, self.codicil_mode);
 
         let mut parser = parser::Parser::new(&source);
         let mut program = match parser.parse() {
@@ -211,8 +278,11 @@ impl LspServer {
         (diagnostics, Some(program))
     }
 
-    fn extract_brief_source(&self, source: &str, is_rbv: bool) -> String {
+    fn extract_brief_source(&self, source: &str, is_rbv: bool, codicil_mode: bool) -> String {
         if !is_rbv {
+            if codicil_mode {
+                return strip_codicil_blocks(source);
+            }
             return source.to_string();
         }
 
@@ -539,6 +609,7 @@ mod tests {
             documents: Arc::new(Mutex::new(DocumentStore {
                 docs: HashMap::new(),
             })),
+            codicil_mode: false,
         };
 
         let rbv_source = r#"
@@ -549,7 +620,7 @@ let x: Int = 10;
   <div>Test</div>
 </view>
 "#;
-        let extracted = lsp.extract_brief_source(rbv_source, true);
+        let extracted = lsp.extract_brief_source(rbv_source, true, false);
 
         // The script tag should be replaced by spaces/newlines
         assert!(extracted.contains("let x: Int = 10;"));
@@ -573,6 +644,7 @@ let x: Int = 10;
             documents: Arc::new(Mutex::new(DocumentStore {
                 docs: HashMap::new(),
             })),
+            codicil_mode: false,
         };
 
         let rbv_source = r#"
@@ -581,7 +653,7 @@ let x: Int = 10;
 let x = 1;
 </script>
 "#;
-        let extracted = lsp.extract_brief_source(rbv_source, true);
+        let extracted = lsp.extract_brief_source(rbv_source, true, false);
 
         // <scripting> should be masked
         assert!(!extracted.contains("<scripting>"));
@@ -596,11 +668,12 @@ let x = 1;
             documents: Arc::new(Mutex::new(DocumentStore {
                 docs: HashMap::new(),
             })),
+            codicil_mode: false,
         };
 
         // Source with multi-byte character (🦀 is 4 bytes)
         let rbv_source = "🦀<script>let x = 1;</script>";
-        let extracted = lsp.extract_brief_source(rbv_source, true);
+        let extracted = lsp.extract_brief_source(rbv_source, true, false);
 
         assert_eq!(rbv_source.len(), extracted.len());
         assert!(extracted.contains("let x = 1;"));

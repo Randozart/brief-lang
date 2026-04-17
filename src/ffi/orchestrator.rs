@@ -110,11 +110,8 @@ impl Orchestrator {
             }
 
             if has_error {
-                let error_variant = Value::Enum(
-                    error_type_name.clone(),
-                    error_type_name.clone(),
-                    err_fields,
-                );
+                let error_variant =
+                    Value::Enum(error_type_name.clone(), error_type_name.clone(), err_fields);
 
                 // Metro v2 pattern: Failure triggers transaction escape
                 return Err(RuntimeError::ContractViolation(format!(
@@ -138,41 +135,6 @@ impl Orchestrator {
         } else {
             // If it's a simple value, return it directly
             Ok(result_val)
-        }
-    }
-}
-
-
-            // If only one success field, return it directly as Ok
-            if binding.success_output.len() == 1 {
-                let first_field = &binding.success_output[0].0;
-                if let Some(val) = fields.remove(first_field) {
-                    return Ok(Value::Enum(
-                        "Result".to_string(),
-                        "Ok".to_string(),
-                        std::collections::HashMap::from([("value".to_string(), val)]),
-                    ));
-                }
-            }
-
-            Ok(Value::Enum(
-                "Result".to_string(),
-                "Ok".to_string(),
-                std::collections::HashMap::from([(
-                    "value".to_string(),
-                    Value::Instance {
-                        typename: "Success".to_string(),
-                        fields,
-                    },
-                )]),
-            ))
-        } else {
-            // If it's a simple value, wrap it in Ok
-            Ok(Value::Enum(
-                "Result".to_string(),
-                "Ok".to_string(),
-                std::collections::HashMap::from([("value".to_string(), result_val)]),
-            ))
         }
     }
 }
