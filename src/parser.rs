@@ -239,10 +239,16 @@ impl<'a> Parser<'a> {
                 let trg = self.parse_trigger()?;
                 Ok(TopLevel::Trigger(trg))
             }
-            Some(Ok(Token::Frgn)) => {
-                // All frgn declarations now require TOML bindings
+            Some(Ok(Token::Frgn))
+            | Some(Ok(Token::FrgnBang))
+            | Some(Ok(Token::Syscall))
+            | Some(Ok(Token::SyscallBang)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
                 Ok(frgn_binding)
+            }
+            Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) => {
+                let resource = self.parse_resource()?;
+                Ok(resource)
             }
             Some(Ok(Token::Struct)) => {
                 let struct_def = self.parse_struct()?;
@@ -382,7 +388,7 @@ impl<'a> Parser<'a> {
                     match self.current_token() {
                         Some(Ok(Token::LParen)) => depth += 1,
                         Some(Ok(Token::RParen)) => depth -= 1,
-                        _ => {}
+                        _ => {;}
                     }
                     self.advance();
                 }
@@ -531,9 +537,9 @@ impl<'a> Parser<'a> {
 
         let frgn_sig = ForeignSignature {
             name: name.clone(),
-            location: String::new(), // Populated by typechecker from TOML
-            wasm_impl: None,         // Populated by typechecker from TOML
-            wasm_setup: None,        // Populated by typechecker from TOML
+            location: String::new(),
+            wasm_impl: None,
+            wasm_setup: None,
             inputs,
             success_output,
             error_type_name: error_type_name.clone(),
@@ -543,6 +549,7 @@ impl<'a> Parser<'a> {
             precondition: None,
             postcondition: None,
             buffer_mode: None,
+            ffi_kind: Some(crate::ast::FfiKind::Frgn),
             span: None,
         };
 
@@ -553,6 +560,41 @@ impl<'a> Parser<'a> {
             target: ForeignTarget::Native,
             span: None,
         })
+    }
+
+    /// Parse a resource declaration: rsrc name: Type(args);
+    fn parse_resource(&mut self) -> Result<TopLevel, SyntaxError> {
+        use crate::ast::ResourceDeclaration;
+
+        let name = self.expect_identifier()?;
+        self.expect(Token::Colon)?;
+
+        let type_name = self.expect_identifier()?;
+
+        let mut args = Vec::new();
+        if let Some(Ok(Token::LParen)) = self.current_token() {
+            self.advance();
+            while let Some(Ok(Token::Integer(n))) = self.current_token() {
+                let val = *n as i64;
+                self.advance();
+                args.push(val);
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RParen)?;
+        }
+
+        self.expect(Token::Semicolon)?;
+
+        Ok(TopLevel::ResourceDecl(ResourceDeclaration {
+            name,
+            resource_type: type_name,
+            args,
+            span: None,
+        }))
     }
 
     fn parse_struct(&mut self) -> Result<StructDefinition, SyntaxError> {
