@@ -226,7 +226,7 @@ fn strip_codicil_blocks(source: &str) -> String {
 fn detect_codicil_project(file_path: &Path) -> bool {
     let mut current = file_path.parent();
     while let Some(dir) = current {
-        if dir.join("codicil.toml").exists() {
+        if dir.join("codicil.toml").exists() || dir.join(".codicil").exists() {
             return true;
         }
         current = dir.parent();

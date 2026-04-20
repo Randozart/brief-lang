@@ -696,10 +696,13 @@ impl WasmGenerator {
         output.push_str("                format!(\"{{\\\"op\\\":\\\"text\\\",\\\"el\\\":\\\"{}\\\",\\\"value\\\":0}}\", el)\n");
         output.push_str("            }\n");
         output.push_str("        }\n");
-        output.push_str("        let eval_show = |signals: &[JsValue], signal_map: &std::collections::HashMap<&str, usize>, expr: &str| -> bool {\n");
-        output.push_str("            // Simple expression evaluator for show conditions\n");
+        output.push_str("        let eval_show = |signals: &[JsValue], signal_map: &std::collections::HashMap<&str, usize>, signal_types: &std::collections::HashMap<&str, &str>, expr: &str| -> bool {\n");
+        output.push_str("            // Type-aware expression evaluator for show conditions\n");
         output.push_str(
             "            // Handles: signal == value, signal != value, signal > value, etc.\n",
+        );
+        output.push_str(
+            "            // Supports: numeric (Int/Float), String, and Boolean comparisons\n",
         );
         output.push_str("            let parts: Vec<&str> = expr.split_whitespace().collect();\n");
         output.push_str("            if parts.len() >= 3 {\n");
@@ -708,18 +711,70 @@ impl WasmGenerator {
         output.push_str("                let value_str = parts[2];\n");
         output.push_str("                if let Some(&sig_id) = signal_map.get(signal_name) {\n");
         output.push_str("                    let sig_val = &signals[sig_id];\n");
-        output.push_str("                    if let Some(sig_num) = sig_val.as_f64() {\n");
+        output.push_str("                    let sig_type = signal_types.get(signal_name).copied().unwrap_or(\"Unknown\");\n");
+        output.push_str("                    \n");
+        output.push_str("                    // Type-aware comparison\n");
+        output.push_str("                    match sig_type {\n");
+        output.push_str("                        \"String\" => {\n");
+        output.push_str("                            // String comparison: handle quoted values\n");
+        output.push_str("                            let is_quoted = value_str.starts_with('\\'') || value_str.starts_with('\\\"');\n");
+        output.push_str("                            if is_quoted {\n");
+        output.push_str("                                let compare_str = value_str.trim_matches('\\\"').trim_matches('\\'');\n");
         output.push_str(
-            "                        let compare_val: f64 = value_str.parse().unwrap_or(0.0);\n",
+            "                                if let Some(sig_str) = sig_val.as_string() {\n",
         );
-        output.push_str("                        match op {\n");
-        output.push_str("                            \"==\" => return sig_num == compare_val,\n");
-        output.push_str("                            \"!=\" => return sig_num != compare_val,\n");
-        output.push_str("                            \">\" => return sig_num > compare_val,\n");
-        output.push_str("                            \"<\" => return sig_num < compare_val,\n");
-        output.push_str("                            \">=\" => return sig_num >= compare_val,\n");
-        output.push_str("                            \"<=\" => return sig_num <= compare_val,\n");
-        output.push_str("                            _ => {}\n");
+        output.push_str("                                    return match op {\n");
+        output.push_str(
+            "                                        \"==\" => sig_str == compare_str,\n",
+        );
+        output.push_str(
+            "                                        \"!=\" => sig_str != compare_str,\n",
+        );
+        output.push_str("                                        _ => false\n");
+        output.push_str("                                    };\n");
+        output.push_str("                                }\n");
+        output.push_str("                            }\n");
+        output.push_str("                        }\n");
+        output.push_str("                        \"Bool\" => {\n");
+        output.push_str("                            // Boolean comparison: accept true/false\n");
+        output.push_str("                            let compare_bool = value_str == \"true\";\n");
+        output
+            .push_str("                            if let Some(sig_bool) = sig_val.as_bool() {\n");
+        output.push_str("                                return match op {\n");
+        output
+            .push_str("                                    \"==\" => sig_bool == compare_bool,\n");
+        output
+            .push_str("                                    \"!=\" => sig_bool != compare_bool,\n");
+        output.push_str("                                    _ => false\n");
+        output.push_str("                                };\n");
+        output.push_str("                            }\n");
+        output.push_str("                        }\n");
+        output.push_str("                        _ => {\n");
+        output.push_str("                            // Numeric comparison (Int/Float/default)\n");
+        output.push_str("                            if let Some(sig_num) = sig_val.as_f64() {\n");
+        output.push_str("                                let compare_val: f64 = value_str.parse().unwrap_or(0.0);\n");
+        output.push_str("                                match op {\n");
+        output.push_str(
+            "                                    \"==\" => return sig_num == compare_val,\n",
+        );
+        output.push_str(
+            "                                    \"!=\" => return sig_num != compare_val,\n",
+        );
+        output.push_str(
+            "                                    \">\" => return sig_num > compare_val,\n",
+        );
+        output.push_str(
+            "                                    \"<\" => return sig_num < compare_val,\n",
+        );
+        output.push_str(
+            "                                    \">=\" => return sig_num >= compare_val,\n",
+        );
+        output.push_str(
+            "                                    \"<=\" => return sig_num <= compare_val,\n",
+        );
+        output.push_str("                                    _ => {}\n");
+        output.push_str("                                }\n");
+        output.push_str("                            }\n");
         output.push_str("                        }\n");
         output.push_str("                    }\n");
         output.push_str("                }\n");
@@ -731,6 +786,23 @@ impl WasmGenerator {
             output.push_str(&format!(
                 "        signal_map.insert(\"{}\", {});\n",
                 name, id
+            ));
+        }
+        output.push_str("        let mut signal_types = std::collections::HashMap::new();\n");
+        for (name, sig_type) in &self.signal_types {
+            let type_str = match sig_type {
+                SignalType::Int => "Int",
+                SignalType::Float => "Float",
+                SignalType::Bool => "Bool",
+                SignalType::String => "String",
+                SignalType::List => "List",
+                SignalType::Struct => "Struct",
+                SignalType::Vector(_) => "Vector",
+                _ => "Unknown",
+            };
+            output.push_str(&format!(
+                "        signal_types.insert(\"{}\", \"{}\");\n",
+                name, type_str
             ));
         }
 
@@ -796,7 +868,7 @@ impl WasmGenerator {
 
         // Emit show instructions for all show bindings (check visibility)
         output.push_str("        for (el_id, expr, prev_visible) in &mut self.show_bindings {\n");
-        output.push_str("            let visible = eval_show(&self.signals, &signal_map, expr);\n");
+        output.push_str("            let visible = eval_show(&self.signals, &signal_map, &signal_types, expr);\n");
         output.push_str("            if visible != *prev_visible {\n");
         output.push_str("                *prev_visible = visible;\n");
         output.push_str("                parts.push(format!(\"{{\\\"op\\\":\\\"show\\\",\\\"el\\\":\\\"{}\\\",\\\"visible\\\":{}}}\", el_id, visible));\n");
@@ -1421,20 +1493,39 @@ impl WasmGenerator {
 
         output.push_str("    const TRIGGER_MAP = {\n");
         for binding in bindings {
-            if let Directive::Trigger { event, txn } = &binding.directive {
+            if let Directive::Trigger { event, txn, params } = &binding.directive {
                 // Transform transaction name to invoke method name
-                // Use short name to match the generated alias
-                // e.g., "Counter.tick" -> "invoke_tick" (alias to invoke_Counter_tick)
-                // e.g., "add" -> "invoke_add"
                 let short_name = if txn.contains('.') {
                     txn.split('.').last().unwrap_or(txn)
                 } else {
-                    txn
+                    txn.as_str()
                 };
                 let invoke_method = format!("invoke_{}", short_name);
+
+                // Include parameters as JSON object
+                let params_json = if params.is_empty() {
+                    "{}".to_string()
+                } else {
+                    let mut pairs = Vec::new();
+                    for (key, value) in params {
+                        // Quote string values properly for JS
+                        let js_value = if value.starts_with('\'') || value.starts_with('"') {
+                            value.to_string()
+                        } else if value == "true" || value == "false" {
+                            value.clone()
+                        } else if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
+                            value.clone()
+                        } else {
+                            format!("\"{}\"", value)
+                        };
+                        pairs.push(format!("{}: {}", key, js_value));
+                    }
+                    format!("{{{}}}", pairs.join(", "))
+                };
+
                 output.push_str(&format!(
-                    "        '{}': {{ event: '{}', txn: '{}' }},\n",
-                    binding.element_id, event, invoke_method
+                    "        '{}': {{ event: '{}', txn: '{}', params: {} }},\n",
+                    binding.element_id, event, invoke_method, params_json
                 ));
             }
         }
@@ -1483,11 +1574,25 @@ impl WasmGenerator {
         output.push_str("                console.warn('Element not found:', elId);\n");
         output.push_str("                continue;\n");
         output.push_str("            }\n");
-        output.push_str("            console.log('Attaching', config.event, 'handler to', elId, '->', config.txn);\n");
+        output.push_str("            console.log('Attaching', config.event, 'handler to', elId, '->', config.txn, 'with params:', config.params);\n");
         output.push_str("            el.addEventListener(config.event, () => {\n");
         output.push_str("                console.log('Trigger clicked:', config.txn);\n");
         output.push_str("                try {\n");
-        output.push_str("                    wasm[config.txn]();\n");
+        output.push_str("                    // Handle parameterized calls\n");
+        output.push_str("                    const params = config.params || {};\n");
+        output.push_str("                    const paramKeys = Object.keys(params);\n");
+        output.push_str("                    if (paramKeys.length === 0) {\n");
+        output.push_str("                        wasm[config.txn]();\n");
+        output.push_str("                    } else if (paramKeys.length === 1 && !paramKeys[0].startsWith('_')) {\n");
+        output
+            .push_str("                        // Single named parameter: set_lens(lens: value)\n");
+        output.push_str("                        const paramValue = params[paramKeys[0]];\n");
+        output.push_str("                        wasm[config.txn](paramValue);\n");
+        output.push_str("                    } else {\n");
+        output.push_str("                        // Multiple or positional: build array\n");
+        output.push_str("                        const args = paramKeys.map(k => params[k]);\n");
+        output.push_str("                        wasm[config.txn](...args);\n");
+        output.push_str("                    }\n");
         output.push_str("                    checkUpdates();\n");
         output.push_str("                } catch(e) {\n");
         output

@@ -1,4 +1,3 @@
-use crate::rbv::RbvFile;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -21,6 +20,7 @@ pub enum Directive {
     Trigger {
         event: String,
         txn: String,
+        params: Vec<(String, String)>, // parameter name -> value (as string for JS)
     },
     Class {
         pairs: Vec<(String, String)>,
@@ -77,7 +77,7 @@ impl ViewCompiler {
     pub fn compile(&mut self, view_html: &str) -> (Vec<Binding>, String) {
         self.bindings.clear();
         let modified_html = self.inject_ids(view_html);
-        self.extract_bindings(&modified_html, 0);
+        self.extract_bindings(&modified_html);
         (self.bindings.clone(), modified_html)
     }
 
@@ -115,15 +115,31 @@ impl ViewCompiler {
                         || tag_lower.contains("b-style")
                         || tag_lower.contains("b-each");
 
-                    if has_directive && !tag_lower.contains("id=") {
-                        let elem_id = self.generate_element_id(tag_str);
+                    if has_directive {
+                        // Always extract the element_id for directives
+                        let elem_id = if !tag_lower.contains("id=") {
+                            // Generate new ID if not present
+                            self.generate_element_id(tag_str)
+                        } else {
+                            // Use existing ID
+                            self.extract_id_from_tag(tag_str)
+                                .unwrap_or_else(|| self.generate_element_id(tag_str))
+                        };
                         let tag_name = tag_str.split_whitespace().next().unwrap_or("");
                         let tag_name_stripped = tag_name.trim_start_matches('<');
-                        let rest = &tag_str[tag_name.len()..];
-                        result.push_str(&format!(
-                            "<{} id=\"{}\"{}",
-                            tag_name_stripped, elem_id, rest
-                        ));
+
+                        if !tag_lower.contains("id=") {
+                            let rest = &tag_str[tag_name.len()..];
+                            result.push_str(&format!(
+                                "<{} id=\"{}\"{}",
+                                tag_name_stripped, elem_id, rest
+                            ));
+                        } else {
+                            result.push_str(tag_str);
+                        }
+
+                        // Always process directives after outputting the tag
+                        self.extract_directives(tag_str);
                     } else {
                         result.push_str(tag_str);
                     }
@@ -138,7 +154,9 @@ impl ViewCompiler {
         result
     }
 
-    fn extract_bindings(&mut self, html: &str, depth: usize) {
+    fn extract_bindings(&mut self, html: &str) {
+        // Note: b-trigger extraction now happens in inject_ids -> extract_directives
+        // This function handles b-each and other directives that need full HTML parsing
         let mut pos = 0;
         let bytes = html.as_bytes();
         let mut element_stack: Vec<(String, usize)> = Vec::new();
@@ -231,7 +249,7 @@ impl ViewCompiler {
                         }
                     }
 
-                    self.extract_directives(&tag_str);
+                    // extract_directives already called in inject_ids - skip to avoid duplicates
                     pos += end_pos;
                     continue;
                 }
@@ -310,15 +328,17 @@ impl ViewCompiler {
                     });
                 }
             } else if attr.starts_with("b-trigger:") {
-                let txn = self.extract_trigger_value(attr);
+                // Extract full value from original tag, not split attr (which breaks on spaces in quoted strings)
+                let result = self.extract_trigger_value_from_tag(tag, "b-trigger:");
                 let elem_id = self.generate_element_id(tag);
                 let event = self.extract_event_suffix(&tag_lower, "b-trigger");
-                if let Some(txn_name) = txn {
+                if let Some((txn_name, params)) = result {
                     self.bindings.push(Binding {
                         element_id: elem_id,
                         directive: Directive::Trigger {
                             event: event.unwrap_or_else(|| "click".to_string()),
                             txn: txn_name,
+                            params,
                         },
                     });
                 }
@@ -355,42 +375,111 @@ impl ViewCompiler {
         }
     }
 
-    fn extract_trigger_value(&self, attr: &str) -> Option<String> {
+    fn extract_trigger_value(&self, attr: &str) -> Option<(String, Vec<(String, String)>)> {
         let after_colon = attr.strip_prefix("b-trigger:")?;
         let after_event = after_colon.find('=')?;
         let value_part = &after_colon[after_event + 1..];
 
         let value = value_part.trim();
-        if value.starts_with('"') {
+
+        let extracted = if value.starts_with('"') {
             let end = value[1..].find('"')?;
-            let extracted = value[1..end + 1].to_string();
-            // Handle parameterized syntax like "set_lens(lens: 'systems')"
-            if let Some(paren_pos) = extracted.find('(') {
-                Some(extracted[..paren_pos].to_string())
-            } else {
-                Some(extracted)
-            }
+            value[1..end + 1].to_string()
         } else if value.starts_with('\'') {
             let end = value[1..].find('\'')?;
-            let extracted = value[1..end + 1].to_string();
-            // Handle parameterized syntax like 'set_lens(lens: "systems")'
-            if let Some(paren_pos) = extracted.find('(') {
-                Some(extracted[..paren_pos].to_string())
-            } else {
-                Some(extracted)
-            }
+            value[1..end + 1].to_string()
+        } else if value.ends_with(')') {
+            value.to_string()
         } else {
             let end = value
                 .find(|c: char| c.is_whitespace() || c == '>')
                 .unwrap_or(value.len());
-            let extracted = value[..end].to_string();
-            // Handle parameterized syntax like set_lens(lens: 'systems')
-            if let Some(paren_pos) = extracted.find('(') {
-                Some(extracted[..paren_pos].to_string())
-            } else {
-                Some(extracted)
+            value[..end].to_string()
+        };
+
+        let mut params = Vec::new();
+
+        if let Some(paren_start) = extracted.find('(') {
+            let func_name = extracted[..paren_start].to_string();
+            let inner = &extracted[paren_start + 1..];
+            let inner_trimmed = inner.trim_end_matches(')');
+
+            if !inner_trimmed.is_empty() {
+                if inner_trimmed.contains(':') {
+                    for pair in inner_trimmed.split(',') {
+                        let pair = pair.trim();
+                        if let Some(colon_pos) = pair.find(':') {
+                            let param_name = pair[..colon_pos].trim().to_string();
+                            let param_value = pair[colon_pos + 1..].trim().to_string();
+                            params.push((param_name, param_value));
+                        }
+                    }
+                } else {
+                    for (i, param) in inner_trimmed.split(',').enumerate() {
+                        let param_value = param.trim().to_string();
+                        params.push((format!("_{}", i), param_value));
+                    }
+                }
+            }
+
+            Some((func_name, params))
+        } else {
+            Some((extracted, params))
+        }
+    }
+
+    fn extract_trigger_value_from_tag(
+        &self,
+        tag: &str,
+        prefix: &str,
+    ) -> Option<(String, Vec<(String, String)>)> {
+        let tag_lower = tag.to_lowercase();
+        let prefix_lower = prefix.to_lowercase();
+
+        // Find the attribute start
+        let attr_start = tag_lower.find(prefix_lower.as_str())? + prefix_lower.len();
+        let after_prefix = &tag[attr_start..];
+
+        // Extract event (e.g., "click" from "b-trigger:click")
+        let mut event_end = 0;
+        for (i, c) in after_prefix.chars().enumerate() {
+            if c == '=' || c.is_whitespace() {
+                event_end = i;
+                break;
             }
         }
+        let event = if event_end > 0 {
+            after_prefix[..event_end].to_string()
+        } else {
+            "click".to_string()
+        };
+
+        // Find the equals sign after event
+        let eq_pos = after_prefix.find('=')?;
+        let value_start = eq_pos + 1;
+        let value_raw = &after_prefix[value_start..];
+
+        // Extract the full quoted value
+        let value = if value_raw.trim_start().starts_with('"') {
+            let first_quote = value_raw.find('"')? + 1;
+            let rest = &value_raw[first_quote..];
+            let end_quote = rest.find('"').unwrap_or(rest.len());
+            rest[..end_quote].to_string()
+        } else if value_raw.trim_start().starts_with('\'') {
+            let first_quote = value_raw.find('\'')? + 1;
+            let rest = &value_raw[first_quote..];
+            let end_quote = rest.find('\'').unwrap_or(rest.len());
+            rest[..end_quote].to_string()
+        } else {
+            let end = value_raw
+                .find(|c: char| c.is_whitespace() || c == '>')
+                .unwrap_or(value_raw.len());
+            value_raw[..end].trim().to_string()
+        };
+
+        // Now parse the extracted value using the existing logic
+        let attr_for_parsing = format!("{}:{}={}", prefix.trim_end_matches(':'), event, value);
+        self.extract_trigger_value(&attr_for_parsing)
     }
 
     fn extract_attr_value(&self, tag: &str, attr_name: &str) -> Option<String> {

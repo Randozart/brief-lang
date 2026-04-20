@@ -104,9 +104,17 @@ impl LspServer {
             let root_path = root_uri.strip_prefix("file://").unwrap_or(root_uri);
             let mut check_path = std::path::PathBuf::from(root_path);
             while check_path.parent().is_some() {
-                if check_path.join("codicil.toml").exists() {
+                // Check for codicil.toml OR .codicil folder
+                if check_path.join("codicil.toml").exists() || check_path.join(".codicil").exists()
+                {
                     self.codicil_mode = true;
                     info!("Codicil project detected - Codicil mode enabled");
+                    // Try to load .codicil/config.toml for additional settings
+                    if let Ok(config) =
+                        std::fs::read_to_string(check_path.join(".codicil/config.toml"))
+                    {
+                        info!("Loaded Codicil config: {}", config);
+                    }
                     break;
                 }
                 if !check_path.pop() {
@@ -451,10 +459,30 @@ impl LspServer {
     }
 
     fn handle_completion(&self, id: lsp_server::RequestId, _params: Value) {
-        let keywords = vec![
+        let mut keywords = vec![
             "txn", "rct", "let", "const", "sig", "defn", "trg", "import", "from", "term", "escape",
             "async", "Int", "UInt", "Float", "String", "Bool", "Data", "Void",
         ];
+
+        // Add Codicil-specific completions when in Codicil mode
+        if self.codicil_mode {
+            keywords.extend(vec![
+                "[route]",
+                "[pre]",
+                "[post]",
+                "method = \"GET\"",
+                "method = \"POST\"",
+                "method = \"PUT\"",
+                "method = \"DELETE\"",
+                "method = \"PATCH\"",
+                "path = \"/\"",
+                "middleware = []",
+                "context = \"server\"",
+                "response.status",
+                "response.body",
+                "params.",
+            ]);
+        }
 
         let completions: Vec<Value> = keywords
             .into_iter()
