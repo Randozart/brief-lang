@@ -447,6 +447,12 @@ impl TypeChecker {
 
     fn check_transaction(&mut self, txn: &Transaction) {
         self.push_scope();
+        
+        for (param_name, param_ty) in &txn.parameters {
+            let resolved_ty = self.resolve_type(param_ty.clone());
+            self.declare_variable(param_name, resolved_ty);
+        }
+
         for stmt in &txn.body {
             self.check_statement(stmt, Some(&txn.is_async));
         }

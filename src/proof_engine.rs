@@ -164,12 +164,16 @@ impl SymbolicExecutor {
     }
 
     pub fn verify_transaction(&mut self, txn: &Transaction) -> Vec<ProofError> {
-        // Lambda-style: verify postcondition is provable from precondition alone
         if txn.is_lambda {
             let pre = &txn.contract.pre_condition;
             let post = &txn.contract.post_condition;
 
-            let state = self.init_state_from_precondition(pre);
+            let mut state = self.init_state_from_precondition(pre);
+            // ADDED: Inject parameters into symbolic state
+            for (p_name, _) in &txn.parameters {
+                state.vars.insert(p_name.clone(), SymbolicValue::Symbolic(p_name.clone()));
+            }
+            
             self.verify_contract_implication(
                 pre,
                 post,
@@ -178,15 +182,15 @@ impl SymbolicExecutor {
                 format!("lambda transaction '{}'", txn.name),
             );
 
-            // Check if (pre && !post) is satisfiable
             let mut state = self.init_state_from_precondition(pre);
+            for (p_name, _) in &txn.parameters {
+                state.vars.insert(p_name.clone(), SymbolicValue::Symbolic(p_name.clone()));
+            }
+
             if let Some(neg_post) = self.negate_expr(post) {
-                // Simplified check: if both pre and !post reference same variables, warn
                 let pre_vars = self.extract_vars(pre);
                 let post_vars = self.extract_vars(post);
                 if !pre_vars.is_empty() && !post_vars.is_empty() {
-                    // Variables exist in both - need actual verification
-                    // For now, add a warning that lambda requires manual proof
                     self.errors.push(
                         ProofError::new("P016", "Lambda transaction requires provable postcondition")
                             .with_explanation(&format!(
@@ -200,6 +204,9 @@ impl SymbolicExecutor {
             }
         } else {
             let mut state = self.init_state_from_precondition(&txn.contract.pre_condition);
+            for (p_name, _) in &txn.parameters {
+                state.vars.insert(p_name.clone(), SymbolicValue::Symbolic(p_name.clone()));
+            }
 
             self.verify_contract_implication(
                 &txn.contract.pre_condition,

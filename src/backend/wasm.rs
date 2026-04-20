@@ -891,9 +891,25 @@ impl WasmGenerator {
         // Add wasm_bindgen attribute to export to JavaScript
         output.push_str("    #[wasm_bindgen]\n");
 
+        // Build parameter string and register local variables
+        let mut param_str = String::new();
+        for (p_name, p_type) in &txn.parameters {
+            let rust_type = match p_type {
+                Type::String => "String",
+                Type::Int => "i32",
+                Type::Float => "f64",
+                Type::Bool => "bool",
+                _ => "JsValue",
+            };
+            param_str.push_str(&format!(", {}: {}", p_name, rust_type));
+            // Register parameter as a local var so expr_to_js_value uses {name}.clone()
+            self.local_vars.insert(p_name.clone(), ());
+        }
+
         let method_name = format!(
-            "    pub fn invoke_{}(&mut self) {{\n",
-            txn.name.replace(".", "_")
+            "    pub fn invoke_{}(&mut self{}) {{\n",
+            txn.name.replace(".", "_"),
+            param_str
         );
         output.push_str(&method_name);
 
@@ -936,11 +952,18 @@ impl WasmGenerator {
         if txn.name.contains('.') {
             let short_name = txn.name.split('.').last().unwrap_or(&txn.name);
             output.push_str("    #[wasm_bindgen]\n");
-            let alias = format!("    pub fn invoke_{}(&mut self) {{\n", short_name);
+            
+            let alias = format!("    pub fn invoke_{}(&mut self{}) {{\n", short_name, param_str);
             output.push_str(&alias);
+            
+            // Pass parameters to the main function
+            let param_names: Vec<String> = txn.parameters.iter().map(|(n, _)| n.clone()).collect();
+            let args_str = param_names.join(", ");
+            
             output.push_str(&format!(
-                "        self.invoke_{}();\n",
-                txn.name.replace(".", "_")
+                "        self.invoke_{}({});\n",
+                txn.name.replace(".", "_"),
+                args_str
             ));
             output.push_str("    }\n\n");
         }
