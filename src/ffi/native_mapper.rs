@@ -31,6 +31,24 @@ impl Mapper for NativeMapper {
                 ));
             }
 
+            // Handle embedded mode: 'address' constructor argument sets the buffer location
+            if field.name == "address" {
+                if let FfiValue::Int(addr) = val {
+                    let addr_usize = *addr as usize;
+                    // If buffer is at a fixed address in embedded mode, ensure we're writing there
+                    let base_ptr = buffer.as_mut_ptr() as usize;
+                    let buffer_size = buffer.len();
+                    
+                    // Check if requested address is within the buffer range
+                    if addr_usize < base_ptr || addr_usize + buffer_size > base_ptr + buffer_size {
+                        return Err(format!(
+                            "Address 0x{:x} outside buffer range [0x{:x}, 0x{:x})",
+                            addr_usize, base_ptr, base_ptr + buffer_size
+                        ));
+                    }
+                }
+            }
+
             let field_endian = field.endian.unwrap_or(layout.endian);
 
             match val {

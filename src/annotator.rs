@@ -222,6 +222,7 @@ impl Annotator {
         let results: Vec<String> = match &sig.result_type {
             ResultType::Projection(types) => types.iter().map(|t| self.type_to_string(t)).collect(),
             ResultType::TrueAssertion => vec!["true".to_string()],
+            ResultType::VoidType => vec!["void".to_string()],
         };
 
         format!(

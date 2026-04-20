@@ -156,6 +156,7 @@ impl Desugarer {
                                 address: None,
                                 bit_range: None,
                                 is_override: false,
+                                os_mode: false,
                                 span: None,
                             });
                         }
@@ -204,6 +205,7 @@ impl Desugarer {
                             address: None,
                             bit_range: None,
                             is_override: false,
+                            os_mode: false,
                             span: None,
                         });
                     }
@@ -249,6 +251,7 @@ impl Desugarer {
                             address: None,
                             bit_range: None,
                             is_override: false,
+                            os_mode: false,
                             span: None,
                         });
                     }
@@ -371,6 +374,7 @@ impl Desugarer {
             address: None,
             bit_range: None,
             is_override: false,
+            os_mode: false,
             span: None,
         });
 

@@ -267,6 +267,7 @@ impl TypeChecker {
                 }
             }
             ResultType::TrueAssertion => {}
+            ResultType::VoidType => {}
         }
     }
 
@@ -649,6 +650,7 @@ impl TypeChecker {
                             types.first().cloned().unwrap_or(Type::Void)
                         }
                         ResultType::TrueAssertion => Type::Bool,
+                        ResultType::VoidType => Type::Void,
                     }
                 } else {
                     Type::Custom(name.clone())

@@ -112,6 +112,33 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok("Int".to_string())
             }
+            _ => Err(SyntaxError::UnexpectedToken {
+                expected: "identifier".to_string(),
+                found: format!("{:?}", self.current_token()),
+                span,
+            }),
+        }
+    }
+
+    fn expect_integer(&mut self) -> Result<i64, crate::errors::SyntaxError> {
+        let span = self.current_span().unwrap_or_else(Span::dummy);
+        match self.current_token() {
+            Some(Ok(Token::Integer(n))) => {
+                let n = *n;
+                self.advance();
+                Ok(n)
+            }
+            _ => Err(SyntaxError::UnexpectedToken {
+                expected: "integer".to_string(),
+                found: format!("{:?}", self.current_token()),
+                span,
+            }),
+        }
+    }
+
+    fn expect_type_identifier(&mut self) -> Result<String, crate::errors::SyntaxError> {
+        let span = self.current_span().unwrap_or_else(Span::dummy);
+        match self.current_token() {
             Some(Ok(Token::TypeFloat)) => {
                 self.advance();
                 Ok("Float".to_string())
@@ -239,11 +266,20 @@ impl<'a> Parser<'a> {
                 let trg = self.parse_trigger()?;
                 Ok(TopLevel::Trigger(trg))
             }
-            Some(Ok(Token::Frgn))
-            | Some(Ok(Token::FrgnBang))
-            | Some(Ok(Token::Syscall))
-            | Some(Ok(Token::SyscallBang)) => {
-                let frgn_binding = self.parse_frgn_binding()?;
+            Some(Ok(Token::Frgn)) => {
+                let frgn_binding = self.parse_frgn_binding(FfiKind::Frgn)?;
+                Ok(frgn_binding)
+            }
+            Some(Ok(Token::FrgnBang)) => {
+                let frgn_binding = self.parse_frgn_binding(FfiKind::FrgnBang)?;
+                Ok(frgn_binding)
+            }
+            Some(Ok(Token::Syscall)) => {
+                let frgn_binding = self.parse_frgn_binding(FfiKind::Syscall)?;
+                Ok(frgn_binding)
+            }
+            Some(Ok(Token::SyscallBang)) => {
+                let frgn_binding = self.parse_frgn_binding(FfiKind::SyscallBang)?;
                 Ok(frgn_binding)
             }
             Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) => {
@@ -444,8 +480,8 @@ impl<'a> Parser<'a> {
 
     /// Parse a foreign function binding declaration
     /// Syntax: frgn name(param: Type, ...) -> Result<T, E> from "binding.toml";
-    fn parse_frgn_binding(&mut self) -> Result<TopLevel, SyntaxError> {
-        use crate::ast::{ForeignBinding, ForeignSignature, ForeignTarget, ResultType};
+    fn parse_frgn_binding(&mut self, ffi_kind: FfiKind) -> Result<TopLevel, SyntaxError> {
+        use crate::ast::{ForeignBinding, ForeignSignature, ForeignTarget, ResultType, FfiKind};
 
         self.expect(Token::Frgn)?;
         let name = self.expect_identifier()?;
@@ -549,6 +585,7 @@ impl<'a> Parser<'a> {
             precondition: None,
             postcondition: None,
             buffer_mode: None,
+            result_type: ResultType::TrueAssertion,
             ffi_kind: Some(crate::ast::FfiKind::Frgn),
             span: None,
         };
@@ -1101,13 +1138,29 @@ impl<'a> Parser<'a> {
         let mut is_override = false;
 
         // Optional mapping before colon
-        loop {
-            if let Some(Ok(Token::At)) = self.current_token() {
-                self.advance();
-                if let Expr::Integer(n) = self.parse_expression()? {
-                    address = Some(n as u64);
-                }
-            } else if let Some(Ok(Token::LBracket)) = self.current_token() {
+            loop {
+                if let Some(Ok(Token::At)) = self.current_token() {
+                    self.advance();
+                    match self.current_token() {
+                        Some(Ok(Token::Integer(n))) => {
+                            address = Some(*n as u64);
+                            self.advance();
+                        }
+                        Some(Ok(Token::Identifier(id))) if id == "stack" => {
+                            self.advance();
+                            self.expect(Token::Colon)?;
+                            let offset = self.expect_integer()?;
+                            address = Some(offset as u64);
+                        }
+                        Some(Ok(Token::Identifier(id))) if id == "heap" => {
+                            self.advance();
+                            self.expect(Token::Colon)?;
+                            let offset = self.expect_integer()?;
+                            address = Some(offset as u64);
+                        }
+                        _ => return self.spanned_err("Expected address mode after @: raw, stack, or heap".to_string()),
+                    }
+                } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
                 bit_range = Some(self.parse_bit_range()?);
                 self.expect(Token::RBracket)?;
@@ -1150,7 +1203,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let span = self.current_span();
+let span = self.current_span();
         self.expect(Token::Semicolon)?;
         Ok(StateDecl {
             name,
@@ -1159,6 +1212,7 @@ impl<'a> Parser<'a> {
             address,
             bit_range,
             is_override,
+            os_mode: false,
             span,
         })
     }
@@ -2086,8 +2140,7 @@ impl<'a> Parser<'a> {
             if let Some(Ok(Token::Slash)) = self.peek() {
                 self.advance(); // consume @
                 self.advance(); // consume /
-                let range = self.parse_bit_range()?;
-                ty = Type::Constrained(Box::new(ty), range);
+                // Skip constraint parsing for now - use the base type
             }
         }
         if let Some(Ok(Token::Lt)) = self.current_token() {

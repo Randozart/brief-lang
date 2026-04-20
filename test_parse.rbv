@@ -1,0 +1,1 @@
+frgn my_function(my_param: Bool) -> Bool from "std/bindings/bool.toml";

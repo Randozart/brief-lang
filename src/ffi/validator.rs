@@ -3,7 +3,7 @@
 //! Validates that frgn declarations match their corresponding TOML bindings
 
 use super::FfiError;
-use crate::ast::{ForeignBinding, ForeignSignature, Type};
+use crate::ast::{ForeignBinding, ForeignSignature, ResultType, Type};
 
 /// Validate that a frgn signature matches its TOML binding
 pub fn validate_frgn_against_binding(
@@ -116,6 +116,7 @@ mod tests {
             wasm_setup: None,
             inputs: vec![("path".to_string(), Type::String)],
             success_output: vec![("content".to_string(), Type::String)],
+            result_type: ResultType::TrueAssertion,
             error_type_name: "IoError".to_string(),
             error_fields: vec![
                 ("code".to_string(), Type::Int),
@@ -126,6 +127,7 @@ mod tests {
             precondition: None,
             postcondition: None,
             buffer_mode: None,
+            ffi_kind: None,
             span: None,
         };
 
@@ -164,6 +166,7 @@ mod tests {
             wasm_setup: None,
             inputs: vec![],
             success_output: vec![],
+            result_type: ResultType::TrueAssertion,
             error_type_name: "Error".to_string(),
             error_fields: vec![],
             input_layout: None,
@@ -171,6 +174,7 @@ mod tests {
             precondition: None,
             postcondition: None,
             buffer_mode: None,
+            ffi_kind: None,
             span: None,
         };
 

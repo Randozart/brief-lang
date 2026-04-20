@@ -10,6 +10,7 @@ pub fn verify_sig_projection(sig: &Signature, defn: &Definition) -> Result<(), S
     let sig_types = match &sig.result_type {
         ResultType::Projection(types) => types.clone(),
         ResultType::TrueAssertion => vec![],
+        ResultType::VoidType => vec![],
     };
 
     // If defn has OutputType, check if all sig types are in defn's outputs

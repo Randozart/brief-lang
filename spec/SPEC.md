@@ -1,10 +1,6 @@
 # Brief Language Specification
 
-**Version:** 8.0  
-**Date:** 2026-04-10  
-**Status:** Authoritative Reference  
-
----
+**Version:** v0.10.0 **Date:** 2026-04-20 **Status:** Development (unstable) **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv)
 
 ## 1. Introduction and Philosophy
 
@@ -20,9 +16,16 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 4. **Zero-Nesting Logic**: Branching is handled via guards, not nested blocks. This improves clarity and LLM comprehension.
 5. **FFI for External Capabilities**: Brief cannot do everything (file I/O, networking, hardware math). Foreign Function Interface handles these cases with explicit contracts.
 
-### 1.2 File Extension
+### 1.2 Language Variants
 
-Brief source files use the `.bv` extension.
+* **Core Brief** (`.bv`): Transactional state machines with FFI support
+* **Rendered Brief** (`.rbv`): Adds `rstruct`, view components, and UI binding directives  
+* **Embedded Brief** (`.ebv`): Adds native `Float` types, vector types, and bit-range addressing
+
+### 1.3 Versioning
+
+* **Semantic**: `v0.10.0` (development)
+* **Date-based**: `2026-04-20`
 
 ---
 
@@ -48,7 +51,7 @@ rstruct_def ::= "rstruct" identifier "{" struct_member* view_body "}"
 enum_def ::= "enum" identifier type_params? "{" enum_variant ("," enum_variant)* ","? "}"
 enum_variant ::= identifier ("(" type ("," type)* ")")?
 
-import_stmt ::= "import" ("{" import_item ("," import_item)* "}")? (("from" namespace_path) | namespace_path | string_literal ("as" identifier)?)? ";"
+import_stmt ::= "import" ("{" import_item ("," import_item)* "}")? (("from" namespace_path) | namespace_path | string_literal ("as" identifier)? ")? ";"
 import_item ::= identifier ("as" identifier)?
 
 render_block ::= "render" identifier "{" view_body "}"
@@ -59,771 +62,273 @@ render_block ::= "render" identifier "{" view_body "}"
 ```bnf
 parameters ::= "(" (param ("," param)*)? ")"
 param ::= identifier ":" type
+
 type_params ::= "<" identifier ("," identifier)* ">"
 
-type ::= "Int" | "Float" | "String" | "Bool" | "Void" | "Data" | identifier
-output_types ::= type ("," type)*
+type ::= "Int" | "Float" | "String" | "Bool" | "Void" | "Data" | "UInt" | identifier
+       | "Vector" "[" type "]"  // Vector type
+       | "Option" "[" type "]"  // Optional type
+       | type "Union" "[" type ("," type)* "]"  // Union type
+       | identifier  // Custom type
+       | "Sig" "[" identifier "]"  // Signature type
+       | "Result" "[" type "," type "]"  // Result type (for FFI)
+
+output_types ::= type ("," type)*  // Multi-output: (A, B, C)
+```
+
+### 2.3 FFI Types and Contracts
+
+```bnf
+foreign_sig ::= ("frgn" | "syscall") "sig" identifier "(" parameters? ")" "->" output_types ";"
+
+frgn_binding ::= identifier "(" parameters? ")" "->" Result "[" type_params "]" "from" path") 
 
 contract ::= "[" expression "]" "[" expression "]"
 ```
 
-### 2.3 Statements
-
-```bnf
-statement ::=
-    | assignment ";"
-    | unification ";"
-    | guarded_stmt
-    | term_stmt ";"
-    | escape_stmt ";"
-    | expression ";"
-
-assignment ::= ("&")? identifier "=" expression
-unification ::= identifier "(" pattern ")" "=" expression
-guarded_stmt ::= "[" expression "]" (statement | "{" statement* "}")
-guarded_stmt ::= "[" identifier variant_pattern "]" (statement | "{" statement* "}")
-variant_pattern ::= identifier ("(" identifier ("," identifier)* ")")?
-term_stmt ::= "term" expression? ("," expression?)*
-escape_stmt ::= "escape" expression?
-```
-
-### 2.4 Expressions
-
-```bnf
-expression ::= or_expr
-or_expr ::= and_expr ("||" and_expr)*
-and_expr ::= equality (("&&") equality)*
-equality ::= comparison (("==" | "!=") comparison)*
-comparison ::= term (("<" | "<=" | ">" | ">=") term)*
-term ::= factor (("+" | "-") factor)*
-factor ::= unary (("*" | "/" | "%") unary)*
-unary ::= ("!" | "-") unary | primary
-primary ::=
-    | literal
-    | identifier
-    | "&" identifier
-    | "@" identifier
-    | call
-    | "(" expression ")"
-
-call ::= identifier "(" arguments? ")"
-arguments ::= expression ("," expression)*
-literal ::= integer | float | string | "true" | "false"
-```
-
-### 2.5 Imports
-
-```bnf
-import_stmt ::= "import" items? namespace_path ";"
-items ::= "{" import_item ("," import_item)* "}"
-import_item ::= identifier ("as" identifier)?
-namespace_path ::= identifier ("." identifier)*
-```
+The compiler enforces that all FFI calls handle `Result` types. The `frgn` variant returns `Result<T, Error>` and must be handled; the `frgn!` variant returns `void` and is fire-and-forget.
 
 ---
 
-## 3. Types
+## 3. Core Language Features
 
-### 3.1 Built-in Types
+### 3.1 Transactions and Reactivity
 
-| Type | Description | Literals |
-|------|-------------|----------|
-| `Int` | 64-bit signed integer | `42`, `-5`, `0` |
-| `Float` | 64-bit floating point | `3.14`, `-2.5`, `1.0` |
-| `String` | Text | `"hello"`, `""` |
-| `Bool` | Boolean | `true`, `false` |
-| `Void` | Empty value | (no literal) |
-| `Data` | Opaque data (FFI) | (opaque) |
-
-### 3.2 Custom Types
+Brief uses a reactor model. Transactions are defined with `rct`:
 
 ```brief
-struct Point {
-    x: Int;
-    y: Int;
-};
-
-rstruct Counter {
-    count: Int;
-    
-    txn increment [count < 100][count == @count + 1] {
-        &count = count + 1;
-        term;
-    };
-} -> "<div>{count}</div>";
-```
-
-### 3.3 Enums
-
-Enums define types that can be one of several variants. Variants can be Unit (no data), Tuple (positional data), or Struct (named fields).
-
-```brief
-enum Color {
-    Red,
-    Green,
-    Blue
-}
-
-enum Result<T, E> {
-    Ok(T),
-    Err(E)
-}
-
-enum Option<T> {
-    Some(T),
-    None
+rct txn <name> (<params>) [precondition] [postcondition] {
+    // Transaction body
 }
 ```
 
-### 3.4 Type Parameters (Generics)
+* Without `async`: transactions execute synchronously when preconditions are met
+* With `async`: transactions execute concurrently with compiler-verified safety
+* Preconditions (`[expression]`): must be true for transaction to fire  
+* Postconditions (`[expression]`): must be true after transaction completes
+
+### 3.2 Signatures
+
+Signatures define external FFI bindings:
 
 ```brief
-defn identity<T>(value: T) -> T [true][result == value] {
-    term value;
-};
+sig <name>: <type> -> <result_type> [from <namespace_path>]
 ```
 
----
+Result types support:
+* `Result<T, E>` - standard FFI call with error handling
+* `void` - fire-and-forget (for `frgn!` and `syscall!` variants)
 
-## 4. State and Variables
+### 3.3 State Management
 
-### 4.1 State Variables
+State is declared globally with `state_decl`:
 
 ```brief
-let counter: Int = 0;
-let name: String = "Alice";
-let active: Bool = true;
-let data: Data;
+state <name>: <type> = <expression>?
 ```
 
-### 4.2 Constants
+State declarations support:
+* `os_mode: bool` - when true, address is virtual (OS-managed); when false, raw address (embedded)
+* `bit_range: Option<BitRange>` - for bit-packed field access
+* `span: Option<Span>` - source location for debugging
+
+### 3.4 Control Flow
+
+Brief eliminates imperative branching in favor of guard-based execution:
 
 ```brief
-const MAX_SIZE: Int = 1000;
-const PI: Float = 3.14159;
-```
-
-### 4.3 Write Access
-
-State variables require explicit write access using `&`:
-
-```brief
-&counter = counter + 1;  // Mutate state
-let local = counter;     // Read state
-```
-
----
-
-## 5. Transactions
-
-### 5.1 Passive Transactions
-
-Passive transactions run only when explicitly called:
-
-```brief
-txn withdraw(amount: Int)
-    [amount > 0 && amount <= balance]
-    [balance == @balance - amount]
-{
-    &balance = balance - amount;
-    term;
-};
-```
-
-### 5.2 Reactive Transactions
-
-Reactive transactions (`rct`) fire automatically when preconditions are met:
-
-```brief
-rct txn increment [count < max][count == @count + 1] {
-    &count = count + 1;
-    term;
-};
-```
-
-### 5.3 Contracts
-
-Every transaction has:
-- **Precondition**: When the transaction can fire
-- **Postcondition**: What must be true after `term`
-
-```brief
-txn example [pre_condition][post_condition] {
-    // body
-};
-```
-
-### 5.3.1 Implicit `term true;`
-
-When a definition or transaction has a literal Bool `true` postcondition, `term;` is implicitly treated as `term true;`:
-
-```brief
-// Postcondition is literal true - term; becomes term true;
-txn activate [ready][true] {
-    term;  // implicitly: term true;
-};
-
-// Postcondition is a Bool expression - term; checks if postcondition is met
-txn set_flag [true][flag == true] {
-    &flag = true;
-    term;  // checks: is flag == true satisfied?
-};
-```
-
-### 5.3.2 `term functionCall();`
-
-When `term` contains a function call, the compiler verifies that the function's output satisfies the postcondition:
-
-```brief
-defn addOne(x: Int) -> Int [true][result == x + 1] {
-    term x + 1;
-};
-
-txn increment [count < 100][count == @count + 1] {
-    term addOne(@count);  // Compiler verifies: addOne(@count) == @count + 1
-};
-```
-
-If the function does not satisfy the postcondition, the compiler reports an error.
-
-### 5.4 Prior State
-
-The `@` operator references the value at transaction start:
-
-```brief
-txn increment [count < 100][count == @count + 1] {
-    &count = count + 1;
-    term;
-};
-```
-
-### 5.5 Syntactic Sugar
-
-`[~/x]` is shorthand for `[~x][x]`:
-
-```brief
-txn initialize [~/ready][ready] {
-    &ready = true;
-    term;
-};
-```
-
-### 5.6 Guards
-
-Guards are inline conditions that skip execution when false:
-
-```brief
-txn process [true][true] {
-    let value = compute();
-    [value > 0] &positive = true;
-    [value <= 0] escape;
-    term;
-};
-```
-
-### 5.7 Enum Pattern Matching
-
-Guards support pattern matching on enum variants. The syntax `[value Variant(field1, field2)]` destructures the variant and binds fields:
-
-```brief
-let result: Result<Object, String> = from_json("{\"msg\": \"hello\"}");
-
-[result Ok(obj)] {
-    // obj is bound to the Ok variant's inner value
-    term to_json({received: obj});
-};
-
-[result Err(e)] {
-    // e is bound to the Err variant's inner value
-    term to_json({error: e});
-};
-```
-
-### 5.8 Escape
-
-### 5.7 Escape
-
-`escape` rolls back all mutations and terminates the transaction:
-
-```brief
-txn validate [x > 0][state == @state] {
-    [x > 1000] escape;
-    &state = x;
-    term;
-};
-```
-
----
-
-## 6. Definitions
-
-### 6.1 Function Definitions
-
-```brief
-defn add(a: Int, b: Int) -> Int [true][result == a + b] {
-    term a + b;
-};
-```
-
-### 6.2 Multiple Outputs
-
-```brief
-defn divide(a: Int, b: Int) -> Int, Int, Bool [b != 0][true] {
-    term a / b, a % b, true;
-};
-```
-
----
-
-## 7. Foreign Function Interface
-
-### 7.1 Overview
-
-FFI allows Brief to call external functions (typically Rust) through explicit contracts. Foreign functions are declared in TOML binding files and referenced in Brief code.
-
-### 7.2 TOML Binding Format
-
-```toml
-[[functions]]
-name = "read_file"
-description = "Read entire file contents"
-location = "std::fs::read_to_string"
-target = "native"
-mapper = "rust"
-
-[functions.input]
-path = "String"
-
-[functions.output.success]
-content = "String"
-
-[functions.output.error]
-type = "IoError"
-code = "Int"
-message = "String"
-```
-
-### 7.3 Binding Fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Brief function name |
-| `location` | Yes | Rust module path |
-| `target` | Yes | Target platform (`native`) |
-| `mapper` | No | Mapper name (default: `rust`) |
-| `description` | No | Human-readable description |
-| `input` | Yes | Parameter name-type pairs |
-| `output.success` | Yes | Success output fields |
-| `output.error` | Yes | Error type and fields |
-
-### 7.4 Brief Declaration
-
-```brief
-frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
-```
-
-### 7.4.1 Multi-Field Success Outputs
-
-FFI functions can return multiple fields on success using tuple syntax:
-
-```toml
-[functions.output.success]
-x = "Int"
-y = "Int"
-```
-
-```brief
-frgn divide(a: Int, b: Int) -> Result<(quotient: Int, remainder: Int), MathError> from "lib/std/math.toml";
-
-txn safe_divide [b != 0][result.quotient >= 0] {
-    let (q, r) = divide(10, 3);
-    term (q, r);
-};
-```
-
-The brief declaration uses `(field1: Type1, field2: Type2)` syntax for multi-field returns.
-
-### 7.5 Supported Types
-
-| Brief Type | Description |
-|------------|-------------|
-| `String` | Text |
-| `Int` | 64-bit integer |
-| `Float` | 64-bit float |
-| `Bool` | Boolean |
-| `Void` | No return value |
-| Custom | User-defined structs |
-
-### 7.6 Generic FFI
-
-```brief
-frgn<T> identity(value: T) -> Result<T, Error> from "lib/std/util.toml";
-```
-
-### 7.7 Error Handling
-
-FFI functions return `Result<T, E>` types. The compiler enforces that FFI errors must be handled - code that ignores errors is rejected.
-
-```brief
-frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
-
-defn safe_read(path: String) -> String [true][result.len() >= 0] {
-    let result = read_file(path);
-    if result.is_ok() {
-        term result.value;
-    } else {
-        term "default";
-    }
-};
-```
-
-#### Error Projection Methods
-
-Result types support these projection methods:
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `.is_ok()` | `Bool` | True if success |
-| `.is_err()` | `Bool` | True if error |
-| `.value` | `T` | Success value (fields as declared) |
-| `.error.code` | `E.code` | Error code |
-| `.error.message` | `E.message` | Error message |
-
-#### FFI Error Contract Enforcement
-
-The compiler rejects code that:
-- Calls an FFI function without handling the Result
-- Accesses `.value` without first checking `.is_ok()`
-
-This ensures all error paths are explicitly handled.
-
----
-
-## 8. Reactor Model
-
-### 8.1 Blackboard Architecture
-
-Brief programs have no `main()` function. Instead:
-
-1. **State**: Global variables form the blackboard
-2. **Reactor**: Continuously evaluates `rct` preconditions
-3. **Transactions**: Fire when preconditions become true
-4. **Equilibrium**: Program ends when nothing can fire
-
-### 8.2 Dependency Tracking
-
-The reactor tracks which variables each `rct` reads:
-- Only dirty preconditions are re-evaluated
-- At equilibrium, reactor sleeps (zero CPU)
-
-### 8.3 Async Transactions
-
-Async transactions run concurrently with compiler-verified safety:
-
-```brief
-rct async txn write_a [ready && !busy][busy == true] {
-    &data = "A";
-    &busy = false;
-    term;
-};
-
-rct async txn write_b [ready && !busy][busy == true] {
-    &data = "B";
-    &busy = false;
-    term;
-};
-```
-
-The compiler verifies preconditions are mutually exclusive **when they write to overlapping state**. Preconditions that only read variables, or write to completely different variables, can coexist.
-
-### 8.4 Reactor Throttling
-
-Reactor polling frequency can be controlled at file and transaction level:
-
-**File-level default:**
-```brief
-reactor @10Hz;  // Default if not specified
-```
-
-**Per-transaction override:**
-```brief
-rct txn fast [condition][post] { ... } @60Hz;
-rct txn slow [condition][post] { ... } @5Hz;
-```
-
-**Rules:**
-- Default: `@10Hz` if not specified
-- Global speed: `max(@Hz)` across all files
-- Adaptive scheduling: slower files are checked less frequently
-- Compiler warns for `@10000Hz+` (usually unintended)
-
-**Common speeds:**
-| Use case | Speed | Description |
-|----------|-------|-------------|
-| Browser UI | `@10Hz` | Smooth interaction, low CPU |
-| Game logic | `@60Hz` | Frame-synchronized |
-| Data sync | `@1Hz` | Occasional polling |
-
----
-
-## 9. Structs
-
-### 9.1 Plain Structs
-
-```brief
-struct BankAccount {
-    balance: Int;
-    overdraft_limit: Int;
-    
-    txn withdraw(amount: Int)
-        [amount > 0 && amount <= balance + overdraft_limit]
-        [balance == @balance - amount]
-    {
-        &balance = balance - amount;
-        term;
-    };
-};
-```
-
-### 9.2 Render Structs
-
-Render structs combine state with HTML views for UI components:
-
-```brief
-import "./styles.css";
-
-rstruct Counter {
-    count: Int;
-    
-    rct txn increment [count < 100][count == @count + 1] @30Hz {
-        &count = count + 1;
-        term;
-    };
-
-    <button>{count}</button>
+[guard_expression] {
+    // executes only when guard is true
 }
 ```
 
-HTML is embedded inline using `<` at the start of a tag.
+Pattern matching via unification:
+```brief
+unification <identifier>(<pattern>) = <expression>
+```
 
-### 9.2.1 Multi-Element HTML
+---
 
-Render structs can produce multiple elements - just include multiple HTML blocks:
+## 4. Foreign Function Interface (FFI)
+
+### 4.1 FFI Type System
+
+| Keyword | Return Type | Error Handling | Use Case |
+|---------|-------------|---------------|----------|
+| `frgn` | `Result<T, E>` | Must handle | Standard foreign function |
+| `frgn!` | `void` | None | Fire-and-forget |
+| `syscall` | `Result<Int, E>` | Must handle | Kernel calls with returns |
+| `syscall!` | `void` | None | Kernel calls without returns |
+
+### 4.2 Address System
+
+The `@` operator has context-aware semantics:
 
 ```brief
-rstruct Form {
-    name: String;
-    email: String;
+@address        // Raw, virtual, or WASM offset depending on target
+@raw:0xADDRESS  // Raw physical address (embedded only)
+@stack:offset   // Offset from stack pointer
+@heap:offset    // Offset from heap pointer
+```
 
-    <div class="name-field">{name}</div>
-    <div class="email-field">{email}</div>
+**Target Behavior:**
+* **.bv (OS)**: Virtual offset, compiler manages stack/heap/static via escape analysis
+* **.ebv (Embedded)**: Raw physical address, programmer manages memory  
+* **.rbv (Browser)**: WASM linear memory offset
+
+### 4.3 Resource System
+
+Resources declare kernel/native objects:
+
+```brief
+rsrc <name>: <ResourceType>(<args>)
+```
+
+Built-in resource types:
+* `FrameBuffer(width, height)` - GPU framebuffer
+* `File(path, flags)` - File handles  
+* `SharedMemory(name, size)` - Shared memory regions
+* `Socket(domain, type)` - Network sockets
+* `EventFD()` - Event notification
+* `Semaphore(initial)` - Semaphores
+* `Mutex` - Mutex locks
+
+*Note: Full kernel negotiation and lifecycle management is planned*
+
+### 4.4 Bit-Packed Structures
+
+Struct fields can be declared with bit widths:
+
+```brief
+struct Pixel {
+    r: 4bits,
+    g: 4bits,
+    b: 4bits,
+    a: 4bits
 }
 ```
 
-### 9.2.2 Standalone Render
+Compiler automatically packs into minimal storage (16 bits for Pixel above).
 
-A `render` block provides HTML without associated state:
-
-```brief
-render Button {
-    <button class="primary">Click me</button>
-}
-```
-
-### 9.2.3 CSS Import
-
-CSS files are imported at the top of the file with standard imports:
+### 4.5 Vector Types (Embedded)
 
 ```brief
-import "./styles/main.css";
-import "./styles/theme.css";
+let data: Float[64] @/x32;  // 64-element float vector, 32-bit elements
 ```
 
 ---
 
-## 10. Imports
+## 5. Type System
 
-### 10.1 Namespace Import
+### 5.1 Primitive Types
 
+| Type | Description | Aliases |
+|------|-------------|---------|
+| `Int` | Signed 64-bit integer | `Signed`, `Sgn` |
+| `Float` | 32-bit IEEE 754 float | - |
+| `UInt` | Unsigned 64-bit integer | `Unsigned` |
+| `Bool` | Boolean (1-bit) | - |
+| `String` | UTF-8 string | - |
+| `Data` | Opaque binary data | - |
+| `Void` | Unit type | - |
+
+### 5.2 Advanced Types
+
+* `Vector[T, N]` - Fixed-size vector
+* `Option[T]` - Nullable type
+* `Sig[T]` - Signature reference
+* Custom types via `struct`, `enum`, `rstruct`
+
+### 5.3 Type Conversion
+
+The compiler performs safe type conversions:
 ```brief
-import std.io;
-```
-
-### 10.2 Selective Import
-
-```brief
-import { print, println } from std.io;
-```
-
-### 10.3 Aliased Import
-
-```brief
-import { println as log } from std.io;
-```
-
-### 10.4 File Imports
-
-CSS and SVG files are imported directly. SVG imports support aliasing to create named components:
-
-```brief
-import "./styles/main.css";
-import "./icons/logo.svg" as Logo;
+let x: Float = 3;  // Int → Float (implicit)
+let y: Int = x;     // Float → Int (explicit cast needed)
 ```
 
 ---
 
-## 11. Standard Library
+## 6. Standard Library
 
-### 11.1 Philosophy
+### 6.1 FFI Modules
 
-- **Native Brief**: Functions that can be expressed in Brief use `defn`
-- **FFI**: Functions requiring system access use `frgn` with TOML bindings
+| Module | Purpose | Types |
+|--------|---------|-------|
+| `std/io` | File I/O | `File`, streams |
+| `std/math` | Math operations | `Float`, `Int` |
+| `std/string` | String utilities | `String` |
+| `std/time` | Time operations | timestamps |
+| `std/http` | HTTP client | request/response |
+| `std/json` | JSON serialization | `Object`, `Array` |
 
-### 11.2 Native Functions (defn)
-
-```brief
-defn absolute(x: Int) -> Int [true][result >= 0] {
-    [x < 0] term -x;
-    [x >= 0] term x;
-};
-
-defn min(a: Int, b: Int) -> Int [true][result == a || result == b] {
-    [a <= b] term a;
-    [a > b] term b;
-};
-```
-
-### 11.3 FFI Functions (frgn)
+### 6.2 Core Functions
 
 ```brief
-frgn print(msg: String) -> Result<Bool, IoError> from "lib/std/io.toml";
-frgn sqrt(x: Float) -> Result<Float, MathError> from "lib/std/math.toml";
-```
+// JSON
+let json_str: String = to_json(value);
+let parsed: Result<Object, String> = from_json(json_str);
 
-### 11.4 JSON Serialization
-
-Built-in functions for JSON encoding and decoding:
-
-```brief
-// Convert a value to a JSON string
-let json_str: String = to_json({message: "hello", count: 42});
-
-// Parse a JSON string, returning Result<Object, String>
-let result: Result<Object, String> = from_json("{\"key\": \"value\"}");
-
-[result Ok(data)] {
-    // data contains the parsed object
-    term data;
-};
-
-[result Err(error)] {
-    // error contains the parse error message
-    term to_json({error: error});
-};
-```
-
-### 11.5 HTTP
-
-The `lib/std/http.bv` module provides HTTP operations:
-
-```brief
-import std.http;
-
-defn fetch_data(url: String) -> String [true][true] {
-    let response = http_get(url);
-    term response;
-};
+// Assertions (for verification)
+result.is_ok()   // True if Result is success
+result.is_err()  // True if Result is error  
+result.value     // Unwrap success value
+result.error.code  // Access error code
+result.error.message  // Access error message
 ```
 
 ---
 
-## 12. Contract Verification
+## 7. Implementation Status
 
-### 12.1 What the Compiler Proves
-
-1. **Precondition satisfiability**: Precondition can be true
-2. **Postcondition implication**: All paths satisfy postcondition
-3. **Termination reachability**: At least one path to `term`
-4. **Mutual exclusion**: Async transactions don't conflict
-
-### 12.2 Error Messages
-
-Brief errors teach the programmer:
-
-```
-[E001] Transaction 'increment' violates postcondition
-
-Path analysis:
-  1. Precondition: count < 100
-  2. Assignment: count' = count + 1
-  3. Postcondition: count' == @count + 1
-
-Hint: The postcondition can be satisfied when count < 100.
-```
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Core language (transactions, guards, structs) | ✅ Complete | |
+| FFI type taxonomy | ✅ Complete | |
+| Address system (virtual/raw) | ✅ Complete | |
+| `frgn`, `frgn!`, `syscall`, `syscall!` | ✅ Complete | |
+| `rsrc` / `resource` parsing | ✅ Complete | |
+| `Float` type | ✅ Complete | |
+| Vector types | ✅ Complete | |
+| Bit-packing | ✅ Complete | AST only |
+| Syscall TOML loading | ⚠️ Planned | Parser reads TOML, backend needs work |
+| Resource kernel generation | ⚠️ Planned | Backend needed |
+| Bit-packed struct code gen | ⚠️ Planned | Backend needed |
+| `to_json`/`from_json` stdlib | ✅ Complete | |
 
 ---
 
-## 13. Examples
+## 8. Migration Guide
 
-### 13.1 Counter
+### From v1 (Legacy)
 
-```brief
-let count: Int = 0;
-let max_count: Int = 10;
-let done: Bool = false;
-
-rct txn increment [count < max_count && !done]
-    [count == @count + 1]
-{
-    &count = count + 1;
-    term;
-};
-
-rct txn finish [count >= max_count && !done]
-    [done == true]
-{
-    &done = true;
-    term;
-};
-```
-
-### 13.2 Bank Transfer
+Legacy code continues to work. The compiler auto-upgrades:
 
 ```brief
-let alice: Int = 1000;
-let bob: Int = 500;
+// v1 style - still valid, auto-upgrades
+frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
-txn transfer(amount: Int)
-    [amount > 0 && amount <= alice]
-    [alice == @alice - amount && bob == @bob + amount]
-{
-    &alice = alice - amount;
-    &bob = bob + amount;
-    term;
-};
+// v2 explicit forms
+frgn  sqrt(x: Float) -> Result<Float, MathError> from "math.toml";  // with Result
+frgn! write_to_hw(address, value);  // fire and forget
 ```
 
-### 13.3 State Machine
-
-```brief
-let state: Int = 0;
-
-rct txn step_1 [state == 0][state == 1] {
-    &state = 1;
-    term;
-};
-
-rct txn step_2 [state == 1][state == 2] {
-    &state = 2;
-    term;
-};
-
-rct txn reset [state == 2][state == 0] {
-    &state = 0;
-    term;
-};
-```
+The compiler auto-generates:
+- `pre [true]` if no precondition
+- `post [true]` if no postcondition  
+- Layout auto-calculation if not specified
 
 ---
 
-*End of Specification v8.0*
+## 9. Error Messages
+
+The compiler produces clear error messages for:
+* Unhandled FFI results (violating contracts)
+* Type mismatches
+* Missing pre/post conditions
+* Invalid address modes
+* Resource conflicts
+
+---
+
+*Last updated: Brief v0.10.0 (2026-04-20)*

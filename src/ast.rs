@@ -60,26 +60,28 @@ pub enum BitRange {
     Any(usize), // /xN
 }
 
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Int,
-    UInt,
     Float,
     String,
     Bool,
     Data,
     Void,
+    UInt,
     Custom(String),
     Union(Vec<Type>),
-    Vector(Box<Type>, usize),
     ContractBound(Box<Type>, Box<Expr>),
     TypeVar(String),
     Generic(String, Vec<Type>),
     Applied(String, Vec<Type>),
-    Sig(String),                      // Signature used as function type: sig name -> ...
-    Option(Box<Type>),                // Option<T> - Some(T) or None
-    Enum(String),                     // Enum type: Result, Color, etc.
-    Constrained(Box<Type>, BitRange), // Type@/N or Type@/xN
+    Sig(String),
+    Vector(Box<Type>, usize),
+    Option(Box<Type>),
+    Enum(String),
+    Constrained(Box<Type>, BitRange),
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +90,7 @@ pub struct TypeParam {
     pub bounds: Vec<TypeBound>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeBound {
     Eq(Type),
     SubTypeOf(Type),
@@ -100,6 +102,7 @@ pub enum TypeBound {
 pub enum ResultType {
     Projection(Vec<Type>),
     TrueAssertion,
+    VoidType,
 }
 
 /// Foreign Function Target Platform
@@ -146,6 +149,7 @@ pub struct ForeignSignature {
     pub wasm_setup: Option<String>,  // WASM JavaScript setup/imports
     pub inputs: Vec<(String, Type)>, // param_name -> type
     pub success_output: Vec<(String, Type)>, // named fields (can be empty for void)
+    pub result_type: ResultType,
     pub error_type_name: String,     // e.g., "IoError"
     pub error_fields: Vec<(String, Type)>, // error shape
     pub input_layout: Option<MemoryLayout>, // Explicit layout (NEW v2)
@@ -529,6 +533,7 @@ pub struct StateDecl {
     pub address: Option<u64>,
     pub bit_range: Option<BitRange>,
     pub is_override: bool,
+    pub os_mode: bool, // In OS mode, address is requested via ioctl/mmap; else embedded mode uses raw address
     pub span: Option<Span>,
 }
 

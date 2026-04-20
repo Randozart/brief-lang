@@ -20,13 +20,56 @@ pub static FFI_REGISTRY: Lazy<FunctionRegistry> = Lazy::new(|| {
 /// Maps function locations (from TOML location field) to implementations
 pub struct FunctionRegistry {
     functions: HashMap<String, ForeignFn>,
+    syscall_numbers: HashMap<String, HashMap<String, i64>>,
 }
 
 impl FunctionRegistry {
     pub fn new() -> Self {
         FunctionRegistry {
             functions: HashMap::new(),
+            syscall_numbers: HashMap::new(),
         }
+    }
+
+    pub fn register_syscall_numbers(&mut self, target: String, numbers: HashMap<String, i64>) {
+        self.syscall_numbers.insert(target, numbers);
+    }
+
+    pub fn get_syscall_number(&self, target: &str, name: &str) -> Option<i64> {
+        self.syscall_numbers.get(target).and_then(|m| m.get(name).copied())
+    }
+
+    pub fn load_syscall_bindings(&mut self) -> Result<(), String> {
+        let binding_dir = std::env::var("BRIEF_STDLIB_PATH")
+            .map(|p| PathBuf::from(p).join("syscalls"))
+            .unwrap_or_else(|_| PathBuf::from("std/bindings/syscalls"));
+
+        if binding_dir.exists() {
+            for entry in std::fs::read_dir(binding_dir).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let path = entry.path();
+                if path.extension().map_or(false, |e| e == "toml") {
+                    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+                    let toml: toml::Value = toml::from_str(&content).map_err(|e| e.to_string())?;
+                    if let Some(syscalls) = toml.get("syscalls").and_then(|v| v.as_array()) {
+                        for syscall in syscalls {
+                            if let Some(name) = syscall.get("name").and_then(|v| v.as_str()) {
+                                let mut numbers = HashMap::new();
+                                if let Some(num_map) = syscall.get("syscall_num").and_then(|v| v.as_table()) {
+                                    for (target, num) in num_map {
+                                        if let Some(n) = num.as_integer() {
+                                            numbers.insert(target.clone(), n);
+                                        }
+                                    }
+                                }
+                                self.syscall_numbers.insert(name.to_string(), numbers);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn register(&mut self, location: String, func: ForeignFn) {

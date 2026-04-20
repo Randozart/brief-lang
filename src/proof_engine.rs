@@ -732,6 +732,7 @@ impl ProofEngine {
                                     match &sig.result_type {
                                         ResultType::Projection(types) => types.clone(),
                                         ResultType::TrueAssertion => vec![],
+                                        ResultType::VoidType => vec![],
                                     }
                                 ));
                                 if let Some(ref output_type) = defn.output_type {
@@ -1197,6 +1198,7 @@ impl ProofEngine {
                         sig_returns.insert(sig.name.clone(), types.clone());
                     }
                     ResultType::TrueAssertion => {}
+                    ResultType::VoidType => {}
                 }
             }
         }
