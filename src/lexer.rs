@@ -48,6 +48,16 @@ pub enum Token {
     As,
     #[token("frgn")]
     Frgn,
+    #[token("frgn!")]
+    FrgnBang,
+    #[token("syscall")]
+    Syscall,
+    #[token("syscall!")]
+    SyscallBang,
+    #[token("resource")]
+    Resource,
+    #[token("rsrc")]
+    Rsrc,
     #[token("struct")]
     Struct,
     #[token("rstruct")]

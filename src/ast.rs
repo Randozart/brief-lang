@@ -128,6 +128,15 @@ impl std::fmt::Display for ForeignTarget {
     }
 }
 
+/// The kind of FFI call determines error handling
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FfiKind {
+    Frgn,        // Foreign function -> Result<T, Error>
+    FrgnBang,    // Foreign function -> void (fire-and-forget)
+    Syscall,     // Kernel call -> Result<Int, Error>
+    SyscallBang, // Kernel call -> void (fire-and-forget)
+}
+
 /// Foreign Function Signature (from frgn declaration)
 #[derive(Debug, Clone)]
 pub struct ForeignSignature {
@@ -144,6 +153,16 @@ pub struct ForeignSignature {
     pub precondition: Option<String>, // Pre-call validation (NEW v2)
     pub postcondition: Option<String>, // Post-call validation (NEW v2)
     pub buffer_mode: Option<String>, // stack | heap | static
+    pub ffi_kind: Option<FfiKind>,   // NEW: frgn, frgn!, syscall, syscall!
+    pub span: Option<Span>,
+}
+
+/// Resource declaration (rsrc/resource)
+#[derive(Debug, Clone)]
+pub struct ResourceDeclaration {
+    pub name: String,
+    pub resource_type: String, // FrameBuffer, File, etc.
+    pub args: Vec<i64>,        // Constructor args: width, height, etc.
     pub span: Option<Span>,
 }
 
@@ -559,6 +578,7 @@ pub enum TopLevel {
         target: ForeignTarget,
         span: Option<Span>,
     },
+    ResourceDecl(ResourceDeclaration), // NEW: rsrc/resource
     Struct(StructDefinition),
     RStruct(RStructDefinition),
     Enum(EnumDefinition),
