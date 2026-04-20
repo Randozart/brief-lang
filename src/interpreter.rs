@@ -393,88 +393,68 @@ impl Interpreter {
         let success_output = &sig.success_output;
         let error_fields = &sig.error_fields;
         let error_type_name = &sig.error_type_name;
+        let ffi_kind = sig.ffi_kind.unwrap_or(FfiKind::Frgn);
 
-        if success_output.is_empty() {
-            return Ok(result);
-        }
-
-        let is_void = success_output.len() == 1
-            && success_output
-                .first()
-                .map(|(_, t)| t == &Type::Void)
-                .unwrap_or(false);
-
-        if is_void {
-            if let Value::Instance {
-                typename: _,
-                fields,
-            } = &result
-            {
-                let mut err_fields = HashMap::new();
-                let mut has_error = false;
-
-                for (field_name, _) in error_fields {
-                    if let Some(val) = fields.get(field_name) {
-                        if !Self::is_empty_value(val) {
-                            err_fields.insert(field_name.clone(), val.clone());
-                            has_error = true;
+        match (success_output.is_empty(), ffi_kind) {
+            (true, _) | (false, FfiKind::FrgnBang) | (false, FfiKind::SyscallBang) => {
+                // Void paths: frgn! and syscall! (always return void)
+                if !success_output.is_empty() {
+                    return Ok(result);
+                }
+                if let Value::Instance { fields, .. } = &result {
+                    for (field_name, _) in error_fields {
+                        if let Some(val) = fields.get(field_name) {
+                            if !Self::is_empty_value(val) {
+                                return Err(RuntimeError::ContractViolation(format!(
+                                    "FFI Error: {}",
+                                    error_type_name
+                                )));
+                            }
                         }
                     }
                 }
-
-                if has_error {
-                    // Return Result::Error(ErrorType { ... })
-                    let error_variant =
-                        Value::Enum(error_type_name.clone(), error_type_name.clone(), err_fields);
-
-                    return Err(RuntimeError::ContractViolation(format!(
-                        "FFI Error({}): {:?}",
-                        error_type_name, error_variant
-                    )));
-                }
+                Ok(Value::Void)
             }
-            return Ok(Value::Void);
-        }
+            (false, FfiKind::Frgn) | (false, FfiKind::Syscall) => {
+                // Result paths: frgn and syscall
+                if let Value::Instance {
+                    typename,
+                    mut fields,
+                } = result
+                {
+                    let mut err_fields_map = HashMap::new();
+                    let mut has_error = false;
 
-        if let Value::Instance {
-            typename,
-            mut fields,
-        } = result
-        {
-            let mut err_fields = HashMap::new();
-            let mut has_error = false;
-
-            for (field_name, _) in error_fields {
-                if let Some(val) = fields.get(field_name) {
-                    if !Self::is_empty_value(val) {
-                        err_fields.insert(field_name.clone(), val.clone());
-                        has_error = true;
+                    for (field_name, _) in error_fields {
+                        if let Some(val) = fields.get(field_name) {
+                            if !Self::is_empty_value(val) {
+                                err_fields_map.insert(field_name.clone(), val.clone());
+                                has_error = true;
+                            }
+                        }
                     }
+
+                    if has_error {
+                        return Err(RuntimeError::ContractViolation(format!(
+                            "FFI Error({}): {:?}",
+                            error_type_name, err_fields_map
+                        )));
+                    }
+
+                    if let Some((first_field, _)) = success_output.first() {
+                        if let Some(value) = fields.remove(first_field) {
+                            return Ok(value);
+                        }
+                    }
+
+                    Ok(Value::Instance {
+                        typename: "Success".to_string(),
+                        fields,
+                    })
+                } else {
+                    Ok(result)
                 }
             }
-
-            if has_error {
-                let error_variant =
-                    Value::Enum(error_type_name.clone(), error_type_name.clone(), err_fields);
-
-                return Err(RuntimeError::ContractViolation(format!(
-                    "FFI Error({}): {:?}",
-                    error_type_name, error_variant
-                )));
-            }
-
-            if let Some((first_field, _)) = success_output.first() {
-                if let Some(value) = fields.remove(first_field) {
-                    return Ok(value);
-                }
-            }
-
-            Ok(Value::Instance {
-                typename: "Success".to_string(),
-                fields,
-            })
-        } else {
-            Ok(result)
         }
     }
 
