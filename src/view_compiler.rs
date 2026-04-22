@@ -1,5 +1,10 @@
 use std::collections::HashMap;
 
+const KNOWN_DIRECTIVES: &[&str] = &[
+    "b-text", "b-show", "b-hide", "b-on:", "b-trigger:",
+    "b-class", "b-attr", "b-style", "b-each",
+];
+
 #[derive(Debug, Clone)]
 pub struct Binding {
     pub element_id: String,
@@ -47,6 +52,7 @@ pub struct ViewCompiler {
     bindings: Vec<Binding>,
     id_counter: usize,
     each_context: Vec<EachContext>,
+    pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +69,7 @@ impl ViewCompiler {
             bindings: Vec::new(),
             id_counter: 0,
             each_context: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -74,11 +81,41 @@ impl ViewCompiler {
         self.transactions.insert(name.to_string(), id);
     }
 
-    pub fn compile(&mut self, view_html: &str) -> (Vec<Binding>, String) {
+    fn extract_class_expression(&self, tag: &str) -> Option<String> {
+        let tag_lower = tag.to_lowercase();
+
+        if !tag_lower.contains("class=") {
+            return None;
+        }
+
+        if let Some(cls_pos) = tag_lower.find("class=") {
+            let value_start = cls_pos + 6;
+            let rest = &tag[value_start..];
+            let rest_trimmed = rest.trim_start();
+
+            if !rest_trimmed.starts_with('{') {
+                return None;
+            }
+
+            let inner = rest_trimmed[1..].trim();
+            if let Some(close_pos) = inner.find('}') {
+                let inner = &inner[..close_pos];
+
+                if inner.contains('?') && inner.contains(" : ") {
+                    return Some(inner.to_string());
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn compile(&mut self, view_html: &str) -> (Vec<Binding>, String, Vec<String>) {
         self.bindings.clear();
+        self.diagnostics.clear();
         let modified_html = self.inject_ids(view_html);
         self.extract_bindings(&modified_html);
-        (self.bindings.clone(), modified_html)
+        (self.bindings.clone(), modified_html, self.diagnostics.clone())
     }
 
     fn inject_ids(&mut self, html: &str) -> String {
@@ -106,40 +143,43 @@ impl ViewCompiler {
                         continue;
                     }
 
+                    let tag_process = tag_str;
+
+                    let has_class_expr = self.extract_class_expression(&tag_str);
+                    let has_b_class = tag_lower.contains("b-class");
                     let has_directive = tag_lower.contains("b-text")
                         || tag_lower.contains("b-show")
                         || tag_lower.contains("b-hide")
                         || tag_lower.contains("b-trigger")
-                        || tag_lower.contains("b-class")
+                        || tag_lower.contains("b-on")
+                        || has_b_class
                         || tag_lower.contains("b-attr")
                         || tag_lower.contains("b-style")
-                        || tag_lower.contains("b-each");
+                        || tag_lower.contains("b-each")
+                        || has_class_expr.is_some();
 
                     if has_directive {
-                        // Always extract the element_id for directives
+                        // Use preprocessed tag for directive processing
                         let elem_id = if !tag_lower.contains("id=") {
-                            // Generate new ID if not present
-                            self.generate_element_id(tag_str)
+                            self.generate_element_id(&tag_process)
                         } else {
-                            // Use existing ID
-                            self.extract_id_from_tag(tag_str)
-                                .unwrap_or_else(|| self.generate_element_id(tag_str))
+                            self.extract_id_from_tag(&tag_process)
+                                .unwrap_or_else(|| self.generate_element_id(&tag_process))
                         };
-                        let tag_name = tag_str.split_whitespace().next().unwrap_or("");
+                        let tag_name = tag_process.split_whitespace().next().unwrap_or("");
                         let tag_name_stripped = tag_name.trim_start_matches('<');
 
-                        if !tag_lower.contains("id=") {
-                            let rest = &tag_str[tag_name.len()..];
-                            result.push_str(&format!(
-                                "<{} id=\"{}\"{}",
-                                tag_name_stripped, elem_id, rest
-                            ));
+                        let tag_with_id = if !tag_lower.contains("id=") {
+                            let rest = &tag_process[tag_name.len()..];
+                            format!("<{} id=\"{}\"{}", tag_name_stripped, elem_id, rest)
                         } else {
-                            result.push_str(tag_str);
-                        }
+                            tag_process.to_string()
+                        };
 
-                        // Always process directives after outputting the tag
-                        self.extract_directives(tag_str);
+                        result.push_str(&tag_with_id);
+
+                        // Pass the computed elem_id to extract_directives so it uses consistent IDs
+                        self.extract_directives(&tag_with_id, &elem_id);
                     } else {
                         result.push_str(tag_str);
                     }
@@ -297,44 +337,71 @@ impl ViewCompiler {
         Some((tag.to_string(), end + 1))
     }
 
-    fn extract_directives(&mut self, tag: &str) {
+    fn extract_directives(&mut self, tag: &str, elem_id: &str) {
         let tag_lower = tag.to_lowercase();
+
+        // Check for bare class={expr} syntax
+        if let Some(expr) = self.extract_class_expression(tag) {
+            let pairs = self.parse_class_expr(&expr);
+            self.bindings.push(Binding {
+                element_id: elem_id.to_string(),
+                directive: Directive::Class { pairs },
+            });
+        }
+
+        // First pass: validate directive prefixes
+        for attr in tag_lower.split_whitespace().skip(1) {
+            let attr = attr.trim_end_matches('>').trim_end_matches('/');
+            if attr.starts_with("b-") {
+                let prefix = if let Some(idx) = attr.find('=') {
+                    attr[..idx].to_string()
+                } else {
+                    attr[..].to_string()
+                };
+                let is_known = KNOWN_DIRECTIVES.iter().any(|k| {
+                    prefix == *k || prefix.starts_with(k.trim_end_matches(':'))
+                });
+                if !is_known {
+                    self.diagnostics.push(format!(
+                        "warning[RBV001]: unknown directive '{}' in tag '{}'",
+                        prefix,
+                        tag.split_whitespace().next().unwrap_or("<tag>")
+                    ));
+                }
+            }
+        }
 
         for attr in tag_lower.split_whitespace().skip(1) {
             let attr = attr.trim_end_matches('>').trim_end_matches('/');
 
-            if attr.starts_with("b-text") {
+if attr.starts_with("b-text") {
                 if let Some(expr) = self.extract_attr_value(tag, "b-text") {
-                    let elem_id = self.generate_element_id(tag);
                     self.bindings.push(Binding {
-                        element_id: elem_id,
+                        element_id: elem_id.to_string(),
                         directive: Directive::Text { signal: expr },
                     });
                 }
             } else if attr.starts_with("b-show") {
                 if let Some(expr) = self.extract_attr_value(tag, "b-show") {
-                    let elem_id = self.generate_element_id(tag);
                     self.bindings.push(Binding {
-                        element_id: elem_id,
+                        element_id: elem_id.to_string(),
                         directive: Directive::Show { expr },
                     });
                 }
             } else if attr.starts_with("b-hide") {
                 if let Some(expr) = self.extract_attr_value(tag, "b-hide") {
-                    let elem_id = self.generate_element_id(tag);
                     self.bindings.push(Binding {
-                        element_id: elem_id,
+                        element_id: elem_id.to_string(),
                         directive: Directive::Hide { expr },
                     });
                 }
-            } else if attr.starts_with("b-trigger:") {
-                // Extract full value from original tag, not split attr (which breaks on spaces in quoted strings)
-                let result = self.extract_trigger_value_from_tag(tag, "b-trigger:");
-                let elem_id = self.generate_element_id(tag);
-                let event = self.extract_event_suffix(&tag_lower, "b-trigger");
+            } else if attr.starts_with("b-trigger:") || attr.starts_with("b-on:") {
+                let prefix = if attr.starts_with("b-trigger:") { "b-trigger:" } else { "b-on:" };
+                let result = self.extract_trigger_value_from_tag(tag, prefix);
+                let event = self.extract_event_suffix(&tag_lower, prefix.trim_end_matches(':'));
                 if let Some((txn_name, params)) = result {
                     self.bindings.push(Binding {
-                        element_id: elem_id,
+                        element_id: elem_id.to_string(),
                         directive: Directive::Trigger {
                             event: event.unwrap_or_else(|| "click".to_string()),
                             txn: txn_name,
@@ -344,29 +411,26 @@ impl ViewCompiler {
                 }
             } else if attr.starts_with("b-class") {
                 if let Some(expr) = self.extract_attr_value(tag, "b-class") {
-                    let elem_id = self.generate_element_id(tag);
                     let pairs = self.parse_class_expr(&expr);
                     self.bindings.push(Binding {
-                        element_id: elem_id,
+                        element_id: elem_id.to_string(),
                         directive: Directive::Class { pairs },
                     });
                 }
             } else if attr.starts_with("b-attr") {
                 if let Some(expr) = self.extract_attr_value(tag, "b-attr") {
-                    let elem_id = self.generate_element_id(tag);
                     if let Some((name, value)) = self.parse_attr_expr(&expr) {
                         self.bindings.push(Binding {
-                            element_id: elem_id,
+                            element_id: elem_id.to_string(),
                             directive: Directive::Attr { name, value },
                         });
                     }
                 }
             } else if attr.starts_with("b-style") {
                 if let Some(expr) = self.extract_attr_value(tag, "b-style") {
-                    let elem_id = self.generate_element_id(tag);
                     if let Some((name, value)) = self.parse_attr_expr(&expr) {
                         self.bindings.push(Binding {
-                            element_id: elem_id,
+                            element_id: elem_id.to_string(),
                             directive: Directive::Style { name, value },
                         });
                     }
@@ -376,7 +440,8 @@ impl ViewCompiler {
     }
 
     fn extract_trigger_value(&self, attr: &str) -> Option<(String, Vec<(String, String)>)> {
-        let after_colon = attr.strip_prefix("b-trigger:")?;
+        let after_colon = attr.strip_prefix("b-trigger:")
+            .or_else(|| attr.strip_prefix("b-on:"))?;
         let after_event = after_colon.find('=')?;
         let value_part = &after_colon[after_event + 1..];
 
@@ -388,8 +453,16 @@ impl ViewCompiler {
         } else if value.starts_with('\'') {
             let end = value[1..].find('\'')?;
             value[1..end + 1].to_string()
-        } else if value.ends_with(')') {
-            value.to_string()
+} else if value.contains('(') {
+            // Function call: extract up to the matching closing paren
+            let open_pos = value.find('(')?;
+            let rest = &value[open_pos..];
+            let close_pos = if let Some(p) = find_closing_paren(rest) {
+                open_pos + p + 1
+            } else {
+                open_pos + rest.len()
+            };
+            value[..close_pos].to_string()
         } else {
             let end = value
                 .find(|c: char| c.is_whitespace() || c == '>')
@@ -410,13 +483,15 @@ impl ViewCompiler {
                         let pair = pair.trim();
                         if let Some(colon_pos) = pair.find(':') {
                             let param_name = pair[..colon_pos].trim().to_string();
-                            let param_value = pair[colon_pos + 1..].trim().to_string();
+                            let raw_value = pair[colon_pos + 1..].trim().to_string();
+                            let param_value = strip_surrounding_quotes(&raw_value);
                             params.push((param_name, param_value));
                         }
                     }
                 } else {
                     for (i, param) in inner_trimmed.split(',').enumerate() {
-                        let param_value = param.trim().to_string();
+                        let raw_value = param.trim().to_string();
+                        let param_value = strip_surrounding_quotes(&raw_value);
                         params.push((format!("_{}", i), param_value));
                     }
                 }
@@ -460,16 +535,13 @@ impl ViewCompiler {
         let value_raw = &after_prefix[value_start..];
 
         // Extract the full quoted value
-        let value = if value_raw.trim_start().starts_with('"') {
-            let first_quote = value_raw.find('"')? + 1;
-            let rest = &value_raw[first_quote..];
-            let end_quote = rest.find('"').unwrap_or(rest.len());
-            rest[..end_quote].to_string()
-        } else if value_raw.trim_start().starts_with('\'') {
-            let first_quote = value_raw.find('\'')? + 1;
-            let rest = &value_raw[first_quote..];
-            let end_quote = rest.find('\'').unwrap_or(rest.len());
-            rest[..end_quote].to_string()
+        let value = if value_raw.trim_start().starts_with('"') || value_raw.trim_start().starts_with('\'') {
+            let rest = value_raw.trim_start();
+            let quote_char = if rest.starts_with('"') { '"' } else { '\'' };
+            let first_quote = rest.find(quote_char)? + 1;
+            let rest_after = &rest[first_quote..];
+            let end_quote = find_closing_quote(rest_after, quote_char).unwrap_or(rest_after.len());
+            rest[..first_quote + end_quote + 1].to_string()
         } else {
             let end = value_raw
                 .find(|c: char| c.is_whitespace() || c == '>')
@@ -599,5 +671,66 @@ fn after_item_name(s: &str) -> Option<(&str, &str)> {
 impl Default for ViewCompiler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn find_closing_paren(s: &str) -> Option<usize> {
+    let mut depth = 0;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    for (i, c) in s.chars().enumerate() {
+        if !in_double_quote && c == '\'' && !in_single_quote {
+            in_single_quote = true;
+        } else if !in_double_quote && c == '\'' && in_single_quote {
+            in_single_quote = false;
+        } else if !in_single_quote && c == '"' && !in_double_quote {
+            in_double_quote = true;
+        } else if !in_single_quote && c == '"' && in_double_quote {
+            in_double_quote = false;
+        } else if !in_single_quote && !in_double_quote {
+            if c == '(' {
+                depth += 1;
+            } else if c == ')' {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+        }
+        // ignore ( and ) inside strings
+    }
+    None
+}
+
+fn find_closing_quote(s: &str, quote_char: char) -> Option<usize> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut first_quote_pos = None;
+    for (i, c) in chars.iter().enumerate() {
+        if *c == quote_char {
+            if first_quote_pos.is_none() {
+                first_quote_pos = Some(i);
+            } else {
+                // This is a candidate closing quote
+                if let Some(next_char) = chars.get(i + 1).copied() {
+                    if next_char.is_whitespace() || next_char == '>' || next_char == '/' {
+                        // This quote terminates the attribute value
+                        return Some(i);
+                    }
+                    // Not a terminator, continue looking for the next quote
+                } else {
+                    return Some(i);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn strip_surrounding_quotes(s: &str) -> String {
+    let trimmed = s.trim();
+    if (trimmed.starts_with('\'') && trimmed.ends_with('\'')) || (trimmed.starts_with('"') && trimmed.ends_with('"')) {
+        trimmed[1..trimmed.len() - 1].to_string()
+    } else {
+        trimmed.to_string()
     }
 }

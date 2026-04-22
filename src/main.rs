@@ -1019,6 +1019,66 @@ fn run_serve(dir: &Path, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn run_arm(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    println!("Compiling to ARM Rust: {}", file_path.display());
+
+    let source = fs::read_to_string(file_path)?;
+    let clean_source = strip_annotations(&source);
+
+    let mut parser = parser::Parser::new(&clean_source);
+    let mut program = parser
+        .parse()
+        .map_err(|e| format!("Brief parse error: {}", e))?;
+
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut program = import_resolver
+        .resolve_imports(&program, file_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    let mut desug = desugarer::Desugarer::new();
+    let mut program = desug.desugar(&program);
+
+    let mut tc = typechecker::TypeChecker::new()
+        .with_stdlib_config(no_stdlib, stdlib_path)
+        .with_target(typechecker::CompilationTarget::Interpreter);
+    let type_errors = tc.check_program(&mut program);
+    if !type_errors.is_empty() {
+        return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
+    }
+
+    let mut pe = proof_engine::ProofEngine::new();
+    let proof_errors = pe.verify_program(&program);
+    if !proof_errors.is_empty() {
+        eprintln!("  Warning: Proof errors (continuing anyway)");
+    }
+
+    let mut wasm_gen = backend::wasm::WasmGenerator::new().with_target(backend::wasm::CodeTarget::Arm);
+    let output = wasm_gen.generate(&program, &[], "kernel");
+
+    let stem = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+
+    let out_path = if let Some(dir) = out_dir {
+        let d = dir.to_path_buf();
+        fs::create_dir_all(&d)?;
+        d.join(format!("{}.rs", stem))
+    } else {
+        PathBuf::from(format!("{}.rs", stem))
+    };
+
+    fs::write(&out_path, &output.rust_code)?;
+    println!("  ARM Rust generated: {}", out_path.display());
+
+    Ok(out_path)
+}
+
 fn run_verilog(
     file_path: &PathBuf,
     hw_config_path: &PathBuf,
@@ -1038,7 +1098,7 @@ fn run_verilog(
     // Standard Brief pipeline
     let source = fs::read_to_string(file_path)?;
     let mut parser = parser::Parser::new(&source);
-    let program = parser
+    let mut program = parser
         .parse()
         .map_err(|e| format!("Brief parse error: {}", e))?;
 
@@ -1260,8 +1320,11 @@ fn run_rbv(
             view_compiler.register_transaction(&t.name, i);
         }
     }
-    let (bindings, html_with_ids) = view_compiler.compile(&expanded_view);
+    let (bindings, html_with_ids, view_diagnostics) = view_compiler.compile(&expanded_view);
     println!("  View compiled: {} bindings", bindings.len());
+    for diag in view_diagnostics {
+        eprintln!("  {}", diag);
+    }
 
     let output_path = if let Some(p) = out_dir {
         p.to_path_buf()
@@ -1507,6 +1570,36 @@ fn main() {
             } else {
                 eprintln!("Error: No .bv file specified");
                 eprintln!("Usage: {} build <file.bv>", args[0]);
+                std::process::exit(1);
+            }
+        }
+
+        "arm" | "a" => {
+            let mut file_path = None;
+            let mut out_dir = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg.ends_with(".bv") || arg.ends_with(".ebv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                if let Err(e) = run_arm(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone()) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .bv or .ebv file specified");
+                eprintln!("Usage: {} arm <file.bv|file.ebv> [--out <dir>]", args[0]);
                 std::process::exit(1);
             }
         }

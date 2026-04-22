@@ -1,7 +1,9 @@
 [interface]
 name = "axi4-lite"
 version = "1.0.0"
-description = "AXI4-Lite protocol for register access"
+description = "AXI4-Lite protocol for register access (CPU-to-FPGA, one word at a time)"
+performance = "low"  # ~10-50 MB/s
+use_case = "control registers, small updates"
 
 [signals]
 awvalid = { bits = 1, direction = "input" }
@@ -16,9 +18,16 @@ rvalid = { bits = 1, direction = "output" }
 rdata = { bits = "data_width", direction = "output" }
 
 [parameters]
-address_width = { default = 16, min = 8, max = 32 }
-data_width = { default = 32, min = 8, max = 512 }
+address_width = { default = 16, min = 8, max = 32, description = "bits to address memory" }
+data_width = { default = 32, min = 8, max = 512, description = "bits per transfer" }
+
+[generation]
+# How compiler generates this interface
+reg_style = "individual"  # one always_ff per address
+burst_support = false
+max_elements = 65536
 
 [constraints]
 max_address = "2^address_width - 1"
 alignment = "data_width / 8"
+recommended_max_elements = 65536  #，超过此值建议使用 bram

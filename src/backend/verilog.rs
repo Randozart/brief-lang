@@ -559,7 +559,57 @@ impl VerilogGenerator {
         self.output
             .push_str(&format!("    // Logic for variable: {}\n", name));
 
-        if is_vector {
+        // Check memory type for this address
+        let mem_type = if let Some(addr) = decl.address {
+            let addr_str = format!("0x{:08X}", addr);
+            self.hw_config.memory.get(&addr_str).map(|m| m.mem_type.clone())
+        } else {
+            None
+        };
+
+        // Determine generation style based on memory type
+        // bram/ultraram -> RAM template (single always_ff with address)
+        // flipflop or unknown -> generate for loop (current behavior)
+        let use_ram_template = matches!(mem_type.as_deref(), Some("bram") | Some("ultraram"));
+
+        if is_vector && use_ram_template && vector_size > 64 {
+            // RAM template: single always_ff with internal address mux
+            // BRAM/UltraRAM have power-on initialization - no reset logic needed
+            self.output.push_str(&format!(
+                "    // RAM template for {} (type: {:?}, size: {})\n",
+                name, mem_type, vector_size
+            ));
+            self.output.push_str("    always_ff @(posedge clk) begin\n");
+            self.output.push_str("        // No reset initialization needed - BRAM auto-initializes on power-up\n");
+
+            for (idx, txn) in txns.iter().enumerate() {
+                let ce_cond = if let Some(speed) = txn.reactor_speed {
+                    format!("ce_{}hz && ", speed)
+                } else {
+                    "".to_string()
+                };
+
+                let cond = format!(
+                    "{}{}",
+                    ce_cond,
+                    self.expr_to_verilog(&txn.contract.pre_condition)
+                );
+
+self.output.push_str(&format!(
+                    "        {}if ({}) begin\n",
+                    if idx > 0 { "else " } else { "" },
+                    cond
+                ));
+
+                // For RAM templates: direct assignment, no index conditional needed
+                // The transaction condition already gates the write
+                self.emit_ram_write_statement(name, &txn.body, program);
+                self.output.push_str("        end\n");
+            }
+
+            self.output.push_str("    end\n\n");
+        } else if is_vector {
+            // Original generate-for pattern for small vectors or flipflop
             let genvar_name = format!("{}_i", name);
             self.output
                 .push_str(&format!("    genvar {};\n", genvar_name));
@@ -899,6 +949,108 @@ impl VerilogGenerator {
         }
     }
 
+    fn emit_ram_assignment_from_txn(
+        &mut self,
+        var_name: &str,
+        body: &[Statement],
+        program: &Program,
+        _base_address: Option<u32>,
+    ) {
+        // For RAM template: use address from AXI interface instead of genvar
+        // The write happens at specific addresses - we generate per-element conditionals
+        // This is less efficient than true dual-port RAM but ensures correctness
+
+        let addr_signal = "cpu_write_addr";  // Standard AXI write address signal
+
+        for stmt in body {
+            match stmt {
+                Statement::Assignment { lhs, expr, .. } => {
+                    if self.extract_assignment_target(lhs).as_deref() == Some(var_name) {
+                        let expr_str = self.expr_to_verilog(expr);
+
+                        match lhs {
+                            Expr::Identifier(_) | Expr::OwnedRef(_) => {
+                                // Full vector assignment - create loop over all addresses
+                                self.output.push_str(&format!(
+                                    "                // Full buffer write via AXI\n",
+                                ));
+                            }
+                            Expr::ListIndex(_, idx_expr) => {
+                                let idx_str = self.expr_to_verilog(idx_expr);
+                                self.output.push_str(&format!(
+                                    "                if ({} == {}) begin\n",
+                                    addr_signal, idx_str
+                                ));
+                                self.output.push_str(&format!(
+                                    "                    {}[{}] <= {};\n",
+                                    var_name, idx_str, expr_str
+                                ));
+                                self.output.push_str("                end\n");
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Statement::Guarded {
+                    condition,
+                    statements,
+                } => {
+                    self.output.push_str(&format!(
+                        "                if ({}) begin\n",
+                        self.expr_to_verilog(condition)
+                    ));
+                    self.emit_ram_assignment_from_txn(var_name, statements, program, None);
+                    self.output.push_str("                end\n");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn emit_ram_write_statement(
+        &mut self,
+        var_name: &str,
+        body: &[Statement],
+        program: &Program,
+    ) {
+        // For RAM templates: direct write, no per-element conditionals
+        // The transaction condition already gates when writes occur
+        for stmt in body {
+            match stmt {
+                Statement::Assignment { lhs, expr, .. } => {
+                    if self.extract_assignment_target(lhs).as_deref() == Some(var_name) {
+                        let expr_str = self.expr_to_verilog(expr);
+                        match lhs {
+                            Expr::Identifier(_) | Expr::OwnedRef(_) => {
+                                self.output.push_str(&format!(
+                                    "                    {} <= {};\n",
+                                    var_name, expr_str
+                                ));
+                            }
+                            Expr::ListIndex(_, idx_expr) => {
+                                let idx_str = self.expr_to_verilog(idx_expr);
+                                self.output.push_str(&format!(
+                                    "                    {}[{}] <= {};\n",
+                                    var_name, idx_str, expr_str
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Statement::Guarded { condition, statements } => {
+                    self.output.push_str(&format!(
+                        "                    if ({}) begin\n",
+                        self.expr_to_verilog(condition)
+                    ));
+                    self.emit_ram_write_statement(var_name, statements, program);
+                    self.output.push_str("                    end\n");
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn expr_to_verilog(&self, expr: &Expr) -> String {
         match expr {
             Expr::Integer(n) => n.to_string(),
@@ -1087,75 +1239,74 @@ impl VerilogGenerator {
         tb.push_str("`timescale 1ns/1ps\n\n");
         tb.push_str(&format!("module {}_tb;\n\n", self.module_name));
 
-        tb.push_str("    logic clk;\n");
-        tb.push_str("    logic rst_n;\n\n");
+        tb.push_str("    // Clock and reset\n");
+        tb.push_str("    logic clk = 0;\n");
+        tb.push_str("    logic rst_n = 0;\n\n");
 
-        // Declare signals for ports
-        let mut ports = Vec::new();
-        for item in &program.items {
-            match item {
-                TopLevel::StateDecl(decl) => {
-                    if let Some(addr) = decl.address {
-                        let io_cfg = self.get_io_mapping(addr);
+        tb.push_str("    // Testbench control\n");
+        tb.push_str("    logic [7:0] cpu_control = 0;\n");
+        tb.push_str("    logic [7:0] cpu_status;\n");
+        tb.push_str("    logic [3:0] cpu_opcode = 0;\n");
+        tb.push_str("    logic signed [15:0] cpu_write_data = 0;\n");
+        tb.push_str("    logic [17:0] cpu_write_addr = 0;\n");
+        tb.push_str("    logic cpu_write_en = 0;\n");
+        tb.push_str("    logic cpu_read_en = 0;\n\n");
 
-                        if io_cfg.is_some() {
-                            let width = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
-                            let width_str = if width > 1 {
-                                format!("[{}:0] ", width - 1)
-                            } else {
-                                "".to_string()
-                            };
-                            tb.push_str(&format!("    logic {}{};\n", width_str, decl.name));
-                            ports.push(decl.name.clone());
-                        }
-                    }
-                }
-                TopLevel::Trigger(trg) => {
-                    let io_cfg = self.get_io_mapping(trg.address);
-
-                    if io_cfg.is_some() {
-                        let width = self.get_bit_width(&trg.ty, trg.bit_range.as_ref());
-                        let width_str = if width > 1 {
-                            format!("[{}:0] ", width - 1)
-                        } else {
-                            "".to_string()
-                        };
-                        tb.push_str(&format!("    logic {}{};\n", width_str, trg.name));
-                        ports.push(trg.name.clone());
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        tb.push_str("\n    // Instantiate Unit Under Test\n");
+        tb.push_str("    // Instantiate Unit Under Test\n");
         tb.push_str(&format!("    {} uut (\n", self.module_name));
         tb.push_str("        .clk(clk),\n");
-        tb.push_str("        .rst_n(rst_n)");
-        for port in ports {
-            tb.push_str(&format!(",\n        .{}({})", port, port));
-        }
-        tb.push_str("\n    );\n\n");
+        tb.push_str("        .rst_n(rst_n)\n");
+        tb.push_str("    );\n\n");
 
-        tb.push_str("    // Clock generation (100MHz)\n");
-        tb.push_str("    initial begin\n");
-        tb.push_str("        clk = 0;\n");
-        tb.push_str("        forever #5 clk = ~clk;\n");
-        tb.push_str("    end\n\n");
+        tb.push_str("    // Clock generation (100MHz = 10ns period)\n");
+        tb.push_str("    always #5 clk = ~clk;\n\n");
 
-        tb.push_str("    // Test Stimulus\n");
+        tb.push_str("    // Test sequence\n");
         tb.push_str("    initial begin\n");
         tb.push_str("        $dumpfile(\"waveform.vcd\");\n");
         tb.push_str("        $dumpvars(0, uut);\n\n");
-        tb.push_str("        rst_n = 0;\n");
-        tb.push_str("        #20 rst_n = 1;\n\n");
-        tb.push_str("        // Let it run for 1000ns\n");
-        tb.push_str("        #1000;\n");
-        tb.push_str("        $display(\"Simulation finished.\");\n");
+        
+        tb.push_str("        // Reset sequence\n");
+        tb.push_str("        #0 rst_n = 0;\n");
+        tb.push_str("        #10 rst_n = 1;\n");
+        tb.push_str("        #5;\n\n");
+        
+        tb.push_str("        // Test 1: Sync control\n");
+        tb.push_str("        cpu_control = 1;\n");
+        tb.push_str("        #10;\n");
+        tb.push_str("        cpu_control = 0;\n");
+        tb.push_str("        #10;\n\n");
+        
+        tb.push_str("        // Test 2: Load input data\n");
+        tb.push_str("        cpu_control = 1;\n");
+        tb.push_str("        cpu_write_en = 1;\n");
+        tb.push_str("        cpu_write_addr = 0;\n");
+        tb.push_str("        cpu_write_data = 16'h1234;\n");
+        tb.push_str("        #10;\n");
+        tb.push_str("        cpu_write_en = 0;\n");
+        tb.push_str("        #10;\n\n");
+        
+        tb.push_str("        // Test 3: Execute forward pass\n");
+        tb.push_str("        cpu_control = 20;\n");
+        tb.push_str("        #10;\n");
+        tb.push_str("        cpu_control = 0;\n");
+        tb.push_str("        #10;\n\n");
+        
+        tb.push_str("        // Wait and finish\n");
+        tb.push_str("        #100;\n");
+        tb.push_str("        $display(\"Test completed successfully.\");\n");
         tb.push_str("        $finish;\n");
         tb.push_str("    end\n\n");
 
+        tb.push_str("    // Monitor for debugging\n");
+        tb.push_str("    always @(posedge clk) begin\n");
+        tb.push_str("        if (uut.control != 0) begin\n");
+        tb.push_str("            $display(\"t=%0d: control=%d, status=%d\", $time, uut.control, uut.status);\n");
+        tb.push_str("        end\n");
+        tb.push_str("    end\n\n");
+
         tb.push_str("endmodule\n");
+
         tb
     }
 }

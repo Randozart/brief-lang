@@ -1,0 +1,35 @@
+[target]
+name = "xczu4ev"
+version = "1.0.0"
+description = "Xilinx Zynq UltraScale+ ZU4EV (Kria KV260) - PS + PL"
+
+[constraints]
+# Physical limits (from KV260 datasheet)
+max_bram_kb = 518        # 144 × 36Kb = 518KB
+max_ultraram_kb = 2304   # 64 × 288Kb = 2304KB (2.25MB)
+max_lut = 256000       # 256K logic cells
+max_dsp = 1200         # ~1.2K DSP slices
+
+# Generation hints for this specific target
+default_ram_style = "auto"      # Use bram/ultraram automatically based on size
+default_address_bits = 18        # 18 bits addresses 262K elements
+max_clock_mhz = 100
+pipeline_required = true    # Must pipeline large operations
+
+# Memory recommendations
+# Small (< 1K): flipflop
+# Medium (1K - 256K): bram (36Kb × dual-port)
+# Large (256K - 2M): ultraram (288Kb × single-port)
+# Everything else: DDR4 (requires AXI4-Full DMA)
+
+[warnings]
+warn_bram_elements = 131072   # Warn at 50% BRAM capacity
+warn_ultraram_elements = 524288  # Warn at 25% UltraRAM capacity
+warn_single_cycle = 256      # Warn if operation can't fit in one cycle
+warn_address_mismatch = 17    # Warn if address bits > 17 for 262K elements
+
+[axi]
+# Which AXI interface to use
+default = "axi4-lite"
+dma_capable = true         # Can use AXI4-Full for DMA
+max_burst_mb = 512       # Max burst in MB

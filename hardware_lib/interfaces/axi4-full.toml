@@ -1,0 +1,52 @@
+[interface]
+name = "axi4-full"
+version = "1.0.0"
+description = "AXI4-Full protocol with burst support (FPGA-to-DDR4 DMA)"
+performance = "very_high"  # ~19.2 GB/s
+use_case = "bulk memory transfers, streaming weights"
+
+[signals]
+awid = { bits = "id_width", direction = "input" }
+awaddr = { bits = "address_width", direction = "input" }
+awlen = { bits = 8, direction = "input" }
+awsize = { bits = 3, direction = "input" }
+awvalid = { bits = 1, direction = "input" }
+awready = { bits = 1, direction = "output" }
+wdata = { bits = "data_width", direction = "input" }
+wstrb = { bits = "data_width/8", direction = "input" }
+wlast = { bits = 1, direction = "input" }
+wvalid = { bits = 1, direction = "input" }
+wready = { bits = 1, direction = "output" }
+bresp = { bits = 2, direction = "output" }
+bvalid = { bits = 1, direction = "output" }
+bready = { bits = 1, direction = "input" }
+arid = { bits = "id_width", direction = "input" }
+araddr = { bits = "address_width", direction = "input" }
+arlen = { bits = 8, direction = "input" }
+arsize = { bits = 3, direction = "input" }
+arvalid = { bits = 1, direction = "input" }
+arready = { bits = 1, direction = "output" }
+rid = { bits = "id_width", direction = "output" }
+rdata = { bits = "data_width", direction = "output" }
+rresp = { bits = 2, direction = "output" }
+rlast = { bits = 1, direction = "output" }
+rvalid = { bits = 1, direction = "output" }
+rready = { bits = 1, direction = "input" }
+
+[parameters]
+address_width = { default = 32, min = 32, max = 64, description = "DDR4 address space" }
+data_width = { default = 64, min = 32, max = 512, description = "bits per beat" }
+id_width = { default = 4, min = 1, max = 12 }
+max_burst_len = { default = 256, description = "beats per burst" }
+
+[generation]
+# How compiler generates this interface
+dma_style = "burst"  # AXI master with burst logic
+fifo_depth = { default = 512, description = "internal FIFO for pipelining" }
+async_read = true
+async_write = true
+max_elements = 16777216
+
+[constraints]
+bandwidth = "19.2 GB/s"  # theoretical max
+recommended_max_elements = 16777216  # 16M elements OK

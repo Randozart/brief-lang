@@ -1,11 +1,25 @@
 [memory]
 name = "bram"
 version = "1.0.0"
-description = "Block RAM for large vector storage"
+description = "Block RAM - on-chip memory, dual-port, recommended for 1K-1M elements"
+capacity_kb = 144  # 36Kb each × 144 blocks = 518KB total on KV260
 
 [synthesis]
 attribute = "syn_ramstyle = \"block_ram\""
 
+[generation]
+# How compiler should generate this memory type
+ram_template = true  # Use single always_ff with address, NOT generate for loop
+preferred_element_bits = 16
+min_elements = 64
+max_elements = 262144  # ~512KB at 16-bit
+supports_simultaneous_rw = true
+max_readers = 2
+
 [parameters]
 size = { required = true, description = "number of elements" }
 element_bits = { required = true, description = "bits per element" }
+
+[constraints]
+recommended_max_elements = 262144  # Don't exceed physical BRAM
+warning_threshold = 131072  # Warn if exceeding this

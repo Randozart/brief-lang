@@ -1,9 +1,22 @@
 [target]
 name = "generic"
 version = "1.0.0"
-description = "Generic target with no device-specific constraints"
+description = "Generic FPGA target - uses defaults, warnings for large memories"
 
 [constraints]
-max_bram_kb = 1000
-max_lut = 100000
-max_dsp = 500
+# Physical limits
+max_bram_kb = 1000      # Total BRAM in KB
+max_ultraram_kb = 0      # UltraRAM (0 if not available)
+max_lut = 100000       # Logic cells
+max_dsp = 500         # DSP slices
+
+# Generation hints
+default_ram_style = "auto"  # auto, flipflop, bram, ultraram
+default_address_bits = 16     # Bits allocated for addresses
+max_clock_mhz = 100        # Maximum clock frequency
+pipeline_required = false   # Require explicit pipelining for large ops
+
+[warnings]
+warn_bram_elements = 65536   # Warn if vector exceeds this
+warn_lut_elements = 65536     # Warn if unrolled logic exceeds this
+warn_single_cycle = 1024        # Warn if operation can't fit in one cycle
