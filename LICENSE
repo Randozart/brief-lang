@@ -162,7 +162,15 @@
       other commercial damages or losses), even if such Contributor
       has been advised of the possibility of such damages.
 
-   9. Accepting Warranty or Additional Liability. While redistributing
+   9. Runtime Exception for Use as a Language. When the Work or any
+       Derivative Work thereof is used to generate code ("generated code"),
+       such generated code shall not be subject to the terms of this License,
+       provided that the generated code itself is not a Derivative Work of
+       the Work. This exception does not apply to code that is itself a
+       compiler, interpreter, or similar tool that incorporates or embeds
+       the Work.
+
+   10. Accepting Warranty or Additional Liability. While redistributing
       the Work or Derivative Works thereof, You may choose to offer,
       and charge a fee for, acceptance of support, warranty, indemnity,
       or other liability obligations and/or rights consistent with this
