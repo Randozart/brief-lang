@@ -1794,50 +1794,52 @@ let span = self.current_span();
 
         let mut count = 0;
         while let Some(Ok(Token::LBracket)) = self.current_token() {
-            self.advance();
+            self.advance(); // consume [
 
             // Check for ~/ syntax - this is a shorthand for [~identifier][identifier]
-            // It expands to TWO conditions, so if we use it, we're done
             if let Some(Ok(Token::TildeSlash)) = self.current_token() {
                 self.advance(); // Consume ~/
                 let identifier = self.expect_identifier()?;
-
-                // For ~/identifier, we need to generate two conditions:
-                // pre_condition = ~identifier (logical NOT)
-                // post_condition = identifier
                 pre_condition = Expr::Not(Box::new(Expr::Identifier(identifier.clone())));
                 post_condition = Expr::Identifier(identifier);
                 self.expect(Token::RBracket)?;
-                break; // ~/ uses the only bracket, we're done
+                break;
             }
 
-            // Watchdog is optional - third bracket is watchdog condition
-            // Syntax: [pre][post][watchdog]
-            // Note: ?[expr] and ![expr] syntax for required/optional could be added later
-
-            let cond = self.parse_expression()?;
-            
             if count == 0 {
-                pre_condition = cond;
+                pre_condition = self.parse_expression()?;
             } else if count == 1 {
-                post_condition = cond;
+                post_condition = self.parse_expression()?;
             } else if count == 2 {
-                // Watchdog specification - must be optional ? only for now
-                // Check that watchdog is not just true
-                if let Expr::Bool(true) = &cond {
+                // Watchdog specification - third bracket
+                //
+                // Syntax: [pre][post][watchdog]      -> optional
+                // Syntax: [pre][post][!watchdog]     -> required (parsed as Expr::Not)
+                //
+                // The ! is parsed as part of the expression (unary negation).
+                // If the expression is a Not, extract the inner and mark as required.
+
+                let cond = self.parse_expression()?;
+
+                // Check if this is a required watchdog (!watchdog parsed as Expr::Not)
+                let (is_required, final_cond) = match &cond {
+                    Expr::Not(inner) => (true, *inner.clone()),
+                    _ => (false, cond.clone()),
+                };
+
+                if matches!(final_cond, Expr::Bool(true)) {
                     return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
                 }
-                // For now, treat all watchdogs as optional (? - only enforced if proof fails)
-                // Later we can add ! for required
+
                 watchdog = Some(WatchdogSpec {
-                    condition: cond,
-                    is_required: false, // Default to optional
+                    condition: final_cond,
+                    is_required,
                 });
             } else {
-                return self.spanned_err("Too many contract brackets (max 3: [pre][post][?watchdog])".to_string());
+                return self.spanned_err("Too many contract brackets (max 3: [pre][post][watchdog])".to_string());
             }
-            count += 1;
 
+            count += 1;
             self.expect(Token::RBracket)?;
         }
 

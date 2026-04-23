@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const KNOWN_DIRECTIVES: &[&str] = &[
     "b-text", "b-show", "b-hide", "b-on:", "b-trigger:",
@@ -75,6 +75,9 @@ pub struct ViewCompiler {
     id_counter: usize,
     each_context: Vec<EachContext>,
     pub diagnostics: Vec<String>,
+    /// Transactions that are triggered by user input (b-trigger:)
+    /// These should have preconditions that account for non-deterministic user input
+    user_triggered_txns: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +95,7 @@ impl ViewCompiler {
             id_counter: 0,
             each_context: Vec::new(),
             diagnostics: Vec::new(),
+            user_triggered_txns: HashSet::new(),
         }
     }
 
@@ -101,6 +105,51 @@ impl ViewCompiler {
 
     pub fn register_transaction(&mut self, name: &str, id: usize) {
         self.transactions.insert(name.to_string(), id);
+    }
+
+    /// Returns transactions that are triggered by user input (b-trigger:)
+    /// These should have preconditions that account for non-deterministic user input
+    pub fn get_user_triggered_transactions(&self) -> &HashSet<String> {
+        &self.user_triggered_txns
+    }
+
+    /// Validate that user-triggered transactions have appropriate preconditions
+    /// For RBV, preconditions should NOT be too strict since user input is unpredictable
+    pub fn validate_user_triggered_preconditions(&self, preconditions: &HashMap<String, String>) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        for txn_name in &self.user_triggered_txns {
+            if let Some(pre) = preconditions.get(txn_name) {
+                // Warn if precondition is too strict (not accounting for unreliable user input)
+                // Common strict patterns that might be problematic:
+                // - Preconditions checking external state that user can't guarantee
+                // - Preconditions that are only true in specific UI states
+
+                // Check if precondition mentions any variable that's likely user-controlled or external
+                let strict_patterns = [
+                    "network", "api", "server", "fetch", "http",
+                    "database", "db_", "file", "disk", "filesystem",
+                ];
+
+                let pre_lower = pre.to_lowercase();
+                for pattern in strict_patterns {
+                    if pre_lower.contains(pattern) {
+                        warnings.push(format!(
+                            "Warning[R001]: Transaction '{}' is user-triggered but has precondition referencing '{}' which may not be available when user acts: [{}]",
+                            txn_name, pattern, pre
+                        ));
+                    }
+                }
+            } else {
+                // No precondition found - this might be fine or need checking
+                warnings.push(format!(
+                    "Info[R002]: Transaction '{}' is user-triggered but has no explicit precondition",
+                    txn_name
+                ));
+            }
+        }
+
+        warnings
     }
 
     fn extract_class_expression(&self, tag: &str) -> Option<String> {
@@ -422,6 +471,9 @@ if attr.starts_with("b-text") {
                 let result = self.extract_trigger_value_from_tag(tag, prefix);
                 let event = self.extract_event_suffix(&tag_lower, prefix.trim_end_matches(':'));
                 if let Some((txn_name, params)) = result {
+                    // Track user-triggered transactions for linting
+                    // These should have preconditions that account for non-deterministic user input
+                    self.user_triggered_txns.insert(txn_name.clone());
                     self.bindings.push(Binding {
                         element_id: elem_id.to_string(),
                         directive: Directive::Trigger {

@@ -1,19 +1,22 @@
-// Test: Watchdog contract - optional third bracket
+// Test: Watchdog contract - optional/required third bracket
 // Category: Embedded - Watchdog
-// Expected: Compiles with watchdog specification
+// Syntax: [pre][post][watchdog] or [pre][post][!watchdog]
 
-let frame_ready: Bool = false;
-let frame_processed: Bool = false;
+let watchdog_active: Bool = false;
+let counter: Int = 0;
 
-rct txn set_ready [frame_ready == false]
-  [frame_ready == true]
+// Optional watchdog (no prefix = optional)
+rct txn process_optional [counter >= 0][counter == @counter + 1]
+  [watchdog_active]
 {
-    &frame_ready = true;
+    &counter = counter + 1;
     term;
 };
 
-rct txn process [frame_ready == true][frame_processed == true][frame_processed]
+// Required watchdog (! prefix = required, always enforced)
+rct txn process_required [counter >= 0][counter == @counter + 1]
+  [!watchdog_active]
 {
-    &frame_processed = true;
+    &counter = counter + 1;
     term;
 };

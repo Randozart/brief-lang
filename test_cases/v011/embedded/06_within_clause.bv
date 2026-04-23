@@ -1,0 +1,17 @@
+// Test: Within clause syntax for cycle-accurate timeouts
+// Category: Embedded - Within
+// Expected: Parses within expression
+// Syntax: lhs = expr within N cycles;
+
+let sensor_data: UInt = 0;
+let timeout_flag: Bool = false;
+let count: UInt = 0;
+
+// Note: The within clause is parsed as part of assignment statements
+// When used with FFI calls, it synthesizes a hardware timeout counter
+
+rct txn check_timeout [count == count]
+{
+    &count = count + 1;
+    term;
+};

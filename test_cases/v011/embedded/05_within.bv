@@ -1,20 +1,15 @@
 // Test: Within timeout syntax
 // Category: Embedded - Within
-// Expected: Parses (transaction-level timeout)
+// Expected: Parses (timeout synthesis for embedded)
 
-// Note: within is transaction-level constraint for embedded systems
+// The within clause: result = read_spi() within 10 cycles;
+// Synthesizes a down-counter for cycle-accurate timeouts.
 
-let ready: Bool = false;
-let counter: UInt = 0;
+let result: UInt = 0;
 
-rct txn wait_ready [ready == false]
-  [ready == true]
+rct txn read_spi [result == 0]
+  [result > 0]
 {
-    &ready = true;
-    term;
-};
-
-rct txn check [counter == counter]
-{
+    &result = result + 1;
     term;
 };

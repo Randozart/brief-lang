@@ -167,6 +167,8 @@ pub enum Token {
     AndAnd,
     #[token("!")]
     Not,
+    #[token("?")]
+    Question,
     #[token("-")]
     Minus,
     #[token("~/")]
