@@ -1,0 +1,20 @@
+// Test: Async transaction with concurrent execution
+// Category: Core - Async Transactions
+// Expected: Compiles with async keyword, verifies no write conflicts
+
+let resource_state: Int = 0;
+let reader_count: Int = 0;
+
+rct async txn reader_access [resource_state == 0]
+  [reader_count == @reader_count + 1]
+{
+    &reader_count = reader_count + 1;
+    term;
+};
+
+rct async txn writer_access [reader_count == 0]
+  [resource_state == 1]
+{
+    &resource_state = 1;
+    term;
+};

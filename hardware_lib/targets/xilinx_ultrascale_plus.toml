@@ -1,0 +1,28 @@
+# Target: Xilinx Zynq UltraScale+ (KV260, etc.)
+# Used for: IMP KV260 project
+
+[vendor]
+name = "xilinx"
+family = "zynq_ultrascale_plus"
+part_prefix = "xczu"
+
+[memory.pragmas]
+bram = "/* synthesis syn_ramstyle = \"block_ram\" */"
+ultraram = "/* synthesis syn_ramstyle = \"ultra_ram\" */"
+distributed = "/* synthesis syn_ramstyle = \"distributed\" */"
+flipflop = ""
+
+[logic.pragmas]
+keep = "/* synthesis keep */"
+buffer_type = "/* synthesis buffer_type = \"bufg\" */"
+noshare = "/* synthesis nelshare = \"none\" */"
+
+[synthesis]
+tool = "vivado"
+mode = "batch"
+script_ext = ".tcl"
+default_part = "xczu4ev-sfvc784-1"
+
+[constraints]
+max_frequency_hz = 100_000_000
+timing_units = "ns"

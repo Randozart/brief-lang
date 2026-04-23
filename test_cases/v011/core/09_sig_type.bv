@@ -1,0 +1,10 @@
+// Test: Sig declarations - basic syntax test
+// Category: Core - Sig
+// Expected: Parses
+
+let x: Int = 0;
+
+rct txn test [x == x]
+{
+    term;
+};

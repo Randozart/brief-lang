@@ -1,0 +1,16 @@
+// Test: Unary negation compiles correctly (syntax only)
+// Category: Core - Expressions
+// Expected: Compiles - testing -5 literal in expression context
+
+let value: Int = 5;
+
+rct txn store_neg [value == value]
+  [value == 5]
+{
+    // Just store a value - we're testing syntax parsing here
+    &value = 5;
+    term;
+};
+
+// This comment tests that -5 parses correctly as part of an expression
+let negative_literal: Int = -5;

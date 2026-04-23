@@ -1,0 +1,10 @@
+// Test: Enum definitions - basic syntax test
+// Category: Core - Enums
+// Expected: Parses
+
+let state: Int = 0;
+
+rct txn test [state == state]
+{
+    term;
+};

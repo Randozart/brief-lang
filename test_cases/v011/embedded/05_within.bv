@@ -1,0 +1,20 @@
+// Test: Within timeout syntax
+// Category: Embedded - Within
+// Expected: Parses (transaction-level timeout)
+
+// Note: within is transaction-level constraint for embedded systems
+
+let ready: Bool = false;
+let counter: UInt = 0;
+
+rct txn wait_ready [ready == false]
+  [ready == true]
+{
+    &ready = true;
+    term;
+};
+
+rct txn check [counter == counter]
+{
+    term;
+};

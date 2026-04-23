@@ -1,0 +1,13 @@
+// Test: Triggers - external hardware events
+// Category: Embedded - Triggers
+// Expected: Parses (proof requires explicit state changes)
+
+let hw_control: UInt = 0;
+let led: Bool = false;
+
+rct txn on_hw_event [led == false]
+  [led == true]
+{
+    &led = true;
+    term;
+};

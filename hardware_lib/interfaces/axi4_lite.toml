@@ -1,0 +1,33 @@
+# Interface: AXI4-Lite
+# Used for: ARM-to-FPGA communication on Zynq UltraScale+
+
+[interface]
+name = "axi4-lite"
+type = "memory_mapped_slave"
+address_width = 18
+data_width = 32
+
+# Map clean Brief names to AXI physical port names
+[port_map]
+clock = "s_axi_aclk"
+reset_n = "s_axi_aresetn"
+
+write_addr = "s_axi_awaddr"
+write_valid = "s_axi_awvalid"
+write_ready = "s_axi_awready"
+
+write_data = "s_axi_wdata"
+write_strb = "s_axi_wstrb"
+
+read_addr = "s_axi_araddr"
+read_valid = "s_axi_arvalid"
+read_ready = "s_axi_arready"
+
+read_data = "s_axi_rdata"
+read_response = "s_axi_rresp"
+
+# Optional burst support
+[axi4_full]
+async_read = true
+async_write = true
+max_burst_length = 256

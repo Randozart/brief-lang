@@ -1,0 +1,19 @@
+// Test: Watchdog contract - optional third bracket
+// Category: Embedded - Watchdog
+// Expected: Compiles with watchdog specification
+
+let frame_ready: Bool = false;
+let frame_processed: Bool = false;
+
+rct txn set_ready [frame_ready == false]
+  [frame_ready == true]
+{
+    &frame_ready = true;
+    term;
+};
+
+rct txn process [frame_ready == true][frame_processed == true][frame_processed]
+{
+    &frame_processed = true;
+    term;
+};

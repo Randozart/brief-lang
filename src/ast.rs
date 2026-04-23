@@ -453,7 +453,14 @@ pub enum Statement {
 pub struct Contract {
     pub pre_condition: Expr,
     pub post_condition: Expr,
+    pub watchdog: Option<WatchdogSpec>,
     pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WatchdogSpec {
+    pub condition: Expr,
+    pub is_required: bool,  // false = ? (optional), true = ! (required)
 }
 
 impl Contract {
@@ -461,6 +468,7 @@ impl Contract {
         Contract {
             pre_condition: pre,
             post_condition: post,
+            watchdog: None,
             span: None,
         }
     }

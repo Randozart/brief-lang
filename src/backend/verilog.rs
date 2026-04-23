@@ -1161,6 +1161,18 @@ self.output.push_str(&format!(
                 self.expr_to_verilog(l),
                 self.expr_to_verilog(r)
             ),
+            Expr::Neg(inner) => format!(
+                "(-{})",
+                self.expr_to_verilog(inner)
+            ),
+            Expr::Not(inner) => format!(
+                "(!{})",
+                self.expr_to_verilog(inner)
+            ),
+            Expr::BitNot(inner) => format!(
+                "(~{})",
+                self.expr_to_verilog(inner)
+            ),
             Expr::Call(name, args) => {
                 let args_str = args
                     .iter()

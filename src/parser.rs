@@ -1790,6 +1790,7 @@ let span = self.current_span();
     fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         let mut pre_condition = Expr::Bool(true);
         let mut post_condition = Expr::Bool(true);
+        let mut watchdog: Option<WatchdogSpec> = None;
 
         let mut count = 0;
         while let Some(Ok(Token::LBracket)) = self.current_token() {
@@ -1810,13 +1811,30 @@ let span = self.current_span();
                 break; // ~/ uses the only bracket, we're done
             }
 
+            // Watchdog is optional - third bracket is watchdog condition
+            // Syntax: [pre][post][watchdog]
+            // Note: ?[expr] and ![expr] syntax for required/optional could be added later
+
             let cond = self.parse_expression()?;
+            
             if count == 0 {
                 pre_condition = cond;
             } else if count == 1 {
                 post_condition = cond;
+            } else if count == 2 {
+                // Watchdog specification - must be optional ? only for now
+                // Check that watchdog is not just true
+                if let Expr::Bool(true) = &cond {
+                    return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
+                }
+                // For now, treat all watchdogs as optional (? - only enforced if proof fails)
+                // Later we can add ! for required
+                watchdog = Some(WatchdogSpec {
+                    condition: cond,
+                    is_required: false, // Default to optional
+                });
             } else {
-                return self.spanned_err("Too many contract brackets (max 2)".to_string());
+                return self.spanned_err("Too many contract brackets (max 3: [pre][post][?watchdog])".to_string());
             }
             count += 1;
 
@@ -1827,6 +1845,7 @@ let span = self.current_span();
         Ok(Contract {
             pre_condition,
             post_condition,
+            watchdog,
             span,
         })
     }

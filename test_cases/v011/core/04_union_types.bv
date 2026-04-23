@@ -1,0 +1,17 @@
+// Test: Union types with pattern matching
+// Category: Core - Types
+// Expected: Compiles successfully
+
+let fetch_status: Bool = false;
+
+sig fetch_data: Int -> Bool | Int;
+
+rct txn load [fetch_status == false]
+  [fetch_status == true]
+{
+    let result = fetch_data(1);
+    
+    Bool(success) = result;
+    [success == true] &fetch_status = true;
+    term;
+};

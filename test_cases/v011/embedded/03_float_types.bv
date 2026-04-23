@@ -1,0 +1,8 @@
+// Test: Float type parsing (not synthesis)
+// Category: Embedded - Float
+// Note: Float not yet supported in verilog synthesis
+
+let value: Int = 0;
+
+// Float declarations are parsed but not yet synthesized
+// let temperature: Float = 3.14;

@@ -1,0 +1,25 @@
+# Target: Intel Stratix (for future support)
+# Used for: Intel FPGA targets
+
+[vendor]
+name = "intel"
+family = "stratix"
+part_prefix = "10M"
+
+[memory.pragmas]
+bram = "/* synthesis ramstyle = \"M20K\" */"
+mlab = "/* synthesis ramstyle = \"MLAB\" */"
+flipflop = ""
+
+[logic.pragmas]
+keep = "/* synthesis preserve */"
+noprune = "/* synthesis noprune */"
+
+[synthesis]
+tool = "quartus"
+mode = "batch"
+script_ext = ".tcl"
+
+[constraints]
+max_frequency_hz = 100_000_000
+timing_units = "ns"

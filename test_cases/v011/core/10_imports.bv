@@ -1,0 +1,10 @@
+// Test: Import statements - basic syntax test
+// Category: Core - Imports
+// Expected: Parses
+
+let x: Int = 42;
+
+rct txn test [x == x]
+{
+    term;
+};

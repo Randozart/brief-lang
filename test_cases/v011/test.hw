@@ -1,0 +1,16 @@
+[project]
+name = "test"
+version = "0.1.0"
+
+[target]
+fpga = "test"
+clock_hz = 100_000_000
+
+[interface]
+name = "test"
+address_width = 8
+data_width = 8
+
+[memory]
+"0x80000000" = { size = 1, type = "flipflop", element_bits = 8 }
+"0x80001000" = { size = 16, type = "bram", element_bits = 16 }

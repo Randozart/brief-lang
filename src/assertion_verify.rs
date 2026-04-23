@@ -204,6 +204,7 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                watchdog: None,
                 span: None,
             },
             body: vec![Statement::Term(vec![Some(Expr::Bool(true))])],
@@ -234,6 +235,7 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                watchdog: None,
                 span: None,
             },
             body: vec![Statement::Term(vec![Some(Expr::Bool(false))])],
@@ -264,6 +266,7 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                watchdog: None,
                 span: None,
             },
             body: vec![
@@ -301,6 +304,7 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                watchdog: None,
                 span: None,
             },
             body: vec![Statement::Term(vec![Some(Expr::String(
@@ -333,6 +337,7 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                watchdog: None,
                 span: None,
             },
             body: vec![Statement::Term(vec![Some(Expr::Bool(false))])],

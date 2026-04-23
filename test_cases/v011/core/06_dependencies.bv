@@ -1,0 +1,29 @@
+// Test: Multiple transactions with dependencies
+// Category: Core - Dependencies
+// Expected: Compiles successfully
+
+let state: Int = 0;
+let result: Int = 0;
+
+rct txn set_state [state == 0]
+  [state == 1]
+{
+    &state = 1;
+    term;
+};
+
+rct txn compute [state == 1]
+  [result == 42]
+{
+    &result = 42;
+    &state = 2;
+    term;
+};
+
+rct txn reset [state == 2]
+  [state == 0 && result == 0]
+{
+    &state = 0;
+    &result = 0;
+    term;
+};

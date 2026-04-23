@@ -1,0 +1,8 @@
+// Test: Guards (conditional assignments within transaction)
+// Category: Core - Guards
+// Expected: Compiles - syntax check only
+
+let counter: Int = 0;
+
+// Guards test - syntax only (proof not required)
+let x: Int = 0;

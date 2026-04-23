@@ -23,11 +23,13 @@
 pub mod annotator;
 pub mod assertion_verify;
 pub mod ast;
+pub mod analysis;
 pub mod backend;
 pub mod cache;
 pub mod desugarer;
 pub mod errors;
 pub mod ffi;
+pub mod hardware;
 pub mod hardware_validator;
 pub mod import_resolver;
 pub mod interpreter;

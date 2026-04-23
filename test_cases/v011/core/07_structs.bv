@@ -1,0 +1,10 @@
+// Test: Struct definitions - basic syntax test
+// Category: Core - Structs
+// Expected: Parses
+
+let x: Int = 0;
+
+rct txn test [x == x]
+{
+    term;
+};

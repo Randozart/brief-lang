@@ -1,0 +1,12 @@
+// Test: Basic transaction with precondition and postcondition
+// Category: Core - Transactions
+// Expected: Compiles successfully
+
+let counter: Int = 0;
+
+rct txn increment [counter < 10]
+  [counter == @counter + 1]
+{
+    &counter = counter + 1;
+    term;
+};
