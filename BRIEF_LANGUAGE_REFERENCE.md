@@ -112,13 +112,19 @@ rct txn increment [counter < 10]
 };
 ```
 
-### Watchdog (Optional Third Contract)
+### Watchdog (Third Contract Bracket)
 
 ```brief
-[pre][post][watchdog_condition]
+[pre][post][watchdog]       // Optional watchdog (default)
+[pre][post][!watchdog]       // Required watchdog (! prefix = always enforced)
 ```
 
-The watchdog is optional and is checked at `term` to ensure the transaction made progress.
+The watchdog is an optional third bracket that is checked at `term`.
+
+| Prefix | Meaning |
+|--------|---------|
+| none | Optional - only enforced if proof fails |
+| `!` | Required - always enforced in simulation/synthesis |
 
 **Example:**
 ```brief
@@ -127,9 +133,16 @@ rct txn process [ready == true][done == true][done]
     &done = true;
     term;
 };
+
+// Required watchdog (! prefix = always enforced)
+rct txn verify [count >= 0][count == @count + 1][!watchdog_active]
+{
+    &count = count + 1;
+    term;
+};
 ```
 
-**Test Case:** `test_cases/v011/embedded/02_watchdog.ebv`
+**Test Case:** `test_cases/v011/embedded/02_watchdog.bv`
 
 ---
 
@@ -349,10 +362,34 @@ Synthesized to: `input logic button;`
 
 ### Within Clause
 
-The `within N cycles` syntax is used for cycle-accurate timeouts (embedded only):
+The `within N cycles` syntax is used for cycle-accurate timeouts in assignments:
+
+```brief
+let result = expr within N cycles;
+```
+
+Time units: `cycles`, `cyc`, `ms`, `s`, `sec`, `min`
 
 ```brief
 let result = read_spi() within 10 cycles;
+```
+
+---
+
+### ~/ Shorthand (Prior State Toggle)
+
+```brief
+~/identifier
+```
+
+Expands to two contracts: `[~identifier][identifier]` (pre is NOT, post is identifier).
+
+```brief
+rct txn toggle [~/ready][ready]
+{
+    &ready = !ready;
+    term;
+};
 ```
 
 ---
