@@ -280,15 +280,45 @@ syscall! write(fd: Int, data: String) -> Int;
 
 ---
 
-## Rendered Brief
+## Rendered Brief (.rbv)
+
+RBV adds HTML view components for web UIs. The HTML is embedded directly in the Brief code.
+
+### Trigger Syntax
+
+| Syntax | Meaning |
+|--------|---------|
+| `b-trigger:click="txn"` | HTML button triggers a transaction |
+| `b-on:submit="action"` | Alternative trigger syntax |
+
+```html
+<button b-trigger:click="increment">+</button>
+<button b-trigger:click="decrement">-</button>
+<button b-trigger:click="reset">Reset</button>
+```
+
+### State Binding Directives
+
+| Directive | Meaning |
+|-----------|---------|
+| `b-text="expr"` | Bind expression to text content |
+| `b-show="expr"` | Show element when expr is true |
+| `b-hide="expr"` | Hide element when expr is true |
+
+```html
+<p>Count: <span b-text="count">0</span></p>
+<div b-show="step == 1">Step 1 content</div>
+```
 
 ### RStruct (Reactive Struct)
 
 ```brief
 rstruct Counter {
     let value: Int = 0;
-    
-    txn increment [value < 100][value == @value + 1] {
+
+    rct txn increment [value < 100]
+      [value == @value + 1]
+    {
         &value = value + 1;
         term;
     };
@@ -304,6 +334,29 @@ rstruct Counter {
 
 ---
 
+## Embedded Brief (.ebv)
+
+### Hardware Triggers
+
+Hardware triggers (`trg`) define external input signals mapped to memory addresses:
+
+```brief
+// EBV: Hardware trigger as input signal
+trg button: Bool @ 0x4000;
+```
+
+Synthesized to: `input logic button;`
+
+### Within Clause
+
+The `within N cycles` syntax is used for cycle-accurate timeouts (embedded only):
+
+```brief
+let result = read_spi() within 10 cycles;
+```
+
+---
+
 ## Test Cases Reference
 
 ### Core Brief (.bv)
@@ -314,13 +367,22 @@ rstruct Counter {
 | `core/02_async_transaction.bv` | Async transactions | ✅ Pass |
 | `core/03_unary_negation.bv` | Unary negation | ✅ Pass |
 | `core/04_union_types.bv` | Union types | ✅ Pass |
+| `core/05_guards.bv` | Guards | ✅ Pass |
+| `core/06_dependencies.bv` | Transaction dependencies | ✅ Pass |
+| `core/07_structs.bv` | Struct syntax | ✅ Pass |
+| `core/08_enums.bv` | Enum syntax | ✅ Pass |
+| `core/09_sig_type.bv` | Foreign signatures | ✅ Pass |
+| `core/10_imports.bv` | Import statements | ✅ Pass |
 
-### Embedded Brief (.ebv)
+### Embedded Brief (.bv - extended)
 
 | File | Feature | Status |
 |------|---------|--------|
-| `embedded/01_vector_types.ebv` | Vectors + bit-range | ✅ Pass |
-| `embedded/02_watchdog.ebv` | Watchdog contract | ✅ Pass |
+| `embedded/01_vector_types.bv` | Vectors + bit-range | ✅ Pass |
+| `embedded/02_watchdog.bv` | Watchdog contract | ✅ Pass |
+| `embedded/03_float_types.bv` | Float (parsing only) | ✅ Pass |
+| `embedded/04_triggers.bv` | Trigger syntax | ✅ Pass |
+| `embedded/05_within.bv` | Transaction syntax | ✅ Pass |
 
 ### Examples Directory
 
