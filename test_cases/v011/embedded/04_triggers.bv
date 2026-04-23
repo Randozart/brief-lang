@@ -1,13 +1,23 @@
-// Test: Triggers - external hardware events
+// Test: Triggers - hardware input signals
 // Category: Embedded - Triggers
-// Expected: Parses (proof requires explicit state changes)
+// Expected: Compiles with trg declarations
 
-let hw_control: UInt = 0;
+trg button: Bool @ 0x4000;
+trg sensor: UInt @ 0x8000 /8;
+
 let led: Bool = false;
+let counter: Int = 0;
 
-rct txn on_hw_event [led == false]
+rct txn on_button [led == false]
   [led == true]
 {
     &led = true;
+    term;
+};
+
+rct txn read_sensor [sensor > 0]
+  [counter == @counter + sensor]
+{
+    &counter = counter + sensor;
     term;
 };

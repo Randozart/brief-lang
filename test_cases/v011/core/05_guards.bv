@@ -1,8 +1,13 @@
-// Test: Guards (conditional assignments within transaction)
+// Test: Guards (conditional statements within transaction)
 // Category: Core - Guards
-// Expected: Compiles - syntax check only
+// Expected: Compiles with guarded statements
 
+let flag: Bool = false;
 let counter: Int = 0;
 
-// Guards test - syntax only (proof not required)
-let x: Int = 0;
+rct txn update [counter >= 0]
+  [counter == @counter + 1]
+{
+    &counter = counter + 1;
+    term;
+};

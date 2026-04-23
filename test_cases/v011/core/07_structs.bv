@@ -1,10 +1,17 @@
-// Test: Struct definitions - basic syntax test
+// Test: Struct definitions
 // Category: Core - Structs
-// Expected: Parses
+// Expected: Compiles with struct definition
 
-let x: Int = 0;
+struct Point {
+    let x: Int = 0;
+    let y: Int = 0;
+};
 
-rct txn test [x == x]
+let px: Int = 0;
+
+rct txn init_point [px == 0]
+  [px == 5]
 {
+    &px = 5;
     term;
 };

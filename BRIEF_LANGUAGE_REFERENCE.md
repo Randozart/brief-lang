@@ -1,93 +1,299 @@
 # Brief Language Reference Guide
 
-**Version:** v0.11.0  
-**Date:** 2026-04-23  
+**Version:** v0.11.0
+**Date:** 2026-04-23
 **Status:** Development
 
 ---
 
 ## Table of Contents
 
-1. [Language Variants](#language-variants)
-2. [Core Syntax](#core-syntax)
-3. [Transactions](#transactions)
-4. [Contracts](#contracts)
-5. [Types](#types)
-6. [Expressions](#expressions)
-7. [Embedded Brief Extensions](#embedded-brief-extensions)
-8. [FFI and Foreign Functions](#ffi-and-foreign-functions)
-9. [Rendered Brief](#rendered-brief)
-10. [Test Cases Reference](#test-cases-reference)
+1. [Lexical Structure](#lexical-structure)
+2. [Types](#types)
+3. [State Declarations](#state-declarations)
+4. [Constants](#constants)
+5. [Transactions](#transactions)
+6. [Contracts](#contracts)
+7. [Definitions (defn)](#definitions-defn)
+8. [Structs](#structs)
+9. [RStructs (Reactive Structs)](#rstructs-reactive-structs)
+10. [Enums](#enums)
+11. [Signatures (FFI)](#signatures-ffi)
+12. [Foreign Bindings](#foreign-bindings)
+13. [Resources](#resources)
+14. [Triggers (EBV)](#triggers-ebv)
+15. [Render Blocks (RBV)](#render-blocks-rbv)
+16. [Imports](#imports)
+17. [Expressions](#expressions)
+18. [Statements](#statements)
+19. [Time Units](#time-units)
 
 ---
 
-## Language Variants
+## Lexical Structure
 
-| Extension | Name | Description |
-|-----------|------|-------------|
-| `.bv` | Core Brief | Transactional state machines with FFI |
-| `.ebv` | Embedded Brief | Adds vectors, bit-ranges, native Float |
-| `.rbv` | Rendered Brief | Adds UI/view components |
+### Keywords
+
+| Keyword | Aliases | Description |
+|---------|---------|-------------|
+| `sig` | `sign`, `signature` | Foreign function signature |
+| `defn` | `def`, `definition` | Function/predicate definition |
+| `let` | - | State variable declaration |
+| `const` | `constant` | Constant declaration |
+| `txn` | `transact`, `transaction` | Transaction |
+| `rct` | - | Reactive transaction |
+| `async` | - | Async modifier |
+| `term` | - | Termination statement |
+| `escape` | - | Escape/return statement |
+| `import` | - | Import statement |
+| `from` | - | Import path delimiter |
+| `as` | - | Alias/rename |
+| `frgn` | - | Foreign binding |
+| `frgn!` | - | Foreign binding (native) |
+| `syscall` | - | System call binding |
+| `syscall!` | - | System call binding (native) |
+| `resource` | `rsrc` | Resource declaration |
+| `struct` | - | Struct definition |
+| `rstruct` | - | Reactive struct definition |
+| `render` | - | Render block (RBV) |
+| `enum` | - | Enum definition |
+| `trg` | - | Hardware trigger (EBV) |
+| `stage` | - | Pipeline stage |
+| `on` | - | Trigger condition |
+| `forall` | - | Universal quantifier |
+| `exists` | - | Existential quantifier |
+| `within` | - | Timeout clause |
+| `bank` | - | Memory bank |
+| `match` | - | Match expression |
+| `some` | `none` | Option variants |
+
+### Type Keywords
+
+| Keyword | Aliases | Description |
+|---------|---------|-------------|
+| `Int` | - | Signed integer |
+| `UInt` | `Unsigned`, `USgn` | Unsigned integer |
+| `Signed` | `Sgn` | Signed type |
+| `Float` | - | Floating point |
+| `String` | - | String type |
+| `Bool` | - | Boolean |
+| `Data` | - | Raw data |
+| `Void` | - | Void/no return |
+
+### Operators
+
+| Operator | Description |
+|----------|-------------|
+| `=` | Assignment |
+| `==` | Equality |
+| `!=` | Inequality |
+| `<` | Less than |
+| `<=` | Less or equal |
+| `>` | Greater than |
+| `>=` | Greater or equal |
+| `<<` | Shift left |
+| `>>` | Shift right |
+| `&` | Mutable reference / Bitwise AND |
+| `\|` | Bitwise OR |
+| `\|\|` | Logical OR |
+| `&&` | Logical AND |
+| `!` | Logical NOT |
+| `-` | Negation |
+| `~` | Bitwise NOT |
+| `~/` | Prior state toggle |
+| `+` | Addition |
+| `*` | Multiplication |
+| `/` | Division |
+| `^` | Bitwise XOR |
+| `->` | Arrow/return type |
+| `@` | Address / Prior state |
+| `?` | Optional watchdog prefix |
+
+### Punctuation
+
+| Token | Description |
+|-------|-------------|
+| `[` `]` | Brackets / Contracts |
+| `{` `}` | Blocks |
+| `(` `)` | Groups / Parameters |
+| `:` | Type annotation |
+| `,` | Separator |
+| `;` | Statement terminator |
+| `..` | Range |
+| `.` | Field access / Namespace |
+| `::` | Enum variant access |
 
 ---
 
-## Core Syntax
+## Types
 
-### 1. State Declarations
+### Primitive Types
 
 ```brief
-let counter: Int = 0;
+let x: Int = 42;
+let y: UInt = 100;
 let flag: Bool = true;
-let name: String = "test";
+let name: String = "hello";
+let pi: Float = 3.14;
 ```
 
-**Test Case:** `test_cases/v011/core/01_basic_transaction.bv`
+### Vector Types
+
+```brief
+let buffer: Int[16];        // Fixed-size array
+let matrix: Float[4][4];     // 2D array
+```
+
+### Constrained Types (Bit-Range)
+
+```brief
+let byte: UInt /8;          // 8-bit unsigned
+let nibble: UInt /4;        // 4-bit unsigned
+let word: Int /16;          // 16-bit signed
+let flags: UInt /x8;        // Inferred 8-bit
+```
+
+### Union Types
+
+```brief
+let result: Int | Error;    // Either Int or Error
+let state: Idle | Active | Error;
+```
+
+### Custom Types
+
+```brief
+let point: Point = Point { x: 0, y: 0 };
+let status: Status = Status::Active;
+```
 
 ---
 
-### 2. Transactions
+## State Declarations
 
-#### Basic Transaction
-```brief
-rct txn <name> [precondition] [postcondition] {
-    <body>
-    term;
-};
-```
+### Basic Declaration
 
-**Example:**
 ```brief
 let counter: Int = 0;
-
-rct txn increment [counter < 10]
-  [counter == @counter + 1]
-{
-    &counter = counter + 1;
-    term;
-};
+let name: String = "test";
+let enabled: Bool = false;
 ```
 
-**Test Case:** `test_cases/v011/core/01_basic_transaction.bv`
+### With Address Mapping (EBV)
 
-#### Async Transaction
 ```brief
-rct async txn <name> [precondition] [postcondition] {
-    <body>
-    term;
-};
+let led: Bool @ 0x4000 = false;           // Memory-mapped at 0x4000
+let sensor: UInt @ 0x8000 /8;             // 8-bit sensor at 0x8000
 ```
 
-**Example:**
+### With Bit-Range
+
 ```brief
-rct async txn reader [resource == 0]
-  [reader_count == @reader_count + 1]
-{
-    &reader_count = reader_count + 1;
+let flags: UInt @ 0x1000 /0..7;           // Bits 0-7 at address 0x1000
+let status: UInt /4;                      // 4-bit field
+```
+
+### Address with Bit-Range Shorthand
+
+```brief
+let data: UInt @ 0x2000 /x16;             // 16-bit value at 0x2000
+```
+
+### Memory Regions
+
+```brief
+let stack_var: Int @ stack:8;             // Stack offset 8
+let heap_ptr: Int @ heap:16;               // Heap offset 16
+```
+
+### Vector with Address
+
+```brief
+let buffer: UInt[256] @ 0x1000;            // 256-element buffer at 0x1000
+```
+
+---
+
+## Constants
+
+```brief
+const MAX_SIZE: Int = 100;
+const VERSION: String = "1.0.0";
+const FLAGS: UInt = 0xFF;
+```
+
+---
+
+## Transactions
+
+### Basic Transaction
+
+```brief
+txn name [precondition] [postcondition] {
+    // body
     term;
 };
 ```
 
-**Test Case:** `test_cases/v011/core/02_async_transaction.bv`
+### Reactive Transaction (RCT)
+
+```brief
+rct txn name [precondition] [postcondition] {
+    &variable = value;
+    term;
+};
+```
+
+### Async Transaction
+
+```brief
+async txn name [precondition] [postcondition] {
+    term;
+};
+```
+
+### Reactive Async Transaction
+
+```brief
+rct async txn name [precondition] [postcondition] {
+    term;
+};
+```
+
+### With Parameters
+
+```brief
+txn add [a: Int] [b: Int] [result == a + b] {
+    term result;
+};
+```
+
+### Lambda-style (No Body)
+
+```brief
+txn identity [x: Int] [result == x];
+```
+
+### With Reactor Speed
+
+```brief
+rct txn blink @60Hz [true] [led == !led] {
+    term;
+};
+```
+
+### Transaction Method (dot syntax)
+
+```brief
+rct txn counter.increment [count < max] [count == @count + 1] {
+    &count = count + 1;
+    term;
+};
+```
+
+### Transaction Dependencies
+
+Dependencies are inferred from pre/post conditions automatically.
 
 ---
 
@@ -99,10 +305,32 @@ rct async txn reader [resource == 0]
 [pre_condition] [post_condition]
 ```
 
-- **Precondition**: Must be true for transaction to fire
-- **Postcondition**: Guaranteed true after transaction completes
+### Watchdog (Third Contract Bracket)
 
-**Example:**
+```brief
+[pre][post][watchdog]     // Required watchdog (default)
+[pre][post][?watchdog]     // Optional watchdog
+```
+
+The watchdog is checked at `term`.
+
+### Prior State Toggle Shorthand
+
+```brief
+~/identifier
+```
+
+Expands to: `[~identifier][identifier]`
+
+```brief
+rct txn toggle [~/ready][ready] {
+    &ready = !ready;
+    term;
+};
+```
+
+### Examples
+
 ```brief
 rct txn increment [counter < 10]
   [counter == @counter + 1]
@@ -110,287 +338,440 @@ rct txn increment [counter < 10]
     &counter = counter + 1;
     term;
 };
-```
 
-### Watchdog (Third Contract Bracket)
-
-```brief
-[pre][post][watchdog]    // Required watchdog (default)
-[pre][post][?watchdog]    // Optional watchdog
-```
-
-The watchdog is checked at `term`. Default is **required**; use `?` prefix for optional.
-
-| Syntax | Meaning |
-|--------|---------|
-| `[watchdog]` | Required - always enforced |
-| `[?watchdog]` | Optional - only enforced if proof fails |
-
-**Example:**
-```brief
-rct txn process [ready == true][done == true][done]
+rct txn guarded [x > 0][y == x * 2]
 {
+    &y = x * 2;
+    term;
+};
+
+rct txn with_watchdog [ready == true][done == true][?timeout] {
     &done = true;
     term;
 };
+```
 
-// Optional watchdog (? prefix)
-rct txn opt_watchdog [count >= 0][count == @count + 1][?watchdog_active]
-{
-    &count = count + 1;
-    term;
+---
+
+## Definitions (defn)
+
+### Predicate Definition
+
+```brief
+defn sufficient_funds(amount: Int) [amount > 0][true] -> Bool {
+    term amount >= minimum_balance;
 };
 ```
 
-**Test Case:** `test_cases/v011/embedded/02_watchdog.bv`
-
----
-
-## Types
-
-### Primitive Types
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `Int` | Signed integer | `let x: Int = 42;` |
-| `UInt` | Unsigned integer | `let x: UInt = 42;` |
-| `Float` | Floating point (embedded only) | `let x: Float = 3.14;` |
-| `Bool` | Boolean | `let flag: Bool = true;` |
-| `String` | Text | `let name: String = "test";` |
-| `Void` | No value | `-> Void` |
-| `Data` | Raw bytes | |
-
-### Vector Types (Embedded Brief)
+### Function Definition with Contract
 
 ```brief
-let buffer: Int[1024];
-```
-
-Generates a fixed-size array of 1024 integers.
-
-**Test Case:** `test_cases/v011/embedded/01_vector_types.ebv`
-
-### Union Types
-
-```brief
-sig fetch_data: Int -> Bool | Int;
-
-txn load []
-{
-    let result = fetch_data(1);
-    Bool(success) = result;
-    [success == true] &status = 1;
-    term;
+defn square(x: Int) [true] [result == x * x] -> Int {
+    term x * x;
 };
 ```
 
-**Test Case:** `test_cases/v011/core/04_union_types.bv`
-
 ---
 
-## Expressions
-
-### Arithmetic Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `+` | Addition | `counter + 1` |
-| `-` | Subtraction | `value - 5` |
-| `*` | Multiplication | `x * y` |
-| `/` | Division | `x / 2` |
-
-### Unary Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `-` | Negation | `-value` or `-5` |
-| `!` | Logical NOT | `!flag` |
-| `~` | Bitwise NOT | `~mask` |
-
-**Important:** Unary negation is now supported in all expressions.
-
-**Test Case:** `test_cases/v011/core/03_unary_negation.bv`
-
-### Comparison Operators
-
-| Operator | Description |
-|----------|-------------|
-| `==` | Equal |
-| `!=` | Not equal |
-| `<` | Less than |
-| `<=` | Less or equal |
-| `>` | Greater than |
-| `>=` | Greater or equal |
-
-### Logical Operators
-
-| Operator | Description |
-|----------|-------------|
-| `&&` | Logical AND |
-| `||` | Logical OR |
-| `!` | Logical NOT |
-
-### Prior State (`@variable`)
-
-The `@` prefix accesses the value before the transaction executes:
+## Structs
 
 ```brief
-[counter == @counter + 1]  // postcondition: counter increased by 1
+struct Point {
+    let x: Int = 0;
+    let y: Int = 0;
+};
+
+struct Rectangle {
+    width: Int,
+    height: Int,
+};
+
+// Struct with embedded transactions
+struct Counter {
+    let value: Int = 0;
+
+    txn increment [value < 100][value == @value + 1] {
+        &value = value + 1;
+        term;
+    };
+};
+```
+
+### Field Declaration Syntax
+
+```brief
+// Using let (required initializer)
+let x: Int = 0;
+let y: Int = 0;
+
+// Direct field syntax
+field_name: Type,
 ```
 
 ---
 
-## Embedded Brief Extensions
+## RStructs (Reactive Structs)
 
-### Bit-Range Addressing
-
-```brief
-let control: UInt @ 0x80000000 /0..7;
-let buffer: Int[16] @ 0x80001000 /x16;
-```
-
-**Syntax:** `@ address /bit_spec`
-
-**Bit Specs:**
-- `/xN` - N-bit width (e.g., `/x16` = 16 bits)
-- `/lo..hi` - Bit range (e.g., `/0..7` = 8 bits, bits 0-7)
-- `/N` - Single bit N
-
-**Test Case:** `test_cases/v011/embedded/01_vector_types.ebv`
-
-### Vector Operations
-
-Vectors support element-wise operations:
-
-```brief
-let buffer: Int[16];
-&buffer[0] = 42;  // Write to element
-let val = buffer[0];  // Read element
-```
-
----
-
-## FFI and Foreign Functions
-
-### Foreign Signatures
-
-```brief
-sig my_function: Int -> Bool;
-```
-
-### Foreign Bindings
-
-```brief
-frgn! my_function(val: Int) from "path/to/lib";
-```
-
-### System Calls
-
-```brief
-syscall! read(fd: Int, buf: String) -> Int;
-syscall! write(fd: Int, data: String) -> Int;
-```
-
----
-
-## Rendered Brief (.rbv)
-
-RBV adds HTML view components for web UIs. The HTML is embedded directly in the Brief code.
-
-### Trigger Syntax
-
-| Syntax | Meaning |
-|--------|---------|
-| `b-trigger:click="txn"` | HTML button triggers a transaction |
-| `b-on:submit="action"` | Alternative trigger syntax |
-
-```html
-<button b-trigger:click="increment">+</button>
-<button b-trigger:click="decrement">-</button>
-<button b-trigger:click="reset">Reset</button>
-```
-
-### State Binding Directives
-
-| Directive | Meaning |
-|-----------|---------|
-| `b-text="expr"` | Bind expression to text content |
-| `b-show="expr"` | Show element when expr is true |
-| `b-hide="expr"` | Hide element when expr is true |
-
-```html
-<p>Count: <span b-text="count">0</span></p>
-<div b-show="step == 1">Step 1 content</div>
-```
-
-### RStruct (Reactive Struct)
+RStructs automatically namespace transactions with the struct name.
 
 ```brief
 rstruct Counter {
     let value: Int = 0;
 
-    rct txn increment [value < 100]
-      [value == @value + 1]
-    {
+    txn increment [value < 100][value == @value + 1] {
         &value = value + 1;
         term;
     };
-}
+};
 ```
 
-### View Directives
+After parsing, `increment` becomes `Counter.increment`.
+
+---
+
+## Enums
+
+### Simple Enum
 
 ```brief
-#button[id="submit"] => txn.submit
-#input[id="name"] => model.name
+enum Status {
+    Idle,
+    Processing,
+    Done,
+    Error,
+};
+```
+
+### Enum with Type Parameters
+
+```brief
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+};
+```
+
+### Tuple Variants
+
+```brief
+enum Value {
+    Int(Int),
+    Float(Float),
+    Pair(Int, Float),
+};
+```
+
+### Enum with Raw Values
+
+```brief
+enum Color {
+    Red = 0xFF0000,
+    Green = 0x00FF00,
+    Blue = 0x0000FF,
+};
 ```
 
 ---
 
-## Embedded Brief (.ebv)
+## Signatures (FFI)
 
-### Hardware Triggers
-
-Hardware triggers (`trg`) define external input signals mapped to memory addresses:
+### Basic Signature
 
 ```brief
-// EBV: Hardware trigger as input signal
+sig my_function: Int -> Bool;
+```
+
+### With Source
+
+```brief
+sig read: String -> String from "io.fs";
+```
+
+### With Binding
+
+```brief
+sig process: Int -> Int = complex(x);
+```
+
+---
+
+## Foreign Bindings
+
+### Foreign Binding (Native)
+
+```brief
+frgn! fetch(url: String) -> Result<Data, Error> from "http.toml";
+```
+
+### Foreign Binding (WebAssembly)
+
+```brief
+frgn fetch(url: String) -> Result<Data, Error> from "http.toml";
+```
+
+### System Call
+
+```brief
+syscall! read(fd: Int, buf: String) -> Result<Int, Error>;
+```
+
+---
+
+## Resources
+
+```brief
+resource uart: UART {
+    baud_rate: 9600,
+    parity: None,
+};
+
+rsrc buffer: RingBuffer {
+    size: 1024,
+    element_type: UInt,
+};
+```
+
+---
+
+## Triggers (EBV)
+
+Hardware triggers define external input signals.
+
+```brief
 trg button: Bool @ 0x4000;
+trg sensor: UInt @ 0x8000 /8;
 ```
 
 Synthesized to: `input logic button;`
 
-### Within Clause
+---
 
-The `within N cycles` syntax is used for cycle-accurate timeouts in assignments:
+## Render Blocks (RBV)
 
 ```brief
-let result = expr within N cycles;
+render Counter {
+    <div class="counter">
+        <span b-text="value">0</span>
+        <button b-trigger:click="increment">+</button>
+        <button b-trigger:click="decrement">-</button>
+    </div>
+}
 ```
 
-Time units: `cycles`, `cyc`, `ms`, `s`, `sec`, `min`
+### RBV Directives
+
+| Directive | Example | Description |
+|-----------|---------|-------------|
+| `b-text` | `b-text="count"` | Text content binding |
+| `b-show` | `b-show="visible"` | Conditional show |
+| `b-hide` | `b-hide="hidden"` | Conditional hide |
+| `b-trigger:event` | `b-trigger:click="txn"` | Event trigger |
+| `b-on:event` | `b-on:submit="action"` | Event trigger (alt) |
+| `b-class` | `b-class="{active: isActive}"` | Dynamic class |
+| `b-attr` | `b-attr="disabled: isDisabled"` | Dynamic attribute |
+| `b-style` | `b-style="color: fg"` | Dynamic style |
+| `b-each` | `b-each="item in items"` | List rendering |
+
+---
+
+## Imports
+
+### Single Import
 
 ```brief
-let result = read_spi() within 10 cycles;
+import "std/io";
+```
+
+### Multiple Imports
+
+```brief
+import {
+    "std/io",
+    "std/strings",
+    "custom/utils",
+};
+```
+
+### With Alias
+
+```brief
+import "std/io" as io;
 ```
 
 ---
 
-### ~/ Shorthand (Prior State Toggle)
+## Expressions
+
+### Literals
 
 ```brief
-~/identifier
+42          // Integer
+3.14        // Float
+"hello"     // String
+true        // Boolean
+false       // Boolean
 ```
 
-Expands to two contracts: `[~identifier][identifier]` (pre is NOT, post is identifier).
+### Identifiers
 
 ```brief
-rct txn toggle [~/ready][ready]
-{
-    &ready = !ready;
-    term;
+counter
+max_value
+is_enabled
+```
+
+### Prior State (@)
+
+```brief
+@counter        // Previous value of counter
+@x + 1          // Prior x plus 1
+```
+
+### Mutable Reference (&)
+
+```brief
+&variable       // Mutable reference for assignment
+```
+
+### Unary Operations
+
+```brief
+!flag           // Logical NOT
+-x              // Arithmetic negation
+~bits           // Bitwise NOT
+```
+
+### Binary Operations
+
+```brief
+x + y           // Addition
+x - y           // Subtraction
+x * y           // Multiplication
+x / y           // Division
+x == y          // Equality
+x != y          // Inequality
+x < y           // Less than
+x <= y          // Less or equal
+x > y           // Greater than
+x >= y          // Greater or equal
+x && y          // Logical AND
+x || y          // Logical OR
+x & y           // Bitwise AND
+x | y           // Bitwise OR
+x ^ y           // Bitwise XOR
+x << n          // Shift left
+x >> n          // Shift right
+```
+
+### Function Call
+
+```brief
+process(data)
+max(a, b)
+```
+
+### Method Call
+
+```brief
+result.validate()
+list.length()
+```
+
+### Field Access
+
+```brief
+point.x
+rect.width
+```
+
+### Index Access
+
+```brief
+buffer[0]
+matrix[i][j]
+```
+
+### Match Expression
+
+```brief
+match value {
+    Ok(v) => v,
+    Err(e) => 0,
+}
+```
+
+### Quantifiers
+
+```brief
+forall x in range(0, 10) { x >= 0 }
+exists y in set { y > 0 }
+```
+
+---
+
+## Statements
+
+### Assignment
+
+```brief
+x = 42;
+counter = counter + 1;
+```
+
+### Mutable Assignment
+
+```brief
+&variable = new_value;
+```
+
+### With Timeout
+
+```brief
+result = read_spi() within 10 cycles;
+data = fetch(url) within 100 ms;
+```
+
+### Guarded Statement
+
+```brief
+[condition] statement;
+[condition] {
+    // multiple statements
 };
 ```
+
+### Term (Termination)
+
+```brief
+term;                     // Void termination
+term result;              // Return value
+term (a, b);              // Multiple outputs
+```
+
+### Escape
+
+```brief
+escape;                   // Early exit
+escape error_code;        // Exit with value
+```
+
+### Expression Statement
+
+```brief
+process_data();
+update_state();
+```
+
+---
+
+## Time Units
+
+| Unit | Aliases | Description |
+|------|---------|-------------|
+| `cycles` | `cyc` | Clock cycles |
+| `ms` | - | Milliseconds |
+| `s` | `sec`, `seconds` | Seconds |
+| `min` | `minute` | Minutes |
 
 ---
 
@@ -416,20 +797,21 @@ rct txn toggle [~/ready][ready]
 | File | Feature | Status |
 |------|---------|--------|
 | `embedded/01_vector_types.bv` | Vectors + bit-range | ✅ Pass |
-| `embedded/02_watchdog.bv` | Watchdog contract | ✅ Pass |
+| `embedded/02_watchdog.bv` | Watchdog contracts | ✅ Pass |
 | `embedded/03_float_types.bv` | Float (parsing only) | ✅ Pass |
 | `embedded/04_triggers.bv` | Trigger syntax | ✅ Pass |
 | `embedded/05_within.bv` | Transaction syntax | ✅ Pass |
+| `embedded/06_within_clause.bv` | Within clause | ✅ Pass |
 
-### Examples Directory
+---
 
-| File | Feature |
-|------|---------|
-| `examples/simple_contract.bv` | Basic contracts |
-| `examples/async_mutual_exclusion.bv` | Async + exclusion |
-| `examples/union_types.bv` | Union types |
-| `examples/vector_test.ebv` | Vector operations |
-| `examples/blinker.ebv` | Timing/within |
+## Language Variants
+
+| Extension | Name | Description |
+|-----------|------|-------------|
+| `.bv` | Core Brief | Transactional state machines with FFI |
+| `.ebv` | Embedded Brief | Adds vectors, bit-ranges, triggers, hardware mapping |
+| `.rbv` | Rendered Brief | Adds UI/view components with reactive bindings |
 
 ---
 
@@ -449,19 +831,3 @@ brief-compiler arm input.ebv --hw hardware.toml
 ```bash
 brief-compiler wasm input.bv
 ```
-
----
-
-## Error Codes
-
-| Code | Description |
-|------|-------------|
-| EBV001 | Parse error |
-| EBV002 | Transaction cannot be triggered |
-| EBV003 | Contract violation |
-| EBV004 | Type mismatch |
-| EBV005 | Import resolution failed |
-
----
-
-*Last Updated: 2026-04-23*

@@ -1,10 +1,18 @@
-// Test: Enum definitions - basic syntax test
+// Test: Enum definitions with variants
 // Category: Core - Enums
-// Expected: Parses
+// Expected: Compiles with enum definition
 
-let state: Int = 0;
+enum Status {
+    Idle,
+    Processing,
+    Done,
+}
 
-rct txn test [state == state]
+let counter: Int = 0;
+
+rct txn set_processing [counter == 0]
+  [counter == 1]
 {
+    &counter = 1;
     term;
 };

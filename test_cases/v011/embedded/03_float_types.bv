@@ -1,8 +1,17 @@
-// Test: Float type parsing (not synthesis)
+// Test: Float type parsing
 // Category: Embedded - Float
-// Note: Float not yet supported in verilog synthesis
+// Note: Float not supported in verilog synthesis, but parses correctly
 
-let value: Int = 0;
+let temperature: Float = 3.14;
+let pressure: Float = 1.01325;
+let reading: Int = 0;
 
-// Float declarations are parsed but not yet synthesized
-// let temperature: Float = 3.14;
+// Float variables can be declared and used in transactions
+// but actual Float operations require fixed-point for synthesis
+
+rct txn read_sensor [reading >= 0]
+  [reading >= 0]
+{
+    &reading = reading + 1;
+    term;
+};

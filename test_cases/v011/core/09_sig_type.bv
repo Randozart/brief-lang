@@ -1,10 +1,15 @@
-// Test: Sig declarations - basic syntax test
+// Test: Foreign signatures (FFI declarations)
 // Category: Core - Sig
-// Expected: Parses
+// Expected: Compiles with sig declarations
 
-let x: Int = 0;
+sig my_add: Int -> Int;
+sig my_check: Int -> Bool;
 
-rct txn test [x == x]
+let result: Int = 0;
+let flag: Bool = false;
+
+rct txn test_sig [flag == false]
+  [result >= 0]
 {
     term;
 };

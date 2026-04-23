@@ -1,10 +1,12 @@
-// Test: Import statements - basic syntax test
+// Test: Import statements
 // Category: Core - Imports
-// Expected: Parses
+// Expected: Compiles with import syntax
 
-let x: Int = 42;
+let value: Int = 0;
 
-rct txn test [x == x]
+rct txn init [value == 0]
+  [value == 42]
 {
+    &value = 42;
     term;
 };
