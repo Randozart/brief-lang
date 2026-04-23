@@ -1813,23 +1813,23 @@ let span = self.current_span();
             } else if count == 2 {
                 // Watchdog specification - third bracket
                 //
-                // Syntax: [pre][post][watchdog]      -> optional (default)
-                // Syntax: [pre][post][?watchdog]     -> explicit optional
-                // Syntax: [pre][post][!watchdog]     -> required (! prefix)
+                // Syntax: [watchdog]       -> optional (default)
+                // Syntax: [?watchdog]      -> explicit optional
+                // Syntax: [required_watchdog] -> required (keyword prefix)
 
-                let is_required = match self.current_token() {
-                    Some(Ok(Token::Not)) => {
-                        self.advance(); // consume !
-                        true
-                    }
-                    Some(Ok(Token::Question)) => {
-                        self.advance(); // consume ?
-                        false
-                    }
-                    _ => false,
+                let is_required;
+                let cond = if matches!(self.current_token(), Some(Ok(Token::Identifier(id))) if id == "required") {
+                    self.advance(); // consume 'required'
+                    is_required = true;
+                    self.parse_expression()?
+                } else if matches!(self.current_token(), Some(Ok(Token::Question))) {
+                    self.advance(); // consume ?
+                    is_required = false;
+                    self.parse_expression()?
+                } else {
+                    is_required = false;
+                    self.parse_expression()?
                 };
-
-                let cond = self.parse_expression()?;
 
                 if matches!(cond, Expr::Bool(true)) {
                     return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());

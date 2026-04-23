@@ -115,18 +115,18 @@ rct txn increment [counter < 10]
 ### Watchdog (Third Contract Bracket)
 
 ```brief
-[pre][post][watchdog]       // Optional watchdog (default)
-[pre][post][?watchdog]      // Explicit optional watchdog
-[pre][post][!watchdog]      // Required watchdog (! prefix = always enforced)
+[pre][post][watchdog]            // Optional watchdog (default)
+[pre][post][?watchdog]           // Explicit optional watchdog
+[pre][post][required watchdog]   // Required watchdog (always enforced)
 ```
 
 The watchdog is an optional third bracket that is checked at `term`.
 
-| Prefix | Meaning |
+| Syntax | Meaning |
 |--------|---------|
-| none | Optional - only enforced if proof fails |
-| `?` | Explicit optional |
-| `!` | Required - always enforced in simulation/synthesis |
+| `[watchdog]` | Optional - only enforced if proof fails |
+| `[?watchdog]` | Explicit optional |
+| `[required watchdog]` | Required - always enforced in simulation/synthesis |
 
 **Example:**
 ```brief
@@ -143,8 +143,8 @@ rct txn opt_watchdog [count >= 0][count == @count + 1][?watchdog_active]
     term;
 };
 
-// Required watchdog (! prefix = always enforced)
-rct txn req_watchdog [count >= 0][count == @count + 1][!watchdog_active]
+// Required watchdog (keyword prefix)
+rct txn req_watchdog [count >= 0][count == @count + 1][required watchdog_active]
 {
     &count = count + 1;
     term;
