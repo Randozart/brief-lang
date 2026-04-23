@@ -1810,26 +1810,21 @@ let span = self.current_span();
                 pre_condition = self.parse_expression()?;
             } else if count == 1 {
                 post_condition = self.parse_expression()?;
-            } else if count == 2 {
+} else if count == 2 {
                 // Watchdog specification - third bracket
                 //
-                // Syntax: [watchdog]       -> optional (default)
-                // Syntax: [?watchdog]      -> explicit optional
-                // Syntax: [required_watchdog] -> required (keyword prefix)
+                // Syntax: [watchdog]       -> required (default)
+                // Syntax: [?watchdog]      -> optional
 
-                let is_required;
-                let cond = if matches!(self.current_token(), Some(Ok(Token::Identifier(id))) if id == "required") {
-                    self.advance(); // consume 'required'
-                    is_required = true;
-                    self.parse_expression()?
-                } else if matches!(self.current_token(), Some(Ok(Token::Question))) {
-                    self.advance(); // consume ?
-                    is_required = false;
-                    self.parse_expression()?
-                } else {
-                    is_required = false;
-                    self.parse_expression()?
+                let is_optional = match self.current_token() {
+                    Some(Ok(Token::Question)) => {
+                        self.advance(); // consume ?
+                        true
+                    }
+                    _ => false,
                 };
+
+                let cond = self.parse_expression()?;
 
                 if matches!(cond, Expr::Bool(true)) {
                     return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
@@ -1837,7 +1832,7 @@ let span = self.current_span();
 
                 watchdog = Some(WatchdogSpec {
                     condition: cond,
-                    is_required,
+                    is_required: !is_optional, // default is required
                 });
             } else {
                 return self.spanned_err("Too many contract brackets (max 3: [pre][post][watchdog])".to_string());

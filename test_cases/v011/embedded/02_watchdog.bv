@@ -1,29 +1,21 @@
-// Test: Watchdog contract - optional/required third bracket
+// Test: Watchdog contract - required/optional third bracket
 // Category: Embedded - Watchdog
-// Syntax: [watchdog] or [?watchdog] or [required watchdog]
+// Syntax: [watchdog] = required (default), [?watchdog] = optional
 
 let watchdog_active: Bool = false;
 let counter: Int = 0;
 
-// Optional watchdog (no prefix = optional)
-rct txn process_optional [counter >= 0][counter == @counter + 1]
+// Required watchdog (no prefix = required by default)
+rct txn process_required [counter >= 0][counter == @counter + 1]
   [watchdog_active]
 {
     &counter = counter + 1;
     term;
 };
 
-// Explicit optional watchdog (? prefix)
-rct txn process_explicit [counter >= 0][counter == @counter + 1]
+// Optional watchdog (? prefix)
+rct txn process_optional [counter >= 0][counter == @counter + 1]
   [?watchdog_active]
-{
-    &counter = counter + 1;
-    term;
-};
-
-// Required watchdog (required keyword prefix)
-rct txn process_required [counter >= 0][counter == @counter + 1]
-  [required watchdog_active]
 {
     &counter = counter + 1;
     term;
