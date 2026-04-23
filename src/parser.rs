@@ -1813,26 +1813,30 @@ let span = self.current_span();
             } else if count == 2 {
                 // Watchdog specification - third bracket
                 //
-                // Syntax: [pre][post][watchdog]      -> optional
-                // Syntax: [pre][post][!watchdog]     -> required (parsed as Expr::Not)
-                //
-                // The ! is parsed as part of the expression (unary negation).
-                // If the expression is a Not, extract the inner and mark as required.
+                // Syntax: [pre][post][watchdog]      -> optional (default)
+                // Syntax: [pre][post][?watchdog]     -> explicit optional
+                // Syntax: [pre][post][!watchdog]     -> required (! prefix)
+
+                let is_required = match self.current_token() {
+                    Some(Ok(Token::Not)) => {
+                        self.advance(); // consume !
+                        true
+                    }
+                    Some(Ok(Token::Question)) => {
+                        self.advance(); // consume ?
+                        false
+                    }
+                    _ => false,
+                };
 
                 let cond = self.parse_expression()?;
 
-                // Check if this is a required watchdog (!watchdog parsed as Expr::Not)
-                let (is_required, final_cond) = match &cond {
-                    Expr::Not(inner) => (true, *inner.clone()),
-                    _ => (false, cond.clone()),
-                };
-
-                if matches!(final_cond, Expr::Bool(true)) {
+                if matches!(cond, Expr::Bool(true)) {
                     return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
                 }
 
                 watchdog = Some(WatchdogSpec {
-                    condition: final_cond,
+                    condition: cond,
                     is_required,
                 });
             } else {
