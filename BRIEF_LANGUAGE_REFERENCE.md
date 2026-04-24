@@ -60,11 +60,11 @@
 | `trg` | - | Hardware trigger (EBV) |
 | `stage` | - | Pipeline stage |
 | `on` | - | Trigger condition |
-| `forall` | - | Universal quantifier |
-| `exists` | - | Existential quantifier |
+| `forall` | - | Universal quantifier *(planned)* |
+| `exists` | - | Existential quantifier *(planned)* |
 | `within` | - | Timeout clause |
 | `bank` | - | Memory bank |
-| `match` | - | Match expression |
+| `match` | - | Match expression *(planned/not fully implemented)* |
 | `some` | `none` | Option variants |
 
 ### Type Keywords
@@ -120,8 +120,7 @@
 | `,` | Separator |
 | `;` | Statement terminator |
 | `..` | Range |
-| `.` | Field access / Namespace |
-| `::` | Enum variant access |
+| `.` | Field access / Namespace / RStruct method |
 
 ---
 
@@ -163,8 +162,8 @@ let state: Idle | Active | Error;
 ### Custom Types
 
 ```brief
-let point: Point = Point { x: 0, y: 0 };
-let status: Status = Status::Active;
+let point: Point;  // Declare variable of custom type
+let status: Status;  // Declare variable of enum type
 ```
 
 ---
@@ -461,15 +460,22 @@ enum Value {
 };
 ```
 
-### Enum with Raw Values
+### Enum Usage
+
+Enums use bare variant names:
 
 ```brief
-enum Color {
-    Red = 0xFF0000,
-    Green = 0x00FF00,
-    Blue = 0x0000FF,
-};
+let state: Status = Idle;
+
+// Comparison
+[state == Idle] &state = Processing;
+
+// Pattern matching via guard
+Status(s) = state;
+[s == Processing] &state = Done;
 ```
+
+**Note:** Enum variants are compared and assigned using bare names, not namespaced syntax.
 
 ---
 
@@ -691,16 +697,25 @@ buffer[0]
 matrix[i][j]
 ```
 
-### Match Expression
+### Pattern Matching
+
+Brief uses **guard-based pattern matching** for unions and enums:
 
 ```brief
-match value {
-    Ok(v) => v,
-    Err(e) => 0,
-}
+// Extract variant from union type
+let result: Int | Error = fetch_data();
+Ok(value) = result;
+[value > 0] &status = Success;
+
+// Enum pattern matching
+let state: Status = Idle;
+Status(s) = state;
+[s == Processing] &state = Done;
 ```
 
-### Quantifiers
+*(Note: `match { }` expression syntax is planned but not yet implemented)*
+
+### Quantifiers *(planned)*
 
 ```brief
 forall x in range(0, 10) { x >= 0 }
@@ -738,6 +753,19 @@ data = fetch(url) within 100 ms;
 [condition] {
     // multiple statements
 };
+```
+
+### Pattern Matching (Guard-based)
+
+```brief
+// Union type pattern extraction
+let result: Int | Error = fetch();
+Ok(value) = result;
+[value > 0] &status = Success;
+
+// Enum variant extraction
+let state: Status = Idle;
+Status(s) = state;
 ```
 
 ### Term (Termination)
