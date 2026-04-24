@@ -1,0 +1,31 @@
+<script type="brief">
+rstruct Counter {
+  count: Int = 0;
+
+  txn Counter.increment [true][count == @count + 1] {
+    &count = count + 1;
+    term;
+  };
+
+  txn Counter.reset [true][0 == count] {
+    &count = 0;
+    term;
+  };
+
+  <div class="counter">
+    <span b-text="count">0</span>
+    <button b-trigger:click="increment">+</button>
+    <button b-trigger:click="reset">Reset</button>
+  </div>
+};
+</script>
+
+<view>
+  <Counter />
+</view>
+
+<style>
+  .counter {
+    font-size: 24px;
+  }
+</style>

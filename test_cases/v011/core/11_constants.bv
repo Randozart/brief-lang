@@ -1,0 +1,18 @@
+// Test: Constants with various types
+// Category: Core - Constants
+// Syntax: const NAME: TYPE = value;
+
+const MAX_SIZE: Int = 100;
+const VERSION: String = "1.0.0";
+const INITIAL_FLAGS: UInt = 0xFF;
+const PI: Float = 3.14159;
+const ENABLED: Bool = true;
+
+let counter: Int = 0;
+
+rct txn increment [counter < MAX_SIZE]
+  [counter == @counter + 1]
+{
+    &counter = counter + 1;
+    term;
+};

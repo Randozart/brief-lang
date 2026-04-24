@@ -1,0 +1,20 @@
+// Test: Basic transactions (regression test for 12_defn)
+// Category: Core - Transactions
+// Testing basic txn syntax with full contracts
+
+let counter: Int = 0;
+
+rct txn increment [counter < 100] [counter == @counter + 1] {
+    &counter = counter + 1;
+    term;
+};
+
+rct txn decrement [counter > 0] [counter == @counter - 1] {
+    &counter = counter - 1;
+    term;
+};
+
+rct txn reset [true] [counter == 0] {
+    &counter = 0;
+    term;
+};
