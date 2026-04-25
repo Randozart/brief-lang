@@ -44,6 +44,18 @@ pub struct ProjectConfig {
 pub struct TargetConfig {
     pub fpga: String,
     pub clock_hz: u32,
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub synthesis: Option<SynthesisConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SynthesisConfig {
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub max_jobs: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -51,6 +63,10 @@ pub struct InterfaceConfig {
     pub name: String,
     pub address_width: Option<u32>,
     pub data_width: Option<u32>,
+    #[serde(default)]
+    pub controller: Option<String>,
+    #[serde(default)]
+    pub situs: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

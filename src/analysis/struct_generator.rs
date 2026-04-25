@@ -144,8 +144,8 @@ mod tests {
 
         let config = HardwareConfig {
             project: crate::ast::ProjectConfig { name: "test".to_string(), version: "0.1.0".to_string() },
-            target: crate::ast::TargetConfig { fpga: "test".to_string(), clock_hz: 100_000_000 },
-            interface: crate::ast::InterfaceConfig { name: "axi4-lite".to_string(), address_width: Some(18), data_width: Some(32) },
+            target: crate::ast::TargetConfig { fpga: "test".to_string(), clock_hz: 100_000_000, platform: None, synthesis: None },
+            interface: crate::ast::InterfaceConfig { name: "axi4-lite".to_string(), address_width: Some(18), data_width: Some(32), controller: None, situs: None },
             memory,
             io: None,
         };

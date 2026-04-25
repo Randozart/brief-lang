@@ -4,7 +4,12 @@ version = "1.0.0"
 
 [target]
 fpga = "generic"
+platform = "pynqz2"  # Board/carrier card (optional)
 clock_hz = 100_000_000
+
+[synthesis]
+mode = "global"  # "global" for full design, "ooc" for out-of-context
+max_jobs = 0      # 0 = auto-detect based on system RAM
 
 [interface]
 name = "parallel"

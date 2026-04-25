@@ -23,6 +23,13 @@
 use crate::ast::*;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone)]
+struct RamWrite {
+    condition: String,
+    address_expr: String,
+    data_expr: String,
+}
+
 pub struct VerilogGenerator {
     module_name: String,
     clock_freq: u32,
@@ -66,6 +73,165 @@ impl VerilogGenerator {
 
         self.emit_footer();
         self.output.clone()
+    }
+
+    pub fn generate_auto(&mut self, program: &Program) -> String {
+        let iface = &self.hw_config.interface.name;
+        if iface == "axi4-lite" || iface == "axi4-full" {
+            self.generate_with_axi(program)
+        } else {
+            self.generate(program)
+        }
+    }
+
+    pub fn generate_with_axi(&mut self, program: &Program) -> String {
+        self.output.clear();
+
+        if let Err(e) = self.validate_hardware(program) {
+            panic!("Hardware validation failed: {}", e);
+        }
+
+        let address_width = self.hw_config.interface.address_width.unwrap_or(16) as usize;
+        let data_width = self.hw_config.interface.data_width.unwrap_or(32) as usize;
+
+        self.output
+            .push_str(&format!("module {} (\n", self.module_name));
+        self.output.push_str("    input logic clk,\n");
+        self.output.push_str("    input logic rst_n,\n");
+
+        self.output.push_str(&format!(
+            "    // AXI4-Lite write address channel\n    input  logic [{}:0] s_awaddr,\n",
+            address_width - 1
+        ));
+        self.output.push_str("    input  logic       s_awvalid,\n");
+        self.output.push_str("    output logic       s_awready,\n");
+
+        self.output.push_str(&format!(
+            "    // AXI4-Lite write data channel\n    input  logic [{}:0] s_wdata,\n",
+            data_width - 1
+        ));
+        self.output.push_str("    input  logic [3:0]  s_wstrb,\n");
+        self.output.push_str("    input  logic       s_wvalid,\n");
+        self.output.push_str("    output logic       s_wready,\n");
+
+        self.output.push_str("    // AXI4-Lite write response channel\n");
+        self.output.push_str("    output logic [1:0] s_bresp,\n");
+        self.output.push_str("    output logic       s_bvalid,\n");
+        self.output.push_str("    input  logic       s_bready,\n");
+
+        self.output.push_str(&format!(
+            "    // AXI4-Lite read address channel\n    input  logic [{}:0] s_araddr,\n",
+            address_width - 1
+        ));
+        self.output.push_str("    input  logic       s_arvalid,\n");
+        self.output.push_str("    output logic       s_arready,\n");
+
+        self.output.push_str(&format!(
+            "    // AXI4-Lite read data channel\n    output logic [{}:0] s_rdata,\n",
+            data_width - 1
+        ));
+        self.output.push_str("    output logic [1:0] s_rresp,\n");
+        self.output.push_str("    output logic       s_rvalid,\n");
+        self.output.push_str("    input  logic       s_rready\n");
+
+        self.output.push_str(");\n\n");
+
+        self.emit_axi_state_machine(program, address_width, data_width);
+        self.emit_clock_dividers(program);
+        self.emit_signals(program);
+        self.emit_definitions(program);
+        self.emit_logic(program);
+        self.emit_footer();
+
+        self.output.clone()
+    }
+
+    fn emit_axi_state_machine(&mut self, program: &Program, _addr_width: usize, _data_width: usize) {
+        self.output.push_str(
+            "    // AXI4-Lite State Machine (Law 2: The Envoy)\n",
+        );
+
+        self.output.push_str("    logic [1:0] axil_state;\n");
+        self.output.push_str("    localparam AXIL_IDLE = 2'd0;\n");
+        self.output.push_str("    localparam AXIL_WRITE = 2'd1;\n");
+        self.output.push_str("    localparam AXIL_WWAIT = 2'd2;\n");
+        self.output.push_str("    localparam AXIL_RWAIT = 2'd3;\n");
+
+        self.output.push_str("    // CPU interface signals\n");
+        self.output.push_str("    logic [31:0] cpu_write_data;\n");
+        self.output.push_str("    logic [17:0] cpu_write_addr;\n");
+        self.output.push_str("    logic       cpu_write_en;\n");
+        self.output.push_str("    logic [31:0] cpu_read_data;\n");
+        self.output.push_str("    logic       cpu_read_en;\n");
+
+        self.output.push_str("    always_ff @(posedge clk) begin\n");
+        self.output.push_str("        if (!rst_n) begin\n");
+        self.output.push_str("            axil_state <= AXIL_IDLE;\n");
+        self.output.push_str("            s_awready <= 1'b0;\n");
+        self.output.push_str("            s_wready <= 1'b0;\n");
+        self.output.push_str("            s_bvalid <= 1'b0;\n");
+        self.output.push_str("            s_arready <= 1'b0;\n");
+        self.output.push_str("            s_rvalid <= 1'b0;\n");
+        self.output.push_str("            cpu_write_en <= 1'b0;\n");
+        self.output.push_str("            cpu_read_en <= 1'b0;\n");
+        self.output.push_str("        end else begin\n");
+        self.output.push_str("            case (axil_state)\n");
+        self.output.push_str("                AXIL_IDLE: begin\n");
+        self.output.push_str("                    if (s_awvalid) begin\n");
+        self.output.push_str("                        s_awready <= 1'b1;\n");
+        self.output.push_str("                        cpu_write_addr <= s_awaddr[17:0];\n");
+        self.output.push_str("                        cpu_write_data <= s_wdata;\n");
+        self.output.push_str("                        axil_state <= AXIL_WRITE;\n");
+        self.output.push_str("                    end else if (s_arvalid) begin\n");
+        self.output.push_str("                        s_arready <= 1'b1;\n");
+        self.output.push_str("                        cpu_read_en <= 1'b1;\n");
+        self.output.push_str("                        axil_state <= AXIL_RWAIT;\n");
+        self.output.push_str("                    end\n");
+        self.output.push_str("                end\n");
+        self.output.push_str("                AXIL_WRITE: begin\n");
+        self.output.push_str("                    s_awready <= 1'b0;\n");
+        self.output.push_str("                    if (s_wvalid) begin\n");
+        self.output.push_str("                        s_wready <= 1'b1;\n");
+        self.output.push_str("                        cpu_write_en <= 1'b1;\n");
+        self.output.push_str("                        axil_state <= AXIL_WWAIT;\n");
+        self.output.push_str("                    end\n");
+        self.output.push_str("                end\n");
+        self.output.push_str("                AXIL_WWAIT: begin\n");
+        self.output.push_str("                    s_wready <= 1'b0;\n");
+        self.output.push_str("                    cpu_write_en <= 1'b0;\n");
+        self.output.push_str("                    s_bvalid <= 1'b1;\n");
+        self.output.push_str("                    s_bresp <= 2'b00;\n");
+        self.output.push_str("                    if (s_bready) begin\n");
+        self.output.push_str("                        s_bvalid <= 1'b0;\n");
+        self.output.push_str("                        axil_state <= AXIL_IDLE;\n");
+        self.output.push_str("                    end\n");
+        self.output.push_str("                end\n");
+        self.output.push_str("                AXIL_RWAIT: begin\n");
+        self.output.push_str("                    s_arready <= 1'b0;\n");
+        self.output.push_str("                    s_rvalid <= 1'b1;\n");
+        self.output.push_str("                    s_rresp <= 2'b00;\n");
+        self.output.push_str("                    if (s_rready) begin\n");
+        self.output.push_str("                        s_rvalid <= 1'b0;\n");
+        self.output.push_str("                        cpu_read_en <= 1'b0;\n");
+        self.output.push_str("                        axil_state <= AXIL_IDLE;\n");
+        self.output.push_str("                    end\n");
+        self.output.push_str("                end\n");
+        self.output.push_str("            endcase\n");
+        self.output.push_str("        end\n");
+        self.output.push_str("    end\n\n");
+
+        self.output.push_str("    // Read data multiplexer\n");
+        self.output.push_str("    always_ff @(posedge clk) begin\n");
+        self.output.push_str("        if (!rst_n) begin\n");
+        self.output.push_str("            cpu_read_data <= '0;\n");
+        self.output.push_str("        end else begin\n");
+        self.output.push_str("            case (cpu_write_addr[7:2])\n");
+        self.output.push_str("                // Map address to register\n");
+        self.output.push_str("                default: cpu_read_data <= '0;\n");
+        self.output.push_str("            endcase\n");
+        self.output.push_str("        end\n");
+        self.output.push_str("    end\n");
+        self.output.push_str("    assign s_rdata = cpu_read_data;\n\n");
     }
 
     fn emit_header(&mut self, program: &Program) {
@@ -114,16 +280,17 @@ impl VerilogGenerator {
                                             });
 
                                         if let Some(mem_cfg) = mem_cfg {
-                                            if mem_cfg.mem_type == "bram" {
-                                                attr =
-                                                    " /* synthesis syn_ramstyle = \"block_ram\" */";
-                                            }
+                                            attr = match mem_cfg.mem_type.as_str() {
+                                                "bram" => "(* ram_style = \"block\" *) ",
+                                                "ultraram" => "(* ram_style = \"ultra\" *) ",
+                                                "distributed" => "(* ram_style = \"distributed\" *) ",
+                                                _ => "",
+                                            };
                                         }
 
                                         self.output.push_str(&format!(
-                                            ",\n    {} logic {}{} {} [0:{}]{} /* pin: {} */",
-                                            direction,
-                                            signed,
+                                            ",\n    {} {}logic {}{} {} [0:{}]{} /* pin: {} */",
+                                            attr, direction, signed,
                                             if element_bits > 1 {
                                                 format!("[{}:0]", element_bits - 1)
                                             } else {
@@ -319,6 +486,7 @@ impl VerilogGenerator {
                     "".to_string()
                 };
 
+                let mut attr = "";
                 let mut suffix = "";
                 if let Some(addr) = address {
                     let addr_str_upper = format!("0x{:08X}", addr);
@@ -335,18 +503,21 @@ impl VerilogGenerator {
                         .or_else(|| self.hw_config.memory.get(&addr_str_hex_lower));
 
                     if let Some(mem_cfg) = mem_cfg {
-                        if mem_cfg.mem_type == "bram" {
-                            suffix = " /* synthesis syn_ramstyle = \"block_ram\" */ /* synthesis keep */";
-                        } else {
-                            suffix = " /* synthesis keep */";
-                        }
+                        attr = match mem_cfg.mem_type.as_str() {
+                            "bram" => "(* ram_style = \"block\" *) ",
+                            "ultraram" => "(* ram_style = \"ultra\" *) ",
+                            "distributed" => "(* ram_style = \"distributed\" *) ",
+                            _ => "",
+                        };
+                        suffix = " /* synthesis keep */";
                     } else {
                         suffix = " /* synthesis keep */";
                     }
                 }
 
                 self.output.push_str(&format!(
-                    "    logic {}{} {} [0:{}]{};\n",
+                    "    {}logic {}{} {} [0:{}]{};\n",
+                    attr,
                     signed,
                     width_str,
                     name,
@@ -595,40 +766,64 @@ impl VerilogGenerator {
         let use_ram_template = matches!(mem_type.as_deref(), Some("bram") | Some("ultraram"));
 
         if is_vector && use_ram_template && vector_size > 64 {
-            // RAM template: single always_ff with internal address mux
-            // BRAM/UltraRAM have power-on initialization - no reset logic needed
+            // Law 1: RAM Multiplexer - consolidate all writes into single port
+            // BRAM/UltraRAM have exactly 2 ports - we use 1 for writes
             self.output.push_str(&format!(
                 "    // RAM template for {} (type: {:?}, size: {})\n",
                 name, mem_type, vector_size
             ));
-            self.output.push_str("    always_ff @(posedge clk) begin\n");
-            self.output.push_str("        // No reset initialization needed - BRAM auto-initializes on power-up\n");
 
-            for (idx, txn) in txns.iter().enumerate() {
-                let ce_cond = if let Some(speed) = txn.reactor_speed {
-                    format!("ce_{}hz && ", speed)
-                } else {
-                    "".to_string()
-                };
+            // Collect all indexed writes from all transactions
+            let all_writes = self.collect_ram_writes(name, &txns, program);
 
-                let cond = format!(
-                    "{}{}",
-                    ce_cond,
-                    self.expr_to_verilog(&txn.contract.pre_condition)
-                );
+            // Generate address/data mux signals
+            let addr_bits = (vector_size as f64).log2() as usize + 1;
+            self.output.push_str("    // Law 1: Single write port mux\n");
+            self.output.push_str(&format!(
+                "    logic [{}:0] s_waddr;\n",
+                addr_bits.saturating_sub(1)
+            ));
+            self.output.push_str("    logic s_we;\n");
 
-self.output.push_str(&format!(
-                    "        {}if ({}) begin\n",
-                    if idx > 0 { "else " } else { "" },
-                    cond
+            // Emit data signal with proper width
+            let data_width = self.get_bit_width(&decl.ty, decl.bit_range.as_ref());
+            self.output.push_str(&format!(
+                "    logic [{}:0] s_wdata;\n",
+                data_width.saturating_sub(1)
+            ));
+
+            // Generate priority encoder (last txn wins)
+            self.output.push_str("    always_comb begin\n");
+            self.output.push_str("        s_we = 1'b0;\n");
+            self.output.push_str("        s_waddr = '0;\n");
+            self.output.push_str("        s_wdata = '0;\n");
+
+            for write in all_writes.iter().rev() {
+                self.output.push_str(&format!(
+                    "        if ({}) begin\n",
+                    write.condition
                 ));
-
-                // For RAM templates: direct assignment, no index conditional needed
-                // The transaction condition already gates the write
-                self.emit_ram_write_statement(name, &txn.body, program);
+                self.output.push_str("            s_we = 1'b1;\n");
+                self.output.push_str(&format!(
+                    "            s_waddr = {};\n",
+                    write.address_expr
+                ));
+                self.output.push_str(&format!(
+                    "            s_wdata = {};\n",
+                    write.data_expr
+                ));
                 self.output.push_str("        end\n");
             }
+            self.output.push_str("    end\n\n");
 
+            // Single BRAM write using muxed signals
+            self.output.push_str("    always_ff @(posedge clk) begin\n");
+            self.output.push_str("        if (s_we) begin\n");
+            self.output.push_str(&format!(
+                "            {}[s_waddr] <= s_wdata;\n",
+                name
+            ));
+            self.output.push_str("        end\n");
             self.output.push_str("    end\n\n");
         } else if is_vector {
             // Original generate-for pattern for small vectors or flipflop
@@ -1067,6 +1262,75 @@ self.output.push_str(&format!(
                     ));
                     self.emit_ram_write_statement(var_name, statements, program);
                     self.output.push_str("                    end\n");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_ram_writes(
+        &self,
+        var_name: &str,
+        txns: &[&Transaction],
+        program: &Program,
+    ) -> Vec<RamWrite> {
+        let mut writes = Vec::new();
+
+        for txn in txns {
+            let ce_cond = if let Some(speed) = txn.reactor_speed {
+                format!("ce_{}hz && ", speed)
+            } else {
+                "".to_string()
+            };
+
+            let cond = format!(
+                "{}{}",
+                ce_cond,
+                self.expr_to_verilog(&txn.contract.pre_condition)
+            );
+
+            self.extract_writes_from_body(var_name, &txn.body, &cond, &mut writes);
+        }
+
+        writes
+    }
+
+    fn extract_writes_from_body(
+        &self,
+        var_name: &str,
+        body: &[Statement],
+        txn_condition: &str,
+        writes: &mut Vec<RamWrite>,
+    ) {
+        for stmt in body {
+            match stmt {
+                Statement::Assignment { lhs, expr, .. } => {
+                    if self.extract_assignment_target(lhs).as_deref() == Some(var_name) {
+                        let data_expr = self.expr_to_verilog(expr);
+                        match lhs {
+                            Expr::Identifier(_) | Expr::OwnedRef(_) => {
+                                writes.push(RamWrite {
+                                    condition: txn_condition.to_string(),
+                                    address_expr: "*".to_string(),
+                                    data_expr,
+                                });
+                            }
+                            Expr::ListIndex(_, idx_expr) => {
+                                let addr_expr = self.expr_to_verilog(idx_expr);
+                                writes.push(RamWrite {
+                                    condition: txn_condition.to_string(),
+                                    address_expr: addr_expr,
+                                    data_expr,
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Statement::Guarded { condition, statements } => {
+                    let guard_cond = self.expr_to_verilog(condition);
+                    let combined = format!("{} && {}", txn_condition, guard_cond);
+                    self.extract_writes_from_body(var_name, statements, &combined, writes);
                 }
                 _ => {}
             }
