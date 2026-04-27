@@ -455,6 +455,7 @@ impl SymbolicExecutor {
                         current_state.vars.insert(name.clone(), value);
                     }
                 }
+                Statement::InlineAsm { .. } => {}
                 Statement::Guarded {
                     condition,
                     statements,
@@ -1450,8 +1451,9 @@ impl ProofEngine {
             }
             Statement::Expression(expr) => {
                 self.collect_read_vars_from_expr(expr, vars);
-            }
-            Statement::Guarded {
+}
+                Statement::InlineAsm { .. } => {}
+                Statement::Guarded {
                 condition,
                 statements,
             } => {
@@ -1491,6 +1493,7 @@ impl ProofEngine {
                 }
             }
             Statement::Let { .. } => {}
+            Statement::InlineAsm { .. } => {}
             Statement::Expression(_) => {}
             Statement::Term(_) => {}
             Statement::Escape(_) => {}

@@ -374,6 +374,7 @@ impl Interpreter {
                     self.state.insert(name.clone(), value);
                 }
             }
+            Statement::InlineAsm { .. } => {}
             Statement::Expression(expr) => {
                 self.eval_expr(expr)?;
             }

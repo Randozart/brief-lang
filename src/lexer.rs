@@ -92,6 +92,8 @@ pub enum Token {
     Trg,
     #[token("link")]
     Link,
+    #[token("asm")]
+    Asm,
     #[token("stage")]
     Stage,
     #[token("on")]

@@ -1299,6 +1299,9 @@ impl WasmGenerator {
                     self.local_vars.insert(name.clone(), ());
                 }
             }
+            Statement::InlineAsm { asm_string, .. } => {
+                output.push_str(&format!("        // asm: {}\n", asm_string));
+            }
             Statement::Expression(expr) => {
                 let expr_code = self.expr_to_js_value(expr);
                 output.push_str(&format!("        {};\n", expr_code));

@@ -179,6 +179,9 @@ impl Reactor {
                 }
                 Ok(StmtResult::Continue)
             }
+            Statement::InlineAsm { .. } => {
+                Ok(StmtResult::Continue)
+            }
             Statement::Expression(expr) => {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)

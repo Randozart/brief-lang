@@ -1959,6 +1959,46 @@ let span = self.current_span();
                 self.expect(Token::Semicolon)?;
                 Ok(Statement::Escape(expr))
             }
+            Some(Ok(Token::Asm)) => {
+                self.advance();
+                // Parse: asm "instruction" { "clobber1", "clobber2" };
+                let asm_string = match self.current_token() {
+                    Some(Ok(Token::String(s))) => {
+                        let s = s.clone();
+                        self.advance();
+                        s
+                    }
+                    _ => return self.spanned_err("Expected string literal after asm".to_string()),
+                };
+
+                let clobbers = if let Some(Ok(Token::LBrace)) = self.current_token() {
+                    self.advance();
+                    let mut clobbers = Vec::new();
+                    loop {
+                        match self.current_token() {
+                            Some(Ok(Token::String(s))) => {
+                                clobbers.push(s.clone());
+                                self.advance();
+                            }
+                            Some(Ok(Token::Comma)) => {
+                                self.advance();
+                            }
+                            Some(Ok(Token::RBrace)) => {
+                                self.advance();
+                                break;
+                            }
+                            _ => return self.spanned_err("Expected clobber list".to_string()),
+                        }
+                    }
+                    clobbers
+                } else {
+                    Vec::new()
+                };
+
+                self.expect(Token::Semicolon)?;
+                let span = self.current_span();
+                Ok(Statement::InlineAsm { asm_string, clobbers, span })
+            }
             Some(Ok(Token::LBracket)) => {
                 // Guarded statement: [condition] statement or [condition] { statements }
                 // Also supports pattern matching: [value Pattern(field)] { statements };
@@ -2844,5 +2884,52 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse minimal program");
         assert_eq!(result.unwrap().items.len(), 1, "Should have one item");
+    }
+
+    #[test]
+    fn test_parse_inline_asm() {
+        let s = r#"txn Foo [true][true] { asm "mov x0, #0" { "x0" }; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse inline asm");
+        let program = result.unwrap();
+        assert!(!program.items.is_empty(), "Should have items");
+        let item = &program.items[0];
+        if let TopLevel::Transaction(txn) = item {
+            assert_eq!(txn.body.len(), 1);
+            match &txn.body[0] {
+                Statement::InlineAsm { asm_string, clobbers, .. } => {
+                    assert_eq!(asm_string, "mov x0, #0");
+                    assert_eq!(clobbers.len(), 1);
+                    assert_eq!(clobbers[0], "x0");
+                }
+                _ => panic!("Expected InlineAsm statement"),
+            }
+        } else {
+            panic!("Expected Transaction item");
+        }
+    }
+
+    #[test]
+    fn test_parse_inline_asm_no_clobbers() {
+        let s = r#"txn Bar [true][true] { asm "wfi"; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse inline asm without clobbers");
+        let program = result.unwrap();
+        assert!(!program.items.is_empty(), "Should have items");
+        let item = &program.items[0];
+        if let TopLevel::Transaction(txn) = item {
+            assert_eq!(txn.body.len(), 1);
+            match &txn.body[0] {
+                Statement::InlineAsm { asm_string, clobbers, .. } => {
+                    assert_eq!(asm_string, "wfi");
+                    assert!(clobbers.is_empty());
+                }
+                _ => panic!("Expected InlineAsm statement"),
+            }
+        } else {
+            panic!("Expected Transaction item");
+        }
     }
 }

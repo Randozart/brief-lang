@@ -463,6 +463,13 @@ pub enum Statement {
         bit_range: Option<BitRange>,
         is_override: bool,
     },
+
+    // Inline assembly: asm "instruction" { "clobber1", "clobber2" };
+    InlineAsm {
+        asm_string: String,
+        clobbers: Vec<String>,
+        span: Option<Span>,
+    },
 }
 
 #[derive(Debug, Clone)]
