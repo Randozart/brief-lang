@@ -1299,8 +1299,22 @@ impl WasmGenerator {
                     self.local_vars.insert(name.clone(), ());
                 }
             }
-            Statement::InlineAsm { asm_string, .. } => {
-                output.push_str(&format!("        // asm: {}\n", asm_string));
+            Statement::InlineAsm { asm_string, clobbers, .. } => {
+                let clobber_list = if clobbers.is_empty() {
+                    String::new()
+                } else {
+                    clobbers.iter()
+                        .map(|c| format!("\"{}\"", c))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                output.push_str(&format!(
+                    "        // asm: {} {}\n        // Note: WASM does not support inline assembly. For native Rust, use:\n        // #![feature(asm)]\n        // unsafe {{ asm!(\"{}\" : : : {}); }}\n",
+                    asm_string,
+                    if clobbers.is_empty() { String::new() } else { format!("(clobbers: {})", clobber_list) },
+                    asm_string,
+                    clobber_list
+                ));
             }
             Statement::Expression(expr) => {
                 let expr_code = self.expr_to_js_value(expr);
