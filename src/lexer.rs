@@ -90,6 +90,8 @@ pub enum Token {
     Enum,
     #[token("trg")]
     Trg,
+    #[token("link")]
+    Link,
     #[token("stage")]
     Stage,
     #[token("on")]

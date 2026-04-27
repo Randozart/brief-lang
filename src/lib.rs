@@ -34,6 +34,7 @@ pub mod hardware_validator;
 pub mod import_resolver;
 pub mod interpreter;
 pub mod lexer;
+pub mod linkage;
 pub mod lsp;
 pub mod manifest;
 pub mod parser;

@@ -22,7 +22,7 @@
 
 use brief_compiler::{
     annotator, ast, backend, desugarer, errors, hardware_validator, import_resolver, interpreter,
-    lsp, manifest, parser, proof_engine, rbv, typechecker, view_compiler,
+    linkage, lsp, manifest, parser, proof_engine, rbv, typechecker, view_compiler,
 };
 use notify::Watcher;
 use std::collections::HashMap;
@@ -1117,6 +1117,22 @@ fn run_verilog(
 
     let hw_config = parser::parse_hardware_config(hw_config_path)?;
 
+    // Load linkage config (optional - look alongside source file)
+    let linkage_path = file_path
+        .parent()
+        .map(|p| p.join("linkage.toml"));
+    let linkage_config = if let Some(ref lp) = linkage_path {
+        if lp.exists() {
+            Some(linkage::LinkageConfig::load(lp).map_err(|e| {
+                format!("Failed to load linkage.toml: {}", e)
+            })?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Standard Brief pipeline
     let source = fs::read_to_string(file_path)?;
     let mut parser = parser::Parser::new(&source);
@@ -1176,6 +1192,9 @@ fn run_verilog(
         .and_then(|s| s.to_str())
         .unwrap_or("top");
     let mut verilog_gen = backend::verilog::VerilogGenerator::new(stem, hw_config);
+    if let Some(linkage) = linkage_config {
+        verilog_gen = verilog_gen.with_linkage(linkage);
+    }
     let verilog_code = verilog_gen.generate(&program);
     let tb_code = verilog_gen.generate_testbench(&program);
 

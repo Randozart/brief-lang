@@ -566,29 +566,6 @@ impl Default for Desugarer {
 #[cfg(test)]
 mod tests {
     use super::*;
-// Copyright 2026 Randy Smits-Schreuder Goedheijt
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//
-// Runtime Exception for Use as a Language:
-// When the Work or any Derivative Work thereof is used to generate code
-// ("generated code"), such generated code shall not be subject to the
-// terms of this License, provided that the generated code itself is not
-// a Derivative Work of the Work. This exception does not apply to code
-// that is itself a compiler, interpreter, or similar tool that incorporates
-// or embeds the Work.
-
-use crate::ast::*;
 
     #[test]
     fn test_expand_implicit_term_true_in_defn() {
@@ -660,30 +637,27 @@ use crate::ast::*;
     }
 
     #[test]
-    #[ignore] // Test seems to have wrong assertion - postcond is Bool(true) but test expects no expansion
-    fn test_no_expansion_when_postcond_not_bool() {
+    fn test_expansion_preserves_nontrivial_body() {
         let defn = Definition {
             name: "test".to_string(),
             type_params: vec![],
-            parameters: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
-                post_condition: Expr::Bool(true),
+                post_condition: Expr::Integer(42),
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term(vec![])],
-            is_lambda: false,
+            body: vec![Statement::Term(vec![Some(Expr::Integer(1))])],
+            is_lambda: true,
         };
 
         let mut desugarer = Desugarer::new();
         let result = desugarer.expand_implicit_terms_defn(&defn);
 
-        // Note: This test has incorrect expectations - postcond is Bool but test expects no expansion
-        // Test is being ignored pending proper fix
-        assert!(true);
+        assert!(!result.body.is_empty(), "Should preserve existing body");
     }
 }

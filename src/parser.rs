@@ -1314,7 +1314,7 @@ let span = self.current_span();
         self.expect(Token::Colon)?;
         let ty = self.parse_type()?;
 
-        let mut address: u64 = 0;
+        let mut address: crate::ast::LinkRef = crate::ast::LinkRef::Explicit(0);
         let mut bit_range: Option<BitRange> = None;
 
         loop {
@@ -1322,10 +1322,21 @@ let span = self.current_span();
                 self.advance();
                 match self.current_token() {
                     Some(Ok(Token::Integer(n))) => {
-                        address = *n as u64;
+                        address = crate::ast::LinkRef::Explicit(*n as u64);
                         self.advance();
                     }
-                    _ => return self.spanned_err("Expected integer address after '@'".to_string()),
+                    Some(Ok(Token::Link)) => {
+                        self.advance();
+                        // @ link <name> - use identifier after link keyword
+                        let link_name = self.expect_identifier()?;
+                        address = crate::ast::LinkRef::Linked(link_name);
+                    }
+                    Some(Ok(Token::Identifier(name))) => {
+                        // Backward compat: @ identifier as link reference
+                        address = crate::ast::LinkRef::Linked(name.clone());
+                        self.advance();
+                    }
+                    _ => return self.spanned_err("Expected integer address or 'link <name>' after '@'".to_string()),
                 }
                 if let Some(Ok(Token::Slash)) = self.current_token() {
                     self.advance();
@@ -2797,6 +2808,41 @@ mod parser_tests {
         let s = r#"rstruct Logo { <svg> <circle /> </svg> };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse_rstruct();
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Should parse successfully");
+        
+        let rstruct_def = result.unwrap();
+        assert_eq!(rstruct_def.name, "Logo", "Struct should be named Logo");
+        assert!(!rstruct_def.view_html.is_empty(), "Should have SVG content");
+    }
+
+    #[test]
+    fn test_parse_trigger_with_link() {
+        let s = r#"trg signal: Bool @ link my_signal;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse_trigger();
+        assert!(result.is_ok(), "Should parse trigger with link");
+        
+        let trg = result.unwrap();
+        assert_eq!(trg.name, "signal", "Trigger should be named signal");
+    }
+
+    #[test]
+    fn test_parse_trigger_with_explicit_address() {
+        let s = r#"trg control: UInt @ 0x8000A000 /0..7;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse_trigger();
+        assert!(result.is_ok(), "Should parse trigger with explicit address");
+        
+        let trg = result.unwrap();
+        assert_eq!(trg.name, "control", "Trigger should be named control");
+    }
+
+    #[test]
+    fn test_parse_minimal_program() {
+        let s = r#"let x: Int = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse minimal program");
+        assert_eq!(result.unwrap().items.len(), 1, "Should have one item");
     }
 }

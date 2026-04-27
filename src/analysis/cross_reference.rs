@@ -43,21 +43,28 @@ impl CrossReferenceValidator {
                     }
                 }
                 TopLevel::Trigger(trg) => {
-                    let addr_str = format!("0x{:08X}", trg.address);
-                    used_addrs.insert(addr_str.clone());
-                    
-                    if !self.hw_config.memory.contains_key(&addr_str) {
-                        let addr_lower = addr_str.to_lowercase();
-                        if !self.hw_config.memory.contains_key(&addr_lower) {
-                            errors.push(CrossRefError {
-                                variable: trg.name.clone(),
-                                address: addr_str,
-                                error_type: CrossRefErrorType::TriggerAddressNotInHardwareConfig,
-                                message: format!(
-                                    "Trigger '{}' address not defined in hardware.toml",
-                                    trg.name
-                                ),
-                            });
+                    match &trg.address {
+                        crate::ast::LinkRef::Explicit(addr) => {
+                            let addr_str = format!("0x{:08X}", addr);
+                            used_addrs.insert(addr_str.clone());
+
+                            if !self.hw_config.memory.contains_key(&addr_str) {
+                                let addr_lower = addr_str.to_lowercase();
+                                if !self.hw_config.memory.contains_key(&addr_lower) {
+                                    errors.push(CrossRefError {
+                                        variable: trg.name.clone(),
+                                        address: addr_str,
+                                        error_type: CrossRefErrorType::TriggerAddressNotInHardwareConfig,
+                                        message: format!(
+                                            "Trigger '{}' address not defined in hardware.toml",
+                                            trg.name
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                        crate::ast::LinkRef::Linked(name) => {
+                            used_addrs.insert(format!("link:{}", name));
                         }
                     }
                 }
@@ -159,10 +166,127 @@ impl std::error::Error for CrossRefError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{HardwareConfig, MemoryMapping, IoMapping, ProjectConfig, TargetConfig, InterfaceConfig};
+
+    fn make_test_hw_config() -> HardwareConfig {
+        HardwareConfig {
+            project: ProjectConfig {
+                name: "test".to_string(),
+                version: "0.1.0".to_string(),
+            },
+            target: TargetConfig {
+                fpga: "xczu4ev".to_string(),
+                clock_hz: 100_000_000,
+                platform: None,
+                synthesis: None,
+            },
+            interface: InterfaceConfig {
+                name: "axi4-lite".to_string(),
+                address_width: Some(18),
+                data_width: Some(32),
+                controller: None,
+                situs: None,
+            },
+            memory: std::collections::HashMap::from([
+                ("0x8000A000".to_string(), MemoryMapping {
+                    size: 1,
+                    mem_type: "flipflop".to_string(),
+                    element_bits: 8,
+                }),
+                ("0x8000A004".to_string(), MemoryMapping {
+                    size: 1,
+                    mem_type: "flipflop".to_string(),
+                    element_bits: 8,
+                }),
+                ("0x40A80000".to_string(), MemoryMapping {
+                    size: 262144,
+                    mem_type: "bram".to_string(),
+                    element_bits: 16,
+                }),
+            ]),
+            io: None,
+        }
+    }
+
+    fn static_hw_config() -> &'static HardwareConfig {
+        Box::leak(Box::new(make_test_hw_config()))
+    }
 
     #[test]
-    fn test_address_validation() {
-        // This would require a full HardwareConfig to test properly
-        assert!(true);
+    fn test_address_validation_known_address() {
+        let hw_config = static_hw_config();
+        let validator = CrossReferenceValidator::new(hw_config);
+
+        let code = r#"
+            let control: UInt @ 0x8000A000 = 0;
+        "#;
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let errors = validator.validate(&program);
+        assert!(errors.is_empty(), "Expected no errors for known address, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_address_validation_unknown_address() {
+        let hw_config = static_hw_config();
+        let validator = CrossReferenceValidator::new(hw_config);
+
+        let code = r#"
+            let unknown: UInt @ 0xDEADBEEF = 0;
+        "#;
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let errors = validator.validate(&program);
+        assert!(!errors.is_empty(), "Expected error for unknown address");
+        assert!(errors.iter().any(|e| e.variable == "unknown"), "Error should mention 'unknown' variable");
+    }
+
+    #[test]
+    fn test_link_ref_not_validated_as_address() {
+        let hw_config = static_hw_config();
+        let validator = CrossReferenceValidator::new(hw_config);
+
+        let code = r#"
+            trg signal: Bool @ link my_signal;
+        "#;
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let errors = validator.validate(&program);
+        assert!(errors.is_empty(), "Linked references should not trigger address validation");
+    }
+
+    #[test]
+    fn test_multiple_vars_same_address_no_overlap() {
+        let hw_config = static_hw_config();
+        let validator = CrossReferenceValidator::new(hw_config);
+
+        let code = r#"
+            let low: UInt @ 0x8000A000 /0..3 = 0;
+            let high: UInt @ 0x8000A000 /4..7 = 0;
+        "#;
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let errors = validator.check_address_consistency(&program);
+        assert!(errors.is_empty(), "Explicit bit ranges should prevent overlap errors");
+    }
+
+    #[test]
+    fn test_implicit_overlap_detection() {
+        let hw_config = static_hw_config();
+        let validator = CrossReferenceValidator::new(hw_config);
+
+        let code = r#"
+            let a: UInt @ 0x8000A000 = 0;
+            let b: UInt @ 0x8000A000 = 0;
+        "#;
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let errors = validator.check_address_consistency(&program);
+        assert!(!errors.is_empty(), "Should detect implicit overlap");
     }
 }

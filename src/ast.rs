@@ -584,10 +584,16 @@ pub struct StateDecl {
 }
 
 #[derive(Debug, Clone)]
+pub enum LinkRef {
+    Explicit(u64),
+    Linked(String),
+}
+
+#[derive(Debug, Clone)]
 pub struct TriggerDeclaration {
     pub name: String,
     pub ty: Type,
-    pub address: u64,
+    pub address: LinkRef,
     pub bit_range: Option<BitRange>,
     pub stages: Vec<String>,
     pub condition: Option<Expr>,

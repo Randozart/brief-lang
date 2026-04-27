@@ -21,6 +21,7 @@
 // or embeds the Work.
 
 use crate::ast::*;
+use crate::linkage::LinkageConfig;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -34,6 +35,7 @@ pub struct VerilogGenerator {
     module_name: String,
     clock_freq: u32,
     hw_config: HardwareConfig,
+    linkage: Option<LinkageConfig>,
     _indent_level: usize,
     output: String,
 }
@@ -45,9 +47,15 @@ impl VerilogGenerator {
             module_name: module_name.to_string(),
             clock_freq,
             hw_config,
+            linkage: None,
             _indent_level: 0,
             output: String::new(),
         }
+    }
+
+    pub fn with_linkage(mut self, linkage: LinkageConfig) -> Self {
+        self.linkage = Some(linkage);
+        self
     }
 
     pub fn generate(&mut self, program: &Program) -> String {
@@ -321,22 +329,45 @@ impl VerilogGenerator {
                     }
                 }
                 TopLevel::Trigger(trg) => {
-                    // Triggers (inputs) only emit if NOT in [memory]
-                    if let Some(io_cfg) = self.get_io_mapping(trg.address) {
-                        if !self.has_memory_mapping(trg.address) {
-                            let width = self.get_bit_width(&trg.ty, trg.bit_range.as_ref());
-                            let direction = "input";
-                            self.output.push_str(&format!(
-                                ",\n    {} logic {} {} /* pin: {} */",
-                                direction,
-                                if width > 1 {
-                                    format!("[{}:0]", width - 1)
-                                } else {
-                                    "".to_string()
-                                },
-                                trg.name,
-                                io_cfg.pin
-                            ));
+                    match &trg.address {
+                        LinkRef::Explicit(addr) => {
+                            // Traditional: look up address in IO mappings
+                            if let Some(io_cfg) = self.get_io_mapping(*addr) {
+                                if !self.has_memory_mapping(*addr) {
+                                    let width = self.get_bit_width(&trg.ty, trg.bit_range.as_ref());
+                                    let direction = "input";
+                                    self.output.push_str(&format!(
+                                        ",\n    {} logic {} {} /* pin: {} */",
+                                        direction,
+                                        if width > 1 {
+                                            format!("[{}:0]", width - 1)
+                                        } else {
+                                            "".to_string()
+                                        },
+                                        trg.name,
+                                        io_cfg.pin
+                                    ));
+                                }
+                            }
+                        }
+                        LinkRef::Linked(name) => {
+                            // Linked: get SV wire name from linkage config
+                            if let Some(linkage) = &self.linkage {
+                                if let Some(sv_wire) = linkage.resolve_sv(name) {
+                                    let width = self.get_bit_width(&trg.ty, trg.bit_range.as_ref());
+                                    self.output.push_str(&format!(
+                                        ",\n    {} logic {} {} /* link: {} */",
+                                        "input",
+                                        if width > 1 {
+                                            format!("[{}:0]", width - 1)
+                                        } else {
+                                            "".to_string()
+                                        },
+                                        trg.name,
+                                        sv_wire
+                                    ));
+                                }
+                            }
                         }
                     }
                 }
@@ -371,6 +402,28 @@ impl VerilogGenerator {
             || self.hw_config.memory.contains_key(&addr_str_lower)
             || self.hw_config.memory.contains_key(&addr_str_hex_upper)
             || self.hw_config.memory.contains_key(&addr_str_hex_lower)
+    }
+
+    fn get_link_ref_address(&self, link_ref: &LinkRef) -> Option<u64> {
+        match link_ref {
+            LinkRef::Explicit(addr) => Some(*addr),
+            LinkRef::Linked(name) => {
+                if let Some(linkage) = &self.linkage {
+                    linkage.resolve_sv(name).and_then(|_| None)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn get_link_ref_sv_wire(&self, link_ref: &LinkRef) -> Option<&str> {
+        match link_ref {
+            LinkRef::Explicit(_) => None,
+            LinkRef::Linked(name) => {
+                self.linkage.as_ref().and_then(|l| l.resolve_sv(name))
+            }
+        }
     }
 
     fn emit_clock_dividers(&mut self, program: &Program) {
@@ -434,18 +487,39 @@ impl VerilogGenerator {
                 self.emit_type_signals(&decl.name, &decl.ty, decl.bit_range.as_ref(), decl.address);
             }
             if let TopLevel::Trigger(trg) = item {
-                // Same for triggers
-                if self.get_io_mapping(trg.address).is_some()
-                    && !self.has_memory_mapping(trg.address)
-                {
-                    continue;
+                match &trg.address {
+                    LinkRef::Explicit(addr) => {
+                        if self.get_io_mapping(*addr).is_some()
+                            && !self.has_memory_mapping(*addr)
+                        {
+                            continue;
+                        }
+                        self.emit_type_signals(
+                            &trg.name,
+                            &trg.ty,
+                            trg.bit_range.as_ref(),
+                            Some(*addr),
+                        );
+                    }
+                    LinkRef::Linked(name) => {
+                        if let Some(linkage) = &self.linkage {
+                            if let Some(sv_wire) = linkage.resolve_sv(name) {
+                                let width = self.get_bit_width(&trg.ty, trg.bit_range.as_ref());
+                                self.output.push_str(&format!(
+                                    "    {}logic {} {} /* link: {} */;\n",
+                                    "",
+                                    if width > 1 {
+                                        format!("[{}:0]", width - 1)
+                                    } else {
+                                        "".to_string()
+                                    },
+                                    trg.name,
+                                    sv_wire
+                                ));
+                            }
+                        }
+                    }
                 }
-                self.emit_type_signals(
-                    &trg.name,
-                    &trg.ty,
-                    trg.bit_range.as_ref(),
-                    Some(trg.address),
-                );
             }
         }
         self.output.push_str("\n");
