@@ -26,7 +26,8 @@
 16. [Imports](#imports)
 17. [Expressions](#expressions)
 18. [Statements](#statements)
-19. [Time Units](#time-units)
+19. [Inline Assembly](#inline-assembly)
+20. [Time Units](#time-units)
 
 ---
 
@@ -65,6 +66,7 @@
 | `within` | - | Timeout clause |
 | `bank` | - | Memory bank |
 | `match` | - | Match expression *(planned/not fully implemented)* |
+| `asm` | - | Inline assembly block |
 | `some` | `none` | Option variants |
 
 ### Type Keywords
@@ -788,6 +790,34 @@ escape error_code;        // Exit with value
 ```brief
 process_data();
 update_state();
+```
+
+### Inline Assembly
+
+Low-level inline assembly for architecture-specific operations. Generates native code via `asm!` (Rust) or `__asm__ __volatile__` (C).
+
+```brief
+asm "DC CIVAC X0, X1" { "x0", "x1" };
+asm "DSB SY" {};
+asm "mov x0, #0" {};
+```
+
+**Syntax:**
+- `asm "instruction" { clobber_list };`
+- Clobbers are comma-separated register names in quotes
+- Empty clobbers `{}` allowed for no-clobber instructions
+- Generates commented template in Rust (requires nightly for real `asm!`)
+- Generates `__asm__ __volatile__("instruction" : : : clobbers)` in C
+
+**Usage:**
+```brief
+txn flush_cache {
+    effect {
+        // Flush data cache before DMA transfer
+        asm "DC CIVAC X0, X1" { "x0", "x1" };
+        asm "DSB SY" {};
+    }
+}
 ```
 
 ---

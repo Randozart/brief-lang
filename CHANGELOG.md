@@ -11,13 +11,20 @@
 
 ### Compiler
 
-- **Lexer**: Added `enum`, `Ok`, `Err`, `match` tokens (`src/lexer.rs`).
-- **AST**: Added `EnumDefinition`, `EnumVariant` (Unit/Tuple/Struct), `Type::Enum`, `Expr::PatternMatch`, `TopLevel::Enum`. Changed `SvgComponent(String)` to `SvgComponent { name, content }` (`src/ast.rs`).
-- **Parser**: Added `parse_enum()` for enum declarations. Extended guard parsing to detect pattern match expressions (`src/parser.rs`).
+- **Inline Assembly**: New `asm` syntax for low-level code generation. Syntax: `asm "instruction" { "clobber1", "clobber2" };`
+- **New Backends**: Added `rust` and `c` CLI commands for native code generation.
+  - `rust` command: Generates native Rust with `asm!` (requires nightly) or commented template
+  - `c` command: Generates C with `__asm__ __volatile__`
+- **CLI Changes**: `check` alias changed from `c` to `ck` to allow `c` for C backend
+- **Lexer**: Added `enum`, `Ok`, `Err`, `match`, `Asm` tokens (`src/lexer.rs`).
+- **AST**: Added `EnumDefinition`, `EnumVariant` (Unit/Tuple/Struct), `Type::Enum`, `Expr::PatternMatch`, `TopLevel::Enum`, `Statement::InlineAsm`. Changed `SvgComponent(String)` to `SvgComponent { name, content }` (`src/ast.rs`).
+- **Parser**: Added `parse_enum()` for enum declarations. Extended guard parsing to detect pattern match expressions. Added `parse_asm_block()` for inline assembly (`src/parser.rs`).
 - **Typechecker**: Added `Type::Enum` compatibility checks, stdlib signature registration for `to_json`/`from_json`, foreign sig collection, and `Expr::PatternMatch` inference (`src/typechecker.rs`).
-- **Interpreter**: Added `Value::Enum` for runtime enum values. Pattern matching evaluates variant and binds fields. `to_json` serializes instances/lists/enums. `from_json` returns `Result::Ok` or `Result::Err` (`src/interpreter.rs`).
+- **Interpreter**: Added `Value::Enum` for runtime enum values. Pattern matching evaluates variant and binds fields. `to_json` serializes instances/lists/enums. `from_json` returns `Result::Ok` or `Result::Err`. InlineAsm statements are logged (no execution in interpreter) (`src/interpreter.rs`).
 - **Import resolver**: SVG imports now extract component name from `as` alias or derive from filename. File-based imports (`.css`, `.svg`) preserve slash paths (`src/import_resolver.rs`).
 - **Wasm codegen**: Added JS FFI glue for `__json_decode`, `__json_get_string`, `__json_encode`, `__http_get`, `__http_post`. Added `attr` and `style` directive rendering in patch engine (`src/wasm_gen.rs`).
+- **New Backends**: Added `src/backend/rust.rs` and `src/backend/c.rs` for native code generation. Added `src/backend/mod.rs` module exports.
+- **CLI**: Added `run_rust()` and `run_c()` functions in `src/main.rs`. Added `rust` and `c`/`cc` command handlers. Changed `check` alias from `c` to `ck`.
 - **View compiler**: Added `b-style` directive parsing and `Style` binding variant (`src/view_compiler.rs`).
 - **Annotator/Proof engine/Symbolic/Reactor**: Updated all passes to handle `Type::Enum`, `Expr::PatternMatch`, and `TopLevel::Enum` (`src/annotator.rs`, `src/proof_engine.rs`, `src/symbolic.rs`, `src/reactor.rs`).
 

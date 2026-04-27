@@ -9,6 +9,8 @@ The Brief compiler's hardware backend generates production-ready Verilog and Viv
 ```
 src/backend/
 ├── mod.rs           # Module exports
+├── c.rs             # C code generator
+├── rust.rs          # Native Rust code generator
 ├── verilog.rs       # Verilog/SystemVerilog generator
 └── tcl_generator.rs # Vivado Tcl build script generator
 ```
