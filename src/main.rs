@@ -1191,7 +1191,31 @@ fn run_c(
         return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
     }
 
+    // Load linkage config (optional - look alongside source file)
+    let linkage_path = file_path
+        .parent()
+        .map(|p| p.join("linkage.toml"));
+    let linkage_config = if let Some(ref lp) = linkage_path {
+        if lp.exists() {
+            Some(linkage::LinkageConfig::load(lp).map_err(|e| {
+                format!("Failed to load linkage.toml: {}", e)
+            })?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let is_ebv = file_path.extension().map(|e| e == "ebv").unwrap_or(false);
+
     let mut c_backend = backend::c::CBackend::new();
+    if let Some(linkage) = linkage_config {
+        c_backend = c_backend.with_linkage(linkage);
+    }
+    if is_ebv {
+        c_backend = c_backend.bare_metal(true);
+    }
     let output = c_backend.generate(&program);
 
     let stem = file_path
