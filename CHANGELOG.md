@@ -11,6 +11,15 @@
 
 ### Compiler
 
+- **Kernel Target Fixes (2026-04-29 19:25)**:
+  - Fixed `return0` bug in C backend — now generates `return 0;` with proper space (`src/backend/c.rs:184,206`)
+  - Fixed duplicate `brief_init` function — renamed wrapper to `init_wrapper()` to avoid kernel naming conflict
+  - Fixed NULL state pointer in kernel mode — now uses `static State state_instance;` for static allocation
+  - Fixed `find_entry_point()` to prioritize transaction named "init" over generic `[true]` preconditions
+  - Fixed Makefile generation — removed circular `-objs` dependency that caused build failures
+  - Added `MODULE_DESCRIPTION` to kernel module output
+  - **Build test**: Successfully compiled `vitriol.bv` to `vitriol.ko` (175K) in `linux-pipe-module/`
+
 - **Inline Assembly**: New `asm` syntax for low-level code generation. Syntax: `asm "instruction" { "clobber1", "clobber2" };`
 - **New Backends**: Added `rust` and `c` CLI commands for native code generation.
   - `rust` command: Generates native Rust with `asm!` (requires nightly) or commented template

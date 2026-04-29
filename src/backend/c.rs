@@ -120,6 +120,10 @@ impl CBackend {
                 // Static allocation for bare-metal (no malloc)
                 output.push_str("static State state_instance;\n");
                 output.push_str("static State *state = &state_instance;\n\n");
+            } else if self.kernel_mode {
+                // Static allocation for kernel (no malloc in kernel space)
+                output.push_str("static State state_instance;\n");
+                output.push_str("static State *state = &state_instance;\n\n");
             } else {
                 // Dynamic allocation for hosted (desktop/embedded Linux)
                 output.push_str("static State *state = NULL;\n\n");
@@ -155,7 +159,7 @@ impl CBackend {
             output.push_str("}\n\n");
         }
 
-        output.push_str("void brief_init(void) {\n");
+        output.push_str("void init_wrapper(void) {\n");
         let state_decls = self.collect_state_declarations(program);
         if !state_decls.is_empty() {
             if self.bare_metal || self.kernel_mode {
@@ -194,6 +198,9 @@ impl CBackend {
             output.push_str("}\n");
             output.push_str("module_exit(brief_exit);\n\n");
             
+            // MODULE_DESCRIPTION
+            output.push_str("MODULE_DESCRIPTION(\"VITRIOL: Direct NVMe to GPU Streamer for Infinite VRAM\");\n");
+            
             // MODULE_LICENSE
             output.push_str("MODULE_LICENSE(\"GPL\");\n");
         } else {
@@ -201,7 +208,7 @@ impl CBackend {
             output.push_str("int main(void) {\n");
             let state_decls = self.collect_state_declarations(program);
             if !state_decls.is_empty() {
-                output.push_str("    brief_init();\n");
+                output.push_str("    init_wrapper();\n");
             }
             output.push_str("    return 0;\n");
             output.push_str("}\n");
@@ -218,8 +225,16 @@ impl CBackend {
     }
 
     fn find_entry_point(&self, program: &Program) -> Option<String> {
-        // Find first transaction that can fire (precondition is true in initial state)
-        // This is a simplified version - full logic is in analysis/entry_point.rs
+        // First, look for a transaction named "init"
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                if txn.name == "init" {
+                    return Some(txn.name.clone());
+                }
+            }
+        }
+        
+        // Next, look for a transaction with precondition = true
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
                 // Check if precondition is true (simplified check)
@@ -251,7 +266,8 @@ impl CBackend {
         let mut makefile = String::new();
         makefile.push_str("# Auto-generated Makefile for kernel module\n");
         makefile.push_str(&format!("obj-m += {}.o\n", stem));
-        makefile.push_str(&format!("{}-objs := {}.o\n\n", stem, stem));
+        // Note: -objs line not needed for single source file (causes circular dependency)
+        makefile.push_str("\n");
         makefile.push_str("all:\n");
         makefile.push_str("\tmake -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules\n\n");
         makefile.push_str("clean:\n");
