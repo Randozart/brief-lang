@@ -1228,12 +1228,13 @@ fn run_c(
             c_backend = c_backend.with_kernel_mode(None);
         }
     }
-    let (output, makefile) = c_backend.generate(&program);
 
     let stem = file_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
+
+    let (output, makefile) = c_backend.generate(&program, stem);
 
     let out_path = if let Some(dir) = out_dir {
         let d = dir.to_path_buf();

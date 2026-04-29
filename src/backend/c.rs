@@ -50,7 +50,7 @@ impl CBackend {
         self
     }
 
-    pub fn generate(&mut self, program: &Program) -> (String, Option<String>) {
+    pub fn generate(&mut self, program: &Program, stem: &str) -> (String, Option<String>) {
         // Collect hardware register names first
         self.collect_hw_registers(program);
 
@@ -68,7 +68,7 @@ impl CBackend {
 
         // Include headers based on mode
         if self.kernel_mode {
-            // Kernel mode: include kernel headers
+            // Kernel mode: include kernel headers (only once!)
             if let Some(os) = &self.kernel_os {
                 match os.as_str() {
                     "linux" => {
@@ -77,10 +77,16 @@ impl CBackend {
                         output.push_str("#include <linux/kthread.h>\n");
                         output.push_str("#include <linux/delay.h>\n");
                     }
-                    _ => {}
+                    _ => {
+                        // Default kernel headers for unknown OS
+                        output.push_str("#include <linux/module.h>\n");
+                        output.push_str("#include <linux/kernel.h>\n");
+                        output.push_str("#include <linux/kthread.h>\n");
+                        output.push_str("#include <linux/delay.h>\n");
+                    }
                 }
             } else {
-                // Default kernel headers
+                // No OS specified - use defaults
                 output.push_str("#include <linux/module.h>\n");
                 output.push_str("#include <linux/kernel.h>\n");
                 output.push_str("#include <linux/kthread.h>\n");
@@ -203,7 +209,7 @@ impl CBackend {
 
         // Generate Makefile for kernel modules
         let makefile = if self.kernel_mode {
-            Some(self.generate_makefile())
+            Some(self.generate_makefile(stem))
         } else {
             None
         };
@@ -241,11 +247,11 @@ impl CBackend {
         last_txn
     }
 
-    fn generate_makefile(&self) -> String {
+    fn generate_makefile(&self, stem: &str) -> String {
         let mut makefile = String::new();
         makefile.push_str("# Auto-generated Makefile for kernel module\n");
-        makefile.push_str("obj-m += brief_module.o\n");
-        makefile.push_str("brief_module-objs := generated.o\n\n");
+        makefile.push_str(&format!("obj-m += {}.o\n", stem));
+        makefile.push_str(&format!("{}-objs := {}.o\n\n", stem, stem));
         makefile.push_str("all:\n");
         makefile.push_str("\tmake -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules\n\n");
         makefile.push_str("clean:\n");
