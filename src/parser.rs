@@ -880,10 +880,11 @@ impl<'a> Parser<'a> {
                     // Parse transaction and expand name if no dot
                     let txn = self.parse_transaction()?;
                     let expanded_txn = if !txn.name.contains('.') {
-                        Transaction {
-                            name: format!("{}.{}", name, txn.name),
-                            ..txn
-                        }
+                            Transaction {
+                                name: format!("{}.{}", name, txn.name),
+                                attrs: Vec::new(),
+                                ..txn
+                            }
                     } else {
                         txn
                     };

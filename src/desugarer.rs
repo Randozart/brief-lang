@@ -503,6 +503,7 @@ impl Desugarer {
 
         Transaction {
             body: new_body,
+            attrs: Vec::new(),
             ..txn.clone()
         }
     }
@@ -614,17 +615,13 @@ mod tests {
             is_reactive: false,
             name: "test".to_string(),
             parameters: vec![],
-            contract: Contract {
-                pre_condition: Expr::Bool(true),
-                post_condition: Expr::Bool(true),
-                watchdog: None,
-                span: None,
-            },
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body: vec![Statement::Term(vec![])],
             reactor_speed: None,
             span: None,
             is_lambda: false,
             dependencies: vec![],
+            attrs: Vec::new(),
         };
 
         let mut desugarer = Desugarer::new();
