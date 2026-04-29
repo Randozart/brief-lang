@@ -291,6 +291,7 @@ fn print_usage(program: &str) {
     eprintln!("  --skip-proof         Skip proof verification");
     eprintln!("  --no-stdlib          Disable standard library bindings");
     eprintln!("  --stdlib-path <path> Use custom standard library path");
+    eprintln!("  --target <target>    Compilation target: linux_kernel, web, etc.");
     eprintln!("  -v, --verbose        Verbose output");
     eprintln!("  --quiet, --whisper   Minimal output (for CI/automated use)");
     eprintln!("  -h, --help           Show this help");
@@ -1164,8 +1165,12 @@ fn run_c(
     out_dir: Option<&Path>,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
+    target: Option<&str>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to C: {}", file_path.display());
+    if let Some(t) = target {
+        println!("  Target: {}", t);
+    }
 
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
@@ -1216,7 +1221,14 @@ fn run_c(
     if is_ebv {
         c_backend = c_backend.bare_metal(true);
     }
-    let output = c_backend.generate(&program);
+    if let Some(t) = target {
+        if t == "linux_kernel" {
+            c_backend = c_backend.with_kernel_mode(Some("linux".to_string()));
+        } else {
+            c_backend = c_backend.with_kernel_mode(None);
+        }
+    }
+    let (output, makefile) = c_backend.generate(&program);
 
     let stem = file_path
         .file_stem()
@@ -1233,6 +1245,17 @@ fn run_c(
 
     fs::write(&out_path, &output)?;
     println!("  C generated: {}", out_path.display());
+
+    // Write Makefile if in kernel mode
+    if let Some(makefile_content) = makefile {
+        let makefile_path = if let Some(dir) = out_dir {
+            dir.join("Makefile")
+        } else {
+            PathBuf::from("Makefile")
+        };
+        fs::write(&makefile_path, makefile_content)?;
+        println!("  Makefile generated: {}", makefile_path.display());
+    }
 
     Ok(out_path)
 }
@@ -1784,12 +1807,16 @@ fn main() {
         "c" | "cc" => {
             let mut file_path = None;
             let mut out_dir = None;
+            let mut target = None;
 
             let mut i = 2;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--target" && i + 1 < args.len() {
+                    target = Some(args[i + 1].as_str());
                     i += 2;
                 } else if arg.ends_with(".bv") || arg.ends_with(".ebv") {
                     file_path = Some(PathBuf::from(arg));
@@ -1800,7 +1827,7 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone()) {
+                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), target) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }

@@ -158,6 +158,7 @@ impl Desugarer {
                                 is_override: false,
                                 os_mode: false,
                                 span: None,
+                                attrs: Vec::new(),
                             });
                         }
                     }
@@ -199,6 +200,7 @@ impl Desugarer {
                             _ => Some(Expr::Integer(0)),
                         };
                         self.generated_state.push(StateDecl {
+                    attrs: Vec::new(),
                             name: field.name.clone(),
                             ty,
                             expr: initial_expr,
@@ -245,6 +247,7 @@ impl Desugarer {
                             _ => Some(Expr::Integer(0)),
                         };
                         self.generated_state.push(StateDecl {
+                    attrs: Vec::new(),
                             name: field.name.clone(),
                             ty,
                             expr: initial_expr,
@@ -330,6 +333,7 @@ impl Desugarer {
         }
 
         Program {
+                    attrs: Vec::new(),
             items,
             comments: program.comments.clone(),
             reactor_speed: program.reactor_speed,
@@ -368,6 +372,7 @@ impl Desugarer {
         let mut state = Vec::new();
 
         state.push(StateDecl {
+                    attrs: Vec::new(),
             name: "done".to_string(),
             ty: Type::Bool,
             expr: Some(Expr::Bool(false)),
@@ -412,6 +417,7 @@ impl Desugarer {
             .collect();
 
         let new_txn = Transaction {
+                    attrs: Vec::new(),
             is_async: txn.is_async,
             is_reactive: txn.is_reactive,
             name: txn.name.clone(),

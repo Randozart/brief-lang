@@ -67,6 +67,7 @@ impl ImportResolver {
             items,
             comments: program.comments.clone(),
             reactor_speed: program.reactor_speed,
+            attrs: Vec::new(),
         })
     }
 
@@ -80,6 +81,7 @@ impl ImportResolver {
                 items: vec![],
                 comments: vec![],
                 reactor_speed: None,
+            attrs: Vec::new(),
             });
         }
 
@@ -88,6 +90,7 @@ impl ImportResolver {
                 items: vec![],
                 comments: vec![],
                 reactor_speed: None,
+            attrs: Vec::new(),
             });
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
@@ -123,12 +126,14 @@ impl ImportResolver {
                         items: vec![TopLevel::Stylesheet(css_for_cache)],
                         comments: vec![],
                         reactor_speed: None,
+            attrs: Vec::new(),
                     },
                 );
                 return Ok(Program {
                     items: vec![TopLevel::Stylesheet(css_for_return)],
                     comments: vec![],
                     reactor_speed: None,
+            attrs: Vec::new(),
                 });
             }
         }
@@ -182,6 +187,7 @@ impl ImportResolver {
                         }],
                         comments: vec![],
                         reactor_speed: None,
+            attrs: Vec::new(),
                     },
                 );
                 return Ok(Program {
@@ -191,6 +197,7 @@ impl ImportResolver {
                     }],
                     comments: vec![],
                     reactor_speed: None,
+            attrs: Vec::new(),
                 });
             }
         }
@@ -298,6 +305,7 @@ impl ImportResolver {
             items: filtered,
             comments: vec![],
             reactor_speed: None,
+            attrs: Vec::new(),
         })
     }
 }

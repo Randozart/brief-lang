@@ -196,6 +196,7 @@ impl<'a> Parser<'a> {
     pub fn parse(&mut self) -> Result<Program, crate::errors::SyntaxError> {
         let mut reactor_speed: Option<u32> = None;
         let mut items = Vec::new();
+        let mut file_attrs: Vec<crate::ast::Attribute> = Vec::new();
 
         // NEW: Check for file-level reactor @Hz declaration at start
         if let Some(Ok(Token::Identifier(name))) = self.current_token() {
@@ -218,7 +219,7 @@ impl<'a> Parser<'a> {
                     // Validate speed
                     if speed == 0 {
                         return Err(SyntaxError::InvalidStatement {
-                            reason: "Reactor speed must be positive (> 0)".to_string(),
+                            reason: "Reactor speed must be positive (>0)".to_string(),
                             span: self.current_span().unwrap_or_else(Span::dummy),
                         });
                     }
@@ -239,6 +240,11 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Parse file-level attributes #![...]
+        if matches!(self.current_token(), Some(Ok(Token::HashBangBracket))) {
+            file_attrs = self.parse_attributes()?;
+        }
+
         while self.current_token().is_some() {
             items.push(self.parse_top_level()?);
         }
@@ -246,6 +252,7 @@ impl<'a> Parser<'a> {
             items,
             comments: self.comments.clone(),
             reactor_speed,
+            attrs: file_attrs,
         })
     }
 
@@ -258,6 +265,13 @@ impl<'a> Parser<'a> {
             });
         }
 
+        // Parse item-level attributes if present
+        let attrs = if matches!(self.current_token(), Some(Ok(Token::HashBracket))) {
+            self.parse_attributes()?
+        } else {
+            Vec::new()
+        };
+
         match self.current_token() {
             Some(Ok(Token::Import)) => {
                 let import = self.parse_import()?;
@@ -268,7 +282,8 @@ impl<'a> Parser<'a> {
                 Ok(TopLevel::Signature(sig))
             }
             Some(Ok(Token::Let)) => {
-                let state = self.parse_state_decl()?;
+                let mut state = self.parse_state_decl()?;
+                state.attrs = attrs;
                 Ok(TopLevel::StateDecl(state))
             }
             Some(Ok(Token::Const)) => {
@@ -276,7 +291,8 @@ impl<'a> Parser<'a> {
                 Ok(TopLevel::Constant(constant))
             }
             Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Async)) => {
-                let txn = self.parse_transaction()?;
+                let mut txn = self.parse_transaction()?;
+                txn.attrs = attrs;
                 Ok(TopLevel::Transaction(txn))
             }
 
@@ -1236,6 +1252,7 @@ let span = self.current_span();
             is_override,
             os_mode: false,
             span,
+            attrs: Vec::new(),  // Initialize attrs
         })
     }
 
@@ -1306,6 +1323,81 @@ let span = self.current_span();
             _ => return self.spanned_err("Expected bit number or 'x'".to_string()),
         };
         Ok(result)
+    }
+
+    /// Parse #[...] or #![...] attribute syntax
+    /// Returns a vector of attributes parsed from the #[...] or #![...] block
+    fn parse_attributes(&mut self) -> Result<Vec<crate::ast::Attribute>, SyntaxError> {
+        let mut attrs = Vec::new();
+        
+        // Expect #[ or #![
+        if matches!(self.current_token(), Some(Ok(Token::HashBracket))) {
+            self.advance(); // consume #[
+        } else if matches!(self.current_token(), Some(Ok(Token::HashBangBracket))) {
+            self.advance(); // consume #![
+        } else {
+            return self.spanned_err("Expected #[ or #![ for attribute".to_string());
+        }
+        
+        // Parse comma-separated items until ]
+        while !matches!(self.current_token(), Some(Ok(Token::RBracket))) {
+            // Parse item: either "key" or "key(value)"
+            let key = if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                let name = name.clone();
+                self.advance();
+                name
+            } else {
+                return self.spanned_err("Expected identifier in attribute".to_string());
+            };
+            
+            // Check if it's key(value) or just key
+            let value = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+                self.advance(); // consume (
+                let val = if let Some(Ok(Token::String(s))) = self.current_token() {
+                    let s = s.clone();
+                    self.advance();
+                    s
+                } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                    let s = n.to_string();
+                    self.advance();
+                    s
+                } else if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                    let name = name.clone();
+                    self.advance();
+                    name
+                } else {
+                    return self.spanned_err("Expected value in attribute key(value)".to_string());
+                };
+                self.expect(Token::RParen)?;
+                Some(val)
+            } else {
+                None
+            };
+            
+            // Check if first item is a target specifier
+            let target = if attrs.is_empty() && value.is_none() {
+                // First item with no value - could be a target
+                // Known targets: c, sv, rust, wasm
+                match key.as_str() {
+                    "c" | "sv" | "rust" | "wasm" | "kernel" => Some(key.clone()),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            
+            attrs.push(crate::ast::Attribute { target, key, value });
+            
+            // Expect comma or ]
+            if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        
+        self.expect(Token::RBracket)?;
+        Ok(attrs)
     }
 
     fn parse_trigger(&mut self) -> Result<TriggerDeclaration, SyntaxError> {
@@ -1512,6 +1604,7 @@ let span = self.current_span();
             span,
             is_lambda,
             dependencies,
+            attrs: Vec::new(),  // Initialize attrs
         })
     }
 

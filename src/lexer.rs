@@ -191,6 +191,10 @@ pub enum Token {
     Arrow,
 
     // Punctuation
+    #[token("#[")]
+    HashBracket,
+    #[token("#![")]
+    HashBangBracket,
     #[token(";")]
     Semicolon,
     #[token(":")]

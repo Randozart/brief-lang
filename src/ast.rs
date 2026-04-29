@@ -576,6 +576,14 @@ pub struct Transaction {
     pub span: Option<Span>,
     pub is_lambda: bool, // Lambda-style: no body, postcondition must be provable
     pub dependencies: Vec<String>, // Variables read in preconditions
+    pub attrs: Vec<Attribute>,  // NEW: #[...] attributes
+}
+
+#[derive(Debug, Clone)]
+pub struct Attribute {
+    pub target: Option<String>,  // None = all targets, Some("c") = C only
+    pub key: String,
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -588,6 +596,7 @@ pub struct StateDecl {
     pub is_override: bool,
     pub os_mode: bool, // In OS mode, address is requested via ioctl/mmap; else embedded mode uses raw address
     pub span: Option<Span>,
+    pub attrs: Vec<Attribute>,  // NEW: #[...] attributes
 }
 
 #[derive(Debug, Clone)]
@@ -724,6 +733,7 @@ pub struct Program {
     pub items: Vec<TopLevel>,
     pub comments: Vec<Comment>,
     pub reactor_speed: Option<u32>, // NEW: file-level @Hz default
+    pub attrs: Vec<Attribute>,  // NEW: file-level #![...] attributes
 }
 
 /// Helper for exhaustiveness checking (Feature A)
