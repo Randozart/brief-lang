@@ -1,7 +1,7 @@
 # FFI Simplification: Implementation Plan
 
 **Date:** 2026-04-29
-**Status:** Proposed
+**Status:** ✅ IMPLEMENTED (2026-04-30)
 **Related:** `BRIEF_COMPILER_CHECKLIST.md`, `VITRIOL_ARCHITECTURE.md`
 
 ---

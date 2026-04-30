@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ast::{Expr, LinkRef, Program, Statement, TopLevel, Type};
+use crate::ast::{Expr, LinkRef, Program, Statement, TopLevel, Type, ForeignBinding, ForeignSignature, FfiState};
+use crate::ffi::error::{ErrorConventions, generate_bounds_check, generate_null_check};  // NEW
 use crate::linkage::LinkageConfig;
 
 pub struct CBackend {
@@ -21,6 +22,9 @@ pub struct CBackend {
     bare_metal: bool,
     kernel_mode: bool,              // NEW: kernel module target
     kernel_os: Option<String>,     // NEW: "linux", "windows", etc.
+    ffi_bindings: Vec<(String, ForeignSignature)>, // NEW: FFI function signatures
+    ffi_state: Option<FfiState>,   // NEW: FFI configuration from #![ffi...]
+    error_conventions: ErrorConventions,  // NEW: Error handling conventions
 }
 
 impl CBackend {
@@ -31,6 +35,9 @@ impl CBackend {
             bare_metal: false,
             kernel_mode: false,
             kernel_os: None,
+            ffi_bindings: Vec::new(),
+            ffi_state: None,
+            error_conventions: ErrorConventions::default(),
         }
     }
 
@@ -53,6 +60,9 @@ impl CBackend {
     pub fn generate(&mut self, program: &Program, stem: &str) -> (String, Option<String>) {
         // Collect hardware register names first
         self.collect_hw_registers(program);
+
+        // Collect FFI bindings and state
+        self.collect_ffi_bindings(program);
 
         let mut output = String::new();
         let mut makefile = String::new();
@@ -104,6 +114,9 @@ impl CBackend {
 
         // Generate MMIO definitions from @ link references
         self.generate_linkage_defines(&mut output);
+
+        // Generate FFI function declarations
+        self.generate_ffi_declarations(&mut output);
 
         let state_decls = self.collect_state_declarations(program);
 
@@ -286,6 +299,17 @@ impl CBackend {
         }
     }
 
+    fn collect_ffi_bindings(&mut self, program: &Program) {
+        self.ffi_bindings.clear();
+        self.ffi_state = program.ffi.clone();
+
+        for item in &program.items {
+            if let TopLevel::ForeignBinding { name, signature, .. } = item {
+                self.ffi_bindings.push((name.clone(), signature.clone()));
+            }
+        }
+    }
+
     fn is_hw_register(&self, name: &str) -> bool {
         self.hw_register_names.iter().any(|n| n == name)
     }
@@ -302,6 +326,144 @@ impl CBackend {
                 output.push_str(&format!("#define {} (*(volatile uint32_t *){}_ADDR)\n", upper_name, upper_name));
                 output.push_str("\n");
             }
+        }
+    }
+
+    fn generate_ffi_declarations(&self, output: &mut String) {
+        if self.ffi_bindings.is_empty() {
+            return;
+        }
+
+        output.push_str("/* FFI Function Declarations */\n");
+
+        for (name, sig) in &self.ffi_bindings {
+            let return_type = if sig.success_output.is_empty() {
+                "void".to_string()
+            } else {
+                // Use first output field's type
+                let (_, ty) = &sig.success_output[0];
+                Self::get_c_type(ty)
+            };
+
+            let params: Vec<String> = sig.inputs.iter().map(|(param_name, ty)| {
+                format!("{} {}", Self::get_c_type(ty), Self::sanitize_name(param_name))
+            }).collect();
+
+            let params_str = if params.is_empty() {
+                "void".to_string()
+            } else {
+                params.join(", ")
+            };
+
+            output.push_str(&format!("extern {} {}({});\n", return_type, Self::sanitize_name(name), params_str));
+        }
+        output.push_str("\n");
+    }
+
+    fn generate_ffi_call(&self, name: &str, args: &[Expr], output: &mut String) {
+        // Find the signature for this FFI function
+        let sig = self.ffi_bindings.iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, s)| s);
+
+        let Some(signature) = sig else {
+            output.push_str(&format!("    /* FFI function '{}' not found */\n", name));
+            return;
+        };
+
+        // Check if it's fire-and-forget (frgn!)
+        let is_fire_and_forget = matches!(
+            signature.ffi_kind,
+            Some(crate::ast::FfiKind::FrgnBang)
+        );
+
+        // Generate arguments
+        let args_str: Vec<String> = args.iter()
+            .map(|a| self.expr_to_c(a))
+            .collect();
+        let args_csv = args_str.join(", ");
+
+        if is_fire_and_forget {
+            // Fire-and-forget: just call the function
+            output.push_str(&format!("    {}({});\n", Self::sanitize_name(name), args_csv));
+        } else {
+            // Standard FFI with Result - generate error handling
+            let result_var = format!("_result_{}", Self::sanitize_name(name));
+            let return_type = if signature.success_output.is_empty() {
+                "void".to_string()
+            } else {
+                let (_, ty) = &signature.success_output[0];
+                Self::get_c_type(ty)
+            };
+
+            if return_type != "void" {
+                // Generate result variable and error check
+                output.push_str(&format!("    /* FFI call to {} with error handling */\n", name));
+                output.push_str(&format!("    {} {} = {}({});\n", return_type, result_var, Self::sanitize_name(name), args_csv));
+                
+                // Generate bounds check
+                let bounds_check = generate_bounds_check(&self.error_conventions, &result_var, "ffi_error");
+                output.push_str(&bounds_check);
+                
+                // Generate error label for this FFI call
+                output.push_str("    goto ffi_ok;\n");
+                output.push_str("ffi_error:\n");
+                output.push_str(&format!("    /* FFI error occurred for {} */\n", name));
+                output.push_str("ffi_ok:\n");
+            } else {
+                // Void return - just call
+                output.push_str(&format!("    /* FFI call to {} */\n", name));
+                output.push_str(&format!("    {}({});\n", Self::sanitize_name(name), args_csv));
+            }
+        }
+    }
+
+    fn generate_ffi_assignment(&self, name: &str, args: &[Expr], target: &str, output: &mut String) {
+        // Find the signature for this FFI function
+        let sig = self.ffi_bindings.iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, s)| s);
+
+        let Some(signature) = sig else {
+            output.push_str(&format!("    /* FFI function '{}' not found */\n", name));
+            return;
+        };
+
+        // Generate arguments
+        let args_str: Vec<String> = args.iter()
+            .map(|a| self.expr_to_c(a))
+            .collect();
+        let args_csv = args_str.join(", ");
+
+        let return_type = if signature.success_output.is_empty() {
+            "void".to_string()
+        } else {
+            let (_, ty) = &signature.success_output[0];
+            Self::get_c_type(ty)
+        };
+
+        let result_var = format!("_result_{}", Self::sanitize_name(name));
+
+        if return_type != "void" {
+            // Generate FFI call with result stored to target
+            output.push_str(&format!("    /* FFI call to {} with error handling */\n", name));
+            output.push_str(&format!("    {} {} = {}({});\n", return_type, result_var, Self::sanitize_name(name), args_csv));
+            
+            // Generate bounds check
+            let bounds_check = generate_bounds_check(&self.error_conventions, &result_var, "ffi_error");
+            output.push_str(&bounds_check);
+            
+            // Store result to target
+            output.push_str(&format!("    state->{} = {};\n", Self::sanitize_name(target), result_var));
+            output.push_str("    goto ffi_ok;\n");
+            output.push_str("ffi_error:\n");
+            output.push_str(&format!("    /* FFI error occurred for {} */\n", name));
+            // For error case, store default/error value
+            output.push_str(&format!("    state->{} = 0;\n", Self::sanitize_name(target)));
+            output.push_str("ffi_ok:\n");
+        } else {
+            // Void return - just call
+            output.push_str(&format!("    {}({});\n", Self::sanitize_name(name), args_csv));
         }
     }
 
@@ -332,6 +494,17 @@ impl CBackend {
                     Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
                     _ => return,
                 };
+
+                // Check if expr is an FFI call
+                if let Expr::Call(func_name, args) = expr {
+                    let is_ffi = self.ffi_bindings.iter().any(|(n, _)| n == func_name);
+                    if is_ffi {
+                        // Generate FFI call with result handling
+                        self.generate_ffi_assignment(&func_name, args, &name, output);
+                        return;
+                    }
+                }
+
                 let expr_code = self.expr_to_c(expr);
                 // Check if lhs is a hardware register (shouldn't happen for assignments, but handle anyway)
                 if self.is_hw_register(&name) {
@@ -372,8 +545,20 @@ impl CBackend {
                 output.push_str("    /* transaction complete */\n");
             }
             Statement::Expression(expr) => {
-                let expr_code = self.expr_to_c(expr);
-                output.push_str(&format!("    {};\n", expr_code));
+                // Check if this is an FFI call
+                if let Expr::Call(name, args) = expr {
+                    // Check if it's an FFI function
+                    let is_ffi = self.ffi_bindings.iter().any(|(n, _)| n == name);
+                    if is_ffi {
+                        self.generate_ffi_call(name, args, output);
+                    } else {
+                        let expr_code = self.expr_to_c(expr);
+                        output.push_str(&format!("    {};\n", expr_code));
+                    }
+                } else {
+                    let expr_code = self.expr_to_c(expr);
+                    output.push_str(&format!("    {};\n", expr_code));
+                }
             }
             _ => {
                 output.push_str("    /* statement not implemented */\n");

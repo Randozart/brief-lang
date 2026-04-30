@@ -1,9 +1,14 @@
 // Standard I/O Library
-// Foreign function declarations
+// Foreign function declarations - NEW FFI SYNTAX
 
-frgn __print(msg: String) -> Result<Bool, IoError> from "std/bindings/io.toml";
-frgn __println(msg: String) -> Result<Bool, IoError> from "std/bindings/io.toml";
-frgn __input() -> Result<String, IoError> from "std/bindings/io.toml";
+#![ffi.c, bind("./bindings/io.toml")]
+
+// Note: Using new syntax without from clause - profile-based resolution
+// The bind() path is optional - if omitted, uses default profile mappings
+frgn __print(msg: String) -> Result<Bool, IoError>;
+frgn __println(msg: String) -> Result<Bool, IoError>;
+frgn __input() -> Result<String, IoError>;
+
 defn print(msg: String) -> Bool [true][true] {
   term true;
 };

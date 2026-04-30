@@ -47,6 +47,36 @@
   - Missing `ffi` field in all `Program` constructors: Added `ffi: None` to 9 locations across codebase
   - Cobol backend using deprecated AST variants: Updated to current `Statement`/`Expr` variants
 
+- **C Backend FFI Integration (2026-04-30 12:00-12:25)**:
+  - Added `ffi_bindings` and `ffi_state` fields to `CBackend` struct (`src/backend/c.rs`)
+  - Added `collect_ffi_bindings()` to collect FFI declarations from program
+  - Added `generate_ffi_declarations()` to emit `extern` declarations in C output
+  - Added `generate_ffi_call()` to handle FFI function calls in transactions
+  - Updated `statement_to_c()` to detect and generate FFI calls
+  - FFI calls now generate proper C function calls with type mappings
+
+- **Stdlib Conversion (2026-04-30 12:24)**:
+  - Converted `lib/std/io.bv` to new FFI syntax as example
+  - Other stdlib files can be converted similarly
+
+- **Phase 4: Script Import System (2026-04-30 12:35-12:50)**:
+  - Added `src/ffi/script.rs` with `ScriptResolver` for loading JS/C/WASM scripts
+  - Added `load_js()` to parse JavaScript function signatures
+  - Added `load_c_header()` to parse C header function signatures
+  - Added `load_wasm()` stub for WebAssembly (placeholder)
+  - No LUT - functions resolved by exact name match
+  - Exported `ScriptFunction`, `ScriptLanguage`, `ScriptResolver` from `ffi` module
+
+- **Phase 5: Error Handling (2026-04-30 12:50-13:10)**:
+  - Added `src/ffi/error.rs` with `ErrorConventions` for TOML convention parsing
+  - Added `ErrVariant` enum for built-in error types (IoError, MappingError, BoundsError, VoidReturn, Generic)
+  - Added `generate_bounds_check()` for error range checking in C code
+  - Added `generate_null_check()` for pointer validation
+  - Updated C backend to include error handling in FFI calls:
+    - FFI calls with return values generate bounds checks
+    - Assignments from FFI calls include error handling
+    - Error labels generated for error flow control
+
 ### Compiler
 
 - **Kernel Target Fixes (2026-04-29 19:25)**:

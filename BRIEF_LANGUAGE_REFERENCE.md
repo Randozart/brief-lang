@@ -505,13 +505,48 @@ sig process: Int -> Int = complex(x);
 
 ## Foreign Bindings
 
-### Foreign Binding (Native)
+### New FFI Syntax (v0.12+)
+
+The new FFI system uses language profiles and doesn't require TOML file references:
+
+#### File-Level Attribute
 
 ```brief
-frgn! fetch(url: String) -> Result<Data, Error> from "http.toml";
+#![ffi.<lang>, bind("./profile.toml"), import("./script"), map("from","to")]
 ```
 
-### Foreign Binding (WebAssembly)
+- `ffi.<lang>` - Language target: `c`, `kernel`, `js`, `rust`, `wasm`
+- `bind()` - Optional profile TOML path
+- `import()` - Optional script/library path  
+- `map()` - Inline type mapping overrides
+
+#### Foreign Function (Standard)
+
+```brief
+frgn printk(fmt: String) -> Result<Int, Err>;
+```
+
+#### Foreign Function (Fire-and-Forget / Void Return)
+
+```brief
+frgn! printk(fmt: String);
+```
+
+#### Foreign Function with Explicit Address
+
+```brief
+frgn read_reg @ 0x40001000 () -> Result<UInt, Err>;
+frgn! write_reg @ 0x40001000 (val: UInt);
+```
+
+#### Per-Function Type Override
+
+```brief
+#[ffi.c, type("Int32Array")]
+frgn get_buffer() -> Result<UInt, Err>;
+```
+
+### Legacy Syntax (Still Supported)
 
 ```brief
 frgn fetch(url: String) -> Result<Data, Error> from "http.toml";
