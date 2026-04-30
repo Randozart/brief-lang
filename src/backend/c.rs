@@ -242,6 +242,31 @@ self.clear_local_vars();
             
             // MODULE_LICENSE
             output.push_str("MODULE_LICENSE(\"GPL\");\n");
+        } else if self.bare_metal {
+            // Bare-metal: generate _start entry point + main
+            // Stack at top of 256MB region (grows down)
+            output.push_str("/* Bare-metal entry point */\n");
+            output.push_str("#define STACK_TOP 0x0F800000\n\n");
+            output.push_str("void _start(void) __attribute__((section(\".text.start\")));\n");
+            output.push_str("void _start(void) {\n");
+            output.push_str("    __asm__ volatile (\n");
+            output.push_str("        \"mov sp, %0\\n\"\n");
+            output.push_str("        \"bl main\\n\"\n");
+            output.push_str("        :\n");
+            output.push_str("        : \"r\" (STACK_TOP)\n");
+            output.push_str("        : \"memory\"\n");
+            output.push_str("    );\n");
+            output.push_str("    while(1) { __asm__ volatile(\"wfi\"); }\n");
+            output.push_str("}\n\n");
+
+            // Generate main() 
+            output.push_str("int main(void) {\n");
+            let state_decls = self.collect_state_declarations(program);
+            if !state_decls.is_empty() {
+                output.push_str("    init_wrapper();\n");
+            }
+            output.push_str("    return 0;\n");
+            output.push_str("}\n");
         } else {
             // Normal/embedded: generate main()
             output.push_str("int main(void) {\n");
