@@ -1,0 +1,14 @@
+// Bank Account Withdrawal
+// Demonstrates: pre/post conditions, boolean locks, old() state capture
+
+let balance: Int = 1000;
+let locked: Bool = false;
+
+rct txn withdraw [locked == false && balance >= 100]
+  [balance == @balance - 100]
+{
+  &locked = true;
+  &balance = balance - 100;
+  &locked = false;
+  term;
+};

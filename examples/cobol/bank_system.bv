@@ -1,0 +1,37 @@
+// Full Banking System
+// Demonstrates: multiple transactions, audit trail, all features
+
+let account_balance: Int = 10000;
+let overdraft_protected: Bool = true;
+let daily_limit: Int = 5000;
+let total_withdrawals: Int = 0;
+let locked: Bool = false;
+
+// Withdrawal with overdraft protection
+rct txn withdraw [locked == false && account_balance >= 50 && total_withdrawals < 10]
+  [account_balance == @account_balance - 50 && total_withdrawals == @total_withdrawals + 1]
+{
+  &locked = true;
+  &account_balance = account_balance - 50;
+  &total_withdrawals = total_withdrawals + 1;
+  &locked = false;
+  term;
+};
+
+// Deposit transaction
+rct txn deposit [locked == false]
+  [account_balance == @account_balance + 100]
+{
+  &locked = true;
+  &account_balance = account_balance + 100;
+  &locked = false;
+  term;
+};
+
+// Reset daily counter (for testing)
+rct txn reset_counter [true]
+  [total_withdrawals == 0]
+{
+  &total_withdrawals = 0;
+  term;
+};
