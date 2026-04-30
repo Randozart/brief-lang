@@ -114,11 +114,19 @@ brief init my-app
 cd my-app
 ```
 
-This creates two files:
+This creates a project with:
 - `main.bv` - Pure Brief (specification only)
-- `main.rbv` - Rendered Brief (with web UI)
+- `main.rbv` - Rendered Brief (specification + web UI)
 
-Feel free to delete whichever one you don't need.
+**Note:** Brief supports three file types for different targets:
+
+| Type | File Type | Description |
+|------|-----------|-------------|
+| **Brief** | `.bv` | Pure declarative logic |
+| **Rendered Brief** | `.rbv` | Brief + Web View (HTML/CSS/SVG) |
+| **Embedded Brief** | `.ebv` | Brief + Hardware triggers (trg, @ addresses) |
+
+See [Brief Languages](#brief-languages) below for details on when to use each.
 
 ### 3. Run Your App
 
@@ -258,9 +266,51 @@ The compiler forces you to think about the entire reactive system as a coherent 
 not just individual transactions. Every transaction's postcondition must flow logically 
 into the next, or compilation fails.
 
-## Software-Defined Silicon: Embedded Brief
+## Brief Languages
 
-Embedded Brief allows you to write code that *is* the hardware. By targeting SystemVerilog, you can "print" your declarative logic directly to an FPGA or ASIC:
+Brief comes in three variants, each targeting different output:
+
+| Language | File Type | Description | Transpilation Targets |
+|----------|-----------|-------------|----------------------|
+| **Brief** | `.bv` | Pure declarative logic | C, Rust, WebAssembly, COBOL |
+| **Rendered Brief** | `.rbv` | Brief + Web View (HTML/CSS/SVG) | Browser (HTML/JS/CSS) |
+| **Embedded Brief** | `.ebv` | Brief + Hardware triggers | SystemVerilog + TCL, ARM Rust, C bare-metal |
+
+### Key Differences
+
+- **`.bv`** — Pure specification. No `@` address bindings, no `trg` hardware triggers.
+  Compiles to software targets (C, Rust, WASM, COBOL).
+
+- **`.rbv`** — `.bv` syntax plus a `view` block with HTML/CSS/SVG components.
+  Generates a web UI; the logic compiles to WebAssembly.
+
+- **`.ebv`** — `.bv` syntax plus `trg name: Type @ address` hardware triggers
+  and `@` memory-mapped I/O bindings. Targets:
+  - **FPGA/ASIC**: SystemVerilog via `brief verilog` (with optional TCL build scripts)
+  - **ARM bare-metal**: Rust via `brief arm` or C via `brief c`
+
+### Quick Reference
+
+```bash
+# Pure Brief (.bv) - Software targets
+brief build program.bv        # → WebAssembly (browser/edge)
+brief c program.bv            # → C (hosted, Linux/embedded)
+brief rust program.bv         # → Native Rust (with std)
+brief cobol program.bv        # → IBM Enterprise COBOL
+
+# Rendered Brief (.rbv) - Web UI
+brief rbv program.rbv         # → Browser files
+brief run program.rbv         # → Build, serve, and open browser
+
+# Embedded Brief (.ebv) - Hardware targets
+brief verilog program.ebv --hw config.toml  # → SystemVerilog (+ TCL with --tcl)
+brief arm program.ebv         # → ARM bare-metal Rust (KV260 Cortex-A53)
+brief c program.ebv           # → C bare-metal (ARM, static allocation, no malloc)
+```
+
+### Embedded Brief: Software-Defined Silicon
+
+For FPGA/ASIC targets, Brief compiles directly to gates:
 
 ```brief
 // Physical wide bus (1024 registers + 1024 ALUs)
@@ -279,24 +329,43 @@ rct txn update [button][true] {
 };
 ```
 
-The Brief compiler ensures **Spatial Isomorphism**, mapping your logical structures to physical gates, wires, and parallel hardware units.
+The compiler ensures **Spatial Isomorphism**, mapping logical structures
+to physical gates, wires, and parallel hardware units.
+
+### TCL Build Scripts
+
+When compiling to SystemVerilog, you can generate Vivado/Quartus TCL build scripts:
+
+```bash
+brief verilog program.ebv --hw config.toml --tcl  # Generate SV + TCL
+brief verilog program.ebv --hw config.toml --tcl-only  # TCL only
+```
 
 ## Implementation Status
 
-Core features (working):
+### Core Features (working)
 - Transactions with pre/post conditions (required on all)
 - Reactive transactions (`rct txn`) auto-firing based on contracts
 - Proof engine: termination and postcondition verification
 - Type checking and inference (including Vector lifting and Union handling)
-- SystemVerilog backend: Software-defined silicon with SIMD unrolling
-- FFI bindings to Rust and an open FFI system for other languages
-- 59+ standard library functions
-- Pattern matching and unification
-- Imports and modular code organization
 - Borrow-checker-inspired race condition prevention
-- Rendered Brief (web UI framework)
+- Pattern matching and unification
+- 59+ standard library functions
+- Imports and modular code organization
 
-Edge cases and limitations:
+### Transpilation Targets
+
+| Target | Command | File Types | Output |
+|--------|---------|------------|--------|
+| WebAssembly | `brief build` | `.bv` | Browser/edge WASM |
+| C | `brief c` | `.bv`, `.ebv` | Hosted/bare-metal C |
+| Rust | `brief rust` | `.bv`, `.ebv` | Native Rust (std) |
+| COBOL | `brief cobol` | `.bv`, `.ebv`, `.br` | IBM Enterprise COBOL |
+| SystemVerilog | `brief verilog` | `.ebv` | FPGA/ASIC synthesis |
+| TCL | `--tcl` flag | — | Vivado/Quartus build scripts |
+| ARM bare-metal | `brief arm` | `.bv`, `.ebv` | KV260 Rust (no_std) |
+
+### Edge Cases and Limitations
 - Some complex termination proofs remain unresolved
 - SystemVerilog: Floating point is currently prohibited for synthesis
 - WASM compilation is functional but not optimized
@@ -311,9 +380,9 @@ A system prompt for Brief can be provided to guide model behavior.
 
 ```bash
 brief check program.bv          # Type check and verify
-brief build program.bv          # Run
+brief build program.bv          # Compile to WebAssembly and run
 brief init my-project           # Create project
-brief lsp                       # Start language server
+brief lsp                       # Start Language Server
 ```
 
 ## Full Language
@@ -323,7 +392,6 @@ brief lsp                       # Start language server
 - **Types**: String, Int, UInt, Float, Bool, Void, Vector, custom structs
 - **Contracts**: Preconditions `[pre]` and postconditions `[post]`
 - **Prior state**: `@variable` references the value at transaction start
-- **Silicon Target**: `brief verilog program.ebv --hw hardware.toml` (Software-Defined Silicon)
 - **Pattern matching**: Unification for handling multiple outcomes
 - **Imports**: Modular code
 - **Definitions**: Named functions with contracts (`defn`)

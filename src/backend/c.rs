@@ -25,6 +25,9 @@ pub struct CBackend {
     ffi_bindings: Vec<(String, ForeignSignature)>, // NEW: FFI function signatures
     ffi_state: Option<FfiState>,   // NEW: FFI configuration from #![ffi...]
     error_conventions: ErrorConventions,  // NEW: Error handling conventions
+    constants: Vec<(String, String)>,  // NEW: const name -> C value
+    local_vars: Vec<String>,  // Local variables in current function
+    test_mode: bool,  // Generate stub FFI implementations
 }
 
 impl CBackend {
@@ -38,7 +41,15 @@ impl CBackend {
             ffi_bindings: Vec::new(),
             ffi_state: None,
             error_conventions: ErrorConventions::default(),
+            constants: Vec::new(),
+            local_vars: Vec::new(),
+            test_mode: false,
         }
+    }
+
+    pub fn with_test_mode(mut self, test_mode: bool) -> Self {
+        self.test_mode = test_mode;
+        self
     }
 
     pub fn with_linkage(mut self, linkage: LinkageConfig) -> Self {
@@ -63,6 +74,9 @@ impl CBackend {
 
         // Collect FFI bindings and state
         self.collect_ffi_bindings(program);
+
+        // Collect constants for #define
+        self.collect_constants(program);
 
         let mut output = String::new();
         let mut makefile = String::new();
@@ -118,6 +132,15 @@ impl CBackend {
         // Generate FFI function declarations
         self.generate_ffi_declarations(&mut output);
 
+        // Generate module parameters for test mode
+        if self.kernel_mode {
+            output.push_str("\n/* Module parameters */\n");
+            output.push_str("static int test_mode = 1;\n");
+            output.push_str("module_param(test_mode, int, 0644);\n");
+            output.push_str("MODULE_PARM_DESC(test_mode, \"1=stub mode (safe), 0=real hardware (DANGER)\");\n");
+            output.push_str("\n");
+        }
+
         let state_decls = self.collect_state_declarations(program);
 
         // Only generate struct for non-hardware state
@@ -150,9 +173,12 @@ impl CBackend {
             output.push_str("}\n\n");
         }
 
+self.clear_local_vars();
+
         for (_, txn) in self.collect_transactions(program) {
+            self.clear_local_vars();
             output.push_str(&format!(
-                "bool {}(void) {{\n",
+                "bool {}(void) {{",
                 Self::sanitize_name(&txn.name)
             ));
             output.push_str(&format!(
@@ -172,7 +198,7 @@ impl CBackend {
             output.push_str("}\n\n");
         }
 
-        output.push_str("void init_wrapper(void) {\n");
+        output.push_str("static void init_wrapper(void) {\n");
         let state_decls = self.collect_state_declarations(program);
         if !state_decls.is_empty() {
             if self.bare_metal || self.kernel_mode {
@@ -310,6 +336,36 @@ impl CBackend {
         }
     }
 
+    fn collect_constants(&mut self, program: &Program) {
+        self.constants.clear();
+        for item in &program.items {
+            if let TopLevel::Constant(c) = item {
+                let value = self.expr_to_c(&c.expr);
+                self.constants.push((c.name.clone(), value));
+            }
+        }
+    }
+
+    fn is_constant(&self, name: &str) -> bool {
+        self.constants.iter().any(|(n, _)| n == name)
+    }
+
+    fn get_constant_value(&self, name: &str) -> Option<String> {
+        self.constants.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
+    }
+
+    fn is_local_var(&self, name: &str) -> bool {
+        self.local_vars.iter().any(|n| n == name)
+    }
+
+    fn add_local_var(&mut self, name: &str) {
+        self.local_vars.push(name.to_string());
+    }
+
+    fn clear_local_vars(&mut self) {
+        self.local_vars.clear();
+    }
+
     fn is_hw_register(&self, name: &str) -> bool {
         self.hw_register_names.iter().any(|n| n == name)
     }
@@ -336,7 +392,25 @@ impl CBackend {
 
         output.push_str("/* FFI Function Declarations */\n");
 
+        // Generate #defines for constants
+        if !self.constants.is_empty() {
+            output.push_str("\n/* Constant Definitions */\n");
+            for (name, value) in &self.constants {
+                output.push_str(&format!("#define {} {}\n", Self::sanitize_name(name), value));
+            }
+        }
+
         for (name, sig) in &self.ffi_bindings {
+            // In kernel mode (linux), skip printk - it's provided by kernel headers
+            if self.kernel_os == Some("linux".to_string()) && name == "printk" {
+                continue;
+            }
+
+            // In test mode with stubs, skip extern declarations (stubs are static)
+            if self.kernel_mode && self.test_mode {
+                continue;
+            }
+
             let return_type = if sig.success_output.is_empty() {
                 "void".to_string()
             } else {
@@ -357,7 +431,55 @@ impl CBackend {
 
             output.push_str(&format!("extern {} {}({});\n", return_type, Self::sanitize_name(name), params_str));
         }
+
         output.push_str("\n");
+
+        // Generate stub implementations for test mode
+        if self.kernel_mode && self.test_mode {
+            output.push_str("/* FFI Stub Implementations (test mode - safe, no real hardware) */\n");
+            for (name, sig) in &self.ffi_bindings {
+                self.generate_ffi_stub(name, sig, output);
+            }
+            output.push_str("\n");
+        }
+    }
+
+    fn generate_ffi_stub(&self, name: &str, sig: &ForeignSignature, output: &mut String) {
+        // In kernel mode (linux), printk is provided by kernel headers - don't stub it
+        if self.kernel_os == Some("linux".to_string()) && name == "printk" {
+            return;
+        }
+
+        let return_type = if sig.success_output.is_empty() {
+            "void".to_string()
+        } else {
+            let (_, ty) = &sig.success_output[0];
+            Self::get_c_type(ty)
+        };
+
+        let params: Vec<String> = sig.inputs.iter().map(|(param_name, ty)| {
+            format!("{} {}", Self::get_c_type(ty), Self::sanitize_name(param_name))
+        }).collect();
+
+        let params_str = if params.is_empty() {
+            "void".to_string()
+        } else {
+            params.join(", ")
+        };
+
+        output.push_str(&format!("static {} {}({}) {{\n", return_type, name, params_str));
+        output.push_str(&format!("    printk(\"[VITRIOL-STUB] {} called\\\\n\");\n", name));
+
+        // Return appropriate stub value based on return type
+        match return_type.as_str() {
+            "void" => {}
+            "uint32_t" => output.push_str("    return 1;  // stub: success handle\n"),
+            "int32_t" => output.push_str("    return 1;  // stub: success handle\n"),
+            "uint64_t" => output.push_str("    return 1;  // stub: success handle\n"),
+            "bool" => output.push_str("    return true;  // stub: success\n"),
+            _ => output.push_str("    return 0;\n"),
+        }
+        output.push_str("}\n\n");
     }
 
     fn generate_ffi_call(&self, name: &str, args: &[Expr], output: &mut String) {
@@ -402,14 +524,14 @@ impl CBackend {
                 output.push_str(&format!("    {} {} = {}({});\n", return_type, result_var, Self::sanitize_name(name), args_csv));
                 
                 // Generate bounds check
-                let bounds_check = generate_bounds_check(&self.error_conventions, &result_var, "ffi_error");
+                let bounds_check = generate_bounds_check(&self.error_conventions, &result_var, &format!("ffi_error_{}", name));
                 output.push_str(&bounds_check);
                 
                 // Generate error label for this FFI call
-                output.push_str("    goto ffi_ok;\n");
-                output.push_str("ffi_error:\n");
+                output.push_str(&format!("    goto ffi_ok_{};\n", name));
+                output.push_str(&format!("ffi_error_{}:\n", name));
                 output.push_str(&format!("    /* FFI error occurred for {} */\n", name));
-                output.push_str("ffi_ok:\n");
+                output.push_str(&format!("ffi_ok_{}:\n", name));
             } else {
                 // Void return - just call
                 output.push_str(&format!("    /* FFI call to {} */\n", name));
@@ -450,17 +572,17 @@ impl CBackend {
             output.push_str(&format!("    {} {} = {}({});\n", return_type, result_var, Self::sanitize_name(name), args_csv));
             
             // Generate bounds check
-            let bounds_check = generate_bounds_check(&self.error_conventions, &result_var, "ffi_error");
+            let bounds_check = generate_bounds_check(&self.error_conventions, &result_var, &format!("ffi_error_{}", name));
             output.push_str(&bounds_check);
             
             // Store result to target
             output.push_str(&format!("    state->{} = {};\n", Self::sanitize_name(target), result_var));
-            output.push_str("    goto ffi_ok;\n");
-            output.push_str("ffi_error:\n");
+            output.push_str(&format!("    goto ffi_ok_{};\n", name));
+            output.push_str(&format!("ffi_error_{}:\n", name));
             output.push_str(&format!("    /* FFI error occurred for {} */\n", name));
             // For error case, store default/error value
             output.push_str(&format!("    state->{} = 0;\n", Self::sanitize_name(target)));
-            output.push_str("ffi_ok:\n");
+            output.push_str(&format!("ffi_ok_{}:\n", name));
         } else {
             // Void return - just call
             output.push_str(&format!("    {}({});\n", Self::sanitize_name(name), args_csv));
@@ -487,7 +609,7 @@ impl CBackend {
         txns
     }
 
-    fn statement_to_c(&self, output: &mut String, stmt: &Statement) {
+    fn statement_to_c(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
                 let name = match lhs {
@@ -517,10 +639,49 @@ impl CBackend {
             }
             Statement::Let { name, expr, .. } => {
                 if let Some(e) = expr {
+                    // Check if expr is an FFI call
+                    if let Expr::Call(func_name, args) = e {
+                        let is_ffi = self.ffi_bindings.iter().any(|(n, _)| n == func_name);
+                        if is_ffi {
+                            // Generate FFI call with result
+                            let sig = self.ffi_bindings.iter()
+                                .find(|(n, _)| n == func_name)
+                                .map(|(_, s)| s);
+                            if let Some(signature) = sig {
+                                let return_type = if signature.success_output.is_empty() {
+                                    "void".to_string()
+                                } else {
+                                    let (_, ty) = &signature.success_output[0];
+                                    Self::get_c_type(ty)
+                                };
+                                if return_type != "void" {
+                                    let args_str: Vec<String> = args.iter()
+                                        .map(|a| self.expr_to_c(a))
+                                        .collect();
+                                    let args_csv = args_str.join(", ");
+                                    output.push_str(&format!("    {} {} = {}({});\n", 
+                                        return_type, Self::sanitize_name(name), 
+                                        Self::sanitize_name(func_name), args_csv));
+                                    self.add_local_var(name);
+                                    return;
+                                }
+                            }
+                        }
+                    }
                     let expr_code = self.expr_to_c(e);
                     let ty = "int32_t".to_string();
                     output.push_str(&format!("    {} {} = {};\n", ty, Self::sanitize_name(name), expr_code));
+                    self.add_local_var(name);
                 }
+            }
+            Statement::Guarded { condition, statements } => {
+                // Generate: if (condition) { statements }
+                let cond_str = self.expr_to_c(condition);
+                output.push_str(&format!("    if ({}) {{\n", cond_str));
+                for stmt in statements {
+                    self.statement_to_c(output, stmt);
+                }
+                output.push_str("    }\n");
             }
             Statement::InlineAsm { asm_string, clobbers, .. } => {
                 output.push_str(&format!("    /* asm: {} */\n", asm_string));
@@ -573,6 +734,14 @@ impl CBackend {
             Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
             Expr::String(s) => format!("\"{}\"", s),
             Expr::Identifier(n) => {
+                // Check if this is a constant first
+                if self.is_constant(n) {
+                    return self.get_constant_value(n).unwrap_or_else(|| n.clone());
+                }
+                // Check if this is a local variable
+                if self.is_local_var(n) {
+                    return Self::sanitize_name(n);
+                }
                 // Check if this is a hardware register
                 if self.is_hw_register(n) {
                     n.to_uppercase()
@@ -581,13 +750,27 @@ impl CBackend {
                 }
             }
             Expr::OwnedRef(n) => {
+                if self.is_constant(n) {
+                    return self.get_constant_value(n).unwrap_or_else(|| n.clone());
+                }
+                if self.is_local_var(n) {
+                    return Self::sanitize_name(n);
+                }
                 if self.is_hw_register(n) {
                     n.to_uppercase()
                 } else {
                     format!("state->{}", Self::sanitize_name(n))
                 }
             }
-            Expr::PriorState(n) => format!("state->{}", Self::sanitize_name(n)),
+            Expr::PriorState(n) => {
+                if self.is_constant(n) {
+                    return self.get_constant_value(n).unwrap_or_else(|| n.clone());
+                }
+                if self.is_local_var(n) {
+                    return Self::sanitize_name(n);
+                }
+                format!("state->{}", Self::sanitize_name(n))
+            }
             Expr::Add(a, b) => format!("({} + {})", self.expr_to_c(a), self.expr_to_c(b)),
             Expr::Sub(a, b) => format!("({} - {})", self.expr_to_c(a), self.expr_to_c(b)),
             Expr::Mul(a, b) => format!("({} * {})", self.expr_to_c(a), self.expr_to_c(b)),

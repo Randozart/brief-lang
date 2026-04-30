@@ -274,12 +274,17 @@ fn print_usage(program: &str) {
     eprintln!("  rust <file>      Compile to Native Rust (std)");
     eprintln!("  c <file>         Compile to C with __asm__");
     eprintln!("  arm <file>       Compile to ARM bare-metal Rust");
-    eprintln!("  verilog <file>  Compile to SystemVerilog (FPGA)");
+    eprintln!("  verilog <file>  Compile to SystemVerilog (FPGA, with --tcl flag)");
     eprintln!("  cobol <file>     Compile to IBM Enterprise COBOL");
     eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
     eprintln!("  wrap <lib>       Generate FFI bindings for a library");
     eprintln!("  install          Install 'brief' to ~/.local/bin");
     eprintln!("  lsp              Start Language Server (for IDE integration)");
+    eprintln!();
+    eprintln!("Verilog Options:");
+    eprintln!("  --hw <file>      Hardware config TOML (required for .ebv files)");
+    eprintln!("  --tcl            Generate TCL build scripts alongside SystemVerilog");
+    eprintln!("  --tcl-only       Generate TCL only (skip SystemVerilog generation)");
     eprintln!();
     eprintln!("RBV Options:");
     eprintln!("  --out <dir>      Output directory (default: <name>-build)");
@@ -1169,6 +1174,7 @@ fn run_c(
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
     target: Option<&str>,
+    args: &[String],
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to C: {}", file_path.display());
     if let Some(t) = target {
@@ -1230,6 +1236,11 @@ fn run_c(
         } else {
             c_backend = c_backend.with_kernel_mode(None);
         }
+    }
+
+    // Check for --test-mode flag in arguments
+    if args.iter().any(|a| a == "--test-mode" || a == "-t") {
+        c_backend = c_backend.with_test_mode(true);
     }
 
     let stem = file_path
@@ -1322,6 +1333,8 @@ fn run_verilog(
     out_dir: Option<&Path>,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
+    generate_tcl: bool,
+    tcl_only: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to SystemVerilog: {}", file_path.display());
 
@@ -1406,7 +1419,7 @@ fn run_verilog(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("top");
-    let mut verilog_gen = backend::verilog::VerilogGenerator::new(stem, hw_config);
+    let mut verilog_gen = backend::verilog::VerilogGenerator::new(stem, hw_config.clone());
     if let Some(linkage) = linkage_config {
         verilog_gen = verilog_gen.with_linkage(linkage);
     }
@@ -1425,9 +1438,22 @@ fn run_verilog(
 
     let tb_file = out_path.join(format!("{}_tb.sv", stem));
     fs::write(&tb_file, tb_code)?;
+    println!("  Generated: {}", tb_file.display());
+
+    if generate_tcl || tcl_only {
+        let sv_files = vec![format!("{}.sv", stem)];
+        let tcl_gen = backend::tcl_generator::TclGenerator::new(&hw_config, sv_files);
+        let tcl_code = tcl_gen.generate();
+        let tcl_file = out_path.join(format!("{}.tcl", stem));
+        fs::write(&tcl_file, tcl_code)?;
+        println!("  Generated TCL: {}", tcl_file.display());
+
+        if tcl_only {
+            return Ok(output_file);
+        }
+    }
 
     println!("  Generated: {}", output_file.display());
-    println!("  Generated: {}", tb_file.display());
     Ok(output_file)
 }
 
@@ -1883,7 +1909,7 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), target) {
+                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), target, &args) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -2042,6 +2068,8 @@ fn main() {
             let mut file_path = None;
             let mut out_dir = None;
             let mut hw_config = None;
+            let mut generate_tcl = false;
+            let mut tcl_only = false;
 
             let mut i = 2;
             while i < args.len() {
@@ -2052,6 +2080,12 @@ fn main() {
                 } else if arg == "--hw" && i + 1 < args.len() {
                     hw_config = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
+                } else if arg == "--tcl" {
+                    generate_tcl = true;
+                    i += 1;
+                } else if arg == "--tcl-only" {
+                    tcl_only = true;
+                    i += 1;
                 } else if arg.ends_with(".ebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -2076,6 +2110,8 @@ fn main() {
                             out_dir.as_deref(),
                             no_stdlib,
                             stdlib_path.clone(),
+                            generate_tcl,
+                            tcl_only,
                         ) {
                             eprintln!("Error: {}", e);
                             std::process::exit(1);
@@ -2083,7 +2119,7 @@ fn main() {
                     } else {
                         eprintln!("Error: .ebv files require --hw <hardware.toml>");
                         eprintln!(
-                            "Usage: {} verilog <file.ebv> --hw <hardware.toml> [--out <dir>]",
+                            "Usage: {} verilog <file.ebv> --hw <hardware.toml> [--out <dir>] [--tcl] [--tcl-only]",
                             args[0]
                         );
                         std::process::exit(1);
@@ -2096,6 +2132,8 @@ fn main() {
                         out_dir.as_deref(),
                         no_stdlib,
                         stdlib_path.clone(),
+                        generate_tcl,
+                        tcl_only,
                     ) {
                         eprintln!("Error: {}", e);
                         std::process::exit(1);
@@ -2104,7 +2142,7 @@ fn main() {
             } else {
                 eprintln!("Error: Missing .bv or .ebv file");
                 eprintln!(
-                    "Usage: {} verilog <file.bv|file.ebv> [--hw <hardware.toml>] [--out <dir>]",
+                    "Usage: {} verilog <file.bv|file.ebv> [--hw <hardware.toml>] [--out <dir>] [--tcl] [--tcl-only]",
                     args[0]
                 );
                 std::process::exit(1);

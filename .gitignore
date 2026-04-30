@@ -8,9 +8,6 @@
 spec/*.pdf
 spec/*.html
 
-# Old docs drafts (not authoritative)
-spec/old_docs/
-
 # ============================================
 # TESTS
 # ============================================
@@ -42,10 +39,12 @@ test-*.js
 test-*.js.map
 test-*.d.ts
 test-*.d.ts.map
+test-*.d.ts.map
 generated/
 landing-build/
 page-build/
 *_build/
+examples/cobol/output/
 
 # ============================================
 # NODE/JAVASCRIPT (legacy tooling)

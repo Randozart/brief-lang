@@ -1,0 +1,21 @@
+# Reference Documentation
+
+Historical and supplementary documentation for the Brief compiler.
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `BRIEF-DATALOG_RESEARCH.md` | Research on Datalog integration |
+| `BRIEF_LANGUAGE_REFERENCE.md` | Language reference (v0.11.0) - compare with spec/LANGUAGE-TUTORIAL.md |
+| `HARDWARE_BACKEND.md` | Hardware backend development guide |
+| `HARDWARE_CONFIG.md` | Hardware configuration guide |
+| `ISSUES.md` | Known issues log |
+| `MISSING_FEATURES.md` | Planning/draft for bare-metal extensions |
+| `NATIVE_BACKENDS.md` | Native code generation (Rust & C backends) |
+| `TARGET_ABSTRACTION.md` | Target Abstraction Layer (TAL) proposal |
+
+## Notes
+
+- `BRIEF_LANGUAGE_REFERENCE.md` and `spec/LANGUAGE-TUTORIAL.md` may have overlapping content - consider consolidating
+- `NATIVE_BACKENDS.md` content implemented as of 2026-04-27 (see CHANGELOG.md)

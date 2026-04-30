@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-04-30
 
 ### Language
 
@@ -112,3 +112,54 @@
 ### Documentation
 
 - **Language reference**: Added sections for Enum declarations, Enums with Data, Pattern Matching syntax, and JSON Serialization (`spec/LANGUAGE-REFERENCE.md`).
+
+---
+
+## 2026-04-27
+
+### C Backend - Bare Metal ARM Support
+
+- **Added `bare_metal` flag** to distinguish hosted vs bare-metal targets:
+  - `.bv` files → `malloc` allocation, includes `stdlib.h` (Desktop/Embedded Linux)
+  - `.ebv` files → static allocation, no heap (ARM bare-metal)
+
+- **Linkage configuration support**:
+  - Added `LinkageConfig` loading from `linkage.toml` alongside source file
+  - Added `collect_hw_registers()` to find `@ link` hardware register names
+  - Added `generate_linkage_defines()` to emit MMIO `#define` macros
+
+- **Static allocation for bare-metal**:
+  - Changed from `static State *state = NULL` + malloc to `static State state_instance; static State *state = &state_instance;`
+  - Removed `stdlib.h` and `stdio.h` (unavailable in bare-metal)
+  - Added `stddef.h` for NULL definition
+
+- **ASM clobber syntax fix**:
+  - Clobbers must be in the third section of GCC asm statement (output, input, clobber)
+  - Previous incorrect format put clobbers in the input section
+
+- **Hardware register handling**:
+  - Identifiers matching `@ link` names generate `HW_REGISTER` macro instead of `state->hw_register`
+  - MMIO base addresses resolved from `linkage.toml`
+
+- **Files changed**:
+  - `src/backend/c.rs`: Added linkage support, `bare_metal` flag, static allocation
+  - `src/main.rs`: Added `run_c()` with linkage config loading
+
+- **Tested with**:
+  ```bash
+  ./brief-compiler c kernel.ebv --out /tmp/test
+  aarch64-linux-gnu-gcc -nostdlib -static -march=armv8-a -ffreestanding -O2 -c /tmp/test/kernel.c -o kernel.o
+  ```
+
+---
+
+## Earlier Changes
+
+### COBOL Transpiler
+
+- **New transpilation target**: IBM Enterprise COBOL for z/OS
+- **Pre/post condition guards**: RETURN-CODE 4000 on failure
+- **Boolean Level 88 condition names**: `88 WS-VAR-TRUE VALUE 'Y'`
+- **RECURSIVE always emitted** in PROGRAM-ID for recursion support
+- **FFI via LINKAGE SECTION** for existing COBOL program integration
+- **Files**: `src/backend/cobol.rs` (685 LOC), `src/main.rs` (`run_cobol()`)
