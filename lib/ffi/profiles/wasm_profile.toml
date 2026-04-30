@@ -1,0 +1,61 @@
+# WebAssembly Language Profile for Brief FFI
+# Defines type mappings and conventions for speaking to WASM modules
+
+[language]
+name = "WebAssembly"
+endianness = "little"
+pointer_size = 8       # 64-bit linear memory
+description = "WebAssembly with WASI extensions"
+
+[types]
+# Integer types (WASM has only i32 and i64)
+Int32 = { representation = "two's complement", size = 4, signed = true }
+UInt32 = { representation = "unsigned", size = 4, signed = false }
+Int64 = { representation = "two's complement", size = 8, signed = true }
+UInt64 = { representation = "unsigned", size = 8, signed = false }
+
+# Floating point (WASM has only f32 and f64)
+Float32 = { representation = "IEEE754", size = 4 }
+Float64 = { representation = "IEEE754", size = 8 }
+
+# Reference types
+Funcref = { representation = "funcref", size = 8 }
+Externref = { representation = "externref", size = 8 }
+
+# Memory
+Memory = { representation = "linear", size = "variable" }
+
+# Other
+Void = { size = 0 }
+Bool = { size = 1 }
+
+[mapping]
+# Default mappings for Brief types
+Int = "i32"
+UInt = "i32"
+Int64 = "i64"
+UInt64 = "i64"
+Float = "f32"
+Double = "f64"
+Void = "void"
+Data = "i32"  # Pointer to memory
+
+[conventions]
+# WASM linear memory model
+error.null_pointer = 0
+error.max_memory = 0xFFFFFFFF
+alignment = 16  # WASM pages are 64KB
+
+# Function call conventions
+call_conv = "wasm"  # WASM stack-based
+
+[[overrides]]
+# Type overrides for WASM specific types
+i32Array = "i32*"
+Buffer = "i32"
+
+[[functions]]
+# Standard WASI functions (for reference)
+name = "fd_write"
+location = "wasi_fd_write"
+description = "Write to file descriptor"

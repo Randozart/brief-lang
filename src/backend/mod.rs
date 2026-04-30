@@ -3,3 +3,4 @@ pub mod rust;
 pub mod verilog;
 pub mod wasm;
 pub mod tcl_generator;
+pub mod cobol;

@@ -1,0 +1,73 @@
+# C Language Profile for Brief FFI
+# Defines type mappings and conventions for speaking to C/kernel code
+
+[language]
+name = "C"
+endianness = "little"  # Most systems are little-endian
+pointer_size = 8       # 64-bit
+description = "Standard C with kernel extensions"
+
+[types]
+# String types
+String = { representation = "ASCII", size = "variable", null_terminated = true }
+char = { size = 1, signed = false }
+
+# Integer types
+Int = { representation = "two's complement", size = 4, signed = true }
+UInt = { representation = "unsigned", size = 4, signed = false }
+Int8 = { representation = "two's complement", size = 1, signed = true }
+UInt8 = { representation = "unsigned", size = 1, signed = false }
+Int16 = { representation = "two's complement", size = 2, signed = true }
+UInt16 = { representation = "unsigned", size = 2, signed = false }
+Int32 = { representation = "two's complement", size = 4, signed = true }
+UInt32 = { representation = "unsigned", size = 4, signed = false }
+Int64 = { representation = "two's complement", size = 8, signed = true }
+UInt64 = { representation = "unsigned", size = 8, signed = false }
+
+# Floating point
+Float = { representation = "IEEE754", size = 4 }
+Double = { representation = "IEEE754", size = 8 }
+
+# Other
+Bool = { size = 4, representation = "int" }  # C has no bool, use int
+Void = { size = 0 }
+
+[mapping]
+# Default mappings for Brief types
+String = "char*"
+Int = "int32_t"
+UInt = "uint32_t"
+Bool = "int"
+Float = "float"
+Double = "double"
+Void = "void"
+Data = "void*"
+
+[conventions]
+# Error handling conventions
+error.null_pointer = 0
+error.error_pointer = -1
+error.min_value = 0
+error.max_value = 0xFFFFFFFF
+
+# Memory alignment
+alignment = 8
+
+# Function calling convention
+call_conv = "cdecl"  # or "stdcall" for Windows
+
+# Pointer conventions
+pointer_size = 8
+
+[[overrides]]
+# Type overrides (can be used with #[ffi.c, type("Int32Array")])
+Int32Array = "int32_t*"
+UInt32Array = "uint32_t*"
+Int64Array = "int64_t*"
+Buffer = "uint8_t*"
+
+[[conventions.custom]]
+# Custom error checking rules
+name = "pci_error"
+check = "result == 0xFFFFFFFF"
+message = "PCI operation failed"

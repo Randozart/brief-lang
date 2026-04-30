@@ -1,0 +1,68 @@
+# JavaScript Language Profile for Brief FFI
+# Defines type mappings and conventions for speaking to JavaScript/WASM
+
+[language]
+name = "JavaScript"
+endianness = "native"  # JavaScript uses host endianness
+pointer_size = 8       # 64-bit (V8, SpiderMonkey are 64-bit)
+description = "Standard JavaScript with WASM bindings"
+
+[types]
+# String type
+String = { representation = "UTF8", size = "variable" }
+
+# Number types (JavaScript has only Number - IEEE754 double)
+Number = { representation = "IEEE754", size = 8 }
+Int = { representation = "IEEE754", size = 8 }  # JavaScript doesn't distinguish
+UInt = { representation = "IEEE754", size = 8 }
+
+# Boolean
+Boolean = { size = 1 }
+
+# BigInt (optional)
+BigInt = { representation = "IEEE754", size = 8 }
+
+# Array/Buffer types
+ArrayBuffer = { representation = "binary", size = "variable" }
+Uint8Array = { representation = "binary", size = "variable" }
+Uint32Array = { representation = "binary", size = "variable" }
+
+# Other
+Void = { size = 0 }
+Object = { representation = "JSObject", size = "variable" }
+
+[mapping]
+# Default mappings for Brief types
+String = "String"
+Int = "Number"
+UInt = "Number"
+Bool = "Boolean"
+Float = "Number"
+Double = "Number"
+Void = "void"
+Data = "ArrayBuffer"
+
+[conventions]
+# Error handling (JavaScript uses exceptions)
+error.null = "null"
+error.undefined = "undefined"
+error.exception_tag = "Error"
+
+# No pointer sizes in JS
+# Memory managed by JS engine
+
+# Function call conventions
+call_conv = "js"  # JavaScript function call
+
+[[overrides]]
+# Type overrides for WASM interop
+Int32Array = "Int32Array"
+Uint8Array = "Uint8Array"
+Uint32Array = "Uint32Array"
+ArrayBuffer = "ArrayBuffer"
+
+[[functions]]
+# Built-in JS functions (for reference)
+name = "console.log"
+location = "console.log"
+description = "Print to console"
