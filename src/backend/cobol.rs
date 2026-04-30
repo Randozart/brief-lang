@@ -58,6 +58,18 @@ impl CobolBackend {
         let params = self.extract_parameters(program);
 
         output.push_str("WORKING-STORAGE SECTION.\n");
+        let old_state_vars = self.collect_all_old_state_vars(program);
+        if !old_state_vars.is_empty() {
+            for var in &old_state_vars {
+                output.push_str(&format!("01  WS-OLD-{} PIC S9(18) COMP-5 VALUE 0.\n", var.to_uppercase()));
+            }
+            output.push_str("\n");
+        }
+        if self.has_watchdog(program) {
+            output.push_str(&format!("01  WS-RECURSION-DEPTH PIC 9(4) COMP-5 VALUE 0.\n"));
+            output.push_str(&format!("01  WS-RECURSION-MAX   PIC 9(4) COMP-5 VALUE {}.\n", self.recursion_limit));
+            output.push_str("\n");
+        }
         if !working_storage.is_empty() {
             output.push_str(&working_storage);
         }
@@ -104,23 +116,34 @@ impl CobolBackend {
         for item in &program.items {
             match item {
                 TopLevel::StateDecl(state) => {
-                    let cobol_type = self.get_cobol_type(&state.ty, &state.attrs);
                     let name = Self::sanitize_name(&state.name);
-                    let init = self.get_init_value(&state.ty, &state.attrs, &state.expr);
 
                     if state.address.is_some() {
                         linkage.push_str(&format!(
                             "01  LS-{} {} {}.\n",
                             name.to_uppercase(),
-                            cobol_type,
-                            init
+                            self.get_cobol_type(&state.ty, &state.attrs),
+                            self.get_init_value(&state.ty, &state.attrs, &state.expr)
+                        ));
+                    } else if state.ty == Type::Bool {
+                        working_storage.push_str(&format!(
+                            "01  WS-{} PIC X VALUE 'N'.\n",
+                            name.to_uppercase()
+                        ));
+                        working_storage.push_str(&format!(
+                            "    88  WS-{}-TRUE   VALUE 'Y'.\n",
+                            name.to_uppercase()
+                        ));
+                        working_storage.push_str(&format!(
+                            "    88  WS-{}-FALSE  VALUE 'N'.\n",
+                            name.to_uppercase()
                         ));
                     } else {
                         working_storage.push_str(&format!(
                             "01  WS-{} {} {}.\n",
                             name.to_uppercase(),
-                            cobol_type,
-                            init
+                            self.get_cobol_type(&state.ty, &state.attrs),
+                            self.get_init_value(&state.ty, &state.attrs, &state.expr)
                         ));
                     }
                 }
@@ -168,6 +191,59 @@ impl CobolBackend {
         }
 
         params
+    }
+
+    fn has_watchdog(&self, program: &Program) -> bool {
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                if txn.contract.watchdog.is_some() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn collect_all_old_state_vars(&self, program: &Program) -> Vec<String> {
+        fn extract_old_vars(expr: &Expr, vars: &mut Vec<String>) {
+            match expr {
+                Expr::Call(name, args) => {
+                    if name == "old" {
+                        if let Some(Expr::Identifier(v)) = args.first() {
+                            if !vars.contains(v) {
+                                vars.push(v.clone());
+                            }
+                        }
+                    }
+                    for arg in args {
+                        extract_old_vars(arg, vars);
+                    }
+                }
+                Expr::PriorState(name) => {
+                    if !vars.contains(name) {
+                        vars.push(name.clone());
+                    }
+                }
+                Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+                | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b)
+                | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b) | Expr::Or(a, b) => {
+                    extract_old_vars(a, vars);
+                    extract_old_vars(b, vars);
+                }
+                Expr::Not(a) | Expr::Neg(a) => {
+                    extract_old_vars(a, vars);
+                }
+                _ => {}
+            }
+        }
+
+        let mut all_vars = Vec::new();
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                extract_old_vars(&txn.contract.post_condition, &mut all_vars);
+            }
+        }
+        all_vars
     }
 
     fn get_cobol_type(&self, ty: &Type, attrs: &[Attribute]) -> String {
@@ -258,35 +334,27 @@ impl CobolBackend {
         let name = Self::sanitize_name(&txn.name).to_uppercase();
 
         let pre_contract = &txn.contract.pre_condition;
-        let cond_str = self.translate_expr(pre_contract);
-        output.push_str(&format!(
-            "    * PRE-CONDITION: {}\n    IF NOT ({})\n        DISPLAY \"BRIEF CONTRACT FAILED: PRECONDITION: {}\"\n        MOVE 4000 TO RETURN-CODE",
-            Self::expr_to_display(pre_contract),
-            cond_str,
-            Self::expr_to_display(pre_contract)
-        ));
-        if self.use_abend {
-            output.push_str("\n        CALL \"CEE3ABD\" USING BY VALUE 4000 BY VALUE 0");
+        let cond_str = self.translate_condition(pre_contract);
+
+        if cond_str != "1 = 1" {
+            output.push_str(&format!(
+                "    * PRE-CONDITION: {}\n    IF NOT ({})\n        DISPLAY \"BRIEF CONTRACT FAILED: PRECONDITION: {}\"\n        MOVE 4000 TO RETURN-CODE",
+                Self::expr_to_display(pre_contract),
+                cond_str,
+                Self::expr_to_display(pre_contract)
+            ));
+            if self.use_abend {
+                output.push_str("\n        CALL \"CEE3ABD\" USING BY VALUE 4000 BY VALUE 0");
+            }
+            output.push_str("\n        GOBACK\n    END-IF.\n\n");
         }
-        output.push_str("\n        GOBACK\n    END-IF.\n\n");
+
+        self.collect_old_state_captures(&txn.contract.post_condition, output);
+
+        self.generate_body(&txn.body, output);
 
         let post_contract = &txn.contract.post_condition;
-        if let Expr::Eq(lhs, _) = post_contract {
-            if let Expr::Call(name, args) = lhs.as_ref() {
-                if name == "old" {
-                    if let Some(var) = args.first() {
-                        if let Expr::Identifier(v) = var {
-                            let var_name = Self::sanitize_name(v).to_uppercase();
-                            output.push_str(&format!(
-                                "    * Capture old state for post-condition\n    MOVE WS-{} TO WS-OLD-{}.\n\n",
-                                var_name, var_name
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        let cond_str = self.translate_expr(post_contract);
+        let cond_str = self.translate_condition(post_contract);
         output.push_str(&format!(
             "    * POST-CONDITION: {}\n    IF NOT ({})\n        DISPLAY \"BRIEF CONTRACT FAILED: POSTCONDITION: {}\"\n        MOVE 4000 TO RETURN-CODE",
             Self::expr_to_display(post_contract),
@@ -305,8 +373,6 @@ impl CobolBackend {
                 self.recursion_limit
             ));
         }
-
-        self.generate_body(&txn.body, output);
     }
 
     fn generate_body(&self, body: &[Statement], output: &mut String) {
@@ -348,11 +414,77 @@ impl CobolBackend {
                     target_name, value_str
                 ));
             }
+            Statement::Term(_) => {
+                output.push_str("    EXIT PARAGRAPH.\n");
+            }
+            Statement::Escape(expr) => {
+                if let Some(e) = expr {
+                    let expr_str = self.translate_expr(e);
+                    output.push_str(&format!("    MOVE {} TO RETURN-CODE.\n", expr_str));
+                }
+                output.push_str("    GOBACK.\n");
+            }
+            Statement::Guarded { condition, statements } => {
+                let cond_str = self.translate_expr(condition);
+                output.push_str(&format!("    IF {}\n", cond_str));
+                for stmt in statements {
+                    self.generate_statement(stmt, output);
+                }
+                output.push_str("    END-IF.\n");
+            }
             Statement::Expression(e) => {
                 let expr_str = self.translate_expr(e);
                 output.push_str(&format!("    {}.\n", expr_str));
             }
-            _ => {} // Stubbed out all other non-supported variants
+            _ => {}
+        }
+    }
+
+    fn collect_old_state_captures(&self, post_condition: &Expr, output: &mut String) {
+        fn extract_old_vars(expr: &Expr, vars: &mut Vec<String>) {
+            match expr {
+                Expr::Call(name, args) => {
+                    if name == "old" {
+                        if let Some(Expr::Identifier(v)) = args.first() {
+                            if !vars.contains(v) {
+                                vars.push(v.clone());
+                            }
+                        }
+                    }
+                    for arg in args {
+                        extract_old_vars(arg, vars);
+                    }
+                }
+                Expr::PriorState(name) => {
+                    if !vars.contains(name) {
+                        vars.push(name.clone());
+                    }
+                }
+                Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+                | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b)
+                | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b) | Expr::Or(a, b) => {
+                    extract_old_vars(a, vars);
+                    extract_old_vars(b, vars);
+                }
+                Expr::Not(a) | Expr::Neg(a) => {
+                    extract_old_vars(a, vars);
+                }
+                _ => {}
+            }
+        }
+
+        let mut old_vars = Vec::new();
+        extract_old_vars(post_condition, &mut old_vars);
+
+        for var in &old_vars {
+            let var_name = Self::sanitize_name(var).to_uppercase();
+            output.push_str(&format!(
+                "    MOVE WS-{} TO WS-OLD-{}.\n",
+                var_name, var_name
+            ));
+        }
+        if !old_vars.is_empty() {
+            output.push_str("\n");
         }
     }
 
@@ -360,18 +492,29 @@ impl CobolBackend {
         match expr {
             Expr::Integer(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
-            Expr::String(s) => format!("\"{}\"", s),
+            Expr::String(s) => format!("'{}'", s),
             Expr::Bool(b) => if *b { "'Y'" } else { "'N'" }.to_string(),
             Expr::Identifier(name) | Expr::OwnedRef(name) => {
                 let n = Self::sanitize_name(name);
-                if n.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) {
-                    format!("LS-{}", n.to_uppercase())
-                } else {
-                    format!("WS-{}", n.to_uppercase())
-                }
+                format!("WS-{}", n.to_uppercase())
             }
             Expr::PriorState(name) => {
                 format!("WS-OLD-{}", Self::sanitize_name(name).to_uppercase())
+            }
+            Expr::Eq(a, b) => {
+                let a_str = self.translate_expr(a);
+                let b_str = self.translate_expr(b);
+                if let Expr::Bool(true) = a.as_ref() {
+                    format!("({} = {} OR {} = 'y')", b_str, b_str, b_str)
+                } else if let Expr::Bool(false) = a.as_ref() {
+                    format!("(NOT ({} = {}) AND NOT ({} = 'y'))", b_str, b_str, b_str)
+                } else if let Expr::Bool(true) = b.as_ref() {
+                    format!("({} = {} OR {} = 'y')", a_str, a_str, a_str)
+                } else if let Expr::Bool(false) = b.as_ref() {
+                    format!("(NOT ({} = {}) AND NOT ({} = 'y'))", a_str, a_str, a_str)
+                } else {
+                    format!("({} = {})", a_str, b_str)
+                }
             }
             Expr::Add(a, b) => format!("({} + {})", self.translate_expr(a), self.translate_expr(b)),
             Expr::Sub(a, b) => format!("({} - {})", self.translate_expr(a), self.translate_expr(b)),
@@ -398,6 +541,31 @@ impl CobolBackend {
                 format!("{}({})", Self::sanitize_name(name), args.iter().map(|a| self.translate_expr(a)).collect::<Vec<_>>().join(", "))
             }
             _ => "0".to_string(),
+        }
+    }
+
+    fn translate_condition(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Bool(true) => "1 = 1".to_string(),
+            Expr::Bool(false) => "1 = 0".to_string(),
+            Expr::Eq(a, b) => {
+                let a_str = self.translate_expr(a);
+                let b_str = self.translate_expr(b);
+                format!("({} = {})", a_str, b_str)
+            }
+            Expr::Ne(a, b) => {
+                let a_str = self.translate_expr(a);
+                let b_str = self.translate_expr(b);
+                format!("(NOT ({} = {}))", a_str, b_str)
+            }
+            Expr::Lt(a, b) => format!("({} < {})", self.translate_expr(a), self.translate_expr(b)),
+            Expr::Le(a, b) => format!("({} <= {})", self.translate_expr(a), self.translate_expr(b)),
+            Expr::Gt(a, b) => format!("({} > {})", self.translate_expr(a), self.translate_expr(b)),
+            Expr::Ge(a, b) => format!("({} >= {})", self.translate_expr(a), self.translate_expr(b)),
+            Expr::And(a, b) => format!("({} AND {})", self.translate_condition(a), self.translate_condition(b)),
+            Expr::Or(a, b) => format!("({} OR {})", self.translate_condition(a), self.translate_condition(b)),
+            Expr::Not(a) => format!("NOT {}", self.translate_condition(a)),
+            _ => self.translate_expr(expr),
         }
     }
 

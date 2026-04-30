@@ -275,6 +275,7 @@ fn print_usage(program: &str) {
     eprintln!("  c <file>         Compile to C with __asm__");
     eprintln!("  arm <file>       Compile to ARM bare-metal Rust");
     eprintln!("  verilog <file>  Compile to SystemVerilog (FPGA)");
+    eprintln!("  cobol <file>     Compile to IBM Enterprise COBOL");
     eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
     eprintln!("  wrap <lib>       Generate FFI bindings for a library");
     eprintln!("  install          Install 'brief' to ~/.local/bin");
@@ -1263,6 +1264,58 @@ fn run_c(
     Ok(out_path)
 }
 
+fn run_cobol(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    println!("Compiling to COBOL: {}", file_path.display());
+
+    let source = fs::read_to_string(file_path)?;
+    let clean_source = strip_annotations(&source);
+
+    let mut parser = parser::Parser::new(&clean_source);
+    let mut program = parser
+        .parse()
+        .map_err(|e| format!("Brief parse error: {}", e))?;
+
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut program = import_resolver
+        .resolve_imports(&program, file_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    let mut desug = desugarer::Desugarer::new();
+    let program = desug.desugar(&program);
+
+    let mut tc = typechecker::TypeChecker::new()
+        .with_stdlib_config(false, None)
+        .with_target(typechecker::CompilationTarget::Interpreter);
+    let type_errors = tc.check_program(&mut program.clone());
+    if !type_errors.is_empty() {
+        return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
+    }
+
+    let stem = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+
+    let mut cobol_backend = backend::cobol::CobolBackend::new();
+    let output = cobol_backend.generate(&program, stem);
+
+    let out_path = if let Some(dir) = out_dir {
+        let d = dir.to_path_buf();
+        fs::create_dir_all(&d)?;
+        d.join(format!("{}.cbl", stem))
+    } else {
+        PathBuf::from(format!("{}.cbl", stem))
+    };
+
+    fs::write(&out_path, &output)?;
+    println!("  COBOL generated: {}", out_path.display());
+
+    Ok(out_path)
+}
+
 fn run_verilog(
     file_path: &PathBuf,
     hw_config_path: &PathBuf,
@@ -1837,6 +1890,36 @@ fn main() {
             } else {
                 eprintln!("Error: No .bv or .ebv file specified");
                 eprintln!("Usage: {} c <file.bv|file.ebv> [--out <dir>]", args[0]);
+                std::process::exit(1);
+            }
+        }
+
+        "cobol" | "cbl" => {
+            let mut file_path = None;
+            let mut out_dir = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg.ends_with(".bv") || arg.ends_with(".ebv") || arg.ends_with(".br") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                if let Err(e) = run_cobol(&path, out_dir.as_deref()) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .bv, .ebv, or .br file specified");
+                eprintln!("Usage: {} cobol <file.bv|file.ebv|file.br> [--out <dir>]", args[0]);
                 std::process::exit(1);
             }
         }
