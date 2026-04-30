@@ -16,6 +16,56 @@ The current FFI system uses complex TOML binding files with per-function definit
 
 ---
 
+## FFI Memory Model (Confirmed)
+
+**Core Principle: Brief owns all memory.**
+
+### Memory Ownership
+- **Brief allocates** memory for FFI parameters
+- **Brief tracks** the memory address
+- **Brief deallocates** memory after call (success OR error)
+- **Compiler handles** all memory operations automatically
+
+### TOML's Role: Declarative Ruleset
+The TOML profile is **declarative only** - it describes rules, not operations:
+- Type mappings (`Int → int32_t`)
+- Error conventions (bounds checking, null pointer)
+- Calling convention (`cdecl`, `stdcall`, `wasm`)
+- Memory layout hints (alignment, size)
+
+### Compiler's Role: Operational
+The compiler handles all memory operations:
+- Memory allocation for parameters
+- Writing parameters to memory (via Mapper)
+- Generating the function call
+- Reading result from memory
+- Freeing memory on success or error
+
+### Memory Flow
+```
+1. Allocate memory for parameters
+2. Write params to memory (via Mapper)
+3. Track memory address
+     ↓
+4. Call FFI function
+     ↓
+5. Read result from memory
+6. FREE memory (always - success or error)
+```
+
+### Error Handling
+- If function returns error → result in `Err`, memory freed
+- If function throws exception → caught, memory freed
+- If non-void returned when `Void` expected → stored in `Err`
+
+### Implications for Implementation
+1. No manual memory management in FFI calls
+2. All buffers are scoped to the transaction
+3. Memory freed automatically regardless of outcome
+4. TOML only defines HOW to map types, not WHEN to free
+
+---
+
 ## Syntax Reference
 
 ### File-Level Attribute

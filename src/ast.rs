@@ -734,6 +734,17 @@ pub struct Program {
     pub comments: Vec<Comment>,
     pub reactor_speed: Option<u32>, // NEW: file-level @Hz default
     pub attrs: Vec<Attribute>,  // NEW: file-level #![...] attributes
+    pub ffi: Option<FfiState>,  // NEW: FFI state from #![ffi.*, ...]
+}
+
+/// FFI State captured from file-level attribute
+/// Example: #![ffi.c, bind("./c.toml"), import("./libc.a"), map("uint","uint32_t")]
+#[derive(Debug, Clone)]
+pub struct FfiState {
+    pub lang: String,              // "c", "js", "rust", etc.
+    pub bind_path: Option<String>, // Profile TOML path
+    pub import_path: Option<String>, // Script/library path
+    pub global_maps: Vec<(String, String)>, // [(brief_type, foreign_type)]
 }
 
 /// Helper for exhaustiveness checking (Feature A)

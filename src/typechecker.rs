@@ -487,6 +487,15 @@ impl TypeChecker {
         toml_path: &str,
         signature: &mut ForeignSignature,
     ) {
+        // If toml_path is empty, we're using the new FFI syntax with profile-based resolution
+        // Skip binding loading and use profile defaults
+        if toml_path.is_empty() {
+            // Use profile-based FFI - address and type mappings come from the FFI state
+            // For now, just set a placeholder location
+            signature.location = format!("<profile:{}>", name);
+            return;
+        }
+
         let resolved_path = match ffi::resolver::resolve_binding_path(
             toml_path,
             &None,

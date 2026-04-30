@@ -68,6 +68,7 @@ impl ImportResolver {
             comments: program.comments.clone(),
             reactor_speed: program.reactor_speed,
             attrs: Vec::new(),
+            ffi: None,
         })
     }
 
@@ -76,12 +77,13 @@ impl ImportResolver {
         import: &Import,
         source_file: &PathBuf,
     ) -> Result<Program, String> {
-        if import.items.is_empty() && import.path.is_empty() {
+if import.items.is_empty() && import.path.is_empty() {
             return Ok(Program {
                 items: vec![],
                 comments: vec![],
                 reactor_speed: None,
-            attrs: Vec::new(),
+                attrs: Vec::new(),
+                ffi: None,
             });
         }
 
@@ -90,7 +92,8 @@ impl ImportResolver {
                 items: vec![],
                 comments: vec![],
                 reactor_speed: None,
-            attrs: Vec::new(),
+                attrs: Vec::new(),
+                ffi: None,
             });
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
@@ -120,20 +123,22 @@ impl ImportResolver {
                     .map_err(|e| format!("Failed to read CSS '{}': {}", css_path.display(), e))?;
                 let css_for_cache = css_content.clone();
                 let css_for_return = css_content.clone();
-                self.loaded_modules.insert(
+self.loaded_modules.insert(
                     path_str.clone(),
                     Program {
                         items: vec![TopLevel::Stylesheet(css_for_cache)],
                         comments: vec![],
                         reactor_speed: None,
-            attrs: Vec::new(),
+                        attrs: Vec::new(),
+                        ffi: None,
                     },
                 );
                 return Ok(Program {
                     items: vec![TopLevel::Stylesheet(css_for_return)],
                     comments: vec![],
                     reactor_speed: None,
-            attrs: Vec::new(),
+                    attrs: Vec::new(),
+                    ffi: None,
                 });
             }
         }
@@ -178,7 +183,7 @@ impl ImportResolver {
                     });
                 let svg_for_cache = svg_content.clone();
                 let svg_for_return = svg_content.clone();
-                self.loaded_modules.insert(
+self.loaded_modules.insert(
                     path_str.clone(),
                     Program {
                         items: vec![TopLevel::SvgComponent {
@@ -187,7 +192,8 @@ impl ImportResolver {
                         }],
                         comments: vec![],
                         reactor_speed: None,
-            attrs: Vec::new(),
+                        attrs: Vec::new(),
+                        ffi: None,
                     },
                 );
                 return Ok(Program {
@@ -197,7 +203,8 @@ impl ImportResolver {
                     }],
                     comments: vec![],
                     reactor_speed: None,
-            attrs: Vec::new(),
+                    attrs: Vec::new(),
+                    ffi: None,
                 });
             }
         }
@@ -306,6 +313,7 @@ impl ImportResolver {
             comments: vec![],
             reactor_speed: None,
             attrs: Vec::new(),
+            ffi: None,
         })
     }
 }

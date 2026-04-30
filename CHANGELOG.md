@@ -9,6 +9,44 @@
 - **JSON serialization**: Built-in `to_json(value) -> String` and `from_json(json_str) -> Result<Object, String>` functions. `from_json` returns a `Result` enum that must be pattern-matched.
 - **`b-style` directive**: Reactive style bindings in views (`b-style="property: signal"`).
 
+### FFI Simplification (2026-04-30)
+
+- **New FFI syntax**: Simplified foreign function declarations without TOML file references:
+  - `frgn name(param: Type) -> Result<T, E>;` - standard FFI with compiler-picked address
+  - `frgn! name(param: Type);` - fire-and-forget (void return)
+  - `frgn name @ address (param: Type) -> Result<T, E>;` - explicit memory address
+  - `frgn! name @ address (param: Type);` - fire-and-forget with address
+
+- **New file-level attribute**: `#![ffi.<lang>, bind("./profile.toml"), map("from","to")]`
+  - `ffi.<lang>` - language target (e.g., `ffi.c`, `ffi.kernel`, `ffi.js`)
+  - `bind()` - optional profile TOML path
+  - `import()` - optional script/library import path
+  - `map()` - inline type mapping overrides
+
+- **Parser changes** (`src/parser.rs`):
+  - Added `process_ffi_attributes()` to extract FFI state from file attributes
+  - Added `parse_type_name_token()` to handle type keywords and `Err` token
+  - Updated `parse_frgn_binding()` to support new syntax and `frgn!`/`frgn` tokens
+  - Added handling for `from` keyword as parameter name
+
+- **AST changes** (`src/ast.rs`):
+  - Added `FfiState` struct to hold language profile, bind path, import path, global maps
+  - Extended `Program` struct with optional `ffi: Option<FfiState>` field
+
+- **Typechecker changes** (`src/typechecker.rs`):
+  - Skip binding loading when `toml_path` is empty (new profile-based FFI)
+
+- **Cobol backend fixes** (`src/backend/cobol.rs`):
+  - Fixed outdated AST variant names (`IntLit` → `Integer`, etc.)
+  - Fixed field names in pattern matching (`target` → `lhs`, etc.)
+
+- **Issues encountered and resolved**:
+  - Borrow checker error in `parse_type_name_token()`: Fixed by dereferencing `String` before mutating `self`
+  - `UInt` parsed as `Custom("UInt")`: Added `"UInt" => Ok(Type::UInt)` to `string_to_type()`
+  - `"from"` treated as keyword in parameters: Added explicit `Token::From` handling in FFI parameter parsing
+  - Missing `ffi` field in all `Program` constructors: Added `ffi: None` to 9 locations across codebase
+  - Cobol backend using deprecated AST variants: Updated to current `Statement`/`Expr` variants
+
 ### Compiler
 
 - **Kernel Target Fixes (2026-04-29 19:25)**:

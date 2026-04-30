@@ -1,0 +1,5 @@
+txn test {
+    let x: UInt = 0;
+    [x > 0] { x = 2; };
+    term;
+};

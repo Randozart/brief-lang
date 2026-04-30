@@ -1,0 +1,7 @@
+#![ffi.c]
+
+// Fire-and-forget with explicit address
+frgn! write_reg @ 0x40001000 (val: UInt);
+
+// Standard foreign function with Result
+frgn printk(fmt: String) -> Result<Int, Err>;

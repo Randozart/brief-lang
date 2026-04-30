@@ -245,6 +245,9 @@ impl<'a> Parser<'a> {
             file_attrs = self.parse_attributes()?;
         }
 
+        // Process FFI state from file attributes
+        let ffi_state = Self::process_ffi_attributes(&file_attrs);
+
         while self.current_token().is_some() {
             items.push(self.parse_top_level()?);
         }
@@ -253,7 +256,62 @@ impl<'a> Parser<'a> {
             comments: self.comments.clone(),
             reactor_speed,
             attrs: file_attrs,
+            ffi: ffi_state,
         })
+    }
+
+    /// Process file-level attributes to extract FFI state
+    /// Example: #![ffi.c, bind("./c.toml"), import("./libc.a"), map("uint","uint32_t")]
+    fn process_ffi_attributes(attrs: &[crate::ast::Attribute]) -> Option<FfiState> {
+        let mut lang = None;
+        let mut bind_path = None;
+        let mut import_path = None;
+        let mut global_maps = Vec::new();
+
+        for attr in attrs {
+            match attr.key.as_str() {
+                k if k.starts_with("ffi.") => {
+                    lang = Some(k[4..].to_string());
+                }
+                "bind" => {
+                    if let Some(v) = &attr.value {
+                        bind_path = Some(v.clone());
+                    }
+                }
+                "import" => {
+                    if let Some(v) = &attr.value {
+                        import_path = Some(v.clone());
+                    }
+                }
+                "map" => {
+                    if let Some(v) = &attr.value {
+                        // map("uint","uint32_t") -> ("uint", "uint32_t")
+                        if let Some((from, to)) = Self::parse_map_pair(v) {
+                            global_maps.push((from, to));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        lang.map(|l| FfiState {
+            lang: l,
+            bind_path,
+            import_path,
+            global_maps,
+        })
+    }
+
+    /// Parse map("from","to") pair from attribute value
+    fn parse_map_pair(value: &str) -> Option<(String, String)> {
+        let inner = value.trim_matches('"');
+        if let Some(comma_pos) = inner.find(',') {
+            let from = inner[..comma_pos].trim().to_string();
+            let to = inner[comma_pos + 1..].trim().to_string();
+            return Some((from, to));
+        }
+        None
     }
 
     fn parse_top_level(&mut self) -> Result<TopLevel, SyntaxError> {
@@ -508,6 +566,7 @@ impl<'a> Parser<'a> {
         match type_name {
             "String" => Ok(Type::String),
             "Int" => Ok(Type::Int),
+            "UInt" => Ok(Type::UInt),
             "Float" => Ok(Type::Float),
             "Bool" => Ok(Type::Bool),
             "void" => Ok(Type::Void),
@@ -516,24 +575,92 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a foreign function binding declaration
-    /// Syntax: frgn name(param: Type, ...) -> Result<T, E> from "binding.toml";
-    fn parse_frgn_binding(&mut self) -> Result<TopLevel, SyntaxError> {
-        use crate::ast::{ForeignBinding, ForeignSignature, ForeignTarget, ResultType};
+    /// Parse a type name token (handles TypeUInt, Err, Identifier, etc.)
+    fn parse_type_name_token(&mut self) -> Result<String, SyntaxError> {
+        match self.current_token() {
+            Some(Ok(Token::Identifier(s))) => {
+                let s = (*s).to_string();
+                self.advance();
+                Ok(s)
+            }
+            Some(Ok(Token::TypeInt)) => { self.advance(); Ok("Int".to_string()) }
+            Some(Ok(Token::TypeUInt)) => { self.advance(); Ok("UInt".to_string()) }
+            Some(Ok(Token::TypeSigned)) => { self.advance(); Ok("Int".to_string()) }
+            Some(Ok(Token::TypeUSgn)) => { self.advance(); Ok("UInt".to_string()) }
+            Some(Ok(Token::TypeUnsigned)) => { self.advance(); Ok("UInt".to_string()) }
+            Some(Ok(Token::TypeFloat)) => { self.advance(); Ok("Float".to_string()) }
+            Some(Ok(Token::TypeString)) => { self.advance(); Ok("String".to_string()) }
+            Some(Ok(Token::TypeBool)) => { self.advance(); Ok("Bool".to_string()) }
+            Some(Ok(Token::TypeVoid)) => { self.advance(); Ok("void".to_string()) }
+            Some(Ok(Token::TypeData)) => { self.advance(); Ok("Data".to_string()) }
+            Some(Ok(Token::Err)) => { self.advance(); Ok("Err".to_string()) }
+            other => self.spanned_err(format!("Expected type name, found {:?}", other)),
+        }
+    }
 
-        self.expect(Token::Frgn)?;
+    /// Parse a foreign function binding declaration
+    /// New Syntax:
+    ///   frgn name @ address (param: Type) -> Result<T, E>;
+    ///   frgn name (param: Type) -> Result<T, E>;       // compiler picks address from profile
+    ///   frgn! name @ address (param: Type);            // fire-and-forget (Void return)
+    ///   frgn! name (param: Type);                       // fire-and-forget, compiler picks address
+    fn parse_frgn_binding(&mut self) -> Result<TopLevel, SyntaxError> {
+        use crate::ast::{ForeignSignature, ForeignTarget, ResultType, FfiKind};
+
+        // Handle both frgn and frgn! tokens
+        let ffi_kind = match self.current_token() {
+            Some(Ok(Token::Frgn)) => {
+                self.advance();
+                FfiKind::Frgn
+            }
+            Some(Ok(Token::FrgnBang)) => {
+                self.advance();
+                FfiKind::FrgnBang
+            }
+            _ => return self.spanned_err("Expected 'frgn' or 'frgn!'".to_string()),
+        };
+
         let name = self.expect_identifier()?;
+
+        // Parse optional @ address
+        let address = if matches!(self.current_token(), Some(Ok(Token::At))) {
+            self.advance();
+            let addr = if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                *n as u64
+            } else if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                // Named address - resolve to actual address from FFI state
+                // For now, store the name; resolution happens in type checking
+                0 // TODO: resolve named address
+            } else {
+                return self.spanned_err("Expected address after @".to_string());
+            };
+            self.advance();
+            Some(addr)
+        } else {
+            None // Compiler will pick address from profile
+        };
 
         // Parse parameters
         self.expect(Token::LParen)?;
         let mut inputs = Vec::new();
-        while let Some(Ok(Token::Identifier(_))) = self.current_token() {
-            let param_name = self.expect_identifier()?;
+        while !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+            // Parameter name can be identifier or 'from' keyword
+            let param_name = match self.current_token() {
+                Some(Ok(Token::Identifier(s))) => {
+                    let name = (*s).to_string();
+                    self.advance();
+                    name
+                }
+                Some(Ok(Token::From)) => {
+                    self.advance();
+                    "from".to_string()
+                }
+                _ => return self.spanned_err("Expected parameter name".to_string()),
+            };
             self.expect(Token::Colon)?;
-            let param_type_name = self.expect_identifier()?;
-            let param_type = self.string_to_type(&param_type_name)?;
+            let param_type = self.parse_type()?;
             inputs.push((param_name, param_type));
-            
+
             if let Some(Ok(Token::Comma)) = self.current_token() {
                 self.advance();
             } else {
@@ -542,65 +669,59 @@ impl<'a> Parser<'a> {
         }
         self.expect(Token::RParen)?;
 
-        // Parse return type: Result<SuccessType, ErrorType>
-        self.expect(Token::Arrow)?;
-
-        // Expect "Result<T, E>" pattern
-        if let Some(Ok(Token::Identifier(result_id))) = self.current_token() {
-            if result_id != "Result" {
-                return self.spanned_err(format!("Expected 'Result<T, E>', found {}", result_id));
-            }
-            self.advance();
+        // Parse return type
+        let success_output = if ffi_kind == FfiKind::FrgnBang {
+            // Fire-and-forget: no return type expected
+            Vec::new()
         } else {
-            return self.spanned_err("Expected Result type for frgn binding".to_string());
-        }
+            self.expect(Token::Arrow)?;
 
-        // Parse <SuccessType, E>
-        self.expect(Token::Lt)?;
-
-        // Parse success type
-        let mut success_output = Vec::new();
-        if let Some(Ok(Token::LParen)) = self.current_token() {
-            // Multi-field success output: (field1: T1, field2: T2)
-            self.advance();
-            loop {
-                let field_name = self.expect_identifier()?;
-                self.expect(Token::Colon)?;
-                let field_type_name = self.expect_identifier()?;
-                let field_type = self.string_to_type(&field_type_name)?;
-                success_output.push((field_name, field_type));
-                
-                if let Some(Ok(Token::Comma)) = self.current_token() {
-                    self.advance();
-                } else {
-                    break;
+            // Expect "Result<T, E>" pattern
+            if let Some(Ok(Token::Identifier(result_id))) = self.current_token() {
+                if result_id != "Result" {
+                    return self.spanned_err(format!("Expected 'Result<T, E>', found {}", result_id));
                 }
+                self.advance();
+            } else {
+                return self.spanned_err("Expected Result type for frgn binding".to_string());
             }
-            self.expect(Token::RParen)?;
-        } else {
-            // Single-field success output: T -> becomes (result: T)
-            let success_type_name = self.expect_identifier()?;
-            let success_type = self.string_to_type(&success_type_name)?;
-            success_output.push(("result".to_string(), success_type));
-        }
 
-        self.expect(Token::Comma)?;
+            // Parse <SuccessType, E>
+            self.expect(Token::Lt)?;
 
-        // Parse error type (just the name)
-        let error_type_name = self.expect_identifier()?;
+            // Parse success type
+            let mut success_output = Vec::new();
+            if let Some(Ok(Token::LParen)) = self.current_token() {
+                // Multi-field success output: (field1: T1, field2: T2)
+                self.advance();
+                loop {
+                    let field_name = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let field_type_name = self.parse_type_name_token()?;
+                    let field_type = self.string_to_type(&field_type_name)?;
+                    success_output.push((field_name, field_type));
 
-        self.expect(Token::Gt)?;
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RParen)?;
+            } else {
+                // Single-field success output: T -> becomes (result: T)
+                let success_type_name = self.parse_type_name_token()?;
+                let success_type = self.string_to_type(&success_type_name)?;
+                success_output.push(("result".to_string(), success_type));
+            }
 
-        // Parse "from" clause
-        self.expect(Token::From)?;
+            self.expect(Token::Comma)?;
 
-        // Parse TOML path
-        let toml_path = if let Some(Ok(Token::String(s))) = self.current_token() {
-            let path = s.clone();
-            self.advance();
-            path
-        } else {
-            return self.spanned_err("Expected TOML file path as string".to_string());
+            // Parse error type (just the name)
+            let _error_type_name = self.parse_type_name_token()?;
+
+            self.expect(Token::Gt)?;
+            success_output
         };
 
         self.expect(Token::Semicolon)?;
@@ -612,7 +733,7 @@ impl<'a> Parser<'a> {
             wasm_setup: None,
             inputs,
             success_output,
-            error_type_name: error_type_name.clone(),
+            error_type_name: "Err".to_string(),
             error_fields: Vec::new(),
             input_layout: None,
             output_layout: None,
@@ -620,13 +741,13 @@ impl<'a> Parser<'a> {
             postcondition: None,
             buffer_mode: None,
             result_type: ResultType::TrueAssertion,
-            ffi_kind: None,
+            ffi_kind: Some(ffi_kind),
             span: None,
         };
 
-Ok(TopLevel::ForeignBinding {
+        Ok(TopLevel::ForeignBinding {
             name,
-            toml_path,
+            toml_path: String::new(), // No longer used - profile-based
             signature: frgn_sig,
             target: ForeignTarget::Native,
             span: None,
@@ -1338,11 +1459,23 @@ let span = self.current_span();
         
         // Parse comma-separated items until ]
         while !matches!(self.current_token(), Some(Ok(Token::RBracket))) {
-            // Parse item: either "key" or "key(value)"
+            // Parse item: either "key" or "key(value)" or "ffi.something"
             let key = if let Some(Ok(Token::Identifier(name))) = self.current_token() {
                 let name = name.clone();
                 self.advance();
-                name
+                // Handle ffi.c, ffi.rust, etc. by checking for . after ffi
+                if name == "ffi" && matches!(self.current_token(), Some(Ok(Token::Dot))) {
+                    self.advance(); // consume Dot
+                    if let Some(Ok(Token::Identifier(lang))) = self.current_token() {
+                        let full_key = format!("ffi.{}", lang);
+                        self.advance();
+                        full_key
+                    } else {
+                        return self.spanned_err("Expected language after ffi.".to_string());
+                    }
+                } else {
+                    name
+                }
             } else {
                 return self.spanned_err("Expected identifier in attribute".to_string());
             };
@@ -1374,9 +1507,10 @@ let span = self.current_span();
             // Check if first item is a target specifier
             let target = if attrs.is_empty() && value.is_none() {
                 // First item with no value - could be a target
-                // Known targets: c, sv, rust, wasm
+                // Known targets: c, sv, rust, wasm, kernel, ffi.c, ffi.rust, etc.
                 match key.as_str() {
                     "c" | "sv" | "rust" | "wasm" | "kernel" => Some(key.clone()),
+                    _ if key.starts_with("ffi.") => Some(key.clone()),
                     _ => None,
                 }
             } else {
