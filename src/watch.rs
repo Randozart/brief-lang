@@ -158,7 +158,7 @@ pub struct WatcherState {
 }
 
 impl WatcherState {
-    pub fn new(debounce_ms: u64) -> Result<Self, WatchError> {
+    pub fn new(_debounce_ms: u64) -> Result<Self, WatchError> {
         let debouncer = Debouncer::new(WatchCallback::new());
 
         let watcher = RecommendedWatcher::new(

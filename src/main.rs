@@ -1,3 +1,5 @@
+#![allow(unused)]
+#![allow(unused_variables)]
 // Copyright 2026 Randy Smits-Schreuder Goedheijt
 //
 // Licensed under the Apache License, Version 2.0 (the "License");

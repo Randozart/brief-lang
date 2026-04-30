@@ -315,7 +315,7 @@ impl ViewCompiler {
                             let elem_id = self.generate_element_id(&tag_str);
                             let inner_html = self.find_each_inner_html(&html[pos..], &tag);
                             let elem_name = tag.split_whitespace().next().unwrap_or(&tag).trim();
-                            let tag_attrs: String = tag
+                            let _tag_attrs: String = tag
                                 .split_whitespace()
                                 .skip(1)
                                 .filter(|s| !s.starts_with("b-"))
@@ -323,7 +323,7 @@ impl ViewCompiler {
                                 .join(" ");
                             let template_html = inner_html.clone();
 
-                            let container_id =
+                            let _container_id =
                                 if let Some((_, parent_pos)) = element_stack.iter().rev().nth(0) {
                                     let parent_html = &html[*parent_pos..];
                                     if let Some((parent_tag, _)) = self.parse_tag(parent_html) {

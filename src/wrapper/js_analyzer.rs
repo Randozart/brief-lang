@@ -401,7 +401,7 @@ fn parse_js_function(line: &str, jsdoc: &[String]) -> Option<AnalyzedFunction> {
 fn parse_js_function_params(
     line: &str,
     name: &str,
-    is_async: bool,
+    _is_async: bool,
     jsdoc: &[String],
 ) -> Option<AnalyzedFunction> {
     let paren_start = line.find('(')?;

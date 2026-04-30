@@ -111,7 +111,7 @@ fn analyze_python_file(content: &str) -> Result<Vec<AnalyzedFunction>, String> {
 }
 
 /// Parse Python function declaration
-fn parse_py_function(line: &str, is_stub: bool) -> Option<AnalyzedFunction> {
+fn parse_py_function(line: &str, _is_stub: bool) -> Option<AnalyzedFunction> {
     let line = line.trim();
 
     // Remove decorators but keep function
@@ -328,9 +328,9 @@ fn parse_py_single_param(
     }
 
     // Handle default values: "name: Type = default"
-    let (name, type_str) = if let Some(eq_pos) = param.find('=') {
-        let before_eq = param[..eq_pos].trim();
-        let after_eq = param[eq_pos + 1..].trim();
+        let (_name, type_str) = if let Some(eq_pos) = param.find('=') {
+            let before_eq = param[..eq_pos].trim();
+            let _after_eq = param[eq_pos + 1..].trim();
 
         // before_eq might be "name: Type" or just "name"
         if let Some(colon_pos) = before_eq.find(':') {
@@ -351,7 +351,7 @@ fn parse_py_single_param(
         }
     };
 
-    Some((name, py_type_to_brief(&type_str)))
+    Some((_name, py_type_to_brief(&type_str)))
 }
 
 /// Convert Python type annotation to Brief type

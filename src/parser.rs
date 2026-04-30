@@ -305,19 +305,19 @@ impl<'a> Parser<'a> {
                 Ok(TopLevel::Trigger(trg))
             }
             Some(Ok(Token::Frgn)) => {
-                let frgn_binding = self.parse_frgn_binding(FfiKind::Frgn)?;
+                let frgn_binding = self.parse_frgn_binding()?;
                 Ok(frgn_binding)
             }
             Some(Ok(Token::FrgnBang)) => {
-                let frgn_binding = self.parse_frgn_binding(FfiKind::FrgnBang)?;
+                let frgn_binding = self.parse_frgn_binding()?;
                 Ok(frgn_binding)
             }
             Some(Ok(Token::Syscall)) => {
-                let frgn_binding = self.parse_frgn_binding(FfiKind::Syscall)?;
+                let frgn_binding = self.parse_frgn_binding()?;
                 Ok(frgn_binding)
             }
             Some(Ok(Token::SyscallBang)) => {
-                let frgn_binding = self.parse_frgn_binding(FfiKind::SyscallBang)?;
+                let frgn_binding = self.parse_frgn_binding()?;
                 Ok(frgn_binding)
             }
             Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) => {
@@ -518,8 +518,8 @@ impl<'a> Parser<'a> {
 
     /// Parse a foreign function binding declaration
     /// Syntax: frgn name(param: Type, ...) -> Result<T, E> from "binding.toml";
-    fn parse_frgn_binding(&mut self, ffi_kind: FfiKind) -> Result<TopLevel, SyntaxError> {
-        use crate::ast::{ForeignBinding, ForeignSignature, ForeignTarget, ResultType, FfiKind};
+    fn parse_frgn_binding(&mut self) -> Result<TopLevel, SyntaxError> {
+        use crate::ast::{ForeignBinding, ForeignSignature, ForeignTarget, ResultType};
 
         self.expect(Token::Frgn)?;
         let name = self.expect_identifier()?;
@@ -533,7 +533,7 @@ impl<'a> Parser<'a> {
             let param_type_name = self.expect_identifier()?;
             let param_type = self.string_to_type(&param_type_name)?;
             inputs.push((param_name, param_type));
-
+            
             if let Some(Ok(Token::Comma)) = self.current_token() {
                 self.advance();
             } else {
@@ -558,9 +558,8 @@ impl<'a> Parser<'a> {
         // Parse <SuccessType, E>
         self.expect(Token::Lt)?;
 
-        // Parse success type - could be simple identifier or tuple syntax (field1: T1, field2: T2)
+        // Parse success type
         let mut success_output = Vec::new();
-
         if let Some(Ok(Token::LParen)) = self.current_token() {
             // Multi-field success output: (field1: T1, field2: T2)
             self.advance();
@@ -570,7 +569,7 @@ impl<'a> Parser<'a> {
                 let field_type_name = self.expect_identifier()?;
                 let field_type = self.string_to_type(&field_type_name)?;
                 success_output.push((field_name, field_type));
-
+                
                 if let Some(Ok(Token::Comma)) = self.current_token() {
                     self.advance();
                 } else {
@@ -606,9 +605,6 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::Semicolon)?;
 
-        // For now, error fields are empty until we load the TOML
-        let error_fields = Vec::new();
-
         let frgn_sig = ForeignSignature {
             name: name.clone(),
             location: String::new(),
@@ -617,14 +613,14 @@ impl<'a> Parser<'a> {
             inputs,
             success_output,
             error_type_name: error_type_name.clone(),
-            error_fields,
+            error_fields: Vec::new(),
             input_layout: None,
             output_layout: None,
             precondition: None,
             postcondition: None,
             buffer_mode: None,
             result_type: ResultType::TrueAssertion,
-            ffi_kind: Some(crate::ast::FfiKind::Frgn),
+            ffi_kind: None,
             span: None,
         };
 
@@ -635,6 +631,160 @@ impl<'a> Parser<'a> {
             target: ForeignTarget::Native,
             span: None,
         })
+    }
+            }
+            self.expect(Token::RParen)?;
+            
+            // Parse return type: Result<SuccessType, ErrorType>
+            self.expect(Token::Arrow)?;
+            
+            // Expect "Result<T, E>" pattern
+            if let Some(Ok(Token::Identifier(result_id))) = self.current_token() {
+                if result_id != "Result" {
+                    return self.spanned_err(format!("Expected 'Result<T, E>', found {}", result_id));
+                }
+                self.advance();
+            } else {
+                return self.spanned_err("Expected Result type for frgn binding".to_string());
+            }
+            
+            // Parse <SuccessType, E>
+            self.expect(Token::Lt)?;
+            
+            // Parse success type
+            let mut success_output = Vec::new();
+            if let Some(Ok(Token::LParen)) = self.current_token() {
+                // Multi-field success output
+                self.advance();
+                loop {
+                    let field_name = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let field_type_name = self.expect_identifier()?;
+                    let field_type = self.string_to_type(&field_type_name)?;
+                    success_output.push((field_name, field_type));
+                    
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RParen)?;
+            } else {
+                // Single-field success output
+                let success_type_name = self.expect_identifier()?;
+                let success_type = self.string_to_type(&success_type_name)?;
+                success_output.push(("result".to_string(), success_type));
+            }
+            
+            self.expect(Token::Comma)?;
+            
+            // Parse error type
+            let error_type_name = self.expect_identifier()?;
+            self.expect(Token::Gt)?;
+            
+            // Parse "from" clause
+            self.expect(Token::From)?;
+            
+            // Parse TOML path
+            let toml_path = if let Some(Ok(Token::String(s))) = self.current_token() {
+                let path = s.clone();
+                self.advance();
+                path
+            } else {
+                return self.spanned_err("Expected TOML file path as string".to_string());
+            };
+            
+            self.expect(Token::Semicolon)?;
+            
+            let frgn_sig = ForeignSignature {
+                name: name.clone(),
+                location: String::new(),
+                wasm_impl: None,
+                wasm_setup: None,
+                inputs,
+                success_output,
+                error_type_name: error_type_name.clone(),
+                error_fields: Vec::new(),
+                input_layout: None,
+                output_layout: None,
+                precondition: None,
+                postcondition: None,
+                buffer_mode: None,
+                result_type: ResultType::TrueAssertion,
+                ffi_kind: Some(crate::ast::FfiKind::Frgn),
+                span: None,
+            };
+            
+            Ok(TopLevel::ForeignBinding {
+                name,
+                toml_path,
+                signature: frgn_sig,
+                target: ForeignTarget::Native,
+                span: None,
+            })
+        } else if ffi_kind == FfiKind::Frgn {
+            // Check what comes next
+            if let Some(Ok(Token::String(_))) = next_token {
+                // Syntax: frgn name "library" { sig ... }
+                let _library = if let Some(Ok(Token::String(s))) = self.current_token() {
+                    let lib = s.clone();
+                    self.advance();
+                    lib
+                } else {
+                    return self.spanned_err("Expected library name as string".to_string());
+                };
+                self.expect(Token::LBrace)?;
+                
+                // Parse sig declarations inside braces
+                // For now, just skip to matching brace
+                let mut _sigs: Vec<String> = Vec::new();
+                while let Some(Ok(Token::Identifier(sig_name))) = self.current_token() {
+                    if sig_name == "sig" {
+                        // Parse sig declaration
+                        self.advance();
+                        // Simplified: just consume until }
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RBrace)?;
+                
+                // Return ForeignBinding with empty signature for now
+                let frgn_sig = ForeignSignature {
+                    name: name.clone(),
+                    location: String::new(),
+                    wasm_impl: None,
+                    wasm_setup: None,
+                    inputs: Vec::new(),
+                    success_output: Vec::new(),
+                    error_type_name: "void".to_string(),
+                    error_fields: Vec::new(),
+                    input_layout: None,
+                    output_layout: None,
+                    precondition: None,
+                    postcondition: None,
+                    buffer_mode: None,
+                    result_type: ResultType::TrueAssertion,
+                    ffi_kind: Some(crate::ast::FfiKind::Frgn),
+                    span: None,
+                };
+                
+                Ok(TopLevel::ForeignBinding {
+                    name,
+                    toml_path: String::new(),
+                    signature: frgn_sig,
+                    target: ForeignTarget::Native,
+                    span: None,
+                })
+            } else {
+                // Assume toml syntax: frgn name(params) -> Result<T, E> from "file.toml";
+                // (Same as FrgnBang case above)
+                return self.spanned_err("Frgn syntax not fully implemented".to_string());
+            }
+        } else {
+            return self.spanned_err("Unknown ffi_kind".to_string());
+        }
     }
 
     /// Parse a resource declaration: rsrc name: Type(args);
