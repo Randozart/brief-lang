@@ -51,7 +51,18 @@ impl TargetSpecLoader {
             return self.load_file(spec_path);
         }
 
-        // 2. Try each search path
+        // 2. Try current directory first (most common case)
+        if spec_path.exists() {
+            return self.load_file(spec_path);
+        }
+
+        // 3. Try with .toml extension in current dir
+        let with_ext = format!("{}.toml", spec_path.display());
+        if std::path::Path::new(&with_ext).exists() {
+            return self.load_file(std::path::Path::new(&with_ext));
+        }
+
+        // 4. Try each search path
         for base in &self.search_paths {
             // Try direct join
             let full_path = base.join(spec_path);

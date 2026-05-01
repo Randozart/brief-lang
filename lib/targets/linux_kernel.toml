@@ -1,0 +1,20 @@
+[codegen]
+backend = "c"
+extension = "c"
+state_allocation = "static"
+
+[codegen.entry_point]
+style = "module_init"
+module_name = "brief_module"
+
+[codegen.templates]
+header = """
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+"""
+footer = """
+MODULE_AUTHOR("Brief Compiler");
+MODULE_LICENSE("GPL");
+"""
