@@ -25,6 +25,7 @@
 use brief_compiler::{
     annotator, ast, backend, desugarer, errors, hardware_validator, import_resolver, interpreter,
     linkage, lsp, manifest, parser, proof_engine, rbv, typechecker, view_compiler,
+    target_spec,
 };
 use notify::Watcher;
 use std::collections::HashMap;
@@ -1227,12 +1228,18 @@ fn run_c(
     if let Some(linkage) = linkage_config {
         c_backend = c_backend.with_linkage(linkage);
     }
-    if is_ebv {
-        c_backend = c_backend.bare_metal(true);
-    }
-if let Some(t) = target {
-        if t == "linux_kernel" {
-            c_backend = c_backend.with_kernel_mode(Some("linux".to_string()));
+
+    // Load target spec if specified
+    if let Some(t) = target {
+        let spec_path = std::path::Path::new(t);
+        let loader = target_spec::loader::TargetSpecLoader::new();
+        match loader.load(spec_path) {
+            Ok(spec) => {
+                c_backend = c_backend.with_spec(spec);
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to load target spec '{}': {}", t, e);
+            }
         }
     }
 

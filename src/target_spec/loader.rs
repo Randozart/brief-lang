@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use super::TargetSpec;
-use crate::target_spec::LoadError;
+use super::LoadError;
 
 /// Searches multiple directories for Target Spec TOML files
 pub struct TargetSpecLoader {

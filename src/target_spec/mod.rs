@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub mod loader;
+pub use loader::TargetSpecLoader;
 
 /// Main TargetSpec struct - can contain FFI, Codegen, or both
 #[derive(Debug, Clone, Deserialize, Serialize)]
