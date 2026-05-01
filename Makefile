@@ -1,5 +1,5 @@
 # Auto-generated Makefile for kernel module
-obj-m += vitriol_new_ffi.o
+obj-m += kernel.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

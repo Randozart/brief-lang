@@ -1230,11 +1230,9 @@ fn run_c(
     if is_ebv {
         c_backend = c_backend.bare_metal(true);
     }
-    if let Some(t) = target {
+if let Some(t) = target {
         if t == "linux_kernel" {
             c_backend = c_backend.with_kernel_mode(Some("linux".to_string()));
-        } else {
-            c_backend = c_backend.with_kernel_mode(None);
         }
     }
 

@@ -48,6 +48,7 @@ pub mod scheduler;
 pub mod sig_casting;
 pub mod signal_graph;
 pub mod symbolic;
+pub mod target_spec;
 pub mod typechecker;
 pub mod view_compiler;
 pub mod watch;
