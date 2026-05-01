@@ -295,6 +295,7 @@ Brief comes in three variants, each targeting different output:
 # Pure Brief (.bv) - Software targets
 brief build program.bv        # → WebAssembly (browser/edge)
 brief c program.bv            # → C (hosted, Linux/embedded)
+brief c program.bv --target lib/targets/linux_kernel.toml  # → Linux kernel module
 brief rust program.bv         # → Native Rust (with std)
 brief cobol program.bv        # → IBM Enterprise COBOL
 
@@ -307,6 +308,26 @@ brief verilog program.ebv --hw config.toml  # → SystemVerilog (+ TCL with --tc
 brief arm program.ebv         # → ARM bare-metal Rust (KV260 Cortex-A53)
 brief c program.ebv           # → C bare-metal (ARM, static allocation, no malloc)
 ```
+
+#### Target Specs for C Compilation
+
+The C backend supports declarative target configuration via TOML files:
+
+```bash
+# Default: hosted (dynamic allocation, main())
+brief c program.bv
+
+# Linux kernel module (static allocation, module_init/module_exit)
+brief c program.bv --target lib/targets/linux_kernel.toml
+
+# ARM bare-metal (static allocation, _start entry point)
+brief c program.bv --target lib/targets/arm_el1.toml
+```
+
+Target specs are stored in `lib/targets/` and define:
+- `codegen.state_allocation`: `"static"` or `"dynamic"`
+- `codegen.entry_point.style`: `"module_init"`, `"bare_metal"`, `"main"`
+- `codegen.templates.header` / `codegen.templates.footer`
 
 ### Embedded Brief: Software-Defined Silicon
 
