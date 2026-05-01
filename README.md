@@ -289,45 +289,67 @@ Brief comes in three variants, each targeting different output:
   - **FPGA/ASIC**: SystemVerilog via `brief verilog` (with optional TCL build scripts)
   - **ARM bare-metal**: Rust via `brief arm` or C via `brief c`
 
+## Unified Build Syntax
+
+Brief uses a **single command** for all transpilation targets. The distinction between "software," "hardware," and "web" is handled entirely by the target configuration.
+
+### The Command
+
+```bash
+brief compile <SOURCE> --target <CONFIG.toml>
+```
+
+Where:
+- `<SOURCE>` is your `.bv`, `.rbv`, or `.ebv` file
+- `<CONFIG.toml>` is the target specification defining the backend, templates, and capabilities
+
+### Semantic Layers
+
+| Extension | Layer | Description | Capabilities |
+| :--- | :--- | :--- | :--- |
+| **`.bv`** | Foundational | Pure logic with contracts | None (all targets) |
+| **`.rbv`** | Rendered | `.bv` + HTML/CSS/SVG view | `reactive_ui` |
+| **`.ebv`** | Embedded | `.bv` + hardware triggers | `hardware_triggers`, `mmio` |
+
+### Target Capabilities
+
+Each target TOML declares which layers it supports. The compiler validates compatibility:
+
+```bash
+# Web backend (supports .bv and .rbv)
+brief compile app.rbv --target react_web.toml
+
+# Hardware backend (supports .bv and .ebv)  
+brief compile logic.ebv --target kv260_fpga.toml
+
+# If you try .ebv for a web target, you get a capability error
+```
+
 ### Quick Reference
 
-```bash
-# Pure Brief (.bv) - Software targets
-brief build program.bv        # → WebAssembly (browser/edge)
-brief c program.bv            # → C (hosted, Linux/embedded)
-brief c program.bv --target lib/targets/linux_kernel.toml  # → Linux kernel module
-brief rust program.bv         # → Native Rust (with std)
-brief cobol program.bv        # → IBM Enterprise COBOL
+| Target | Command |
+| :--- | :--- |
+| **Web (React)** | `brief compile app.rbv --target react_web.toml` |
+| **Linux Kernel** | `brief compile logic.bv --target linux_kernel.toml` |
+| **KV260 FPGA** | `brief compile logic.ebv --target kv260_fpga.toml` |
+| **Rust (native)** | `brief compile logic.bv --target rust_std.toml` |
+| **Python/NumPy** | `brief compile model.bv --target python_numpy.toml` |
+| **WebGPU** | `brief compile kernel.bv --target webgpu_wgsl.toml` |
+| **COBOL** | `brief compile audit.bv --target ibm_cobol.toml` |
 
-# Rendered Brief (.rbv) - Web UI
+#### Legacy Commands (Still Supported)
+
+```bash
+# These old commands still work and map to target specs:
+brief build program.bv        # → WebAssembly
+brief c program.bv            # → C (hosted default)
+brief c program.ebv           # → C bare-metal (for .ebv files)
+brief rust program.bv         # → Native Rust
+brief cobol program.bv        # → IBM COBOL
 brief rbv program.rbv         # → Browser files
-brief run program.rbv         # → Build, serve, and open browser
-
-# Embedded Brief (.ebv) - Hardware targets
-brief verilog program.ebv --hw config.toml  # → SystemVerilog (+ TCL with --tcl)
-brief arm program.ebv         # → ARM bare-metal Rust (KV260 Cortex-A53)
-brief c program.ebv           # → C bare-metal (ARM, static allocation, no malloc)
+brief run program.rbv         # → Build, serve, open browser
+brief verilog program.ebv --hw config.toml  # → SystemVerilog
 ```
-
-#### Target Specs for C Compilation
-
-The C backend supports declarative target configuration via TOML files:
-
-```bash
-# Default: hosted (dynamic allocation, main())
-brief c program.bv
-
-# Linux kernel module (static allocation, module_init/module_exit)
-brief c program.bv --target lib/targets/linux_kernel.toml
-
-# ARM bare-metal (static allocation, _start entry point)
-brief c program.bv --target lib/targets/arm_el1.toml
-```
-
-Target specs are stored in `lib/targets/` and define:
-- `codegen.state_allocation`: `"static"` or `"dynamic"`
-- `codegen.entry_point.style`: `"module_init"`, `"bare_metal"`, `"main"`
-- `codegen.templates.header` / `codegen.templates.footer`
 
 ### Embedded Brief: Software-Defined Silicon
 
