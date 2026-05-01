@@ -1,0 +1,21 @@
+[target]
+name = "hosted-c"
+backend = "c"
+capabilities = ["logic"]
+
+[codegen]
+backend = "c"
+extension = "c"
+state_allocation = "dynamic"
+
+[codegen.entry_point]
+style = "main"
+
+[codegen.templates]
+header = """
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+"""
+footer = ""

@@ -24,13 +24,105 @@ use std::path::{Path, PathBuf};
 pub mod loader;
 pub use loader::TargetSpecLoader;
 
-/// Main TargetSpec struct - can contain FFI, Codegen, or both
+/// Main TargetSpec struct - can contain target metadata, FFI, Codegen, or all
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TargetSpec {
+    #[serde(default)]
+    pub target: Option<TargetSection>,
     #[serde(default)]
     pub ffi: Option<FfiSection>,
     #[serde(default)]
     pub codegen: Option<CodegenSection>,
+}
+
+/// Target metadata: defines which backend and what capabilities are supported
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TargetSection {
+    pub name: String,
+    pub backend: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub import_ffi: Option<String>,  // Phase 4: inherit FFI from profile
+}
+
+/// Errors for TargetSpec operations
+#[derive(Debug, Clone)]
+pub enum TargetError {
+    SpecNotFound(String),
+    ParseError(String),
+    CapabilityMismatch {
+        source_capability: String,
+        target: String,
+        missing: String,
+    },
+    BackendNotFound(String),
+}
+
+impl std::fmt::Display for TargetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TargetError::SpecNotFound(s) => write!(f, "Target spec '{}' not found", s),
+            TargetError::ParseError(s) => write!(f, "Parse error: {}", s),
+            TargetError::CapabilityMismatch { source_capability, target, missing } => {
+                write!(f, "B4001: Target '{}' lacks '{}' capability required by source", target, missing)
+            }
+            TargetError::BackendNotFound(s) => write!(f, "Backend '{}' not found", s),
+        }
+    }
+}
+
+impl std::error::Error for TargetError {}
+
+impl TargetSpec {
+    /// Get capabilities from target section, falling back to defaults
+    pub fn capabilities(&self) -> Vec<String> {
+        self.target
+            .as_ref()
+            .map(|t| t.capabilities.clone())
+            .unwrap_or_else(|| vec!["logic".to_string()])
+    }
+
+    /// Check if target has required capability
+    pub fn has_capability(&self, capability: &str) -> bool {
+        let caps = self.capabilities();
+        caps.contains(&capability.to_string()) || caps.contains(&"logic".to_string())
+    }
+
+    /// Validate source capabilities against target, returning error or warnings
+    pub fn validate_capabilities(&self, source_caps: &[&str]) -> Result<Vec<String>, TargetError> {
+        let target_caps = self.capabilities();
+        let mut warnings = Vec::new();
+
+        for sc in source_caps {
+            if !target_caps.contains(&sc.to_string()) && *sc != "logic" {
+                warnings.push(format!(
+                    "B4005: Target '{}' lacks '{}'; feature may be stripped",
+                    self.target.as_ref().map(|t| &t.name).unwrap_or(&"default".to_string()),
+                    sc
+                ));
+            }
+        }
+
+        if warnings.is_empty() {
+            Ok(warnings)
+        } else {
+            Err(TargetError::CapabilityMismatch {
+                source_capability: source_caps.join(", "),
+                target: self.target.as_ref().map(|t| t.name.clone()).unwrap_or_default(),
+                missing: warnings.join("; "),
+            })
+        }
+    }
+
+    /// Get backend name from target section
+    pub fn backend(&self) -> String {
+        self.target
+            .as_ref()
+            .map(|t| t.backend.clone())
+            .or_else(|| self.codegen.as_ref().map(|c| c.backend.clone()))
+            .unwrap_or_else(|| "c".to_string())
+    }
 }
 
 /// FFI section from TOML profile
@@ -92,9 +184,11 @@ pub struct TypeOverride {
 }
 
 /// Codegen section from TOML profile
+/// Note: `backend` is now also in `[target]` section for consistency, but we check both for compatibility
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CodegenSection {
-    pub backend: String,
+    #[serde(default)]
+    pub backend: String,  // Kept for backward compatibility
     #[serde(default)]
     pub extension: String,
     #[serde(default, rename = "state_allocation")]

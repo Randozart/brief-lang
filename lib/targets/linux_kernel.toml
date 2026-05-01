@@ -1,5 +1,9 @@
-[codegen]
+[target]
+name = "linux-kernel"
 backend = "c"
+capabilities = ["logic"]
+
+[codegen]
 extension = "c"
 state_allocation = "static"
 
