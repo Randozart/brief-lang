@@ -6,16 +6,9 @@ capabilities = ["logic", "hardware_triggers", "mmio"]
 [codegen]
 extension = "sv"
 state_allocation = "static"
-entry_point = "module"
+
+[codegen.entry_point]
+style = "module"
 
 [codegen.templates]
-header = """
-module brief_top (
-    input wire clk,
-    input wire rst_n,
-    // Add your signals here
-);
-"""
-footer = """
-endmodule
-"""
+header = "module brief_top (input wire clk, input wire rst_n);"

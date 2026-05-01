@@ -1,0 +1,14 @@
+[target]
+name = "rust-std"
+backend = "rust"
+capabilities = ["logic"]
+
+[codegen]
+extension = "rs"
+state_allocation = "dynamic"
+
+[codegen.entry_point]
+style = "main"
+
+[codegen.templates]
+header = "use std::collections::HashMap;"

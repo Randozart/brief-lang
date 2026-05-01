@@ -1,0 +1,19 @@
+[target]
+name = "ibm-cobol"
+backend = "cobol"
+capabilities = ["logic"]
+
+[codegen]
+extension = "cbl"
+state_allocation = "static"
+
+[codegen.entry_point]
+style = "cobol"
+
+[codegen.templates]
+header = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BRIEF01.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+"""
