@@ -266,6 +266,7 @@ fn print_usage(program: &str) {
     eprintln!();
     eprintln!("Commands:");
     eprintln!("  check <file>     Type check without execution (fast)");
+    eprintln!("  compile <file>   Unified compile with --target (Phase 3)");
     eprintln!("  build <file>     Full compilation");
     eprintln!("  init [name]      Create new project");
     eprintln!("  import <name>    Add dependency to project");
@@ -275,12 +276,16 @@ fn print_usage(program: &str) {
     eprintln!("  rust <file>      Compile to Native Rust (std)");
     eprintln!("  c <file>         Compile to C with __asm__");
     eprintln!("  arm <file>       Compile to ARM bare-metal Rust");
-    eprintln!("  verilog <file>  Compile to SystemVerilog (FPGA, with --tcl flag)");
+    eprintln!("  verilog <file>   Compile to SystemVerilog (FPGA, with --tcl flag)");
     eprintln!("  cobol <file>     Compile to IBM Enterprise COBOL");
     eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
     eprintln!("  wrap <lib>       Generate FFI bindings for a library");
-    eprintln!("  install          Install 'brief' to ~/.local/bin");
-    eprintln!("  lsp              Start Language Server (for IDE integration)");
+    eprintln!("  install         Install 'brief' to ~/.local/bin");
+    eprintln!("  lsp             Start Language Server (for IDE integration)");
+    eprintln!();
+    eprintln!("Compile Options (Phase 3 Unified):");
+    eprintln!("  --target <spec> Target spec TOML (e.g., hosted_c.toml)");
+    eprintln!("  --out <dir>     Output directory");
     eprintln!();
     eprintln!("Verilog Options:");
     eprintln!("  --hw <file>      Hardware config TOML (required for .ebv files)");
@@ -300,7 +305,7 @@ fn print_usage(program: &str) {
     eprintln!("  --skip-proof         Skip proof verification");
     eprintln!("  --no-stdlib          Disable standard library bindings");
     eprintln!("  --stdlib-path <path> Use custom standard library path");
-    eprintln!("  --target <target>    Compilation target: linux_kernel, web, etc.");
+    eprintln!("  --target <spec>      Target spec TOML (e.g., hosted_c.toml, linux_kernel.toml)");
     eprintln!("  -v, --verbose        Verbose output");
     eprintln!("  --quiet, --whisper   Minimal output (for CI/automated use)");
     eprintln!("  -h, --help           Show this help");
@@ -1169,6 +1174,130 @@ fn run_rust(
     Ok(out_path)
 }
 
+fn run_compile_unified(args: &[String]) {
+    let mut file_path = None;
+    let mut target: Option<&str> = None;
+    let mut out_dir = None;
+    let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
+
+    // Parse arguments
+    let mut i = 2;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "--target" && i + 1 < args.len() {
+            target = Some(&args[i + 1]);
+            i += 2;
+        } else if arg == "--out" && i + 1 < args.len() {
+            out_dir = Some(PathBuf::from(&args[i + 1]));
+            i += 2;
+        } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") {
+            file_path = Some(PathBuf::from(arg));
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    let file_path = match file_path {
+        Some(p) => p,
+        None => {
+            eprintln!("Error: No source file specified");
+            eprintln!("Usage: {} compile <file> --target <spec.toml>", args[0]);
+            std::process::exit(1);
+        }
+    };
+
+    // Detect source type from extension
+    let source_type = if file_path.extension().map(|e| e == "rbv").unwrap_or(false) {
+        "rendered"
+    } else if file_path.extension().map(|e| e == "ebv").unwrap_or(false) {
+        "embedded"
+    } else {
+        "foundational"
+    };
+
+    // Infer default target if not specified
+    let target_spec = if let Some(t) = target {
+        let loader = target_spec::TargetSpecLoader::new();
+        match loader.load(std::path::Path::new(t)) {
+            Ok(spec) => Some(spec),
+            Err(e) => {
+                eprintln!("Warning: failed to load target spec '{}': {}", t, e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Validate capabilities (if target specified)
+    if let Some(ref spec) = target_spec {
+        let source_cap = match source_type {
+            "rendered" => vec!["logic", "reactive_ui"],
+            "embedded" => vec!["logic", "hardware_triggers"],
+            _ => vec!["logic"],
+        };
+        
+        // Check for capability mismatches (warn only for now, Phase 3.1)
+        let target_caps = spec.capabilities();
+        for cap in &source_cap {
+            if !target_caps.contains(&cap.to_string()) && *cap != "logic" {
+                eprintln!("Warning B4005: Target '{}' lacks '{}' capability", 
+                    spec.target.as_ref().map(|t| &t.name).unwrap_or(&"default".to_string()),
+                    cap);
+            }
+        }
+    };
+
+    println!("Compiling to unified: {}", file_path.display());
+    println!("  Source type: {}", source_type);
+    if let Some(ref spec) = target_spec {
+        println!("  Target: {}", spec.target.as_ref().map(|t| &t.name).unwrap_or(&"default".to_string()));
+        println!("  Backend: {}", spec.backend());
+    } else {
+        println!("  Target: default (hosted_c)");
+        println!("  Backend: c");
+    }
+
+    // Dispatch to appropriate backend based on target backend
+let backend = target_spec.as_ref().map(|s| s.backend()).unwrap_or_else(|| "c".to_string());
+
+    // Dispatch to appropriate backend (Phase 3: C is fully implemented, others fallback)
+    let result: Option<PathBuf> = match backend.as_str() {
+        "c" => run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok(),
+        "rust" => {
+            eprintln!("Note: rust backend not yet Phase 3 ready, using C backend");
+            run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok()
+        }
+        "cobol" => {
+            eprintln!("Note: cobol backend not yet Phase 3 ready, using C backend");
+            run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok()
+        }
+        "verilog" => {
+            eprintln!("Note: verilog backend requires --hw flag, falling back to C");
+            run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok()
+        }
+        _ => {
+            eprintln!("Error: Unknown backend '{}' in target spec", backend);
+            None
+        }
+    };
+
+    if result.is_none() {
+        std::process::exit(1);
+    }
+}
+
+fn run_c_compile(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+    target: Option<&str>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    run_c(file_path, out_dir, no_stdlib, stdlib_path, target, &[])
+}
+
 fn run_c(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1841,6 +1970,10 @@ fn main() {
                 eprintln!("Usage: {} check <file.bv>", args[0]);
                 std::process::exit(1);
             }
+        }
+
+        "compile" => {
+            run_compile_unified(&args);
         }
 
         "build" | "b" => {
