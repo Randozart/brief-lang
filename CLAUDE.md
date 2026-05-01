@@ -29,6 +29,8 @@ The project consists of:
 
 ### Running the Compiler
 - **Compile RBV File**: `./target/release/brief-compiler rbv <file.rbv>`
+- **Compile to C**: `./target/release/brief-compiler c <file.bv>`
+- **Compile to C with target spec**: `./target/release/brief-compiler c <file.bv> --target <spec.toml>`
 - **Run with Server**: `./target/release/brief-compiler run <file.rbv>`
 - **Install to PATH**: `cp target/release/brief-compiler ~/.local/bin/brief`
 
@@ -253,6 +255,13 @@ Implement the solution:
 3. **Execute** - Make changes, run tests (`cargo test`), update documentation
 
 ---
+
+## Changes Made
+
+### 2026-05-01 - Phase 2: TargetSpec refactor
+- Files: `src/backend/c.rs`, `src/main.rs`, `src/target_spec/`
+- Change: Replaced CBackend boolean flags with TOML-based TargetSpec
+- Now uses `--target <spec.toml>` for kernel modules, bare-metal, etc.
 
 ## Contact
 
