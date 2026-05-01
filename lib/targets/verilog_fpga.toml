@@ -1,0 +1,21 @@
+[target]
+name = "verilog-fpga"
+backend = "verilog"
+capabilities = ["logic", "hardware_triggers", "mmio"]
+
+[codegen]
+extension = "sv"
+state_allocation = "static"
+entry_point = "module"
+
+[codegen.templates]
+header = """
+module brief_top (
+    input wire clk,
+    input wire rst_n,
+    // Add your signals here
+);
+"""
+footer = """
+endmodule
+"""

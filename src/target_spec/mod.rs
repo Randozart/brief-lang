@@ -85,8 +85,9 @@ impl TargetSpec {
 
     /// Check if target has required capability
     pub fn has_capability(&self, capability: &str) -> bool {
+        // "logic" is always required, but specific capabilities need explicit support
         let caps = self.capabilities();
-        caps.contains(&capability.to_string()) || caps.contains(&"logic".to_string())
+        caps.contains(&capability.to_string())
     }
 
     /// Validate source capabilities against target, returning error or warnings

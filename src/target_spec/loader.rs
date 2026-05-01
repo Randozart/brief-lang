@@ -27,14 +27,36 @@ pub struct TargetSpecLoader {
 }
 
 impl TargetSpecLoader {
-    /// Create a new loader with default search paths
+/// Create a new loader with default search paths
     pub fn new() -> Self {
         Self {
             search_paths: vec![
-                PathBuf::from("lib/ffi/profiles"),
-                PathBuf::from("lib/codegen"),
                 PathBuf::from("lib/targets"),
-                PathBuf::from("hardware_lib/targets"),
+                PathBuf::from("."),
+            ],
+        }
+    }
+
+    /// Try to find a target spec, checking multiple locations
+    pub fn find(&self, name: &str) -> Option<PathBuf> {
+        let name = if name.ends_with(".toml") { name.to_string() } else { format!("{}.toml", name) };
+        
+        // Try each search path
+        for base in &self.search_paths {
+            let path = base.join(&name);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    /// Create loader for project root (where binary is run)
+    pub fn project_root() -> Self {
+        Self {
+            search_paths: vec![
+                PathBuf::from("lib/targets"),
+                PathBuf::from("."),
             ],
         }
     }

@@ -1,0 +1,19 @@
+[target]
+name = "react-web"
+backend = "react"
+capabilities = ["logic", "reactive_ui"]
+
+[codegen]
+extension = "tsx"
+state_allocation = "dynamic"
+
+[codegen.entry_point]
+style = "react"
+
+[codegen.templates]
+header = """
+import React, { useState, useEffect } from 'react';
+"""
+footer = """
+export default App;
+"""

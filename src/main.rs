@@ -1216,7 +1216,10 @@ fn run_compile_unified(args: &[String]) {
         "foundational"
     };
 
-    // Infer default target if not specified
+    // Infer default target if not specified (Phase 3.3)
+    // .bv -> hosted_c.toml (default C)
+    // .rbv -> react_web.toml (React web)
+    // .ebv -> verilog_fpga.toml (FPGA/embedded)
     let target_spec = if let Some(t) = target {
         let loader = target_spec::TargetSpecLoader::new();
         match loader.load(std::path::Path::new(t)) {
@@ -1227,25 +1230,48 @@ fn run_compile_unified(args: &[String]) {
             }
         }
     } else {
-        None
+        // No target specified - infer from source type
+        let inferred_target = match source_type {
+            "rendered" => "react_web.toml",
+            "embedded" => "verilog_fpga.toml",
+            _ => "hosted_c.toml",
+        };
+        let loader = target_spec::TargetSpecLoader::new();
+        // Try to find the target spec
+        if let Some(path) = loader.find(inferred_target) {
+            match loader.load(&path) {
+                Ok(spec) => {
+                    let target_name = spec.target.as_ref().map(|t| t.name.as_str()).unwrap_or(inferred_target);
+                    println!("  Note: Inferred target '{}' for .{} files", target_name, 
+                        file_path.extension().map(|e| e.to_string_lossy()).unwrap_or_default());
+                    Some(spec)
+                }
+                Err(e) => {
+                    eprintln!("  Note: Could not load '{}', using defaults", inferred_target);
+                    None
+                }
+            }
+        } else {
+            eprintln!("  Note: Could not find '{}', using defaults", inferred_target);
+            None
+        }
     };
 
-    // Validate capabilities (if target specified)
+    // Validate capabilities (Phase 3.2: strict for .ebv, warn for .rbv)
     if let Some(ref spec) = target_spec {
-        let source_cap = match source_type {
-            "rendered" => vec!["logic", "reactive_ui"],
-            "embedded" => vec!["logic", "hardware_triggers"],
-            _ => vec!["logic"],
-        };
+        let target_name = spec.target.as_ref().map(|t| &t.name).unwrap_or(&"default".to_string()).clone();
         
-        // Check for capability mismatches (warn only for now, Phase 3.1)
-        let target_caps = spec.capabilities();
-        for cap in &source_cap {
-            if !target_caps.contains(&cap.to_string()) && *cap != "logic" {
-                eprintln!("Warning B4005: Target '{}' lacks '{}' capability", 
-                    spec.target.as_ref().map(|t| &t.name).unwrap_or(&"default".to_string()),
-                    cap);
-            }
+        // .ebv files ALWAYS require hardware_triggers capability
+        if source_type == "embedded" && !spec.has_capability("hardware_triggers") {
+            eprintln!("Error B4001: Target '{}' lacks required 'hardware_triggers' capability", target_name);
+            eprintln!("  .ebv files require target with hardware_triggers support");
+            eprintln!("  Hint: Use a target spec with capabilities = [\"logic\", \"hardware_triggers\"]");
+            std::process::exit(1);
+        }
+        
+        // .rbv files warn if no reactive_ui capability (view gets stripped)
+        if source_type == "rendered" && !spec.has_capability("reactive_ui") {
+            eprintln!("Warning B4005: Target '{}' lacks 'reactive_ui'; view block will be stripped", target_name);
         }
     };
 
