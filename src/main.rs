@@ -25,7 +25,7 @@
 use brief_compiler::{
     annotator, ast, backend, desugarer, errors, hardware_validator, import_resolver, interpreter,
     linkage, lsp, manifest, parser, proof_engine, rbv, typechecker, view_compiler,
-    target_spec,
+    target_spec::{self, TargetSpec},
 };
 use notify::Watcher;
 use std::collections::HashMap;
@@ -1125,6 +1125,7 @@ fn run_rust(
     out_dir: Option<&Path>,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
+    target_spec: Option<TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to Native Rust: {}", file_path.display());
 
@@ -1153,6 +1154,9 @@ fn run_rust(
     }
 
     let mut rust_backend = backend::rust::RustBackend::new();
+    if let Some(spec) = target_spec {
+        rust_backend = rust_backend.with_spec(spec);
+    }
     let output = rust_backend.generate(&program);
 
     let stem = file_path
@@ -1286,33 +1290,50 @@ fn run_compile_unified(args: &[String]) {
     }
 
     // Dispatch to appropriate backend based on target backend
-let backend = target_spec.as_ref().map(|s| s.backend()).unwrap_or_else(|| "c".to_string());
+    let backend = target_spec.as_ref().map(|s| s.backend()).unwrap_or_else(|| "c".to_string());
 
-    // Dispatch to appropriate backend (Phase 5: all backends wired)
     let result: Option<PathBuf> = match backend.as_str() {
-        "c" => run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok(),
+        "c" => {
+            match run_c_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref()) {
+                Ok(p) => Some(p),
+                Err(e) => { eprintln!("Error: {}", e); None }
+            }
+        },
         "rust" => {
-            // Fallback to C for now (Phase 5.2 will implement)
-            eprintln!("Note: rust backend not fully Phase 5 ready, using C backend");
-            run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok()
-        }
+            match run_rust_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref()) {
+                Ok(p) => Some(p),
+                Err(e) => { eprintln!("Error: {}", e); None }
+            }
+        },
         "cobol" => {
-            // Fallback to C for now (Phase 5.3 will implement)
-            eprintln!("Note: cobol backend not fully Phase 5 ready, using C backend");
-            run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok()
-        }
+            match run_cobol_compile(&file_path, out_dir.as_deref(), target_spec.as_ref()) {
+                Ok(p) => Some(p),
+                Err(e) => { eprintln!("Error: {}", e); None }
+            }
+        },
         "verilog" => {
-            eprintln!("Note: verilog backend requires --hw flag, falling back to C");
-            run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok()
-        }
+            if let Some(ref spec) = target_spec {
+                if let Some(hw_path) = spec.codegen.as_ref().and_then(|c| c.hardware_config.as_ref()) {
+                    match run_verilog_compile(&file_path, &PathBuf::from(hw_path), out_dir.as_deref(), false, None, false, false, target_spec.as_ref()) {
+                        Ok(p) => Some(p),
+                        Err(e) => { eprintln!("Error: {}", e); None }
+                    }
+                } else {
+                    eprintln!("Error: verilog backend requires hardware_config in target spec");
+                    None
+                }
+            } else {
+                eprintln!("Error: verilog backend requires --target with hardware_config");
+                None
+            }
+        },
         "react" => {
-            eprintln!("Note: react/web backend not fully Phase 5 ready, using C backend");
-            run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok()
+            eprintln!("Error: react backend not yet implemented");
+            None
         }
         "wasm" => {
-            // Fallback to C for now (Phase 5.4 will implement)  
-            eprintln!("Note: wasm backend not fully Phase 5 ready, using C backend");
-            run_c_compile(&file_path, out_dir.as_deref(), false, None, target).ok()
+            eprintln!("Error: wasm backend not yet implemented");
+            None
         }
         _ => {
             eprintln!("Error: Unknown backend '{}' in target spec", backend);
@@ -1330,9 +1351,40 @@ fn run_c_compile(
     out_dir: Option<&Path>,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
-    target: Option<&str>,
+    target: Option<&TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_c(file_path, out_dir, no_stdlib, stdlib_path, target, &[])
+    run_c(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), &[])
+}
+
+fn run_rust_compile(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+    target: Option<&TargetSpec>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    run_rust(file_path, out_dir, no_stdlib, stdlib_path, target.cloned())
+}
+
+fn run_cobol_compile(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+    target: Option<&TargetSpec>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    run_cobol(file_path, out_dir, target.cloned())
+}
+
+fn run_verilog_compile(
+    file_path: &PathBuf,
+    hw_config_path: &PathBuf,
+    out_dir: Option<&Path>,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+    generate_tcl: bool,
+    tcl_only: bool,
+    target: Option<&TargetSpec>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    run_verilog(file_path, hw_config_path, out_dir, no_stdlib, stdlib_path, generate_tcl, tcl_only, target.cloned())
 }
 
 fn run_c(
@@ -1340,12 +1392,12 @@ fn run_c(
     out_dir: Option<&Path>,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
-    target: Option<&str>,
+    target_spec: Option<TargetSpec>,
     args: &[String],
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to C: {}", file_path.display());
-    if let Some(t) = target {
-        println!("  Target: {}", t);
+    if let Some(ref spec) = target_spec {
+        println!("  Target: {}", spec.target.as_ref().map(|t| t.name.as_str()).unwrap_or("unknown"));
     }
 
     let source = fs::read_to_string(file_path)?;
@@ -1395,23 +1447,9 @@ fn run_c(
         c_backend = c_backend.with_linkage(linkage);
     }
 
-    // Load target spec if specified
-    if let Some(t) = target {
-        let spec_path = std::path::Path::new(t);
-        let loader = target_spec::loader::TargetSpecLoader::new();
-        match loader.load(spec_path) {
-            Ok(spec) => {
-                c_backend = c_backend.with_spec(spec);
-            }
-            Err(e) => {
-                eprintln!("Warning: failed to load target spec '{}': {}", t, e);
-            }
-        }
-    }
-
-    // Check for --test-mode flag in arguments
-    if args.iter().any(|a| a == "--test-mode" || a == "-t") {
-        c_backend = c_backend.with_test_mode(true);
+    // Use target spec if provided
+    if let Some(spec) = target_spec {
+        c_backend = c_backend.with_spec(spec);
     }
 
     let stem = file_path
@@ -1449,6 +1487,7 @@ fn run_c(
 fn run_cobol(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
+    target_spec: Option<TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to COBOL: {}", file_path.display());
 
@@ -1482,6 +1521,9 @@ fn run_cobol(
         .unwrap_or("output");
 
     let mut cobol_backend = backend::cobol::CobolBackend::new();
+    if let Some(spec) = target_spec {
+        cobol_backend = cobol_backend.with_spec(spec);
+    }
     let output = cobol_backend.generate(&program, stem);
 
     let out_path = if let Some(dir) = out_dir {
@@ -1506,6 +1548,7 @@ fn run_verilog(
     stdlib_path: Option<PathBuf>,
     generate_tcl: bool,
     tcl_only: bool,
+    target_spec: Option<TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to SystemVerilog: {}", file_path.display());
 
@@ -1566,6 +1609,7 @@ fn run_verilog(
         Some(&hw_config),
         "verilog",
         is_ebv,
+        target_spec.as_ref(),
     );
 
     if !hw_diagnostics.is_empty() {
@@ -1593,6 +1637,9 @@ fn run_verilog(
     let mut verilog_gen = backend::verilog::VerilogGenerator::new(stem, hw_config.clone());
     if let Some(linkage) = linkage_config {
         verilog_gen = verilog_gen.with_linkage(linkage);
+    }
+    if let Some(spec) = target_spec {
+        verilog_gen = verilog_gen.with_spec(spec);
     }
     let verilog_code = verilog_gen.generate(&program);
     let tb_code = verilog_gen.generate_testbench(&program);
@@ -2050,7 +2097,7 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone()) {
+                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), None) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -2084,7 +2131,13 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), target, &args) {
+                let spec = if let Some(t) = target {
+                    let loader = target_spec::TargetSpecLoader::new();
+                    loader.load(std::path::Path::new(t)).ok()
+                } else {
+                    None
+                };
+                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), spec, &args) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -2114,7 +2167,7 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                if let Err(e) = run_cobol(&path, out_dir.as_deref()) {
+                if let Err(e) = run_cobol(&path, out_dir.as_deref(), None) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -2287,6 +2340,7 @@ fn main() {
                             stdlib_path.clone(),
                             generate_tcl,
                             tcl_only,
+                            None,
                         ) {
                             eprintln!("Error: {}", e);
                             std::process::exit(1);
@@ -2309,6 +2363,7 @@ fn main() {
                         stdlib_path.clone(),
                         generate_tcl,
                         tcl_only,
+                        None,
                     ) {
                         eprintln!("Error: {}", e);
                         std::process::exit(1);

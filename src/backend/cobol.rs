@@ -15,6 +15,7 @@
 use crate::ast::{Attribute, Expr, OutputType, Program, Statement, TopLevel, Transaction, Type, Contract, WatchdogSpec};
 
 pub struct CobolBackend {
+    spec: Option<crate::target_spec::TargetSpec>,
     program_id: String,
     use_abend: bool,
     recursion_limit: u32,
@@ -23,10 +24,16 @@ pub struct CobolBackend {
 impl CobolBackend {
     pub fn new() -> Self {
         Self {
+            spec: None,
             program_id: String::new(),
             use_abend: false,
             recursion_limit: 1000,
         }
+    }
+
+    pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
+        self.spec = Some(spec);
+        self
     }
 
     pub fn with_program_id(mut self, id: String) -> Self {
@@ -51,6 +58,15 @@ impl CobolBackend {
         output.push_str(">>SOURCE FORMAT IS FREE\n");
         output.push_str("IDENTIFICATION DIVISION.\n");
         output.push_str(&format!("PROGRAM-ID. {} RECURSIVE.\n\n", program_id));
+
+        if let Some(spec) = &self.spec {
+            if let Some(cg) = &spec.codegen {
+                if let Some(header) = &cg.templates.header {
+                    output.push_str(header);
+                    output.push_str("\n");
+                }
+            }
+        }
 
         output.push_str("DATA DIVISION.\n");
 

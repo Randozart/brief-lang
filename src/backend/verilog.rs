@@ -32,6 +32,7 @@ struct RamWrite {
 }
 
 pub struct VerilogGenerator {
+    spec: Option<crate::target_spec::TargetSpec>,
     module_name: String,
     clock_freq: u32,
     hw_config: HardwareConfig,
@@ -44,6 +45,7 @@ impl VerilogGenerator {
     pub fn new(module_name: &str, hw_config: HardwareConfig) -> Self {
         let clock_freq = hw_config.target.clock_hz;
         VerilogGenerator {
+            spec: None,
             module_name: module_name.to_string(),
             clock_freq,
             hw_config,
@@ -51,6 +53,11 @@ impl VerilogGenerator {
             _indent_level: 0,
             output: String::new(),
         }
+    }
+
+    pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
+        self.spec = Some(spec);
+        self
     }
 
     pub fn with_linkage(mut self, linkage: LinkageConfig) -> Self {
@@ -63,6 +70,16 @@ impl VerilogGenerator {
 
         if let Err(e) = self.validate_hardware(program) {
             panic!("Hardware validation failed: {}", e);
+        }
+
+        if let Some(spec) = &self.spec {
+            if let Some(cg) = &spec.codegen {
+                if let Some(header) = &cg.templates.header {
+                    self.output.push_str(&format!("// Spec header from {}\n", spec.target.as_ref().map(|t| t.name.as_str()).unwrap_or("unknown")));
+                    self.output.push_str(header);
+                    self.output.push_str("\n\n");
+                }
+            }
         }
 
         self.emit_header(program);
@@ -80,6 +97,17 @@ impl VerilogGenerator {
         self.emit_logic(program);
 
         self.emit_footer();
+        self.output.push_str("\n");
+
+        if let Some(spec) = &self.spec {
+            if let Some(cg) = &spec.codegen {
+                if let Some(footer) = &cg.templates.footer {
+                    self.output.push_str(footer);
+                    self.output.push_str("\n");
+                }
+            }
+        }
+
         self.output.clone()
     }
 

@@ -6,6 +6,7 @@ capabilities = ["logic", "hardware_triggers", "mmio"]
 [codegen]
 extension = "sv"
 state_allocation = "static"
+hardware_config = "examples/hardware.toml"
 
 [codegen.entry_point]
 style = "module"

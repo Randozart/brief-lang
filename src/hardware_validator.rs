@@ -22,6 +22,7 @@
 
 use crate::ast::{Expr, HardwareConfig, Program, Statement, TopLevel};
 use crate::errors::{Diagnostic, Severity};
+use crate::target_spec::TargetSpec;
 use std::collections::HashSet;
 
 pub struct HardwareValidator;
@@ -32,6 +33,7 @@ impl HardwareValidator {
         hw_config: Option<&HardwareConfig>,
         _target: &str,
         is_ebv: bool,
+        target_spec: Option<&TargetSpec>,
     ) -> Vec<Diagnostic> {
         let write_graph = WriteGraph::build(program);
         let trigger_graph = TriggerGraph::build(program);
@@ -57,6 +59,75 @@ impl HardwareValidator {
             hw_config,
             &read_graph,
         ));
+
+        if let Some(spec) = target_spec {
+            diagnostics.extend(Self::check_memory_overlaps(program, hw_config, spec));
+        }
+
+        diagnostics
+    }
+
+    fn check_memory_overlaps(
+        program: &Program,
+        _hw_config: Option<&HardwareConfig>,
+        spec: &TargetSpec,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        let mut occupied_regions: Vec<(u64, u64, String)> = Vec::new();
+
+        // 1. Collect sections from target spec
+        if let Some(memory) = &spec.memory {
+            for (name, section) in &memory.sections {
+                if let Some(max_size) = section.max_size {
+                    occupied_regions.push((section.at, section.at + max_size, format!("Section '{}'", name)));
+                }
+            }
+            
+            // 2. Check memory banks bounds
+            for item in &program.items {
+                if let TopLevel::StateDecl(decl) = item {
+                    if let Some(addr) = decl.address {
+                        let mut found_bank = false;
+                        for (bank_name, bank) in &memory.banks {
+                            if addr >= bank.start && addr < bank.start + bank.size {
+                                found_bank = true;
+                                break;
+                            }
+                        }
+                        if !found_bank && !memory.banks.is_empty() {
+                            let mut diag = Diagnostic::new(
+                                "B4006",
+                                Severity::Error,
+                                &format!("Address 0x{:X} for '{}' is outside any defined memory bank", addr, decl.name),
+                            );
+                            if let Some(span) = decl.span {
+                                diag = diag.with_span(span);
+                            }
+                            diagnostics.push(diag);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Check for overlaps between defined sections
+        for i in 0..occupied_regions.len() {
+            for j in i + 1..occupied_regions.len() {
+                let (s1, e1, n1) = &occupied_regions[i];
+                let (s2, e2, n2) = &occupied_regions[j];
+                
+                if s1 < e2 && s2 < e1 {
+                    diagnostics.push(Diagnostic::new(
+                        "B4007",
+                        Severity::Error,
+                        &format!("Memory overlap detected between {} and {}", n1, n2),
+                    ).with_explanation(&format!(
+                        "Region 1: 0x{:X}-0x{:X}, Region 2: 0x{:X}-0x{:X}",
+                        s1, e1, s2, e2
+                    )));
+                }
+            }
+        }
 
         diagnostics
     }

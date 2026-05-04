@@ -33,6 +33,31 @@ pub struct TargetSpec {
     pub ffi: Option<FfiSection>,
     #[serde(default)]
     pub codegen: Option<CodegenSection>,
+    #[serde(default)]
+    pub memory: Option<MemorySection>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct MemorySection {
+    #[serde(default)]
+    pub banks: HashMap<String, MemoryBank>,
+    #[serde(default)]
+    pub sections: HashMap<String, MemorySectionDef>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MemoryBank {
+    pub start: u64,
+    pub size: u64,
+    #[serde(default)]
+    pub usage: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MemorySectionDef {
+    pub at: u64,
+    #[serde(default)]
+    pub max_size: Option<u64>,
 }
 
 /// Target metadata: defines which backend and what capabilities are supported
@@ -202,6 +227,8 @@ pub struct CodegenSection {
     pub validation: HashMap<String, String>,
     #[serde(default)]
     pub inference: HashMap<String, String>,
+    #[serde(default, rename = "hardware_config")]
+    pub hardware_config: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
