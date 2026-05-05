@@ -222,6 +222,40 @@ if ((current_weight == /* Unsupported Expr: Neg(Integer(1)) */)) begin
 
 ---
 
+## Additional Requirements from Research
+
+### DBrief: Recursive Datalog Engine
+
+**Gap:** Full Prolog-style recursive rules require a complete Datalog engine.
+
+**Required:**
+1. Implement rule evaluation with stratification
+2. Support for `RULE head :- body` syntax
+3. Handle recursive queries (e.g., path finding)
+4. Negation support (stratified)
+
+### DBrief: Address Allocation (@auto)
+
+**Gap:** The `@auto` keyword needs a linker-style address allocator.
+
+**Required:**
+1. Parse claimed address ranges from `.dbv`
+2. Implement first-fit/best-fit allocation algorithm
+3. Track allocated vs free space
+4. Error on insufficient space
+
+### VHDL: Second Backend Target
+
+**Gap:** Need VHDL transpilation alongside SystemVerilog.
+
+**Required:**
+1. VHDL type mapping (std_logic, signed, unsigned)
+2. Transaction → process translation
+3. Contracts → PSL assertions
+4. Dual output (both SV and VHDL)
+
+---
+
 ## References
 
 - Issue discovered during IMP KV260 development
