@@ -18,7 +18,7 @@ pub mod eval;
 pub mod alloc;
 
 pub use ast::*;
-pub use parser::parse_dbrief;
+pub use parser::{parse_dbrief, parse_dbvs, parse_dbvl};
 pub use eval::*;
 pub use alloc::*;
 
@@ -77,4 +77,92 @@ impl DbriefEngine {
 pub fn compile_dbrief(input: &str) -> Result<DbriefEngine, String> {
     let program = parse_dbrief(input)?;
     Ok(DbriefEngine::new(program))
+}
+
+/// Schema engine for .dbvs files - provides template definitions for hardware
+pub struct DbvsEngine {
+    pub program: DbvsProgram,
+}
+
+impl DbvsEngine {
+    pub fn new(program: DbvsProgram) -> Self {
+        DbvsEngine { program }
+    }
+
+    pub fn get_register(&self, name: &str) -> Option<&DbriefRegister> {
+        self.program.registers.iter().find(|r| {
+            if let Some(n) = &r.name {
+                n == name
+            } else {
+                false
+            }
+        })
+    }
+
+    pub fn get_struct(&self, name: &str) -> Option<&DbriefStruct> {
+        self.program.structs.iter().find(|s| s.name == name)
+    }
+
+    pub fn get_enum(&self, name: &str) -> Option<&DbriefEnum> {
+        self.program.enums.iter().find(|e| e.name == name)
+    }
+
+    pub fn get_alias(&self, name: &str) -> Option<&DbriefAlias> {
+        self.program.aliases.iter().find(|a| a.name == name)
+    }
+}
+
+pub fn compile_dbvs(input: &str) -> Result<DbvsEngine, String> {
+    let program = parse_dbvs(input)?;
+    Ok(DbvsEngine::new(program))
+}
+
+/// Mutable database engine for .dbvl files - line-based mutable records
+pub struct DbvlEngine {
+    pub program: DbvlProgram,
+    records: HashMap<DbriefAddress, DbvlRecord>,
+}
+
+impl DbvlEngine {
+    pub fn new(program: DbvlProgram) -> Self {
+        let mut records = HashMap::new();
+        for record in &program.records {
+            records.insert(record.address.clone(), record.clone());
+        }
+        DbvlEngine { program, records }
+    }
+
+    pub fn insert(&mut self, address: DbriefAddress, fields: Vec<(String, DbriefLiteral)>) {
+        let record = DbvlRecord { address: address.clone(), fields };
+        self.records.insert(address, record);
+    }
+
+    pub fn update(&mut self, address: &DbriefAddress, fields: Vec<(String, DbriefLiteral)>) {
+        if let Some(record) = self.records.get_mut(address) {
+            for (key, value) in fields {
+                if let Some(existing) = record.fields.iter_mut().find(|(n, _)| n == &key) {
+                    *existing = (key, value);
+                } else {
+                    record.fields.push((key, value));
+                }
+            }
+        }
+    }
+
+    pub fn delete(&mut self, address: &DbriefAddress) {
+        self.records.remove(address);
+    }
+
+    pub fn get(&self, address: &DbriefAddress) -> Option<&DbvlRecord> {
+        self.records.get(address)
+    }
+
+    pub fn all_records(&self) -> Vec<&DbvlRecord> {
+        self.records.values().collect()
+    }
+}
+
+pub fn compile_dbvl(input: &str) -> Result<DbvlEngine, String> {
+    let program = parse_dbvl(input)?;
+    Ok(DbvlEngine::new(program))
 }

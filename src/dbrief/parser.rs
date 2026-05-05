@@ -338,8 +338,11 @@ impl DbriefParser {
         Ok(DbriefRecord { address, fields })
     }
 
-    fn parse_address(&mut self) -> Result<DbriefAddress, String> {
-        self.consume('@')?;
+fn parse_address(&mut self) -> Result<DbriefAddress, String> {
+        // Handle optional @ prefix - some callers consume it, some don't
+        if self.peek() == Some('@') {
+            self.advance();
+        }
         
         if self.starts_with("auto") {
             self.pos += 4;
@@ -823,5 +826,123 @@ mod tests {
         } else {
             panic!("Expected Vector type");
         }
+    }
+}
+
+pub fn parse_dbvs(input: &str) -> Result<DbvsProgram, String> {
+    let mut parser = DbriefParser::new(input.to_string());
+    let mut program = parser.parse()?;
+    
+    Ok(DbvsProgram {
+        imports: program.imports,
+        registers: program.registers,
+        structs: program.structs,
+        enums: program.enums,
+        aliases: program.aliases,
+    })
+}
+
+pub fn parse_dbvl(input: &str) -> Result<DbvlProgram, String> {
+    let mut parser = DbriefParser::new(input.to_string());
+    let mut program = parser.parse()?;
+    
+    let mut records = Vec::new();
+    let mut operations = Vec::new();
+    
+    for record in program.records {
+        records.push(DbvlRecord {
+            address: record.address,
+            fields: record.fields,
+        });
+    }
+    
+    Ok(DbvlProgram {
+        imports: program.imports,
+        records,
+        operations,
+    })
+}
+
+#[cfg(test)]
+mod dbvs_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_dbvs_schema() {
+        let input = r#"
+            REGISTER @1: Vector[Person];
+            
+            STRUCT Person {
+                name: String;
+                age: UInt[8];
+                role: String;
+            }
+            
+            ALIAS status_reg: UInt[32];
+            ALIAS led: Bool;
+        "#;
+        let result = parse_dbvs(input);
+        assert!(result.is_ok(), "Failed to parse dbvs: {:?}", result);
+        let program = result.unwrap();
+        assert_eq!(program.registers.len(), 1);
+        assert_eq!(program.structs.len(), 1);
+        assert_eq!(program.aliases.len(), 2);
+    }
+
+    #[test]
+    fn test_dbvs_aliases_are_declarations_only() {
+        let input = r#"
+            ALIAS status_reg: UInt[32];
+            ALIAS led: Bool;
+        "#;
+        let result = parse_dbvs(input);
+        assert!(result.is_ok());
+        let program = result.unwrap();
+        
+        for alias in &program.aliases {
+            assert!(alias.address.is_none(), "dbvs aliases should not have addresses");
+        }
+    }
+}
+
+#[cfg(test)]
+mod dbvl_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_dbvl_records() {
+        let input = "@1 { name: \"Alice\"; age: 30; }";
+        let result = parse_dbvl(input);
+        assert!(result.is_ok(), "Failed to parse dbvl: {:?}", result);
+        let program = result.unwrap();
+        assert_eq!(program.records.len(), 1);
+        
+        // Verify the record fields
+        let record = &program.records[0];
+        assert!(matches!(record.address, DbriefAddress::Numeric(1)));
+    }
+
+    #[test]
+    fn test_parse_dbvl_with_hex_address() {
+        let input = "@0xFF5E0000 { name: \"LED\"; state: \"off\"; }";
+        let result = parse_dbvl(input);
+        assert!(result.is_ok(), "Failed to parse dbvl: {:?}", result);
+        let program = result.unwrap();
+        assert_eq!(program.records.len(), 1);
+        
+        if let DbriefAddress::Hex(addr) = program.records[0].address {
+            assert_eq!(addr, 0xFF5E0000);
+        } else {
+            panic!("Expected hex address");
+        }
+    }
+
+    #[test]
+    fn test_parse_dbvl_multiple_records() {
+        let input = "@1 { name: \"Alice\"; }\n@2 { name: \"Bob\"; }";
+        let result = parse_dbvl(input);
+        assert!(result.is_ok(), "Failed to parse dbvl: {:?}", result);
+        let program = result.unwrap();
+        assert_eq!(program.records.len(), 2);
     }
 }

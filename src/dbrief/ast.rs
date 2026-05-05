@@ -191,6 +191,37 @@ pub struct DbriefProgram {
     pub checks: Vec<DbriefContract>,
 }
 
+/// DBrief Schema (.dbvs) - Template definitions for hardware registers
+#[derive(Debug, Clone)]
+pub struct DbvsProgram {
+    pub imports: Vec<ImportStmt>,
+    pub registers: Vec<DbriefRegister>,
+    pub structs: Vec<DbriefStruct>,
+    pub enums: Vec<DbriefEnum>,
+    pub aliases: Vec<DbriefAlias>,
+}
+
+/// DBrief Mutable Database (.dbvl) - Line-based mutable records
+#[derive(Debug, Clone)]
+pub struct DbvlProgram {
+    pub imports: Vec<ImportStmt>,
+    pub records: Vec<DbvlRecord>,
+    pub operations: Vec<DbvlOperation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DbvlRecord {
+    pub address: DbriefAddress,
+    pub fields: Vec<(String, DbriefLiteral)>,
+}
+
+#[derive(Debug, Clone)]
+pub enum DbvlOperation {
+    Insert { address: DbriefAddress, fields: Vec<(String, DbriefLiteral)> },
+    Update { address: DbriefAddress, filter: Option<DbriefExpr>, set: Vec<(String, DbriefLiteral)> },
+    Delete { address: DbriefAddress, filter: Option<DbriefExpr> },
+}
+
 #[derive(Debug, Clone)]
 pub struct ImportStmt {
     pub path: String,

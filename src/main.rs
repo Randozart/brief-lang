@@ -289,7 +289,7 @@ fn print_usage(program: &str) {
     eprintln!("  --out <dir>     Output directory");
     eprintln!();
     eprintln!("Verilog Options:");
-    eprintln!("  --hw <file>      Hardware config TOML or DBrief .dbv (required for .ebv files)");
+    eprintln!("  --hw <file>      Hardware config TOML, .dbv, or .dbvs (required for .ebv files)");
     eprintln!("  --tcl            Generate TCL build scripts alongside SystemVerilog");
     eprintln!("  --tcl-only       Generate TCL only (skip SystemVerilog generation)");
     eprintln!();
@@ -1615,9 +1615,62 @@ fn run_verilog(
         
         // Create a minimal hardware config from DBrief
         parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
+    } else if hw_config_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e == "dbvs")
+        .unwrap_or(false)
+    {
+        // Load DBrief schema and display available registers/aliases
+        println!("  Loading DBrief schema: {}", hw_config_path.display());
+        let dbvs_source = fs::read_to_string(hw_config_path)?;
+        let dbvs_program = dbrief::parse_dbvs(&dbvs_source)
+            .map_err(|e| format!("DBrief schema parse error: {}", e))?;
+        
+        println!("  Schema defines:");
+        println!("    Registers: {}", dbvs_program.registers.len());
+        println!("    Structs: {}", dbvs_program.structs.len());
+        println!("    Enums: {}", dbvs_program.enums.len());
+        println!("    Aliases: {}", dbvs_program.aliases.len());
+        
+        for alias in &dbvs_program.aliases {
+            println!("      - {}: {:?}", alias.name, alias.alias_type);
+        }
+        
+        // Create a minimal hardware config
+        parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
     } else {
         parser::parse_hardware_config(hw_config_path)?
     };
+
+    // Check for .dbvs schema imports in the source file
+    let source = fs::read_to_string(file_path)?;
+    if source.contains("IMPORT") && source.contains(".dbvs") {
+        println!("  Checking for .dbvs schema imports...");
+        
+        // Find .dbvs import statements
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("IMPORT") && trimmed.contains(".dbvs") {
+                // Extract path
+                if let Some(path_start) = trimmed.find('"') {
+                    if let Some(path_end) = trimmed[path_start+1..].find('"') {
+                        let import_path = &trimmed[path_start+1..path_start+1+path_end];
+                        println!("    Found import: {}", import_path);
+                        
+                        // Load and display schema info
+                        if let Ok(dbvs_content) = fs::read_to_string(file_path.parent().unwrap().join(import_path)) {
+                            if let Ok(dbvs) = dbrief::parse_dbvs(&dbvs_content) {
+                                for alias in &dbvs.aliases {
+                                    println!("      Schema alias: {} -> {:?}", alias.name, alias.alias_type);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Load linkage config (optional - look alongside source file)
     let linkage_path = file_path
@@ -1748,7 +1801,7 @@ fn run_vhdl(
         return Err("Hardware config (--hw) is REQUIRED for VHDL compilation".into());
     }
 
-    // Check if loading .dbv (DBrief config) or .toml (hardware config)
+    // Check if loading .dbv (DBrief config), .dbvs (schema), or .toml (hardware config)
     let hw_config = if hw_config_path
         .extension()
         .and_then(|e| e.to_str())
@@ -1777,6 +1830,26 @@ fn run_vhdl(
         }
         
         // Create a minimal hardware config from DBrief
+        parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
+    } else if hw_config_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e == "dbvs")
+        .unwrap_or(false)
+    {
+        // Load DBrief schema
+        println!("  Loading DBrief schema: {}", hw_config_path.display());
+        let dbvs_source = fs::read_to_string(hw_config_path)?;
+        let dbvs_program = dbrief::parse_dbvs(&dbvs_source)
+            .map_err(|e| format!("DBrief schema parse error: {}", e))?;
+        
+        println!("  Schema defines:");
+        println!("    Registers: {}", dbvs_program.registers.len());
+        println!("    Structs: {}", dbvs_program.structs.len());
+        for alias in &dbvs_program.aliases {
+            println!("    Alias: {} = {:?}", alias.name, alias.alias_type);
+        }
+        
         parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
     } else {
         parser::parse_hardware_config(hw_config_path)?
