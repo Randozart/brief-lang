@@ -1,0 +1,39 @@
+// KV260 Target Configuration (.dbv)
+// Converted from kv260.toml
+// DBrief v0.1.0
+
+// Target: kv260
+// Backend: c
+// Capabilities: logic, hardware_triggers
+// Codegen: state_allocation=static, entry_point=bare_metal
+
+// Memory Banks
+
+// Low bank: 2GB @ 0x00000000
+REGISTER @0x00000000: Vector[UInt[8], 0x80000000]
+
+// High bank: 2GB @ 0x800000000
+REGISTER @0x800000000: Vector[UInt[8], 0x80000000]
+
+// Memory Sections
+
+// Kernel: 16MB @ 0x10000000
+REGISTER @0x10000000: Vector[UInt[8], 0x01000000]
+
+// Model A: 1.1GB @ 0x800000000
+REGISTER @0x800000000: Vector[UInt[8], 0x44C00000]
+
+// Model B: 1.1GB @ 0x848000000
+REGISTER @0x848000000: Vector[UInt[8], 0x44C00000]
+
+// Validation: Verify memory layout at compile time
+CHECK valid_layout [
+    // High bank starts after low bank ends
+    0x800000000 == 0x00000000 + 0x80000000;
+    // Model A is within high bank
+    @0x800000000 >= @0x800000000;
+    @0x800000000 + 0x44C00000 <= @0x800000000 + 0x80000000;
+    // Model B is within high bank
+    @0x848000000 >= @0x800000000;
+    @0x848000000 + 0x44C00000 <= @0x800000000 + 0x80000000;
+]
