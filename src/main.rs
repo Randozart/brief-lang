@@ -277,6 +277,7 @@ fn print_usage(program: &str) {
     eprintln!("  c <file>         Compile to C with __asm__");
     eprintln!("  arm <file>       Compile to ARM bare-metal Rust");
     eprintln!("  verilog <file>   Compile to SystemVerilog (FPGA, with --tcl flag)");
+    eprintln!("  vhdl <file>      Compile to VHDL (FPGA, with PSL assertions)");
     eprintln!("  cobol <file>     Compile to IBM Enterprise COBOL");
     eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
     eprintln!("  wrap <lib>       Generate FFI bindings for a library");
@@ -1327,6 +1328,22 @@ fn run_compile_unified(args: &[String]) {
                 None
             }
         },
+        "vhdl" => {
+            if let Some(ref spec) = target_spec {
+                if let Some(hw_path) = spec.codegen.as_ref().and_then(|c| c.hardware_config.as_ref()) {
+                    match run_vhdl_compile(&file_path, &PathBuf::from(hw_path), out_dir.as_deref(), target_spec.as_ref()) {
+                        Ok(p) => Some(p),
+                        Err(e) => { eprintln!("Error: {}", e); None }
+                    }
+                } else {
+                    eprintln!("Error: vhdl backend requires hardware_config in target spec");
+                    None
+                }
+            } else {
+                eprintln!("Error: vhdl backend requires --target with hardware_config");
+                None
+            }
+        },
         "react" => {
             eprintln!("Error: react backend not yet implemented");
             None
@@ -1385,6 +1402,15 @@ fn run_verilog_compile(
     target: Option<&TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     run_verilog(file_path, hw_config_path, out_dir, no_stdlib, stdlib_path, generate_tcl, tcl_only, target.cloned())
+}
+
+fn run_vhdl_compile(
+    file_path: &PathBuf,
+    hw_config_path: &PathBuf,
+    out_dir: Option<&Path>,
+    target: Option<&TargetSpec>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    run_vhdl(file_path, hw_config_path, out_dir, target.cloned())
 }
 
 fn run_c(
@@ -1670,6 +1696,99 @@ fn run_verilog(
             return Ok(output_file);
         }
     }
+
+    println!("  Generated: {}", output_file.display());
+    Ok(output_file)
+}
+
+fn run_vhdl(
+    file_path: &PathBuf,
+    hw_config_path: &PathBuf,
+    out_dir: Option<&Path>,
+    target_spec: Option<TargetSpec>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    println!("Compiling to VHDL: {}", file_path.display());
+
+    // Load HW config (required)
+    if hw_config_path.to_str() == Some("/dev/null") {
+        return Err("Hardware config (--hw) is REQUIRED for VHDL compilation".into());
+    }
+
+    let hw_config = parser::parse_hardware_config(hw_config_path)?;
+
+    // Standard Brief pipeline
+    let source = fs::read_to_string(file_path)?;
+    let mut parser = parser::Parser::new(&source);
+    let mut program = parser
+        .parse()
+        .map_err(|e| format!("Brief parse error: {}", e))?;
+
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut program = import_resolver
+        .resolve_imports(&program, file_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    let mut desug = desugarer::Desugarer::new();
+    let program = desug.desugar(&program);
+
+    let mut tc = typechecker::TypeChecker::new()
+        .with_target(typechecker::CompilationTarget::Verilog);
+    let type_errors = tc.check_program(&mut program.clone());
+
+    if !type_errors.is_empty() {
+        for e in type_errors.iter().take(10) {
+            eprintln!("Type error: {}", e);
+        }
+        if type_errors.len() > 10 {
+            eprintln!("... and {} more errors", type_errors.len() - 10);
+        }
+        return Err("Type checking failed".into());
+    }
+
+    // Check if this is an .ebv file and validate hardware if so
+    let is_ebv = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e == "ebv")
+        .unwrap_or(false);
+
+    if is_ebv {
+        let hw_diagnostics = hardware_validator::HardwareValidator::validate(
+            &program,
+            Some(&hw_config),
+            "vhdl",
+            is_ebv,
+            target_spec.as_ref(),
+        );
+        
+        let has_errors = hw_diagnostics
+            .iter()
+            .any(|d| d.severity == errors::Severity::Error);
+        if has_errors {
+            return Err("Hardware validation failed for .ebv".into());
+        }
+    }
+
+    // VHDL generation
+    let stem = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("top");
+    let mut vhdl_gen = backend::vhdl::VhdlGenerator::new(stem, hw_config.clone());
+    if let Some(spec) = target_spec {
+        vhdl_gen = vhdl_gen.with_spec(spec);
+    }
+    let vhdl_code = vhdl_gen.generate(&program);
+
+    // Write output
+    let out_path = out_dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    if !out_path.exists() {
+        fs::create_dir_all(&out_path)?;
+    }
+    let output_file = out_path.join(format!("{}.vhd", stem));
+    fs::write(&output_file, vhdl_code)?;
 
     println!("  Generated: {}", output_file.display());
     Ok(output_file)

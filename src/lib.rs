@@ -28,6 +28,7 @@ pub mod ast;
 pub mod analysis;
 pub mod backend;
 pub mod cache;
+pub mod dbrief;
 pub mod desugarer;
 pub mod errors;
 pub mod ffi;
