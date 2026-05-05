@@ -23,7 +23,7 @@
 // or embeds the Work.
 
 use brief_compiler::{
-    annotator, ast, backend, desugarer, errors, hardware_validator, import_resolver, interpreter,
+    annotator, ast, backend, dbrief, desugarer, errors, hardware_validator, import_resolver, interpreter,
     linkage, lsp, manifest, parser, proof_engine, rbv, typechecker, view_compiler,
     target_spec::{self, TargetSpec},
 };
@@ -289,7 +289,7 @@ fn print_usage(program: &str) {
     eprintln!("  --out <dir>     Output directory");
     eprintln!();
     eprintln!("Verilog Options:");
-    eprintln!("  --hw <file>      Hardware config TOML (required for .ebv files)");
+    eprintln!("  --hw <file>      Hardware config TOML or DBrief .dbv (required for .ebv files)");
     eprintln!("  --tcl            Generate TCL build scripts alongside SystemVerilog");
     eprintln!("  --tcl-only       Generate TCL only (skip SystemVerilog generation)");
     eprintln!();
@@ -1583,7 +1583,41 @@ fn run_verilog(
         return Err("Hardware config (--hw) is REQUIRED for Verilog compilation".into());
     }
 
-    let hw_config = parser::parse_hardware_config(hw_config_path)?;
+    // Check if loading .dbv (DBrief config) or .toml (hardware config)
+    let hw_config = if hw_config_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e == "dbv")
+        .unwrap_or(false)
+    {
+        // Load DBrief config and extract address aliases
+        println!("  Loading DBrief config: {}", hw_config_path.display());
+        let dbrief_source = fs::read_to_string(hw_config_path)?;
+        let dbrief_program = dbrief::parse_dbrief(&dbrief_source)
+            .map_err(|e| format!("DBrief parse error: {}", e))?;
+        
+        // Convert DBrief aliases to hardware config
+        let mut aliases = Vec::new();
+        for alias in &dbrief_program.aliases {
+            if let Some(addr) = &alias.address {
+                match addr {
+                    dbrief::DbriefAddress::Hex(h) => {
+                        aliases.push((alias.name.clone(), *h));
+                    }
+                    dbrief::DbriefAddress::Numeric(n) => {
+                        aliases.push((alias.name.clone(), *n));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        println!("  Found {} alias bindings", aliases.len());
+        
+        // Create a minimal hardware config from DBrief
+        parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
+    } else {
+        parser::parse_hardware_config(hw_config_path)?
+    };
 
     // Load linkage config (optional - look alongside source file)
     let linkage_path = file_path
@@ -1714,7 +1748,39 @@ fn run_vhdl(
         return Err("Hardware config (--hw) is REQUIRED for VHDL compilation".into());
     }
 
-    let hw_config = parser::parse_hardware_config(hw_config_path)?;
+    // Check if loading .dbv (DBrief config) or .toml (hardware config)
+    let hw_config = if hw_config_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e == "dbv")
+        .unwrap_or(false)
+    {
+        // Load DBrief config and extract address aliases
+        println!("  Loading DBrief config: {}", hw_config_path.display());
+        let dbrief_source = fs::read_to_string(hw_config_path)?;
+        let dbrief_program = dbrief::parse_dbrief(&dbrief_source)
+            .map_err(|e| format!("DBrief parse error: {}", e))?;
+        
+        // Extract alias bindings
+        for alias in &dbrief_program.aliases {
+            if let Some(addr) = &alias.address {
+                match addr {
+                    dbrief::DbriefAddress::Hex(h) => {
+                        println!("    ALIAS {} -> 0x{:X}", alias.name, h);
+                    }
+                    dbrief::DbriefAddress::Numeric(n) => {
+                        println!("    ALIAS {} -> {}", alias.name, n);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        // Create a minimal hardware config from DBrief
+        parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
+    } else {
+        parser::parse_hardware_config(hw_config_path)?
+    };
 
     // Standard Brief pipeline
     let source = fs::read_to_string(file_path)?;
@@ -2465,9 +2531,9 @@ fn main() {
                             std::process::exit(1);
                         }
                     } else {
-                        eprintln!("Error: .ebv files require --hw <hardware.toml>");
+                        eprintln!("Error: .ebv files require --hw <hardware.toml|config.dbv>");
                         eprintln!(
-                            "Usage: {} verilog <file.ebv> --hw <hardware.toml> [--out <dir>] [--tcl] [--tcl-only]",
+                            "Usage: {} verilog <file.ebv> --hw <hardware.toml|config.dbv> [--out <dir>] [--tcl] [--tcl-only]",
                             args[0]
                         );
                         std::process::exit(1);
@@ -2491,7 +2557,7 @@ fn main() {
             } else {
                 eprintln!("Error: Missing .bv or .ebv file");
                 eprintln!(
-                    "Usage: {} verilog <file.bv|file.ebv> [--hw <hardware.toml>] [--out <dir>] [--tcl] [--tcl-only]",
+                    "Usage: {} verilog <file.bv|file.ebv> [--hw <hardware.toml|config.dbv>] [--out <dir>] [--tcl] [--tcl-only]",
                     args[0]
                 );
                 std::process::exit(1);
