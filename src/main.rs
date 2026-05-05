@@ -1741,6 +1741,26 @@ fn run_verilog(
             return Err("Hardware validation failed for .ebv".into());
         }
     }
+    
+    // Schema import validation (for .dbvs imports)
+    let schema_diagnostics = hardware_validator::HardwareValidator::validate_schema_imports(
+        &program,
+        file_path,
+    );
+    
+    if !schema_diagnostics.is_empty() {
+        eprintln!("{}", format_hardware_diagnostics(
+            &schema_diagnostics,
+            &source,
+            file_path.to_str().unwrap_or("main.ebv")
+        ));
+        let has_errors = schema_diagnostics
+            .iter()
+            .any(|d| d.severity == errors::Severity::Error);
+        if is_ebv && has_errors {
+            return Err("Schema validation failed for .ebv".into());
+        }
+    }
 
     // Verilog generation
     let stem = file_path
@@ -1905,6 +1925,24 @@ fn run_vhdl(
             .any(|d| d.severity == errors::Severity::Error);
         if has_errors {
             return Err("Hardware validation failed for .ebv".into());
+        }
+        
+        // Schema import validation
+        let schema_diagnostics = hardware_validator::HardwareValidator::validate_schema_imports(
+            &program,
+            file_path,
+        );
+        
+        let schema_errors = schema_diagnostics
+            .iter()
+            .any(|d| d.severity == errors::Severity::Error);
+        if schema_errors {
+            eprintln!("{}", format_hardware_diagnostics(
+                &schema_diagnostics,
+                &source,
+                file_path.to_str().unwrap_or("main.ebv")
+            ));
+            return Err("Schema validation failed for .ebv".into());
         }
     }
 

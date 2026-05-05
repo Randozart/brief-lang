@@ -55,6 +55,13 @@ impl ImportResolver {
 
         while index < items.len() {
             if let TopLevel::Import(import) = &items[index] {
+                // Skip .dbvs schema imports - they're handled by schema validation
+                let path_str = import.path.join("/");
+                if path_str.ends_with(".dbvs") {
+                    index += 1;
+                    continue;
+                }
+                
                 let resolved = self.resolve_import(import, file_path)?;
                 items.remove(index);
                 items.splice(index..index, resolved.items.clone());
@@ -77,16 +84,7 @@ impl ImportResolver {
         import: &Import,
         source_file: &PathBuf,
     ) -> Result<Program, String> {
-if import.items.is_empty() && import.path.is_empty() {
-            return Ok(Program {
-                items: vec![],
-                comments: vec![],
-                reactor_speed: None,
-                attrs: Vec::new(),
-                ffi: None,
-            });
-        }
-
+        // Skip .dbvs schema imports - they're handled by schema validation, not as Brief modules
         let path_str = if import.path.is_empty() {
             return Ok(Program {
                 items: vec![],
@@ -97,8 +95,17 @@ if import.items.is_empty() && import.path.is_empty() {
             });
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
-            // If so, use slashes instead of dots to preserve the file path
             let last_component = import.path.last().unwrap();
+            if last_component.ends_with(".dbvs") {
+                // Skip .dbvs imports - they're schema imports, not Brief modules
+                return Ok(Program {
+                    items: vec![],
+                    comments: vec![],
+                    reactor_speed: None,
+                    attrs: Vec::new(),
+                    ffi: None,
+                });
+            }
             if last_component.ends_with(".css") || last_component.ends_with(".svg") {
                 import.path.join("/")
             } else {

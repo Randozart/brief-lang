@@ -26,116 +26,169 @@ use logos::Logos;
 #[logos(skip r"[ \t\n\r]+")]
 #[logos(skip r"//[^\n]*")] // Skip // comments entirely
 pub enum Token {
-    // Sig aliases: sig, sign, signature
+    // Sig aliases: sig, sign, signature (lowercase and UPPERCASE)
     #[token("sig")]
+    #[token("SIG")]
     #[token("sign")]
+    #[token("SIGN")]
     #[token("signature")]
+    #[token("SIGNATURE")]
     Sig,
 
-    // Defn aliases: defn, def, definition
+    // Defn aliases: defn, def, definition (lowercase and UPPERCASE)
     #[token("defn")]
+    #[token("DEFN")]
     #[token("def")]
+    #[token("DEF")]
     #[token("definition")]
+    #[token("DEFINITION")]
     Defn,
 
     #[token("let")]
+    #[token("LET")]
     Let,
 
-    // Const aliases: const, constant
+    // Const aliases: const, constant (lowercase and UPPERCASE)
     #[token("const")]
+    #[token("CONST")]
     #[token("constant")]
+    #[token("CONSTANT")]
     Const,
 
-    // Txn aliases: txn, transact, transaction
+    // Txn aliases: txn, transact, transaction (lowercase and UPPERCASE)
     #[token("txn")]
+    #[token("TXN")]
     #[token("transact")]
+    #[token("TRANSACT")]
     #[token("transaction")]
+    #[token("TRANSACTION")]
     Txn,
 
     #[token("rct")]
+    #[token("RCT")]
     Rct,
 
     #[token("async")]
+    #[token("ASYNC")]
     Async,
 
     #[token("term")]
+    #[token("TERM")]
     Term,
     #[token("escape")]
+    #[token("ESCAPE")]
     Escape,
     #[token("import")]
+    #[token("IMPORT")]
     Import,
     #[token("from")]
+    #[token("FROM")]
     From,
     #[token("as")]
+    #[token("AS")]
     As,
     #[token("frgn")]
+    #[token("FRGN")]
     Frgn,
     #[token("frgn!")]
+    #[token("FRGN!")]
     FrgnBang,
     #[token("syscall")]
+    #[token("SYSCALL")]
     Syscall,
     #[token("syscall!")]
+    #[token("SYSCALL!")]
     SyscallBang,
     #[token("resource")]
+    #[token("RESOURCE")]
     Resource,
     #[token("rsrc")]
+    #[token("RSRC")]
     Rsrc,
     #[token("struct")]
+    #[token("STRUCT")]
     Struct,
     #[token("rstruct")]
+    #[token("RSTRUCT")]
     Rstruct,
     #[token("render")]
+    #[token("RENDER")]
     Render,
     #[token("enum")]
+    #[token("ENUM")]
     Enum,
     #[token("trg")]
+    #[token("TRG")]
     Trg,
     #[token("link")]
+    #[token("LINK")]
     Link,
     #[token("asm")]
+    #[token("ASM")]
     Asm,
     #[token("stage")]
+    #[token("STAGE")]
     Stage,
     #[token("on")]
+    #[token("ON")]
     On,
     #[token("forall")]
+    #[token("FORALL")]
     Forall,
     #[token("exists")]
+    #[token("EXISTS")]
     Exists,
     #[token("within")]
+    #[token("WITHIN")]
     Within,
     #[token("bank")]
+    #[token("BANK")]
     Bank,
     #[token("Ok")]
+    #[token("OK")]
     Ok,
     #[token("Err")]
+    #[token("ERR")]
     Err,
     #[token("match")]
+    #[token("MATCH")]
     Match,
 
     #[token("some")]
+    #[token("SOME")]
     Some,
     #[token("none")]
+    #[token("NONE")]
     None,
 
     #[token("true")]
+    #[token("TRUE")]
     BoolTrue,
     #[token("false")]
+    #[token("FALSE")]
     BoolFalse,
 
-    // Time units
+    // Time units (lowercase and UPPERCASE)
     #[token("cycles")]
+    #[token("CYCLES")]
     Cycles,
     #[token("cyc")]
+    #[token("CYC")]
     Cyc,
     #[token("ms")]
+    #[token("MS")]
     Ms,
     #[token("s")]
+    #[token("S")]
     #[token("sec")]
+    #[token("SEC")]
     #[token("seconds")]
+    #[token("SECONDS")]
     Seconds,
     #[token("min")]
+    #[token("MIN")]
     #[token("minute")]
+    #[token("MINUTE")]
     Minute,
 
     // Operators

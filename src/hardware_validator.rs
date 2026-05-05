@@ -302,6 +302,112 @@ impl HardwareValidator {
             || cfg.memory.contains_key(&addr_str_hex_upper)
             || cfg.memory.contains_key(&addr_str_hex_lower)
     }
+
+    pub fn validate_schema_imports(
+        program: &Program,
+        source_file: &std::path::Path,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        
+        let mut schema_files: Vec<(String, std::path::PathBuf)> = Vec::new();
+        
+        for item in &program.items {
+            if let TopLevel::Import(import) = item {
+                let path_str = import.path.join("/");
+                if path_str.ends_with(".dbvs") {
+                    if let Some(parent) = source_file.parent() {
+                        schema_files.push((path_str.clone(), parent.join(&path_str)));
+                    }
+                }
+            }
+        }
+        
+        if schema_files.is_empty() {
+            return diagnostics;
+        }
+        
+        let mut schema_aliases: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        
+        for (schema_path, full_path) in &schema_files {
+            match std::fs::read_to_string(full_path) {
+                Ok(content) => {
+                    match crate::dbrief::parse_dbvs(&content) {
+                        Ok(dbvs) => {
+                            for alias in &dbvs.aliases {
+                                schema_aliases.insert(alias.name.clone(), schema_path.clone());
+                            }
+                        }
+                        Err(e) => {
+                            diagnostics.push(Diagnostic {
+                                code: "HW005".to_string(),
+                                title: "Failed to parse schema".to_string(),
+                                explanation: vec![format!("Failed to parse {}: {}", schema_path, e)],
+                                severity: Severity::Error,
+                                span: None,
+                                source_snippet: None,
+                                proof_chain: Vec::new(),
+                                examples: Vec::new(),
+                                hints: Vec::new(),
+                                notes: Vec::new(),
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    diagnostics.push(Diagnostic {
+                        code: "HW006".to_string(),
+                        title: "Schema file not found".to_string(),
+                        explanation: vec![format!("Cannot read {}: {}", schema_path, e)],
+                        severity: Severity::Error,
+                        span: None,
+                        source_snippet: None,
+                        proof_chain: Vec::new(),
+                        examples: Vec::new(),
+                        hints: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                }
+            }
+        }
+        
+        for item in &program.items {
+            match item {
+                TopLevel::StateDecl(state) => {
+                    if !schema_aliases.contains_key(&state.name) && !state.name.starts_with("__") {
+                        // Check if it's a Definition (pure function) - those don't need to be in schema
+                        let is_definition = program.items.iter().any(|i| {
+                            match i {
+                                TopLevel::Definition(d) => d.name == state.name,
+                                _ => false,
+                            }
+                        });
+                        
+                        // Only report error if schemas were loaded and state is not a definition
+                        if !is_definition && !schema_aliases.is_empty() {
+                            diagnostics.push(Diagnostic {
+                                code: "HW007".to_string(),
+                                title: "Undefined alias reference".to_string(),
+                                explanation: vec![format!(
+                                    "State '{}' is not declared in any imported schema. Import schema or provide via --hw config.dbv",
+                                    state.name
+                                )],
+                                severity: Severity::Error,
+                                span: state.span.clone(),
+                                source_snippet: None,
+                                proof_chain: Vec::new(),
+                                examples: Vec::new(),
+                                hints: vec!["Add ALIAS declaration to .dbvs schema file".to_string()],
+                                notes: Vec::new(),
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        diagnostics
+    }
 }
 
 struct WriteGraph {
