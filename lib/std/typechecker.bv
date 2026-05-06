@@ -1,0 +1,566 @@
+// Type Checker - Type inference and verification
+// Tier 5: Type Checker
+
+// ===== TYPE CONTEXT =====
+
+struct TypeContext {
+    scopes: Stack<HashMap<String, Type>>,  // Variable types
+    functions: HashMap<String, Definition>,  // Function signatures
+    transactions: HashMap<String, Transaction>,  // Transaction signatures
+    structs: HashMap<String, StructDefinition>,  // Struct definitions
+    enums: HashMap<String, EnumDefinition>,  // Enum definitions
+    type_aliases: HashMap<String, Type>,  // Type aliases
+    current_scope: Int  // Current scope level
+}
+
+// ===== CONTEXT OPERATIONS =====
+
+defn new_context() -> TypeContext {
+    let mut ctx = TypeContext {
+        scopes: new_stack(),
+        functions: new_map(),
+        transactions: new_map(),
+        structs: new_map(),
+        enums: new_map(),
+        type_aliases: new_map(),
+        current_scope: 0
+    };
+    &ctx = ctx.enter_scope();
+    term ctx;
+}
+
+defn enter_scope(ctx: TypeContext) -> TypeContext {
+    let mut scopes = ctx.scopes;
+    scopes = scopes.push(new_map());
+    term TypeContext {
+        scopes: scopes,
+        functions: ctx.functions,
+        transactions: ctx.transactions,
+        structs: ctx.structs,
+        enums: ctx.enums,
+        type_aliases: ctx.type_aliases,
+        current_scope: ctx.current_scope + 1
+    };
+}
+
+defn exit_scope(ctx: TypeContext) -> TypeContext {
+    let (popped, scopes) = ctx.scopes.pop().unwrap();
+    term TypeContext {
+        scopes: scopes,
+        functions: ctx.functions,
+        transactions: ctx.transactions,
+        structs: ctx.structs,
+        enums: ctx.enums,
+        type_aliases: ctx.type_aliases,
+        current_scope: ctx.current_scope - 1
+    };
+}
+
+defn add_binding(ctx: TypeContext, name: String, ty: Type) -> Result<TypeContext, String> {
+    let mut scopes = ctx.scopes;
+    [!scopes.is_empty()] {
+        let (mut current, rest) = scopes.pop().unwrap();
+        current = current.insert(name, ty);
+        scopes = scopes.push(current);
+        term Ok(TypeContext {
+            scopes: scopes,
+            functions: ctx.functions,
+            transactions: ctx.transactions,
+            structs: ctx.structs,
+            enums: ctx.enums,
+            type_aliases: ctx.type_aliases,
+            current_scope: ctx.current_scope
+        });
+    };
+    term Err("No active scope");
+}
+
+defn lookup_type(ctx: TypeContext, name: String) -> Option<Type> {
+    // Search scopes from innermost to outermost
+    let scopes = ctx.scopes;
+    let i: Int = 0;
+    [i < scopes.len()] {
+        let scope = scopes[i];
+        [scope.contains_key(name)] {
+            term scope.get(name);
+        };
+        &i = i + 1;
+    };
+    term None;
+}
+
+defn add_function(ctx: TypeContext, defn: Definition) -> TypeContext {
+    let mut functions = ctx.functions;
+    functions = functions.insert(defn.name, defn);
+    term TypeContext {
+        scopes: ctx.scopes,
+        functions: functions,
+        transactions: ctx.transactions,
+        structs: ctx.structs,
+        enums: ctx.enums,
+        type_aliases: ctx.type_aliases,
+        current_scope: ctx.current_scope
+    };
+}
+
+defn add_transaction(ctx: TypeContext, txn: Transaction) -> TypeContext {
+    let mut transactions = ctx.transactions;
+    transactions = transactions.insert(txn.name, txn);
+    term TypeContext {
+        scopes: ctx.scopes,
+        functions: ctx.functions,
+        transactions: transactions,
+        structs: ctx.structs,
+        enums: ctx.enums,
+        type_aliases: ctx.type_aliases,
+        current_scope: ctx.current_scope
+    };
+}
+
+// ===== SUBSTITUTION (for unification) =====
+
+struct Substitution {
+    bindings: HashMap<String, Type>
+}
+
+defn empty_subst() -> Substitution {
+    term Substitution {
+        bindings: new_map()
+    };
+}
+
+defn apply_subst(ty: Type, subst: Substitution) -> Type {
+    unification ty(TypeNamed(name, args)) = {
+        [subst.bindings.contains_key(name)] {
+            let bound = subst.bindings.get(name).unwrap();
+            term apply_subst(bound, subst);
+        };
+        [args.len() > 0] {
+            let mut new_args: List<Type> = [];
+            let i: Int = 0;
+            [i < args.len()] {
+                new_args = new_args.append(apply_subst(args[i], subst));
+                &i = i + 1;
+            };
+            term TypeNamed(name, new_args);
+        };
+        term ty;
+    };
+    unification ty(TypeVector(inner, size)) = {
+        term TypeVector(Box::new(apply_subst(*inner, subst)), size);
+    };
+    unification ty(TypeOption(inner)) = {
+        term TypeOption(Box::new(apply_subst(*inner, subst)));
+    };
+    unification ty(TypeResult(ok, err)) = {
+        term TypeResult(
+            Box::new(apply_subst(*ok, subst)),
+            Box::new(apply_subst(*err, subst))
+        );
+    };
+    term ty;  // Primitive types unchanged
+}
+
+defn unify(t1: Type, t2: Type, subst: Substitution) -> Result<Substitution, String> {
+    // Apply existing substitutions
+    let t1 = apply_subst(t1, subst);
+    let t2 = apply_subst(t2, subst);
+    
+    // If identical, success
+    [t1 == t2] {
+        term Ok(subst);
+    };
+    
+    // If t1 is a type variable, bind it
+    [t1.is_type_var()] {
+        term unify_var(t1.get_name(), t2, subst);
+    };
+    
+    // If t2 is a type variable, bind it
+    [t2.is_type_var()] {
+        term unify_var(t2.get_name(), t1, subst);
+    };
+    
+    // If both are named types, unify structure
+    unification (t1, t2) = (TypeNamed(name1, args1), TypeNamed(name2, args2)) {
+        [name1 == name2] {
+            [args1.len() == args2.len()] {
+                let mut new_subst = subst;
+                let i: Int = 0;
+                [i < args1.len()] {
+                    new_subst = unify(args1[i], args2[i], new_subst)?;
+                    &i = i + 1;
+                };
+                term Ok(new_subst);
+            };
+            term Err("Type arity mismatch: " + name1 + " vs " + name2);
+        };
+        term Err("Cannot unify " + name1 + " with " + name2);
+    };
+    
+    // Primitive type mismatch
+    term Err("Type mismatch");
+}
+
+defn unify_var(name: String, ty: Type, subst: Substitution) -> Result<Substitution, String> {
+    // Occurs check
+    [occurs_check(name, ty, subst)] {
+        term Err("Occurs check failed: " + name + " in " + type_to_string(ty));
+    };
+    
+    // Add binding
+    let mut bindings = subst.bindings;
+    bindings = bindings.insert(name, ty);
+    term Ok(Substitution { bindings: bindings });
+}
+
+defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool {
+    unification ty(TypeNamed(other, args)) = {
+        [name == other] {
+            term true;
+        };
+        let i: Int = 0;
+        [i < args.len()] {
+            [occurs_check(name, args[i], subst)] {
+                term true;
+            };
+            &i = i + 1;
+        };
+        term false;
+    };
+    unification ty(TypeVector(inner, _)) = {
+        term occurs_check(name, *inner, subst);
+    };
+    unification ty(TypeOption(inner)) = {
+        term occurs_check(name, *inner, subst);
+    };
+    unification ty(TypeResult(ok, err)) = {
+        occurs_check(name, *ok, subst) || occurs_check(name, *err, subst)
+    };
+    term false;
+}
+
+// ===== TYPE INFERENCE =====
+
+struct InferResult {
+    ty: Type,
+    subst: Substitution
+}
+
+defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
+    // Literals
+    unification expr(ExprInt(_)) = {
+        term Ok(InferResult {
+            ty: TypeInt,
+            subst: empty_subst()
+        });
+    };
+    
+    unification expr(ExprFloat(_)) = {
+        term Ok(InferResult {
+            ty: TypeFloat,
+            subst: empty_subst()
+        });
+    };
+    
+    unification expr(ExprString(_)) = {
+        term Ok(InferResult {
+            ty: TypeString,
+            subst: empty_subst()
+        });
+    };
+    
+    unification expr(ExprChar(_)) = {
+        term Ok(InferResult {
+            ty: TypeChar,
+            subst: empty_subst()
+        });
+    };
+    
+    unification expr(ExprBool(_)) = {
+        term Ok(InferResult {
+            ty: TypeBool,
+            subst: empty_subst()
+        });
+    };
+    
+    // Variables
+    unification expr(ExprVar(name)) = {
+        [ctx.lookup_type(name).is_some()] {
+            term Ok(InferResult {
+                ty: ctx.lookup_type(name).unwrap(),
+                subst: empty_subst()
+            });
+        };
+        term Err("Undefined variable: " + name);
+    };
+    
+    // Binary operations
+    unification expr(ExprBinOp(op, left, right)) = {
+        let left_result = infer_expr(*left, ctx)?;
+        let right_result = infer_expr(*right, ctx)?;
+        
+        // Unify operand types
+        let mut subst = left_result.subst;
+        subst = unify(left_result.ty, right_result.ty, subst)?;
+        
+        // Determine result type based on operator
+        [op == "+" || op == "-" || op == "*" || op == "/"] {
+            term Ok(InferResult {
+                ty: left_result.ty,
+                subst: subst
+            });
+        };
+        [op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="] {
+            term Ok(InferResult {
+                ty: TypeBool,
+                subst: subst
+            });
+        };
+        [op == "&&" || op == "||"] {
+            term Ok(InferResult {
+                ty: TypeBool,
+                subst: subst
+            });
+        };
+        term Err("Unknown operator: " + op);
+    };
+    
+    // Function calls
+    unification expr(ExprCall(name, args)) = {
+        [ctx.functions.contains_key(name)] {
+            let defn = ctx.functions.get(name).unwrap();
+            
+            // Infer argument types
+            let mut subst = empty_subst();
+            let i: Int = 0;
+            [i < args.len()] {
+                let arg_result = infer_expr(args[i], ctx)?;
+                subst = unify(arg_result.ty, defn.params[i].param_type, subst)?;
+                &i = i + 1;
+            };
+            
+            term Ok(InferResult {
+                ty: defn.output_type.unwrap_or(TypeVoid),
+                subst: subst
+            });
+        };
+        term Err("Undefined function: " + name);
+    };
+    
+    // Default
+    term Err("Cannot infer type for expression");
+}
+
+// ===== TYPE CHECKING =====
+
+defn check_program(program: Program) -> Result<TypedProgram, String> {
+    let mut ctx = new_context();
+    
+    // First pass: collect definitions
+    let i: Int = 0;
+    [i < program.items.len()] {
+        unification program.items[i] = TopDefn(defn) = {
+            &ctx = ctx.add_function(defn);
+        };
+        unification program.items[i] = TopTxn(txn) = {
+            &ctx = ctx.add_transaction(txn);
+        };
+        unification program.items[i] = TopStruct(struct_def) = {
+            // Add struct to context
+        };
+        unification program.items[i] = TopEnum(enum_def) = {
+            // Add enum to context
+        };
+        &i = i + 1;
+    };
+    
+    // Second pass: check definitions
+    let i: Int = 0;
+    [i < program.items.len()] {
+        unification program.items[i] = TopDefn(defn) = {
+            check_definition(defn, ctx)?;
+        };
+        unification program.items[i] = TopTxn(txn) = {
+            check_transaction(txn, ctx)?;
+        };
+        &i = i + 1;
+    };
+    
+    term Ok(program);
+}
+
+defn check_definition(defn: Definition, ctx: TypeContext) -> Result<(), String> {
+    // Enter function scope
+    let mut ctx = ctx.enter_scope();
+    
+    // Add parameters to scope
+    let i: Int = 0;
+    [i < defn.params.len()] {
+        &ctx = ctx.add_binding(defn.params[i].name, defn.params[i].param_type)?;
+        &i = i + 1;
+    };
+    
+    // Check body
+    let (body_ty, _) = check_block(defn.body, ctx)?;
+    
+    // Check return type matches
+    [defn.output_type.is_some()] {
+        let mut subst = empty_subst();
+        subst = unify(body_ty, defn.output_type.unwrap(), subst)?;
+    };
+    
+    term Ok(());
+}
+
+defn check_transaction(txn: Transaction, ctx: TypeContext) -> Result<(), String> {
+    // Enter transaction scope
+    let mut ctx = ctx.enter_scope();
+    
+    // Add parameters to scope
+    let i: Int = 0;
+    [i < txn.params.len()] {
+        &ctx = ctx.add_binding(txn.params[i].name, txn.params[i].param_type)?;
+        &i = i + 1;
+    };
+    
+    // Check precondition
+    let (pre_ty, _) = infer_expr(txn.contract.precondition, ctx)?;
+    [pre_ty != TypeBool] {
+        term Err("Precondition must be Bool, got " + type_to_string(pre_ty));
+    };
+    
+    // Check postcondition
+    let (post_ty, _) = infer_expr(txn.contract.postcondition, ctx)?;
+    [post_ty != TypeBool] {
+        term Err("Postcondition must be Bool, got " + type_to_string(post_ty));
+    };
+    
+    // Check body
+    check_block(txn.body, ctx)?;
+    
+    term Ok(());
+}
+
+defn check_block(stmts: List<Statement>, ctx: TypeContext) -> Result<(Type, TypeContext), String> {
+    let mut ctx = ctx;
+    let mut last_ty: Type = TypeVoid;
+    
+    let i: Int = 0;
+    [i < stmts.len()] {
+        let (stmt_ty, new_ctx) = check_statement(stmts[i], ctx)?;
+        &last_ty = stmt_ty;
+        &ctx = new_ctx;
+        &i = i + 1;
+    };
+    
+    term (last_ty, ctx);
+}
+
+defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeContext), String> {
+    unification stmt(StmtLet(name, var_type, init)) = {
+        let mut ctx = ctx;
+        let mut ty: Type = TypeVoid;
+        
+        [init.is_some()] {
+            let (init_ty, _) = infer_expr(init.unwrap(), ctx)?;
+            [var_type.is_some()] {
+                let mut subst = empty_subst();
+                subst = unify(init_ty, var_type.unwrap(), subst)?;
+                &ty = var_type.unwrap();
+            };
+            [!var_type.is_some()] {
+                &ty = init_ty;
+            };
+        };
+        [var_type.is_some() && init.is_none()] {
+            &ty = var_type.unwrap();
+        };
+        
+        &ctx = ctx.add_binding(name, ty)?;
+        term (TypeVoid, ctx);
+    };
+    
+    unification stmt(StmtAssign(lhs, rhs)) = {
+        let (lhs_ty, _) = infer_expr(*lhs, ctx)?;
+        let (rhs_ty, _) = infer_expr(*rhs, ctx)?;
+        
+        let mut subst = empty_subst();
+        subst = unify(lhs_ty, rhs_ty, subst)?;
+        
+        term (TypeVoid, ctx);
+    };
+    
+    unification stmt(StmtExpr(expr)) = {
+        let (ty, _) = infer_expr(expr, ctx)?;
+        term (ty, ctx);
+    };
+    
+    unification stmt(StmtTerm(values)) = {
+        [values.len() == 0] {
+            term (TypeVoid, ctx);
+        };
+        [values.len() == 1] {
+            let (ty, _) = infer_expr(values[0].unwrap(), ctx)?;
+            term (ty, ctx);
+        };
+        // Multiple return values - would need tuple type
+        term (TypeVoid, ctx);
+    };
+    
+    unification stmt(StmtEscape(value)) = {
+        [value.is_some()] {
+            let (_, _) = infer_expr(value.unwrap(), ctx)?;
+        };
+        term (TypeVoid, ctx);
+    };
+    
+    unification stmt(StmtGuarded(condition, body)) = {
+        let (cond_ty, _) = infer_expr(*condition, ctx)?;
+        [cond_ty != TypeBool] {
+            term Err("Guard condition must be Bool");
+        };
+        
+        check_block(body, ctx)?;
+        term (TypeVoid, ctx);
+    };
+    
+    unification stmt(StmtUnification(name, pattern, expr)) = {
+        let (expr_ty, _) = infer_expr(*expr, ctx)?;
+        // Pattern matching would bind variables here
+        term (TypeVoid, ctx);
+    };
+    
+    term (TypeVoid, ctx);
+}
+
+// ===== UTILITY FUNCTIONS =====
+
+defn type_to_string(ty: Type) -> String {
+    unification ty(TypeInt) = "Int";
+    unification ty(TypeUInt) = "UInt";
+    unification ty(TypeFloat) = "Float";
+    unification ty(TypeString) = "String";
+    unification ty(TypeBool) = "Bool";
+    unification ty(TypeChar) = "Char";
+    unification ty(TypeData) = "Data";
+    unification ty(TypeVoid) = "Void";
+    unification ty(TypeNamed(name, args)) = {
+        let mut sb = new_builder();
+        sb = sb.append_str(name);
+        [args.len() > 0] {
+            sb = sb.append_char('<');
+            let i: Int = 0;
+            [i < args.len()] {
+                [i > 0] {
+                    sb = sb.append_str(", ");
+                };
+                sb = sb.append_str(type_to_string(args[i]));
+                &i = i + 1;
+            };
+            sb = sb.append_char('>');
+        };
+        term sb.to_string();
+    };
+    term "Unknown";
+}
