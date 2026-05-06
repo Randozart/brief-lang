@@ -831,5 +831,41 @@ impl TypeChecker {
         format!("{:?}", ty)
     }
 
-    fn check_expr_for_ffi_errors(&mut self, _expr: &Expr) {}
+    fn check_expr_for_ffi_errors(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Call(name, args) => {
+                if self.foreign_bindings.contains_key(name) {
+                    let binding = self.foreign_bindings.get(name).unwrap();
+                    if !binding.success_output.is_empty() || binding.error_type_name != "Error" {
+                        let mut diag = Diagnostic::new(
+                            "T001",
+                            Severity::Info,
+                            "FFI call returns Result type",
+                        )
+                        .with_explanation(&format!(
+                            "FFI function '{}' returns Result. Ensure both Success and Error branches are handled.",
+                            name
+                        ))
+                        .with_hint("Use unification to handle both branches: Success(val) = func()");
+                        self.diagnostics.borrow_mut().push(diag);
+                    }
+                    if !args.is_empty() && args.len() != binding.inputs.len() {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: format!("{} parameters", binding.inputs.len()),
+                            found: format!("{} arguments", args.len()),
+                            context: format!("FFI call '{}'", name),
+                        });
+                    }
+                }
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.check_expr_for_ffi_errors(l);
+                self.check_expr_for_ffi_errors(r);
+            }
+            Expr::FieldAccess(obj, _) => {
+                self.check_expr_for_ffi_errors(obj);
+            }
+            _ => {}
+        }
+    }
 }

@@ -192,14 +192,6 @@ impl RustBackend {
                         asm_string, clobber_list
                     ));
                 }
-
-                #[cfg(feature = "nightly")]
-                {
-                    output.push_str(&format!(
-                        "        unsafe {{ asm!(\"{}\" : : : {}); }}\n",
-                        asm_string, clobber_list
-                    ));
-                }
             }
             Statement::Term(_) => {
                 output.push_str("        // transaction complete\n");

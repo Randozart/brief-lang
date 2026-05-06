@@ -709,6 +709,7 @@ impl ProofEngine {
         self.check_trivial_contracts(program);
         self.check_sig_projections(program);
         self.check_ffi_error_handling(program);
+        self.check_circular_dependencies(program);
         self.verify_contracts(program);
         self.errors.clone()
     }
@@ -815,16 +816,152 @@ impl ProofEngine {
         defn: &Definition,
         ffi_bindings: &HashMap<String, ForeignSignature>,
     ) {
-        // Find all FFI calls in the definition
         let ffi_calls = self.find_ffi_calls_in_body(&defn.body, ffi_bindings);
 
         for (frgn_name, _call_context) in ffi_calls {
-            // For each FFI call, verify that there's proper error handling
-            // This is a placeholder for more sophisticated verification
-            // In a full implementation, we would:
-            // 1. Check if the result is destructured into Success and Error
-            // 2. Verify both branches are non-empty
-            // 3. Check that error handling is reachable and not contradictory
+            let result_var = self.find_ffi_result_variable(&defn.body, &frgn_name);
+            if let Some(var_name) = result_var {
+                self.verify_ffi_result_handling(defn, &var_name, &frgn_name);
+            }
+        }
+    }
+
+    fn find_ffi_result_variable(&self, body: &[Statement], target_fn: &str) -> Option<String> {
+        for stmt in body {
+            match stmt {
+                Statement::Let { name, expr, .. } => {
+                    if let Some(e) = expr {
+                        if let Expr::Call(fn_name, _) = e {
+                            if fn_name == target_fn {
+                                return Some(name.clone());
+                            }
+                        }
+                    }
+                }
+                Statement::Assignment { lhs, expr, .. } => {
+                    if let Expr::Call(fn_name, _) = expr {
+                        if fn_name == target_fn {
+                            if let Expr::Identifier(name) = lhs {
+                                return Some(name.clone());
+                            }
+                        }
+                    }
+                }
+                Statement::Guarded { statements, .. } => {
+                    return self.find_ffi_result_variable(statements, target_fn);
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn verify_ffi_result_handling(&mut self, defn: &Definition, result_var: &str, frgn_name: &str) {
+        let mut has_success_path = false;
+        let mut has_error_path = false;
+        let mut success_terminates = false;
+        let mut error_terminates = false;
+
+        self.check_ffi_branch_handling(&defn.body, result_var, &mut has_success_path, &mut has_error_path, &mut success_terminates, &mut error_terminates);
+
+        if !has_success_path {
+            let mut err = ProofError::new("F101", "FFI call missing success handling");
+            err.explanation = format!(
+                "FFI call '{}' result '{}' has no success branch handling",
+                frgn_name, result_var
+            );
+            err.proof_chain.push(format!("1. '{}' returns Result<T, Error>", frgn_name));
+            err.proof_chain.push(format!("2. caller '{}' must handle both Success and Error", defn.name));
+            err.hints.push("add a success branch (e.g., let Success(val) = result;)".to_string());
+            self.errors.push(err);
+        }
+
+        if !has_error_path {
+            let mut err = ProofError::new("F102", "FFI call missing error handling");
+            err.explanation = format!(
+                "FFI call '{}' result '{}' has no error branch handling",
+                frgn_name, result_var
+            );
+            err.proof_chain.push(format!("1. '{}' returns Result<T, Error>", frgn_name));
+            err.proof_chain.push(format!("2. caller '{}' must handle both Success and Error", defn.name));
+            err.hints.push("add an error branch (e.g., let Error(e) = result;)".to_string());
+            self.errors.push(err);
+        }
+
+        if has_success_path && has_error_path && !success_terminates && !error_terminates {
+            let mut err = ProofError::new_warning("F103", "FFI result may not be properly terminated");
+            err.explanation = format!(
+                "FFI call '{}' has both branches but neither terminates (escape/term)",
+                frgn_name
+            );
+            err.proof_chain.push("1. both branches should either escape or return".to_string());
+            err.proof_chain.push("2. otherwise the remaining code may execute unexpectedly".to_string());
+            err.hints.push("ensure each branch either escapes or has a term statement".to_string());
+            self.errors.push(err);
+        }
+    }
+
+    fn check_ffi_branch_handling(
+        &self,
+        body: &[Statement],
+        result_var: &str,
+        has_success: &mut bool,
+        has_error: &mut bool,
+        success_terminates: &mut bool,
+        error_terminates: &mut bool,
+    ) {
+        for stmt in body {
+            match stmt {
+                Statement::Guarded { condition, statements } => {
+                    if self.is_success_variant_check(condition, result_var) {
+                        *has_success = true;
+                        self.check_branch_terminates(statements, success_terminates);
+                    } else if self.is_error_variant_check(condition, result_var) {
+                        *has_error = true;
+                        self.check_branch_terminates(statements, error_terminates);
+                    } else {
+                        self.check_ffi_branch_handling(statements, result_var, has_success, has_error, success_terminates, error_terminates);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn is_success_variant_check(&self, condition: &Expr, _result_var: &str) -> bool {
+        match condition {
+            Expr::Call(name, args) => {
+                name == "Success" || name == "Ok" || (name == "is_ok" && args.is_empty())
+            }
+            _ => false
+        }
+    }
+
+    fn is_error_variant_check(&self, condition: &Expr, _result_var: &str) -> bool {
+        match condition {
+            Expr::Call(name, args) => {
+                name == "Error" || name == "Err" || (name == "is_err" && args.is_empty())
+            }
+            _ => false
+        }
+    }
+
+    fn check_branch_terminates(&self, statements: &[Statement], terminates: &mut bool) {
+        for stmt in statements {
+            match stmt {
+                Statement::Term(_) => {
+                    *terminates = true;
+                    return;
+                }
+                Statement::Escape(_) => {
+                    *terminates = true;
+                    return;
+                }
+                Statement::Guarded { statements: inner, .. } => {
+                    self.check_branch_terminates(inner, terminates);
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1221,34 +1358,244 @@ impl ProofEngine {
     }
 
     fn check_exhaustiveness(&mut self, program: &Program) {
-        let mut sig_returns: HashMap<String, Vec<Type>> = HashMap::new();
+        let mut sig_outputs: HashMap<String, usize> = HashMap::new();
+        let mut sig_callers: HashMap<String, Vec<(String, String)>> = HashMap::new();
 
         for item in &program.items {
             if let TopLevel::Signature(sig) = item {
-                match &sig.result_type {
-                    ResultType::Projection(types) => {
-                        sig_returns.insert(sig.name.clone(), types.clone());
-                    }
-                    ResultType::TrueAssertion => {}
-                    ResultType::VoidType => {}
-                }
+                let output_count = match &sig.result_type {
+                    ResultType::Projection(types) => types.len(),
+                    ResultType::TrueAssertion => 1,
+                    ResultType::VoidType => 0,
+                };
+                sig_outputs.insert(sig.name.clone(), output_count);
             }
         }
 
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
-                for stmt in &txn.body {
-                    if let Statement::Unification {
-                        name: _,
-                        pattern: _,
-                        expr,
-                    } = stmt
-                    {
-                        // Legacy check - simplified for now
+                self.find_sig_unifications_in_body(&txn.body, &txn.name, &mut sig_callers);
+            }
+            if let TopLevel::Definition(defn) = item {
+                self.find_sig_unifications_in_body(&defn.body, &defn.name, &mut sig_callers);
+            }
+        }
+
+        for (sig_name, callers) in &sig_callers {
+            if let Some(total_outputs) = sig_outputs.get(sig_name) {
+                if *total_outputs <= 1 {
+                    continue;
+                }
+
+                let mut handled_outputs: HashSet<usize> = HashSet::new();
+                for (caller, pattern) in callers {
+                    if let Some(idx) = pattern.parse::<usize>().ok() {
+                        handled_outputs.insert(idx);
                     }
+                }
+
+                let mut missing = Vec::new();
+                for i in 0..*total_outputs {
+                    if !handled_outputs.contains(&i) {
+                        missing.push(i);
+                    }
+                }
+
+                if !missing.is_empty() {
+                    let mut err = ProofError::new("P011", "unhandled signature output");
+                    err.explanation = format!(
+                        "signature '{}' has {} outputs but callers only handle: {:?}. Missing: {:?}",
+                        sig_name, total_outputs, handled_outputs, missing
+                    );
+                    err.proof_chain.push(format!(
+                        "1. '{}' is a multi-output signature with {} outputs",
+                        sig_name, total_outputs
+                    ));
+                    for (caller, pattern) in callers {
+                        err.proof_chain.push(format!(
+                            "2. caller '{}' handles output {}",
+                            caller, pattern
+                        ));
+                    }
+                    err.proof_chain.push(format!(
+                        "3. outputs {:?} are not handled by any caller",
+                        missing
+                    ));
+                    err.hints.push(format!(
+                        "ensure all outputs from '{}' are handled via unification",
+                        sig_name
+                    ));
+                    err.hints.push("e.g., 'call_sig(output_idx)' for each output index".to_string());
+                    self.errors.push(err);
                 }
             }
         }
+    }
+
+    fn find_sig_unifications_in_body(
+        &self,
+        body: &[Statement],
+        caller_name: &str,
+        sig_callers: &mut HashMap<String, Vec<(String, String)>>,
+    ) {
+        for stmt in body {
+            match stmt {
+                Statement::Unification {
+                    name,
+                    pattern,
+                    expr,
+                } => {
+                    if let Expr::Call(sig_name, _) = expr {
+                        sig_callers
+                            .entry(sig_name.clone())
+                            .or_insert_with(Vec::new)
+                            .push((caller_name.to_string(), pattern.clone()));
+                    }
+                }
+                Statement::Guarded { statements, .. } => {
+                    self.find_sig_unifications_in_body(statements, caller_name, sig_callers);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn check_circular_dependencies(&mut self, program: &Program) {
+        let mut call_graph: HashMap<String, Vec<String>> = HashMap::new();
+        let mut all_txn_names: HashSet<String> = HashSet::new();
+        let mut txn_spans: HashMap<String, Option<Span>> = HashMap::new();
+
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                all_txn_names.insert(txn.name.clone());
+                txn_spans.insert(txn.name.clone(), txn.span);
+                let called_txns = self.extract_called_transactions(&txn.body);
+                call_graph.entry(txn.name.clone()).or_insert_with(Vec::new).extend(called_txns);
+            }
+        }
+
+        for txn_name in &all_txn_names {
+            let mut visited: HashSet<String> = HashSet::new();
+            let mut path: Vec<String> = Vec::new();
+            if self.detect_cycle(txn_name, &call_graph, &mut visited, &mut path) {
+                let mut err = ProofError::new("P012", "circular transaction dependency");
+                err.explanation = format!(
+                    "transactions form a circular dependency: {}",
+                    path.join(" -> ")
+                );
+                err.proof_chain.push("1. transaction call cycle detected".to_string());
+                for (i, name) in path.iter().enumerate() {
+                    err.proof_chain.push(format!("{}. {}", i + 2, name));
+                }
+                err.proof_chain.push(format!("{}. (cycle closes back to {})", path.len() + 2, txn_name));
+                err.hints.push("break the cycle by removing or reordering calls".to_string());
+                if let Some(span) = txn_spans.get(txn_name).and_then(|s| *s) {
+                    err.span = Some(span);
+                }
+                self.errors.push(err);
+                break;
+            }
+        }
+    }
+
+    fn extract_called_transactions(&self, body: &[Statement]) -> Vec<String> {
+        let mut called = Vec::new();
+        for stmt in body {
+            match stmt {
+                Statement::Assignment { expr, .. } => {
+                    self.collect_call_names(expr, &mut called);
+                }
+                Statement::Let { expr, .. } => {
+                    if let Some(e) = expr {
+                        self.collect_call_names(e, &mut called);
+                    }
+                }
+                Statement::Expression(e) => {
+                    self.collect_call_names(e, &mut called);
+                }
+                Statement::Guarded { statements, .. } => {
+                    called.extend(self.extract_called_transactions(statements));
+                }
+                _ => {}
+            }
+        }
+        called
+    }
+
+    fn collect_call_names(&self, expr: &Expr, called: &mut Vec<String>) {
+        match expr {
+            Expr::Call(name, args) => {
+                called.push(name.clone());
+                for arg in args {
+                    self.collect_call_names(arg, called);
+                }
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
+                self.collect_call_names(l, called);
+                self.collect_call_names(r, called);
+            }
+            Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) => {
+                self.collect_call_names(l, called);
+                self.collect_call_names(r, called);
+            }
+            Expr::And(l, r) | Expr::Or(l, r) => {
+                self.collect_call_names(l, called);
+                self.collect_call_names(r, called);
+            }
+            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+                self.collect_call_names(e, called);
+            }
+            Expr::FieldAccess(e, _) => {
+                self.collect_call_names(e, called);
+            }
+            Expr::ListLiteral(elems) => {
+                for elem in elems {
+                    self.collect_call_names(elem, called);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn detect_cycle(
+        &self,
+        node: &str,
+        graph: &HashMap<String, Vec<String>>,
+        visited: &mut HashSet<String>,
+        path: &mut Vec<String>,
+    ) -> bool {
+        let node_str = node.to_string();
+        if path.iter().any(|n| *n == node_str) {
+            if let Some(pos) = path.iter().position(|n| *n == node_str) {
+                let cycle_start = pos;
+                path.push(node_str.clone());
+                for i in cycle_start..path.len() {
+                    if path[i] == node_str && i > cycle_start {
+                        return true;
+                    }
+                }
+                path.pop();
+            }
+            return true;
+        }
+
+        if visited.contains(node) {
+            return false;
+        }
+
+        visited.insert(node.to_string());
+        path.push(node.to_string());
+
+        if let Some(edges) = graph.get(node) {
+            for next in edges {
+                if self.detect_cycle(next, graph, visited, path) {
+                    return true;
+                }
+            }
+        }
+
+        path.pop();
+        false
     }
 
     fn type_name(&self, ty: &Type) -> String {
