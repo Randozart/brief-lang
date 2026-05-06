@@ -1,0 +1,338 @@
+// AST - Abstract Syntax Tree definitions
+// Tier 4: Parser Components
+
+// ===== EXPRESSIONS =====
+
+enum Expr {
+    // Literals
+    ExprInt(Int),
+    ExprFloat(Float),
+    ExprString(String),
+    ExprChar(Char),
+    ExprBool(Bool),
+    
+    // Variables
+    ExprVar(String),
+    ExprPriorState(String),  // @var
+    
+    // Binary operations
+    ExprBinOp(String, Box<Expr>, Box<Expr>),  // op, left, right
+    
+    // Unary operations
+    ExprUnaryOp(String, Box<Expr>),  // op, operand
+    
+    // Calls and access
+    ExprCall(String, List<Expr>),  // name, args
+    ExprFieldAccess(Box<Expr>, String),  // object, field
+    ExprIndex(Box<Expr>, Box<Expr>),  // array, index
+    ExprSlice(Box<Expr>, Option<Box<Expr>>, Option<Box<Expr>>),  // arr, start, end
+    
+    // Containers
+    ExprList(List<Expr>),
+    ExprTuple(List<Expr>),
+    
+    // Type operations
+    ExprCast(Box<Expr>, Type),  // expr, target_type
+    
+    // Blocks
+    ExprBlock(List<Statement>)
+}
+
+// ===== STATEMENTS =====
+
+enum Statement {
+    // Assignment
+    StmtAssign(Box<Expr>, Box<Expr>),  // lhs, rhs
+    
+    // Let binding
+    StmtLet(String, Option<Type>, Option<Box<Expr>>),  // name, type, init
+    
+    // Expression statement
+    StmtExpr(Box<Expr>),
+    
+    // Term statement
+    StmtTerm(List<Option<Box<Expr>>>),  // return values
+    
+    // Escape statement
+    StmtEscape(Option<Box<Expr>>),  // escape value
+    
+    // Guarded statement
+    StmtGuarded(Box<Expr>, List<Statement>),  // condition, body
+    
+    // Unification
+    StmtUnification(String, String, Box<Expr>),  // name, pattern, expr
+    
+    // Inline assembly
+    StmtAsm(String, List<String>)  // asm code, clobbers
+}
+
+// ===== CONTRACTS =====
+
+struct Contract {
+    precondition: Expr,
+    postcondition: Expr,
+    watchdog: Option<Watchdog>
+}
+
+struct Watchdog {
+    condition: Expr,
+    is_required: Bool  // true = !, false = ?
+}
+
+// ===== DEFINITIONS =====
+
+struct Definition {
+    name: String,
+    type_params: List<String>,
+    params: List<Param>,
+    output_type: Option<Type>,
+    contract: Contract,
+    body: List<Statement>
+}
+
+struct Transaction {
+    name: String,
+    is_async: Bool,
+    is_reactive: Bool,
+    type_params: List<String>,
+    params: List<Param>,
+    contract: Contract,
+    body: List<Statement>
+}
+
+struct Param {
+    name: String,
+    param_type: Type
+}
+
+struct Signature {
+    name: String,
+    input_type: Type,
+    output_type: Type,
+    source: Option<String>,
+    bound_defn: Option<String>
+}
+
+// ===== TYPE DEFINITIONS =====
+
+enum Type {
+    TypeInt,
+    TypeUInt,
+    TypeFloat,
+    TypeString,
+    TypeBool,
+    TypeChar,
+    TypeData,
+    TypeVoid,
+    TypeVector(Box<Type>, Int),
+    TypeOption(Box<Type>),
+    TypeResult(Box<Type>, Box<Type>),
+    TypeList(Box<Type>),
+    TypeHashMap(Box<Type>, Box<Type>),
+    TypeHashSet(Box<Type>),
+    TypeStack(Box<Type>),
+    TypeQueue(Box<Type>),
+    TypeStringBuilder,
+    TypeNamed(String, List<Type>),
+    TypeTuple(List<Type>),
+    TypeUnion(List<Type>),
+    TypeSig(String),
+    TypeConstrained(Box<Type>, BitRange)
+}
+
+struct BitRange {
+    start: Int,
+    end: Int
+}
+
+// ===== STRUCTS AND ENUMS =====
+
+struct StructDefinition {
+    name: String,
+    fields: List<StructField>,
+    methods: List<Transaction>
+}
+
+struct StructField {
+    name: String,
+    field_type: Type,
+    default_value: Option<Expr>
+}
+
+struct RStructDefinition {
+    name: String,
+    fields: List<StructField>,
+    methods: List<Transaction>,
+    view: Option<ViewBody>
+}
+
+struct EnumDefinition {
+    name: String,
+    type_params: List<String>,
+    variants: List<EnumVariant>
+}
+
+enum EnumVariant {
+    VariantSimple(String),
+    VariantTuple(String, List<Type>),
+    VariantStruct(String, List<StructField>)
+}
+
+// ===== VIEWS (Rendered Brief) =====
+
+struct ViewBody {
+    elements: List<ViewElement>
+}
+
+enum ViewElement {
+    ViewHtml(String, List<ViewAttr>, List<ViewElement>),  // tag, attrs, children
+    ViewComponent(String, List<ViewAttr>, List<ViewElement>),  // component, attrs, children
+    ViewText(String),  // text content
+    ViewExpr(Box<Expr>)  // embedded expression
+}
+
+enum ViewAttr {
+    AttrNormal(String, String),  // name, value
+    AttrBText(String, Box<Expr>),  // b-text binding
+    AttrBShow(String, Box<Expr>),  // b-show binding
+    AttrBTrigger(String, String),  // b-trigger binding
+    AttrBModel(String, String)  // b-model binding
+}
+
+// ===== IMPORTS =====
+
+struct Import {
+    path: String,
+    items: List<ImportItem>,
+    alias: Option<String>
+}
+
+enum ImportItem {
+    ImportAll,
+    ImportNamed(String, Option<String>)  // name, alias
+}
+
+// ===== CONSTANTS AND STATE =====
+
+struct Constant {
+    name: String,
+    const_type: Type,
+    value: Expr
+}
+
+struct StateDecl {
+    name: String,
+    state_type: Type,
+    initial_value: Option<Expr>
+}
+
+// ===== PROGRAM =====
+
+enum TopLevel {
+    TopDefn(Definition),
+    TopTxn(Transaction),
+    TopSig(Signature),
+    TopStruct(StructDefinition),
+    TopRStruct(RStructDefinition),
+    TopEnum(EnumDefinition),
+    TopImport(Import),
+    TopConst(Constant),
+    TopState(StateDecl),
+    TopRender(String, ViewBody)  // name, body
+}
+
+struct Program {
+    items: List<TopLevel>
+}
+
+// ===== UTILITY FUNCTIONS =====
+
+// Get expression precedence
+defn expr_precedence(expr: Expr) -> Int {
+    unification expr(ExprBinOp(op, _, _)) = {
+        [op == "*"] { term 11; };
+        [op == "/"] { term 11; };
+        [op == "%"] { term 11; };
+        [op == "+"] { term 10; };
+        [op == "-"] { term 10; };
+        [op == "<"] { term 8; };
+        [op == ">"] { term 8; };
+        [op == "<="] { term 8; };
+        [op == ">="] { term 8; };
+        [op == "=="] { term 7; };
+        [op == "!="] { term 7; };
+        [op == "&&"] { term 5; };
+        [op == "||"] { term 4; };
+    };
+    term 0;
+}
+
+// Check if expression is literal
+defn is_literal_expr(expr: Expr) -> Bool {
+    unification expr(ExprInt(_)) = true;
+    unification expr(ExprFloat(_)) = true;
+    unification expr(ExprString(_)) = true;
+    unification expr(ExprChar(_)) = true;
+    unification expr(ExprBool(_)) = true;
+    term false;
+}
+
+// Get expression type (simple inference)
+defn infer_expr_type(expr: Expr) -> Option<Type> {
+    unification expr(ExprInt(_)) = Some(TypeInt);
+    unification expr(ExprFloat(_)) = Some(TypeFloat);
+    unification expr(ExprString(_)) = Some(TypeString);
+    unification expr(ExprChar(_)) = Some(TypeChar);
+    unification expr(ExprBool(_)) = Some(TypeBool);
+    term None;
+}
+
+// Create binary expression
+defn make_binop(op: String, left: Expr, right: Expr) -> Expr {
+    term ExprBinOp(op, Box::new(left), Box::new(right));
+}
+
+// Create unary expression
+defn make_unaryop(op: String, operand: Expr) -> Expr {
+    term ExprUnaryOp(op, Box::new(operand));
+}
+
+// Create variable expression
+defn make_var(name: String) -> Expr {
+    term ExprVar(name);
+}
+
+// Create prior state expression
+defn make_prior_state(name: String) -> Expr {
+    term ExprPriorState(name);
+}
+
+// Create call expression
+defn make_call(name: String, args: List<Expr>) -> Expr {
+    term ExprCall(name, args);
+}
+
+// Create integer literal
+defn make_int(n: Int) -> Expr {
+    term ExprInt(n);
+}
+
+// Create float literal
+defn make_float(f: Float) -> Expr {
+    term ExprFloat(f);
+}
+
+// Create bool literal
+defn make_bool(b: Bool) -> Expr {
+    term ExprBool(b);
+}
+
+// Create string literal
+defn make_string(s: String) -> Expr {
+    term ExprString(s);
+}
+
+// Create char literal
+defn make_char(c: Char) -> Expr {
+    term ExprChar(c);
+}

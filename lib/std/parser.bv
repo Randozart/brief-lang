@@ -1,0 +1,837 @@
+// Parser - Recursive descent parser for Brief
+// Tier 4: Parser Components
+
+// ===== PARSER STATE =====
+
+struct ParserState {
+    tokens: List<Token>,
+    position: Int,
+    current_token: Token
+}
+
+// ===== PARSER CONSTRUCTION =====
+
+defn new_parser(tokens: List<Token>) -> ParserState {
+    let current = tokens.get(0).unwrap_or(TokenEof);
+    term ParserState {
+        tokens: tokens,
+        position: 0,
+        current_token: current
+    };
+}
+
+// ===== TOKEN ACCESS =====
+
+defn current_token(state: ParserState) -> Token {
+    term state.current_token;
+}
+
+defn peek_token(state: ParserState, offset: Int) -> Token {
+    let pos = state.position + offset;
+    [pos < state.tokens.len()] {
+        term state.tokens[pos];
+    };
+    term TokenEof;
+}
+
+defn advance(state: ParserState) -> ParserState {
+    let new_pos = state.position + 1;
+    [new_pos < state.tokens.len()] {
+        let new_current = state.tokens[new_pos];
+        term ParserState {
+            tokens: state.tokens,
+            position: new_pos,
+            current_token: new_current
+        };
+    };
+    term ParserState {
+        tokens: state.tokens,
+        position: new_pos,
+        current_token: TokenEof
+    };
+}
+
+defn expect_token(state: ParserState, expected: Token) -> Result<ParserState, String> {
+    [current_token(state) == expected] {
+        term Ok(advance(state));
+    };
+    term Err("Expected " + token_to_string(expected) + " but got " + token_to_string(current_token(state)));
+}
+
+defn match_token(state: ParserState, token: Token) -> (Bool, ParserState) {
+    [current_token(state) == token] {
+        term (true, advance(state));
+    };
+    term (false, state);
+}
+
+// ===== PROGRAM PARSING =====
+
+defn parse_program(state: ParserState) -> Result<Program, String> {
+    let mut items: List<TopLevel> = [];
+    
+    [current_token(state) != TokenEof] {
+        let (item, new_state) = parse_top_level(state)?;
+        &items = items.append(item);
+        &state = new_state;
+    };
+    
+    term Ok(Program { items: items });
+}
+
+defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), String> {
+    let tok = current_token(state);
+    
+    // Keywords
+    unification tok(KeywordLet) = {
+        let (decl, state) = parse_state_decl(state)?;
+        term (TopState(decl), state);
+    };
+    
+    unification tok(KeywordConst) = {
+        let (const, state) = parse_constant(state)?;
+        term (TopConst(const), state);
+    };
+    
+    unification tok(KeywordTxn) = {
+        let (txn, state) = parse_transaction(state)?;
+        term (TopTxn(txn), state);
+    };
+    
+    unification tok(KeywordRct) = {
+        let (txn, state) = parse_transaction(state)?;
+        term (TopTxn(txn), state);
+    };
+    
+    unification tok(KeywordDefn) = {
+        let (defn, state) = parse_definition(state)?;
+        term (TopDefn(defn), state);
+    };
+    
+    unification tok(KeywordSig) = {
+        let (sig, state) = parse_signature(state)?;
+        term (TopSig(sig), state);
+    };
+    
+    unification tok(KeywordStruct) = {
+        let (struct_def, state) = parse_struct(state)?;
+        term (TopStruct(struct_def), state);
+    };
+    
+    unification tok(KeywordEnum) = {
+        let (enum_def, state) = parse_enum(state)?;
+        term (TopEnum(enum_def), state);
+    };
+    
+    unification tok(KeywordImport) = {
+        let (import, state) = parse_import(state)?;
+        term (TopImport(import), state);
+    };
+    
+    term Err("Unexpected token: " + token_to_string(tok));
+}
+
+// ===== TRANSACTION PARSING =====
+
+defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState), String> {
+    let mut is_async = false;
+    let mut is_reactive = false;
+    
+    // Check for rct
+    [current_token(state) == KeywordRct] {
+        &is_reactive = true;
+        &state = advance(state);
+    };
+    
+    // Check for async
+    [current_token(state) == KeywordAsync] {
+        &is_async = true;
+        &state = advance(state);
+    };
+    
+    // Expect txn keyword
+    state = expect_token(state, KeywordTxn)?;
+    
+    // Get name
+    let tok = current_token(state);
+    unification tok(TokenIdentifier(name)) = {
+        &state = advance(state);
+    };
+    [!tok.is_identifier()] {
+        term Err("Expected transaction name");
+    };
+    
+    // Parse type params (optional)
+    let type_params: List<String> = [];
+    [current_token(state) == OpLt] {
+        let (params, new_state) = parse_type_params(state)?;
+        &type_params = params;
+        &state = new_state;
+    };
+    
+    // Parse params
+    let (params, new_state) = parse_params(state)?;
+    &state = new_state;
+    
+    // Parse contract
+    let (contract, new_state) = parse_contract(state)?;
+    &state = new_state;
+    
+    // Parse body
+    let body: List<Statement> = [];
+    [current_token(state) == DelimLBrace] {
+        let (stmts, new_state) = parse_block(state)?;
+        &body = stmts;
+        &state = new_state;
+    };
+    
+    // Expect semicolon if no body
+    [current_token(state) == OpSemicolon] {
+        &state = advance(state);
+    };
+    
+    let txn = Transaction {
+        name: tok.unwrap_identifier(),
+        is_async: is_async,
+        is_reactive: is_reactive,
+        type_params: type_params,
+        params: params,
+        contract: contract,
+        body: body
+    };
+    
+    term (txn, state);
+}
+
+// ===== DEFINITION PARSING =====
+
+defn parse_definition(state: ParserState) -> Result<(Definition, ParserState), String> {
+    state = expect_token(state, KeywordDefn)?;
+    
+    // Get name
+    let tok = current_token(state);
+    unification tok(TokenIdentifier(name)) = {
+        &state = advance(state);
+    };
+    [!tok.is_identifier()] {
+        term Err("Expected function name");
+    };
+    
+    // Parse type params
+    let type_params: List<String> = [];
+    [current_token(state) == OpLt] {
+        let (params, new_state) = parse_type_params(state)?;
+        &type_params = params;
+        &state = new_state;
+    };
+    
+    // Parse params
+    let (params, new_state) = parse_params(state)?;
+    &state = new_state;
+    
+    // Parse output type
+    let output_type: Option<Type> = None;
+    [current_token(state) == OpArrow] {
+        &state = advance(state);
+        let (ty, new_state) = parse_type(state)?;
+        &output_type = Some(ty);
+        &state = new_state;
+    };
+    
+    // Parse contract
+    let (contract, new_state) = parse_contract(state)?;
+    &state = new_state;
+    
+    // Parse body
+    let body: List<Statement> = [];
+    [current_token(state) == DelimLBrace] {
+        let (stmts, new_state) = parse_block(state)?;
+        &body = stmts;
+        &state = new_state;
+    };
+    
+    // Expect semicolon if no body
+    [current_token(state) == OpSemicolon] {
+        &state = advance(state);
+    };
+    
+    let defn = Definition {
+        name: tok.unwrap_identifier(),
+        type_params: type_params,
+        params: params,
+        output_type: output_type,
+        contract: contract,
+        body: body
+    };
+    
+    term (defn, state);
+}
+
+// ===== CONTRACT PARSING =====
+
+defn parse_contract(state: ParserState) -> Result<(Contract, ParserState), String> {
+    // Parse precondition
+    state = expect_token(state, DelimLBracket)?;
+    let (pre, new_state) = parse_expression(state)?;
+    &state = new_state;
+    state = expect_token(state, DelimRBracket)?;
+    
+    // Parse postcondition
+    state = expect_token(state, DelimLBracket)?;
+    let (post, new_state) = parse_expression(state)?;
+    &state = new_state;
+    state = expect_token(state, DelimRBracket)?;
+    
+    // Parse watchdog (optional)
+    let watchdog: Option<Watchdog> = None;
+    [current_token(state) == OpQuestion || current_token(state) == OpBang] {
+        let is_required = current_token(state) == OpBang;
+        &state = advance(state);
+        state = expect_token(state, DelimLBracket)?;
+        let (cond, new_state) = parse_expression(state)?;
+        &state = new_state;
+        state = expect_token(state, DelimRBracket)?;
+        &watchdog = Some(Watchdog {
+            condition: cond,
+            is_required: is_required
+        });
+    };
+    
+    let contract = Contract {
+        precondition: pre,
+        postcondition: post,
+        watchdog: watchdog
+    };
+    
+    term (contract, state);
+}
+
+// ===== EXPRESSION PARSING =====
+
+defn parse_expression(state: ParserState) -> Result<(Expr, ParserState), String> {
+    parse_or_expr(state)
+}
+
+defn parse_or_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
+    let (mut left, new_state) = parse_and_expr(state)?;
+    &state = new_state;
+    
+    [current_token(state) == OpOr] {
+        &state = advance(state);
+        let (right, new_state) = parse_or_expr(state)?;
+        &state = new_state;
+        &left = make_binop("||", left, right);
+    };
+    
+    term (left, state);
+}
+
+defn parse_and_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
+    let (mut left, new_state) = parse_equality_expr(state)?;
+    &state = new_state;
+    
+    [current_token(state) == OpAnd] {
+        &state = advance(state);
+        let (right, new_state) = parse_and_expr(state)?;
+        &state = new_state;
+        &left = make_binop("&&", left, right);
+    };
+    
+    term (left, state);
+}
+
+defn parse_equality_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
+    let (mut left, new_state) = parse_comparison_expr(state)?;
+    &state = new_state;
+    
+    [current_token(state) == OpEqEq] {
+        &state = advance(state);
+        let (right, new_state) = parse_comparison_expr(state)?;
+        &state = new_state;
+        &left = make_binop("==", left, right);
+    };
+    
+    [current_token(state) == OpNeq] {
+        &state = advance(state);
+        let (right, new_state) = parse_comparison_expr(state)?;
+        &state = new_state;
+        &left = make_binop("!=", left, right);
+    };
+    
+    term (left, state);
+}
+
+defn parse_comparison_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
+    let (mut left, new_state) = parse_additive_expr(state)?;
+    &state = new_state;
+    
+    [current_token(state) == OpLt] {
+        &state = advance(state);
+        let (right, new_state) = parse_additive_expr(state)?;
+        &state = new_state;
+        &left = make_binop("<", left, right);
+    };
+    
+    [current_token(state) == OpGt] {
+        &state = advance(state);
+        let (right, new_state) = parse_additive_expr(state)?;
+        &state = new_state;
+        &left = make_binop(">", left, right);
+    };
+    
+    [current_token(state) == OpLtEq] {
+        &state = advance(state);
+        let (right, new_state) = parse_additive_expr(state)?;
+        &state = new_state;
+        &left = make_binop("<=", left, right);
+    };
+    
+    [current_token(state) == OpGtEq] {
+        &state = advance(state);
+        let (right, new_state) = parse_additive_expr(state)?;
+        &state = new_state;
+        &left = make_binop(">=", left, right);
+    };
+    
+    term (left, state);
+}
+
+defn parse_additive_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
+    let (mut left, new_state) = parse_multiplicative_expr(state)?;
+    &state = new_state;
+    
+    [current_token(state) == OpPlus] {
+        &state = advance(state);
+        let (right, new_state) = parse_additive_expr(state)?;
+        &state = new_state;
+        &left = make_binop("+", left, right);
+    };
+    
+    [current_token(state) == OpMinus] {
+        &state = advance(state);
+        let (right, new_state) = parse_additive_expr(state)?;
+        &state = new_state;
+        &left = make_binop("-", left, right);
+    };
+    
+    term (left, state);
+}
+
+defn parse_multiplicative_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
+    let (mut left, new_state) = parse_unary_expr(state)?;
+    &state = new_state;
+    
+    [current_token(state) == OpStar] {
+        &state = advance(state);
+        let (right, new_state) = parse_unary_expr(state)?;
+        &state = new_state;
+        &left = make_binop("*", left, right);
+    };
+    
+    [current_token(state) == OpSlash] {
+        &state = advance(state);
+        let (right, new_state) = parse_unary_expr(state)?;
+        &state = new_state;
+        &left = make_binop("/", left, right);
+    };
+    
+    [current_token(state) == OpPercent] {
+        &state = advance(state);
+        let (right, new_state) = parse_unary_expr(state)?;
+        &state = new_state;
+        &left = make_binop("%", left, right);
+    };
+    
+    term (left, state);
+}
+
+defn parse_unary_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
+    [current_token(state) == OpMinus] {
+        &state = advance(state);
+        let (operand, new_state) = parse_unary_expr(state)?;
+        &state = new_state;
+        term (make_unaryop("-", operand), state);
+    };
+    
+    [current_token(state) == OpBang] {
+        &state = advance(state);
+        let (operand, new_state) = parse_unary_expr(state)?;
+        &state = new_state;
+        term (make_unaryop("!", operand), state);
+    };
+    
+    [current_token(state) == OpTilde] {
+        &state = advance(state);
+        let (operand, new_state) = parse_unary_expr(state)?;
+        &state = new_state;
+        term (make_unaryop("~", operand), state);
+    };
+    
+    parse_primary_expr(state)
+}
+
+defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
+    let tok = current_token(state);
+    
+    // Literals
+    unification tok(TokenInt(n)) = {
+        &state = advance(state);
+        term (make_int(n), state);
+    };
+    
+    unification tok(TokenFloat(f)) = {
+        &state = advance(state);
+        term (make_float(f), state);
+    };
+    
+    unification tok(TokenString(s)) = {
+        &state = advance(state);
+        term (make_string(s), state);
+    };
+    
+    unification tok(TokenChar(c)) = {
+        &state = advance(state);
+        term (make_char(c), state);
+    };
+    
+    unification tok(KeywordTrue) = {
+        &state = advance(state);
+        term (make_bool(true), state);
+    };
+    
+    unification tok(KeywordFalse) = {
+        &state = advance(state);
+        term (make_bool(false), state);
+    };
+    
+    // Identifier
+    unification tok(TokenIdentifier(_)) = {
+        let name = tok.unwrap_identifier();
+        &state = advance(state);
+        
+        // Check for function call
+        [current_token(state) == DelimLParen] {
+            &state = advance(state);
+            let (args, new_state) = parse_expr_list(state)?;
+            &state = new_state;
+            state = expect_token(state, DelimRParen)?;
+            term (make_call(name, args), state);
+        };
+        
+        term (make_var(name), state);
+    };
+    
+    // Prior state (@var)
+    unification tok(OpAt) = {
+        &state = advance(state);
+        let tok = current_token(state);
+        unification tok(TokenIdentifier(name)) = {
+            &state = advance(state);
+            term (make_prior_state(name), state);
+        };
+        term Err("Expected identifier after @");
+    };
+    
+    // Parenthesized expression
+    unification tok(DelimLParen) = {
+        &state = advance(state);
+        let (expr, new_state) = parse_expression(state)?;
+        &state = new_state;
+        state = expect_token(state, DelimRParen)?;
+        term (expr, state);
+    };
+    
+    // List literal
+    unification tok(DelimLBracket) = {
+        &state = advance(state);
+        let (elements, new_state) = parse_expr_list(state)?;
+        &state = new_state;
+        state = expect_token(state, DelimRBracket)?;
+        term (ExprList(elements), state);
+    };
+    
+    term Err("Unexpected token in expression: " + token_to_string(tok));
+}
+
+defn parse_expr_list(state: ParserState) -> Result<(List<Expr>, ParserState), String> {
+    let mut elements: List<Expr> = [];
+    
+    [current_token(state) != DelimRParen && current_token(state) != DelimRBracket] {
+        let (expr, new_state) = parse_expression(state)?;
+        &elements = elements.append(expr);
+        &state = new_state;
+        
+        [current_token(state) == OpComma] {
+            &state = advance(state);
+        };
+    };
+    
+    term (elements, state);
+}
+
+// ===== STATEMENT PARSING =====
+
+defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), String> {
+    let tok = current_token(state);
+    
+    // Let binding
+    unification tok(KeywordLet) = {
+        let (stmt, new_state) = parse_let(state)?;
+        term (stmt, new_state);
+    };
+    
+    // Assignment
+    [tok.is_identifier() || tok == OpAt] {
+        let (expr, new_state) = parse_expression(state)?;
+        &state = new_state;
+        
+        [current_token(state) == OpEq] {
+            &state = advance(state);
+            let (rhs, new_state) = parse_expression(state)?;
+            &state = new_state;
+            state = expect_token(state, OpSemicolon)?;
+            term (StmtAssign(Box::new(expr), Box::new(rhs)), state);
+        };
+    };
+    
+    // Term statement
+    unification tok(KeywordTerm) = {
+        &state = advance(state);
+        
+        let mut values: List<Option<Box<Expr>>> = [];
+        [current_token(state) != OpSemicolon] {
+            let (expr, new_state) = parse_expression(state)?;
+            &values = values.append(Some(Box::new(expr)));
+            &state = new_state;
+            
+            [current_token(state) == OpComma] {
+                &state = advance(state);
+            };
+        };
+        
+        state = expect_token(state, OpSemicolon)?;
+        term (StmtTerm(values), state);
+    };
+    
+    // Escape statement
+    unification tok(KeywordEscape) = {
+        &state = advance(state);
+        
+        let value: Option<Box<Expr>> = None;
+        [current_token(state) != OpSemicolon] {
+            let (expr, new_state) = parse_expression(state)?;
+            &value = Some(Box::new(expr));
+            &state = new_state;
+        };
+        
+        state = expect_token(state, OpSemicolon)?;
+        term (StmtEscape(value), state);
+    };
+    
+    // Guarded statement
+    unification tok(DelimLBracket) = {
+        &state = advance(state);
+        let (condition, new_state) = parse_expression(state)?;
+        &state = new_state;
+        state = expect_token(state, DelimRBracket)?;
+        
+        let body: List<Statement> = [];
+        [current_token(state) == DelimLBrace] {
+            let (stmts, new_state) = parse_block(state)?;
+            &body = stmts;
+            &state = new_state;
+        };
+        [current_token(state) != DelimLBrace] {
+            let (stmt, new_state) = parse_statement(state)?;
+            &body = body.append(stmt);
+            &state = new_state;
+        };
+        
+        term (StmtGuarded(Box::new(condition), body), state);
+    };
+    
+    // Block
+    unification tok(DelimLBrace) = {
+        let (stmts, new_state) = parse_block(state)?;
+        term (ExprBlock(stmts), state);
+    };
+    
+    // Expression statement
+    {
+        let (expr, new_state) = parse_expression(state)?;
+        &state = new_state;
+        state = expect_token(state, OpSemicolon)?;
+        term (StmtExpr(Box::new(expr)), state);
+    };
+}
+
+defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
+    state = expect_token(state, KeywordLet)?;
+    
+    let tok = current_token(state);
+    unification tok(TokenIdentifier(name)) = {
+        &state = advance(state);
+    };
+    [!tok.is_identifier()] {
+        term Err("Expected variable name");
+    };
+    
+    let var_type: Option<Type> = None;
+    [current_token(state) == OpColon] {
+        &state = advance(state);
+        let (ty, new_state) = parse_type(state)?;
+        &var_type = Some(ty);
+        &state = new_state;
+    };
+    
+    let init_value: Option<Box<Expr>> = None;
+    [current_token(state) == OpEq] {
+        &state = advance(state);
+        let (expr, new_state) = parse_expression(state)?;
+        &init_value = Some(Box::new(expr));
+        &state = new_state;
+    };
+    
+    state = expect_token(state, OpSemicolon)?;
+    
+    term (StmtLet(name, var_type, init_value), state);
+}
+
+defn parse_block(state: ParserState) -> Result<(List<Statement>, ParserState), String> {
+    state = expect_token(state, DelimLBrace)?;
+    
+    let mut stmts: List<Statement> = [];
+    [current_token(state) != DelimRBrace] {
+        let (stmt, new_state) = parse_statement(state)?;
+        &stmts = stmts.append(stmt);
+        &state = new_state;
+    };
+    
+    state = expect_token(state, DelimRBrace)?;
+    term (stmts, state);
+}
+
+// ===== TYPE PARSING =====
+
+defn parse_type(state: ParserState) -> Result<(Type, ParserState), String> {
+    let tok = current_token(state);
+    
+    unification tok(KeywordInt) = {
+        &state = advance(state);
+        term (TypeInt, state);
+    };
+    
+    unification tok(KeywordUInt) = {
+        &state = advance(state);
+        term (TypeUInt, state);
+    };
+    
+    unification tok(KeywordFloat) = {
+        &state = advance(state);
+        term (TypeFloat, state);
+    };
+    
+    unification tok(KeywordString) = {
+        &state = advance(state);
+        term (TypeString, state);
+    };
+    
+    unification tok(KeywordBool) = {
+        &state = advance(state);
+        term (TypeBool, state);
+    };
+    
+    unification tok(KeywordChar) = {
+        &state = advance(state);
+        term (TypeChar, state);
+    };
+    
+    unification tok(KeywordVoid) = {
+        &state = advance(state);
+        term (TypeVoid, state);
+    };
+    
+    term Err("Unknown type: " + token_to_string(tok));
+}
+
+defn parse_type_params(state: ParserState) -> Result<(List<String>, ParserState), String> {
+    state = expect_token(state, OpLt)?;
+    
+    let mut params: List<String> = [];
+    [current_token(state) != OpGt] {
+        let tok = current_token(state);
+        unification tok(TokenIdentifier(name)) = {
+            &params = params.append(name);
+            &state = advance(state);
+        };
+        [!tok.is_identifier()] {
+            term Err("Expected type parameter name");
+        };
+        
+        [current_token(state) == OpComma] {
+            &state = advance(state);
+        };
+    };
+    
+    state = expect_token(state, OpGt)?;
+    term (params, state);
+}
+
+defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), String> {
+    state = expect_token(state, DelimLParen)?;
+    
+    let mut params: List<Param> = [];
+    [current_token(state) != DelimRParen] {
+        let tok = current_token(state);
+        unification tok(TokenIdentifier(name)) = {
+            &state = advance(state);
+        };
+        [!tok.is_identifier()] {
+            term Err("Expected parameter name");
+        };
+        
+        state = expect_token(state, OpColon)?;
+        
+        let (param_type, new_state) = parse_type(state)?;
+        &state = new_state;
+        
+        let param = Param {
+            name: name,
+            param_type: param_type
+        };
+        &params = params.append(param);
+        
+        [current_token(state) == OpComma] {
+            &state = advance(state);
+        };
+    };
+    
+    state = expect_token(state, DelimRParen)?;
+    term (params, state);
+}
+
+// ===== PLACEHOLDER PARSING (to be implemented) =====
+
+defn parse_signature(state: ParserState) -> Result<(Signature, ParserState), String> {
+    term Err("Signature parsing not yet implemented");
+}
+
+defn parse_struct(state: ParserState) -> Result<(StructDefinition, ParserState), String> {
+    term Err("Struct parsing not yet implemented");
+}
+
+defn parse_enum(state: ParserState) -> Result<(EnumDefinition, ParserState), String> {
+    term Err("Enum parsing not yet implemented");
+}
+
+defn parse_import(state: ParserState) -> Result<(Import, ParserState), String> {
+    term Err("Import parsing not yet implemented");
+}
+
+defn parse_constant(state: ParserState) -> Result<(Constant, ParserState), String> {
+    term Err("Constant parsing not yet implemented");
+}
+
+defn parse_state_decl(state: ParserState) -> Result<(StateDecl, ParserState), String> {
+    term Err("State declaration parsing not yet implemented");
+}
