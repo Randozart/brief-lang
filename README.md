@@ -128,13 +128,65 @@ This creates a project with:
 
 See [Brief Languages](#brief-languages) below for details on when to use each.
 
-### 3. Run Your App
+### 3. Build and Run Your App
+
+The `brief build` command is the new standard for compiling. Its behavior depends on the file type:
 
 ```bash
-brief run
+# For .bv files (pure logic) -> builds a native Rust executable
+brief build main.bv
+
+# For .rbv files (with a UI) -> builds a full web application
+brief build main.rbv
 ```
 
-Opens http://localhost:8080 in your browser with your app running.
+To run the web app, use `brief run`:
+```bash
+brief run main.rbv
+```
+This command builds the `.rbv` file, starts a local server, and opens your app in a browser.
+
+### New `brief wasm` Command
+For specific WASM output, use the `wasm` command:
+- **`.bv` file**: Generates a pure, standalone WASM binary.
+- **`.rbv` file**: Generates a full web application (WASM + JS + Frontend).
+
+```bash
+brief wasm main.bv --out ./dist
+```
+
+## Commands
+
+Brief uses a unified command structure. While older commands like `brief c` and `brief rust` still work, the recommended commands are:
+
+| Command | Description |
+|---|---|
+| `brief build <file>` | Compiles a file to its default target. `.bv` -> native executable, `.rbv` -> web app. |
+| `brief compile <file> --target <spec>` | Compiles a file to a specific target using a `.toml` spec file. |
+| `brief wasm <file>` | Generates a pure WASM binary (`.bv`) or a full web app (`.rbv`). |
+| `brief run <file.rbv>` | Builds and serves a `.rbv` file, opening it in your browser. |
+| `brief check <file>` | Type checks and verifies a file without compiling. |
+| `brief init [name]` | Creates a new Brief project. |
+| `brief lsp` | Starts the Language Server for IDE integration. |
+
+### Direct Compilation Commands
+
+These commands provide shortcuts for compiling to a specific language target without needing a full `--target` spec file. They are useful for quick tests and single-file projects.
+
+| Command | Description |
+|---|---|
+| `brief c <file>` | Compiles to C. Handles `.bv` and `.ebv` for hosted or bare-metal targets. |
+| `brief rust <file>` | Compiles to native Rust (std). |
+| `brief arm <file>` | Compiles to ARM bare-metal Rust. |
+| `brief verilog <file.ebv>` | Compiles to SystemVerilog. Requires `--hw` config. |
+| `brief vhdl <file.ebv>` | Compiles to VHDL. Requires `--hw` config. |
+| `brief cobol <file>` | Compiles to IBM Enterprise COBOL. |
+
+### Data Brief for Configuration
+
+Hardware configuration has been modernized with **Data Brief**, a schema-enforced configuration system using `.dbv` and `.dbvs` files, replacing the older `hardware.toml` files. This allows for safer and more reliable hardware definitions.
+
+See `DATABRIEF.md` for more details.
 
 ## Why Declarative?
 
@@ -275,6 +327,9 @@ Brief comes in three variants, each targeting different output:
 | **Brief** | `.bv` | Pure declarative logic | C, Rust, WebAssembly, COBOL |
 | **Rendered Brief** | `.rbv` | Brief + Web View (HTML/CSS/SVG) | Browser (HTML/JS/CSS) |
 | **Embedded Brief** | `.ebv` | Brief + Hardware triggers | SystemVerilog + TCL, ARM Rust, C bare-metal |
+| **Data Brief** | `.dbv` | Provides concrete hardware configuration values | Configuration |
+| **Data Brief Schema** | `.dbvs` | Defines hardware schemas, templates, and aliases | Configuration |
+| **Data Brief Lines** | `.dbvl` | Line-based mutable database for large datasets | Data Storage & Verification |
 
 ### Key Differences
 
@@ -289,144 +344,7 @@ Brief comes in three variants, each targeting different output:
   - **FPGA/ASIC**: SystemVerilog via `brief verilog` (with optional TCL build scripts)
   - **ARM bare-metal**: Rust via `brief arm` or C via `brief c`
 
-## Unified Build Syntax
 
-Brief uses a **single command** for all transpilation targets. The distinction between "software," "hardware," and "web" is handled entirely by the target configuration.
-
-### The Command
-
-```bash
-brief compile <SOURCE> --target <CONFIG.toml>
-```
-
-Where:
-- `<SOURCE>` is your `.bv`, `.rbv`, or `.ebv` file
-- `<CONFIG.toml>` is the target specification defining the backend, templates, and capabilities
-
-### Semantic Layers
-
-| Extension | Layer | Description | Capabilities |
-| :--- | :--- | :--- | :--- |
-| **`.bv`** | Foundational | Pure logic with contracts | None (all targets) |
-| **`.rbv`** | Rendered | `.bv` + HTML/CSS/SVG view | `reactive_ui` |
-| **`.ebv`** | Embedded | `.bv` + hardware triggers | `hardware_triggers`, `mmio` |
-
-### Target Capabilities
-
-Each target TOML declares which layers it supports. The compiler validates compatibility:
-
-```bash
-# Web backend (supports .bv and .rbv)
-brief compile app.rbv --target react_web.toml
-
-# Hardware backend (supports .bv and .ebv)  
-brief compile logic.ebv --target kv260_fpga.toml
-
-# If you try .ebv for a web target, you get a capability error
-```
-
-### Quick Reference
-
-| Target | Command |
-| :--- | :--- |
-| **Web (React)** | `brief compile app.rbv --target react_web.toml` |
-| **Linux Kernel** | `brief compile logic.bv --target linux_kernel.toml` |
-| **KV260 FPGA** | `brief compile logic.ebv --target kv260_fpga.toml` |
-| **Rust (native)** | `brief compile logic.bv --target rust_std.toml` |
-| **Python/NumPy** | `brief compile model.bv --target python_numpy.toml` |
-| **WebGPU** | `brief compile kernel.bv --target webgpu_wgsl.toml` |
-| **COBOL** | `brief compile audit.bv --target ibm_cobol.toml` |
-
-#### Legacy Commands (Still Supported)
-
-```bash
-# These old commands still work and map to target specs:
-brief build program.bv        # → WebAssembly
-brief c program.bv            # → C (hosted default)
-brief c program.ebv           # → C bare-metal (for .ebv files)
-brief rust program.bv         # → Native Rust
-brief cobol program.bv        # → IBM COBOL
-brief rbv program.rbv         # → Browser files
-brief run program.rbv         # → Build, serve, open browser
-brief verilog program.ebv --hw config.toml  # → SystemVerilog
-```
-
-### Embedded Brief: Software-Defined Silicon
-
-For FPGA/ASIC targets, Brief compiles directly to gates:
-
-```brief
-// Physical wide bus (1024 registers + 1024 ALUs)
-let pixels: UInt[1024] = 0;
-
-// Hardware trigger mapped to physical pin
-trg button: Bool @ 0x4000;
-
-// Cycle-accurate watchdog timer
-sensor_val = read_spi() within 10 cycles;
-
-// Parallel SIMD update
-rct txn update [button][true] {
-  &pixels = pixels + 1; // 1024 parallel additions in 1 clock cycle
-  term;
-};
-```
-
-The compiler ensures **Spatial Isomorphism**, mapping logical structures
-to physical gates, wires, and parallel hardware units.
-
-### TCL Build Scripts
-
-When compiling to SystemVerilog, you can generate Vivado/Quartus TCL build scripts:
-
-```bash
-brief verilog program.ebv --hw config.toml --tcl  # Generate SV + TCL
-brief verilog program.ebv --hw config.toml --tcl-only  # TCL only
-```
-
-## Implementation Status
-
-### Core Features (working)
-- Transactions with pre/post conditions (required on all)
-- Reactive transactions (`rct txn`) auto-firing based on contracts
-- Proof engine: termination and postcondition verification
-- Type checking and inference (including Vector lifting and Union handling)
-- Borrow-checker-inspired race condition prevention
-- Pattern matching and unification
-- 59+ standard library functions
-- Imports and modular code organization
-
-### Transpilation Targets
-
-| Target | Command | File Types | Output |
-|--------|---------|------------|--------|
-| WebAssembly | `brief build` | `.bv` | Browser/edge WASM |
-| C | `brief c` | `.bv`, `.ebv` | Hosted/bare-metal C |
-| Rust | `brief rust` | `.bv`, `.ebv` | Native Rust (std) |
-| COBOL | `brief cobol` | `.bv`, `.ebv`, `.br` | IBM Enterprise COBOL |
-| SystemVerilog | `brief verilog` | `.ebv` | FPGA/ASIC synthesis |
-| TCL | `--tcl` flag | — | Vivado/Quartus build scripts |
-| ARM bare-metal | `brief arm` | `.bv`, `.ebv` | KV260 Rust (no_std) |
-
-### Edge Cases and Limitations
-- Some complex termination proofs remain unresolved
-- SystemVerilog: Floating point is currently prohibited for synthesis
-- WASM compilation is functional but not optimized
-- Multi-clock domain synthesis is in early development
-
-Note on AI Integration:
-If using an LLM to write Brief code, the language is designed with that in mind.
-Contracts make intent explicit, helping LLMs generate more correct code.
-A system prompt for Brief can be provided to guide model behavior.
-
-## Usage
-
-```bash
-brief check program.bv          # Type check and verify
-brief build program.bv          # Compile to WebAssembly and run
-brief init my-project           # Create project
-brief lsp                       # Start Language Server
-```
 
 ## Full Language
 

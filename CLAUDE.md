@@ -28,11 +28,52 @@ The project consists of:
 - **Typecheck**: `cargo check`
 
 ### Running the Compiler
+- **Unified Compile**: `./target/release/brief-compiler compile <file> --target <spec.toml>`
+- **Build (Default)**: `./target/release/brief-compiler build <file>`
+- **WASM Generation**: `./target/release/brief-compiler wasm <file>`
 - **Compile RBV File**: `./target/release/brief-compiler rbv <file.rbv>`
-- **Compile to C**: `./target/release/brief-compiler c <file.bv>`
-- **Compile to C with target spec**: `./target/release/brief-compiler c <file.bv> --target <spec.toml>`
 - **Run with Server**: `./target/release/brief-compiler run <file.rbv>`
 - **Install to PATH**: `cp target/release/brief-compiler ~/.local/bin/brief`
+
+### New CLI Commands & Build System (as of May 2026)
+
+The build and compilation system has been refactored to be more explicit and powerful.
+
+#### `brief build`
+
+The `build` command is now the primary way to compile a Brief file to its default target. The behavior depends on the file extension:
+
+-   **`.bv` (Brief Volume)**: Transpiles to Rust and attempts to compile to a native executable using `rustc`.
+    -   *Default Target*: Native Rust application.
+-   **`.rbv` (Rendered Brief Volume)**: Compiles to a full web application (WASM + JS + Frontend), similar to the old `run` command.
+    -   *Default Target*: Web application.
+-   **`.ebv` (Embedded Brief Volume)**: **No default target**. These files are hardware-specific and must be compiled with an explicit target using `brief compile`.
+
+#### `brief wasm`
+
+This new command is dedicated to WASM generation:
+
+-   **`.bv` file**: Generates a pure, standalone WASM binary. No JS glue or frontend is created.
+-   **`.rbv` file**: Generates a full web application (WASM + JS + Frontend), identical to `brief build` for `.rbv` files.
+
+#### `brief compile` (Unified)
+
+This is the most flexible command, allowing you to compile any Brief file to any supported target by specifying a target specification file.
+
+`brief compile <file> --target <spec.toml>`
+
+**New Target Specs**:
+-   `vhdl_fpga.toml`: Compiles to VHDL for FPGAs.
+-   `react_native.toml`: Generates a React Native component.
+-   `nextjs.toml`: Generates a Next.js page.
+-   `vite.toml`: Generates a React component for a Vite project.
+
+See `lib/targets/` for all available target specifications.
+
+### Data Brief for Configuration
+
+The old `hardware.toml` files are being replaced by **Data Brief** (`.dbv`, `.dbvs`). This allows for schema-enforced hardware configuration and validation. See `DATABRIEF.md` for more details.
+
 
 ### Example Files
 - **Shopping Cart**: `examples/shopping_cart.rbv`

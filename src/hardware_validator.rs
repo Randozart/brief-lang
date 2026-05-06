@@ -21,6 +21,7 @@
 // or embeds the Work.
 
 use crate::ast::{Expr, HardwareConfig, Program, Statement, TopLevel};
+use crate::dbrief::DbvsEngine;
 use crate::errors::{Diagnostic, Severity};
 use crate::target_spec::TargetSpec;
 use std::collections::HashSet;
@@ -34,6 +35,7 @@ impl HardwareValidator {
         _target: &str,
         is_ebv: bool,
         target_spec: Option<&TargetSpec>,
+        dbvs_engine: Option<&DbvsEngine>,
     ) -> Vec<Diagnostic> {
         let write_graph = WriteGraph::build(program);
         let trigger_graph = TriggerGraph::build(program);
@@ -61,7 +63,7 @@ impl HardwareValidator {
         ));
 
         if let Some(spec) = target_spec {
-            diagnostics.extend(Self::check_memory_overlaps(program, hw_config, spec));
+            diagnostics.extend(Self::check_memory_overlaps(program, hw_config, spec, dbvs_engine));
         }
 
         diagnostics
@@ -71,6 +73,7 @@ impl HardwareValidator {
         program: &Program,
         _hw_config: Option<&HardwareConfig>,
         spec: &TargetSpec,
+        dbvs_engine: Option<&DbvsEngine>,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         let mut occupied_regions: Vec<(u64, u64, String)> = Vec::new();
@@ -104,6 +107,44 @@ impl HardwareValidator {
                                 diag = diag.with_span(span);
                             }
                             diagnostics.push(diag);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Use DbvsEngine to check for overflows and add to occupied regions
+        if let Some(engine) = dbvs_engine {
+            for item in &program.items {
+                if let TopLevel::StateDecl(decl) = item {
+                    if let Some(addr) = decl.address {
+                        if let Some(alias) = engine.get_alias(&decl.name) {
+                            let size = get_dbrief_type_size(&alias.alias_type, engine);
+                            if size > 0 {
+                                occupied_regions.push((addr, addr + size, format!("StateDecl '{}'", decl.name)));
+
+                                // Check if this region fits within any memory bank
+                                let mut found_bank = false;
+                                if let Some(memory) = &spec.memory {
+                                    for (_bank_name, bank) in &memory.banks {
+                                        if addr >= bank.start && (addr + size) <= (bank.start + bank.size) {
+                                            found_bank = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !found_bank && spec.memory.as_ref().map_or(false, |m| !m.banks.is_empty()) {
+                                    let mut diag = Diagnostic::new(
+                                        "B4006",
+                                        Severity::Error,
+                                        &format!("Memory region for '{}' (0x{:X} - 0x{:X}) is outside any defined memory bank", decl.name, addr, addr + size),
+                                    );
+                                    if let Some(span) = decl.span {
+                                        diag = diag.with_span(span);
+                                    }
+                                    diagnostics.push(diag);
+                                }
+                            }
                         }
                     }
                 }
@@ -532,5 +573,31 @@ impl ReadGraph {
 
     fn reads_from(&self, var: &str) -> bool {
         self.reads.contains(var)
+    }
+}
+
+fn get_dbrief_type_size(db_type: &crate::dbrief::ast::DbriefType, engine: &DbvsEngine) -> u64 {
+    use crate::dbrief::ast::DbriefType;
+    match db_type {
+        DbriefType::Bool => 1,
+        DbriefType::Int(bits) | DbriefType::UInt(bits) => (bits / 8) as u64,
+        DbriefType::Float => 8, // Assume f64
+        DbriefType::Vector(inner, Some(size)) => {
+            get_dbrief_type_size(inner, engine) * (*size as u64)
+        }
+        DbriefType::Named(name) => {
+            if let Some(s) = engine.get_struct(name) {
+                s.fields.iter().map(|(_, f_type)| get_dbrief_type_size(f_type, engine)).sum()
+            } else if let Some(e) = engine.get_enum(name) {
+                // Enums are usually stored as an integer type
+                4 // Assume 32-bit integer for enum
+            } else {
+                0 // Or handle as an error
+            }
+        }
+        DbriefType::Struct(fields) => {
+            fields.iter().map(|(_, f_type)| get_dbrief_type_size(f_type, engine)).sum()
+        }
+        _ => 0, // Other types don't have a fixed size
     }
 }

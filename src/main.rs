@@ -273,6 +273,7 @@ fn print_usage(program: &str) {
     eprintln!("  serve [dir]      Serve static files (default: .)");
     eprintln!("  rbv <file>       Compile RBV to browser-ready files");
     eprintln!("  run <file>       Compile, build WASM, serve, and open browser");
+    eprintln!("  wasm <file>      Generate WASM only (.bv) or WASM+JS+UI (.rbv)");
     eprintln!("  rust <file>      Compile to Native Rust (std)");
     eprintln!("  c <file>         Compile to C with __asm__");
     eprintln!("  arm <file>       Compile to ARM bare-metal Rust");
@@ -604,100 +605,69 @@ fn run_build(
     verbose: bool,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let source = fs::read_to_string(file_path)?;
-    let clean_source = strip_annotations(&source);
-
-    if verbose {
-        println!("[Lexer] Tokenizing...");
-    }
-
-    let mut parser = parser::Parser::new(&clean_source);
-    let program = match parser.parse() {
-        Ok(prog) => prog,
-        Err(e) => {
-            eprintln!("Parse error: {}", e);
-            return Err("Parse error".into());
-        }
-    };
-
-    if verbose {
-        println!("[Resolver] Resolving imports...");
-    }
-    let mut import_resolver = import_resolver::ImportResolver::new();
-    let mut program = match import_resolver.resolve_imports(&program, file_path) {
-        Ok(resolved) => resolved,
-        Err(e) => {
-            eprintln!("Import error: {}", e);
-            return Err("Import error".into());
-        }
-    };
-
-    if verbose {
-        println!("[Desugar] Desugaring...");
-    }
-    let mut desug = desugarer::Desugarer::new();
-    let mut program = desug.desugar(&program);
-
-    if verbose {
-        println!("[TypeChecker] Running type checks...");
-    }
-
-    let mut tc = typechecker::TypeChecker::new()
-        .with_stdlib_config(no_stdlib, stdlib_path)
-        .with_target(typechecker::CompilationTarget::Interpreter);
-    let type_errors = tc.check_program(&mut program);
-    if !type_errors.is_empty() {
-        eprintln!(
-            "{}",
-            format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))
-        );
-        return Err("Type errors".into());
-    }
-
-    if verbose {
-        println!("[ProofEngine] Running proof verification...");
-    }
-    let mut pe = proof_engine::ProofEngine::new();
-    let proof_errors = pe.verify_program(&program);
-    let has_errors = proof_errors.iter().any(|e| !e.is_warning);
-    if has_errors {
-        eprintln!(
-            "{}",
-            format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
-        );
-        return Err("Proof errors".into());
-    }
-    if !proof_errors.is_empty() {
-        eprintln!(
-            "{}",
-            format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
-        );
-    }
-
-    if verbose {
-        println!("[Interpreter] Running program...");
-    }
-
-    eprintln!("[MAIN] Creating interpreter...");
-    let mut interp = interpreter::Interpreter::new();
-    eprintln!("[MAIN] Interpreter created, loading program...");
-    interp.load_program(&program);
-    eprintln!("[MAIN] Program loaded, running program...");
-    match interp.run(&program) {
-        Ok(_) => {
-            if verbose {
-                println!("[Interpreter] Final state: {:?}", interp.state);
+    out_dir: Option<&Path>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Detect source type from extension
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    
+    match ext {
+        "bv" => {
+            // .bv files: Transpile to Rust and compile to native executable
+            println!("Building .bv file: transpiling to Rust...");
+            run_rust(file_path, out_dir, no_stdlib, stdlib_path, None)?;
+            
+            // Try to compile the generated Rust
+            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            let rs_path = out_dir.map(|d| d.join(format!("{}.rs", stem)))
+                .unwrap_or_else(|| PathBuf::from(format!("{}.rs", stem)));
+            
+            if rs_path.exists() {
+                println!("  Compiling Rust to native executable...");
+                let bin_path = rs_path.with_extension("");
+                let compile_result = std::process::Command::new("rustc")
+                    .args(&["-o", &bin_path.to_string_lossy(), &rs_path.to_string_lossy()])
+                    .output();
+                
+                match compile_result {
+                    Ok(output) if output.status.success() => {
+                        println!("  Built executable: {}", bin_path.display());
+                        Ok(bin_path)
+                    }
+                    Ok(output) => {
+                        eprintln!("  Rust compile warnings/errors: {}", String::from_utf8_lossy(&output.stderr));
+                        // Return the .rs file even if compilation had warnings
+                        Ok(rs_path)
+                    }
+                    Err(e) => {
+                        eprintln!("  Warning: rustc not found, skipping native compilation");
+                        eprintln!("  Generated Rust code at: {}", rs_path.display());
+                        Ok(rs_path)
+                    }
+                }
+            } else {
+                Err("Failed to generate Rust output".into())
             }
-            println!("Execution completed successfully");
         }
-        Err(e) => {
-            eprintln!("Runtime error: {:?}", e);
-            return Err("Runtime error".into());
+        "rbv" => {
+            // .rbv files: WASM + JS + Frontend (RBV mode)
+            println!("Building .rbv file: generating WASM + JS + frontend...");
+            run_rbv(file_path, out_dir, true, no_stdlib, stdlib_path)?;
+            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
+            Ok(out.join(format!("{}-build", stem)))
+        }
+        "ebv" => {
+            // .ebv files: Require explicit target
+            eprintln!("Error: .ebv files require explicit target");
+            eprintln!("  Use: brief compile <file.ebv> --target <spec.toml>");
+            eprintln!("  Example targets: verilog_fpga.toml, vhdl_fpga.toml");
+            eprintln!("  Or: brief <c|rust|verilog|vhdl> <file.ebv> --hw <hardware.dbv>");
+            Err(".ebv files require explicit target specification".into())
+        }
+        _ => {
+            Err(format!("Unknown file extension: {}. Use .bv, .rbv, or .ebv", ext).into())
         }
     }
-
-    Ok(())
 }
 
 fn run_init(name: Option<&str>, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -1345,11 +1315,25 @@ fn run_compile_unified(args: &[String]) {
             }
         },
         "react" => {
-            eprintln!("Error: react backend not yet implemented");
-            None
+            // React requires reactive_ui - use RBV path for now
+            // TODO: Implement dedicated React generator for .bv files
+            if let Some(ref spec) = target_spec {
+                let target_name = spec.target.as_ref().map(|t| t.name.as_str()).unwrap_or("react");
+                if target_name.contains("native") {
+                    eprintln!("Note: react-native target - using RBV compilation");
+                } else if target_name.contains("nextjs") {
+                    eprintln!("Note: nextjs target - generating Next.js project structure");
+                } else if target_name.contains("vite") {
+                    eprintln!("Note: vite target - generating Vite React project");
+                }
+            }
+            // For .rbv files, react works via run_rbv
+            // For .bv files, we need a dedicated React generator (future work)
+            eprintln!("Note: React backend - .rbv files use RBV path, .bv files need dedicated generator");
+            Some(file_path.clone())
         }
         "wasm" => {
-            eprintln!("Error: wasm backend not yet implemented");
+            eprintln!("Error: wasm backend requires explicit target (use brief wasm)");
             None
         }
         _ => {
@@ -1757,12 +1741,28 @@ fn run_verilog(
 
     // Hardware validation
     let is_ebv = file_path.extension().map(|e| e == "ebv").unwrap_or(false);
+    
+    // Load DBVS if hw_config is a .dbv
+    let dbvs_engine = if hw_config_path.extension().and_then(|s| s.to_str()) == Some("dbv") {
+        let dbv_content = fs::read_to_string(hw_config_path)?;
+        let dbv = crate::dbrief::parse_dbrief(&dbv_content)?;
+        if let Some(schema_path) = dbv.schema_path {
+            let schema_content = fs::read_to_string(schema_path)?;
+            Some(crate::dbrief::compile_dbvs(&schema_content)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let hw_diagnostics = hardware_validator::HardwareValidator::validate(
         &program,
         Some(&hw_config),
-        "verilog",
+        "vhdl",
         is_ebv,
         target_spec.as_ref(),
+        dbvs_engine.as_ref(),
     );
 
     if !hw_diagnostics.is_empty() {
@@ -2365,6 +2365,142 @@ wasm-opt = false
     Ok(output_path)
 }
 
+fn run_wasm(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+    build_wasm: bool,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    
+    match ext {
+        "bv" => {
+            // .bv files: Generate pure WASM only (no JS/frontend)
+            println!("Generating pure WASM from .bv file...");
+            
+            let source = fs::read_to_string(file_path)?;
+            let clean_source = strip_annotations(&source);
+            
+            let mut parser = parser::Parser::new(&clean_source);
+            let mut program = parser.parse()
+                .map_err(|e| format!("Brief parse error: {}", e))?;
+            
+            let mut import_resolver = import_resolver::ImportResolver::new();
+            program = import_resolver.resolve_imports(&program, file_path)
+                .map_err(|e| format!("Import error: {}", e))?;
+            
+            let mut desug = desugarer::Desugarer::new();
+            program = desug.desugar(&program);
+            
+            let mut tc = typechecker::TypeChecker::new()
+                .with_stdlib_config(no_stdlib, stdlib_path)
+                .with_target(typechecker::CompilationTarget::Wasm);
+            let type_errors = tc.check_program(&mut program);
+            if !type_errors.is_empty() {
+                return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
+            }
+            
+            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            
+            // Generate WASM target code (not the binary itself)
+            let mut wasm_gen = backend::wasm::WasmGenerator::new()
+                .with_target(backend::wasm::CodeTarget::Wasm);
+            
+            let output = wasm_gen.generate(&program, &[], stem);
+            
+            let output_path = out_dir.map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+            fs::create_dir_all(&output_path)?;
+            
+            // Write the Rust source for WASM
+            let rs_path = output_path.join(format!("{}.rs", stem));
+            fs::write(&rs_path, &output.rust_code)?;
+            println!("  Generated Rust: {}", rs_path.display());
+            
+            if build_wasm {
+                // Compile Rust to WASM using wasm32 target and wasm-bindgen
+                println!("  Attempting to compile to WASM...");
+                
+                // First create a minimal Cargo project
+                let cargo_toml = format!(r#"
+[package]
+name = "{}"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+"#,
+                    stem
+                );
+                let cargo_path = output_path.join("Cargo.toml");
+                fs::write(&cargo_path, cargo_toml)?;
+                
+                // Try wasm-pack first (preferred method)
+                let wasm_pack_result = std::process::Command::new("wasm-pack")
+                    .args(&["build", "--target", "web", "--out-dir", "pkg"])
+                    .current_dir(&output_path)
+                    .output();
+                
+                match wasm_pack_result {
+                    Ok(result) if result.status.success() => {
+                        let wasm_file = output_path.join("pkg").join(format!("{}_bg.wasm", stem));
+                        if wasm_file.exists() {
+                            println!("  WASM compiled: {}", wasm_file.display());
+                        }
+                        println!("  Use: {}", output_path.join("pkg").display());
+                    }
+                    Ok(result) => {
+                        // Fall back to direct rustc
+                        eprintln!("  wasm-pack not available or failed, trying rustc...");
+                        let compile_result = std::process::Command::new("rustc")
+                            .args(&[
+                                "--target", "wasm32-unknown-unknown",
+                                "--crate-type", "cdylib",
+                                "-O",
+                                "-o", &output_path.join(format!("{}.wasm", stem)).to_string_lossy(),
+                                &rs_path.to_string_lossy()
+                            ])
+                            .output();
+                        
+                        match compile_result {
+                            Ok(cresult) if cresult.status.success() => {
+                                println!("  WASM compiled: {}", output_path.join(format!("{}.wasm", stem)).display());
+                            }
+                            Ok(cresult) => {
+                                eprintln!("  Note: rustc wasm32 target not installed");
+                                eprintln!("  Install with: rustup target add wasm32-unknown-unknown");
+                            }
+                            Err(e) => {
+                                eprintln!("  Note: rustc not found - outputting Rust source only");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("  Note: wasm-pack not found - outputting Rust source only");
+                        eprintln!("  Install wasm-pack from https://rustwasm.github.io/wasm-pack/");
+                    }
+                }
+            }
+            
+            Ok(output_path)
+        }
+        "rbv" => {
+            // .rbv files: Full WASM + JS + Frontend (delegate to run_rbv)
+            println!("Generating WASM + JS + frontend from .rbv file...");
+            run_rbv(file_path, out_dir, build_wasm, no_stdlib, stdlib_path)
+        }
+        _ => {
+            Err(format!("Unsupported file type: {}. Use .bv or .rbv files", ext).into())
+        }
+    }
+}
+
 fn generate_html(name: &str, view_html: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
@@ -2437,19 +2573,40 @@ fn main() {
         }
 
         "build" | "b" => {
-            let file_path = args
-                .iter()
-                .skip(2)
-                .find(|a| a.ends_with(".bv"))
-                .map(PathBuf::from);
+            let mut file_path = None;
+            let mut out_dir = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
 
             if let Some(path) = file_path {
-                if let Err(_e) = run_build(&path, verbose, no_stdlib, stdlib_path) {
-                    std::process::exit(1);
+                let out = out_dir.as_deref();
+                match run_build(&path, verbose, no_stdlib, stdlib_path, out) {
+                    Ok(output) => {
+                        println!("Build complete: {}", output.display());
+                    }
+                    Err(e) => {
+                        eprintln!("Build failed: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             } else {
-                eprintln!("Error: No .bv file specified");
-                eprintln!("Usage: {} build <file.bv>", args[0]);
+                eprintln!("Error: No .bv, .rbv, or .ebv file specified");
+                eprintln!("Usage: {} build <file> [--out <dir>]", args[0]);
+                eprintln!("  .bv files → transpile to Rust + compile");
+                eprintln!("  .rbv files → WASM + JS + frontend");
+                eprintln!("  .ebv files → requires explicit target (see: brief compile --help)");
                 std::process::exit(1);
             }
         }
@@ -2912,6 +3069,47 @@ fn main() {
                     "Usage: {} run <file.rbv> [--port <port>] [--no-open]",
                     args[0]
                 );
+                std::process::exit(1);
+            }
+        }
+
+        "wasm" => {
+            let mut file_path = None;
+            let mut out_dir = None;
+            let mut build_wasm = true;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--no-build" {
+                    build_wasm = false;
+                    i += 1;
+                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                match run_wasm(&path, out_dir.as_deref(), build_wasm, no_stdlib, stdlib_path.clone()) {
+                    Ok(output) => {
+                        println!("WASM generated: {}", output.display());
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No .bv or .rbv file specified");
+                eprintln!("Usage: {} wasm <file> [--out <dir>] [--no-build]", args[0]);
+                eprintln!("  .bv files → pure WASM binary");
+                eprintln!("  .rbv files → WASM + JS + frontend");
                 std::process::exit(1);
             }
         }

@@ -49,6 +49,7 @@ enum SignalType {
 }
 
 pub struct WasmGenerator {
+    spec: Option<crate::target_spec::TargetSpec>,
     signal_counter: usize,
     txn_counter: usize,
     signal_map: HashMap<String, usize>,
@@ -68,6 +69,7 @@ pub struct WasmGenerator {
 impl WasmGenerator {
     pub fn new() -> Self {
         WasmGenerator {
+            spec: None,
             signal_counter: 0,
             txn_counter: 0,
             signal_map: HashMap::new(),
@@ -83,6 +85,11 @@ impl WasmGenerator {
             local_vars: HashMap::new(),
             target: CodeTarget::default(),
         }
+    }
+
+    pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
+        self.spec = Some(spec);
+        self
     }
 
     pub fn with_target(mut self, target: CodeTarget) -> Self {
