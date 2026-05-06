@@ -1,0 +1,25 @@
+[target]
+name = "react-native"
+backend = "react"
+capabilities = ["logic", "reactive_ui", "mobile"]
+
+[codegen]
+extension = "tsx"
+state_allocation = "dynamic"
+
+[codegen.entry_point]
+style = "react_native"
+init_txn = "onMount"
+
+[codegen.templates]
+header = """
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+"""
+footer = """
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
+});
+export default App;
+"""

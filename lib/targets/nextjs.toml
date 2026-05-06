@@ -1,0 +1,24 @@
+[target]
+name = "nextjs"
+backend = "react"
+capabilities = ["logic", "reactive_ui", "ssr"]
+
+[codegen]
+extension = "tsx"
+state_allocation = "dynamic"
+
+[codegen.entry_point]
+style = "nextjs"
+init_txn = "useEffect"
+
+[codegen.templates]
+header = """
+'use client';
+import React, { useState, useEffect } from 'react';
+import { Inter } from 'next/font/google';
+"""
+footer = """
+export default function Home() {
+  return <App />;
+}
+"""

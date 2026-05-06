@@ -1,0 +1,22 @@
+[target]
+name = "vite"
+backend = "react"
+capabilities = ["logic", "reactive_ui", "spa"]
+
+[codegen]
+extension = "jsx"
+state_allocation = "dynamic"
+
+[codegen.entry_point]
+style = "vite"
+init_txn = "useEffect"
+
+[codegen.templates]
+header = """
+import React, { useState, useEffect } from 'react';
+import ReactDOM from 'react-dom/client';
+"""
+footer = """
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+"""
