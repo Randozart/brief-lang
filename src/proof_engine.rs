@@ -1642,7 +1642,13 @@ impl ProofEngine {
             }
             Type::Enum(name) => name.clone(),
             Type::UInt => "UInt".to_string(),
-            Type::Char => "Char".to_string(),  // NEW
+            Type::Char => "Char".to_string(),
+            Type::HashMap(key, value) => {
+                format!("HashMap<{}, {}>", self.type_name(key), self.type_name(value))
+            }
+            Type::HashSet(inner) => {
+                format!("HashSet<{}>", self.type_name(inner))
+            }
             Type::Vector(inner, size) => format!("Vector<{}>[{}]", self.type_name(inner), size),
             Type::Constrained(inner, _) => self.type_name(inner),
         }

@@ -2442,13 +2442,23 @@ let span = self.current_span();
                 self.advance();
                 Type::Char
             }
-            Some(Ok(Token::TypeVoid)) => {
+            Some(Ok(Token::TypeHashMap)) => {
                 self.advance();
-                Type::Void
+                // Parse HashMap<K, V>
+                self.expect(Token::Lt)?;
+                let key_type = self.parse_type()?;
+                self.expect(Token::Comma)?;
+                let value_type = self.parse_type()?;
+                self.expect(Token::Gt)?;
+                Type::HashMap(Box::new(key_type), Box::new(value_type))
             }
-            Some(Ok(Token::TypeChar)) => {
+            Some(Ok(Token::TypeHashSet)) => {
                 self.advance();
-                Type::Char
+                // Parse HashSet<T>
+                self.expect(Token::Lt)?;
+                let inner_type = self.parse_type()?;
+                self.expect(Token::Gt)?;
+                Type::HashSet(Box::new(inner_type))
             }
             Some(Ok(Token::TypeVoid)) => {
                 self.advance();

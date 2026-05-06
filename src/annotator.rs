@@ -179,7 +179,13 @@ impl Annotator {
             Type::Option(inner) => format!("Option<{}>", self.type_to_string(inner)),
             Type::Enum(name) => name.clone(),
             Type::UInt => "UInt".to_string(),
-            Type::Char => "Char".to_string(),  // NEW
+            Type::Char => "Char".to_string(),
+            Type::HashMap(key, value) => {
+                format!("HashMap<{}, {}>", self.type_to_string(key), self.type_to_string(value))
+            }
+            Type::HashSet(inner) => {
+                format!("HashSet<{}>", self.type_to_string(inner))
+            }
             Type::Vector(inner, size) => {
                 format!("Vector<{}>[{}]", self.type_to_string(inner), size)
             }

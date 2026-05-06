@@ -109,7 +109,9 @@ pub enum Type {
     Data,
     Void,
     UInt,
-    Char,  // NEW: Unicode codepoint type
+    Char,  // Unicode codepoint type
+    HashMap(Box<Type>, Box<Type>),  // NEW: HashMap<K, V>
+    HashSet(Box<Type>),  // NEW: HashSet<T>
     Custom(String),
     Union(Vec<Type>),
     ContractBound(Box<Type>, Box<Expr>),
