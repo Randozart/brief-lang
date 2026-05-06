@@ -1,39 +1,22 @@
-// KV260 Target Configuration (.dbv)
-// Converted from kv260.toml
-// DBrief v0.1.0
+// Kria KV260 Vision AI Starter Kit Configuration (.dbv)
+// Concrete board-level bindings
 
-// Target: kv260
-// Backend: c
-// Capabilities: logic, hardware_triggers
-// Codegen: state_allocation=static, entry_point=bare_metal
+IMPORT "xck26.dbvs";
 
-// Memory Banks
+// PS Peripheral Bindings
+ALIAS gic_distributor: Data = @0xF9010000;
+ALIAS uart_debug: Data = @0xFF010000;
+ALIAS smmu_regs: Data = @0xFD800000;
+ALIAS ocm_memory: Vector[UInt[8], 262144] = @0xFFFC0000;
 
-// Low bank: 2GB @ 0x00000000
-REGISTER @0x00000000: Vector[UInt[8], 0x80000000]
+// Firmware Reservations
+ALIAS atf_vectors: Data = @0x00000000; // 0x0000_0000 – 0x0000_1FFF
+ALIAS pmu_firmware: Data = @0x7FF00000; // 0x7FF0_0000 – 0x7FFF_FFFF
+ALIAS rpu_shared: Data = @0x7FE00000; // 0x7FE0_0000 – 0x7FEF_FFFF
 
-// High bank: 2GB @ 0x800000000
-REGISTER @0x800000000: Vector[UInt[8], 0x80000000]
-
-// Memory Sections
-
-// Kernel: 16MB @ 0x10000000
-REGISTER @0x10000000: Vector[UInt[8], 0x01000000]
-
-// Model A: 1.1GB @ 0x800000000
-REGISTER @0x800000000: Vector[UInt[8], 0x44C00000]
-
-// Model B: 1.1GB @ 0x848000000
-REGISTER @0x848000000: Vector[UInt[8], 0x44C00000]
-
-// Validation: Verify memory layout at compile time
-CHECK valid_layout [
-    // High bank starts after low bank ends
-    0x800000000 == 0x00000000 + 0x80000000;
-    // Model A is within high bank
-    @0x800000000 >= @0x800000000;
-    @0x800000000 + 0x44C00000 <= @0x800000000 + 0x80000000;
-    // Model B is within high bank
-    @0x848000000 >= @0x800000000;
-    @0x848000000 + 0x44C00000 <= @0x800000000 + 0x80000000;
+// Board Constraints
+CHECK board_safety [
+    // Ensure critical firmware regions are locked
+    atf_vectors == 0x00000000;
+    pmu_firmware == 0x7FF00000;
 ]

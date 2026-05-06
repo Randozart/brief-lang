@@ -373,7 +373,8 @@ impl HardwareValidator {
         for item in &program.items {
             match item {
                 TopLevel::StateDecl(state) => {
-                    if !schema_aliases.contains_key(&state.name) && !state.name.starts_with("__") {
+                    let is_internal = state.attrs.iter().any(|a| a.key == "internal");
+                    if !schema_aliases.contains_key(&state.name) && !state.name.starts_with("_") && !is_internal {
                         // Check if it's a Definition (pure function) - those don't need to be in schema
                         let is_definition = program.items.iter().any(|i| {
                             match i {

@@ -1,0 +1,27 @@
+// Zynq UltraScale+ MPSoC (XCK26) Schema (.dbvs)
+// ARM chip configuration template
+
+// Physical DDR Banks
+REGISTER @0x00000000: Vector[UInt[8], 0x80000000]; // Bank 0 (2GB)
+REGISTER @0x800000000: Vector[UInt[8], 0x80000000]; // Bank 1 (2GB)
+
+// Critical PS Peripherals
+ALIAS gic_distributor: Data;
+ALIAS uart_debug: Data;
+ALIAS smmu_regs: Data;
+ALIAS ocm_memory: Vector[UInt[8], 262144];
+
+// PL Apertures
+REGISTER @0x80000000: Vector[UInt[8], 0x20000000]; // HPM0_LPD
+REGISTER @0xA0000000: Vector[UInt[8], 0x20000000]; // HPM0_FPD
+
+// Firmware Reservations (declared as aliases for linting)
+ALIAS? atf_vectors: Data;
+ALIAS? pmu_firmware: Data;
+ALIAS? rpu_shared: Data;
+
+// Constraints
+CHECK ps_integrity [
+    // OCM is always at the top of 32-bit space
+    @0xFFFC0000.size == 262144;
+]

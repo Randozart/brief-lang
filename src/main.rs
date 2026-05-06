@@ -1614,7 +1614,27 @@ fn run_verilog(
         println!("  Found {} alias bindings", aliases.len());
         
         // Create a minimal hardware config from DBrief
-        parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
+        ast::HardwareConfig {
+            project: ast::ProjectConfig {
+                name: "dbrief_target".to_string(),
+                version: "0.1.0".to_string(),
+            },
+            target: ast::TargetConfig {
+                fpga: "auto".to_string(),
+                clock_hz: 100_000_000,
+                platform: None,
+                synthesis: None,
+            },
+            interface: ast::InterfaceConfig {
+                name: "axi4-lite".to_string(),
+                address_width: Some(32),
+                data_width: Some(32),
+                controller: None,
+                situs: None,
+            },
+            memory: HashMap::new(),
+            io: None,
+        }
     } else if hw_config_path
         .extension()
         .and_then(|e| e.to_str())
@@ -1638,7 +1658,27 @@ fn run_verilog(
         }
         
         // Create a minimal hardware config
-        parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
+        ast::HardwareConfig {
+            project: ast::ProjectConfig {
+                name: "dbrief_target".to_string(),
+                version: "0.1.0".to_string(),
+            },
+            target: ast::TargetConfig {
+                fpga: "auto".to_string(),
+                clock_hz: 100_000_000,
+                platform: None,
+                synthesis: None,
+            },
+            interface: ast::InterfaceConfig {
+                name: "axi4-lite".to_string(),
+                address_width: Some(32),
+                data_width: Some(32),
+                controller: None,
+                situs: None,
+            },
+            memory: HashMap::new(),
+            io: None,
+        }
     } else {
         parser::parse_hardware_config(hw_config_path)?
     };
@@ -1850,7 +1890,27 @@ fn run_vhdl(
         }
         
         // Create a minimal hardware config from DBrief
-        parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
+        ast::HardwareConfig {
+            project: ast::ProjectConfig {
+                name: "dbrief_target".to_string(),
+                version: "0.1.0".to_string(),
+            },
+            target: ast::TargetConfig {
+                fpga: "auto".to_string(),
+                clock_hz: 100_000_000,
+                platform: None,
+                synthesis: None,
+            },
+            interface: ast::InterfaceConfig {
+                name: "axi4-lite".to_string(),
+                address_width: Some(32),
+                data_width: Some(32),
+                controller: None,
+                situs: None,
+            },
+            memory: HashMap::new(),
+            io: None,
+        }
     } else if hw_config_path
         .extension()
         .and_then(|e| e.to_str())
@@ -1870,7 +1930,27 @@ fn run_vhdl(
             println!("    Alias: {} = {:?}", alias.name, alias.alias_type);
         }
         
-        parser::parse_hardware_config(&PathBuf::from("/dev/null"))?
+        ast::HardwareConfig {
+            project: ast::ProjectConfig {
+                name: "dbrief_target".to_string(),
+                version: "0.1.0".to_string(),
+            },
+            target: ast::TargetConfig {
+                fpga: "auto".to_string(),
+                clock_hz: 100_000_000,
+                platform: None,
+                synthesis: None,
+            },
+            interface: ast::InterfaceConfig {
+                name: "axi4-lite".to_string(),
+                address_width: Some(32),
+                data_width: Some(32),
+                controller: None,
+                situs: None,
+            },
+            memory: HashMap::new(),
+            io: None,
+        }
     } else {
         parser::parse_hardware_config(hw_config_path)?
     };
