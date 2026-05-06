@@ -358,6 +358,7 @@ impl Annotator {
             Expr::Sub(l, r) => format!("({} - {})", self.format_expr(l), self.format_expr(r)),
             Expr::Mul(l, r) => format!("({} * {})", self.format_expr(l), self.format_expr(r)),
             Expr::Div(l, r) => format!("({} / {})", self.format_expr(l), self.format_expr(r)),
+            Expr::Mod(l, r) => format!("({} % {})", self.format_expr(l), self.format_expr(r)),
             Expr::Eq(l, r) => format!("({} == {})", self.format_expr(l), self.format_expr(r)),
             Expr::Ne(l, r) => format!("({} != {})", self.format_expr(l), self.format_expr(r)),
             Expr::Lt(l, r) => format!("({} < {})", self.format_expr(l), self.format_expr(r)),

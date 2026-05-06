@@ -194,6 +194,17 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             }
         }
 
+        Expr::Mod(left, right) => {
+            let left_sym = eval_symbolic(left, state);
+            let right_sym = eval_symbolic(right, state);
+
+            if let Some(simplified) = simplify_binary("%", &left_sym, &right_sym) {
+                simplified
+            } else {
+                SymbolicValue::Binary("%".to_string(), Box::new(left_sym), Box::new(right_sym))
+            }
+        }
+
         Expr::BitAnd(left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);

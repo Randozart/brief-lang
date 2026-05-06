@@ -370,6 +370,7 @@ impl TypeChecker {
             | Expr::Sub(left, right)
             | Expr::Mul(left, right)
             | Expr::Div(left, right)
+            | Expr::Mod(left, right)
             | Expr::Eq(left, right)
             | Expr::Ne(left, right)
             | Expr::Lt(left, right)
@@ -459,6 +460,7 @@ impl TypeChecker {
             | Expr::Sub(l, r)
             | Expr::Mul(l, r)
             | Expr::Div(l, r)
+            | Expr::Mod(l, r)
             | Expr::And(l, r)
             | Expr::Or(l, r) => self.expr_has_result(l) || self.expr_has_result(r),
             Expr::Not(inner) => self.expr_has_result(inner),
@@ -663,7 +665,7 @@ impl TypeChecker {
             Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => self
                 .lookup_variable(name)
                 .unwrap_or(Type::Custom(name.clone())),
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
                 self.binary_op_type(l, r, Type::Int, Type::Float)
             }
             Expr::Eq(_, _)

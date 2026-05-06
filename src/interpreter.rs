@@ -565,6 +565,19 @@ impl Interpreter {
                     _ => Err(RuntimeError::TypeMismatch("Division".to_string())),
                 }
             }
+            Expr::Mod(l, r) => {
+                let l_val = self.eval_expr(l)?;
+                let r_val = self.eval_expr(r)?;
+                match (l_val, r_val) {
+                    (Value::Int(l), Value::Int(r)) => {
+                        if r == 0 {
+                            return Err(RuntimeError::DivisionByZero);
+                        }
+                        Ok(Value::Int(l % r))
+                    }
+                    _ => Err(RuntimeError::TypeMismatch("Division".to_string())),
+                }
+            }
             Expr::Eq(l, r) => {
                 let l_val = self.eval_expr(l)?;
                 let r_val = self.eval_expr(r)?;

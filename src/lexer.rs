@@ -268,6 +268,8 @@ pub enum Token {
     RBracket,
     #[token(",")]
     Comma,
+    #[token("%")]
+    Percent,
     #[token("..")]
     DotDot,
     #[token(".")]

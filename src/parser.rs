@@ -2672,6 +2672,11 @@ let span = self.current_span();
                     let right = self.parse_unary()?;
                     left = Expr::Div(Box::new(left), Box::new(right));
                 }
+                Ok(Token::Percent) => {
+                    self.advance();
+                    let right = self.parse_unary()?;
+                    left = Expr::Mod(Box::new(left), Box::new(right));
+                }
                 _ => break,
             }
         }

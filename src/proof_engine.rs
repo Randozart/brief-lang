@@ -343,7 +343,7 @@ impl SymbolicExecutor {
             Expr::PriorState(name) => {
                 vars.insert(name.clone());
             }
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
                 self.collect_vars(l, vars);
                 self.collect_vars(r, vars);
             }
@@ -546,7 +546,7 @@ impl SymbolicExecutor {
     fn contains_prior_state(&self, expr: &Expr) -> bool {
         match expr {
             Expr::PriorState(_) => true,
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
                 self.contains_prior_state(l) || self.contains_prior_state(r)
             }
             Expr::Eq(l, r)
@@ -659,6 +659,7 @@ impl SymbolicExecutor {
             Expr::Sub(l, r) => format!("{} - {}", self.format_expr(l), self.format_expr(r)),
             Expr::Mul(l, r) => format!("{} * {}", self.format_expr(l), self.format_expr(r)),
             Expr::Div(l, r) => format!("{} / {}", self.format_expr(l), self.format_expr(r)),
+            Expr::Mod(l, r) => format!("{} % {}", self.format_expr(l), self.format_expr(r)),
             Expr::Eq(l, r) => format!("{} == {}", self.format_expr(l), self.format_expr(r)),
             Expr::Ne(l, r) => format!("{} != {}", self.format_expr(l), self.format_expr(r)),
             Expr::Lt(l, r) => format!("{} < {}", self.format_expr(l), self.format_expr(r)),
@@ -1161,6 +1162,7 @@ impl ProofEngine {
             | Expr::Sub(l, r)
             | Expr::Mul(l, r)
             | Expr::Div(l, r)
+            | Expr::Mod(l, r)
             | Expr::BitAnd(l, r)
             | Expr::BitOr(l, r)
             | Expr::BitXor(l, r)
@@ -1412,7 +1414,7 @@ impl ProofEngine {
             Expr::PriorState(name) => {
                 vars.insert(name.clone());
             }
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
                 self.collect_read_vars_from_expr(l, vars);
                 self.collect_read_vars_from_expr(r, vars);
             }
