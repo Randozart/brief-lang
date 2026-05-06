@@ -1,0 +1,488 @@
+// Lexer - Tokenizer for Brief language
+// Tier 3: Lexer Components
+
+// ===== LEXER STATE =====
+
+struct LexerState {
+    source: String,
+    position: Int,
+    line: Int,
+    column: Int,
+    start_pos: Int,  // Start of current token
+    start_line: Int,
+    start_column: Int
+}
+
+// ===== LEXER CONSTRUCTION =====
+
+defn new_lexer(source: String) -> LexerState {
+    term LexerState {
+        source: source,
+        position: 0,
+        line: 1,
+        column: 1,
+        start_pos: 0,
+        start_line: 1,
+        start_column: 1
+    };
+}
+
+// ===== CHARACTER ACCESS =====
+
+defn current_char(state: LexerState) -> Option<Char> {
+    [state.position < state.source.len()] {
+        term Some(state.source[state.position..state.position+1].char_at(0));
+    };
+    term None;
+}
+
+defn peek_char(state: LexerState, offset: Int) -> Option<Char> {
+    let pos = state.position + offset;
+    [pos < state.source.len()] {
+        term Some(state.source[pos..pos+1].char_at(0));
+    };
+    term None;
+}
+
+defn advance(state: LexerState) -> LexerState {
+    let c = current_char(state);
+    [c.is_some()] {
+        let ch = c.unwrap();
+        [ch == '\n'] {
+            term LexerState {
+                source: state.source,
+                position: state.position + 1,
+                line: state.line + 1,
+                column: 1,
+                start_pos: state.start_pos,
+                start_line: state.start_line,
+                start_column: state.start_column
+            };
+        };
+    };
+    term LexerState {
+        source: state.source,
+        position: state.position + 1,
+        line: state.line,
+        column: state.column + 1,
+        start_pos: state.start_pos,
+        start_line: state.start_line,
+        start_column: state.start_column
+    };
+}
+
+defn skip_chars(state: LexerState, count: Int) -> LexerState {
+    let i: Int = 0;
+    [i < count] {
+        &state = advance(state);
+        &i = i + 1;
+    };
+    term state;
+}
+
+// ===== TOKEN EXTRACTION =====
+
+defn current_token_text(state: LexerState) -> String {
+    term state.source[state.start_pos..state.position];
+}
+
+defn start_token(state: LexerState) -> LexerState {
+    term LexerState {
+        source: state.source,
+        position: state.position,
+        line: state.line,
+        column: state.column,
+        start_pos: state.position,
+        start_line: state.line,
+        start_column: state.column
+    };
+}
+
+// ===== LEXING FUNCTIONS =====
+
+// Skip whitespace
+defn skip_whitespace(state: LexerState) -> LexerState {
+    [current_char(state).is_some()] {
+        let c = current_char(state).unwrap();
+        [is_whitespace(c)] {
+            &state = advance(state);
+            term skip_whitespace(state);
+        };
+    };
+    term state;
+}
+
+// Skip comment
+defn skip_comment(state: LexerState) -> LexerState {
+    // Assume // comment
+    [current_char(state).is_some()] {
+        let c = current_char(state).unwrap();
+        [c != '\n'] {
+            &state = advance(state);
+            term skip_comment(state);
+        };
+    };
+    term state;
+}
+
+// Read identifier or keyword
+defn read_identifier(state: LexerState) -> (Token, LexerState) {
+    [current_char(state).is_some()] {
+        let c = current_char(state).unwrap();
+        [is_alphanumeric(c) || c == '_'] {
+            &state = advance(state);
+            let (tok, state) = read_identifier(state);
+            term (tok, state);
+        };
+    };
+    
+    // End of identifier - check if keyword
+    let text = current_token_text(state);
+    
+    // Check keywords
+    [text == "let"] { term (KeywordLet, state); };
+    [text == "const"] { term (KeywordConst, state); };
+    [text == "txn"] { term (KeywordTxn, state); };
+    [text == "rct"] { term (KeywordRct, state); };
+    [text == "async"] { term (KeywordAsync, state); };
+    [text == "term"] { term (KeywordTerm, state); };
+    [text == "escape"] { term (KeywordEscape, state); };
+    [text == "defn"] { term (KeywordDefn, state); };
+    [text == "sig"] { term (KeywordSig, state); };
+    [text == "frgn"] { term (KeywordFrgn, state); };
+    [text == "struct"] { term (KeywordStruct, state); };
+    [text == "enum"] { term (KeywordEnum, state); };
+    [text == "import"] { term (KeywordImport, state); };
+    [text == "from"] { term (KeywordFrom, state); };
+    [text == "as"] { term (KeywordAs, state); };
+    [text == "true"] { term (KeywordTrue, state); };
+    [text == "false"] { term (KeywordFalse, state); };
+    
+    // Not a keyword - it's an identifier
+    term (TokenIdentifier(text), state);
+}
+
+// Read number (int or float)
+defn read_number(state: LexerState) -> (Token, LexerState) {
+    // Check for hex
+    [current_char(state).is_some() && current_char(state).unwrap() == '0'] {
+        [peek_char(state, 1).is_some()] {
+            let next = peek_char(state, 1).unwrap();
+            [next == 'x' || next == 'X'] {
+                &state = advance(state);  // consume 0
+                &state = advance(state);  // consume x/X
+                let (tok, state) = read_hex_number(state);
+                term (tok, state);
+            };
+        };
+    };
+    
+    // Read decimal
+    [current_char(state).is_some()] {
+        let c = current_char(state).unwrap();
+        [is_digit(c)] {
+            &state = advance(state);
+            let (tok, state) = read_number(state);
+            term (tok, state);
+        };
+        [c == '.'] {
+            // Float
+            [peek_char(state, 1).is_some()] {
+                let next = peek_char(state, 1).unwrap();
+                [is_digit(next)] {
+                    &state = advance(state);  // consume .
+                    let (tok, state) = read_float_fraction(state);
+                    term (tok, state);
+                };
+            };
+        };
+    };
+    
+    // End of number
+    let text = current_token_text(state);
+    term (TokenInt(text.to_int()), state);
+}
+
+defn read_hex_number(state: LexerState) -> (Token, LexerState) {
+    [current_char(state).is_some()] {
+        let c = current_char(state).unwrap();
+        [is_hex_digit(c)] {
+            &state = advance(state);
+            let (tok, state) = read_hex_number(state);
+            term (tok, state);
+        };
+    };
+    
+    let text = current_token_text(state);
+    term (TokenInt(text.to_int()), state);
+}
+
+defn read_float_fraction(state: LexerState) -> (Token, LexerState) {
+    [current_char(state).is_some()] {
+        let c = current_char(state).unwrap();
+        [is_digit(c)] {
+            &state = advance(state);
+            let (tok, state) = read_float_fraction(state);
+            term (tok, state);
+        };
+    };
+    
+    let text = current_token_text(state);
+    term (TokenFloat(text.to_float()), state);
+}
+
+// Read string literal
+defn read_string(state: LexerState) -> (Token, LexerState) {
+    // Skip opening quote
+    &state = advance(state);
+    
+    let mut sb = new_builder();
+    
+    [current_char(state).is_some()] {
+        let c = current_char(state).unwrap();
+        [c != '"'] {
+            [c == '\\'] {
+                // Escape sequence
+                &state = advance(state);
+                [current_char(state).is_some()] {
+                    let escaped = current_char(state).unwrap();
+                    [escaped == 'n'] { sb = sb.append_char('\n'); };
+                    [escaped == 't'] { sb = sb.append_char('\t'); };
+                    [escaped == 'r'] { sb = sb.append_char('\r'); };
+                    [escaped == '\\'] { sb = sb.append_char('\\'); };
+                    [escaped == '"'] { sb = sb.append_char('"'); };
+                    &state = advance(state);
+                };
+            };
+            [c != '\\'] {
+                sb = sb.append_char(c);
+                &state = advance(state);
+            };
+        };
+    };
+    
+    // Skip closing quote
+    [current_char(state).is_some() && current_char(state).unwrap() == '"'] {
+        &state = advance(state);
+    };
+    
+    term (TokenString(sb.to_string()), state);
+}
+
+// Read char literal
+defn read_char_literal(state: LexerState) -> (Token, LexerState) {
+    // Skip opening quote
+    &state = advance(state);
+    
+    let c: Char = ' ';
+    
+    [current_char(state).is_some()] {
+        let ch = current_char(state).unwrap();
+        [ch != '\''] {
+            [ch == '\\'] {
+                // Escape sequence
+                &state = advance(state);
+                [current_char(state).is_some()] {
+                    let escaped = current_char(state).unwrap();
+                    [escaped == 'n'] { &c = '\n'; };
+                    [escaped == 't'] { &c = '\t'; };
+                    [escaped == 'r'] { &c = '\r'; };
+                    [escaped == '\\'] { &c = '\\'; };
+                    [escaped == '\''] { &c = '\''; };
+                    &state = advance(state);
+                };
+            };
+            [ch != '\\'] {
+                &c = ch;
+                &state = advance(state);
+            };
+        };
+    };
+    
+    // Skip closing quote
+    [current_char(state).is_some() && current_char(state).unwrap() == '\''] {
+        &state = advance(state);
+    };
+    
+    term (TokenChar(c), state);
+}
+
+// ===== MAIN LEXER FUNCTION =====
+
+defn next_token(state: LexerState) -> Result<(Token, LexerState), String> {
+    // Skip whitespace
+    &state = skip_whitespace(state);
+    
+    // Check for EOF
+    [current_char(state).is_none()] {
+        term Ok((TokenEof, state));
+    };
+    
+    // Start new token
+    &state = start_token(state);
+    
+    let c = current_char(state).unwrap();
+    
+    // Single-char operators
+    [c == '+'] { &state = advance(state); term Ok((OpPlus, state)); };
+    [c == '-'] { &state = advance(state); term Ok((OpMinus, state)); };
+    [c == '*'] { &state = advance(state); term Ok((OpStar, state)); };
+    [c == '/'] {
+        // Check for comment
+        [peek_char(state, 1).is_some() && peek_char(state, 1).unwrap() == '/'] {
+            &state = advance(state);
+            &state = advance(state);
+            &state = skip_comment(state);
+            term next_token(state);  // Recurse to get next token
+        };
+        &state = advance(state);
+        term Ok((OpSlash, state));
+    };
+    [c == '%'] { &state = advance(state); term Ok((OpPercent, state)); };
+    [c == '='] { &state = advance(state); term Ok((OpEq, state)); };
+    [c == '!'] { &state = advance(state); term Ok((OpBang, state)); };
+    [c == '&'] { &state = advance(state); term Ok((OpAmp, state)); };
+    [c == '|'] { &state = advance(state); term Ok((OpPipe, state)); };
+    [c == '^'] { &state = advance(state); term Ok((OpCaret, state)); };
+    [c == '~'] { &state = advance(state); term Ok((OpTilde, state)); };
+    [c == '?'] { &state = advance(state); term Ok((OpQuestion, state)); };
+    [c == '@'] { &state = advance(state); term Ok((OpAt, state)); };
+    [c == '.'] { &state = advance(state); term Ok((OpDot, state)); };
+    [c == ':'] { &state = advance(state); term Ok((OpColon, state)); };
+    [c == ';'] { &state = advance(state); term Ok((OpSemicolon, state)); };
+    [c == ','] { &state = advance(state); term Ok((OpComma, state)); };
+    
+    // Delimiters
+    [c == '('] { &state = advance(state); term Ok((DelimLParen, state)); };
+    [c == ')'] { &state = advance(state); term Ok((DelimRParen, state)); };
+    [c == '{'] { &state = advance(state); term Ok((DelimLBrace, state)); };
+    [c == '}'] { &state = advance(state); term Ok((DelimRBrace, state)); };
+    [c == '['] { &state = advance(state); term Ok((DelimLBracket, state)); };
+    [c == ']'] { &state = advance(state); term Ok((DelimRBracket, state)); };
+    
+    // Multi-char operators (check first)
+    [c == '<'] {
+        [peek_char(state, 1).is_some()] {
+            let next = peek_char(state, 1).unwrap();
+            [next == '='] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((OpLtEq, state));
+            };
+            [next == '<'] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((OpLtLt, state));
+            };
+            [next == '-'] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((OpArrow, state));
+            };
+        };
+        &state = advance(state);
+        term Ok((OpLt, state));
+    };
+    
+    [c == '>'] {
+        [peek_char(state, 1).is_some()] {
+            let next = peek_char(state, 1).unwrap();
+            [next == '='] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((OpGtEq, state));
+            };
+            [next == '>'] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((OpGtGt, state));
+            };
+            [next == '='] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((OpFatArrow, state));
+            };
+        };
+        &state = advance(state);
+        term Ok((OpGt, state));
+    };
+    
+    [c == '|'] {
+        [peek_char(state, 1).is_some() && peek_char(state, 1).unwrap() == '|'] {
+            &state = advance(state);
+            &state = advance(state);
+            term Ok((OpOr, state));
+        };
+    };
+    
+    [c == '&'] {
+        [peek_char(state, 1).is_some() && peek_char(state, 1).unwrap() == '&'] {
+            &state = advance(state);
+            &state = advance(state);
+            term Ok((OpAnd, state));
+        };
+    };
+    
+    // Literals
+    [is_digit(c)] {
+        let (tok, state) = read_number(state);
+        term Ok((tok, state));
+    };
+    
+    [is_alpha(c) || c == '_'] {
+        let (tok, state) = read_identifier(state);
+        term Ok((tok, state));
+    };
+    
+    [c == '"'] {
+        let (tok, state) = read_string(state);
+        term Ok((tok, state));
+    };
+    
+    [c == '\''] {
+        let (tok, state) = read_char_literal(state);
+        term Ok((tok, state));
+    };
+    
+    // Unknown character
+    term Err("Unexpected character: " + char_to_string(c));
+}
+
+// ===== FULL TOKENIZATION =====
+
+defn tokenize(source: String) -> Result<List<Token>, String> {
+    let mut tokens: List<Token> = [];
+    let mut state = new_lexer(source);
+    
+    [true] {
+        let result = next_token(state);
+        [result.is_ok()] {
+            let (tok, new_state) = result.unwrap();
+            &tokens = tokens.append(tok);
+            &state = new_state;
+            [tok != TokenEof] {
+                term tokenize_continue(source, tokens, state);
+            };
+        };
+        [result.is_err()] {
+            term Err(result.unwrap_err());
+        };
+    };
+    
+    term Ok(tokens);
+}
+
+defn tokenize_continue(source: String, tokens: List<Token>, state: LexerState) -> Result<List<Token>, String> {
+    let result = next_token(state);
+    [result.is_ok()] {
+        let (tok, new_state) = result.unwrap();
+        let tokens = tokens.append(tok);
+        [tok != TokenEof] {
+            term tokenize_continue(source, tokens, new_state);
+        };
+    };
+    [result.is_err()] {
+        term Err(result.unwrap_err());
+    };
+    term Ok(tokens);
+}
