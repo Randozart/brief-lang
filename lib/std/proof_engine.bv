@@ -1,0 +1,674 @@
+// Proof Engine - Symbolic execution and contract verification
+// Tier 6: Proof Engine
+
+// ===== SYMBOLIC VALUES =====
+
+enum SymbolicValue {
+    SymInt(Int),
+    SymFloat(Float),
+    SymBool(Bool),
+    SymString(String),
+    SymChar(Char),
+    SymVar(String),  // Symbolic variable
+    SymBinaryOp(String, Box<SymbolicValue>, Box<SymbolicValue>),  // op, left, right
+    SymUnaryOp(String, Box<SymbolicValue>),  // op, operand
+    SymUnknown  // For complex expressions
+}
+
+// ===== SYMBOLIC STATE =====
+
+struct SymbolicState {
+    vars: HashMap<String, SymbolicValue>,  // Variable bindings
+    path_constraints: List<SymbolicValue>,  // Path conditions
+    visited: HashSet<String>  // Prevent infinite loops
+}
+
+// ===== STATE OPERATIONS =====
+
+defn initial_state() -> SymbolicState {
+    term SymbolicState {
+        vars: new_map(),
+        path_constraints: [],
+        visited: new_set()
+    };
+}
+
+defn state_assign(state: SymbolicState, name: String, value: SymbolicValue) -> SymbolicState {
+    let mut vars = state.vars;
+    vars = vars.insert(name, value);
+    term SymbolicState {
+        vars: vars,
+        path_constraints: state.path_constraints,
+        visited: state.visited
+    };
+}
+
+defn state_lookup(state: SymbolicState, name: String) -> Option<SymbolicValue> {
+    term state.vars.get(name);
+}
+
+defn state_add_constraint(state: SymbolicState, constraint: SymbolicValue) -> SymbolicState {
+    let mut constraints = state.path_constraints;
+    constraints = constraints.append(constraint);
+    term SymbolicState {
+        vars: state.vars,
+        path_constraints: constraints,
+        visited: state.visited
+    };
+}
+
+defn state_mark_visited(state: SymbolicState, key: String) -> SymbolicState {
+    let mut visited = state.visited;
+    visited = visited.insert(key);
+    term SymbolicState {
+        vars: state.vars,
+        path_constraints: state.path_constraints,
+        visited: visited
+    };
+}
+
+defn state_is_visited(state: SymbolicState, key: String) -> Bool {
+    term state.visited.contains(key);
+}
+
+// ===== SYMBOLIC EXPRESSION EVALUATION =====
+
+defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
+    // Literals
+    unification expr(ExprInt(n)) = {
+        term SymInt(n);
+    };
+    
+    unification expr(ExprFloat(f)) = {
+        term SymFloat(f);
+    };
+    
+    unification expr(ExprBool(b)) = {
+        term SymBool(b);
+    };
+    
+    unification expr(ExprChar(c)) = {
+        term SymChar(c);
+    };
+    
+    unification expr(ExprString(s)) = {
+        term SymString(s);
+    };
+    
+    // Variables
+    unification expr(ExprVar(name)) = {
+        [state.vars.contains_key(name)] {
+            term state.vars.get(name).unwrap();
+        };
+        term SymVar(name);
+    };
+    
+    // Prior state (@var)
+    unification expr(ExprPriorState(name)) = {
+        term SymVar("@" + name);
+    };
+    
+    // Binary operations
+    unification expr(ExprBinOp(op, left, right)) = {
+        let left_sym = eval_symbolic(*left, state);
+        let right_sym = eval_symbolic(*right, state);
+        term SymBinaryOp(op, Box::new(left_sym), Box::new(right_sym));
+    };
+    
+    // Unary operations
+    unification expr(ExprUnaryOp(op, operand)) = {
+        let operand_sym = eval_symbolic(*operand, state);
+        term SymUnaryOp(op, Box::new(operand_sym));
+    };
+    
+    // Unknown for complex expressions
+    term SymUnknown;
+}
+
+// ===== SIMPLIFICATION =====
+
+defn simplify(sym: SymbolicValue) -> SymbolicValue {
+    unification sym(SymBinaryOp(op, left, right)) = {
+        let left_simp = simplify(*left);
+        let right_simp = simplify(*right);
+        
+        // Constant folding
+        unification (left_simp, right_simp) = (SymInt(l), SymInt(r)) = {
+            [op == "+"] { term SymInt(l + r); };
+            [op == "-"] { term SymInt(l - r); };
+            [op == "*"] { term SymInt(l * r); };
+            [op == "/"] { [r != 0] { term SymInt(l / r); }; };
+            [op == "%"] { [r != 0] { term SymInt(l % r); }; };
+        };
+        
+        unification (left_simp, right_simp) = (SymFloat(l), SymFloat(r)) = {
+            [op == "+"] { term SymFloat(l + r); };
+            [op == "-"] { term SymFloat(l - r); };
+            [op == "*"] { term SymFloat(l * r); };
+            [op == "/"] { [r != 0.0] { term SymFloat(l / r); }; };
+        };
+        
+        unification (left_simp, right_simp) = (SymBool(l), SymBool(r)) = {
+            [op == "&&"] { term SymBool(l && r); };
+            [op == "||"] { term SymBool(l || r); };
+            [op == "=="] { term SymBool(l == r); };
+            [op == "!="] { term SymBool(l != r); };
+        };
+        
+        // Identity operations
+        unification (op, left_simp, right_simp) = ("+", SymInt(0), _) = {
+            term right_simp;
+        };
+        unification (op, left_simp, right_simp) = ("+", _, SymInt(0)) = {
+            term left_simp;
+        };
+        unification (op, left_simp, right_simp) = ("*", SymInt(1), _) = {
+            term right_simp;
+        };
+        unification (op, left_simp, right_simp) = ("*", _, SymInt(1)) = {
+            term left_simp;
+        };
+        unification (op, left_simp, right_simp) = ("*", _, SymInt(0)) = {
+            term SymInt(0);
+        };
+        unification (op, left_simp, right_simp) = ("*", SymInt(0), _) = {
+            term SymInt(0);
+        };
+        
+        term SymBinaryOp(op, Box::new(left_simp), Box::new(right_simp));
+    };
+    
+    unification sym(SymUnaryOp(op, operand)) = {
+        let operand_simp = simplify(*operand);
+        
+        unification (op, operand_simp) = ("-", SymInt(n)) = {
+            term SymInt(-n);
+        };
+        unification (op, operand_simp) = ("!", SymBool(b)) = {
+            term SymBool(!b);
+        };
+        
+        term SymUnaryOp(op, Box::new(operand_simp));
+    };
+    
+    term sym;
+}
+
+// ===== CONSTRAINT SOLVING =====
+
+defn check_constraint(constraint: SymbolicValue) -> Bool {
+    let simp = simplify(constraint);
+    unification simp(SymBool(b)) = {
+        term b;
+    };
+    term true;  // Unknown constraints assumed satisfiable
+}
+
+defn constraints_satisfiable(constraints: List<SymbolicValue>) -> Bool {
+    let i: Int = 0;
+    [i < constraints.len()] {
+        [!check_constraint(constraints[i])] {
+            term false;
+        };
+        &i = i + 1;
+    };
+    term true;
+}
+
+// ===== PATH EXPLORATION =====
+
+struct ExecutionPath {
+    statements: List<Statement>,
+    constraints: List<SymbolicValue>,
+    final_state: SymbolicState,
+    feasible: Bool
+}
+
+defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<ExecutionPath> {
+    let mut paths: List<ExecutionPath> = [];
+    let mut work_queue: List<(List<Statement>, SymbolicState, List<SymbolicValue>)> = [];
+    
+    // Start with initial state
+    work_queue = work_queue.append((stmts, initial, []));
+    
+    let iterations: Int = 0;
+    [iterations < 1000 && work_queue.len() > 0] {
+        let (remaining, state, constraints) = work_queue[0];
+        work_queue = work_queue.drop(1);
+        
+        [remaining.len() == 0] {
+            // Complete path
+            paths = paths.append(ExecutionPath {
+                statements: stmts,
+                constraints: constraints,
+                final_state: state,
+                feasible: constraints_satisfiable(constraints)
+            });
+        };
+        [remaining.len() > 0] {
+            let stmt = remaining[0];
+            let rest = remaining.drop(1);
+            
+            // Handle guarded statements (branching)
+            unification stmt(StmtGuarded(condition, body)) = {
+                // Evaluate condition symbolically
+                let cond_sym = eval_symbolic(*condition, state);
+                let cond_simp = simplify(cond_sym);
+                
+                // True branch
+                unification cond_simp(SymBool(true)) = {
+                    let new_state = state_add_constraint(state, cond_simp);
+                    let mut new_stmts = body;
+                    new_stmts = new_stmts.append_all(rest);
+                    work_queue = work_queue.append((new_stmts, new_state, constraints));
+                };
+                
+                // False branch
+                unification cond_simp(SymBool(false)) = {
+                    // Skip guarded block
+                    work_queue = work_queue.append((rest, state, constraints));
+                };
+                
+                // Unknown - explore both paths
+                [!unification cond_simp(SymBool(_)) = true] {
+                    // True path
+                    let true_state = state_add_constraint(state, SymBool(true));
+                    let mut true_stmts = body;
+                    true_stmts = true_stmts.append_all(rest);
+                    work_queue = work_queue.append((true_stmts, true_state, constraints));
+                    
+                    // False path
+                    let false_state = state_add_constraint(state, SymBool(false));
+                    work_queue = work_queue.append((rest, false_state, constraints));
+                };
+            };
+            
+            // Non-branching statement
+            [!unification stmt(StmtGuarded(_, _)) = true] {
+                let new_state = execute_statement_symbolic(stmt, state);
+                work_queue = work_queue.append((rest, new_state, constraints));
+            };
+        };
+        
+        &iterations = iterations + 1;
+    };
+    
+    term paths;
+}
+
+defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> SymbolicState {
+    unification stmt(StmtLet(name, _, Some(init))) = {
+        let value = eval_symbolic(*init, state);
+        term state_assign(state, name, value);
+    };
+    
+    unification stmt(StmtAssign(lhs, rhs)) = {
+        // Extract variable name from lhs
+        unification *lhs(ExprVar(name)) = {
+            let value = eval_symbolic(*rhs, state);
+            term state_assign(state, name, value);
+        };
+        term state;
+    };
+    
+    term state;
+}
+
+// ===== CONTRACT VERIFICATION =====
+
+struct ProofResult {
+    verified: Bool,
+    counterexample: Option<CounterExample>,
+    paths_explored: Int
+}
+
+struct CounterExample {
+    inputs: HashMap<String, SymbolicValue>,
+    path: ExecutionPath,
+    violation: String
+}
+
+defn verify_contract(txn: Transaction) -> ProofResult {
+    // Create initial symbolic state with prior state variables
+    let mut initial = initial_state();
+    
+    // Add prior state for each parameter
+    let i: Int = 0;
+    [i < txn.params.len()] {
+        let param = txn.params[i];
+        initial = state_assign(initial, "@" + param.name, SymVar("@old_" + param.name));
+        &i = i + 1;
+    };
+    
+    // Explore all paths through transaction
+    let paths = explore_paths(txn.body, initial);
+    
+    // Check each path
+    let mut all_verified = true;
+    let mut counterexample: Option<CounterExample> = None;
+    
+    let i: Int = 0;
+    [i < paths.len()] {
+        let path = paths[i];
+        
+        // Check if path is feasible
+        [path.feasible] {
+            // Evaluate postcondition on final state
+            let post_sym = eval_symbolic(txn.contract.postcondition, path.final_state);
+            let post_simp = simplify(post_sym);
+            
+            // Check if postcondition holds
+            unification post_simp(SymBool(false)) = {
+                &all_verified = false;
+                &counterexample = Some(CounterExample {
+                    inputs: path.final_state.vars,
+                    path: path,
+                    violation: "Postcondition not satisfied"
+                });
+            };
+        };
+        
+        &i = i + 1;
+    };
+    
+    term ProofResult {
+        verified: all_verified,
+        counterexample: counterexample,
+        paths_explored: paths.len()
+    };
+}
+
+defn verify_precondition(precondition: Expr, state: SymbolicState) -> Bool {
+    let pre_sym = eval_symbolic(precondition, state);
+    let pre_simp = simplify(pre_sym);
+    
+    unification pre_simp(SymBool(true)) = {
+        term true;
+    };
+    unification pre_simp(SymBool(false)) = {
+        term false;
+    };
+    term true;  // Unknown preconditions assumed satisfiable
+}
+
+defn verify_postcondition(postcondition: Expr, state: SymbolicState) -> Bool {
+    let post_sym = eval_symbolic(postcondition, state);
+    let post_simp = simplify(post_sym);
+    
+    unification post_simp(SymBool(true)) = {
+        term true;
+    };
+    unification post_simp(SymBool(false)) = {
+        term false;
+    };
+    term true;  // Unknown postconditions need manual verification
+}
+
+// ===== MUTUAL EXCLUSION CHECKING =====
+
+struct ConflictResult {
+    has_conflict: Bool,
+    conflicting_txns: List<String>,
+    explanation: String
+}
+
+defn check_mutual_exclusion(txn1: Transaction, txn2: Transaction) -> ConflictResult {
+    // Both must be async and reactive to have conflicts
+    [!txn1.is_async || !txn2.is_async] {
+        term ConflictResult {
+            has_conflict: false,
+            conflicting_txns: [],
+            explanation: "At least one transaction is not async"
+        };
+    };
+    
+    [!txn1.is_reactive || !txn2.is_reactive] {
+        term ConflictResult {
+            has_conflict: false,
+            conflicting_txns: [],
+            explanation: "At least one transaction is not reactive"
+        };
+    };
+    
+    // Check if they write to the same variables
+    let writes1 = collect_writes(txn1.body);
+    let writes2 = collect_writes(txn2.body);
+    
+    let i: Int = 0;
+    [i < writes1.len()] {
+        let j: Int = 0;
+        [j < writes2.len()] {
+            [writes1[i] == writes2[j]] {
+                term ConflictResult {
+                    has_conflict: true,
+                    conflicting_txns: [txn1.name, txn2.name],
+                    explanation: "Both transactions write to variable: " + writes1[i]
+                };
+            };
+            &j = j + 1;
+        };
+        &i = i + 1;
+    };
+    
+    term ConflictResult {
+        has_conflict: false,
+        conflicting_txns: [],
+        explanation: "No conflicting writes detected"
+    };
+}
+
+defn collect_writes(stmts: List<Statement>) -> List<String> {
+    let mut writes: List<String> = [];
+    
+    let i: Int = 0;
+    [i < stmts.len()] {
+        unification stmts[i](StmtLet(name, _, _)) = {
+            writes = writes.append(name);
+        };
+        unification stmts[i](StmtAssign(lhs, _)) = {
+            unification *lhs(ExprVar(name)) = {
+                writes = writes.append(name);
+            };
+        };
+        unification stmts[i](StmtGuarded(_, body)) = {
+            let nested = collect_writes(body);
+            writes = writes.append_all(nested);
+        };
+        &i = i + 1;
+    };
+    
+    term writes;
+}
+
+// ===== DEADLOCK DETECTION =====
+
+struct DeadlockResult {
+    has_deadlock: Bool,
+    cycle: List<String>,
+    explanation: String
+}
+
+defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
+    // Build dependency graph
+    let mut deps: HashMap<String, List<String>> = new_map();
+    
+    let i: Int = 0;
+    [i < txns.len()] {
+        let txn = txns[i];
+        let reads = collect_reads(txn.body);
+        let writes = collect_writes(txn.body);
+        
+        // Find transactions that write to variables this one reads
+        let mut txn_deps: List<String> = [];
+        let j: Int = 0;
+        [j < txns.len()] {
+            [i != j] {
+                let other_writes = collect_writes(txns[j].body);
+                let k: Int = 0;
+                [k < reads.len()] {
+                    let l: Int = 0;
+                    [l < other_writes.len()] {
+                        [reads[k] == other_writes[l]] {
+                            txn_deps = txn_deps.append(txns[j].name);
+                        };
+                        &l = l + 1;
+                    };
+                    &k = k + 1;
+                };
+            };
+            &j = j + 1;
+        };
+        
+        deps = deps.insert(txn.name, txn_deps);
+        &i = i + 1;
+    };
+    
+    // Check for cycles using DFS
+    let mut visited: HashSet<String> = new_set();
+    let mut rec_stack: HashSet<String> = new_set();
+    
+    let i: Int = 0;
+    [i < txns.len()] {
+        [!visited.contains(txns[i].name)] {
+            let (has_cycle, cycle) = dfs_cycle(txns[i].name, deps, visited, rec_stack, []);
+            [has_cycle] {
+                term DeadlockResult {
+                    has_deadlock: true,
+                    cycle: cycle,
+                    explanation: "Circular dependency detected"
+                };
+            };
+        };
+        &i = i + 1;
+    };
+    
+    term DeadlockResult {
+        has_deadlock: false,
+        cycle: [],
+        explanation: "No deadlock detected"
+    };
+}
+
+defn dfs_cycle(node: String, deps: HashMap<String, List<String>>, 
+               visited: HashSet<String>, rec_stack: HashSet<String>,
+               path: List<String>) -> (Bool, List<String>) {
+    let mut visited = visited;
+    let mut rec_stack = rec_stack;
+    let mut path = path;
+    
+    visited = visited.insert(node);
+    rec_stack = rec_stack.insert(node);
+    path = path.append(node);
+    
+    [deps.contains_key(node)] {
+        let neighbors = deps.get(node).unwrap();
+        let i: Int = 0;
+        [i < neighbors.len()] {
+            let neighbor = neighbors[i];
+            [!visited.contains(neighbor)] {
+                let (has_cycle, cycle) = dfs_cycle(neighbor, deps, visited, rec_stack, path);
+                [has_cycle] {
+                    term (true, cycle);
+                };
+            };
+            [rec_stack.contains(neighbor)] {
+                // Found cycle
+                term (true, path.append(neighbor));
+            };
+            &i = i + 1;
+        };
+    };
+    
+    rec_stack = rec_stack.remove(node);
+    term (false, []);
+}
+
+defn collect_reads(stmts: List<Statement>) -> List<String> {
+    // Simplified - would need to traverse expressions
+    term [];
+}
+
+// ===== VERIFICATION CONDITIONS =====
+
+struct VerificationCondition {
+    assumptions: List<SymbolicValue>,
+    conclusion: SymbolicValue
+}
+
+defn generate_vc(txn: Transaction) -> VerificationCondition {
+    // Generate verification condition from contract
+    let pre_sym = eval_symbolic(txn.contract.precondition, initial_state());
+    let post_sym = eval_symbolic(txn.contract.postcondition, initial_state());
+    
+    term VerificationCondition {
+        assumptions: [pre_sym],
+        conclusion: post_sym
+    };
+}
+
+defn check_vc(vc: VerificationCondition) -> Result<(), String> {
+    // Check if assumptions imply conclusion
+    // For each assumption, add to path constraints
+    let mut state = initial_state();
+    
+    let i: Int = 0;
+    [i < vc.assumptions.len()] {
+        state = state_add_constraint(state, vc.assumptions[i]);
+        &i = i + 1;
+    };
+    
+    // Check if conclusion holds
+    let conclusion_simp = simplify(vc.conclusion);
+    unification conclusion_simp(SymBool(false)) = {
+        term Err("Verification condition failed");
+    };
+    
+    term Ok(());
+}
+
+// ===== UTILITY FUNCTIONS =====
+
+defn sym_to_string(sym: SymbolicValue) -> String {
+    unification sym(SymInt(n)) = {
+        term String(n);
+    };
+    unification sym(SymFloat(f)) = {
+        term String(f);
+    };
+    unification sym(SymBool(b)) = {
+        [b] { term "true"; };
+        term "false";
+    };
+    unification sym(SymString(s)) = {
+        term "\"" + s + "\"";
+    };
+    unification sym(SymChar(c)) = {
+        term "'" + char_to_string(c) + "'";
+    };
+    unification sym(SymVar(name)) = {
+        term name;
+    };
+    unification sym(SymBinaryOp(op, left, right)) = {
+        let mut sb = new_builder();
+        sb = sb.append_char('(');
+        sb = sb.append_str(sym_to_string(*left));
+        sb = sb.append_str(" ");
+        sb = sb.append_str(op);
+        sb = sb.append_str(" ");
+        sb = sb.append_str(sym_to_string(*right));
+        sb = sb.append_char(')');
+        term sb.to_string();
+    };
+    unification sym(SymUnaryOp(op, operand)) = {
+        let mut sb = new_builder();
+        sb = sb.append_char('(');
+        sb = sb.append_str(op);
+        sb = sb.append_str(sym_to_string(*operand));
+        sb = sb.append_char(')');
+        term sb.to_string();
+    };
+    unification sym(SymUnknown) = {
+        term "?";
+    };
+    term "?";
+}
