@@ -1,0 +1,18 @@
+// AArch64 Target Schema
+schema AArch64Target {
+    name: String,
+    architecture: String,
+    bits: Int,
+    endian: String,
+    os: String,
+    abi: String
+};
+
+AArch64Target {
+    name: "aarch64-unknown-linux-gnu",
+    architecture: "aarch64",
+    bits: 64,
+    endian: "little",
+    os: "linux",
+    abi: "gnu"
+};

@@ -1,0 +1,11 @@
+schema RustTarget {
+    name: String,
+    edition: String,
+    crate_type: String
+};
+
+RustTarget {
+    name: "rust-std",
+    edition: "2021",
+    crate_type: "bin"
+};

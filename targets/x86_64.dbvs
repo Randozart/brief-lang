@@ -1,0 +1,17 @@
+schema X86_64Target {
+    name: String,
+    architecture: String,
+    bits: Int,
+    endian: String,
+    os: String,
+    abi: String
+};
+
+X86_64Target {
+    name: "x86_64-unknown-linux-gnu",
+    architecture: "x86_64",
+    bits: 64,
+    endian: "little",
+    os: "linux",
+    abi: "gnu"
+};

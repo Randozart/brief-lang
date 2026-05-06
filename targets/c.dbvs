@@ -1,0 +1,11 @@
+schema CTarget {
+    name: String,
+    standard: String,
+    compiler: String
+};
+
+CTarget {
+    name: "c99",
+    standard: "c99",
+    compiler: "gcc"
+};
