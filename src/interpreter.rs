@@ -24,7 +24,7 @@ use crate::ast::*;
 use crate::ffi::orchestrator::Orchestrator;
 use crate::ffi::FFI_REGISTRY;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,10 +32,12 @@ pub enum Value {
     Int(i64),
     Float(f64),
     String(String),
-    Char(char),  // NEW
+    Char(char),
     Bool(bool),
     Data(Vec<u8>),
     List(Vec<Value>),
+    HashMap(HashMap<String, Value>),  // NEW: HashMap (string keys for simplicity)
+    HashSet(HashSet<String>),  // NEW: HashSet (string values for simplicity)
     Instance {
         typename: String,
         fields: HashMap<String, Value>,
@@ -55,6 +57,8 @@ impl fmt::Display for Value {
             Value::Bool(v) => write!(f, "{}", v),
             Value::Data(_) => write!(f, "<data>"),
             Value::List(items) => write!(f, "[{}]", items.len()),
+            Value::HashMap(map) => write!(f, "<HashMap {}>", map.len()),
+            Value::HashSet(set) => write!(f, "<HashSet {}>", set.len()),
             Value::Instance { typename, fields } => {
                 write!(f, "<{} {{}}>", typename)
             }
@@ -86,6 +90,19 @@ fn value_to_json_value(v: &Value) -> JsonValue {
         Value::String(s) => JsonValue::String(s.clone()),
         Value::Char(c) => JsonValue::String(c.to_string()),
         Value::List(items) => JsonValue::Array(items.iter().map(value_to_json_value).collect()),
+        Value::HashMap(map) => {
+            let json_map: serde_json::Map<String, JsonValue> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), value_to_json_value(v)))
+                .collect();
+            JsonValue::Object(json_map)
+        }
+        Value::HashSet(set) => {
+            let arr: Vec<JsonValue> = set.iter()
+                .map(|s| JsonValue::String(s.clone()))
+                .collect();
+            JsonValue::Array(arr)
+        }
         Value::Instance { fields, .. } => {
             let map: serde_json::Map<String, JsonValue> = fields
                 .iter()
@@ -813,6 +830,218 @@ impl Interpreter {
                             let mut method_args = args[1..].to_vec();
                             method_args.insert(0, args[0].clone());
                             return self.call_defn(&method_name, &method_args);
+                        }
+                    }
+                }
+
+                // HashMap built-in methods
+                if fn_name == "HashMap::new" || fn_name == "new_map" {
+                    return Ok(Value::HashMap(HashMap::new()));
+                }
+
+                if fn_name == "HashSet::new" || fn_name == "new_set" {
+                    return Ok(Value::HashSet(HashSet::new()));
+                }
+
+                // HashMap methods (called as map.insert(key, value))
+                if arg_values.len() >= 1 {
+                    if let Value::HashMap(map) = &arg_values[0] {
+                        let mut map = map.clone();
+                        
+                        if fn_name == "insert" && arg_values.len() == 3 {
+                            if let Value::String(key) = &arg_values[1] {
+                                map.insert(key.clone(), arg_values[2].clone());
+                                return Ok(Value::HashMap(map));
+                            }
+                        }
+                        
+                        if fn_name == "get" && arg_values.len() == 2 {
+                            if let Value::String(key) = &arg_values[1] {
+                                return Ok(match map.get(key) {
+                                    Some(v) => Value::Enum(
+                                        "Option".to_string(),
+                                        "Some".to_string(),
+                                        HashMap::from([("value".to_string(), v.clone())]),
+                                    ),
+                                    None => Value::Enum(
+                                        "Option".to_string(),
+                                        "None".to_string(),
+                                        HashMap::new(),
+                                    ),
+                                });
+                            }
+                        }
+                        
+                        if fn_name == "contains_key" && arg_values.len() == 2 {
+                            if let Value::String(key) = &arg_values[1] {
+                                return Ok(Value::Bool(map.contains_key(key)));
+                            }
+                        }
+                        
+                        if fn_name == "remove" && arg_values.len() == 2 {
+                            if let Value::String(key) = &arg_values[1] {
+                                map.remove(key);
+                                return Ok(Value::HashMap(map));
+                            }
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(map.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(map.is_empty()));
+                        }
+                        
+                        if fn_name == "keys" {
+                            let keys: Vec<Value> = map.keys()
+                                .map(|k| Value::String(k.clone()))
+                                .collect();
+                            return Ok(Value::List(keys));
+                        }
+                        
+                        if fn_name == "values" {
+                            let values: Vec<Value> = map.values().cloned().collect();
+                            return Ok(Value::List(values));
+                        }
+                    }
+                    
+                    // HashSet methods
+                    if let Value::HashSet(set) = &arg_values[0] {
+                        let mut set = set.clone();
+                        
+                        if fn_name == "insert" && arg_values.len() == 2 {
+                            if let Value::String(item) = &arg_values[1] {
+                                set.insert(item.clone());
+                                return Ok(Value::HashSet(set));
+                            }
+                        }
+                        
+                        if fn_name == "contains" && arg_values.len() == 2 {
+                            if let Value::String(item) = &arg_values[1] {
+                                return Ok(Value::Bool(set.contains(item)));
+                            }
+                        }
+                        
+                        if fn_name == "remove" && arg_values.len() == 2 {
+                            if let Value::String(item) = &arg_values[1] {
+                                set.remove(item);
+                                return Ok(Value::HashSet(set));
+                            }
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(set.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(set.is_empty()));
+                        }
+                    }
+                }
+
+                // HashMap built-in methods
+                if fn_name == "HashMap::new" || fn_name == "new_map" {
+                    return Ok(Value::HashMap(HashMap::new()));
+                }
+
+                if fn_name == "HashSet::new" || fn_name == "new_set" {
+                    return Ok(Value::HashSet(HashSet::new()));
+                }
+
+                // HashMap methods (called as map.insert(key, value))
+                if arg_values.len() >= 1 {
+                    if let Value::HashMap(map) = &arg_values[0] {
+                        let mut map = map.clone();
+                        
+                        if fn_name == "insert" && arg_values.len() == 3 {
+                            if let Value::String(key) = &arg_values[1] {
+                                map.insert(key.clone(), arg_values[2].clone());
+                                return Ok(Value::HashMap(map));
+                            }
+                        }
+                        
+                        if fn_name == "get" && arg_values.len() == 2 {
+                            if let Value::String(key) = &arg_values[1] {
+                                return Ok(match map.get(key) {
+                                    Some(v) => Value::Enum(
+                                        "Option".to_string(),
+                                        "Some".to_string(),
+                                        HashMap::from([("value".to_string(), v.clone())]),
+                                    ),
+                                    None => Value::Enum(
+                                        "Option".to_string(),
+                                        "None".to_string(),
+                                        HashMap::new(),
+                                    ),
+                                });
+                            }
+                        }
+                        
+                        if fn_name == "contains_key" && arg_values.len() == 2 {
+                            if let Value::String(key) = &arg_values[1] {
+                                return Ok(Value::Bool(map.contains_key(key)));
+                            }
+                        }
+                        
+                        if fn_name == "remove" && arg_values.len() == 2 {
+                            if let Value::String(key) = &arg_values[1] {
+                                map.remove(key);
+                                return Ok(Value::HashMap(map));
+                            }
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(map.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(map.is_empty()));
+                        }
+                        
+                        if fn_name == "keys" {
+                            let keys: Vec<Value> = map.keys()
+                                .map(|k| Value::String(k.clone()))
+                                .collect();
+                            return Ok(Value::List(keys));
+                        }
+                        
+                        if fn_name == "values" {
+                            let values: Vec<Value> = map.values().cloned().collect();
+                            return Ok(Value::List(values));
+                        }
+                    }
+                    
+                    // HashSet methods
+                    if let Value::HashSet(set) = &arg_values[0] {
+                        let mut set = set.clone();
+                        
+                        if fn_name == "insert" && arg_values.len() == 2 {
+                            if let Value::String(item) = &arg_values[1] {
+                                set.insert(item.clone());
+                                return Ok(Value::HashSet(set));
+                            }
+                        }
+                        
+                        if fn_name == "contains" && arg_values.len() == 2 {
+                            if let Value::String(item) = &arg_values[1] {
+                                return Ok(Value::Bool(set.contains(item)));
+                            }
+                        }
+                        
+                        if fn_name == "remove" && arg_values.len() == 2 {
+                            if let Value::String(item) = &arg_values[1] {
+                                set.remove(item);
+                                return Ok(Value::HashSet(set));
+                            }
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(set.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(set.is_empty()));
                         }
                     }
                 }
