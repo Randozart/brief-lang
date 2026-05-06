@@ -424,6 +424,7 @@ impl Annotator {
                 start,
                 end,
                 stride: _,
+                mask: _,
             } => {
                 format!(
                     "{}[{}:{}]",

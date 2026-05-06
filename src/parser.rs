@@ -2728,9 +2728,8 @@ let span = self.current_span();
         loop {
             if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
-                let index = self.parse_expression()?;
-                self.expect(Token::RBracket)?;
-                expr = Expr::ListIndex(Box::new(expr), Box::new(index));
+                let result = self.parse_bracket_contents()?;
+                expr = self.bracket_contents_to_expr(expr, result);
             } else if let Some(Ok(Token::Dot)) = self.current_token() {
                 self.advance();
                 let member_name = self.expect_identifier()?;
@@ -3061,6 +3060,138 @@ let span = self.current_span();
             None => self.spanned_err("Unexpected EOF in expression".to_string()),
         }
     }
+
+    fn parse_bracket_contents(&mut self) -> Result<BracketContents, SyntaxError> {
+        if let Some(Ok(Token::RBracket)) = self.current_token() {
+            return Ok(BracketContents::Empty);
+        }
+
+        let mut start: Option<Box<Expr>> = None;
+        let mut end: Option<Box<Expr>> = None;
+        let mut stride: Option<Box<Expr>> = None;
+        let mut mask: Option<Box<Expr>> = None;
+
+        let mut current_element = BracketElement::Start;
+
+        loop {
+            match current_element {
+                BracketElement::Start => {
+                    if let Some(Ok(Token::DotDot)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::End;
+                    } else if let Some(Ok(Token::ColonColon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Stride;
+                    } else if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Mask;
+                    } else if let Some(Ok(Token::RBracket)) = self.current_token() {
+                        break;
+                    } else {
+                        start = Some(Box::new(self.parse_expression()?));
+                        current_element = BracketElement::AfterStart;
+                    }
+                }
+                BracketElement::AfterStart => {
+                    if let Some(Ok(Token::DotDot)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::End;
+                    } else if let Some(Ok(Token::ColonColon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Stride;
+                    } else if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Mask;
+                    } else if let Some(Ok(Token::RBracket)) = self.current_token() {
+                        break;
+                    } else {
+                        return Err(SyntaxError::UnexpectedToken { expected: ".., ::, ;, or ]".to_string(), found: "".to_string(), span: self.current_span().unwrap_or_else(Span::dummy) });
+                    }
+                }
+                BracketElement::End => {
+                    if let Some(Ok(Token::RBracket)) = self.current_token() {
+                        current_element = BracketElement::AfterEnd;
+                    } else if let Some(Ok(Token::ColonColon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Stride;
+                    } else if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Mask;
+                    } else {
+                        end = Some(Box::new(self.parse_expression()?));
+                        current_element = BracketElement::AfterEnd;
+                    }
+                }
+                BracketElement::AfterEnd => {
+                    if let Some(Ok(Token::ColonColon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Stride;
+                    } else if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Mask;
+                    } else if let Some(Ok(Token::RBracket)) = self.current_token() {
+                        break;
+                    } else {
+                        return Err(SyntaxError::UnexpectedToken { expected: "::, ;, or ]".to_string(), found: "".to_string(), span: self.current_span().unwrap_or_else(Span::dummy) });
+                    }
+                }
+                BracketElement::Stride => {
+                    stride = Some(Box::new(self.parse_expression()?));
+                    current_element = BracketElement::AfterStride;
+                }
+                BracketElement::AfterStride => {
+                    if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                        current_element = BracketElement::Mask;
+                    } else if let Some(Ok(Token::RBracket)) = self.current_token() {
+                        break;
+                    } else {
+                        return Err(SyntaxError::UnexpectedToken { expected: "; or ]".to_string(), found: "".to_string(), span: self.current_span().unwrap_or_else(Span::dummy) });
+                    }
+                }
+                BracketElement::Mask => {
+                    mask = Some(Box::new(self.parse_expression()?));
+                    current_element = BracketElement::AfterMask;
+                }
+                BracketElement::AfterMask => {
+                    if let Some(Ok(Token::RBracket)) = self.current_token() {
+                        break;
+                    } else {
+                        return Err(SyntaxError::UnexpectedToken { expected: "]".to_string(), found: "".to_string(), span: self.current_span().unwrap_or_else(Span::dummy) });
+                    }
+                }
+            }
+        }
+
+        self.expect(Token::RBracket)?;
+
+        if start.is_none() && end.is_none() && stride.is_none() && mask.is_none() {
+            Ok(BracketContents::Empty)
+        } else if stride.is_none() && mask.is_none() && end.is_none() && start.is_some() {
+            Ok(BracketContents::SimpleIndex(start.unwrap()))
+        } else {
+            Ok(BracketContents::Slice {
+                start,
+                end,
+                stride,
+                mask,
+            })
+        }
+    }
+
+    fn bracket_contents_to_expr(&self, base: Expr, contents: BracketContents) -> Expr {
+        match contents {
+            BracketContents::Empty => Expr::ListIndex(Box::new(base), Box::new(Expr::Integer(0))),
+            BracketContents::SimpleIndex(idx) => Expr::ListIndex(Box::new(base), idx),
+            BracketContents::Slice { start, end, stride, mask } => Expr::Slice {
+                value: Box::new(base),
+                start,
+                end,
+                stride,
+                mask,
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3156,4 +3287,26 @@ mod parser_tests {
             panic!("Expected Transaction item");
         }
     }
+}
+
+enum BracketElement {
+    Start,
+    AfterStart,
+    End,
+    AfterEnd,
+    Stride,
+    AfterStride,
+    Mask,
+    AfterMask,
+}
+
+enum BracketContents {
+    Empty,
+    SimpleIndex(Box<Expr>),
+    Slice {
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        stride: Option<Box<Expr>>,
+        mask: Option<Box<Expr>>,
+    },
 }

@@ -314,7 +314,9 @@ pub enum Expr {
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,
         stride: Option<Box<Expr>>,
+        mask: Option<Box<Expr>>,
     },
+
     FieldAccess(Box<Expr>, String),
     StructInstance(String, Vec<(String, Expr)>),
     ObjectLiteral(Vec<(String, Expr)>),
@@ -392,6 +394,7 @@ impl Expr {
                 start,
                 end,
                 stride,
+                mask,
             } => {
                 value.extract_deps_recursive(deps);
                 if let Some(s) = start {
@@ -402,6 +405,9 @@ impl Expr {
                 }
                 if let Some(st) = stride {
                     st.extract_deps_recursive(deps);
+                }
+                if let Some(m) = mask {
+                    m.extract_deps_recursive(deps);
                 }
             }
             Expr::FieldAccess(e, _) => {

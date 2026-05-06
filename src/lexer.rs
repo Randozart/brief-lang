@@ -252,6 +252,8 @@ pub enum Token {
     Semicolon,
     #[token(":")]
     Colon,
+    #[token("::")]
+    ColonColon,
     #[token("{")]
     LBrace,
     #[token("}")]

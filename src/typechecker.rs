@@ -705,6 +705,19 @@ impl TypeChecker {
                 Type::Vector(inner, _) => *inner,
                 _ => Type::TypeVar("T".to_string()),
             },
+            Expr::Slice { value, mask, .. } => {
+                if let Some(mask_expr) = mask {
+                    let mask_type = self.infer_expression(mask_expr);
+                    if mask_type != Type::Bool {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: "Bool".to_string(),
+                            found: format!("{:?}", mask_type),
+                            context: "Slice mask expression".to_string(),
+                        });
+                    }
+                }
+                self.infer_expression(value)
+            },
             _ => Type::Custom("unknown".to_string()),
         }
     }

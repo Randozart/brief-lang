@@ -974,7 +974,17 @@ impl VerilogGenerator {
                     if idx > 0 { "else " } else { "" },
                     cond
                 ));
-                self.emit_vector_assignment_from_txn(name, &txn.body, program);
+                for stmt in &txn.body {
+                    if let Statement::Assignment { lhs, expr: rhs, .. } = stmt {
+                        if let Expr::ListIndex(val, _) = lhs {
+                            if let Expr::Identifier(var_name) = &**val {
+                                if var_name == name {
+                                     self.emit_vector_assignment_from_txn(name, &txn.body, program);
+                                }
+                            }
+                        }
+                    }
+                }
                 self.output.push_str("                    end\n");
             }
 
@@ -1241,6 +1251,53 @@ impl VerilogGenerator {
                                 self.output.push_str(&format!(
                                     "                        if ({} == {}) begin\n",
                                     genvar_name, idx_str
+                                ));
+                                self.output.push_str(&format!(
+                                    "                            {}[{}] <= {};\n",
+                                    var_name, genvar_name, lifted_expr
+                                ));
+                                self.output.push_str("                        end\n");
+                            }
+                            Expr::Slice { start, end, stride, mask, .. } => {
+                                let range_str = match (start, end) {
+                                    (Some(s), Some(e)) => {
+                                        let s_str = self.expr_to_verilog(s);
+                                        let e_str = self.expr_to_verilog(e);
+                                        format!("{} <= {} && {} <= {}", genvar_name, s_str, genvar_name, e_str)
+                                    }
+                                    (Some(s), None) => {
+                                        let s_str = self.expr_to_verilog(s);
+                                        format!("{} >= {}", genvar_name, s_str)
+                                    }
+                                    (None, Some(e)) => {
+                                        let e_str = self.expr_to_verilog(e);
+                                        format!("{} <= {}", genvar_name, e_str)
+                                    }
+                                    (None, None) => "1".to_string(),
+                                };
+                                
+                                let stride_str = stride.as_ref().map(|s| {
+                                    let s_str = self.expr_to_verilog(s);
+                                    format!("({} % {}) == 0", genvar_name, s_str)
+                                });
+                                
+                                let mask_str = mask.as_ref().map(|m| {
+                                    self.expr_to_verilog(m)
+                                });
+                                
+                                let mut condition = range_str.clone();
+                                
+                                if let Some(s) = stride_str {
+                                    condition = format!("{} && {}", condition, s);
+                                }
+                                
+                                if let Some(m) = mask_str {
+                                    condition = format!("{} && ({})", condition, m);
+                                }
+                                
+                                self.output.push_str(&format!(
+                                    "                        if ({}) begin\n",
+                                    condition
                                 ));
                                 self.output.push_str(&format!(
                                     "                            {}[{}] <= {};\n",
@@ -1558,8 +1615,12 @@ impl VerilogGenerator {
                 }
             }
             Expr::Slice {
-                value, start, end, ..
+                value, start, end, stride, mask
             } => {
+                if let Some(mask_expr) = mask {
+                    // This is a masked assignment, handle it differently
+                    return format!("/* Masked assignment for {} */", self.expr_to_verilog(value));
+                }
                 let v_str = self.expr_to_verilog(value);
                 let s_str = start
                     .as_ref()

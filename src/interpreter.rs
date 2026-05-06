@@ -916,9 +916,67 @@ impl Interpreter {
                     _ => Ok(Value::Bool(false)),
                 }
             }
-            Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } => {
+            Expr::Slice { value, start, end, stride, mask: _ } => {
+                let list_val = self.eval_expr(value)?;
+                let list = match list_val {
+                    Value::List(vec) => vec,
+                    _ => return Err(RuntimeError::TypeMismatch("Cannot slice non-list".to_string())),
+                };
+                
+                let len = list.len();
+                
+                let start_idx = match start {
+                    Some(s) => {
+let s_val = self.eval_expr(s)?;
+                        match s_val {
+                            Value::Int(n) => {
+                                if n < 0 { (len as i64 + n) as usize } else { n as usize }
+                            }
+                            _ => return Err(RuntimeError::TypeMismatch("Slice start must be integer".to_string())),
+                        }
+                    }
+                    None => 0,
+                };
+                
+                let end_idx = match end {
+                    Some(e) => {
+                        let e_val = self.eval_expr(e)?;
+                        match e_val {
+                            Value::Int(n) => {
+                                if n < 0 { (len as i64 + n) as usize } else { n as usize }
+                            }
+                            _ => return Err(RuntimeError::TypeMismatch("Slice end must be integer".to_string())),
+                        }
+                    }
+                    None => len,
+                };
+                
+                let stride_val = stride.as_ref().map(|s| {
+                    let s_val = self.eval_expr(s)?;
+                    match s_val {
+                        Value::Int(n) => Ok(n as usize),
+                        _ => Err(RuntimeError::TypeMismatch("Stride must be integer".to_string())),
+                    }
+                }).transpose()?;
+                
+                let stride = stride_val.unwrap_or(1);
+                
+                let mut result = Vec::new();
+                let mut idx = start_idx;
+                
+                while idx < end_idx && idx < len {
+                    result.push(list[idx].clone());
+                    if stride == 0 {
+                        break;
+                    }
+                    idx += stride;
+                }
+                
+                Ok(Value::List(result))
+            }
+            Expr::ForAll { .. } | Expr::Exists { .. } => {
                 Err(RuntimeError::TypeMismatch(
-                    "Slice/quantifier expressions not supported in interpreter".to_string(),
+                    "Quantifier expressions not supported in interpreter".to_string(),
                 ))
             }
         }
