@@ -1,0 +1,268 @@
+// Metropolitan FFI - Shared Memory Negotiation System
+// Allows Brief to negotiate memory positions with foreign languages
+
+// ===== SHARED MEMORY REGIONS =====
+
+struct SharedRegion {
+    id: String,           // Unique identifier
+    base_address: Int,    // Base memory address
+    size: Int,            // Size in bytes
+    permissions: String,  // "rw", "r", "w", "ro"
+    foreign_id: String    // Foreign language's identifier for this region
+}
+
+// ===== NEGOTIATION PROTOCOL =====
+
+enum NegotiationResult {
+    NegotiationSuccess(SharedRegion),
+    NegotiationFailed(String),
+    NegotiationConflict(String, String)  // Our request, their request
+}
+
+// Request a shared memory region
+defn request_shared_region(
+    id: String,
+    size: Int,
+    permissions: String,
+    foreign_lang: String
+) -> Result<SharedRegion, String> {
+    // This would interface with the Metropolitan protocol
+    // For now, return a placeholder
+    term Ok(SharedRegion {
+        id: id,
+        base_address: 0x10000000,  // Placeholder
+        size: size,
+        permissions: permissions,
+        foreign_id: foreign_lang + "_" + id
+    });
+}
+
+// Release a shared memory region
+defn release_shared_region(region: SharedRegion) -> Result<Void, String> {
+    term Ok();
+}
+
+// ===== MEMORY-MAPPED FFI =====
+
+// Map a foreign function to a shared memory region
+struct MappedFFI {
+    name: String,
+    region: SharedRegion,
+    input_offset: Int,
+    output_offset: Int,
+    status_offset: Int
+}
+
+defn map_ffi_to_memory(
+    name: String,
+    region: SharedRegion,
+    input_size: Int,
+    output_size: Int
+) -> Result<MappedFFI, String> {
+    // Layout:
+    // [0..input_size] - Input data
+    // [input_size..input_size+output_size] - Output data
+    // [input_size+output_size..input_size+output_size+8] - Status word
+    
+    term Ok(MappedFFI {
+        name: name,
+        region: region,
+        input_offset: 0,
+        output_offset: input_size,
+        status_offset: input_size + output_size
+    });
+}
+
+// ===== DATA MARSHALLING =====
+
+// Write data to shared memory
+defn write_to_shared(region: SharedRegion, offset: Int, data: Data) -> Result<Void, String> {
+    [offset + data.len() <= region.size] {
+        // Write data to shared memory at offset
+        term Ok();
+    };
+    term Err("Data exceeds region bounds");
+}
+
+// Read data from shared memory
+defn read_from_shared(region: SharedRegion, offset: Int, size: Int) -> Result<Data, String> {
+    [offset + size <= region.size] {
+        // Read data from shared memory at offset
+        term Ok(Data::from_size(size));
+    };
+    term Err("Read exceeds region bounds");
+}
+
+// ===== STATUS WORD MANAGEMENT =====
+
+enum FFIStatus {
+    StatusReady,
+    StatusProcessing,
+    StatusComplete,
+    StatusError(Int)
+}
+
+defn write_status(region: SharedRegion, offset: Int, status: FFIStatus) -> Result<Void, String> {
+    let status_word: Int = 0;
+    unification status(StatusReady) = { &status_word = 0; };
+    unification status(StatusProcessing) = { &status_word = 1; };
+    unification status(StatusComplete) = { &status_word = 2; };
+    unification status(StatusError(code)) = { &status_word = 0x80000000 | code; };
+    
+    // Write status_word to memory at offset
+    term Ok();
+}
+
+defn read_status(region: SharedRegion, offset: Int) -> Result<FFIStatus, String> {
+    // Read status_word from memory at offset
+    let status_word: Int = 0;
+    
+    [status_word == 0] { term Ok(StatusReady); };
+    [status_word == 1] { term Ok(StatusProcessing); };
+    [status_word == 2] { term Ok(StatusComplete); };
+    [status_word & 0x80000000 != 0] { 
+        term Ok(StatusError(status_word & 0x7FFFFFFF));
+    };
+    
+    term Ok(StatusReady);
+}
+
+// ===== SYNCHRONIZATION =====
+
+// Atomic compare-and-swap for synchronization
+defn atomic_cas(region: SharedRegion, offset: Int, expected: Int, new_value: Int) -> Result<Int, String> {
+    // Read current value
+    let current: Int = 0;
+    
+    // Atomic compare-and-swap
+    [current == expected] {
+        // Write new value
+        term Ok(current);
+    };
+    
+    term Ok(current);
+}
+
+// Memory barrier for ordering
+defn memory_barrier() {
+    // Ensure all memory operations before this point are complete
+    term;
+}
+
+// ===== METROPOLITAN PROTOCOL =====
+
+struct MetropolitanChannel {
+    id: String,
+    request_region: SharedRegion,
+    response_region: SharedRegion,
+    sync_region: SharedRegion
+}
+
+defn create_metropolitan_channel(
+    channel_id: String,
+    foreign_lang: String
+) -> Result<MetropolitanChannel, String> {
+    // Request three shared regions:
+    // 1. Request region (Brief → Foreign)
+    let request = request_shared_region(
+        channel_id + "_request",
+        4096,
+        "rw",
+        foreign_lang
+    )?;
+    
+    // 2. Response region (Foreign → Brief)
+    let response = request_shared_region(
+        channel_id + "_response",
+        4096,
+        "rw",
+        foreign_lang
+    )?;
+    
+    // 3. Sync region (coordination)
+    let sync = request_shared_region(
+        channel_id + "_sync",
+        64,
+        "rw",
+        foreign_lang
+    )?;
+    
+    term Ok(MetropolitanChannel {
+        id: channel_id,
+        request_region: request,
+        response_region: response,
+        sync_region: sync
+    });
+}
+
+// Send a request through Metropolitan channel
+defn metropolitan_send(channel: MetropolitanChannel, request: Data) -> Result<Void, String> {
+    // Write request to request_region
+    write_to_shared(channel.request_region, 0, request)?;
+    
+    // Update sync word to signal "request ready"
+    write_status(channel.sync_region, 0, StatusProcessing)?;
+    
+    memory_barrier();
+    
+    term Ok();
+}
+
+// Receive a response from Metropolitan channel
+defn metropolitan_receive(channel: MetropolitanChannel, timeout_ms: Int) -> Result<Data, String> {
+    let start_time: Int = 0;  // Would use time.now()
+    
+    [time.now() - start_time < timeout_ms] {
+        let status = read_status(channel.sync_region, 8)?;
+        
+        unification status(StatusComplete) = {
+            memory_barrier();
+            // Read response from response_region
+            let response = read_from_shared(channel.response_region, 0, 4096)?;
+            write_status(channel.sync_region, 8, StatusReady)?;
+            term Ok(response);
+        };
+        
+        unification status(StatusError(code)) = {
+            term Err("Foreign error: " + String(code));
+        };
+        
+        // Wait a bit before checking again
+        time.sleep(time.duration_millis(1));
+    };
+    
+    term Err("Timeout waiting for response");
+}
+
+// ===== EXAMPLE USAGE =====
+
+// Example: Call a foreign function through Metropolitan FFI
+defn call_foreign_function(
+    channel: MetropolitanChannel,
+    input: Data,
+    timeout_ms: Int
+) -> Result<Data, String> {
+    // Send request
+    metropolitan_send(channel, input)?;
+    
+    // Wait for response
+    let response = metropolitan_receive(channel, timeout_ms)?;
+    
+    term Ok(response);
+}
+
+// Example: Set up a shared array for foreign processing
+defn setup_shared_array(
+    channel_id: String,
+    array_size: Int,
+    foreign_lang: String
+) -> Result<SharedRegion, String> {
+    let region = request_shared_region(
+        channel_id + "_array",
+        array_size * 8,  // 8 bytes per element
+        "rw",
+        foreign_lang
+    )?;
+    
+    term Ok(region);
+}
