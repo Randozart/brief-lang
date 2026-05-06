@@ -1,0 +1,332 @@
+// x86-64 Binary Backend - Direct machine code generation
+// Tier 7 Part 2
+
+// ===== X86_64 INSTRUCTION ENUM =====
+
+enum X64Instr {
+    // Data movement
+    MOV(String, String),           // mov r64, r64
+    MOV_IMM(String, Int),          // mov r64, imm
+    MOV_MEM(String, String, Int),  // mov r64, [r64+offset]
+    MOV_MEM_IMM(String, Int, Int), // mov [r64+offset], imm
+    
+    // Arithmetic
+    ADD(String, String),           // add r64, r64
+    ADD_IMM(String, Int),          // add r64, imm
+    SUB(String, String),           // sub r64, r64
+    SUB_IMM(String, Int),          // sub r64, imm
+    IMUL(String, String),          // imul r64, r64
+    IMUL_IMM(String, Int),         // imul r64, imm
+    
+    // Logic
+    AND(String, String),           // and r64, r64
+    OR(String, String),            // or r64, r64
+    XOR(String, String),           // xor r64, r64
+    NOT(String),                   // not r64
+    NEG(String),                   // neg r64
+    
+    // Compare
+    CMP(String, String),           // cmp r64, r64
+    CMP_IMM(String, Int),          // cmp r64, imm
+    TEST(String, String),          // test r64, r64
+    
+    // Control flow
+    JMP(String),                   // jmp label
+    JE(String),                    // je label
+    JNE(String),                   // jne label
+    JL(String),                    // jl label
+    JG(String),                    // jg label
+    JLE(String),                   // jle label
+    JGE(String),                   // jge label
+    CALL(String),                  // call label
+    RET,                           // ret
+    NOP,                           // nop
+    
+    // Stack
+    PUSH(String),                  // push r64
+    POP(String),                   // pop r64
+    LEAVE,                         // leave
+    ENTER(Int, Int),               // enter size, 0
+    
+    // Labels
+    Label(String),
+    Comment(String)
+}
+
+// ===== REGISTER DEFINITIONS =====
+
+defn x64_callee_saved() -> List<String> {
+    term ["RBX", "RBP", "R12", "R13", "R14", "R15"];
+}
+
+defn x64_caller_saved() -> List<String> {
+    term ["RAX", "RCX", "RDX", "RSI", "RDI", "R8", "R9", "R10", "R11"];
+}
+
+defn x64_reg_to_num(reg: String) -> u8 {
+    [reg == "RAX"] { term 0; };
+    [reg == "RCX"] { term 1; };
+    [reg == "RDX"] { term 2; };
+    [reg == "RBX"] { term 3; };
+    [reg == "RSP"] { term 4; };
+    [reg == "RBP"] { term 5; };
+    [reg == "RSI"] { term 6; };
+    [reg == "RDI"] { term 7; };
+    [reg == "R8"] { term 8; };
+    [reg == "R9"] { term 9; };
+    [reg == "R10"] { term 10; };
+    [reg == "R11"] { term 11; };
+    [reg == "R12"] { term 12; };
+    [reg == "R13"] { term 13; };
+    [reg == "R14"] { term 14; };
+    [reg == "R15"] { term 15; };
+    term 0;
+}
+
+// ===== INSTRUCTION EMISSION =====
+
+defn x64_emit_mov(rd: String, rs: String) -> X64Instr {
+    term MOV(rd, rs);
+}
+
+defn x64_emit_mov_imm(rd: String, imm: Int) -> X64Instr {
+    term MOV_IMM(rd, imm);
+}
+
+defn x64_emit_add(rd: String, rs: String) -> X64Instr {
+    term ADD(rd, rs);
+}
+
+defn x64_emit_add_imm(rd: String, imm: Int) -> X64Instr {
+    term ADD_IMM(rd, imm);
+}
+
+defn x64_emit_sub(rd: String, rs: String) -> X64Instr {
+    term SUB(rd, rs);
+}
+
+defn x64_emit_sub_imm(rd: String, imm: Int) -> X64Instr {
+    term SUB_IMM(rd, imm);
+}
+
+defn x64_emit_cmp(rn: String, rm: String) -> X64Instr {
+    term CMP(rn, rm);
+}
+
+defn x64_emit_je(label: String) -> X64Instr {
+    term JE(label);
+}
+
+defn x64_emit_jne(label: String) -> X64Instr {
+    term JNE(label);
+}
+
+defn x64_emit_jmp(label: String) -> X64Instr {
+    term JMP(label);
+}
+
+defn x64_emit_call(label: String) -> X64Instr {
+    term CALL(label);
+}
+
+defn x64_emit_ret() -> X64Instr {
+    term RET;
+}
+
+defn x64_emit_label(name: String) -> X64Instr {
+    term Label(name);
+}
+
+// ===== BINARY ENCODING =====
+
+defn x64_encode_instr(instr: X64Instr) -> List<u8> {
+    unification instr(MOV(rd, rs)) = {
+        // mov r64, r64: 48 89 C0 + reg codes
+        let rd_num = x64_reg_to_num(rd);
+        let rs_num = x64_reg_to_num(rs);
+        term [0x48, 0x89, 0xC0 | (rd_num) | (rs_num << 3)];
+    };
+    
+    unification instr(MOV_IMM(rd, imm)) = {
+        // mov r64, imm32: 48 B8 + imm (64-bit)
+        let rd_num = x64_reg_to_num(rd);
+        let mut bytes = [0x48, 0xB8 | rd_num];
+        bytes = bytes.append_all(u64_to_le_bytes(imm as u64));
+        term bytes;
+    };
+    
+    unification instr(ADD(rd, rs)) = {
+        // add r64, r64: 48 01 C0 + reg codes
+        let rd_num = x64_reg_to_num(rd);
+        let rs_num = x64_reg_to_num(rs);
+        term [0x48, 0x01, 0xC0 | (rd_num) | (rs_num << 3)];
+    };
+    
+    unification instr(ADD_IMM(rd, imm)) = {
+        // add r64, imm32: 48 83 C0 + reg + imm8
+        let rd_num = x64_reg_to_num(rd);
+        term [0x48, 0x83, 0xC0 | rd_num, imm as u8];
+    };
+    
+    unification instr(SUB(rd, rs)) = {
+        // sub r64, r64: 48 29 C0 + reg codes
+        let rd_num = x64_reg_to_num(rd);
+        let rs_num = x64_reg_to_num(rs);
+        term [0x48, 0x29, 0xC0 | (rd_num) | (rs_num << 3)];
+    };
+    
+    unification instr(SUB_IMM(rd, imm)) = {
+        // sub r64, imm32: 48 83 E8 + reg + imm8
+        let rd_num = x64_reg_to_num(rd);
+        term [0x48, 0x83, 0xE8 | rd_num, imm as u8];
+    };
+    
+    unification instr(CMP(rn, rm)) = {
+        // cmp r64, r64: 48 39 F0 + reg codes
+        let rn_num = x64_reg_to_num(rn);
+        let rm_num = x64_reg_to_num(rm);
+        term [0x48, 0x39, 0xF0 | (rn_num) | (rm_num << 3)];
+    };
+    
+    unification instr(JE(label)) = {
+        // je rel32: 0F 84 + rel32 (placeholder)
+        term [0x0F, 0x84, 0x00, 0x00, 0x00, 0x00];
+    };
+    
+    unification instr(JNE(label)) = {
+        // jne rel32: 0F 85 + rel32
+        term [0x0F, 0x85, 0x00, 0x00, 0x00, 0x00];
+    };
+    
+    unification instr(JMP(label)) = {
+        // jmp rel32: E9 + rel32
+        term [0xE9, 0x00, 0x00, 0x00, 0x00];
+    };
+    
+    unification instr(CALL(label)) = {
+        // call rel32: E8 + rel32
+        term [0xE8, 0x00, 0x00, 0x00, 0x00];
+    };
+    
+    unification instr(RET) = {
+        // ret: C3
+        term [0xC3];
+    };
+    
+    unification instr(NOP) = {
+        // nop: 90
+        term [0x90];
+    };
+    
+    unification instr(Label(_)) = {
+        term [];
+    };
+    
+    unification instr(Comment(_)) = {
+        term [];
+    };
+    
+    // Default
+    term [0x90];  // nop
+}
+
+defn u64_to_le_bytes(n: u64) -> List<u8> {
+    term [
+        (n AND 0xFF) as u8,
+        ((n >> 8) AND 0xFF) as u8,
+        ((n >> 16) AND 0xFF) as u8,
+        ((n >> 24) AND 0xFF) as u8,
+        ((n >> 32) AND 0xFF) as u8,
+        ((n >> 40) AND 0xFF) as u8,
+        ((n >> 48) AND 0xFF) as u8,
+        ((n >> 56) AND 0xFF) as u8
+    ];
+}
+
+// ===== CODE GENERATION =====
+
+defn x64_generate_reactor(txns: List<Transaction>) -> List<X64Instr> {
+    let mut instrs: List<X64Instr> = [];
+    
+    // Entry point
+    instrs = instrs.append(x64_emit_label("reactor_entry"));
+    instrs = instrs.append(x64_emit_push("RBP"));
+    instrs = instrs.append(x64_emit_mov("RBP", "RSP"));
+    instrs = instrs.append(x64_emit_sub_imm("RSP", 16));
+    
+    // Reactor loop
+    instrs = instrs.append(x64_emit_label("reactor_loop"));
+    
+    // Call each transaction
+    let i: Int = 0;
+    [i < txns.len()] {
+        instrs = instrs.append(x64_emit_call(txns[i].name + "_check"));
+        &i = i + 1;
+    };
+    
+    // Loop back
+    instrs = instrs.append(x64_emit_jmp("reactor_loop"));
+    
+    // Exit
+    instrs = instrs.append(x64_emit_label("reactor_exit"));
+    instrs = instrs.append(x64_emit_mov("RSP", "RBP"));
+    instrs = instrs.append(x64_emit_pop("RBP"));
+    instrs = instrs.append(x64_emit_ret());
+    
+    term instrs;
+}
+
+defn x64_generate_transaction_check(txn: Transaction) -> List<X64Instr> {
+    let mut instrs: List<X64Instr> = [];
+    
+    // Label
+    instrs = instrs.append(x64_emit_label(txn.name + "_check"));
+    instrs = instrs.append(x64_emit_comment("Check: " + txn.name));
+    
+    // Simplified: just return for now
+    instrs = instrs.append(x64_emit_ret());
+    
+    term instrs;
+}
+
+defn x64_emit_binary(instrs: List<X64Instr>) -> List<u8> {
+    let mut binary: List<u8> = [];
+    
+    let i: Int = 0;
+    [i < instrs.len()] {
+        let bytes = x64_encode_instr(instrs[i]);
+        binary = binary.append_all(bytes);
+        &i = i + 1;
+    };
+    
+    term binary;
+}
+
+defn generate_x86_64(program: Program) -> List<u8> {
+    let mut all_instrs: List<X64Instr> = [];
+    
+    // Extract transactions
+    let mut txns: List<Transaction> = [];
+    let i: Int = 0;
+    [i < program.items.len()] {
+        unification program.items[i](TopTxn(txn)) = {
+            txns = txns.append(txn);
+        };
+        &i = i + 1;
+    };
+    
+    // Generate reactor
+    let reactor_instrs = x64_generate_reactor(txns);
+    all_instrs = all_instrs.append_all(reactor_instrs);
+    
+    // Generate transaction checks
+    let j: Int = 0;
+    [j < txns.len()] {
+        let txn_instrs = x64_generate_transaction_check(txns[j]);
+        all_instrs = all_instrs.append_all(txn_instrs);
+        &j = j + 1;
+    };
+    
+    // Emit binary
+    term x64_emit_binary(all_instrs);
+}
