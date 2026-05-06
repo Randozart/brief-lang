@@ -112,7 +112,9 @@ pub enum Type {
     Char,  // Unicode codepoint type
     HashMap(Box<Type>, Box<Type>),  // HashMap<K, V>
     HashSet(Box<Type>),  // HashSet<T>
-    StringBuilder,  // NEW: Efficient string building
+    StringBuilder,  // Efficient string building
+    Stack(Box<Type>),  // NEW: Stack<T>
+    Queue(Box<Type>),  // NEW: Queue<T>
     Custom(String),
     Union(Vec<Type>),
     ContractBound(Box<Type>, Box<Expr>),

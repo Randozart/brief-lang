@@ -2464,6 +2464,22 @@ let span = self.current_span();
                 self.advance();
                 Type::StringBuilder
             }
+            Some(Ok(Token::TypeStack)) => {
+                self.advance();
+                // Parse Stack<T>
+                self.expect(Token::Lt)?;
+                let inner_type = self.parse_type()?;
+                self.expect(Token::Gt)?;
+                Type::Stack(Box::new(inner_type))
+            }
+            Some(Ok(Token::TypeQueue)) => {
+                self.advance();
+                // Parse Queue<T>
+                self.expect(Token::Lt)?;
+                let inner_type = self.parse_type()?;
+                self.expect(Token::Gt)?;
+                Type::Queue(Box::new(inner_type))
+            }
             Some(Ok(Token::TypeVoid)) => {
                 self.advance();
                 Type::Void

@@ -1,0 +1,53 @@
+// Queue<T> - FIFO data structure
+
+// Construction
+defn new_queue<T>() -> Queue<T> [true][result.len() == 0] {
+    term Queue::empty();
+};
+
+defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][result.len() == 0] {
+    term Queue::with_capacity(capacity);
+};
+
+// Queue operations
+defn enqueue<T>(queue: Queue<T>, item: T) 
+    [true][result.len() == queue.len() + 1] 
+    -> Queue<T> 
+{
+    term queue.enqueue(item);
+};
+
+defn dequeue<T>(queue: Queue<T>) 
+    [queue.len() > 0][result.len() == queue.len() - 1] 
+    -> Option<(T, Queue<T>)> 
+{
+    term queue.dequeue();
+};
+
+defn front<T>(queue: Queue<T>) 
+    [queue.len() > 0][true] 
+    -> Option<T> 
+{
+    term queue.front();
+};
+
+defn is_empty<T>(queue: Queue<T>) 
+    [true][result == true || result == false] 
+    -> Bool 
+{
+    term queue.len() == 0;
+};
+
+defn len<T>(queue: Queue<T>) 
+    [true][result >= 0] 
+    -> Int 
+{
+    term queue.len();
+};
+
+defn clear<T>(queue: Queue<T>) 
+    [true][result.len() == 0] 
+    -> Queue<T> 
+{
+    term new_queue<T>();
+};

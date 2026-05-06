@@ -1,0 +1,144 @@
+
+// ===== FUNCTIONAL METHODS (Tier 1.6) =====
+
+// Map over Option
+defn option_map<T, U>(opt: Option<T>, f: T -> U) -> Option<U> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        let val = opt.unwrap();
+        term Some(f(val));
+    };
+    term None;
+};
+
+// And_then (flat map)
+defn option_and_then<T, U>(opt: Option<T>, f: T -> Option<U>) -> Option<U> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        let val = opt.unwrap();
+        term f(val);
+    };
+    term None;
+};
+
+// Or_else
+defn option_or_else<T>(opt: Option<T>, f: () -> Option<T>) -> Option<T> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        term opt;
+    };
+    term f();
+};
+
+// Filter
+defn option_filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        let val = opt.unwrap();
+        [pred(val)] {
+            term Some(val);
+        };
+    };
+    term None;
+};
+
+// Or
+defn option_or<T>(opt: Option<T>, other: Option<T>) -> Option<T> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        term opt;
+    };
+    term other;
+};
+
+// Xor (one or the other, not both)
+defn option_xor<T>(opt: Option<T>, other: Option<T>) -> Option<T> 
+    [true][true] 
+{
+    let has_opt = opt.is_some();
+    let has_other = other.is_some();
+    [has_opt && !has_other] {
+        term opt;
+    };
+    [!has_opt && has_other] {
+        term other;
+    };
+    term None;
+};
+
+// ===== FUNCTIONAL METHODS (Tier 1.6) =====
+
+// Map over Option
+defn option_map<T, U>(opt: Option<T>, f: T -> U) -> Option<U> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        let val = opt.unwrap();
+        term Some(f(val));
+    };
+    term None;
+};
+
+// And_then (flat map)
+defn option_and_then<T, U>(opt: Option<T>, f: T -> Option<U>) -> Option<U> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        let val = opt.unwrap();
+        term f(val);
+    };
+    term None;
+};
+
+// Or_else
+defn option_or_else<T>(opt: Option<T>, f: () -> Option<T>) -> Option<T> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        term opt;
+    };
+    term f();
+};
+
+// Filter
+defn option_filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        let val = opt.unwrap();
+        [pred(val)] {
+            term Some(val);
+        };
+    };
+    term None;
+};
+
+// Or
+defn option_or<T>(opt: Option<T>, other: Option<T>) -> Option<T> 
+    [true][true] 
+{
+    [opt.is_some()] {
+        term opt;
+    };
+    term other;
+};
+
+// Xor (one or the other, not both)
+defn option_xor<T>(opt: Option<T>, other: Option<T>) -> Option<T> 
+    [true][true] 
+{
+    let has_opt = opt.is_some();
+    let has_other = other.is_some();
+    [has_opt && !has_other] {
+        term opt;
+    };
+    [!has_opt && has_other] {
+        term other;
+    };
+    term None;
+};

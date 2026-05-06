@@ -1,0 +1,53 @@
+// Stack<T> - LIFO data structure
+
+// Construction
+defn new_stack<T>() -> Stack<T> [true][result.len() == 0] {
+    term Stack::empty();
+};
+
+defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][result.len() == 0] {
+    term Stack::with_capacity(capacity);
+};
+
+// Stack operations
+defn push<T>(stack: Stack<T>, item: T) 
+    [true][result.len() == stack.len() + 1] 
+    -> Stack<T> 
+{
+    term stack.push(item);
+};
+
+defn pop<T>(stack: Stack<T>) 
+    [stack.len() > 0][result.len() == stack.len() - 1] 
+    -> Option<(T, Stack<T>)> 
+{
+    term stack.pop();
+};
+
+defn peek<T>(stack: Stack<T>) 
+    [stack.len() > 0][true] 
+    -> Option<T> 
+{
+    term stack.peek();
+};
+
+defn is_empty<T>(stack: Stack<T>) 
+    [true][result == true || result == false] 
+    -> Bool 
+{
+    term stack.len() == 0;
+};
+
+defn len<T>(stack: Stack<T>) 
+    [true][result >= 0] 
+    -> Int 
+{
+    term stack.len();
+};
+
+defn clear<T>(stack: Stack<T>) 
+    [true][result.len() == 0] 
+    -> Stack<T> 
+{
+    term new_stack<T>();
+};

@@ -24,7 +24,7 @@ use crate::ast::*;
 use crate::ffi::orchestrator::Orchestrator;
 use crate::ffi::FFI_REGISTRY;
 use serde_json::Value as JsonValue;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,7 +38,9 @@ pub enum Value {
     List(Vec<Value>),
     HashMap(HashMap<String, Value>),  // HashMap (string keys for simplicity)
     HashSet(HashSet<String>),  // HashSet (string values for simplicity)
-    StringBuilder(String),  // NEW: StringBuilder (internal buffer as String)
+    StringBuilder(String),  // StringBuilder (internal buffer as String)
+    Stack(Vec<Value>),  // Stack<T>
+    Queue(VecDeque<Value>),  // Queue<T> (VecDeque for efficient pop_front)
     Instance {
         typename: String,
         fields: HashMap<String, Value>,
@@ -61,6 +63,8 @@ impl fmt::Display for Value {
             Value::HashMap(map) => write!(f, "<HashMap {}>", map.len()),
             Value::HashSet(set) => write!(f, "<HashSet {}>", set.len()),
             Value::StringBuilder(s) => write!(f, "<StringBuilder {}>", s.len()),
+            Value::Stack(stack) => write!(f, "<Stack {}>", stack.len()),
+            Value::Queue(queue) => write!(f, "<Queue {}>", queue.len()),
             Value::Instance { typename, fields } => {
                 write!(f, "<{} {{}}>", typename)
             }
@@ -106,6 +110,8 @@ fn value_to_json_value(v: &Value) -> JsonValue {
             JsonValue::Array(arr)
         }
         Value::StringBuilder(s) => JsonValue::String(s.clone()),
+        Value::Stack(stack) => JsonValue::Array(stack.iter().map(value_to_json_value).collect()),
+        Value::Queue(queue) => JsonValue::Array(queue.iter().map(value_to_json_value).collect()),
         Value::Instance { fields, .. } => {
             let map: serde_json::Map<String, JsonValue> = fields
                 .iter()
@@ -1181,6 +1187,194 @@ impl Interpreter {
                         if fn_name == "capacity" {
                             // For simplicity, capacity = len (no pre-allocation yet)
                             return Ok(Value::Int(buffer.len() as i64));
+                        }
+                    }
+                }
+
+                // Stack built-in methods
+                if fn_name == "Stack::new" || fn_name == "new_stack" {
+                    return Ok(Value::Stack(Vec::new()));
+                }
+
+                if arg_values.len() >= 1 {
+                    if let Value::Stack(stack) = &arg_values[0] {
+                        let mut stack = stack.clone();
+                        
+                        if fn_name == "push" && arg_values.len() == 2 {
+                            stack.push(arg_values[1].clone());
+                            return Ok(Value::Stack(stack));
+                        }
+                        
+                        if fn_name == "pop" && !stack.is_empty() {
+                            let item = stack.pop().unwrap();
+                            return Ok(Value::Enum(
+                                "Option".to_string(),
+                                "Some".to_string(),
+                                HashMap::from([
+                                    ("0".to_string(), item.clone()),
+                                    ("1".to_string(), Value::Stack(stack)),
+                                ]),
+                            ));
+                        }
+                        
+                        if fn_name == "peek" && !stack.is_empty() {
+                            let item = stack.last().unwrap().clone();
+                            return Ok(Value::Enum(
+                                "Option".to_string(),
+                                "Some".to_string(),
+                                HashMap::from([("value".to_string(), item)]),
+                            ));
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(stack.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(stack.is_empty()));
+                        }
+                        
+                        if fn_name == "clear" {
+                            stack.clear();
+                            return Ok(Value::Stack(stack));
+                        }
+                    }
+                    
+                    // Queue methods
+                    if let Value::Queue(queue) = &arg_values[0] {
+                        let mut queue = queue.clone();
+                        
+                        if fn_name == "enqueue" && arg_values.len() == 2 {
+                            queue.push_back(arg_values[1].clone());
+                            return Ok(Value::Queue(queue));
+                        }
+                        
+                        if fn_name == "dequeue" && !queue.is_empty() {
+                            let item = queue.pop_front().unwrap();
+                            return Ok(Value::Enum(
+                                "Option".to_string(),
+                                "Some".to_string(),
+                                HashMap::from([
+                                    ("0".to_string(), item.clone()),
+                                    ("1".to_string(), Value::Queue(queue)),
+                                ]),
+                            ));
+                        }
+                        
+                        if fn_name == "front" && !queue.is_empty() {
+                            let item = queue.front().unwrap().clone();
+                            return Ok(Value::Enum(
+                                "Option".to_string(),
+                                "Some".to_string(),
+                                HashMap::from([("value".to_string(), item)]),
+                            ));
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(queue.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(queue.is_empty()));
+                        }
+                        
+                        if fn_name == "clear" {
+                            queue.clear();
+                            return Ok(Value::Queue(queue));
+                        }
+                    }
+                }
+
+                // Stack built-in methods
+                if fn_name == "Stack::new" || fn_name == "new_stack" {
+                    return Ok(Value::Stack(Vec::new()));
+                }
+
+                if arg_values.len() >= 1 {
+                    if let Value::Stack(stack) = &arg_values[0] {
+                        let mut stack = stack.clone();
+                        
+                        if fn_name == "push" && arg_values.len() == 2 {
+                            stack.push(arg_values[1].clone());
+                            return Ok(Value::Stack(stack));
+                        }
+                        
+                        if fn_name == "pop" && !stack.is_empty() {
+                            let item = stack.pop().unwrap();
+                            return Ok(Value::Enum(
+                                "Option".to_string(),
+                                "Some".to_string(),
+                                HashMap::from([
+                                    ("0".to_string(), item.clone()),
+                                    ("1".to_string(), Value::Stack(stack)),
+                                ]),
+                            ));
+                        }
+                        
+                        if fn_name == "peek" && !stack.is_empty() {
+                            let item = stack.last().unwrap().clone();
+                            return Ok(Value::Enum(
+                                "Option".to_string(),
+                                "Some".to_string(),
+                                HashMap::from([("value".to_string(), item)]),
+                            ));
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(stack.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(stack.is_empty()));
+                        }
+                        
+                        if fn_name == "clear" {
+                            stack.clear();
+                            return Ok(Value::Stack(stack));
+                        }
+                    }
+                    
+                    // Queue methods
+                    if let Value::Queue(queue) = &arg_values[0] {
+                        let mut queue = queue.clone();
+                        
+                        if fn_name == "enqueue" && arg_values.len() == 2 {
+                            queue.push_back(arg_values[1].clone());
+                            return Ok(Value::Queue(queue));
+                        }
+                        
+                        if fn_name == "dequeue" && !queue.is_empty() {
+                            let item = queue.pop_front().unwrap();
+                            return Ok(Value::Enum(
+                                "Option".to_string(),
+                                "Some".to_string(),
+                                HashMap::from([
+                                    ("0".to_string(), item.clone()),
+                                    ("1".to_string(), Value::Queue(queue)),
+                                ]),
+                            ));
+                        }
+                        
+                        if fn_name == "front" && !queue.is_empty() {
+                            let item = queue.front().unwrap().clone();
+                            return Ok(Value::Enum(
+                                "Option".to_string(),
+                                "Some".to_string(),
+                                HashMap::from([("value".to_string(), item)]),
+                            ));
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(queue.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(queue.is_empty()));
+                        }
+                        
+                        if fn_name == "clear" {
+                            queue.clear();
+                            return Ok(Value::Queue(queue));
                         }
                     }
                 }

@@ -187,6 +187,12 @@ impl Annotator {
                 format!("HashSet<{}>", self.type_to_string(inner))
             }
             Type::StringBuilder => "StringBuilder".to_string(),
+            Type::Stack(inner) => {
+                format!("Stack<{}>", self.type_to_string(inner))
+            }
+            Type::Queue(inner) => {
+                format!("Queue<{}>", self.type_to_string(inner))
+            }
             Type::Vector(inner, size) => {
                 format!("Vector<{}>[{}]", self.type_to_string(inner), size)
             }

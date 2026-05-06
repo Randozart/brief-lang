@@ -349,6 +349,10 @@ pub enum Token {
     TypeHashSet,
     #[token("StringBuilder")]  // StringBuilder type keyword
     TypeStringBuilder,
+    #[token("Stack")]  // Stack type keyword
+    TypeStack,
+    #[token("Queue")]  // Queue type keyword
+    TypeQueue,
     #[token("Data")]
     TypeData,
     #[token("Void")]

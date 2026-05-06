@@ -1650,6 +1650,12 @@ impl ProofEngine {
                 format!("HashSet<{}>", self.type_name(inner))
             }
             Type::StringBuilder => "StringBuilder".to_string(),
+            Type::Stack(inner) => {
+                format!("Stack<{}>", self.type_name(inner))
+            }
+            Type::Queue(inner) => {
+                format!("Queue<{}>", self.type_name(inner))
+            }
             Type::Vector(inner, size) => format!("Vector<{}>[{}]", self.type_name(inner), size),
             Type::Constrained(inner, _) => self.type_name(inner),
         }
