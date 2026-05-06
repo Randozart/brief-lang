@@ -1,0 +1,8 @@
+IMPORT "hardware.dbvs";
+
+let undefined_state: UInt = 0;
+
+rct txn init [undefined_state == 0][undefined_state == 1] {
+    &undefined_state = 1;
+    term;
+};

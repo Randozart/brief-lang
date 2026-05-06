@@ -1,0 +1,8 @@
+ALIAS status_reg: UInt[32];
+ALIAS led: Bool;
+ALIAS switch: Bool;
+ALIAS counter: UInt[16];
+ALIAS temperature: Int[16];
+
+REGISTER @0x1000: UInt[32];
+REGISTER @0x1004: UInt[32];
