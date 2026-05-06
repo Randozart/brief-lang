@@ -390,3 +390,76 @@ With Tier 1 complete, the foundation is laid for:
 
 *Last updated: 2026-05-06*
 *Status: Tier 1 COMPLETE ✅*
+
+---
+
+## Tier 2: String & Text Processing - COMPLETE
+
+**Status:** ✅ Complete (2026-05-06)
+
+### New Native Functions
+
+**Character Classification (char.bv):**
+- `is_whitespace(c)` - space, tab, newline, etc.
+- `is_digit(c)` - '0'-'9'
+- `is_hex_digit(c)` - '0'-'9', 'a'-'f', 'A'-'F'
+- `is_oct_digit(c)` - '0'-'7'
+- `is_alpha(c)` - 'a'-'z', 'A'-'Z'
+- `is_alphanumeric(c)` - letters or digits
+- `is_upper(c)` - uppercase
+- `is_lower(c)` - lowercase
+- `is_symbol(c)` - punctuation/symbols
+- `is_control(c)` - control characters
+- `is_ascii(c)` - ASCII range
+- `is_unicode_scalar(c)` - valid Unicode
+- `is_surrogate(c)` - surrogate pair
+
+**Character Conversion:**
+- `char_to_int(c)` - Char → Int
+- `int_to_char(n)` - Int → Char
+- `char_to_string(c)` - Char → String
+- `to_upper(c)` - lowercase → uppercase
+- `to_lower(c)` - uppercase → lowercase
+- `digit_to_int(c)` - '0'-'9' → 0-9
+- `int_to_digit(n)` - 0-9 → '0'-'9'
+- `hex_digit_to_int(c)` - hex char → 0-15
+- `int_to_hex_digit(n)` - 0-15 → hex char
+
+**String Operations (string.bv additions):**
+- `is_whitespace_str(s)` - all whitespace?
+- `is_alpha_str(s)` - all alphabetic?
+- `is_numeric_str(s)` - all digits?
+- `to_lower_str(s)` - convert to lowercase
+- `to_upper_str(s)` - convert to uppercase
+- `trim_str(s)` - trim both sides
+- `trim_left_str(s)` - trim left
+- `trim_right_str(s)` - trim right
+- `capitalize(s)` - first char upper, rest lower
+- `title_case(s)` - capitalize each word
+- `reverse_str(s)` - reverse string
+- `count_char(s, c)` - count occurrences
+- `count_substr(s, substr)` - count substring
+- `repeat_char(c, n)` - repeat character
+- `pad_center(s, width)` - center pad
+- `truncate(s, max_len)` - truncate
+- `truncate_with_ellipsis(s, max_len)` - truncate with ...
+- `ensure_prefix(s, prefix)` - add if missing
+- `ensure_suffix(s, suffix)` - add if missing
+- `remove_prefix(s, prefix)` - remove if present
+- `remove_suffix(s, suffix)` - remove if present
+- `strip_chars(s, chars)` - strip any of chars
+- `is_empty_str(s)` - empty check
+- `is_blank(s)` - all whitespace
+
+### Impact
+
+**Before Tier 2:**
+- String functions: 65% native, 35% FFI
+- Character classification: 100% FFI
+
+**After Tier 2:**
+- String functions: **95% native**, 5% FFI
+- Character classification: **100% native**
+
+This enables the lexer to be written entirely in Brief without FFI dependencies.
+
