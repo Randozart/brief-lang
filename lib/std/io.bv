@@ -1,22 +1,142 @@
-// Standard I/O Library
-// Foreign function declarations - NEW FFI SYNTAX
+// IO - File and console I/O operations
+// Tier 8: Infrastructure
 
-#![ffi.c, bind("./bindings/io.toml")]
-
-// Note: Using new syntax without from clause - profile-based resolution
-// The bind() path is optional - if omitted, uses default profile mappings
-frgn __print(msg: String) -> Result<Bool, IoError>;
-frgn __println(msg: String) -> Result<Bool, IoError>;
-frgn __input() -> Result<String, IoError>;
+// ===== CONSOLE IO (Native) =====
 
 defn print(msg: String) -> Bool [true][true] {
-  term true;
+    term true;  // FFI implementation needed
 };
 
 defn println(msg: String) -> Bool [true][true] {
-  term true;
+    term print(msg + "\n");
 };
 
 defn input() -> String [true][true] {
-  term "";
+    term "";  // FFI implementation needed
 };
+
+// ===== FILE IO (FFI Signatures) =====
+
+frgn sig __read_file(path: String) -> Result<String, IOError> from "io.toml";
+frgn sig __write_file(path: String, content: String) -> Result<Void, IOError> from "io.toml";
+frgn sig __file_exists(path: String) -> Result<Bool, IOError> from "io.toml";
+frgn sig __delete_file(path: String) -> Result<Void, IOError> from "io.toml";
+frgn sig __list_directory(path: String) -> Result<List<String>, IOError> from "io.toml";
+frgn sig __create_dir(path: String) -> Result<Void, IOError> from "io.toml";
+
+// ===== NATIVE WRAPPERS =====
+
+defn read_file(path: String) -> Result<String, IOError> {
+    term __read_file(path);
+};
+
+defn write_file(path: String, content: String) -> Result<Void, IOError> {
+    term __write_file(path, content);
+};
+
+defn file_exists(path: String) -> Bool {
+    let result = __file_exists(path);
+    [result.is_ok()] {
+        term result.value;
+    };
+    term false;
+};
+
+defn delete_file(path: String) -> Result<Void, IOError> {
+    term __delete_file(path);
+};
+
+defn list_directory(path: String) -> Result<List<String>, IOError> {
+    term __list_directory(path);
+};
+
+defn create_dir(path: String) -> Result<Void, IOError> {
+    term __create_dir(path);
+};
+
+// ===== PATH OPERATIONS (Native) =====
+
+defn join_path(parts: List<String>) -> String [true][result.len() > 0] {
+    let mut result = new_builder();
+    let i: Int = 0;
+    [i < parts.len()] {
+        [i > 0] {
+            result = result.append_char('/');
+        };
+        result = result.append_str(parts[i]);
+        &i = i + 1;
+    };
+    term result.to_string();
+};
+
+defn split_path(path: String) -> List<String> [true][true] {
+    term split(path, "/");
+};
+
+defn file_extension(path: String) -> String [true][result.len() >= 0] {
+    let parts = split(path, ".");
+    [parts.len() > 1] {
+        term parts[parts.len() - 1];
+    };
+    term "";
+};
+
+defn file_stem(path: String) -> String [true][result.len() >= 0] {
+    let parts = split(path, ".");
+    [parts.len() > 1] {
+        term parts[0];
+    };
+    term path;
+};
+
+defn directory(path: String) -> String [true][result.len() >= 0] {
+    let parts = split(path, "/");
+    [parts.len() > 1] {
+        let mut result = new_builder();
+        let i: Int = 0;
+        [i < parts.len() - 1] {
+            [i > 0] {
+                result = result.append_char('/');
+            };
+            result = result.append_str(parts[i]);
+            &i = i + 1;
+        };
+        term result.to_string();
+    };
+    term ".";
+};
+
+defn absolute_path(path: String) -> String [true][result.len() >= 0] {
+    term path;  // FFI implementation needed
+};
+
+defn normalize_path(path: String) -> String [true][result.len() >= 0] {
+    term path;  // FFI implementation needed
+};
+
+// ===== FILE TYPE OPERATIONS =====
+
+defn is_file(path: String) -> Bool [true][result == true || result == false] {
+    [file_exists(path)] {
+        let ext = file_extension(path);
+        [ext != ""] {
+            term true;
+        };
+    };
+    term false;
+};
+
+defn is_dir(path: String) -> Bool [true][result == true || result == false] {
+    term !is_file(path);
+};
+
+// ===== ERROR TYPE =====
+
+enum IOError {
+    IONotFound(String),
+    IOPermissionDenied,
+    IOAlreadyExists,
+    IOInvalidData,
+    IOTimedOut,
+    IOOther(String)
+}

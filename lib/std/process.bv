@@ -1,0 +1,63 @@
+// Process - Process spawning and environment
+// Tier 8: Infrastructure
+
+// ===== PROCESS SPAWNING (FFI) =====
+
+frgn sig __spawn(command: String, args: List<String>) -> Result<Int, IOError> from "process.toml";
+frgn sig __spawn_with_output(command: String, args: List<String>) -> Result<(Int, String, String), IOError> from "process.toml";
+frgn sig __env_var(name: String) -> Option<String> from "process.toml";
+frgn sig __set_env_var(name: String, value: String) -> Result<Void, IOError> from "process.toml";
+frgn sig __current_dir() -> Result<String, IOError> from "process.toml";
+frgn sig __set_current_dir(path: String) -> Result<Void, IOError> from "process.toml";
+
+// ===== NATIVE WRAPPERS =====
+
+defn spawn(command: String, args: List<String>) -> Result<Int, IOError> {
+    term __spawn(command, args);
+};
+
+defn spawn_with_output(command: String, args: List<String>) -> Result<(Int, String, String), IOError> {
+    term __spawn_with_output(command, args);
+};
+
+defn env_var(name: String) -> Option<String> {
+    term __env_var(name);
+};
+
+defn set_env_var(name: String, value: String) -> Result<Void, IOError> {
+    term __set_env_var(name, value);
+};
+
+defn current_dir() -> Result<String, IOError> {
+    term __current_dir();
+};
+
+defn set_current_dir(path: String) -> Result<Void, IOError> {
+    term __set_current_dir(path);
+};
+
+// ===== CONVENIENCE FUNCTIONS =====
+
+defn run_command(command: String) -> Bool [true][result == true || result == false] {
+    let result = spawn(command, []);
+    [result.is_ok()] {
+        term result.value == 0;
+    };
+    term false;
+};
+
+defn run_command_with_args(command: String, args: List<String>) -> Bool [true][result == true || result == false] {
+    let result = spawn(command, args);
+    [result.is_ok()] {
+        term result.value == 0;
+    };
+    term false;
+};
+
+defn get_env_or_default(name: String, default: String) -> String [true][result.len() >= 0] {
+    let opt = env_var(name);
+    [opt.is_some()] {
+        term opt.unwrap();
+    };
+    term default;
+};
