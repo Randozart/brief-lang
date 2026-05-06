@@ -32,6 +32,7 @@ pub enum Value {
     Int(i64),
     Float(f64),
     String(String),
+    Char(char),  // NEW
     Bool(bool),
     Data(Vec<u8>),
     List(Vec<Value>),
@@ -50,6 +51,7 @@ impl fmt::Display for Value {
             Value::Int(v) => write!(f, "{}", v),
             Value::Float(v) => write!(f, "{}", v),
             Value::String(v) => write!(f, "\"{}\"", v),
+            Value::Char(v) => write!(f, "'{}'", v),
             Value::Bool(v) => write!(f, "{}", v),
             Value::Data(_) => write!(f, "<data>"),
             Value::List(items) => write!(f, "[{}]", items.len()),
@@ -82,6 +84,7 @@ fn value_to_json_value(v: &Value) -> JsonValue {
         Value::Float(f) => serde_json::json!(*f),
         Value::Bool(b) => JsonValue::Bool(*b),
         Value::String(s) => JsonValue::String(s.clone()),
+        Value::Char(c) => JsonValue::String(c.to_string()),
         Value::List(items) => JsonValue::Array(items.iter().map(value_to_json_value).collect()),
         Value::Instance { fields, .. } => {
             let map: serde_json::Map<String, JsonValue> = fields
@@ -503,6 +506,7 @@ impl Interpreter {
             Expr::Integer(v) => Ok(Value::Int(*v)),
             Expr::Float(v) => Ok(Value::Float(*v)),
             Expr::String(v) => Ok(Value::String(v.clone())),
+            Expr::Char(v) => Ok(Value::Char(*v)),  // NEW
             Expr::Bool(v) => Ok(Value::Bool(*v)),
             Expr::Identifier(name) => self
                 .state

@@ -132,6 +132,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::Integer(n) => SymbolicValue::Literal(*n, "int".to_string()),
         Expr::Float(_) => SymbolicValue::Unknown, // Float support via Unknown
         Expr::Bool(b) => SymbolicValue::bool_literal(*b),
+        Expr::Char(c) => SymbolicValue::Literal(*c as i64, "char".to_string()),  // NEW: Char as int
         Expr::String(_) => SymbolicValue::Unknown, // Strings not trackable at this level
 
         // Variable references

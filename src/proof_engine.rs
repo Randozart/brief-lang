@@ -1324,7 +1324,7 @@ impl ProofEngine {
                     self.collect_identifiers(arg, vars);
                 }
             }
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Bool(_) => {}
+            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) => {}
             Expr::ListLiteral(elements) => {
                 for elem in elements {
                     self.collect_identifiers(elem, vars);
@@ -1642,6 +1642,7 @@ impl ProofEngine {
             }
             Type::Enum(name) => name.clone(),
             Type::UInt => "UInt".to_string(),
+            Type::Char => "Char".to_string(),  // NEW
             Type::Vector(inner, size) => format!("Vector<{}>[{}]", self.type_name(inner), size),
             Type::Constrained(inner, _) => self.type_name(inner),
         }

@@ -2438,6 +2438,18 @@ let span = self.current_span();
                 self.advance();
                 Type::Bool
             }
+            Some(Ok(Token::TypeChar)) => {
+                self.advance();
+                Type::Char
+            }
+            Some(Ok(Token::TypeVoid)) => {
+                self.advance();
+                Type::Void
+            }
+            Some(Ok(Token::TypeChar)) => {
+                self.advance();
+                Type::Char
+            }
             Some(Ok(Token::TypeVoid)) => {
                 self.advance();
                 Type::Void
@@ -2817,6 +2829,11 @@ let span = self.current_span();
                 let val = val.clone();
                 self.advance();
                 Ok(Expr::String(val))
+            }
+            Some(Ok(Token::Char(val))) => {
+                let val = *val;
+                self.advance();
+                Ok(Expr::Char(val))
             }
             Some(Ok(Token::BoolTrue)) => {
                 self.advance();

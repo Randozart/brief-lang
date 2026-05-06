@@ -109,6 +109,7 @@ pub enum Type {
     Data,
     Void,
     UInt,
+    Char,  // NEW: Unicode codepoint type
     Custom(String),
     Union(Vec<Type>),
     ContractBound(Box<Type>, Box<Expr>),
@@ -281,6 +282,7 @@ pub enum Expr {
     Integer(i64),
     Float(f64),
     String(String),
+    Char(char),  // NEW: Char literal
     Bool(bool),
     Identifier(String),
     OwnedRef(String),

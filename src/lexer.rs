@@ -290,6 +290,37 @@ pub enum Token {
         Some(inner.to_string())
     })]
     String(String),
+    #[regex(r"'([^'\\]|\\.)*'", |lex| {
+        let s = lex.slice();
+        let inner = &s[1..s.len()-1];
+        // Handle escape sequences
+        if inner.is_empty() {
+            return Some(' ');  // Default for empty char literal
+        }
+        if inner.len() == 1 {
+            return Some(inner.chars().next().unwrap());
+        }
+        if inner == "\\n" {
+            return Some('\n');
+        }
+        if inner == "\\t" {
+            return Some('\t');
+        }
+        if inner == "\\\\" {
+            return Some('\\');
+        }
+        if inner == "\\'" {
+            return Some('\'');
+        }
+        if inner.starts_with("\\u{") && inner.ends_with('}') {
+            // Unicode escape: \u{1F600}
+            let hex = &inner[3..inner.len()-1];
+            return u32::from_str_radix(hex, 16).ok().and_then(|cp| char::from_u32(cp));
+        }
+        // Multi-character char literal or invalid - just take first char
+        Some(inner.chars().next().unwrap_or(' '))
+    })]
+    Char(char),
 
     // Keywords
     #[token("Int")]
@@ -310,6 +341,8 @@ pub enum Token {
     TypeString,
     #[token("Bool")]
     TypeBool,
+    #[token("Char")]  // NEW: Char type keyword
+    TypeChar,
     #[token("Data")]
     TypeData,
     #[token("Void")]
@@ -338,5 +371,42 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
         assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
         assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_char_literals() {
+        // Basic char
+        let mut lexer = Token::lexer("'a'");
+        assert_eq!(lexer.next(), Some(Ok(Token::Char('a'))));
+        
+        // Newline escape
+        let mut lexer = Token::lexer("'\\n'");
+        assert_eq!(lexer.next(), Some(Ok(Token::Char('\n'))));
+        
+        // Tab escape
+        let mut lexer = Token::lexer("'\\t'");
+        assert_eq!(lexer.next(), Some(Ok(Token::Char('\t'))));
+        
+        // Backslash escape
+        let mut lexer = Token::lexer("'\\\\'");
+        assert_eq!(lexer.next(), Some(Ok(Token::Char('\\'))));
+        
+        // Single quote escape
+        let mut lexer = Token::lexer("'\\''");
+        assert_eq!(lexer.next(), Some(Ok(Token::Char('\''))));
+        
+        // Unicode escape
+        let mut lexer = Token::lexer("'\\u{1F600}'");
+        assert_eq!(lexer.next(), Some(Ok(Token::Char('😀'))));
+        
+        // Char type keyword
+        let mut lexer = Token::lexer("let c: Char = 'x';");
+        assert_eq!(lexer.next(), Some(Ok(Token::Let)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("c".to_string()))));
+        assert_eq!(lexer.next(), Some(Ok(Token::Colon)));
+        assert_eq!(lexer.next(), Some(Ok(Token::TypeChar)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Eq)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Char('x'))));
+        assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
     }
 }

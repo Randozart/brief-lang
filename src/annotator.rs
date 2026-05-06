@@ -179,6 +179,7 @@ impl Annotator {
             Type::Option(inner) => format!("Option<{}>", self.type_to_string(inner)),
             Type::Enum(name) => name.clone(),
             Type::UInt => "UInt".to_string(),
+            Type::Char => "Char".to_string(),  // NEW
             Type::Vector(inner, size) => {
                 format!("Vector<{}>[{}]", self.type_to_string(inner), size)
             }
@@ -341,6 +342,7 @@ impl Annotator {
             Expr::Integer(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::String(s) => format!("\"{}\"", s),
+            Expr::Char(c) => format!("'{}'", c),  // NEW
             Expr::Bool(true) => "true".to_string(),
             Expr::Bool(false) => "false".to_string(),
             Expr::Identifier(n) => n.clone(),
