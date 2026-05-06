@@ -47,15 +47,16 @@ function activate(context) {
 
     // Options to control the language client
     const clientOptions = {
-        // Register the server for Brief files
+        // Register the server for Brief and DBrief files
         documentSelector: [
             { scheme: 'file', language: 'brief' },
             { scheme: 'file', language: 'rbv' },
-            { scheme: 'file', language: 'ebv' }
+            { scheme: 'file', language: 'ebv' },
+            { scheme: 'file', language: 'dbrief' }
         ],
         synchronize: {
-            // Notify the server about file changes to '.bv', '.rbv' and '.ebv' files contained in the workspace
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{bv,rbv,ebv}')
+            // Notify the server about file changes
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{bv,rbv,ebv,dbv,dbvl,dbvs}')
         }
     };
 

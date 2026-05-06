@@ -272,6 +272,32 @@ impl LspServer {
 
     fn run_type_check(&self, uri: &str, text: &str) -> (Vec<Value>, Option<Program>) {
         let is_rbv = uri.ends_with(".rbv");
+        let is_dbrief = uri.ends_with(".dbv") || uri.ends_with(".dbvl") || uri.ends_with(".dbvs");
+
+        if is_dbrief {
+            let res = if uri.ends_with(".dbvs") {
+                crate::dbrief::parse_dbvs(text).map(|_| ())
+            } else if uri.ends_with(".dbvl") {
+                crate::dbrief::parse_dbvl(text).map(|_| ())
+            } else {
+                crate::dbrief::parse_dbrief(text).map(|_| ())
+            };
+
+            let mut diagnostics = Vec::new();
+            if let Err(e) = res {
+                // For now, report DBrief errors at the beginning of the file since we don't have spans
+                diagnostics.push(serde_json::json!({
+                    "range": {
+                        "start": { "line": 0, "character": 0 },
+                        "end": { "line": 0, "character": 1 }
+                    },
+                    "severity": 1,
+                    "source": "dbrief-parser",
+                    "message": e
+                }));
+            }
+            return (diagnostics, None);
+        }
 
         if self.codicil_mode && !is_rbv {
             info!("Codicil mode enabled - ignoring [route], [pre], [post] blocks");
@@ -484,6 +510,9 @@ impl LspServer {
         let mut keywords = vec![
             "txn", "rct", "let", "const", "sig", "defn", "trg", "import", "from", "term", "escape",
             "async", "Int", "UInt", "Float", "String", "Bool", "Data", "Void",
+            "TXN", "RCT", "LET", "CONST", "SIG", "DEFN", "TRG", "IMPORT", "FROM", "TERM", "ESCAPE",
+            "ASYNC", "REGISTER", "ALIAS", "RULE", "CHECK", "IMPORT", "Ok", "Err", "Some", "None",
+            "TRUE", "FALSE", "null", "NULL",
         ];
 
         // Add Codicil-specific completions when in Codicil mode

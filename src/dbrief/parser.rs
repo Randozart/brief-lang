@@ -50,22 +50,43 @@ impl DbriefParser {
                 Some('I') if self.starts_with("IMPORT") => {
                     self.parse_import(&mut program)?;
                 }
+                Some('i') if self.starts_with("import") => {
+                    self.parse_import(&mut program)?;
+                }
                 Some('R') if self.starts_with("REGISTER") => {
+                    program.registers.push(self.parse_register()?);
+                }
+                Some('r') if self.starts_with("register") => {
                     program.registers.push(self.parse_register()?);
                 }
                 Some('A') if self.starts_with("ALIAS") => {
                     program.aliases.push(self.parse_alias()?);
                 }
+                Some('a') if self.starts_with("alias") => {
+                    program.aliases.push(self.parse_alias()?);
+                }
                 Some('S') if self.starts_with("STRUCT") => {
+                    program.structs.push(self.parse_struct()?);
+                }
+                Some('s') if self.starts_with("struct") => {
                     program.structs.push(self.parse_struct()?);
                 }
                 Some('E') if self.starts_with("ENUM") => {
                     program.enums.push(self.parse_enum()?);
                 }
+                Some('e') if self.starts_with("enum") => {
+                    program.enums.push(self.parse_enum()?);
+                }
                 Some('R') if self.starts_with("RULE") => {
                     program.rules.push(self.parse_rule()?);
                 }
+                Some('r') if self.starts_with("rule") => {
+                    program.rules.push(self.parse_rule()?);
+                }
                 Some('C') if self.starts_with("CHECK") => {
+                    program.checks.push(self.parse_check()?);
+                }
+                Some('c') if self.starts_with("check") => {
                     program.checks.push(self.parse_check()?);
                 }
                 Some('@') => {
@@ -121,14 +142,30 @@ impl DbriefParser {
         self.input[self.pos..].starts_with(s)
     }
 
+    fn consume_keyword(&mut self, kw: &str) -> Result<(), String> {
+        if self.starts_with(&kw.to_uppercase()) {
+            self.pos += kw.len();
+            Ok(())
+        } else if self.starts_with(&kw.to_lowercase()) {
+            self.pos += kw.len();
+            Ok(())
+        } else {
+            Err(format!("Expected keyword '{}'", kw))
+        }
+    }
+
     fn parse_import(&mut self, program: &mut DbriefProgram) -> Result<(), String> {
-        self.pos += "IMPORT".len();
+        self.consume_keyword("IMPORT")?;
         self.skip_whitespace();
         
         let path = self.parse_string_literal()?;
         
-        let alias = if self.starts_with("AS") {
-            self.pos += "AS".len();
+        let alias = if self.starts_with("AS") || self.starts_with("as") {
+            if self.starts_with("AS") {
+                self.pos += 2;
+            } else {
+                self.pos += 2;
+            }
             self.skip_whitespace();
             Some(self.parse_identifier()?)
         } else {
@@ -142,7 +179,7 @@ impl DbriefParser {
     }
 
     fn parse_register(&mut self) -> Result<DbriefRegister, String> {
-        self.pos += "REGISTER".len();
+        self.consume_keyword("REGISTER")?;
         self.skip_whitespace();
         
         let address = self.parse_address()?;
@@ -151,8 +188,8 @@ impl DbriefParser {
         
         let register_type = self.parse_type()?;
         
-        let check = if self.starts_with("CHECK") {
-            self.pos += "CHECK".len();
+        let check = if self.starts_with("CHECK") || self.starts_with("check") {
+            self.consume_keyword("CHECK")?;
             Some(self.parse_check()?)
         } else {
             None
@@ -171,11 +208,11 @@ impl DbriefParser {
     fn parse_alias(&mut self) -> Result<DbriefAlias, String> {
         self.skip_whitespace();
         
-        let optional = self.starts_with("ALIAS?");
+        let optional = self.starts_with("ALIAS?") || self.starts_with("alias?");
         if optional {
             self.pos += "ALIAS?".len();
         } else {
-            self.pos += "ALIAS".len();
+            self.consume_keyword("ALIAS")?;
         }
         self.skip_whitespace();
         
@@ -206,7 +243,7 @@ impl DbriefParser {
     }
 
     fn parse_struct(&mut self) -> Result<DbriefStruct, String> {
-        self.pos += "STRUCT".len();
+        self.consume_keyword("STRUCT")?;
         self.skip_whitespace();
         
         let name = self.parse_identifier()?;
@@ -233,7 +270,7 @@ impl DbriefParser {
     }
 
     fn parse_enum(&mut self) -> Result<DbriefEnum, String> {
-        self.pos += "ENUM".len();
+        self.consume_keyword("ENUM")?;
         self.skip_whitespace();
         
         let name = self.parse_identifier()?;
@@ -258,7 +295,7 @@ impl DbriefParser {
     }
 
     fn parse_rule(&mut self) -> Result<DbriefRule, String> {
-        self.pos += "RULE".len();
+        self.consume_keyword("RULE")?;
         self.skip_whitespace();
         
         let name = self.parse_identifier()?;
@@ -291,7 +328,7 @@ impl DbriefParser {
     }
 
     fn parse_check(&mut self) -> Result<DbriefContract, String> {
-        self.pos += "CHECK".len();
+        self.consume_keyword("CHECK")?;
         self.consume('[')?;
         
         let mut conditions = Vec::new();
@@ -344,8 +381,8 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
             self.advance();
         }
         
-        if self.starts_with("auto") {
-            self.pos += 4;
+        if self.starts_with("auto") || self.starts_with("AUTO") {
+            if self.starts_with("auto") { self.pos += 4; } else { self.pos += 4; }
             return Ok(DbriefAddress::Auto);
         }
         
@@ -384,29 +421,29 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
         Ok(DbriefAddress::Named(name))
     }
 
-fn parse_type(&mut self) -> Result<DbriefType, String> {
+    fn parse_type(&mut self) -> Result<DbriefType, String> {
         let tok = self.parse_identifier()?;
         
-        match tok.as_str() {
-            "Bool" => Ok(DbriefType::Bool),
-            "Int" => {
+        match tok.to_lowercase().as_str() {
+            "bool" => Ok(DbriefType::Bool),
+            "int" => {
                 self.consume('[')?;
                 let size: usize = self.parse_number::<usize>()?;
                 self.consume(']')?;
                 Ok(DbriefType::Int(size))
             }
-            "UInt" => {
+            "uint" => {
                 self.consume('[')?;
                 let size: usize = self.parse_number::<usize>()?;
                 self.consume(']')?;
                 Ok(DbriefType::UInt(size))
             }
-            "Float" => Ok(DbriefType::Float),
-            "String" => Ok(DbriefType::String),
-            "Data" => Ok(DbriefType::Data),
-            "Addr" => Ok(DbriefType::Addr),
-            "RegOffset" => Ok(DbriefType::RegOffset),
-            "Vector" => {
+            "float" => Ok(DbriefType::Float),
+            "string" => Ok(DbriefType::String),
+            "data" => Ok(DbriefType::Data),
+            "addr" => Ok(DbriefType::Addr),
+            "regoffset" => Ok(DbriefType::RegOffset),
+            "vector" => {
                 self.consume('[')?;
                 let inner = Box::new(self.parse_type()?);
                 self.skip_whitespace();
@@ -420,7 +457,7 @@ fn parse_type(&mut self) -> Result<DbriefType, String> {
                 self.consume(']')?;
                 Ok(DbriefType::Vector(inner, size))
             }
-            "Option" => {
+            "option" => {
                 self.consume('[')?;
                 let inner = Box::new(self.parse_type()?);
                 self.consume(']')?;
@@ -430,14 +467,15 @@ fn parse_type(&mut self) -> Result<DbriefType, String> {
         }
     }
 
+
     fn parse_literal(&mut self) -> Result<DbriefLiteral, String> {
         match self.peek() {
-            Some('t') if self.starts_with("true") => {
-                self.pos += 4;
+            Some('t') | Some('T') if self.starts_with("true") || self.starts_with("TRUE") => {
+                if self.starts_with("true") { self.pos += 4; } else { self.pos += 4; }
                 Ok(DbriefLiteral::Bool(true))
             }
-            Some('f') if self.starts_with("false") => {
-                self.pos += 5;
+            Some('f') | Some('F') if self.starts_with("false") || self.starts_with("FALSE") => {
+                if self.starts_with("false") { self.pos += 5; } else { self.pos += 5; }
                 Ok(DbriefLiteral::Bool(false))
             }
             Some('"') => {
@@ -506,12 +544,12 @@ fn parse_type(&mut self) -> Result<DbriefType, String> {
         self.skip_whitespace();
         
         match self.peek() {
-            Some('t') if self.starts_with("true") => {
-                self.pos += 4;
+            Some('t') | Some('T') if self.starts_with("true") || self.starts_with("TRUE") => {
+                if self.starts_with("true") { self.pos += 4; } else { self.pos += 4; }
                 Ok(DbriefExpr::Bool(true))
             }
-            Some('f') if self.starts_with("false") => {
-                self.pos += 5;
+            Some('f') | Some('F') if self.starts_with("false") || self.starts_with("FALSE") => {
+                if self.starts_with("false") { self.pos += 5; } else { self.pos += 5; }
                 Ok(DbriefExpr::Bool(false))
             }
             Some(c) if c.is_ascii_digit() => {

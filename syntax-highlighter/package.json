@@ -9,7 +9,8 @@
   "activationEvents": [
     "onLanguage:brief",
     "onLanguage:rbv",
-    "onLanguage:ebv"
+    "onLanguage:ebv",
+    "onLanguage:dbrief"
   ],
   "engines": {
     "vscode": "^1.60.0"
@@ -64,6 +65,19 @@
           "dark": "./images/e-brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "dbrief",
+        "aliases": [
+          "Data Brief",
+          "dbrief"
+        ],
+        "extensions": [
+          ".dbv",
+          ".dbvl",
+          ".dbvs"
+        ],
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
@@ -81,6 +95,11 @@
         "language": "ebv",
         "scopeName": "source.brief",
         "path": "./syntaxes/brief.tmLanguage.json"
+      },
+      {
+        "language": "dbrief",
+        "scopeName": "source.dbrief",
+        "path": "./syntaxes/dbrief.tmLanguage.json"
       }
     ],
     "themes": [
