@@ -1,6 +1,9 @@
 # Brief Language Specification
 
-**Version:** v0.10.0 **Date:** 2026-04-20 **Status:** Development (unstable) **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv)
+**Version:** v0.11.0  
+**Date:** 2026-05-06  
+**Status:** Development (stable core, experimental backends)  
+**Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl)
 
 ## 1. Introduction and Philosophy
 
@@ -18,14 +21,38 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 
 ### 1.2 Language Variants
 
-* **Core Brief** (`.bv`): Transactional state machines with FFI support
-* **Rendered Brief** (`.rbv`): Adds `rstruct`, view components, and UI binding directives  
-* **Embedded Brief** (`.ebv`): Adds native `Float` types, vector types, and bit-range addressing
+* **Core Brief** (`.bv`): Transactional state machines with FFI support. Pure specification, compiles to C, Rust, WASM, COBOL.
+* **Rendered Brief** (`.rbv`): Adds `rstruct`, view components (HTML/CSS/SVG), and UI binding directives (b-text, b-show, b-trigger). Compiles to browser-ready WASM + JS.
+* **Embedded Brief** (`.ebv`): Adds native `Float` types, vector types, bit-range addressing, and hardware triggers (`trg`). Compiles to SystemVerilog/VHDL for FPGAs or bare-metal Rust/C for ARM.
+* **Data Brief** (`.dbv`): Concrete configuration data with schema validation. Replaces hardware.toml.
+* **Data Brief Schema** (`.dbvs`): Schema definitions for Data Brief, including aliases and validation rules.
+* **Data Brief Lines** (`.dbvl`): Line-based mutable database for large datasets with verification.
 
 ### 1.3 Versioning
 
-* **Semantic**: `v0.10.0` (development)
-* **Date-based**: `2026-04-20`
+* **Semantic**: `v0.11.0` (development, core stable)
+* **Date-based**: `2026-05-06`
+
+### 1.4 Compiler Architecture
+
+```
+Lexer → Parser → Type Checker → Proof Engine → Backend
+               ↓
+         Symbolic Execution
+               ↓
+        Contract Verification
+```
+
+**Backends:**
+- **Rust** (`.bv` → native executable)
+- **C** (`.bv`, `.ebv` → hosted or bare-metal)
+- **WASM** (`.bv` → standalone WASM, `.rbv` → WASM + JS + UI)
+- **SystemVerilog** (`.ebv` → FPGA with TCL build scripts)
+- **VHDL** (`.ebv` → FPGA with PSL assertions)
+- **COBOL** (`.bv` → IBM Enterprise COBOL)
+- **React Native** (`.rbv` → React Native component via target spec)
+- **Next.js** (`.rbv` → Next.js page via target spec)
+- **Vite** (`.rbv` → Vite React component via target spec)
 
 ---
 
@@ -34,46 +61,322 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 ### 2.1 Program Structure
 
 ```bnf
-program ::= (definition | transaction | state_decl | constant | import | struct_def | rstruct_def | enum_def | render_block)*
+program ::= (top_level)*
 
-definition ::= ("defn" | "def" | "definition") identifier type_params? parameters? "->" output_types contract ("{" body "}" ";" | ";")
-transaction ::= ("async")? "rct"? "txn" identifier "(" parameters? ")" contract ("{" body "}" ";" | ";")
-signature ::= ("sig" | "sign" | "signature") identifier ":" type "->" result_type ("=" identifier "(" arguments? ")" | "from" path)? ";"
+top_level ::= definition
+            | transaction
+            | state_decl
+            | constant
+            | import
+            | struct_def
+            | rstruct_def
+            | enum_def
+            | signature
+            | resource_decl
+            | render_block
+
+definition ::= ("defn" | "def" | "definition") identifier type_params? parameters? "->" output_types contract body
+
+transaction ::= ("async")? "rct"? "txn" identifier type_params? parameters? contract body
+
+body ::= "{" statement* "}" ";" | ";"
+
+signature ::= ("sig" | "sign" | "signature") identifier ":" type "->" result_type binding? ";"
+
+binding ::= "=" identifier "(" arguments? ")" | "from" path
+
+resource_decl ::= ("rsrc" | "resource") identifier ":" resource_type "(" arguments? ")" ";"
 
 constant ::= ("const" | "constant") identifier ":" type "=" expression ";"
 
+state_decl ::= "state" identifier ":" type ("=" expression)? ";"
+
 struct_def ::= "struct" identifier "{" struct_member* "}"
+
 struct_member ::= field_decl | transaction
-field_decl ::= identifier ":" type ";"
+
+field_decl ::= identifier ":" type ("=" expression)? ";"
 
 rstruct_def ::= "rstruct" identifier "{" struct_member* view_body "}"
 
 enum_def ::= "enum" identifier type_params? "{" enum_variant ("," enum_variant)* ","? "}"
+
 enum_variant ::= identifier ("(" type ("," type)* ")")?
 
-import_stmt ::= "import" ("{" import_item ("," import_item)* "}")? (("from" namespace_path) | namespace_path | string_literal ("as" identifier)? ")? ";"
+import_stmt ::= "import" (import_items | string_literal ("as" identifier)?) ("from" path)? ";"
+
+import_items ::= "{" import_item ("," import_item)* "}"
+
 import_item ::= identifier ("as" identifier)?
 
 render_block ::= "render" identifier "{" view_body "}"
+
+view_body ::= (view_component | html_element)*
+
+view_component ::= "<" component_name attributes? ">" children? "</" component_name ">"
+                 | "<" component_name attributes? "/>"
+
+html_element ::= "<" tag_name attributes? ">" children? "</" tag_name ">"
+               | "<" tag_name attributes? "/>"
+
+attributes ::= attribute+
+
+attribute ::= identifier "=" string_literal
+            | "b-text:" identifier "=" expression
+            | "b-show:" identifier "=" expression
+            | "b-trigger:" identifier "=" identifier
+            | "b-model:" identifier
+
+children ::= (html_element | text_content)*
+
+text_content ::= [^<]+
 ```
 
 ### 2.2 Parameters and Types
 
 ```bnf
 parameters ::= "(" (param ("," param)*)? ")"
+
 param ::= identifier ":" type
 
 type_params ::= "<" identifier ("," identifier)* ">"
 
-type ::= "Int" | "Float" | "String" | "Bool" | "Void" | "Data" | "UInt" | identifier
-       | "Vector" "[" type "]"  // Vector type
+type ::= "Int" | "UInt" | "Float" | "String" | "Bool" | "Void" | "Data" | "Char"
+       | identifier
+       | "Vector" "[" type ("," Int)? "]"  // Vector type with optional size
        | "Option" "[" type "]"  // Optional type
-       | type "Union" "[" type ("," type)* "]"  // Union type
-       | identifier  // Custom type
-       | "Sig" "[" identifier "]"  // Signature type
        | "Result" "[" type "," type "]"  // Result type (for FFI)
+       | "List" "[" type "]"  // Dynamic list
+       | "Sig" "[" identifier "]"  // Signature type
+       | type "Union" "[" type ("," type)* "]"  // Union type
+       | "(" type ("," type)* ")"  // Tuple type
+       | "const" type  // Const-qualified type
 
 output_types ::= type ("," type)*  // Multi-output: (A, B, C)
+```
+
+### 2.3 Statements
+
+```bnf
+statement ::= assignment
+            | unification
+            | guarded
+            | term
+            | escape
+            | expression_stmt
+            | let_binding
+            | inline_asm
+
+assignment ::= "&"? lhs "=" expression ("," expression)* ";"
+
+lhs ::= identifier | field_access | index_access
+
+unification ::= identifier "(" pattern ")" "=" expression ";"
+
+guarded ::= "[" condition "]" ("{" statement* "}" | statement)
+
+term ::= "term" (expression ("," expression)*)? ";"
+
+escape ::= "escape" expression? ";"
+
+expression_stmt ::= expression ";"
+
+let_binding ::= "let" identifier (":" type)? ("=" expression)? ";"
+
+inline_asm ::= "asm" string_literal ("{" string_literal ("," string_literal)* "}")? ";"
+```
+
+### 2.4 Expressions
+
+```bnf
+expression ::= literal
+             | identifier
+             | binary_op
+             | unary_op
+             | call
+             | field_access
+             | index_access
+             | slice
+             | tuple
+             | list
+             | range
+             | cast
+             | prior_state
+             | block
+
+literal ::= Int | Float | Bool | String | Char | "true" | "false"
+
+binary_op ::= expression operator expression
+
+operator ::= "+" | "-" | "*" | "/" | "%"
+           | "==" | "!=" | "<" | ">" | "<=" | ">="
+           | "&&" | "||"
+           | "&" | "|" | "^" | "<<" | ">>"
+
+unary_op ::= "-" expression | "!" expression | "~" expression
+
+call ::= expression "(" (expression ("," expression)*)? ")"
+
+field_access ::= expression "." identifier
+
+index_access ::= expression "[" expression "]"
+
+slice ::= expression "[" expression? ":" expression? "]"
+
+tuple ::= "(" (expression ("," expression)*)? ")"
+
+list ::= "[" (expression ("," expression)*)? "]"
+
+range ::= expression ".." expression?
+
+cast ::= expression "as" type
+
+prior_state ::= "@" identifier
+
+block ::= "{" statement* "}"
+```
+
+### 2.5 Contracts
+
+```bnf
+contract ::= "[" expression "]" "[" expression "]" watchdog?
+
+watchdog ::= ("?" | "!") "[" expression "]"
+```
+
+* **Precondition**: First bracket `[pre]` - must be true for transaction to fire
+* **Postcondition**: Second bracket `[post]` - must be true after transaction completes
+* **Watchdog**: Optional timeout/condition `?[timeout]` (optional) or `![timeout]` (required)
+
+### 2.6 FFI Grammar
+
+```bnf
+foreign_sig ::= ("frgn" | "frgn!" | "syscall" | "syscall!") "sig" identifier parameters? "->" result_type "from" string_literal ";"
+
+frgn_binding ::= identifier parameters? "->" "Result" "[" type_params "]" "from" string_literal
+
+result_type ::= "Result" "[" type "," type "]"
+              | "void"
+              | type
+
+ffi_attributes ::= "#![" ffi_attr ("," ffi_attr)* "]"
+
+ffi_attr ::= "ffi" "(" string_literal ")"
+           | "bind" "(" string_literal ")"
+           | "import" "(" string_literal ")"
+           | "map" "(" string_literal "," string_literal ")"
+```
+
+### 2.3 Statements
+
+```bnf
+statement ::= assignment
+            | unification
+            | guarded
+            | term
+            | escape
+            | expression_stmt
+            | let_binding
+            | inline_asm
+
+assignment ::= "&"? lhs "=" expression ("," expression)* ";"
+
+lhs ::= identifier | field_access | index_access
+
+unification ::= identifier "(" pattern ")" "=" expression ";"
+
+guarded ::= "[" condition "]" ("{" statement* "}" | statement)
+
+term ::= "term" (expression ("," expression)*)? ";"
+
+escape ::= "escape" expression? ";"
+
+expression_stmt ::= expression ";"
+
+let_binding ::= "let" identifier (":" type)? ("=" expression)? ";"
+
+inline_asm ::= "asm" string_literal ("{" string_literal ("," string_literal)* "}")? ";"
+```
+
+### 2.4 Expressions
+
+```bnf
+expression ::= literal
+             | identifier
+             | binary_op
+             | unary_op
+             | call
+             | field_access
+             | index_access
+             | slice
+             | tuple
+             | list
+             | range
+             | cast
+             | prior_state
+             | block
+
+literal ::= Int | Float | Bool | String | Char | "true" | "false"
+
+binary_op ::= expression operator expression
+
+operator ::= "+" | "-" | "*" | "/" | "%"
+           | "==" | "!=" | "<" | ">" | "<=" | ">="
+           | "&&" | "||"
+           | "&" | "|" | "^" | "<<" | ">>"
+
+unary_op ::= "-" expression | "!" expression | "~" expression
+
+call ::= expression "(" (expression ("," expression)*)? ")"
+
+field_access ::= expression "." identifier
+
+index_access ::= expression "[" expression "]"
+
+slice ::= expression "[" expression? ":" expression? "]"
+
+tuple ::= "(" (expression ("," expression)*)? ")"
+
+list ::= "[" (expression ("," expression)*)? "]"
+
+range ::= expression ".." expression?
+
+cast ::= expression "as" type
+
+prior_state ::= "@" identifier
+
+block ::= "{" statement* "}"
+```
+
+### 2.5 Contracts
+
+```bnf
+contract ::= "[" expression "]" "[" expression "]" watchdog?
+
+watchdog ::= ("?" | "!") "[" expression "]"
+```
+
+* **Precondition**: First bracket `[pre]` - must be true for transaction to fire
+* **Postcondition**: Second bracket `[post]` - must be true after transaction completes
+* **Watchdog**: Optional timeout/condition `?[timeout]` (optional) or `![timeout]` (required)
+
+### 2.6 FFI Grammar
+
+```bnf
+foreign_sig ::= ("frgn" | "frgn!" | "syscall" | "syscall!") "sig" identifier parameters? "->" result_type "from" string_literal ";"
+
+frgn_binding ::= identifier parameters? "->" "Result" "[" type_params "]" "from" string_literal
+
+result_type ::= "Result" "[" type "," type "]"
+              | "void"
+              | type
+
+ffi_attributes ::= "#![" ffi_attr ("," ffi_attr)* "]"
+
+ffi_attr ::= "ffi" "(" string_literal ")"
+           | "bind" "(" string_literal ")"
+           | "import" "(" string_literal ")"
+           | "map" "(" string_literal "," string_literal ")"
 ```
 
 ### 2.3 FFI Types and Contracts
@@ -94,241 +397,1607 @@ The compiler enforces that all FFI calls handle `Result` types. The `frgn` varia
 
 ### 3.1 Transactions and Reactivity
 
-Brief uses a reactor model. Transactions are defined with `rct`:
+Brief uses a reactor model where transactions declare when they can run and what they guarantee:
 
 ```brief
-rct txn <name> (<params>) [precondition] [postcondition] {
-    // Transaction body
+// Passive transaction (must be explicitly called)
+txn increment(amount: Int) [amount > 0][counter == @counter + amount] {
+    &counter = counter + amount;
+    term;
+};
+
+// Reactive transaction (fires automatically when precondition met)
+rct txn auto_save [dirty && !saving][!dirty] {
+    &saving = true;
+    save_to_disk();
+    &dirty = false;
+    &saving = false;
+    term;
+};
+
+// Async reactive transaction (can run concurrently with verified safety)
+rct async txn fetch_data [needs_update][data != @data] {
+    let result = http_get(url);
+    [result.is_ok()] {
+        &data = result.value;
+    };
+    term;
+};
+```
+
+**Transaction modifiers:**
+- `rct` - Reactive: fires automatically when precondition becomes true
+- `async` - Can run concurrently; compiler verifies mutual exclusion
+- Both can be combined: `rct async txn`
+
+**Contract semantics:**
+- `[pre]` - Precondition: when the transaction is allowed to fire
+- `[post]` - Postcondition: what must be true after completion
+- `@var` - Prior state: value of `var` at transaction start
+- `term` - Completes transaction; verifies postcondition
+
+### 3.2 Guard-Based Control Flow
+
+Brief eliminates imperative branching (`if`/`else`) in favor of guards:
+
+```brief
+txn process(value: Int) [true][result != 0] {
+    let result: Int = 0;
+    
+    // Guard: only executes if condition is true
+    [value > 0] {
+        &result = value * 2;
+    };
+    
+    [value < 0] {
+        &result = value * -1;
+    };
+    
+    [value == 0] {
+        escape;  // Rollback transaction
+    };
+    
+    term;
+};
+```
+
+**Guard behavior:**
+- Multiple guards can execute (unlike `if`/`else if`)
+- Guards are evaluated in order
+- Empty guard body is valid: `[x > 0] &positive = true;`
+- `escape` inside a guard rolls back the entire transaction
+
+### 3.3 Definitions (Functions)
+
+Functions (`defn`) are pure computations with contracts:
+
+```brief
+// Simple function
+defn abs(n: Int) [true][result >= 0] -> Int {
+    [n < 0] {
+        term -n;
+    };
+    term n;
+};
+
+// Generic function
+defn max<T>(a: T, b: T) [a >= b || b >= a][result == a.max(b)] -> T {
+    [a >= b] {
+        term a;
+    };
+    term b;
+};
+
+// Multi-output function
+defn div_mod(a: Int, b: Int) [b != 0][quotient * b + remainder == a] -> (Int, Int) {
+    term (a / b, a % b);
+};
+
+// Function with named outputs
+defn get_coords() -> (x: Int, y: Int) {
+    term (10, 20);
 }
 ```
 
-* Without `async`: transactions execute synchronously when preconditions are met
-* With `async`: transactions execute concurrently with compiler-verified safety
-* Preconditions (`[expression]`): must be true for transaction to fire  
-* Postconditions (`[expression]`): must be true after transaction completes
+**Definition syntax:**
+- `defn name(params) -> output_type [pre][post] { body }`
+- Can return multiple values: `-> (Type1, Type2)`
+- Named outputs: `-> (name: Type, ...)`
+- Contracts are verified at compile time
 
-### 3.2 Signatures
+### 3.4 Signatures (FFI)
 
-Signatures define external FFI bindings:
+Signatures declare external function bindings:
 
 ```brief
-sig <name>: <type> -> <result_type> [from <namespace_path>]
+// Standard FFI with error handling
+frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+
+// Fire-and-forget
+frgn! sig log_message(msg: String) -> void from "io.toml";
+
+// Kernel syscall
+syscall sig read_fd(fd: Int, buf: Data, count: Int) -> Result<Int, IOError> from "kernel.toml";
+
+// Syscall without return
+syscall! sig exit(code: Int) -> void from "kernel.toml";
+
+// Bound to a specific implementation
+sig hash: String -> Int = sha256;
 ```
 
-Result types support:
-* `Result<T, E>` - standard FFI call with error handling
-* `void` - fire-and-forget (for `frgn!` and `syscall!` variants)
+**FFI keywords:**
+- `frgn` - Foreign function returning `Result<T, E>` (must handle)
+- `frgn!` - Foreign function returning `void` (fire-and-forget)
+- `syscall` - Kernel call returning `Result<Int, E>`
+- `syscall!` - Kernel call returning `void`
 
-### 3.3 State Management
+### 3.5 State Management
 
-State is declared globally with `state_decl`:
+State is declared globally and mutated with `&`:
 
 ```brief
-state <name>: <type> = <expression>?
+// Simple state
+let counter: Int = 0;
+let name: String = "default";
+
+// State without initial value (defaults to 0, "", false)
+let balance: Int;
+let active: Bool;
+
+// Constant (immutable)
+const MAX_SIZE: Int = 100;
+const VERSION: String = "1.0.0";
+
+// Mutable state in transaction
+txn increment() [true][counter == @counter + 1] {
+    &counter = counter + 1;  // & required for mutation
+    term;
+};
 ```
 
-State declarations support:
-* `os_mode: bool` - when true, address is virtual (OS-managed); when false, raw address (embedded)
-* `bit_range: Option<BitRange>` - for bit-packed field access
-* `span: Option<Span>` - source location for debugging
+**State rules:**
+- `let` - Mutable state
+- `const` - Immutable constant
+- `&var = expr` - Mutation (required in transactions)
+- `@var` - Prior state value in contracts
 
-### 3.4 Control Flow
+**Transaction modifiers:**
+- `rct` - Reactive: fires automatically when precondition becomes true
+- `async` - Can run concurrently; compiler verifies mutual exclusion
+- Both can be combined: `rct async txn`
 
-Brief eliminates imperative branching in favor of guard-based execution:
+**Contract semantics:**
+- `[pre]` - Precondition: when the transaction is allowed to fire
+- `[post]` - Postcondition: what must be true after completion
+- `@var` - Prior state: value of `var` at transaction start
+- `term` - Completes transaction; verifies postcondition
+
+### 3.2 Guard-Based Control Flow
+
+Brief eliminates imperative branching (`if`/`else`) in favor of guards:
 
 ```brief
-[guard_expression] {
-    // executes only when guard is true
+txn process(value: Int) [true][result != 0] {
+    let result: Int = 0;
+    
+    // Guard: only executes if condition is true
+    [value > 0] {
+        &result = value * 2;
+    };
+    
+    [value < 0] {
+        &result = value * -1;
+    };
+    
+    [value == 0] {
+        escape;  // Rollback transaction
+    };
+    
+    term;
+};
+```
+
+**Guard behavior:**
+- Multiple guards can execute (unlike `if`/`else if`)
+- Guards are evaluated in order
+- Empty guard body is valid: `[x > 0] &positive = true;`
+- `escape` inside a guard rolls back the entire transaction
+
+### 3.3 Definitions (Functions)
+
+Functions (`defn`) are pure computations with contracts:
+
+```brief
+// Simple function
+defn abs(n: Int) [true][result >= 0] -> Int {
+    [n < 0] {
+        term -n;
+    };
+    term n;
+};
+
+// Generic function
+defn max<T>(a: T, b: T) [a >= b || b >= a][result == a.max(b)] -> T {
+    [a >= b] {
+        term a;
+    };
+    term b;
+};
+
+// Multi-output function
+defn div_mod(a: Int, b: Int) [b != 0][quotient * b + remainder == a] -> (Int, Int) {
+    term (a / b, a % b);
+};
+
+// Function with named outputs
+defn get_coords() -> (x: Int, y: Int) {
+    term (10, 20);
 }
 ```
 
-Pattern matching via unification:
+**Definition syntax:**
+- `defn name(params) -> output_type [pre][post] { body }`
+- Can return multiple values: `-> (Type1, Type2)`
+- Named outputs: `-> (name: Type, ...)`
+- Contracts are verified at compile time
+
+### 3.4 Signatures (FFI)
+
+Signatures declare external function bindings:
+
 ```brief
-unification <identifier>(<pattern>) = <expression>
+// Standard FFI with error handling
+frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+
+// Fire-and-forget
+frgn! sig log_message(msg: String) -> void from "io.toml";
+
+// Kernel syscall
+syscall sig read_fd(fd: Int, buf: Data, count: Int) -> Result<Int, IOError> from "kernel.toml";
+
+// Syscall without return
+syscall! sig exit(code: Int) -> void from "kernel.toml";
+
+// Bound to a specific implementation
+sig hash: String -> Int = sha256;
 ```
 
----
+**FFI keywords:**
+- `frgn` - Foreign function returning `Result<T, E>` (must handle)
+- `frgn!` - Foreign function returning `void` (fire-and-forget)
+- `syscall` - Kernel call returning `Result<Int, E>`
+- `syscall!` - Kernel call returning `void`
 
-## 4. Foreign Function Interface (FFI)
+### 3.5 State Management
 
-### 4.1 FFI Type System
-
-| Keyword | Return Type | Error Handling | Use Case |
-|---------|-------------|---------------|----------|
-| `frgn` | `Result<T, E>` | Must handle | Standard foreign function |
-| `frgn!` | `void` | None | Fire-and-forget |
-| `syscall` | `Result<Int, E>` | Must handle | Kernel calls with returns |
-| `syscall!` | `void` | None | Kernel calls without returns |
-
-### 4.2 Address System
-
-The `@` operator has context-aware semantics:
+State is declared globally and mutated with `&`:
 
 ```brief
-@address        // Raw, virtual, or WASM offset depending on target
-@raw:0xADDRESS  // Raw physical address (embedded only)
-@stack:offset   // Offset from stack pointer
-@heap:offset    // Offset from heap pointer
+// Simple state
+let counter: Int = 0;
+let name: String = "default";
+
+// State without initial value (defaults to 0, "", false)
+let balance: Int;
+let active: Bool;
+
+// Constant (immutable)
+const MAX_SIZE: Int = 100;
+const VERSION: String = "1.0.0";
+
+// Mutable state in transaction
+txn increment() [true][counter == @counter + 1] {
+    &counter = counter + 1;  // & required for mutation
+    term;
+};
 ```
 
-**Target Behavior:**
-* **.bv (OS)**: Virtual offset, compiler manages stack/heap/static via escape analysis
-* **.ebv (Embedded)**: Raw physical address, programmer manages memory  
-* **.rbv (Browser)**: WASM linear memory offset
+**State rules:**
+- `let` - Mutable state
+- `const` - Immutable constant
+- `&var = expr` - Mutation (required in transactions)
+- `@var` - Prior state value in contracts
 
-### 4.3 Resource System
+### 3.6 Structs and Rstructs
 
-Resources declare kernel/native objects:
+Structs define composite types with fields and transactions:
 
 ```brief
-rsrc <name>: <ResourceType>(<args>)
+// Basic struct
+struct Point {
+    x: Int;
+    y: Int;
+};
+
+// Struct with methods (transactions)
+struct Counter {
+    value: Int = 0;
+    
+    txn increment(amount: Int) [amount > 0][value == @value + amount] {
+        &value = value + amount;
+        term;
+    };
+    
+    txn reset() [true][value == 0] {
+        &value = 0;
+        term;
+    };
+};
+
+// Usage
+let p: Point = Point { x: 10, y: 20 };
+let x_val = p.x;
+
+let c: Counter = Counter {};
+c.increment(5);
 ```
 
-Built-in resource types:
-* `FrameBuffer(width, height)` - GPU framebuffer
-* `File(path, flags)` - File handles  
-* `SharedMemory(name, size)` - Shared memory regions
-* `Socket(domain, type)` - Network sockets
-* `EventFD()` - Event notification
-* `Semaphore(initial)` - Semaphores
-* `Mutex` - Mutex locks
-
-*Note: Full kernel negotiation and lifecycle management is planned*
-
-### 4.4 Bit-Packed Structures
-
-Struct fields can be declared with bit widths:
+**Rstructs (Rendered Structs)** add UI components:
 
 ```brief
+rstruct App {
+    count: Int = 0;
+    
+    txn increment() [true][count == @count + 1] {
+        &count = count + 1;
+        term;
+    };
+    
+    view {
+        <div class="counter">
+            <span b-text="count"></span>
+            <button b-trigger:click="increment">+</button>
+        </div>
+    }
+}
+```
+
+### 3.7 Enums
+
+Enums define sum types with variants:
+
+```brief
+// Simple enum
+enum Color {
+    Red,
+    Green,
+    Blue
+};
+
+// Enum with data
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
+};
+
+// Usage with pattern matching
+defn handle_result(r: Result<Int, String>) -> Int {
+    unification r(Ok(value)) = value;
+    unification r(Err(_)) = -1;
+    term 0;  // Default
+};
+
+// Enum methods
+enum Option<T> {
+    Some(T),
+    None;
+    
+    defn is_some(self) -> Bool {
+        unification self(Some(_)) = true;
+        term false;
+    };
+    
+    defn unwrap(self) -> T {
+        unification self(Some(value)) = value;
+        term panic("unwrapped None");
+    };
+};
+```
+
+### 3.8 Imports and Modules
+
+Imports bring external code into scope:
+
+```brief
+// Import entire module
+import std.math;
+let x = math.sqrt(4.0);
+
+// Import with alias
+import std.collections as coll;
+let list = coll.new_list();
+
+// Import specific items
+import {HashMap, HashSet} from std.collections;
+let map = HashMap::new();
+
+// Import from file
+import "./my_module.bv";
+
+// Import with rename
+import {foo as bar} from "./utils.bv";
+
+// Import resource (CSS, SVG, etc.)
+import "./styles.css";
+import "./logo.svg" as Logo;
+```
+
+**Import resolution:**
+- Relative paths: `./module.bv`, `../parent.bv`
+- Standard library: `std.math`, `std.string`, etc.
+- Resources: `.css`, `.svg`, `.png` (for Rendered Brief)
+
+### 3.9 Resources
+
+Resources declare external objects (files, kernel objects, etc.):
+
+```brief
+// File resource
+rsrc config: File("config.toml", "read");
+
+// Framebuffer (graphics)
+rsrc fb: FrameBuffer(1920, 1080);
+
+// Shared memory
+rsrc shared: SharedMemory("my_app", 4096);
+
+// Network socket
+rsrc sock: Socket(AF_INET, SOCK_STREAM);
+
+// Mutex
+rsrc lock: Mutex();
+```
+
+**Built-in resource types:**
+- `File(path, flags)` - File handle
+- `FrameBuffer(width, height)` - GPU framebuffer
+- `SharedMemory(name, size)` - IPC shared memory
+- `Socket(domain, type)` - Network socket
+- `EventFD()` - Event notification
+- `Semaphore(initial)` - Counting semaphore
+- `Mutex` - Mutual exclusion lock
+
+### 3.10 Inline Assembly
+
+Inline assembly for low-level operations:
+
+```brief
+// ARM assembly
+txn wait_for_interrupt() [true][true] {
+    asm "wfi";
+    term;
+};
+
+// ARM with clobber list
+txn set_register(value: Int) [true][true] {
+    asm "mov x0, %0" { "x0" };
+    term;
+};
+
+// With multiple clobbers
+txn complex_op() [true][true] {
+    asm "add x0, x1, x2; mul x3, x0, x4" { "x0", "x3" };
+    term;
+};
+```
+
+**ASM syntax:**
+- `asm "instructions";` - Simple form
+- `asm "instructions" { "clobber1", "clobber2" };` - With clobber list
+- Clobbers tell compiler which registers are modified
+
+### 3.11 Bit-Packed Structures
+
+Struct fields can have bit widths for compact storage:
+
+```brief
+// Packed struct (fits in 16 bits)
 struct Pixel {
     r: 4bits,
     g: 4bits,
     b: 4bits,
     a: 4bits
-}
+};
+
+// Bit ranges
+struct Control {
+    enable: 0..1,
+    mode: 1..3,
+    flags: 3..8
+};
+
+// Usage
+let p: Pixel = Pixel { r: 15, g: 0, b: 0, a: 255 };
+let packed: Int = p;  // Automatically packed
 ```
 
-Compiler automatically packs into minimal storage (16 bits for Pixel above).
+**Bit packing:**
+- `nbits` - Exactly n bits
+- `start..end` - Bit range (end-exclusive)
+- Compiler auto-packs fields into minimal storage
 
-### 4.5 Vector Types (Embedded)
+### 3.12 Vector Types (Embedded)
+
+Fixed-size vectors for SIMD/embedded:
 
 ```brief
-let data: Float[64] @/x32;  // 64-element float vector, 32-bit elements
+// Vector declaration
+let data: Float[64] @ 0x40000000;  // 64 floats at address
+let ints: Int[16];  // 16 integers
+
+// Vector operations (via FFI or native)
+defn dot_product(a: Float[4], b: Float[4]) -> Float {
+    let result: Float = 0.0;
+    let i: Int = 0;
+    [i < 4] {
+        &result = result + a[i] * b[i];
+        &i = i + 1;
+    };
+    term result;
+};
+```
+
+**Vector syntax:**
+- `Type[N]` - Vector of N elements
+- `v[i]` - Element access
+- Memory-mapped with `@ address`
+
+---
+
+## 4. Type System
+
+### 4.1 Primitive Types
+
+| Type | Size | Description | Aliases |
+|------|------|-------------|---------|
+| `Int` | 64-bit | Signed integer | `Signed`, `Sgn`, `I64` |
+| `UInt` | 64-bit | Unsigned integer | `Unsigned`, `U64` |
+| `Float` | 32-bit | IEEE 754 float | `F32` |
+| `Float64` | 64-bit | IEEE 754 double | `Double`, `F64` |
+| `Bool` | 1-bit | Boolean | - |
+| `Char` | 32-bit | Unicode codepoint | - |
+| `String` | variable | UTF-8 string | - |
+| `Data` | variable | Opaque binary | `Bytes`, `[u8]` |
+| `Void` | 0-bit | Unit type | `()` |
+
+**Type literals:**
+```brief
+let i: Int = 42;
+let u: UInt = 42u;
+let f: Float = 3.14;
+let f64: Float64 = 3.14f64;
+let b: Bool = true;
+let c: Char = 'a';
+let s: String = "hello";
+let d: Data = Data::from_bytes([1, 2, 3]);
+```
+
+### 4.2 Compound Types
+
+**Lists (dynamic arrays):**
+```brief
+let list: List<Int> = [1, 2, 3];
+let empty: List<String> = [];
+
+// Operations
+list.len();           // Length
+list[i];              // Index access
+list[i..j];           // Slice
+list + [4];           // Concatenation
+list.contains(2);     // Membership
+```
+
+**Vectors (fixed-size arrays):**
+```brief
+let vec: Int[5] = [1, 2, 3, 4, 5];
+let matrix: Float[3][3];  // 3x3 matrix
+
+// Operations
+vec[i];             // Index access (bounds-checked)
+vec.len();          // Size (compile-time constant)
+```
+
+**Options (nullable types):**
+```brief
+let opt: Option<Int> = Some(42);
+let none: Option<Int> = None;
+
+// Methods
+opt.is_some();      // true if Some
+opt.is_none();      // true if None
+opt.unwrap();       // Extract value (panics if None)
+opt.unwrap_or(0);   // Extract or default
+opt.map(|x| x * 2); // Transform if Some
+```
+
+**Results (error handling):**
+```brief
+let result: Result<Int, String> = Ok(42);
+let err: Result<Int, String> = Err("error");
+
+// Methods
+result.is_ok();     // true if Ok
+result.is_err();    // true if Err
+result.unwrap();    // Extract Ok value
+result.unwrap_err(); // Extract Err value
+result.map(|x| x * 2);  // Transform Ok
+result.map_err(|e| e.len()); // Transform Err
+result.and_then(|x| Ok(x * 2)); // Chain operations
+```
+
+**Tuples:**
+```brief
+let pair: (Int, String) = (42, "answer");
+let triple: (Int, Bool, Float) = (1, true, 3.14);
+
+// Access
+let (x, y) = pair;  // Destructuring
+let first = pair.0; // Field access
+let second = pair.1;
+```
+
+**Unions:**
+```brief
+let value: Int Union String Union Bool = 42;
+
+// Pattern matching
+unification value(Int(n)) = n;
+unification value(String(s)) = s.len();
+unification value(Bool(b)) = if b { 1 } else { 0 };
+```
+
+### 4.3 Custom Types
+
+**Structs:**
+```brief
+struct Point {
+    x: Int,
+    y: Int
+};
+
+let p: Point = Point { x: 10, y: 20 };
+let x = p.x;
+```
+
+**Enums:**
+```brief
+enum Color {
+    Red,
+    Green(Int),  // With data
+    Blue(Int, Int, Int)
+};
+
+let c: Color = Color::Green(255);
+```
+
+**Type aliases:**
+```brief
+type UserId = Int;
+type Name = String;
+type Point2D = (Int, Int);
+
+let id: UserId = 42;
+```
+
+### 4.4 Type Conversions
+
+**Implicit conversions:**
+```brief
+let i: Int = 42;
+let f: Float = i;      // Int → Float (widening)
+
+let u: UInt = 100;
+let i2: Int = u;       // UInt → Int (if fits)
+```
+
+**Explicit casts:**
+```brief
+let f: Float = 3.14;
+let i: Int = f as Int;  // Float → Int (truncates)
+
+let s: String = "42";
+let i2: Int = s as Int; // String → Int (parses)
+```
+
+**Type constructors:**
+```brief
+let s: String = String(42);      // Int → String
+let i: Int = Int("42");          // String → Int
+let f: Float = Float(42);        // Int → Float
+let c: Char = Char(65);          // Int → Char ('A')
+```
+
+### 4.5 Generics
+
+Functions and types can be generic:
+
+```brief
+// Generic function
+defn identity<T>(x: T) -> T {
+    term x;
+};
+
+// Generic struct
+struct Box<T> {
+    value: T
+};
+
+// Generic enum
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
+};
+
+// Usage
+let x = identity<Int>(42);
+let b: Box<String> = Box { value: "hello" };
+let r: Result<Int, String> = Ok(42);
+```
+
+**Generic constraints (future):**
+```brief
+// Trait bounds (planned)
+defn max<T: Ord>(a: T, b: T) -> T {
+    [a >= b] { term a; };
+    term b;
+};
+
+// Where clauses (planned)
+defn process<T, U>(t: T, u: U) -> String
+    where T: Debug, U: Debug
+{
+    term t.debug() + u.debug();
+};
+```
+
+### 4.6 Type Inference
+
+Brief can infer types in many contexts:
+
+```brief
+// Variable type inference
+let x = 42;           // Inferred: Int
+let s = "hello";      // Inferred: String
+let list = [1, 2, 3]; // Inferred: List<Int>
+
+// Function return type inference
+defn add(a: Int, b: Int) {
+    term a + b;  // Inferred: Int
+};
+
+// Generic type inference
+defn make_pair<T>(a: T, b: T) -> (T, T) {
+    term (a, b);
+};
+
+let p = make_pair(1, 2);  // Inferred: (Int, Int)
 ```
 
 ---
 
-## 5. Type System
+## 5. Foreign Function Interface (FFI)
 
-### 5.1 Primitive Types
+### 5.1 FFI Declaration
 
-| Type | Description | Aliases |
-|------|-------------|---------|
-| `Int` | Signed 64-bit integer | `Signed`, `Sgn` |
-| `Float` | 32-bit IEEE 754 float | - |
-| `UInt` | Unsigned 64-bit integer | `Unsigned` |
-| `Bool` | Boolean (1-bit) | - |
-| `String` | UTF-8 string | - |
-| `Data` | Opaque binary data | - |
-| `Void` | Unit type | - |
-
-### 5.2 Advanced Types
-
-* `Vector[T, N]` - Fixed-size vector
-* `Option[T]` - Nullable type
-* `Sig[T]` - Signature reference
-* Custom types via `struct`, `enum`, `rstruct`
-
-### 5.3 Type Conversion
-
-The compiler performs safe type conversions:
+**Foreign signatures:**
 ```brief
-let x: Float = 3;  // Int → Float (implicit)
-let y: Int = x;     // Float → Int (explicit cast needed)
+// Standard FFI (must handle Result)
+frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+
+// Fire-and-forget (no return)
+frgn! sig log(msg: String) -> void from "io.toml";
+
+// Kernel syscall with return
+syscall sig read(fd: Int, buf: Data, count: Int) -> Result<Int, IOError> from "kernel.toml";
+
+// Kernel syscall without return
+syscall! sig exit(code: Int) -> void from "kernel.toml";
+```
+
+**FFI keywords:**
+- `frgn` - Foreign function, returns `Result<T, E>`, must handle
+- `frgn!` - Foreign function, returns `void`, fire-and-forget
+- `syscall` - Kernel call, returns `Result<Int, E>`, must handle
+- `syscall!` - Kernel call, returns `void`, no handling needed
+
+### 5.2 FFI Type Mapping
+
+| Brief Type | C Type | Rust Type | Python Type |
+|------------|--------|-----------|-------------|
+| `Int` | `int64_t` | `i64` | `int` |
+| `UInt` | `uint64_t` | `u64` | `int` |
+| `Float` | `float` | `f32` | `float` |
+| `Float64` | `double` | `f64` | `float` |
+| `Bool` | `bool` | `bool` | `bool` |
+| `Char` | `char32_t` | `char` | `str` (len=1) |
+| `String` | `const char*` | `&str` | `str` |
+| `Data` | `uint8_t*` | `&[u8]` | `bytes` |
+
+### 5.3 Error Handling
+
+**Result handling patterns:**
+```brief
+// Pattern 1: Guard-based
+let result = sqrt(4.0);
+[result.is_ok()] {
+    let value = result.value;
+    log("Success: " + String(value));
+};
+[result.is_err()] {
+    log("Error: " + result.error.message);
+};
+
+// Pattern 2: Unification
+unification result(Ok(value)) = {
+    log("Success: " + String(value));
+};
+unification result(Err(e)) = {
+    log("Error: " + e.message);
+};
+
+// Pattern 3: Combinators
+let value = result.unwrap_or(0.0);
+let doubled = result.map(|x| x * 2.0);
+```
+
+**Error types:**
+```brief
+enum MathError {
+    DomainError(String),
+    Overflow,
+    Underflow
+};
+
+enum IOError {
+    NotFound(String),
+    PermissionDenied,
+    TimedOut,
+    Other(String)
+};
+```
+
+### 5.4 FFI Attributes
+
+Compiler directives for FFI:
+
+```brief
+#![ffi.c, bind("./bindings.toml"), import("./lib.a"), map("uint", "uint32_t")]
+
+frgn sig custom_func(x: Int) -> Result<Int, Error> from "custom.toml";
+```
+
+**Attributes:**
+- `ffi.c` - C FFI
+- `ffi.rust` - Rust FFI
+- `ffi.python` - Python FFI
+- `ffi.wasm` - WASM FFI
+- `bind("path.toml")` - Binding configuration
+- `import("lib.a")` - Link library
+- `map("brief_type", "foreign_type")` - Type mapping
+
+### 5.5 Resource Lifecycle
+
+Resources are declared and managed:
+
+```brief
+// Declare resource
+rsrc file: File("data.txt", "read");
+
+// Use in transaction
+txn read_data() [file.exists()][data.len() > 0] {
+    let result = file.read();
+    [result.is_ok()] {
+        &data = result.value;
+    };
+    term;
+};
+
+// Resource is automatically closed when out of scope
 ```
 
 ---
 
 ## 6. Standard Library
 
-### 6.1 FFI Modules
+### 6.1 Core Modules
 
-| Module | Purpose | Types |
-|--------|---------|-------|
-| `std/io` | File I/O | `File`, streams |
-| `std/math` | Math operations | `Float`, `Int` |
-| `std/string` | String utilities | `String` |
-| `std/time` | Time operations | timestamps |
-| `std/http` | HTTP client | request/response |
-| `std/json` | JSON serialization | `Object`, `Array` |
+| Module | Description | Key Functions |
+|--------|-------------|---------------|
+| `std/math` | Mathematical operations | `abs`, `sqrt`, `sin`, `cos`, `pow`, `min`, `max` |
+| `std/string` | String manipulation | `len`, `concat`, `find`, `split`, `replace`, `trim` |
+| `std/collections` | Data structures | `List`, `HashMap`, `HashSet`, `Stack`, `Queue` |
+| `std/io` | Input/output | `print`, `println`, `input`, `read_file`, `write_file` |
+| `std/time` | Time operations | `now`, `sleep`, `duration`, `timestamp` |
+| `std/http` | HTTP client | `get`, `post`, `put`, `delete` |
+| `std/json` | JSON serialization | `to_json`, `from_json`, `parse`, `stringify` |
+| `std/encoding` | Data encoding | `base64_encode`, `base64_decode`, `hex_encode`, `hex_decode` |
+| `std/option` | Option type methods | `is_some`, `is_none`, `unwrap`, `map`, `and_then` |
+| `std/result` | Result type methods | `is_ok`, `is_err`, `unwrap`, `map`, `map_err` |
 
-### 6.2 Core Functions
+### 6.2 Math Module
 
 ```brief
-// JSON
-let json_str: String = to_json(value);
-let parsed: Result<Object, String> = from_json(json_str);
+import std.math;
 
-// Assertions (for verification)
-result.is_ok()   // True if Result is success
-result.is_err()  // True if Result is error  
-result.value     // Unwrap success value
-result.error.code  // Access error code
-result.error.message  // Access error message
+// Basic operations
+let abs_val = math.abs(-42);           // 42
+let min_val = math.min(10, 20);        // 10
+let max_val = math.max(10, 20);        // 20
+let sum = math.add(5, 3);              // 8
+
+// Float operations
+let sqrt_val = math.sqrt(16.0);        // 4.0
+let sin_val = math.sin(3.14 / 2.0);    // ~1.0
+let pow_val = math.pow(2.0, 3.0);      // 8.0
+
+// Integer operations
+let gcd_val = math.gcd(48, 18);        // 6
+let lcm_val = math.lcm(4, 6);          // 12
+let fact = math.factorial(5);          // 120
+let fib = math.fibonacci(10);          // 55
+```
+
+### 6.3 String Module
+
+```brief
+import std.string;
+
+let s = "Hello, World!";
+
+// Basic operations
+let len = string.len(s);               // 13
+let lower = string.to_lower(s);        // "hello, world!"
+let upper = string.to_upper(s);        // "HELLO, WORLD!"
+
+// Search
+let contains = string.contains(s, "World");  // true
+let idx = string.find(s, "World");     // 7
+let starts = string.starts_with(s, "Hello"); // true
+
+// Manipulation
+let trimmed = string.trim("  hello  "); // "hello"
+let replaced = string.replace(s, "World", "Brief");  // "Hello, Brief!"
+let parts = string.split(s, ", ");     // ["Hello", "World!"]
+
+// Substring
+let sub = string.substr(s, 7, 12);     // "World"
+```
+
+### 6.4 Collections Module
+
+```brief
+import std.collections;
+
+// Lists
+let list = [1, 2, 3];
+let len = list.len();                  // 3
+let appended = list + [4];             // [1, 2, 3, 4]
+let contains = list.contains(2);       // true
+let idx = list.find(2);                // 1
+let sliced = list[1..3];               // [2, 3]
+
+// HashMaps (requires Hash + Eq)
+let mut map = HashMap::new();
+map = map.insert("key", 42);
+let val = map.get("key");              // Some(42)
+let has = map.contains_key("key");     // true
+
+// HashSets
+let mut set = HashSet::new();
+set = set.insert(1);
+set = set.insert(2);
+let has = set.contains(1);             // true
+
+// Stacks
+let mut stack = Stack::new();
+stack = stack.push(1);
+stack = stack.push(2);
+let (val, stack) = stack.pop();        // (Some(2), stack with [1])
+
+// Queues
+let mut queue = Queue::new();
+queue = queue.enqueue(1);
+queue = queue.enqueue(2);
+let (val, queue) = queue.dequeue();    // (Some(1), queue with [2])
+```
+
+### 6.5 IO Module
+
+```brief
+import std.io;
+
+// Console I/O
+io.print("Hello");
+io.println("World");
+let input = io.input();  // Read line from stdin
+
+// File I/O (FFI-backed)
+let content = io.read_file("data.txt");
+io.write_file("output.txt", content);
+let exists = io.file_exists("data.txt");
+
+// Formatting
+io.format("Value: {}", 42);
+io.formatln("Name: {}, Age: {}", "Alice", 30);
+```
+
+### 6.6 JSON Module
+
+```brief
+import std.json;
+
+// Serialization
+let obj = json.object([("name", "Alice"), ("age", 30)]);
+let json_str = json.to_string(obj);    // '{"name":"Alice","age":30}'
+
+// Deserialization
+let parsed = json.from_string(json_str);
+let name = parsed.get("name");         // "Alice"
+let age = parsed.get("age");           // 30
+
+// Convenience
+let json_str2 = json.to_json(value);
+let value2 = json.from_json(json_str2);
+```
+
+### 6.7 Time Module
+
+```brief
+import std.time;
+
+// Current time
+let now = time.now();                  // Current timestamp (seconds)
+let now_ms = time.now_millis();        // Current timestamp (milliseconds)
+
+// Durations
+let duration = time.duration_seconds(60);
+let sleep_time = time.duration_millis(500);
+
+// Operations
+let later = time.add_seconds(now, 60);
+let diff = time.diff_seconds(later, now);  // 60
+
+// Sleeping
+time.sleep(time.duration_millis(100));
 ```
 
 ---
 
-## 7. Implementation Status
+## 7. Address System (Embedded)
+
+The `@` operator provides memory-mapped access:
+
+```brief
+// Raw physical address (embedded only)
+let reg: Int @ 0x40020000;
+
+// Virtual address (OS-managed)
+let buffer: Data @virtual:0x1000;
+
+// Stack-relative
+let local: Int @stack:0;
+
+// Heap-relative
+let heap_var: Int @heap:0;
+
+// Bit-range addressing
+let field: Int @0x40020000.0..4;  // Bits 0-4 at address
+```
+
+**Address modes:**
+- `@0xADDR` - Raw physical address (`.ebv` only)
+- `@virtual:ADDR` - Virtual address (OS-managed)
+- `@stack:OFFSET` - Stack-relative offset
+- `@heap:OFFSET` - Heap-relative offset
+- `@ADDR.START..END` - Bit range within address
+
+**Target behavior:**
+| Target | `@` Semantics |
+|--------|---------------|
+| `.bv` (Native) | Virtual address, OS-managed |
+| `.rbv` (WASM) | Linear memory offset |
+| `.ebv` (Embedded) | Raw physical address |
+| `.ebv` (FPGA) | Register/memory-mapped I/O |
+
+---
+
+## 8. Data Brief (Configuration)
+
+Data Brief provides schema-enforced configuration:
+
+### 8.1 Data Brief Schema (`.dbvs`)
+
+```brief
+// hardware.dbvs
+schema Hardware {
+    name: String,
+    version: String,
+    fpga: FPGAConfig,
+    peripherals: [Peripheral],
+    memory: MemoryMap
+};
+
+schema FPGAConfig {
+    family: String,
+    part: String,
+    package: String,
+    speed_grade: Int
+};
+
+schema Peripheral {
+    name: String,
+    type: String,
+    address: Int,
+    interrupt: Option<Int>
+};
+
+schema MemoryMap {
+    regions: [MemoryRegion]
+};
+
+schema MemoryRegion {
+    name: String,
+    start: Int,
+    size: Int,
+    access: String  // "rw", "ro", "wo"
+};
+
+// Aliases for reuse
+alias CommonPeriph = {
+    name: String,
+    address: Int
+};
+```
+
+### 8.2 Data Brief (`.dbv`)
+
+```brief
+// hardware.dbv
+import "hardware.dbvs";
+
+Hardware {
+    name: "MyBoard",
+    version: "1.0.0",
+    fpga: FPGAConfig {
+        family: "Xilinx",
+        part: "xc7a35t",
+        package: "cpg236",
+        speed_grade: -1
+    },
+    peripherals: [
+        Peripheral {
+            name: "UART",
+            type: "serial",
+            address: 0x40000000,
+            interrupt: Some(3)
+        },
+        Peripheral {
+            name: "GPIO",
+            type: "gpio",
+            address: 0x40001000,
+            interrupt: None
+        }
+    ],
+    memory: MemoryMap {
+        regions: [
+            MemoryRegion {
+                name: "SRAM",
+                start: 0x00000000,
+                size: 65536,
+                access: "rw"
+            },
+            MemoryRegion {
+                name: "ROM",
+                start: 0x00010000,
+                size: 32768,
+                access: "ro"
+            }
+        ]
+    }
+};
+```
+
+### 8.3 Data Brief Lines (`.dbvl`)
+
+Line-based storage for large datasets:
+
+```brief
+// sensors.dbvl
+schema SensorReading {
+    timestamp: Int,
+    sensor_id: Int,
+    value: Float
+};
+
+// Data lines (one per reading)
+1234567890, 1, 23.5
+1234567891, 2, 45.2
+1234567892, 1, 23.7
+```
+
+### 8.4 Validation
+
+Data Brief validates against schema:
+
+```brief
+// Compile-time validation
+brief check hardware.dbv  // Error if schema mismatch
+
+// Access in Brief code
+import "hardware.dbv";
+
+let addr = hardware.peripherals[0].address;
+let size = hardware.memory.regions[0].size;
+```
+
+---
+
+## 9. Compiler Architecture
+
+### 9.1 Compilation Pipeline
+
+```
+Source (.bv/.rbv/.ebv)
+    ↓
+Lexer (tokenization)
+    ↓
+Parser (AST construction)
+    ↓
+Type Checker (type inference, trait resolution)
+    ↓
+Proof Engine (symbolic execution, contract verification)
+    ↓
+Backend (code generation)
+    ↓
+Target (Rust/C/WASM/Verilog/VHDL/COBOL)
+```
+
+### 9.2 CLI Commands
+
+```bash
+# Check (type-check only, no codegen)
+brief check file.bv
+
+# Build (compile to default target)
+brief build file.bv      # .bv → native Rust executable
+brief build file.rbv     # .rbv → web app (WASM + JS + UI)
+brief build file.ebv     # .ebv → error (needs --target)
+
+# Compile with explicit target
+brief compile file.bv --target rust.toml
+brief compile file.ebv --target vhdl_fpga.toml
+brief compile file.rbv --target nextjs.toml
+
+# Backend-specific
+brief wasm file.bv       # .bv → standalone WASM
+brief wasm file.rbv      # .rbv → full web app
+brief rust file.bv       # .bv → Rust source
+brief c file.bv          # .bv/.ebv → C source
+brief arm file.ebv       # .ebv → bare-metal Rust
+brief verilog file.ebv   # .ebv → SystemVerilog
+brief vhdl file.ebv      # .ebv → VHDL
+brief cobol file.bv      # .bv → COBOL
+
+# Run (build and execute)
+brief run file.rbv       # Build and open in browser
+brief run file.bv        # Build and execute native
+
+# Project management
+brief init my-app        # Create new project
+brief import package     # Add dependency
+brief lsp                # Start language server
+```
+
+### 9.3 Target Specifications
+
+Targets are configured via TOML:
+
+```toml
+# rust.toml
+[target]
+name = "rust"
+edition = "2021"
+crate_type = "bin"
+
+[features]
+async = true
+reactive = true
+
+[output]
+directory = "target"
+```
+
+```toml
+# vhdl_fpga.toml
+[target]
+name = "vhdl"
+family = "Xilinx"
+series = "Artix-7"
+
+[synthesis]
+optimization = "speed"
+fanout_limit = 10000
+
+[pins]
+clock = "CLK50"
+reset = "RESETn"
+```
+
+---
+
+## 10. Implementation Status
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Core language (transactions, guards, structs) | ✅ Complete | |
-| FFI type taxonomy | ✅ Complete | |
-| Address system (virtual/raw) | ✅ Complete | |
-| `frgn`, `frgn!`, `syscall`, `syscall!` | ✅ Complete | |
-| `rsrc` / `resource` parsing | ✅ Complete | |
-| `Float` type | ✅ Complete | |
-| Vector types | ✅ Complete | |
-| Bit-packing | ✅ Complete | AST only |
-| Syscall TOML loading | ⚠️ Planned | Parser reads TOML, backend needs work |
-| Resource kernel generation | ⚠️ Planned | Backend needed |
-| Bit-packed struct code gen | ⚠️ Planned | Backend needed |
-| `to_json`/`from_json` stdlib | ✅ Complete | |
+| **Core Language** | | |
+| Transactions (`txn`, `rct txn`) | ✅ Complete | |
+| Async transactions | ✅ Complete | With mutual exclusion checking |
+| Definitions (`defn`) | ✅ Complete | With contracts |
+| Guards | ✅ Complete | Guard-based control flow |
+| Pattern matching | ✅ Complete | Via unification |
+| Inline assembly | ✅ Complete | C backend support |
+| **Type System** | | |
+| Primitive types | ✅ Complete | Int, UInt, Float, Bool, String, Char, Data, Void |
+| Lists | ✅ Complete | Dynamic arrays |
+| Vectors | ✅ Complete | Fixed-size arrays |
+| Options | ✅ Complete | Nullable types |
+| Results | ✅ Complete | Error handling |
+| Tuples | ✅ Complete | Multi-value |
+| Structs | ✅ Complete | With methods |
+| Enums | ✅ Complete | With data |
+| Rstructs | ✅ Complete | Rendered structs with UI |
+| Generics | ⚠️ Partial | Syntax works, trait bounds pending |
+| Traits | ❌ Planned | For generic constraints |
+| **FFI** | | |
+| Foreign signatures | ✅ Complete | `frgn`, `frgn!`, `syscall`, `syscall!` |
+| Resource declarations | ✅ Complete | `rsrc` keyword |
+| Bit-packing | ✅ Complete | AST-level |
+| Vector types | ✅ Complete | Embedded only |
+| Address system | ✅ Complete | `@`, `@raw:`, `@stack:`, `@heap:` |
+| **Data Brief** | | |
+| Schema (`.dbvs`) | ✅ Complete | |
+| Data (`.dbv`) | ✅ Complete | |
+| Lines (`.dbvl`) | ✅ Complete | |
+| Validation | ✅ Complete | Compile-time |
+| **Backends** | | |
+| Rust | ✅ Complete | Native executables |
+| C | ✅ Complete | Hosted and bare-metal |
+| WASM | ✅ Complete | Standalone and with JS |
+| SystemVerilog | ✅ Complete | With TCL scripts |
+| VHDL | ✅ Complete | With PSL assertions |
+| COBOL | ✅ Complete | IBM Enterprise COBOL |
+| React Native | ✅ Complete | Via target spec |
+| Next.js | ✅ Complete | Via target spec |
+| Vite | ✅ Complete | Via target spec |
+| **Tooling** | | |
+| Language Server (LSP) | ✅ Complete | Type-checking, go-to-def |
+| Syntax highlighting | ✅ Complete | VS Code extension |
+| Formatter | ❌ Planned | |
+| Debugger | ❌ Planned | |
+| Profiler | ❌ Planned | |
+
+**Legend:**
+- ✅ Complete - Fully implemented and tested
+- ⚠️ Partial - Implemented but incomplete
+- ❌ Planned - Not yet implemented
 
 ---
 
-## 8. Migration Guide
+## 11. Error Messages
+
+The compiler produces detailed error messages:
+
+### 11.1 Type Errors
+
+```
+error[E001]: type mismatch
+  --> src/main.bv:10:5
+   |
+10 |     let x: Int = "hello";
+   |         ^      ^^^^^^^^ expected Int, found String
+   |         |
+   |         expected due to this
+   |
+   = note: expected type `Int`
+              found type `String`
+```
+
+### 11.2 Contract Violations
+
+```
+error[P001]: postcondition not satisfied
+  --> src/main.bv:15:1
+   |
+15 | txn increment(amount: Int) [amount > 0][counter == @counter + amount] {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | |
+   | this path does not satisfy the postcondition
+   |
+   = note: postcondition `counter == @counter + amount` may be false
+   = help: ensure all paths update `counter`
+   = help: counterexample: amount=5, @counter=10, counter=10
+```
+
+### 11.3 Mutual Exclusion Violations
+
+```
+error[P002]: ownership conflict in reactive cascade
+  --> src/main.bv:20:1
+   |
+20 | rct async txn reader() [!writing][reading == true] { ... }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | conflicts with:
+25 | rct async txn writer() [!reading][writing == true] { ... }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: both transactions can fire simultaneously
+   = note: `reader` reads `reading`, `writer` writes `reading`
+   = help: add guard to prevent simultaneous execution
+```
+
+### 11.4 FFI Errors
+
+```
+error[F001]: unhandled FFI result
+  --> src/main.bv:30:5
+   |
+30 |     let result = sqrt(-1.0);
+   |         ^^^^^^ Result<Float, MathError> must be handled
+   |
+   = note: FFI calls return Result and must be handled
+   = help: use guard: [result.is_ok()] { ... }
+   = help: or use: result.unwrap_or(0.0)
+```
+
+### 11.5 Parse Errors
+
+```
+error[S001]: unexpected token
+  --> src/main.bv:5:15
+   |
+5  | txn foo(x: Int {
+   |               ^ expected `)` or `,`, found `{`
+   |
+   = note: while parsing transaction parameters
+   = help: parameters must be enclosed in parentheses
+```
+
+---
+
+## 12. Migration Guide
+
+### From v0.9 to v0.11
+
+**State declaration changes:**
+```brief
+// Old (v0.9)
+state counter: Int = 0;
+
+// New (v0.11)
+let counter: Int = 0;
+```
+
+**FFI syntax changes:**
+```brief
+// Old (v0.9)
+frgn sqrt(x: Float) -> Float from "math.toml";
+
+// New (v0.11) - must handle errors
+frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+
+// Or fire-and-forget
+frgn! sig log(msg: String) -> void from "io.toml";
+```
+
+**Contract watchdog syntax:**
+```brief
+// Old (v0.9)
+txn foo [true][true] watchdog [100ms] { ... }
+
+// New (v0.11)
+txn foo [true][true] ?[100ms] { ... }  // Optional timeout
+txn foo [true][true] ![100ms] { ... }  // Required timeout
+```
 
 ### From v1 (Legacy)
 
-Legacy code continues to work. The compiler auto-upgrades:
+Legacy code continues to work with auto-upgrades:
 
 ```brief
-// v1 style - still valid, auto-upgrades
+// v1 style - auto-upgraded by compiler
 frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
-// v2 explicit forms
-frgn  sqrt(x: Float) -> Result<Float, MathError> from "math.toml";  // with Result
-frgn! write_to_hw(address, value);  // fire and forget
+// v0.11 explicit forms (recommended)
+frgn  sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn! write_to_hw(address, value);
 ```
 
-The compiler auto-generates:
+**Auto-generated defaults:**
 - `pre [true]` if no precondition
-- `post [true]` if no postcondition  
-- Layout auto-calculation if not specified
+- `post [true]` if no postcondition
+- Layout auto-calculation for structs
 
 ---
 
-## 9. Error Messages
+## 13. Examples
 
-The compiler produces clear error messages for:
-* Unhandled FFI results (violating contracts)
-* Type mismatches
-* Missing pre/post conditions
-* Invalid address modes
-* Resource conflicts
+### 13.1 Counter Application
+
+```brief
+// counter.rbv
+rstruct Counter {
+    count: Int = 0;
+    
+    txn increment() [true][count == @count + 1] {
+        &count = count + 1;
+        term;
+    };
+    
+    txn decrement() [count > 0][count == @count - 1] {
+        &count = count - 1;
+        term;
+    };
+    
+    view {
+        <div class="counter">
+            <h1 b-text="count"></h1>
+            <button b-trigger:click="increment">+</button>
+            <button b-trigger:click="decrement">-</button>
+        </div>
+    }
+}
+```
+
+### 13.2 Bank Transfer
+
+```brief
+let alice_balance: Int = 1000;
+let bob_balance: Int = 500;
+let transfer_in_progress: Bool = false;
+
+txn transfer_alice_to_bob(amount: Int)
+    [transfer_in_progress == false && alice_balance >= amount && amount > 0]
+    [alice_balance == @alice_balance - amount && bob_balance == @bob_balance + amount]
+{
+    &transfer_in_progress = true;
+    &alice_balance = alice_balance - amount;
+    &bob_balance = bob_balance + amount;
+    &transfer_in_progress = false;
+    term;
+};
+```
+
+### 13.3 FFI Usage
+
+```brief
+import std.math;
+import std.io;
+
+frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+
+defn calculate_hypotenuse(a: Float, b: Float) -> Float {
+    let a_sq = a * a;
+    let b_sq = b * b;
+    let sum = a_sq + b_sq;
+    
+    let result = math.sqrt(sum);
+    [result.is_ok()] {
+        term result.value;
+    };
+    [result.is_err()] {
+        term 0.0;
+    };
+    term 0.0;
+};
+
+txn main() [true][true] {
+    let hypot = calculate_hypotenuse(3.0, 4.0);
+    io.println("Hypotenuse: " + String(hypot));
+    term;
+};
+```
 
 ---
 
-*Last updated: Brief v0.10.0 (2026-04-20)*
+*Last updated: Brief v0.11.0 (2026-05-06)*
