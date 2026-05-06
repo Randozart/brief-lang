@@ -1746,12 +1746,12 @@ fn run_verilog(
     let dbvs_engine = if hw_config_path.extension().and_then(|s| s.to_str()) == Some("dbv") {
         let dbv_content = fs::read_to_string(hw_config_path)?;
         let dbv = crate::dbrief::parse_dbrief(&dbv_content)?;
-        if let Some(schema_path) = dbv.schema_path {
-            let schema_content = fs::read_to_string(schema_path)?;
-            Some(crate::dbrief::compile_dbvs(&schema_content)?)
-        } else {
-            None
-        }
+//         if let Some(schema_path) = dbv.schema_path {
+//             let schema_content = fs::read_to_string(schema_path)?;
+//             Some(crate::dbrief::compile_dbvs(&schema_content)?)
+//         } else {
+//             None
+//         }
     } else {
         None
     };
@@ -1762,7 +1762,6 @@ fn run_verilog(
         "vhdl",
         is_ebv,
         target_spec.as_ref(),
-        dbvs_engine.as_ref(),
     );
 
     if !hw_diagnostics.is_empty() {
@@ -1998,6 +1997,7 @@ fn run_vhdl(
             "vhdl",
             is_ebv,
             target_spec.as_ref(),
+            None,  // dbvs_engine
         );
         
         let has_errors = hw_diagnostics

@@ -1,0 +1,96 @@
+# Welcome to Brief! 🎉
+
+**Brief** is a declarative, contract-enforced logic language designed for building verifiable state machines.
+
+## What Makes Brief Different?
+
+### 1. Contracts First
+Every transaction declares what must be true **before** and **after** it runs:
+
+```brief
+txn withdraw(amount: Int) 
+    [amount > 0 && balance >= amount]  // Precondition
+    [balance == @balance - amount]      // Postcondition
+{
+    &balance = balance - amount;
+    term;
+};
+```
+
+The compiler **verifies** that your code actually satisfies these contracts.
+
+### 2. Reactive by Default
+Transactions fire automatically when their preconditions are met:
+
+```brief
+rct txn auto_save() [dirty && !saving][!dirty] {
+    save_to_disk();
+    &dirty = false;
+    term;
+};
+```
+
+No event handlers. No polling. Just logic.
+
+### 3. Zero-Nesting Logic
+No `if/else` chains. Use guards instead:
+
+```brief
+// Instead of: if x > 0 { ... } else if x < 0 { ... }
+[x > 0] {
+    &result = x * 2;
+};
+[x < 0] {
+    &result = x * -1;
+};
+```
+
+### 4. Compile-Time Verification
+The compiler proves:
+- ✅ No race conditions
+- ✅ No unintended side effects
+- ✅ All contracts are satisfied
+- ✅ No deadlocks in async code
+
+## Quick Start
+
+### Your First Program
+
+Create `hello.bv`:
+
+```brief
+let message: String = "Hello, Brief!";
+
+txn main() [true][true] {
+    println(message);
+    term;
+};
+```
+
+Run it:
+
+```bash
+brief run hello.bv
+```
+
+### Learning Path
+
+This folder contains a complete Brief tutorial:
+
+1. **01-basics.md** - Variables, types, transactions
+2. **02-contracts.md** - Preconditions, postconditions, @ prior state
+3. **03-reactive.md** - Reactive transactions, auto-firing logic
+4. **04-functions.md** - Functions with contracts
+5. **05-data-types.md** - HashMap, HashSet, Stack, Queue
+6. **06-string.md** - String manipulation, StringBuilder
+7. **07-ffi.md** - Foreign function interface
+8. **08-examples.md** - Complete examples
+
+## Next Steps
+
+Start with [01-basics.md](01-basics.md) to learn the fundamentals!
+
+---
+
+*Last updated: 2026-05-06*  
+*Version: Brief v0.11.0*
