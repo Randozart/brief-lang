@@ -4,9 +4,7 @@
 
 ## Brief Doesn't Break
 
-**Status:** v0.12.0 - Self-Hosting Capable ✅  
-**Implementation Time:** 1 workday (2026-05-06)  
-**Tests:** 148/148 passing ✅
+**Status:** v0.12.0 - Self-Hosting Capable
 
 Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions.
 
@@ -40,8 +38,6 @@ cargo build --release
 # Run tests
 cargo test --lib
 ```
-
-**Test Results:** ✅ 148/148 tests passing
 
 ### 2. Create Your First Program
 
@@ -148,10 +144,10 @@ No `if/else` chains. Use guards:
 ### 4. Compile-Time Verification
 
 The compiler proves:
-- ✅ No race conditions
-- ✅ No unintended side effects  
-- ✅ All contracts are satisfied
-- ✅ No deadlocks in async code
+- No race conditions
+- No unintended side effects  
+- All contracts are satisfied
+- No deadlocks in async code
 
 ---
 
@@ -184,7 +180,7 @@ Backends
 
 ## Standard Library
 
-### Core Types (Tier 1) ✅
+### Core Types
 - **Char** - Unicode codepoints
 - **HashMap<K,V>** - O(1) lookup
 - **HashSet<T>** - O(1) membership
@@ -193,24 +189,24 @@ Backends
 - **Queue<T>** - FIFO structure
 - **Result/Option** - Error handling with combinators
 
-### String Processing (Tier 2) ✅
+### String Processing
 - Character classification (`is_whitespace`, `is_digit`, `is_alpha`)
 - Case conversion (`to_upper`, `to_lower`, `capitalize`)
 - String manipulation (`trim`, `reverse`, `split`, `join`)
 - 95% native functions (no FFI)
 
-### Collections (Existing) ✅
+### Collections
 - `List<T>` - Dynamic arrays
 - Vector operations
 - Sorting, filtering, mapping
 
-### IO & Process (Tier 8) ✅
+### IO & Process
 - File I/O (`read_file`, `write_file`, `file_exists`)
 - Path operations (`join_path`, `split_path`, `file_extension`)
 - Process spawning (`spawn`, `spawn_with_output`)
 - Environment access (`env_var`, `current_dir`)
 
-### Iterators (Tier 9) ✅
+### Iterators
 - `map`, `filter`, `fold`
 - `take`, `skip`, `zip`, `chain`
 - `sum`, `product`, `min`, `max`
@@ -331,8 +327,6 @@ cargo test --lib lexer::tests
 ./target/debug/brief-compiler check examples/counter.rbv
 ```
 
-**Test Results:** ✅ 148/148 tests passing
-
 **Test Files:**
 - `tests/tier1/` - Core data type tests
 - `tests/tier2/` - String processing tests
@@ -344,13 +338,11 @@ cargo test --lib lexer::tests
 
 ## Self-Hosting Status
 
-**✅ COMPLETE** (as of 2026-05-06)
-
 The Brief compiler can now:
-- ✅ Parse itself
-- ✅ Type-check itself
-- ✅ Verify its own contracts
-- ✅ Generate code for itself (AArch64, x86-64, Rust, C)
+- Parse itself
+- Type-check itself
+- Verify its own contracts
+- Generate code for itself (AArch64, x86-64, Rust, C)
 
 **Implementation:**
 - 9 architectural tiers (100% complete)
@@ -448,19 +440,6 @@ brief-compiler/
 ## License
 
 Apache 2.0
-
----
-
-## Acknowledgments
-
-**Built in one workday (2026-05-06)**
-
-- ~10,000 lines of compiler code
-- ~7,500 lines of documentation
-- 148/148 tests passing
-- 9/9 architectural tiers complete
-
-**Brief is ready for self-hosting.** 🚀
 
 ---
 
