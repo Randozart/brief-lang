@@ -35,6 +35,9 @@
       "include": "#booleans"
     },
     {
+      "include": "#constants"
+    },
+    {
       "include": "#identifiers"
     },
     {
@@ -131,6 +134,12 @@
           "end": "\\]",
           "patterns": [
             {
+              "include": "#line-comments"
+            },
+            {
+              "include": "#block-comments"
+            },
+            {
               "include": "#expressions"
             }
           ]
@@ -140,6 +149,12 @@
           "begin": "\\[",
           "end": "\\]",
           "patterns": [
+            {
+              "include": "#line-comments"
+            },
+            {
+              "include": "#block-comments"
+            },
             {
               "include": "#expressions"
             }
@@ -238,6 +253,14 @@
         }
       ]
     },
+    "constants": {
+      "patterns": [
+        {
+          "name": "variable.other.constant.brief",
+          "match": "\\b[A-Z][A-Z0-9_]*\\b"
+        }
+      ]
+    },
     "identifiers": {
       "patterns": [
         {
@@ -253,6 +276,12 @@
     "expressions": {
       "patterns": [
         {
+          "include": "#line-comments"
+        },
+        {
+          "include": "#block-comments"
+        },
+        {
           "include": "#strings"
         },
         {
@@ -263,6 +292,9 @@
         },
         {
           "include": "#operators"
+        },
+        {
+          "include": "#constants"
         },
         {
           "include": "#identifiers"

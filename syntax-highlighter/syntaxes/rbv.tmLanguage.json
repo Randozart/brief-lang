@@ -2,70 +2,44 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Rendered Brief",
   "fileTypes": ["rbv"],
-  "firstLineMatch": "^<script",
   "patterns": [
     {
-      "include": "#rbv-tags"
+      "include": "#view-tag"
+    },
+    {
+      "include": "#style-tag"
+    },
+    {
+      "include": "#script-tag"
+    },
+    {
+      "include": "source.brief"
     }
   ],
   "repository": {
-    "rbv-tags": {
-      "patterns": [
-        {
-          "include": "#script-tag"
-        },
-        {
-          "include": "#view-tag"
-        },
-        {
-          "include": "#style-tag"
-        },
-        {
-          "include": "#plain-text"
-        }
-      ]
-    },
     "script-tag": {
       "begin": "(<script>|<script type=\"brief\">)",
       "beginCaptures": {
-        "1": { "name": "tag.embedded.script.brief" },
-        "2": { "name": "tag.embedded.script.brief" }
+        "0": { "name": "punctuation.definition.tag.brief" }
       },
       "end": "</script>",
       "endCaptures": {
-        "0": { "name": "tag.embedded.script.brief" }
+        "0": { "name": "punctuation.definition.tag.brief" }
       },
       "patterns": [
         {
-          "include": "#brief-with-html"
-        }
-      ]
-    },
-    "brief-with-html": {
-      "patterns": [
-        {
           "include": "source.brief"
-        },
-        {
-          "include": "#inline-html"
-        }
-      ]
-    },
-    "inline-html": {
-      "patterns": [
-        {
-          "include": "text.html.basic"
         }
       ]
     },
     "view-tag": {
-      "begin": "<view>",
+      "begin": "(<view>)",
       "beginCaptures": {
-        "0": { "name": "tag.embedded.view.brief" }
+        "0": { "name": "punctuation.definition.tag.brief" }
       },
-      "end": "</view>",
+      "end": "(</view>)",
       "endCaptures": {
-        "0": { "name": "tag.embedded.view.brief" }
+        "0": { "name": "punctuation.definition.tag.brief" }
       },
       "patterns": [
         {
@@ -73,32 +47,17 @@
         },
         {
           "include": "text.html.basic"
-        },
-        {
-          "include": "#brief-bindings"
-        }
-      ]
-    },
-    "html-components": {
-      "patterns": [
-        {
-          "name": "entity.name.type.custom.brief",
-          "match": "<[A-Z][a-zA-Z0-9_]*(\\s+[^>]*)?/?>"
-        },
-        {
-          "name": "entity.name.type.custom.brief",
-          "match": "</[A-Z][a-zA-Z0-9_]*>"
         }
       ]
     },
     "style-tag": {
-      "begin": "<style>",
+      "begin": "(<style>)",
       "beginCaptures": {
-        "0": { "name": "tag.embedded.style.brief" }
+        "0": { "name": "punctuation.definition.tag.brief" }
       },
-      "end": "</style>",
+      "end": "(</style>)",
       "endCaptures": {
-        "0": { "name": "tag.embedded.style.brief" }
+        "0": { "name": "punctuation.definition.tag.brief" }
       },
       "patterns": [
         {
@@ -106,19 +65,56 @@
         }
       ]
     },
-    "brief-bindings": {
+    "html-components": {
       "patterns": [
         {
-          "name": "meta.attribute.brief-binding",
-          "match": "b-\\w+=\"[^\"]*\""
+          "match": "(<)([A-Z][a-zA-Z0-9_]*)(\\s+[^>]*)?(/?>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.brief" },
+            "2": { "name": "entity.name.tag.brief" },
+            "3": { "patterns": [{ "include": "text.html.basic" }] },
+            "4": { "name": "punctuation.definition.tag.brief" }
+          }
+        },
+        {
+          "match": "(</)([A-Z][a-zA-Z0-9_]*)(>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.brief" },
+            "2": { "name": "entity.name.tag.brief" },
+            "3": { "name": "punctuation.definition.tag.brief" }
+          }
+        },
+        {
+          "begin": "(<)([a-z][a-z0-9]*)",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.tag.brief" },
+            "2": { "name": "entity.name.tag.brief" }
+          },
+          "end": "(</)(\\2)(>)|(/>)",
+          "endCaptures": {
+            "1": { "name": "punctuation.definition.tag.brief" },
+            "2": { "name": "entity.name.tag.brief" },
+            "3": { "name": "punctuation.definition.tag.brief" },
+            "4": { "name": "punctuation.definition.tag.brief" }
+          },
+          "patterns": [
+            { "include": "#brief-bindings" },
+            { "include": "text.html.basic" },
+            { "include": "#html-components" }
+          ]
         }
       ]
     },
-    "plain-text": {
+    "brief-bindings": {
       "patterns": [
         {
-          "name": "text.plain",
-          "match": "[^<]+"
+          "match": "\\b(b-[a-z0-9\\-]+)(:([a-z0-9\\-]+))?(=)(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.brief" },
+            "3": { "name": "variable.parameter.brief" },
+            "4": { "name": "punctuation.separator.key-value.brief" },
+            "5": { "name": "string.quoted.double.brief" }
+          }
         }
       ]
     }
