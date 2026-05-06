@@ -1,0 +1,608 @@
+// AArch64 Binary Backend - Direct machine code generation
+// Tier 7: Code Generation Backends
+
+// ===== AARCH64 INSTRUCTION ENUM =====
+
+enum A64Instr {
+    // Data processing (immediate)
+    ADDI(String, String, Int),      // add Rd, Rn, #imm
+    SUBI(String, String, Int),      // sub Rd, Rn, #imm
+    ANDI(String, String, Int),      // and Rd, Rn, #imm
+    ORI(String, String, Int),       // orr Rd, Rn, #imm
+    MOVI(String, Int),              // mov Rd, #imm
+    
+    // Data processing (register)
+    ADD(String, String, String),    // add Rd, Rn, Rm
+    SUB(String, String, String),    // sub Rd, Rn, Rm
+    AND(String, String, String),    // and Rd, Rn, Rm
+    ORR(String, String, String),    // orr Rd, Rn, Rm
+    EOR(String, String, String),    // eor Rd, Rn, Rm
+    
+    // Memory operations
+    LDR(String, String, Int),       // ldr Rd, [Rn, #offset]
+    STR(String, String, Int),       // str Rd, [Rn, #offset]
+    LDRB(String, String, Int),      // ldrb Rd, [Rn, #offset]
+    STRB(String, String, Int),      // strb Rd, [Rn, #offset]
+    
+    // Branch operations
+    B(String),                      // b label
+    BL(String),                     // bl label (call)
+    BR(String),                     // br Rn (indirect)
+    BEQ(String),                    // beq label
+    BNE(String),                    // bne label
+    BLT(String),                    // blt label
+    BGT(String),                    // bgt label
+    BLE(String),                    // ble label
+    BGE(String),                    // bge label
+    
+    // Compare
+    CMP(String, String),            // cmp Rn, Rm
+    CMP_IMM(String, Int),           // cmp Rn, #imm
+    
+    // System
+    NOP,                            // nop
+    RET,                            // ret
+    SVC(Int),                       // svc #imm
+    
+    // Labels
+    Label(String),                  // label:
+    Comment(String)                 // // comment
+}
+
+// ===== REGISTER ALLOCATION =====
+
+struct RegisterAllocator {
+    used_regs: HashSet<String>,
+    var_to_reg: HashMap<String, String>,
+    reg_to_var: HashMap<String, String>,
+    spill_slots: HashMap<String, Int>,
+    next_spill: Int
+}
+
+defn new_regalloc() -> RegisterAllocator {
+    term RegisterAllocator {
+        used_regs: new_set(),
+        var_to_reg: new_map(),
+        reg_to_var: new_map(),
+        spill_slots: new_map(),
+        next_spill: 0
+    };
+}
+
+// AArch64 has 31 general-purpose registers (X0-X30)
+// X29 = FP (frame pointer), X30 = LR (link register)
+defn callee_saved_regs() -> List<String> {
+    term ["X19", "X20", "X21", "X22", "X23", "X24", "X25", "X26", "X27", "X28", "X29"];
+}
+
+defn caller_saved_regs() -> List<String> {
+    term ["X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "X9", 
+          "X10", "X11", "X12", "X13", "X14", "X15", "X16", "X17", "X18"];
+}
+
+defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, RegisterAllocator) {
+    // Try hint first
+    [hint.is_some()] {
+        let reg = hint.unwrap();
+        [!alloc.used_regs.contains(reg)] {
+            let mut used = alloc.used_regs;
+            used = used.insert(reg);
+            term (reg, RegisterAllocator {
+                used_regs: used,
+                var_to_reg: alloc.var_to_reg,
+                reg_to_var: alloc.reg_to_var,
+                spill_slots: alloc.spill_slots,
+                next_spill: alloc.next_spill
+            });
+        };
+    };
+    
+    // Find first available caller-saved register
+    let regs = caller_saved_regs();
+    let i: Int = 0;
+    [i < regs.len()] {
+        [!alloc.used_regs.contains(regs[i])] {
+            let mut used = alloc.used_regs;
+            used = used.insert(regs[i]);
+            term (regs[i], RegisterAllocator {
+                used_regs: used,
+                var_to_reg: alloc.var_to_reg,
+                reg_to_var: alloc.reg_to_var,
+                spill_slots: alloc.spill_slots,
+                next_spill: alloc.next_spill
+            });
+        };
+        &i = i + 1;
+    };
+    
+    // Need to spill - for now, just use X16
+    term ("X16", alloc);
+}
+
+defn free_reg(alloc: RegisterAllocator, reg: String) -> RegisterAllocator {
+    let mut used = alloc.used_regs;
+    used = used.remove(reg);
+    term RegisterAllocator {
+        used_regs: used,
+        var_to_reg: alloc.var_to_reg,
+        reg_to_var: alloc.reg_to_var,
+        spill_slots: alloc.spill_slots,
+        next_spill: alloc.next_spill
+    };
+}
+
+// ===== INSTRUCTION EMISSION =====
+
+defn emit_addi(rd: String, rn: String, imm: Int) -> A64Instr {
+    term ADDI(rd, rn, imm);
+}
+
+defn emit_subi(rd: String, rn: String, imm: Int) -> A64Instr {
+    term SUBI(rd, rn, imm);
+}
+
+defn emit_add(rd: String, rn: String, rm: String) -> A64Instr {
+    term ADD(rd, rn, rm);
+}
+
+defn emit_sub(rd: String, rn: String, rm: String) -> A64Instr {
+    term SUB(rd, rn, rm);
+}
+
+defn emit_mov(rd: String, imm: Int) -> A64Instr {
+    term MOVI(rd, imm);
+}
+
+defn emit_ldr(rd: String, rn: String, offset: Int) -> A64Instr {
+    term LDR(rd, rn, offset);
+}
+
+defn emit_str(rd: String, rn: String, offset: Int) -> A64Instr {
+    term STR(rd, rn, offset);
+}
+
+defn emit_cmp(rn: String, rm: String) -> A64Instr {
+    term CMP(rn, rm);
+}
+
+defn emit_cmp_imm(rn: String, imm: Int) -> A64Instr {
+    term CMP_IMM(rn, imm);
+}
+
+defn emit_b(label: String) -> A64Instr {
+    term B(label);
+}
+
+defn emit_bl(label: String) -> A64Instr {
+    term BL(label);
+}
+
+defn emit_beq(label: String) -> A64Instr {
+    term BEQ(label);
+}
+
+defn emit_bne(label: String) -> A64Instr {
+    term BNE(label);
+}
+
+defn emit_blt(label: String) -> A64Instr {
+    term BLT(label);
+}
+
+defn emit_bgt(label: String) -> A64Instr {
+    term BGT(label);
+}
+
+defn emit_ret() -> A64Instr {
+    term RET;
+}
+
+defn emit_nop() -> A64Instr {
+    term NOP;
+}
+
+defn emit_label(name: String) -> A64Instr {
+    term Label(name);
+}
+
+defn emit_comment(text: String) -> A64Instr {
+    term Comment(text);
+}
+
+// ===== BINARY ENCODING =====
+
+defn encode_instr(instr: A64Instr) -> List<u8> {
+    unification instr(ADDI(rd, rn, imm)) = {
+        // ADD (immediate): 0001000100iiiiii iiiiiiRRRRR RRRRR00000000000
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let imm12 = imm AND 0xFFF;
+        let enc = 0x11000000 | (imm12 << 10) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    unification instr(SUBI(rd, rn, imm)) = {
+        // SUB (immediate): 0101000100iiiiii iiiiiiRRRRR RRRRR00000000000
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let imm12 = imm AND 0xFFF;
+        let enc = 0x51000000 | (imm12 << 10) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    unification instr(ADD(rd, rn, rm)) = {
+        // ADD (register): 0000101100000000 000000RRRRR RRRRRMMMMM
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let rm_num = reg_to_num(rm);
+        let enc = 0x0B000000 | (rm_num << 16) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    unification instr(MOVI(rd, imm)) = {
+        // MOVZ (move wide): 1001001010000000 iiiiiiRRRRR RRRRR00000000000
+        let rd_num = reg_to_num(rd);
+        let imm16 = imm AND 0xFFFF;
+        let enc = 0x92800000 | (imm16 << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    unification instr(LDR(rd, rn, offset)) = {
+        // LDR (literal): 00011000iiiiiiii iiiiiiRRRRR RRRRR00000000000
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let imm19 = (offset / 4) AND 0x7FFFF;
+        let enc = 0x18000000 | (imm19 << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    unification instr(STR(rd, rn, offset)) = {
+        // STR (register offset): 1111100000000000 000000RRRRR RRRRRMMMMM
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let rm_num = reg_to_num(offset);  // Using offset as register for simplicity
+        let enc = 0xF8000000 | (rm_num << 16) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    unification instr(CMP(rn, rm)) = {
+        // SUBS (compare): 0110101100000000 000000RRRRR RRRRRMMMMM
+        let rn_num = reg_to_num(rn);
+        let rm_num = reg_to_num(rm);
+        let enc = 0x6B000000 | (rm_num << 16) | (rn_num << 5) | 31;  // R31 = zero reg
+        term u32_to_le_bytes(enc);
+    };
+    
+    unification instr(B(label)) = {
+        // B (branch): 000101iiiiiiiii iiiiiiiiiiiiiiiiiiii
+        // Placeholder - actual encoding needs label resolution
+        term [0x14, 0x00, 0x00, 0x00];
+    };
+    
+    unification instr(BL(label)) = {
+        // BL (branch with link): 100101iiiiiiiii iiiiiiiiiiiiiiiiiiii
+        term [0x94, 0x00, 0x00, 0x00];
+    };
+    
+    unification instr(BEQ(label)) = {
+        // B.EQ: 01010100iiiiiiiii iiiiiiiiiiiiiiiiiiii
+        term [0x54, 0x00, 0x00, 0x00];
+    };
+    
+    unification instr(BNE(label)) = {
+        // B.NE: 01010100iiiiiiiii iiiiiiiiiiiiiiiiiiii
+        term [0x54, 0x01, 0x00, 0x00];
+    };
+    
+    unification instr(RET) = {
+        // RET: 1101011000111111 00000000000 00000000000
+        term [0xD6, 0x5F, 0x03, 0xC0];
+    };
+    
+    unification instr(NOP) = {
+        // NOP: D503201F
+        term [0x1F, 0x20, 0x03, 0xD5];
+    };
+    
+    unification instr(Label(_)) = {
+        // Labels don't emit code
+        term [];
+    };
+    
+    unification instr(Comment(_)) = {
+        // Comments don't emit code
+        term [];
+    };
+    
+    // Default - unimplemented
+    term [0x00, 0x00, 0x00, 0x00];
+}
+
+defn reg_to_num(reg: String) -> u32 {
+    [reg == "X0"] { term 0; };
+    [reg == "X1"] { term 1; };
+    [reg == "X2"] { term 2; };
+    [reg == "X3"] { term 3; };
+    [reg == "X4"] { term 4; };
+    [reg == "X5"] { term 5; };
+    [reg == "X6"] { term 6; };
+    [reg == "X7"] { term 7; };
+    [reg == "X8"] { term 8; };
+    [reg == "X9"] { term 9; };
+    [reg == "X10"] { term 10; };
+    [reg == "X11"] { term 11; };
+    [reg == "X12"] { term 12; };
+    [reg == "X13"] { term 13; };
+    [reg == "X14"] { term 14; };
+    [reg == "X15"] { term 15; };
+    [reg == "X16"] { term 16; };
+    [reg == "X17"] { term 17; };
+    [reg == "X18"] { term 18; };
+    [reg == "X19"] { term 19; };
+    [reg == "X20"] { term 20; };
+    [reg == "X21"] { term 21; };
+    [reg == "X22"] { term 22; };
+    [reg == "X23"] { term 23; };
+    [reg == "X24"] { term 24; };
+    [reg == "X25"] { term 25; };
+    [reg == "X26"] { term 26; };
+    [reg == "X27"] { term 27; };
+    [reg == "X28"] { term 28; };
+    [reg == "X29"] { term 29; };
+    [reg == "X30"] { term 30; };
+    term 0;
+}
+
+defn u32_to_le_bytes(n: u32) -> List<u8> {
+    term [(n AND 0xFF) as u8, ((n >> 8) AND 0xFF) as u8, ((n >> 16) AND 0xFF) as u8, ((n >> 24) AND 0xFF) as u8];
+}
+
+// ===== REACTOR LOOP GENERATION =====
+
+defn generate_reactor(txns: List<Transaction>) -> List<A64Instr> {
+    let mut instrs: List<A64Instr> = [];
+    
+    // Entry point
+    instrs = instrs.append(emit_label("reactor_entry"));
+    instrs = instrs.append(emit_comment("Save frame pointer"));
+    instrs = instrs.append(emit_subi("X29", "SP", 0));  // FP = SP
+    instrs = instrs.append(emit_subi("SP", "SP", 16));  // Allocate stack
+    
+    // Reactor loop
+    instrs = instrs.append(emit_label("reactor_loop"));
+    instrs = instrs.append(emit_comment("Check each transaction"));
+    
+    // Call each transaction
+    let i: Int = 0;
+    [i < txns.len()] {
+        instrs = instrs.append(emit_bl(txns[i].name + "_check"));
+        &i = i + 1;
+    };
+    
+    // Loop back
+    instrs = instrs.append(emit_b("reactor_loop"));
+    
+    // Exit
+    instrs = instrs.append(emit_label("reactor_exit"));
+    instrs = instrs.append(emit_addi("SP", "X29", 16));  // Deallocate stack
+    instrs = instrs.append(emit_ret());
+    
+    term instrs;
+}
+
+// ===== TRANSACTION CODE GENERATION =====
+
+defn generate_transaction_check(txn: Transaction) -> List<A64Instr> {
+    let mut instrs: List<A64Instr> = [];
+    let mut alloc = new_regalloc();
+    
+    // Label
+    instrs = instrs.append(emit_label(txn.name + "_check"));
+    instrs = instrs.append(emit_comment("Check precondition for " + txn.name));
+    
+    // Load state variables into registers
+    // For each parameter, allocate register and load value
+    let i: Int = 0;
+    [i < txn.params.len()] {
+        let param = txn.params[i];
+        let (reg, new_alloc) = alloc_reg(alloc, None);
+        &alloc = new_alloc;
+        
+        // Load from memory (simplified - assumes state at known offset)
+        instrs = instrs.append(emit_ldr(reg, "X29", i * 8));
+        instrs = instrs.append(emit_comment("Load param: " + param.name));
+        &i = i + 1;
+    };
+    
+    // Evaluate precondition (simplified)
+    // Generate code for: precondition must be true
+    instrs = instrs.append(emit_comment("Evaluate precondition"));
+    // ... precondition code generation ...
+    
+    // If precondition false, return
+    instrs = instrs.append(emit_label(txn.name + "_pre_fail"));
+    instrs = instrs.append(emit_ret());
+    
+    // Execute body
+    instrs = instrs.append(emit_comment("Execute body"));
+    let body_instrs = generate_statement_list(txn.body, alloc);
+    instrs = instrs.append_all(body_instrs);
+    
+    // Return success
+    instrs = instrs.append(emit_ret());
+    
+    term instrs;
+}
+
+defn generate_statement_list(stmts: List<Statement>, alloc: RegisterAllocator) -> List<A64Instr> {
+    let mut instrs: List<A64Instr> = [];
+    let mut current_alloc = alloc;
+    
+    let i: Int = 0;
+    [i < stmts.len()] {
+        let (stmt_instrs, new_alloc) = generate_statement(stmts[i], current_alloc);
+        instrs = instrs.append_all(stmt_instrs);
+        &current_alloc = new_alloc;
+        &i = i + 1;
+    };
+    
+    term (instrs, current_alloc);
+}
+
+defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64Instr>, RegisterAllocator) {
+    unification stmt(StmtLet(name, _, Some(init))) = {
+        // let name = init;
+        let (expr_instrs, new_alloc) = generate_expr(*init, alloc);
+        let (reg, final_alloc) = alloc_reg(new_alloc, None);
+        
+        let mut instrs = expr_instrs;
+        instrs = instrs.append(emit_comment("Store let binding: " + name));
+        // Store to stack slot (simplified)
+        instrs = instrs.append(emit_str(reg, "X29", 0));
+        
+        term (instrs, final_alloc);
+    };
+    
+    unification stmt(StmtAssign(lhs, rhs)) = {
+        // lhs = rhs;
+        let (expr_instrs, new_alloc) = generate_expr(*rhs, alloc);
+        
+        let mut instrs = expr_instrs;
+        instrs = instrs.append(emit_comment("Assignment"));
+        // Store result (simplified)
+        
+        term (instrs, new_alloc);
+    };
+    
+    unification stmt(StmtTerm(values)) = {
+        // term [values];
+        let mut instrs: List<A64Instr> = [];
+        let mut current_alloc = alloc;
+        
+        let i: Int = 0;
+        [i < values.len()] {
+            [values[i].is_some()] {
+                let (expr_instrs, new_alloc) = generate_expr(values[i].unwrap(), current_alloc);
+                instrs = instrs.append_all(expr_instrs);
+                &current_alloc = new_alloc;
+            };
+            &i = i + 1;
+        };
+        
+        instrs = instrs.append(emit_ret());
+        term (instrs, current_alloc);
+    };
+    
+    unification stmt(StmtGuarded(condition, body)) = {
+        // [condition] { body }
+        let (cond_instrs, new_alloc) = generate_expr(*condition, alloc);
+        
+        let mut instrs = cond_instrs;
+        
+        // Branch if false
+        let false_label = "guard_false_" + String(alloc.next_spill);
+        instrs = instrs.append(emit_cmp_imm("X0", 0));  // Assume result in X0
+        instrs = instrs.append(emit_beq(false_label));
+        
+        // Generate body
+        let (body_instrs, body_alloc) = generate_statement_list(body, new_alloc);
+        instrs = instrs.append_all(body_instrs);
+        
+        // False label
+        instrs = instrs.append(emit_label(false_label));
+        
+        term (instrs, body_alloc);
+    };
+    
+    // Default - no code
+    term ([], alloc);
+}
+
+defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, RegisterAllocator) {
+    unification expr(ExprInt(n)) = {
+        let (reg, new_alloc) = alloc_reg(alloc, None);
+        let instrs = [emit_mov(reg, n as Int)];
+        term (instrs, new_alloc);
+    };
+    
+    unification expr(ExprVar(name)) = {
+        // Load variable from memory
+        let (reg, new_alloc) = alloc_reg(alloc, None);
+        let instrs = [
+            emit_comment("Load var: " + name),
+            emit_ldr(reg, "X29", 0)  // Simplified offset
+        ];
+        term (instrs, new_alloc);
+    };
+    
+    unification expr(ExprBinOp(op, left, right)) = {
+        // Generate code for left operand
+        let (left_instrs, left_alloc) = generate_expr(*left, alloc);
+        
+        // Generate code for right operand
+        let (right_instrs, right_alloc) = generate_expr(*right, left_alloc);
+        
+        // Combine with operator
+        let (result_reg, final_alloc) = alloc_reg(right_alloc, None);
+        let mut instrs = left_instrs;
+        instrs = instrs.append_all(right_instrs);
+        
+        [op == "+"] {
+            instrs = instrs.append(emit_add(result_reg, "X0", "X1"));  // Assume results in X0, X1
+        };
+        [op == "-"] {
+            instrs = instrs.append(emit_sub(result_reg, "X0", "X1"));
+        };
+        
+        term (instrs, final_alloc);
+    };
+    
+    // Default - no code
+    term ([], alloc);
+}
+
+// ===== BINARY OUTPUT =====
+
+defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
+    let mut binary: List<u8> = [];
+    
+    let i: Int = 0;
+    [i < instrs.len()] {
+        let bytes = encode_instr(instrs[i]);
+        binary = binary.append_all(bytes);
+        &i = i + 1;
+    };
+    
+    term binary;
+}
+
+// ===== MAIN ENTRY POINT =====
+
+defn generate_aarch64(program: Program) -> List<u8> {
+    let mut all_instrs: List<A64Instr> = [];
+    
+    // Extract transactions
+    let mut txns: List<Transaction> = [];
+    let i: Int = 0;
+    [i < program.items.len()] {
+        unification program.items[i](TopTxn(txn)) = {
+            txns = txns.append(txn);
+        };
+        &i = i + 1;
+    };
+    
+    // Generate reactor loop
+    let reactor_instrs = generate_reactor(txns);
+    all_instrs = all_instrs.append_all(reactor_instrs);
+    
+    // Generate transaction check functions
+    let j: Int = 0;
+    [j < txns.len()] {
+        let txn_instrs = generate_transaction_check(txns[j]);
+        all_instrs = all_instrs.append_all(txn_instrs);
+        &j = j + 1;
+    };
+    
+    // Emit binary
+    term emit_binary(all_instrs);
+}
