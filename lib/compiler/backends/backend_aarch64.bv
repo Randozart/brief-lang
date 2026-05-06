@@ -85,7 +85,7 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
     [hint.is_some()] {
         let reg = hint.unwrap();
         [!alloc.used_regs.contains(reg)] {
-            let mut used = alloc.used_regs;
+            let used = alloc.used_regs;
             used = used.insert(reg);
             term (reg, RegisterAllocator {
                 used_regs: used,
@@ -102,7 +102,7 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
     let i: Int = 0;
     [i < regs.len()] {
         [!alloc.used_regs.contains(regs[i])] {
-            let mut used = alloc.used_regs;
+            let used = alloc.used_regs;
             used = used.insert(regs[i]);
             term (regs[i], RegisterAllocator {
                 used_regs: used,
@@ -120,7 +120,7 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
 }
 
 defn free_reg(alloc: RegisterAllocator, reg: String) -> RegisterAllocator {
-    let mut used = alloc.used_regs;
+    let used = alloc.used_regs;
     used = used.remove(reg);
     term RegisterAllocator {
         used_regs: used,
@@ -360,7 +360,7 @@ defn u32_to_le_bytes(n: u32) -> List<u8> {
 // ===== REACTOR LOOP GENERATION =====
 
 defn generate_reactor(txns: List<Transaction>) -> List<A64Instr> {
-    let mut instrs: List<A64Instr> = [];
+    let instrs: List<A64Instr> = [];
     
     // Entry point
     instrs = instrs.append(emit_label("reactor_entry"));
@@ -393,8 +393,8 @@ defn generate_reactor(txns: List<Transaction>) -> List<A64Instr> {
 // ===== TRANSACTION CODE GENERATION =====
 
 defn generate_transaction_check(txn: Transaction) -> List<A64Instr> {
-    let mut instrs: List<A64Instr> = [];
-    let mut alloc = new_regalloc();
+    let instrs: List<A64Instr> = [];
+    let alloc = new_regalloc();
     
     // Label
     instrs = instrs.append(emit_label(txn.name + "_check"));
@@ -435,8 +435,8 @@ defn generate_transaction_check(txn: Transaction) -> List<A64Instr> {
 }
 
 defn generate_statement_list(stmts: List<Statement>, alloc: RegisterAllocator) -> List<A64Instr> {
-    let mut instrs: List<A64Instr> = [];
-    let mut current_alloc = alloc;
+    let instrs: List<A64Instr> = [];
+    let current_alloc = alloc;
     
     let i: Int = 0;
     [i < stmts.len()] {
@@ -455,7 +455,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         let (expr_instrs, new_alloc) = generate_expr(*init, alloc);
         let (reg, final_alloc) = alloc_reg(new_alloc, None);
         
-        let mut instrs = expr_instrs;
+        let instrs = expr_instrs;
         instrs = instrs.append(emit_comment("Store let binding: " + name));
         // Store to stack slot (simplified)
         instrs = instrs.append(emit_str(reg, "X29", 0));
@@ -467,7 +467,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         // lhs = rhs;
         let (expr_instrs, new_alloc) = generate_expr(*rhs, alloc);
         
-        let mut instrs = expr_instrs;
+        let instrs = expr_instrs;
         instrs = instrs.append(emit_comment("Assignment"));
         // Store result (simplified)
         
@@ -476,8 +476,8 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
     
     unification stmt(StmtTerm(values)) = {
         // term [values];
-        let mut instrs: List<A64Instr> = [];
-        let mut current_alloc = alloc;
+        let instrs: List<A64Instr> = [];
+        let current_alloc = alloc;
         
         let i: Int = 0;
         [i < values.len()] {
@@ -497,7 +497,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         // [condition] { body }
         let (cond_instrs, new_alloc) = generate_expr(*condition, alloc);
         
-        let mut instrs = cond_instrs;
+        let instrs = cond_instrs;
         
         // Branch if false
         let false_label = "guard_false_" + String(alloc.next_spill);
@@ -544,7 +544,7 @@ defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, Reg
         
         // Combine with operator
         let (result_reg, final_alloc) = alloc_reg(right_alloc, None);
-        let mut instrs = left_instrs;
+        let instrs = left_instrs;
         instrs = instrs.append_all(right_instrs);
         
         [op == "+"] {
@@ -564,7 +564,7 @@ defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, Reg
 // ===== BINARY OUTPUT =====
 
 defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
-    let mut binary: List<u8> = [];
+    let binary: List<u8> = [];
     
     let i: Int = 0;
     [i < instrs.len()] {
@@ -579,10 +579,10 @@ defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
 // ===== MAIN ENTRY POINT =====
 
 defn generate_aarch64(program: Program) -> List<u8> {
-    let mut all_instrs: List<A64Instr> = [];
+    let all_instrs: List<A64Instr> = [];
     
     // Extract transactions
-    let mut txns: List<Transaction> = [];
+    let txns: List<Transaction> = [];
     let i: Int = 0;
     [i < program.items.len()] {
         unification program.items[i](TopTxn(txn)) = {

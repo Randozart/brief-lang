@@ -27,7 +27,7 @@ use brief_compiler::ast::HardwareConfig;
 let hw_config: HardwareConfig = toml::from_str(&std::fs::read_to_string("hardware.toml")?)?;
 
 // Generate Verilog
-let mut gen = VerilogGenerator::new(&hw_config.project.name, hw_config.clone());
+let gen = VerilogGenerator::new(&hw_config.project.name, hw_config.clone());
 let sv = gen.generate_auto(&program);  // Auto-detects interface type
 std::fs::write(format!("{}.sv", hw_config.project.name), sv)?;
 

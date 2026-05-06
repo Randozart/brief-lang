@@ -98,7 +98,7 @@ UTF-8 Character Iteration:
   Emoji length: char.len_utf8() = 4 bytes
 
 Fixed Code:
-  let mut byte_pos = start;
+  let byte_pos = start;
   for ch in self.source[start..].chars() {
     if ch == '>' { break; }
     byte_pos += ch.len_utf8();  ← Properly advance by char width

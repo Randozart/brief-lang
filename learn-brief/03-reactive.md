@@ -1,6 +1,6 @@
 # Reactive Transactions
 
-Reactive transactions fire **automatically** when their precondition becomes true. No explicit call needed.
+Reactive transactions fire **automatically** when their precondition becomes true. The compiler proves they can terminate, then optimizes them to loop until termination.
 
 ## 1. The `rct` Keyword
 
@@ -20,26 +20,56 @@ rct txn auto_increment() [counter < 100][counter == @counter + 1] {
 };
 ```
 
-**The difference:**
-- Passive: You call `increment()`
-- Reactive: Fires automatically when `counter < 100`
+**How it works:**
+1. Compiler verifies the postcondition can be satisfied (proves termination)
+2. At runtime, transaction fires when precondition is true
+3. **Loops until postcondition is met** (not just once!)
+4. Only stops when `term` is reached with postcondition satisfied
 
-## 2. How Reactivity Works
+## 2. Termination Verification
 
-The Brief runtime continuously checks all reactive transactions:
+The compiler **proves** reactive transactions can terminate:
 
+```brief
+// ✅ VERIFIES - provably terminates
+rct txn increment() [counter < 100][counter == @counter + 1] {
+    &counter = counter + 1;
+    term;
+};
+// Compiler proves: counter increases by 1 each iteration, will reach 100
+
+// ❌ REJECTED - cannot prove termination
+rct txn bad_increment() [counter < 100][counter == @counter + 1] {
+    [counter < 50] {
+        &counter = counter + 1;
+    };
+    // No else branch - might not satisfy postcondition!
+    term;
+};
+// Error: Postcondition not satisfied on all paths
 ```
-1. State changes (counter = 50)
-2. Reactor scans reactive transactions
-3. Finds auto_increment: [counter < 100] ✓
-4. Fires auto_increment automatically
-5. counter = 51
-6. Loop back to step 2
+
+## 3. Optimized Execution
+
+Once termination is proven, the compiler optimizes:
+
+```brief
+rct txn fill_buffer() [buffer.len() < 100][buffer.len() == 100] {
+    &buffer = buffer.append(read_item());
+    term;
+};
 ```
 
-This continues until no reactive transactions can fire (equilibrium).
+**Compilation:**
+```rust
+// Optimized loop (no repeated precondition checks needed)
+while buffer.len() < 100 {
+    buffer.append(read_item());
+    // Compiler knows this WILL reach 100
+}
+```
 
-## 3. Reactive Chains
+## 4. Reactive Chains
 
 Reactive transactions can trigger each other:
 
@@ -57,35 +87,18 @@ rct txn finish() [count >= 10 && !done][done == true] {
     println("Done!");
     term;
 };
-
-// Execution:
-// increment fires 10 times (count: 0→10)
-// finish fires once (done: false→true)
 ```
 
-## 4. Mutual Exclusion
-
-The compiler prevents reactive conflicts:
-
-```brief
-// ❌ This FAILS - mutual exclusion violation
-rct async txn reader() [!writing][reading = true] { ... }
-rct async txn writer() [!reading][writing = true] { ... }
-
-// Error: Both transactions can fire simultaneously
-// reader reads 'reading', writer writes 'reading'
-```
-
-**Fix with guards:**
-```brief
-// ✅ This PASSES
-rct async txn reader() [!writing && readers == 0][readers = 1] { ... }
-rct async txn writer() [readers == 0 && !writing][writing = true] { ... }
-```
+**Execution:**
+1. `increment` fires repeatedly (count: 0→10)
+2. When count >= 10, `increment` precondition fails
+3. `finish` precondition becomes true
+4. `finish` fires once, sets `done = true`
+5. Equilibrium reached (no more transactions can fire)
 
 ## 5. Async Reactive Transactions
 
-Add `async` for concurrent execution:
+Add `async` for concurrent execution (compiler verifies safety):
 
 ```brief
 rct async txn fetch_data() [needs_update][data != @data] {
@@ -104,7 +117,10 @@ rct async txn process_data() [data != @processed_data][processed == true] {
 };
 ```
 
-Both can run concurrently (verified safe by compiler).
+**Compiler verifies:**
+- No race conditions (mutual exclusion)
+- No deadlocks (no circular dependencies)
+- Both can terminate independently
 
 ## 6. Common Patterns
 
@@ -148,7 +164,7 @@ rct txn notify_observers() [subject_value != @notified_value][true] {
     let i: Int = 0;
     [i < observers.len()] {
         notify(observers[i], subject_value);
-        &i = i + 1;
+        i = i + 1;
     };
     &notified_value = subject_value;
     term;
@@ -162,7 +178,7 @@ let debounce_time: Int = 100;  // ms
 
 rct txn debounced_action() 
     [current_time() - last_trigger > debounce_time]
-    [last_trigger == @current_time()]
+    [last_trigger == current_time()]
 {
     do_action();
     &last_trigger = current_time();
@@ -235,9 +251,10 @@ rct txn clear_cart() [items > 0][items == 0 && total == 0.0] {
 ```
 
 **Reactive chain:**
-1. `add_item` fires 11 times
-2. `apply_bulk_discount` fires automatically (items > 10, total > 100)
-3. Cart now has 10% discount applied
+1. `add_item` fires 11 times (items: 0→11, total accumulates)
+2. When items > 10 AND total > 100, `apply_bulk_discount` precondition true
+3. `apply_bulk_discount` fires, applies 10% discount
+4. Equilibrium: no more transactions can fire
 
 ## Exercises
 

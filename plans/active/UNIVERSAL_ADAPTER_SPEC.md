@@ -271,7 +271,7 @@ pub struct CBackend {
 
 impl CBackend {
     pub fn generate(&mut self, program: &Program, stem: &str) -> String {
-        let mut output = String::new();
+        let output = String::new();
 
         // 1. Inject header from TOML
         if let Some(header) = &self.spec. codegen. templates. header {
@@ -314,7 +314,7 @@ pub struct TypeScriptBackend {
 
 impl TypeScriptBackend {
     pub fn generate(&mut self, program: &Program, stem: &str) -> String {
-        let mut output = String::new();
+        let output = String::new();
 
         if let Some(header) = &self.spec.codegen.templates.header {
             output.push_str(header);

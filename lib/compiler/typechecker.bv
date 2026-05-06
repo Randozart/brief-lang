@@ -16,7 +16,7 @@ struct TypeContext {
 // ===== CONTEXT OPERATIONS =====
 
 defn new_context() -> TypeContext {
-    let mut ctx = TypeContext {
+    let ctx = TypeContext {
         scopes: new_stack(),
         functions: new_map(),
         transactions: new_map(),
@@ -30,7 +30,7 @@ defn new_context() -> TypeContext {
 }
 
 defn enter_scope(ctx: TypeContext) -> TypeContext {
-    let mut scopes = ctx.scopes;
+    let scopes = ctx.scopes;
     scopes = scopes.push(new_map());
     term TypeContext {
         scopes: scopes,
@@ -57,7 +57,7 @@ defn exit_scope(ctx: TypeContext) -> TypeContext {
 }
 
 defn add_binding(ctx: TypeContext, name: String, ty: Type) -> Result<TypeContext, String> {
-    let mut scopes = ctx.scopes;
+    let scopes = ctx.scopes;
     [!scopes.is_empty()] {
         let (mut current, rest) = scopes.pop().unwrap();
         current = current.insert(name, ty);
@@ -90,7 +90,7 @@ defn lookup_type(ctx: TypeContext, name: String) -> Option<Type> {
 }
 
 defn add_function(ctx: TypeContext, defn: Definition) -> TypeContext {
-    let mut functions = ctx.functions;
+    let functions = ctx.functions;
     functions = functions.insert(defn.name, defn);
     term TypeContext {
         scopes: ctx.scopes,
@@ -104,7 +104,7 @@ defn add_function(ctx: TypeContext, defn: Definition) -> TypeContext {
 }
 
 defn add_transaction(ctx: TypeContext, txn: Transaction) -> TypeContext {
-    let mut transactions = ctx.transactions;
+    let transactions = ctx.transactions;
     transactions = transactions.insert(txn.name, txn);
     term TypeContext {
         scopes: ctx.scopes,
@@ -136,7 +136,7 @@ defn apply_subst(ty: Type, subst: Substitution) -> Type {
             term apply_subst(bound, subst);
         };
         [args.len() > 0] {
-            let mut new_args: List<Type> = [];
+            let new_args: List<Type> = [];
             let i: Int = 0;
             [i < args.len()] {
                 new_args = new_args.append(apply_subst(args[i], subst));
@@ -185,7 +185,7 @@ defn unify(t1: Type, t2: Type, subst: Substitution) -> Result<Substitution, Stri
     unification (t1, t2) = (TypeNamed(name1, args1), TypeNamed(name2, args2)) {
         [name1 == name2] {
             [args1.len() == args2.len()] {
-                let mut new_subst = subst;
+                let new_subst = subst;
                 let i: Int = 0;
                 [i < args1.len()] {
                     new_subst = unify(args1[i], args2[i], new_subst)?;
@@ -209,7 +209,7 @@ defn unify_var(name: String, ty: Type, subst: Substitution) -> Result<Substituti
     };
     
     // Add binding
-    let mut bindings = subst.bindings;
+    let bindings = subst.bindings;
     bindings = bindings.insert(name, ty);
     term Ok(Substitution { bindings: bindings });
 }
@@ -301,7 +301,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
         let right_result = infer_expr(*right, ctx)?;
         
         // Unify operand types
-        let mut subst = left_result.subst;
+        let subst = left_result.subst;
         subst = unify(left_result.ty, right_result.ty, subst)?;
         
         // Determine result type based on operator
@@ -332,7 +332,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
             let defn = ctx.functions.get(name).unwrap();
             
             // Infer argument types
-            let mut subst = empty_subst();
+            let subst = empty_subst();
             let i: Int = 0;
             [i < args.len()] {
                 let arg_result = infer_expr(args[i], ctx)?;
@@ -355,7 +355,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
 // ===== TYPE CHECKING =====
 
 defn check_program(program: Program) -> Result<TypedProgram, String> {
-    let mut ctx = new_context();
+    let ctx = new_context();
     
     // First pass: collect definitions
     let i: Int = 0;
@@ -392,7 +392,7 @@ defn check_program(program: Program) -> Result<TypedProgram, String> {
 
 defn check_definition(defn: Definition, ctx: TypeContext) -> Result<(), String> {
     // Enter function scope
-    let mut ctx = ctx.enter_scope();
+    let ctx = ctx.enter_scope();
     
     // Add parameters to scope
     let i: Int = 0;
@@ -406,7 +406,7 @@ defn check_definition(defn: Definition, ctx: TypeContext) -> Result<(), String> 
     
     // Check return type matches
     [defn.output_type.is_some()] {
-        let mut subst = empty_subst();
+        let subst = empty_subst();
         subst = unify(body_ty, defn.output_type.unwrap(), subst)?;
     };
     
@@ -415,7 +415,7 @@ defn check_definition(defn: Definition, ctx: TypeContext) -> Result<(), String> 
 
 defn check_transaction(txn: Transaction, ctx: TypeContext) -> Result<(), String> {
     // Enter transaction scope
-    let mut ctx = ctx.enter_scope();
+    let ctx = ctx.enter_scope();
     
     // Add parameters to scope
     let i: Int = 0;
@@ -443,8 +443,8 @@ defn check_transaction(txn: Transaction, ctx: TypeContext) -> Result<(), String>
 }
 
 defn check_block(stmts: List<Statement>, ctx: TypeContext) -> Result<(Type, TypeContext), String> {
-    let mut ctx = ctx;
-    let mut last_ty: Type = TypeVoid;
+    let ctx = ctx;
+    let last_ty: Type = TypeVoid;
     
     let i: Int = 0;
     [i < stmts.len()] {
@@ -459,13 +459,13 @@ defn check_block(stmts: List<Statement>, ctx: TypeContext) -> Result<(Type, Type
 
 defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeContext), String> {
     unification stmt(StmtLet(name, var_type, init)) = {
-        let mut ctx = ctx;
-        let mut ty: Type = TypeVoid;
+        let ctx = ctx;
+        let ty: Type = TypeVoid;
         
         [init.is_some()] {
             let (init_ty, _) = infer_expr(init.unwrap(), ctx)?;
             [var_type.is_some()] {
-                let mut subst = empty_subst();
+                let subst = empty_subst();
                 subst = unify(init_ty, var_type.unwrap(), subst)?;
                 &ty = var_type.unwrap();
             };
@@ -485,7 +485,7 @@ defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeCon
         let (lhs_ty, _) = infer_expr(*lhs, ctx)?;
         let (rhs_ty, _) = infer_expr(*rhs, ctx)?;
         
-        let mut subst = empty_subst();
+        let subst = empty_subst();
         subst = unify(lhs_ty, rhs_ty, subst)?;
         
         term (TypeVoid, ctx);
@@ -546,7 +546,7 @@ defn type_to_string(ty: Type) -> String {
     unification ty(TypeData) = "Data";
     unification ty(TypeVoid) = "Void";
     unification ty(TypeNamed(name, args)) = {
-        let mut sb = new_builder();
+        let sb = new_builder();
         sb = sb.append_str(name);
         [args.len() > 0] {
             sb = sb.append_char('<');

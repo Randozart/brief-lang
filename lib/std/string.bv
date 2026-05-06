@@ -320,7 +320,7 @@ defn is_numeric_str(s: String) [true][result == true || result == false] -> Bool
 };
 
 defn to_lower_str(s: String) [true][result.len() == s.len()] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < s.len()] {
         let c = s[i..i+1];
@@ -331,7 +331,7 @@ defn to_lower_str(s: String) [true][result.len() == s.len()] -> String {
 };
 
 defn to_upper_str(s: String) [true][result.len() == s.len()] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < s.len()] {
         let c = s[i..i+1];
@@ -377,7 +377,7 @@ defn capitalize(s: String) [true][result.len() == s.len()] -> String {
     [s.len() == 0] {
         term s;
     };
-    let mut sb = new_builder();
+    let sb = new_builder();
     let first = s[0..1];
     sb = sb.append_char(first.to_upper());
     let i: Int = 1;
@@ -390,8 +390,8 @@ defn capitalize(s: String) [true][result.len() == s.len()] -> String {
 };
 
 defn title_case(s: String) [true][result.len() == s.len()] -> String {
-    let mut sb = new_builder();
-    let mut new_word: Bool = true;
+    let sb = new_builder();
+    let new_word: Bool = true;
     let i: Int = 0;
     [i < s.len()] {
         let c = s[i..i+1];
@@ -414,7 +414,7 @@ defn title_case(s: String) [true][result.len() == s.len()] -> String {
 };
 
 defn reverse_str(s: String) [true][result.len() == s.len()] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < s.len()] {
         let c = s[s.len()-1-i..s.len()-i];
@@ -452,7 +452,7 @@ defn count_substr(s: String, substr: String) [substr.len() > 0][result >= 0] -> 
 };
 
 defn repeat_char(c: Char, n: Int) [n >= 0][result.len() == n] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < n] {
         sb = sb.append_char(c);
@@ -466,7 +466,7 @@ defn pad_center(s: String, width: Int) [width >= s.len()][result.len() == width.
     let left_pad: Int = padding / 2;
     let right_pad: Int = padding - left_pad;
     
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < left_pad] {
         sb = sb.append_char(' ');
@@ -492,7 +492,7 @@ defn truncate_with_ellipsis(s: String, max_len: Int) [max_len >= 3][result.len()
     [s.len() <= max_len] {
         term s;
     };
-    let mut sb = new_builder();
+    let sb = new_builder();
     sb = sb.append_str(s[0..max_len-3]);
     sb = sb.append_str("...");
     term sb.to_string();
@@ -502,7 +502,7 @@ defn ensure_prefix(s: String, prefix: String) [true][result.len() >= s.len()] ->
     [s.starts_with(prefix)] {
         term s;
     };
-    let mut sb = new_builder();
+    let sb = new_builder();
     sb = sb.append_str(prefix);
     sb = sb.append_str(s);
     term sb.to_string();
@@ -512,7 +512,7 @@ defn ensure_suffix(s: String, suffix: String) [true][result.len() >= s.len()] ->
     [s.ends_with(suffix)] {
         term s;
     };
-    let mut sb = new_builder();
+    let sb = new_builder();
     sb = sb.append_str(s);
     sb = sb.append_str(suffix);
     term sb.to_string();
@@ -534,7 +534,7 @@ defn remove_suffix(s: String, suffix: String) [true][result.len() <= s.len()] ->
 
 defn strip_chars(s: String, chars: String) [true][result.len() <= s.len()] -> String {
     // Strip from left
-    let mut start: Int = 0;
+    let start: Int = 0;
     [start < s.len()] {
         let c = s[start..start+1];
         [chars.contains(c)] {
@@ -546,7 +546,7 @@ defn strip_chars(s: String, chars: String) [true][result.len() <= s.len()] -> St
     };
     
     // Strip from right
-    let mut end: Int = s.len();
+    let end: Int = s.len();
     [end > start] {
         let c = s[end-1..end];
         [chars.contains(c)] {
@@ -620,7 +620,7 @@ defn is_numeric_str(s: String) [true][result == true || result == false] -> Bool
 };
 
 defn to_lower_str(s: String) [true][result.len() == s.len()] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < s.len()] {
         let c = s[i..i+1];
@@ -631,7 +631,7 @@ defn to_lower_str(s: String) [true][result.len() == s.len()] -> String {
 };
 
 defn to_upper_str(s: String) [true][result.len() == s.len()] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < s.len()] {
         let c = s[i..i+1];
@@ -677,7 +677,7 @@ defn capitalize(s: String) [true][result.len() == s.len()] -> String {
     [s.len() == 0] {
         term s;
     };
-    let mut sb = new_builder();
+    let sb = new_builder();
     let first = s[0..1];
     sb = sb.append_char(first.to_upper());
     let i: Int = 1;
@@ -690,8 +690,8 @@ defn capitalize(s: String) [true][result.len() == s.len()] -> String {
 };
 
 defn title_case(s: String) [true][result.len() == s.len()] -> String {
-    let mut sb = new_builder();
-    let mut new_word: Bool = true;
+    let sb = new_builder();
+    let new_word: Bool = true;
     let i: Int = 0;
     [i < s.len()] {
         let c = s[i..i+1];
@@ -714,7 +714,7 @@ defn title_case(s: String) [true][result.len() == s.len()] -> String {
 };
 
 defn reverse_str(s: String) [true][result.len() == s.len()] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < s.len()] {
         let c = s[s.len()-1-i..s.len()-i];
@@ -752,7 +752,7 @@ defn count_substr(s: String, substr: String) [substr.len() > 0][result >= 0] -> 
 };
 
 defn repeat_char(c: Char, n: Int) [n >= 0][result.len() == n] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < n] {
         sb = sb.append_char(c);
@@ -766,7 +766,7 @@ defn pad_center(s: String, width: Int) [width >= s.len()][result.len() == width.
     let left_pad: Int = padding / 2;
     let right_pad: Int = padding - left_pad;
     
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < left_pad] {
         sb = sb.append_char(' ');
@@ -792,7 +792,7 @@ defn truncate_with_ellipsis(s: String, max_len: Int) [max_len >= 3][result.len()
     [s.len() <= max_len] {
         term s;
     };
-    let mut sb = new_builder();
+    let sb = new_builder();
     sb = sb.append_str(s[0..max_len-3]);
     sb = sb.append_str("...");
     term sb.to_string();
@@ -802,7 +802,7 @@ defn ensure_prefix(s: String, prefix: String) [true][result.len() >= s.len()] ->
     [s.starts_with(prefix)] {
         term s;
     };
-    let mut sb = new_builder();
+    let sb = new_builder();
     sb = sb.append_str(prefix);
     sb = sb.append_str(s);
     term sb.to_string();
@@ -812,7 +812,7 @@ defn ensure_suffix(s: String, suffix: String) [true][result.len() >= s.len()] ->
     [s.ends_with(suffix)] {
         term s;
     };
-    let mut sb = new_builder();
+    let sb = new_builder();
     sb = sb.append_str(s);
     sb = sb.append_str(suffix);
     term sb.to_string();
@@ -834,7 +834,7 @@ defn remove_suffix(s: String, suffix: String) [true][result.len() <= s.len()] ->
 
 defn strip_chars(s: String, chars: String) [true][result.len() <= s.len()] -> String {
     // Strip from left
-    let mut start: Int = 0;
+    let start: Int = 0;
     [start < s.len()] {
         let c = s[start..start+1];
         [chars.contains(c)] {
@@ -846,7 +846,7 @@ defn strip_chars(s: String, chars: String) [true][result.len() <= s.len()] -> St
     };
     
     // Strip from right
-    let mut end: Int = s.len();
+    let end: Int = s.len();
     [end > start] {
         let c = s[end-1..end];
         [chars.contains(c)] {

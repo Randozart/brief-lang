@@ -429,7 +429,7 @@ defn compile(source: String) -> Result<Program, String> {
     let tokens = tokenize(source)?;
     
     // Phase 2: Parsing
-    let mut parser = new_parser(tokens);
+    let parser = new_parser(tokens);
     let program = parse_program(parser)?;
     
     term Ok(program);

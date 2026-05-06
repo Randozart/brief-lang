@@ -57,7 +57,7 @@ defn create_dir(path: String) -> Result<Void, IOError> {
 // ===== PATH OPERATIONS (Native) =====
 
 defn join_path(parts: List<String>) -> String [true][result.len() > 0] {
-    let mut result = new_builder();
+    let result = new_builder();
     let i: Int = 0;
     [i < parts.len()] {
         [i > 0] {
@@ -92,7 +92,7 @@ defn file_stem(path: String) -> String [true][result.len() >= 0] {
 defn directory(path: String) -> String [true][result.len() >= 0] {
     let parts = split(path, "/");
     [parts.len() > 1] {
-        let mut result = new_builder();
+        let result = new_builder();
         let i: Int = 0;
         [i < parts.len() - 1] {
             [i > 0] {

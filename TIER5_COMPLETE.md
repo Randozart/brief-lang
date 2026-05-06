@@ -330,7 +330,7 @@ Uses Stack<HashMap> for efficient scope management:
 
 ```brief
 defn enter_scope(ctx: TypeContext) -> TypeContext {
-    let mut scopes = ctx.scopes;
+    let scopes = ctx.scopes;
     scopes = scopes.push(new_map());  // New scope
     term TypeContext { scopes: scopes, ... };
 }
@@ -358,7 +358,7 @@ defn unify_var(name: String, ty: Type, subst: Substitution) -> Result<Substituti
     };
     
     // Add binding
-    let mut bindings = subst.bindings;
+    let bindings = subst.bindings;
     bindings = bindings.insert(name, ty);
     term Ok(Substitution { bindings: bindings });
 }
@@ -426,7 +426,7 @@ defn compile(source: String) -> Result<TypedProgram, String> {
     let tokens = tokenize(source)?;
     
     // Phase 2: Parsing
-    let mut parser = new_parser(tokens);
+    let parser = new_parser(tokens);
     let program = parse_program(parser)?;
     
     // Phase 3: Type Checking

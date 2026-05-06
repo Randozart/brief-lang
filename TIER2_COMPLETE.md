@@ -232,7 +232,7 @@ All string-building operations use StringBuilder for O(1) append:
 
 ```brief
 defn to_lower_str(s: String) -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     let i: Int = 0;
     [i < s.len()] {
         let c = s[i..i+1];
@@ -312,7 +312,7 @@ With Tier 2 complete, the lexer can now:
 1. **String literal processing:**
    ```brief
    defn unescape_string(s: String) -> String {
-       let mut sb = new_builder();
+       let sb = new_builder();
        let i: Int = 1;  // Skip opening quote
        [i < s.len() - 1] {  // Skip closing quote
            let c = s[i..i+1];

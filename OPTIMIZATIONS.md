@@ -73,7 +73,7 @@ defn contains_set(set: HashSet<String>, item: String) -> Bool {
 
 ```brief
 // BEFORE: O(n²) for building string of length n
-let mut s = "";
+let s = "";
 let i: Int = 0;
 [i < n] {
     s = s + "x";  // O(n) - creates new string each time
@@ -82,7 +82,7 @@ let i: Int = 0;
 // Total: O(1 + 2 + 3 + ... + n) = O(n²)
 
 // AFTER: O(n) for building string of length n
-let mut sb = new_builder();
+let sb = new_builder();
 let i: Int = 0;
 [i < n] {
     sb = sb.append_char('x');  // O(1) amortized
@@ -164,8 +164,8 @@ defn to_upper(c: Char) -> Char {
 
 ```brief
 defn tokenize(source: String) -> List<Token> {
-    let mut tokens = [];
-    let mut i: Int = 0;
+    let tokens = [];
+    let i: Int = 0;
     [i < source.len()] {
         // Classify current character - O(1)
         // Read token - O(token_length)
@@ -250,7 +250,7 @@ defn parse_expression(tokens: List<Token>) -> Expr {
 // No operator stack
 // Direct recursive calls based on precedence
 defn parse_expr(precedence: Int) -> Expr {
-    let mut left = parse_primary();
+    let left = parse_primary();
     
     [current_precedence() >= precedence] {
         let op = current_operator();
@@ -395,8 +395,8 @@ defn eval_and_simplify(expr: Expr, state: SymbolicState) -> SymbolicValue {
 
 ```brief
 defn explore_paths(stmts: List<Statement>, state: SymbolicState) -> List<ExecutionPath> {
-    let mut queue = [(stmts, state, [])];
-    let mut paths = [];
+    let queue = [(stmts, state, [])];
+    let paths = [];
     
     [queue.len() > 0] {
         let (remaining, state, constraints) = queue[0];
@@ -480,8 +480,8 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
 // Graph coloring: O(n²) or worse
 // Linear scan: O(n)
 defn allocate_registers(instrs: List<Instruction>) -> List<Instruction> {
-    let mut live_intervals = compute_live_intervals(instrs);  // O(n)
-    let mut registers = [];
+    let live_intervals = compute_live_intervals(instrs);  // O(n)
+    let registers = [];
     
     // Sort by start position: O(n log n)
     live_intervals = sort(live_intervals);
@@ -530,8 +530,8 @@ defn select_instructions(expr: Expr) -> List<Instruction> {
 
 ```brief
 defn peephole_optimize(instrs: List<Instruction>) -> List<Instruction> {
-    let mut result = [];
-    let mut i: Int = 0;
+    let result = [];
+    let i: Int = 0;
     
     [i < instrs.len()] {
         // Check 2-instruction patterns

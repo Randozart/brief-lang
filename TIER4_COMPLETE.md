@@ -311,7 +311,7 @@ let source = "
 ";
 
 let tokens = tokenize(source)?;
-let mut parser = new_parser(tokens);
+let parser = new_parser(tokens);
 let program = parse_program(parser)?;
 
 // program.items contains the AST
@@ -320,7 +320,7 @@ let program = parse_program(parser)?;
 ### Parse Single Expression
 
 ```brief
-let mut parser = new_parser(tokenize("x + y * 2")?);
+let parser = new_parser(tokenize("x + y * 2")?);
 let (expr, _) = parse_expression(parser)?;
 
 // expr = ExprBinOp("+", 
@@ -424,7 +424,7 @@ defn compile(source: String) -> Result<Program, String> {
 
 ```brief
 defn typecheck(program: Program) -> Result<TypedProgram, TypeError> {
-    let mut ctx = new_type_context();
+    let ctx = new_type_context();
     
     for item in program.items {
         unification item(TopDefn(defn)) = {

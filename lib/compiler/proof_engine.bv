@@ -34,7 +34,7 @@ defn initial_state() -> SymbolicState {
 }
 
 defn state_assign(state: SymbolicState, name: String, value: SymbolicValue) -> SymbolicState {
-    let mut vars = state.vars;
+    let vars = state.vars;
     vars = vars.insert(name, value);
     term SymbolicState {
         vars: vars,
@@ -48,7 +48,7 @@ defn state_lookup(state: SymbolicState, name: String) -> Option<SymbolicValue> {
 }
 
 defn state_add_constraint(state: SymbolicState, constraint: SymbolicValue) -> SymbolicState {
-    let mut constraints = state.path_constraints;
+    let constraints = state.path_constraints;
     constraints = constraints.append(constraint);
     term SymbolicState {
         vars: state.vars,
@@ -58,7 +58,7 @@ defn state_add_constraint(state: SymbolicState, constraint: SymbolicValue) -> Sy
 }
 
 defn state_mark_visited(state: SymbolicState, key: String) -> SymbolicState {
-    let mut visited = state.visited;
+    let visited = state.visited;
     visited = visited.insert(key);
     term SymbolicState {
         vars: state.vars,
@@ -225,8 +225,8 @@ struct ExecutionPath {
 }
 
 defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<ExecutionPath> {
-    let mut paths: List<ExecutionPath> = [];
-    let mut work_queue: List<(List<Statement>, SymbolicState, List<SymbolicValue>)> = [];
+    let paths: List<ExecutionPath> = [];
+    let work_queue: List<(List<Statement>, SymbolicState, List<SymbolicValue>)> = [];
     
     // Start with initial state
     work_queue = work_queue.append((stmts, initial, []));
@@ -258,7 +258,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
                 // True branch
                 unification cond_simp(SymBool(true)) = {
                     let new_state = state_add_constraint(state, cond_simp);
-                    let mut new_stmts = body;
+                    let new_stmts = body;
                     new_stmts = new_stmts.append_all(rest);
                     work_queue = work_queue.append((new_stmts, new_state, constraints));
                 };
@@ -273,7 +273,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
                 [!unification cond_simp(SymBool(_)) = true] {
                     // True path
                     let true_state = state_add_constraint(state, SymBool(true));
-                    let mut true_stmts = body;
+                    let true_stmts = body;
                     true_stmts = true_stmts.append_all(rest);
                     work_queue = work_queue.append((true_stmts, true_state, constraints));
                     
@@ -330,7 +330,7 @@ struct CounterExample {
 
 defn verify_contract(txn: Transaction) -> ProofResult {
     // Create initial symbolic state with prior state variables
-    let mut initial = initial_state();
+    let initial = initial_state();
     
     // Add prior state for each parameter
     let i: Int = 0;
@@ -344,8 +344,8 @@ defn verify_contract(txn: Transaction) -> ProofResult {
     let paths = explore_paths(txn.body, initial);
     
     // Check each path
-    let mut all_verified = true;
-    let mut counterexample: Option<CounterExample> = None;
+    let all_verified = true;
+    let counterexample: Option<CounterExample> = None;
     
     let i: Int = 0;
     [i < paths.len()] {
@@ -458,7 +458,7 @@ defn check_mutual_exclusion(txn1: Transaction, txn2: Transaction) -> ConflictRes
 }
 
 defn collect_writes(stmts: List<Statement>) -> List<String> {
-    let mut writes: List<String> = [];
+    let writes: List<String> = [];
     
     let i: Int = 0;
     [i < stmts.len()] {
@@ -490,7 +490,7 @@ struct DeadlockResult {
 
 defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
     // Build dependency graph
-    let mut deps: HashMap<String, List<String>> = new_map();
+    let deps: HashMap<String, List<String>> = new_map();
     
     let i: Int = 0;
     [i < txns.len()] {
@@ -499,7 +499,7 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
         let writes = collect_writes(txn.body);
         
         // Find transactions that write to variables this one reads
-        let mut txn_deps: List<String> = [];
+        let txn_deps: List<String> = [];
         let j: Int = 0;
         [j < txns.len()] {
             [i != j] {
@@ -524,8 +524,8 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
     };
     
     // Check for cycles using DFS
-    let mut visited: HashSet<String> = new_set();
-    let mut rec_stack: HashSet<String> = new_set();
+    let visited: HashSet<String> = new_set();
+    let rec_stack: HashSet<String> = new_set();
     
     let i: Int = 0;
     [i < txns.len()] {
@@ -552,9 +552,9 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
 defn dfs_cycle(node: String, deps: HashMap<String, List<String>>, 
                visited: HashSet<String>, rec_stack: HashSet<String>,
                path: List<String>) -> (Bool, List<String>) {
-    let mut visited = visited;
-    let mut rec_stack = rec_stack;
-    let mut path = path;
+    let visited = visited;
+    let rec_stack = rec_stack;
+    let path = path;
     
     visited = visited.insert(node);
     rec_stack = rec_stack.insert(node);
@@ -609,7 +609,7 @@ defn generate_vc(txn: Transaction) -> VerificationCondition {
 defn check_vc(vc: VerificationCondition) -> Result<(), String> {
     // Check if assumptions imply conclusion
     // For each assumption, add to path constraints
-    let mut state = initial_state();
+    let state = initial_state();
     
     let i: Int = 0;
     [i < vc.assumptions.len()] {
@@ -649,7 +649,7 @@ defn sym_to_string(sym: SymbolicValue) -> String {
         term name;
     };
     unification sym(SymBinaryOp(op, left, right)) = {
-        let mut sb = new_builder();
+        let sb = new_builder();
         sb = sb.append_char('(');
         sb = sb.append_str(sym_to_string(*left));
         sb = sb.append_str(" ");
@@ -660,7 +660,7 @@ defn sym_to_string(sym: SymbolicValue) -> String {
         term sb.to_string();
     };
     unification sym(SymUnaryOp(op, operand)) = {
-        let mut sb = new_builder();
+        let sb = new_builder();
         sb = sb.append_char('(');
         sb = sb.append_str(op);
         sb = sb.append_str(sym_to_string(*operand));

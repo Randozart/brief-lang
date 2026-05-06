@@ -379,7 +379,7 @@ fn verify_txn_contract(txn: &Transaction) -> Result<(), Error> {
     
     for (path_idx, path) in paths.iter().enumerate() {
         // Initialize symbolic state from precondition
-        let mut state = SymbolicState::new(pre);
+        let state = SymbolicState::new(pre);
         
         // Walk through the path
         for stmt in path {
@@ -428,16 +428,16 @@ fn verify_txn_contract(txn: &Transaction) -> Result<(), Error> {
 /// Enumerate all possible execution paths through a statement block
 /// Each path is a sequence of statements, with guards either taken or not taken
 fn enumerate_paths(body: &[Statement]) -> Vec<Vec<Statement>> {
-    let mut paths = vec![vec![]];  // Start with one empty path
+    let paths = vec![vec![]];  // Start with one empty path
     
     for stmt in body {
-        let mut new_paths = Vec::new();
+        let new_paths = Vec::new();
         
         for mut path in paths {
             match stmt {
                 Statement::Guarded { condition, stmt: inner } => {
                     // Path 1: Guard taken
-                    let mut path1 = path.clone();
+                    let path1 = path.clone();
                     path1.push(Statement::Guarded {
                         condition: condition.clone(),
                         stmt: inner.clone(),
@@ -446,7 +446,7 @@ fn enumerate_paths(body: &[Statement]) -> Vec<Vec<Statement>> {
                     new_paths.push(path1);
                     
                     // Path 2: Guard not taken (skip this statement)
-                    let mut path2 = path;
+                    let path2 = path;
                     path2.push(stmt.clone());  // Include the guard statement for tracking
                     new_paths.push(path2);
                 }
@@ -477,7 +477,7 @@ fn enumerate_paths(body: &[Statement]) -> Vec<Vec<Statement>> {
 ```rust
 #[test]
 fn test_literal_assignment() {
-    let mut state = SymbolicState::new(&Expr::Literal(Value::Bool(true)));
+    let state = SymbolicState::new(&Expr::Literal(Value::Bool(true)));
     state.assign("x", &Expr::Literal(Value::Int(5)));
     
     let val = state.assignments.get("x").unwrap();
@@ -505,7 +505,7 @@ fn test_arithmetic_simplification() {
 
 #[test]
 fn test_postcondition_equality() {
-    let mut state = SymbolicState::new(&Expr::Literal(Value::Bool(true)));
+    let state = SymbolicState::new(&Expr::Literal(Value::Bool(true)));
     state.assign("x", &Expr::Literal(Value::Int(5)));
     
     let postcond = Expr::Binary(
@@ -519,7 +519,7 @@ fn test_postcondition_equality() {
 
 #[test]
 fn test_postcondition_inequality() {
-    let mut state = SymbolicState::new(&Expr::Literal(Value::Bool(true)));
+    let state = SymbolicState::new(&Expr::Literal(Value::Bool(true)));
     state.assign("x", &Expr::Literal(Value::Int(5)));
     
     let postcond = Expr::Binary(
@@ -533,7 +533,7 @@ fn test_postcondition_inequality() {
 
 #[test]
 fn test_arithmetic_postcondition() {
-    let mut state = SymbolicState::new(&Expr::Literal(Value::Bool(true)));
+    let state = SymbolicState::new(&Expr::Literal(Value::Bool(true)));
     state.assign("x", &Expr::Literal(Value::Int(5)));
     
     let postcond = Expr::Binary(

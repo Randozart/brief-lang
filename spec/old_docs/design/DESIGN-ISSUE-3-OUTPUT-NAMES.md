@@ -184,7 +184,7 @@ pub struct Definition {
 Current `parse_output_types()` pseudocode:
 ```rust
 fn parse_output_types(&mut self) -> Result<Vec<Type>> {
-    let mut types = Vec::new();
+    let types = Vec::new();
     loop {
         types.push(self.parse_type()?);
         if self.peek() != "," { break; }
@@ -197,8 +197,8 @@ fn parse_output_types(&mut self) -> Result<Vec<Type>> {
 New `parse_output_types()`:
 ```rust
 fn parse_output_types(&mut self) -> Result<(Vec<Type>, Vec<Option<String>>)> {
-    let mut types = Vec::new();
-    let mut names = Vec::new();
+    let types = Vec::new();
+    let names = Vec::new();
     
     loop {
         // Check for optional name before type
@@ -224,7 +224,7 @@ fn parse_output_types(&mut self) -> Result<(Vec<Type>, Vec<Option<String>>)> {
     }
     
     // Validation: output names are unique
-    let mut seen = HashSet::new();
+    let seen = HashSet::new();
     for name in names.iter().filter_map(|n| n.as_ref()) {
         if seen.contains(name) {
             return Err(ParseError::DuplicateOutputName(name.clone()));
@@ -270,7 +270,7 @@ fn parse_definition(&mut self) -> Result<Definition> {
 New helper function:
 ```rust
 fn build_output_name_map(defn: &Definition) -> HashMap<String, usize> {
-    let mut map = HashMap::new();
+    let map = HashMap::new();
     
     for (index, name) in defn.output_names.iter().enumerate() {
         if let Some(n) = name {
@@ -296,7 +296,7 @@ fn verify_definition(defn: &Definition) -> Result<(), Error> {
     
     for path in paths {
         // Initialize symbolic state
-        let mut state = SymbolicState::new(pre);
+        let state = SymbolicState::new(pre);
         
         // Walk through path
         for stmt in &path {

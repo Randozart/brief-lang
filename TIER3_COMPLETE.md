@@ -193,7 +193,7 @@ let result = tokenize(source);
 ### Manual Lexing
 
 ```brief
-let mut state = new_lexer("let x = 1;");
+let state = new_lexer("let x = 1;");
 
 let (tok1, state) = next_token(state).unwrap();  // KeywordLet
 let (tok2, state) = next_token(state).unwrap();  // TokenIdentifier("x")
@@ -289,7 +289,7 @@ Handles \n, \t, \r, \\, \":
 defn read_string(state: LexerState) -> (Token, LexerState) {
     &state = advance(state);  // Skip opening "
     
-    let mut sb = new_builder();
+    let sb = new_builder();
     
     [current_char(state).unwrap() != '"'] {
         [current_char(state).unwrap() == '\\'] {
@@ -351,7 +351,7 @@ The lexer produces a `List<Token>` that the parser consumes:
 ```brief
 defn parse_program(source: String) -> Result<Program, ParseError> {
     let tokens = tokenize(source)?;
-    let mut parser = new_parser(tokens);
+    let parser = new_parser(tokens);
     parser.parse()
 };
 ```

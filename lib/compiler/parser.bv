@@ -68,7 +68,7 @@ defn match_token(state: ParserState, token: Token) -> (Bool, ParserState) {
 // ===== PROGRAM PARSING =====
 
 defn parse_program(state: ParserState) -> Result<Program, String> {
-    let mut items: List<TopLevel> = [];
+    let items: List<TopLevel> = [];
     
     [current_token(state) != TokenEof] {
         let (item, new_state) = parse_top_level(state)?;
@@ -134,8 +134,8 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
 // ===== TRANSACTION PARSING =====
 
 defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState), String> {
-    let mut is_async = false;
-    let mut is_reactive = false;
+    let is_async = false;
+    let is_reactive = false;
     
     // Check for rct
     [current_token(state) == KeywordRct] {
@@ -554,7 +554,7 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
 }
 
 defn parse_expr_list(state: ParserState) -> Result<(List<Expr>, ParserState), String> {
-    let mut elements: List<Expr> = [];
+    let elements: List<Expr> = [];
     
     [current_token(state) != DelimRParen && current_token(state) != DelimRBracket] {
         let (expr, new_state) = parse_expression(state)?;
@@ -598,7 +598,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     unification tok(KeywordTerm) = {
         &state = advance(state);
         
-        let mut values: List<Option<Box<Expr>>> = [];
+        let values: List<Option<Box<Expr>>> = [];
         [current_token(state) != OpSemicolon] {
             let (expr, new_state) = parse_expression(state)?;
             &values = values.append(Some(Box::new(expr)));
@@ -735,7 +735,7 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
 defn parse_block(state: ParserState) -> Result<(List<Statement>, ParserState), String> {
     state = expect_token(state, DelimLBrace)?;
     
-    let mut stmts: List<Statement> = [];
+    let stmts: List<Statement> = [];
     [current_token(state) != DelimRBrace] {
         let (stmt, new_state) = parse_statement(state)?;
         &stmts = stmts.append(stmt);
@@ -792,7 +792,7 @@ defn parse_type(state: ParserState) -> Result<(Type, ParserState), String> {
 defn parse_type_params(state: ParserState) -> Result<(List<String>, ParserState), String> {
     state = expect_token(state, OpLt)?;
     
-    let mut params: List<String> = [];
+    let params: List<String> = [];
     [current_token(state) != OpGt] {
         let tok = current_token(state);
         unification tok(TokenIdentifier(name)) = {
@@ -815,7 +815,7 @@ defn parse_type_params(state: ParserState) -> Result<(List<String>, ParserState)
 defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), String> {
     state = expect_token(state, DelimLParen)?;
     
-    let mut params: List<Param> = [];
+    let params: List<Param> = [];
     [current_token(state) != DelimRParen] {
         let tok = current_token(state);
         unification tok(TokenIdentifier(name)) = {

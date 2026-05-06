@@ -72,7 +72,7 @@ impl HardwareValidator {
         let precond_graph = PreconditionGraph::build(program);
         let trigger_graph = TriggerGraph::build(program);
         
-        let mut diagnostics = Vec::new();
+        let diagnostics = Vec::new();
         
         // Rule 1: Check for orphan variables
         diagnostics.extend(Self::check_orphan_variables(program, &write_graph, &trigger_graph, is_ebv));

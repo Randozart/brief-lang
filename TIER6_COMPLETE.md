@@ -90,7 +90,7 @@ defn state_is_visited(state: SymbolicState, key: String) -> Bool
 
 **Usage:**
 ```brief
-let mut state = initial_state();
+let state = initial_state();
 state = state_assign(state, "x", SymInt(42));
 state = state_assign(state, "y", SymVar("x"));  // y = x
 state = state_add_constraint(state, SymBinaryOp(">", SymVar("x"), SymInt(0)));
@@ -471,8 +471,8 @@ Uses BFS with work queue:
 
 ```brief
 defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<ExecutionPath> {
-    let mut paths: List<ExecutionPath> = [];
-    let mut work_queue = [(stmts, initial, [])];
+    let paths: List<ExecutionPath> = [];
+    let work_queue = [(stmts, initial, [])];
     
     [work_queue.len() > 0] {
         let (remaining, state, constraints) = work_queue[0];
@@ -544,7 +544,7 @@ defn verify(source: String) -> Result<VerificationReport, String> {
     let typed_program = check_program(program)?;
     
     // Phase 4: Verify contracts
-    let mut report = VerificationReport::new();
+    let report = VerificationReport::new();
     
     for item in typed_program.items {
         unification item(TopTxn(txn)) = {

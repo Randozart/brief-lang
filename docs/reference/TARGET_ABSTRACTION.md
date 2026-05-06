@@ -300,8 +300,8 @@ pub struct InterfaceProfile {
 impl HardwareLib {
     /// Load all profiles from hardware_lib directory
     pub fn load<P: AsRef<Path>>(base_path: P) -> Result<Self, LoadError> {
-        let mut targets = HashMap::new();
-        let mut interfaces = HashMap::new();
+        let targets = HashMap::new();
+        let interfaces = HashMap::new();
         
         // Load all .toml files from targets/
         for entry in fs::read_dir(base_path.as_ref().join("targets")) {

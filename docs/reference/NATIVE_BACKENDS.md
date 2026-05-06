@@ -55,7 +55,7 @@ impl State {
 }
 
 fn main() {
-    let mut state = State::default();
+    let state = State::default();
     state.inc();
 }
 ```

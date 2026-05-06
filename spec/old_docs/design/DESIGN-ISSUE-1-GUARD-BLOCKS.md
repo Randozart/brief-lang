@@ -201,7 +201,7 @@ fn parse_statement(&mut self) -> Result<Statement> {
         if self.peek() == "{" {
             // Block guard
             self.advance();  // consume {
-            let mut stmts = Vec::new();
+            let stmts = Vec::new();
             
             while self.peek() != "}" {
                 stmts.push(self.parse_statement()?);

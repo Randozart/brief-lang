@@ -146,8 +146,8 @@ Add reactor declaration parsing to `parse_program()`:
 
 ```rust
 fn parse_program(&mut self) -> Result<Program> {
-    let mut reactor_speed: Option<u32> = None;
-    let mut items = Vec::new();
+    let reactor_speed: Option<u32> = None;
+    let items = Vec::new();
     
     // NEW: Check for reactor declaration at start
     if self.peek() == "reactor" {
@@ -186,7 +186,7 @@ Update `parse_rct_transaction()` to accept speed:
 fn parse_rct_transaction(&mut self) -> Result<Transaction> {
     // ... existing parsing ...
     
-    let mut speed: Option<u32> = None;
+    let speed: Option<u32> = None;
     
     // NEW: Check for speed declaration after }
     if self.peek() == "@" {
@@ -451,7 +451,7 @@ fn test_aggressive_speed_warning() {
 
 #[test]
 fn test_scheduler_skip_ratio() {
-    let mut scheduler = ReactorScheduler::new();
+    let scheduler = ReactorScheduler::new();
     scheduler.register_file("file_a".to_string(), Some(10));   // @10Hz
     scheduler.register_file("file_b".to_string(), Some(60));   // @60Hz
     

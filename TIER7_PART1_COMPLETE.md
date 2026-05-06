@@ -148,7 +148,7 @@ defn reg_to_num(reg: String) -> u32 {
 
 ```brief
 defn generate_reactor(txns: List<Transaction>) -> List<A64Instr> {
-    let mut instrs = [];
+    let instrs = [];
     
     // Entry: save frame pointer
     instrs = instrs.append(emit_label("reactor_entry"));
@@ -200,8 +200,8 @@ reactor_exit:
 
 ```brief
 defn generate_transaction_check(txn: Transaction) -> List<A64Instr> {
-    let mut instrs = [];
-    let mut alloc = new_regalloc();
+    let instrs = [];
+    let alloc = new_regalloc();
     
     // Label
     instrs = instrs.append(emit_label(txn.name + "_check"));
@@ -262,7 +262,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> ... {
         let (expr_instrs, new_alloc) = generate_expr(*init, alloc);
         let (reg, final_alloc) = alloc_reg(new_alloc, None);
         
-        let mut instrs = expr_instrs;
+        let instrs = expr_instrs;
         instrs = instrs.append(emit_str(reg, "X29", offset));
         
         term (instrs, final_alloc);
@@ -373,7 +373,7 @@ unification expr(ExprBinOp(op, left, right)) = {
     let (right_instrs, right_alloc) = generate_expr(*right, left_alloc);
     
     let (result_reg, final_alloc) = alloc_reg(right_alloc, None);
-    let mut instrs = left_instrs;
+    let instrs = left_instrs;
     instrs = instrs.append_all(right_instrs);
     
     [op == "+"] {
@@ -400,10 +400,10 @@ add x2, x0, x1       ; x2 = x + y
 
 ```brief
 defn generate_aarch64(program: Program) -> List<u8> {
-    let mut all_instrs = [];
+    let all_instrs = [];
     
     // Extract transactions
-    let mut txns = [];
+    let txns = [];
     for item in program.items {
         unification item(TopTxn(txn)) = {
             txns = txns.append(txn);
@@ -425,7 +425,7 @@ defn generate_aarch64(program: Program) -> List<u8> {
 }
 
 defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
-    let mut binary = [];
+    let binary = [];
     for instr in instrs {
         let bytes = encode_instr(instr);
         binary = binary.append_all(bytes);

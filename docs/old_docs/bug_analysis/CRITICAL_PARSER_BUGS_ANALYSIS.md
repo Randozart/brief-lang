@@ -63,7 +63,7 @@ Replace lines 673-687 with:
 
 ```rust
 fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
-    let mut pos = start;
+    let pos = start;
     
     // Skip to end of opening tag
     while pos < self.source.len() && self.source.chars().nth(pos) != Some('>') {
@@ -78,7 +78,7 @@ fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
     let tag_content = &self.source[start..pos];
     
     // Extract tag name
-    let mut tag_name = String::new();
+    let tag_name = String::new();
     let after_lt = if tag_content.starts_with("<") {
         &tag_content[1..]
     } else {
@@ -102,7 +102,7 @@ fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
     // FIXED: Track nesting depth
     let close_tag = format!("</{}>", tag_name);
     let open_tag_pattern = format!("<{}", tag_name);  // Match <tagname or <tagname>
-    let mut depth = 1;
+    let depth = 1;
     
     while pos < self.source.len() && depth > 0 {
         // Look for either opening or closing tag
@@ -277,7 +277,7 @@ Replace lines 636-687 with:
 ```rust
 fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
     let source_bytes = self.source.as_bytes();
-    let mut pos = start;
+    let pos = start;
 
     // Skip to end of opening tag - use byte indexing properly
     while pos < source_bytes.len() && source_bytes[pos] != b'>' {
@@ -293,7 +293,7 @@ fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
     let tag_content = &self.source[start..pos];
 
     // Extract tag name
-    let mut tag_name = String::new();
+    let tag_name = String::new();
     let after_lt = if tag_content.starts_with("<") {
         &tag_content[1..]
     } else {
@@ -357,8 +357,8 @@ fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), String> {
     // Convert to chars iterator for proper UTF-8 handling
     let chars: Vec<char> = self.source.chars().collect();
     let source_bytes = self.source.as_bytes();
-    let mut byte_pos = start;
-    let mut char_pos = 0;
+    let byte_pos = start;
+    let char_pos = 0;
 
     // Find starting position in chars array
     for (i, c) in self.source[start..].chars().enumerate() {
@@ -657,7 +657,7 @@ Add these test cases in `wasm_gen.rs`:
 ```rust
 #[test]
 fn test_struct_transaction_method_names() {
-    let mut gen = WasmGenerator::new();
+    let gen = WasmGenerator::new();
     
     let txn1 = Transaction {
         name: "Counter.increment".to_string(),

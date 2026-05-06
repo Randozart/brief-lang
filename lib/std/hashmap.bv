@@ -83,7 +83,7 @@ defn merge<K, V>(a: HashMap<K, V>, b: HashMap<K, V>)
     [true][result.len() >= a.len() && result.len() <= a.len() + b.len()] 
     -> HashMap<K, V> 
 {
-    let mut result = a;
+    let result = a;
     let keys = b.keys();
     let i: Int = 0;
     [i < keys.len()] {
@@ -99,7 +99,7 @@ defn filter<K, V>(map: HashMap<K, V>, pred: (K, V) -> Bool)
     [true][result.len() <= map.len()] 
     -> HashMap<K, V> 
 {
-    let mut result = new_map<K, V>();
+    let result = new_map<K, V>();
     let keys = map.keys();
     let i: Int = 0;
     [i < keys.len()] {

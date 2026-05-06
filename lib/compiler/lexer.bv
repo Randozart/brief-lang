@@ -236,7 +236,7 @@ defn read_string(state: LexerState) -> (Token, LexerState) {
     // Skip opening quote
     &state = advance(state);
     
-    let mut sb = new_builder();
+    let sb = new_builder();
     
     [current_char(state).is_some()] {
         let c = current_char(state).unwrap();
@@ -451,8 +451,8 @@ defn next_token(state: LexerState) -> Result<(Token, LexerState), String> {
 // ===== FULL TOKENIZATION =====
 
 defn tokenize(source: String) -> Result<List<Token>, String> {
-    let mut tokens: List<Token> = [];
-    let mut state = new_lexer(source);
+    let tokens: List<Token> = [];
+    let state = new_lexer(source);
     
     [true] {
         let result = next_token(state);

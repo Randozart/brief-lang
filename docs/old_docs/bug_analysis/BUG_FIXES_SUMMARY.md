@@ -153,7 +153,7 @@ test result: ok. 12 passed; 0 failed
 ### Bug #1 Fix in `src/parser.rs`
 ```rust
 // Now uses depth tracking instead of greedy first-match
-let mut depth = 1;
+let depth = 1;
 while byte_pos < source_bytes.len() {
     if self.source[byte_pos..].starts_with(&close_tag) {
         depth -= 1;

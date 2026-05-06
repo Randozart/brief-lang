@@ -231,7 +231,7 @@ defn hex_decode(s: String) -> Result<Data, String>
 ```brief
 import std.hashmap;
 
-let mut map = new_map<String, Int>();
+let map = new_map<String, Int>();
 map = map.insert("age", 42);
 map = map.insert("count", 100);
 
@@ -246,7 +246,7 @@ let age = map.get("age");
 ```brief
 import std.string_builder;
 
-let mut sb = new_builder();
+let sb = new_builder();
 sb = sb.append_str("Hello");
 sb = sb.append_char(',');
 sb = sb.append_char(' ');
@@ -261,7 +261,7 @@ println(message);
 ```brief
 import std.stack;
 
-let mut s = new_stack<Int>();
+let s = new_stack<Int>();
 s = s.push(1);
 s = s.push(2);
 s = s.push(3);

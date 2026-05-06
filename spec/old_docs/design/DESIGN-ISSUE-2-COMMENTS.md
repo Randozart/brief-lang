@@ -206,7 +206,7 @@ pub enum Token {
 ```rust
 #[test]
 fn test_comment_is_skipped() {
-    let mut lexer = Token::lexer("x = 5; // comment");
+    let lexer = Token::lexer("x = 5; // comment");
     let tokens: Vec<_> = lexer.collect();
     
     // Should NOT contain comment token
@@ -217,7 +217,7 @@ fn test_comment_is_skipped() {
 
 #[test]
 fn test_standalone_comment_line() {
-    let mut lexer = Token::lexer("// This is a comment\nlet x = 5;");
+    let lexer = Token::lexer("// This is a comment\nlet x = 5;");
     let tokens: Vec<_> = lexer.collect();
     
     // Should start with 'let' token, comment skipped
@@ -232,7 +232,7 @@ fn test_multiple_comments() {
         // Comment 3
         term;
     ";
-    let mut lexer = Token::lexer(code);
+    let lexer = Token::lexer(code);
     let tokens: Vec<_> = lexer.collect();
     
     // No comment tokens
@@ -245,7 +245,7 @@ fn test_multiple_comments() {
 fn test_comment_in_string_not_skipped() {
     // String literal containing // should not be treated as comment
     let code = r#"let msg: String = "This is // not a comment";"#;
-    let mut lexer = Token::lexer(code);
+    let lexer = Token::lexer(code);
     let tokens: Vec<_> = lexer.collect();
     
     // Should parse successfully; string contains //
@@ -255,7 +255,7 @@ fn test_comment_in_string_not_skipped() {
 #[test]
 fn test_comment_with_special_chars() {
     let code = "let x = 5; // !@#$%^&*() special chars";
-    let mut lexer = Token::lexer(code);
+    let lexer = Token::lexer(code);
     let tokens: Vec<_> = lexer.collect();
     
     // Should skip entire comment including special chars

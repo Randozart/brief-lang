@@ -208,7 +208,7 @@ fn parse_output_types(&mut self) -> Result<OutputType> {
     // Check for union (|) or tuple (,)
     if self.peek() == "|" {
         // Union type
-        let mut types = vec![first];
+        let types = vec![first];
         while self.peek() == "|" {
             self.consume("|")?;
             types.push(parse_single_output()?);
@@ -216,7 +216,7 @@ fn parse_output_types(&mut self) -> Result<OutputType> {
         
         // Check if there's a comma after (mixed type)
         if self.peek() == "," {
-            let mut tuple_elements = vec![OutputType::Union(types)];
+            let tuple_elements = vec![OutputType::Union(types)];
             while self.peek() == "," {
                 self.consume(",")?;
                 tuple_elements.push(parse_output_types()?);
@@ -227,7 +227,7 @@ fn parse_output_types(&mut self) -> Result<OutputType> {
         }
     } else if self.peek() == "," {
         // Tuple type
-        let mut elements = vec![OutputType::Single(first)];
+        let elements = vec![OutputType::Single(first)];
         while self.peek() == "," {
             self.consume(",")?;
             elements.push(parse_output_types()?);

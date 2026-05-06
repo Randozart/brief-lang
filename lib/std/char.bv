@@ -13,7 +13,7 @@ defn int_to_char(n: Int) [n >= 0 && n <= 0x10FFFF][true] -> Char {
 };
 
 defn char_to_string(c: Char) [true][result.len() == 1] -> String {
-    let mut sb = new_builder();
+    let sb = new_builder();
     sb = sb.append_char(c);
     term sb.to_string();
 };

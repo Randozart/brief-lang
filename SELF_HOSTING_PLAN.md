@@ -1330,7 +1330,7 @@ defn format_proof_error(err: ProofError) -> String
 ```brief
 // Reactor as jump table
 defn generate_aarch64_reactor(txns: List<TypedTransaction>) -> List<u8> {
-    let mut code: List<u8> = [];
+    let code: List<u8> = [];
     
     // Emit reactor loop
     code.append_all(emit_label("reactor_loop"));
@@ -1348,7 +1348,7 @@ defn generate_aarch64_reactor(txns: List<TypedTransaction>) -> List<u8> {
 
 // Transaction as guard + action
 defn generate_transaction(txn: TypedTransaction) -> List<u8> {
-    let mut code: List<u8> = [];
+    let code: List<u8> = [];
     
     // Emit guard (precondition check)
     code.append_all(emit_guard_check(txn.precondition));

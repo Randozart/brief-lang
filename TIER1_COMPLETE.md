@@ -92,7 +92,7 @@ defn iter<K, V>(map: HashMap<K, V>) -> List<(K, V)>
 
 **Usage:**
 ```brief
-let mut map = new_map<String, Int>();
+let map = new_map<String, Int>();
 map = map.insert("key", 42);
 let val = map.get("key");  // Some(42)
 let has = map.contains_key("key");  // true
@@ -165,7 +165,7 @@ defn capacity(builder: StringBuilder) -> Int
 
 **Usage:**
 ```brief
-let mut sb = new_builder();
+let sb = new_builder();
 sb = sb.append_str("Hello");
 sb = sb.append_char(' ');
 sb = sb.append_str("World");
@@ -220,13 +220,13 @@ defn clear<T>(queue: Queue<T>) -> Queue<T>
 **Usage:**
 ```brief
 // Stack
-let mut s = new_stack<Int>();
+let s = new_stack<Int>();
 s = s.push(1);
 s = s.push(2);
 let (val, s) = s.pop();  // (Some(2), stack with [1])
 
 // Queue
-let mut q = new_queue<String>();
+let q = new_queue<String>();
 q = q.enqueue("hello");
 q = q.enqueue("world");
 let (val, q) = q.dequeue();  // (Some("hello"), queue with ["world"])

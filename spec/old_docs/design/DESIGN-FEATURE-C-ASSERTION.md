@@ -131,7 +131,7 @@ fn verify_assertion_cast(
     
     for path in paths {
         // Walk path with symbolic execution
-        let mut state = SymbolicState::new(&defn.contract.pre_condition);
+        let state = SymbolicState::new(&defn.contract.pre_condition);
         
         for stmt in path {
             match stmt {
@@ -222,7 +222,7 @@ fn can_produce_true_with_args(
     
     for path in paths {
         // Create state with argument values
-        let mut state = SymbolicState::new(&defn.contract.pre_condition);
+        let state = SymbolicState::new(&defn.contract.pre_condition);
         
         // Bind parameters to argument values
         for (param, arg) in defn.parameters.iter().zip(args) {

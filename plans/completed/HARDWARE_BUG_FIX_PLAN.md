@@ -245,7 +245,7 @@ Add new method `generate_ram_mux()` that replaces the current approach:
 ```rust
 fn generate_ram_mux(&mut self, var_name: &str, txns: Vec<&Transaction>, program: &Program) {
     // Step 1: Collect all indexed writes from ALL transactions
-    let mut all_writes: Vec<RamWrite> = Vec::new();
+    let all_writes: Vec<RamWrite> = Vec::new();
     for txn in &txns {
         let writes = self.extract_indexed_writes(var_name, &txn.body);
         all_writes.extend(writes);
@@ -458,7 +458,7 @@ use crate::ast::HardwareConfig;
 let hw_config = /* ... parse hardware.toml ... */;
 
 // Create generator - uses project name from hardware.toml
-let mut gen = VerilogGenerator::new(&hw_config.project.name, hw_config.clone());
+let gen = VerilogGenerator::new(&hw_config.project.name, hw_config.clone());
 
 // Generate based on interface type
 let sv = match hw_config.interface.name.as_str() {
@@ -492,7 +492,7 @@ fn compile_to_vivado(program: &Program, hw_config: &HardwareConfig) -> Result<()
     let project_name = &hw_config.project.name;
     
     // Generate Verilog
-    let mut gen = VerilogGenerator::new(project_name, hw_config.clone());
+    let gen = VerilogGenerator::new(project_name, hw_config.clone());
     let sv = match hw_config.interface.name.as_str() {
         "axi4-lite" | "axi4-full" => gen.generate_with_axi(program),
         _ => gen.generate(program),

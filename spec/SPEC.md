@@ -1378,25 +1378,25 @@ let idx = list.find(2);                // 1
 let sliced = list[1..3];               // [2, 3]
 
 // HashMaps (requires Hash + Eq)
-let mut map = HashMap::new();
+let map = HashMap::new();
 map = map.insert("key", 42);
 let val = map.get("key");              // Some(42)
 let has = map.contains_key("key");     // true
 
 // HashSets
-let mut set = HashSet::new();
+let set = HashSet::new();
 set = set.insert(1);
 set = set.insert(2);
 let has = set.contains(1);             // true
 
 // Stacks
-let mut stack = Stack::new();
+let stack = Stack::new();
 stack = stack.push(1);
 stack = stack.push(2);
 let (val, stack) = stack.pop();        // (Some(2), stack with [1])
 
 // Queues
-let mut queue = Queue::new();
+let queue = Queue::new();
 queue = queue.enqueue(1);
 queue = queue.enqueue(2);
 let (val, queue) = queue.dequeue();    // (Some(1), queue with [2])

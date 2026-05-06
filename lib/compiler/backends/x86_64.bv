@@ -150,7 +150,7 @@ defn x64_encode_instr(instr: X64Instr) -> List<u8> {
     unification instr(MOV_IMM(rd, imm)) = {
         // mov r64, imm32: 48 B8 + imm (64-bit)
         let rd_num = x64_reg_to_num(rd);
-        let mut bytes = [0x48, 0xB8 | rd_num];
+        let bytes = [0x48, 0xB8 | rd_num];
         bytes = bytes.append_all(u64_to_le_bytes(imm as u64));
         term bytes;
     };
@@ -246,7 +246,7 @@ defn u64_to_le_bytes(n: u64) -> List<u8> {
 // ===== CODE GENERATION =====
 
 defn x64_generate_reactor(txns: List<Transaction>) -> List<X64Instr> {
-    let mut instrs: List<X64Instr> = [];
+    let instrs: List<X64Instr> = [];
     
     // Entry point
     instrs = instrs.append(x64_emit_label("reactor_entry"));
@@ -277,7 +277,7 @@ defn x64_generate_reactor(txns: List<Transaction>) -> List<X64Instr> {
 }
 
 defn x64_generate_transaction_check(txn: Transaction) -> List<X64Instr> {
-    let mut instrs: List<X64Instr> = [];
+    let instrs: List<X64Instr> = [];
     
     // Label
     instrs = instrs.append(x64_emit_label(txn.name + "_check"));
@@ -290,7 +290,7 @@ defn x64_generate_transaction_check(txn: Transaction) -> List<X64Instr> {
 }
 
 defn x64_emit_binary(instrs: List<X64Instr>) -> List<u8> {
-    let mut binary: List<u8> = [];
+    let binary: List<u8> = [];
     
     let i: Int = 0;
     [i < instrs.len()] {
@@ -303,10 +303,10 @@ defn x64_emit_binary(instrs: List<X64Instr>) -> List<u8> {
 }
 
 defn generate_x86_64(program: Program) -> List<u8> {
-    let mut all_instrs: List<X64Instr> = [];
+    let all_instrs: List<X64Instr> = [];
     
     // Extract transactions
-    let mut txns: List<Transaction> = [];
+    let txns: List<Transaction> = [];
     let i: Int = 0;
     [i < program.items.len()] {
         unification program.items[i](TopTxn(txn)) = {
