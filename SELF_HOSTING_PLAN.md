@@ -1,10 +1,17 @@
 # Brief Self-Hosting Implementation Plan
 
-**Goal:** Enable the Brief compiler to be written in Brief itself
+**Goal:** Enable the Brief compiler to be written in Brief itself, with direct binary backend and self-verification
 
-**Current Status:** ~10-15% feasible  
-**Target:** 100% self-hosting capable  
-**Estimated Timeline:** 2-4 weeks with AI assistance
+**Current Status:** ~15% feasible (Char type implemented)  
+**Target:** 100% self-hosting capable with AArch64 binary backend  
+**Estimated Timeline:** 4-6 weeks with AI assistance
+
+**Vision:** Brief is not just another self-hosting language. It is a **Universal Logic Transformer** that can:
+- Target anything from FPGA gates to CPU binary
+- Mathematically prove its own compiler correctness (kills "Trusting Trust")
+- Define CPUs as reactive transactions (opcodes = guards)
+- Use SIMD-parallel lexing and optimization
+- Run with zero runtime overhead (no safety checks needed - already proven safe)
 
 ---
 
@@ -16,8 +23,14 @@ The Brief compiler currently consists of ~19,452 lines of Rust across 26 modules
 - **~470 native function definitions** (`defn`)
 - **~20 FFI bindings** (for OS interaction, can be native later)
 - **Type system extensions** (traits, constraints, unification)
+- **Binary backends** (AArch64, x86-64) - THE "TRUE" Brief target
+- **Self-verification contracts** - Prove compiler correctness
 
 This plan is organized into **9 tiers** with clear dependencies. Each tier must be completed before the next can begin.
+
+**NEW: Tier 7.4 adds AArch64 binary backend as primary target (not C/Rust intermediate)**
+
+**NEW: Tier 7.4 adds AArch64 binary backend as primary target (not C/Rust intermediate)**
 
 ---
 
@@ -1304,78 +1317,304 @@ defn format_proof_error(err: ProofError) -> String
 ## Tier 7: Code Generation Backends
 
 **Status:** ❌ Not started  
-**Priority:** MEDIUM - can start with one backend  
-**Estimated:** 5-7 days
+**Priority:** CRITICAL - AArch64 binary backend is the "true" Brief target  
+**Estimated:** 7-10 days
 
-### 7.1 Rust Backend
+**Philosophy:** ASM is the "most honest" software representation of Brief. It bypasses the "sequential delusion" of C/Rust and treats the CPU as what it is: a collection of physical resources (registers, ALUs) that must be coordinated to satisfy a logical state.
+
+### 7.1 AArch64 Binary Backend (NEW - HIGH PRIORITY)
+
+**Why First:** ARM is simpler than x86, matches KV260 hardware, and is the "true" Brief target (no runtime, direct hardware access).
 
 **Implementation:**
+```brief
+// Reactor as jump table
+defn generate_aarch64_reactor(txns: List<TypedTransaction>) -> List<u8> {
+    let mut code: List<u8> = [];
+    
+    // Emit reactor loop
+    code.append_all(emit_label("reactor_loop"));
+    
+    // Call each transaction
+    for txn in txns {
+        code.append_all(emit_bl(txn.name));
+    };
+    
+    // Jump back to start
+    code.append_all(emit_b("reactor_loop"));
+    
+    term code;
+};
+
+// Transaction as guard + action
+defn generate_transaction(txn: TypedTransaction) -> List<u8> {
+    let mut code: List<u8> = [];
+    
+    // Emit guard (precondition check)
+    code.append_all(emit_guard_check(txn.precondition));
+    
+    // Emit action (state mutation)
+    code.append_all(emit_body(txn.body));
+    
+    // Return
+    code.append_all(emit_ret());
+    
+    term code;
+};
+
+// @ address as literal memory operand
+defn emit_mmio_store(addr: Int, value: String) -> List<u8> {
+    // mov dword [0xA0000000], 1
+    term emit_mov_mem(addr, value);
+};
+
+// Masked SIMD → Native NEON/SVE ops
+defn emit_masked_assign(vec: String, mask: Expr, value: Expr) -> List<u8> {
+    // VCMGT (compare to generate mask)
+    // VBIT (bitwise insert under mask)
+    term emit_neon_masked_op(vec, mask, value);
+};
+```
+
+**Key Features:**
+- **Reactor Loop:** Simple `CALL` sequence to all transactions (no mutexes needed - Brief proved safety)
+- **Direct MMIO:** `@0xA0000000` becomes literal memory operand
+- **Zero Runtime:** No stack checks, no null checks, no bounds checks (all proven at compile time)
+- **Register Allocation:** Map Brief variables to CPU registers via `@REG_X0`, `@REG_X1`, etc.
+- **Interrupt Handling:** IRQs become reactive transactions with hardware pin guards
+
+**Register Aliases:**
+```brief
+// Map Brief state to CPU registers
+ALIAS accumulator: UInt[64] @REG_X0;
+ALIAS status_flags: UInt[64] @REG_X1;
+ALIAS program_counter: UInt[64] @REG_PC;
+```
+
+**Files to modify:**
+- `lib/std/backend_aarch64.bv` - New module
+- `src/backend/aarch64.rs` - Rust implementation (bootstrap)
+
+**Acceptance criteria:**
+- [ ] Generates valid AArch64 machine code
+- [ ] Reactor loop executes all transactions
+- [ ] MMIO writes work (`@addr` → literal operand)
+- [ ] NEON SIMD for masked operations
+- [ ] Produces `.bin` or ELF file (no intermediate C/Rust)
+- [ ] Runs on KV260 ARM core
+
+---
+
+### 7.2 x86-64 Binary Backend
+
+**Implementation:** Similar to AArch64 but with x86-64 opcodes, AVX-512 for SIMD.
+
+```brief
+defn generate_x86_64(program: TypedProgram) -> List<u8>
+defn emit_reactor_x64(txns: List<Transaction>) -> List<u8>
+defn emit_avx512_masked(vec: String, mask: Expr, value: Expr) -> List<u8>
+```
+
+**Files to modify:**
+- `lib/std/backend_x86_64.bv` - New module
+
+**Acceptance criteria:**
+- [ ] Generates valid x86-64 machine code
+- [ ] AVX-512 masked operations
+- [ ] Runs on desktop/laptop
+
+---
+
+### 7.3 Rust Backend (Intermediate)
+
+**Status:** Existing in Rust compiler  
+**Purpose:** Bootstrap only (generate Brief compiler initially)
+
 ```brief
 defn generate_rust(program: TypedProgram) -> String
 defn generate_rust_transaction(txn: TypedTransaction) -> String
-defn generate_rust_definition(defn: TypedDefinition) -> String
-defn generate_rust_struct(struct: TypedStruct) -> String
-defn generate_rust_enum(enum: TypedEnum) -> String
-defn generate_rust_type(ty: Type) -> String
-defn generate_rust_statement(stmt: TypedStatement) -> String
-defn generate_rust_expression(expr: TypedExpr) -> String
-defn generate_rust_literal(literal: Literal) -> String
-defn generate_rust_contract(contract: TypedContract) -> String
-defn rust_escape_string(s: String) -> String
-defn rust_identifier(name: String) -> String  // Handle keywords
+// ... etc
 ```
-
-**Files to modify:**
-- `lib/std/backend_rust.bv` - New module
 
 **Acceptance criteria:**
 - [ ] Generates valid Rust code
-- [ ] Compiles with rustc
-- [ ] Preserves contracts as assertions
+- [ ] Used only for bootstrapping
+- [ ] Eventually replaced by AArch64 backend
 
 ---
 
-### 7.2 C Backend
+### 7.4 C Backend (Intermediate)
 
-**Implementation:**
-```brief
-defn generate_c(program: TypedProgram) -> String
-defn generate_c_header(program: TypedProgram) -> String
-defn generate_c_transaction(txn: TypedTransaction) -> String
-defn generate_c_type(ty: Type) -> String
-defn generate_c_statement(stmt: TypedStatement) -> String
-defn generate_c_expression(expr: TypedExpr) -> String
-defn c_escape_string(s: String) -> String
-defn c_identifier(name: String) -> String
-```
-
-**Files to modify:**
-- `lib/std/backend_c.bv` - New module
-
-**Acceptance criteria:**
-- [ ] Generates valid C code
-- [ ] Compiles with gcc/clang
-- [ ] Header file has correct declarations
+Similar to Rust - for bootstrap and embedded targets without Rust support.
 
 ---
 
-### 7.3 WASM Backend
+### 7.5 WASM Backend
+
+For browser-based Brief development and testing.
+
+---
+
+### 7.6 FPGA Backends (SystemVerilog/VHDL)
+
+Brief in **Space** (vs ASM in **Time**).
+
+---
+
+## Tier 7.5: CPU Definition in Brief (NEW)
+
+**Status:** ❌ Not started  
+**Priority:** DEMONSTRATION - proves Brief universality  
+**Estimated:** 2-3 days
+
+**Goal:** Define a CPU in Brief where opcodes are transaction guards. This demonstrates that Brief can define its own runtime.
+
+### Brief-16 CPU Example
+
+```brief
+// cpu_arch.dbvs - CPU topology
+REGISTER @REG_FILE: Vector[UInt[32], 16];
+ALIAS pc: UInt[32] @0x0;   // Program Counter
+ALIAS ir: UInt[32] @0x4;   // Instruction Register
+REGISTER @ROM: Vector[UInt[32], 4096] @0x1000;
+
+// cpu_core.bv - CPU logic
+rct txn fetch [true] {
+    ir = @ROM[pc / 4];
+}
+
+// ADD instruction: opcode is the guard
+rct txn inst_add [ir[31..24] == 0x01] {
+    let dest = ir[23..20];
+    let srca = ir[19..16];
+    let srcb = ir[15..12];
+    @REG_FILE[dest] = @REG_FILE[srca] + @REG_FILE[srcb];
+    pc = pc + 4;
+}
+
+// JUMP IF ZERO
+rct txn inst_jz [ir[31..24] == 0x05 && @REG_FILE[ir[23..20]] == 0] {
+    pc = ir[19..0];
+}
+```
+
+**Program in DBrief:**
+```brief
+// program.dbvl
+ALIAS ADD(D, A, B) = (0x01 << 24) | (D << 20) | (A << 16) | (B << 12);
++ @ROM[0] = ADD(1, 2, 3);
+```
+
+**Acceptance criteria:**
+- [ ] CPU definition compiles to VHDL (FPGA)
+- [ ] CPU definition compiles to AArch64 (emulator)
+- [ ] DBrief program runs on defined CPU
+- [ ] Cross-layer verification (program proven safe for CPU)
+
+---
+
+## Tier 6.5: Compiler Self-Verification (NEW)
+
+**Status:** ❌ Not started  
+**Priority:** CRITICAL - Brief's unfair advantage  
+**Estimated:** 3-4 days
+
+**Goal:** Use Brief's proof engine to verify the compiler's own transformations. This eliminates the "Trusting Trust" attack and all silent compiler bugs.
+
+### Self-Verification Contracts
+
+```brief
+// In the Brief compiler source code
+
+// Prove lexing is correct
+CHECK lexer_correctness [
+    forall source in @test_sources:
+        tokens_match(manual_lex(source), auto_lex(source))
+];
+
+// Prove parsing preserves semantics
+CHECK parser_correctness [
+    forall tokens in @test_tokens:
+        ast_equiv(parse(tokens), reference_parse(tokens))
+];
+
+// THE KILLER: Prove code generation is correct
+CHECK transpiler_integrity [
+    forall node in @AST:
+        logic_equiv(node, generate_aarch64(node))
+];
+
+// Prove optimizations preserve semantics
+CHECK optimizer_correctness [
+    forall ast in @test_asts:
+        semantics_preserved(ast, optimize(ast))
+];
+
+// Prove the compiler doesn't miscompile itself
+CHECK self_hosting_integrity [
+    let compiler_v1 = compile(brief_compiler_source);
+    let compiler_v2 = compile_v2(brief_compiler_source);
+    binary_equiv(compiler_v1, compiler_v2)
+];
+```
 
 **Implementation:**
 ```brief
-defn generate_wasm(program: TypedProgram) -> WasmOutput
-defn generate_wasm_rust(program: TypedProgram) -> String  // Via Rust
-defn generate_wasm_bindings(program: TypedProgram) -> String
-defn generate_wasm_js() -> String
+defn verify_compiler(program: TypedProgram) -> VerificationResult {
+    let results: List<CheckResult> = [];
+    
+    // Verify each transformation
+    results.append(check_lexing(program.source));
+    results.append(check_parsing(program.tokens));
+    results.append(check_typechecking(program.ast));
+    results.append(check_codegen(program.typed_ast));
+    
+    // Return overall result
+    term results.all_ok();
+};
 ```
 
 **Files to modify:**
-- `lib/std/backend_wasm.bv` - New module
+- `lib/std/verification.bv` - New module
+- `src/proof_engine.rs` - Add logic equivalence checking
 
 **Acceptance criteria:**
-- [ ] Generates valid WASM
-- [ ] JS bindings work in browser
-- [ ] Can call transactions from JS
+- [ ] All compiler phases have CHECK contracts
+- [ ] Logic equivalence prover implemented
+- [ ] Compiler verifies itself on each build
+- [ ] "Trusting Trust" attack eliminated
+- [ ] Silent compiler bugs impossible (proven)
+
+---
+
+## Tier 3.5: SIMD-Optimized Lexer (NEW)
+
+**Status:** ❌ Not started  
+**Priority:** OPTIMIZATION - after basic lexer works  
+**Estimated:** 2-3 days
+
+**Goal:** Use Brief's masked SIMD syntax for parallel tokenization.
+
+```brief
+// Parallel lexing with masked SIMD
+let source: Vector[UInt8, 65536] = load_source();
+let tokens: Vector<Token, 65536];
+
+// "Identify all semicolons at once"
+&tokens[; source == ';'] = Token.Semicolon;
+
+// "Identify all keywords in parallel"
+&tokens[; vector_match(source, "rct") > 0.9] = Token.Reactive;
+&tokens[; vector_match(source, "txn") > 0.9] = Token.Transaction;
+
+// "Identify all string literals"
+&tokens[; source == '"'] = find_string_boundaries(source);
+```
+
+**Acceptance criteria:**
+- [ ] Parallel tokenization works
+- [ ] Faster than sequential lexer
+- [ ] Used in production compiler
 
 ---
 
@@ -1686,25 +1925,41 @@ defn clamp<T>(value: T, min: T, max: T) -> T where T: Ord
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Week 1)
-- [ ] Tier 1: Core Data Types
+### Phase 1: Foundation (Week 1-2)
+- [x] Tier 1.1: Char Type (COMPLETE)
+- [ ] Tier 1.2-1.6: HashMap, HashSet, StringBuilder, Stack/Queue, Result/Option
 - [ ] Tier 2: String & Text Processing
-- [ ] Tier 8: Infrastructure (partial - spans, basic I/O)
+- [ ] Tier 8: Infrastructure (spans, I/O, process spawning)
 
-### Phase 2: Frontend (Week 2)
+### Phase 2: Frontend (Week 2-3)
 - [ ] Tier 3: Lexer Components
+- [ ] Tier 3.5: SIMD-Optimized Lexer (optimization)
 - [ ] Tier 4: Parser Components
 - [ ] Tier 5: Type Checker (partial - without traits)
 
-### Phase 3: Advanced Features (Week 3)
+### Phase 3: Advanced Features (Week 3-4)
 - [ ] Tier 5: Type Checker (complete - with traits)
 - [ ] Tier 6: Proof Engine
+- [ ] Tier 6.5: Compiler Self-Verification (CRITICAL)
 - [ ] Tier 9: Standard Library Extensions
 
-### Phase 4: Backends (Week 4)
-- [ ] Tier 7: Code Generation Backends
+### Phase 4: Binary Backends (Week 4-5)
+- [ ] Tier 7.1: AArch64 Binary Backend (PRIMARY TARGET)
+- [ ] Tier 7.2: x86-64 Binary Backend
+- [ ] Tier 7.5: CPU Definition Example (demonstration)
+
+### Phase 5: Bootstrap Backends (Week 5-6)
+- [ ] Tier 7.3: Rust Backend (bootstrap only)
+- [ ] Tier 7.4: C Backend (bootstrap/embedded)
+- [ ] Tier 7.6: WASM Backend (browser dev)
 - [ ] Integration testing
 - [ ] Bootstrap: compile compiler with itself
+
+### Phase 6: Self-Hosting (Week 6+)
+- [ ] Compile Brief compiler (in Brief) using Rust compiler
+- [ ] Compile Brief compiler (in Brief) using Brief AArch64 backend
+- [ ] Verify binary equivalence (self-verification)
+- [ ] Success: Brief compiles itself!
 
 ---
 
@@ -1730,10 +1985,24 @@ defn test_hashmap_missing_key() -> Bool {
 ### Integration Tests
 - Lexer + Parser: tokenize and parse example programs
 - Parser + Typechecker: typecheck parsed programs
-- Full pipeline: compile Brief programs to Rust/C
+- Full pipeline: compile Brief programs to AArch64 binary
+
+### Self-Verification Tests (NEW)
+```brief
+CHECK compiler_correctness [
+    forall source in @test_sources:
+        logic_equiv(source, generate_aarch64(parse(source)))
+];
+```
 
 ### Bootstrap Test
 Final test: compile the Brief compiler (written in Brief) using itself
+
+### CPU Definition Test (NEW)
+- Define Brief-16 CPU in Brief
+- Compile to VHDL → run on FPGA
+- Compile to AArch64 → run as emulator
+- Write program in DBrief → verify it runs on both
 
 ---
 
@@ -1743,16 +2012,20 @@ Final test: compile the Brief compiler (written in Brief) using itself
 1. **Trait system** - Major language extension, may require compiler changes
 2. **Proof engine** - Symbolic execution is complex
 3. **Generics with trait bounds** - Type inference becomes harder
+4. **AArch64 backend** - Machine code emission is error-prone
+5. **Self-verification** - Logic equivalence proving is research-level
 
 ### Medium Risk
 1. **HashMap/HashSet** - Need efficient implementation
 2. **Unicode handling** - Edge cases in UTF-8
 3. **Error messages** - Hard to make them as good as Rust's
+4. **SIMD lexer** - Parallel tokenization complexity
 
 ### Low Risk
 1. **Lexer/Parser** - Standard algorithms, well understood
 2. **Code generation** - Straightforward tree traversal
 3. **Standard library** - Can be built incrementally
+4. **CPU definition** - Mostly documentation/example work
 
 ---
 
@@ -1762,6 +2035,7 @@ Final test: compile the Brief compiler (written in Brief) using itself
 - Can tokenize any valid Brief program
 - Produces correct tokens with spans
 - Error messages point to right location
+- SIMD parallelization works (optimization)
 
 ### Milestone 2: Parser Complete
 - Can parse any valid Brief program
@@ -1778,10 +2052,90 @@ Final test: compile the Brief compiler (written in Brief) using itself
 - Finds counterexamples
 - Detects conflicts
 
-### Milestone 5: Self-Hosting Complete
-- Compiler written in Brief
-- Can compile itself
-- Output matches Rust compiler output
+### Milestone 5: Self-Verification Complete (NEW - CRITICAL)
+- Compiler has CHECK contracts for all phases
+- Logic equivalence prover works
+- Compiler verifies its own transformations
+- "Trusting Trust" attack eliminated
+
+### Milestone 6: AArch64 Backend Complete (NEW - PRIMARY)
+- Generates valid AArch64 machine code
+- Reactor loop executes transactions
+- MMIO works (`@addr` → literal operand)
+- NEON SIMD for masked operations
+- Produces runnable `.bin` file
+
+### Milestone 7: CPU Definition Works (NEW)
+- Brief-16 CPU defined in Brief
+- Compiles to VHDL (FPGA) and AArch64 (emulator)
+- DBrief program runs on both
+- Cross-layer verification proves program safety
+
+### Milestone 8: Self-Hosting Complete
+- Brief compiler written in Brief
+- Compiles itself successfully
+- Binary equivalence verified
+- **Brief is self-sustaining**
+
+---
+
+## Bootstrap Strategy
+
+### Stage 0: Current (Rust Compiler)
+- Rust-based Brief compiler exists
+- Compiles Brief → Rust/C/WASM/VHDL
+- **Used to compile Stage 1**
+
+### Stage 1: Minimal Brief Compiler
+- Brief compiler written in minimal Brief subset
+- Compiled by Stage 0 compiler
+- Outputs AArch64 binary (via Rust backend initially)
+- **Limited features: no traits, basic types only**
+
+### Stage 2: Full Brief Compiler
+- Full-featured Brief compiler (all tiers complete)
+- Compiled by Stage 1 compiler
+- Outputs AArch64 binary directly
+- **Includes self-verification contracts**
+
+### Stage 3: Self-Compiled
+- Stage 2 compiler compiles itself
+- Binary from Stage 2 == Binary from Stage 3
+- **Success! Brief is self-hosting**
+
+---
+
+## The Ultimate Vision
+
+**Brief is not just another self-hosting language.** It is:
+
+1. **A Universal Logic Transformer**
+   - Same Brief code → FPGA (VHDL), CPU (AArch64), Browser (WASM)
+   - No semantic changes between targets
+
+2. **A Self-Verifying Compiler**
+   - Proves its own correctness
+   - Eliminates "Trusting Trust" attack
+   - No silent compiler bugs
+
+3. **A Hardware/Software Unifier**
+   - Define CPUs as reactive transactions
+   - Opcodes = guards
+   - Same language for hardware and software
+
+4. **A Zero-Overhead Language**
+   - No runtime checks (proven safe at compile time)
+   - Direct hardware access (`@addr` = literal)
+   - SIMD parallelization by default
+
+5. **A Self-Sustaining Ecosystem**
+   - Compiles itself
+   - Defines its own runtime (CPU)
+   - Verifies its own transformations
+
+**When complete, Brief will be the first language that is mathematically proven to not have compiler bugs, can define its own hardware, and compiles directly to binary with zero runtime overhead.**
+
+This is not just self-hosting. This is **language singularity**.
 
 ---
 
