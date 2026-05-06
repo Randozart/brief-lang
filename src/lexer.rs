@@ -343,10 +343,12 @@ pub enum Token {
     TypeBool,
     #[token("Char")]  // NEW: Char type keyword
     TypeChar,
-    #[token("HashMap")]  // NEW: HashMap type keyword
+    #[token("HashMap")]  // HashMap type keyword
     TypeHashMap,
-    #[token("HashSet")]  // NEW: HashSet type keyword
+    #[token("HashSet")]  // HashSet type keyword
     TypeHashSet,
+    #[token("StringBuilder")]  // StringBuilder type keyword
+    TypeStringBuilder,
     #[token("Data")]
     TypeData,
     #[token("Void")]

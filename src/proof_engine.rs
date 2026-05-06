@@ -1649,6 +1649,7 @@ impl ProofEngine {
             Type::HashSet(inner) => {
                 format!("HashSet<{}>", self.type_name(inner))
             }
+            Type::StringBuilder => "StringBuilder".to_string(),
             Type::Vector(inner, size) => format!("Vector<{}>[{}]", self.type_name(inner), size),
             Type::Constrained(inner, _) => self.type_name(inner),
         }

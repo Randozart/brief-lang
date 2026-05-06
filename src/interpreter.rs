@@ -36,8 +36,9 @@ pub enum Value {
     Bool(bool),
     Data(Vec<u8>),
     List(Vec<Value>),
-    HashMap(HashMap<String, Value>),  // NEW: HashMap (string keys for simplicity)
-    HashSet(HashSet<String>),  // NEW: HashSet (string values for simplicity)
+    HashMap(HashMap<String, Value>),  // HashMap (string keys for simplicity)
+    HashSet(HashSet<String>),  // HashSet (string values for simplicity)
+    StringBuilder(String),  // NEW: StringBuilder (internal buffer as String)
     Instance {
         typename: String,
         fields: HashMap<String, Value>,
@@ -59,6 +60,7 @@ impl fmt::Display for Value {
             Value::List(items) => write!(f, "[{}]", items.len()),
             Value::HashMap(map) => write!(f, "<HashMap {}>", map.len()),
             Value::HashSet(set) => write!(f, "<HashSet {}>", set.len()),
+            Value::StringBuilder(s) => write!(f, "<StringBuilder {}>", s.len()),
             Value::Instance { typename, fields } => {
                 write!(f, "<{} {{}}>", typename)
             }
@@ -103,6 +105,7 @@ fn value_to_json_value(v: &Value) -> JsonValue {
                 .collect();
             JsonValue::Array(arr)
         }
+        Value::StringBuilder(s) => JsonValue::String(s.clone()),
         Value::Instance { fields, .. } => {
             let map: serde_json::Map<String, JsonValue> = fields
                 .iter()
@@ -1042,6 +1045,142 @@ impl Interpreter {
                         
                         if fn_name == "is_empty" {
                             return Ok(Value::Bool(set.is_empty()));
+                        }
+                    }
+                }
+
+                // StringBuilder built-in methods
+                if fn_name == "StringBuilder::new" || fn_name == "new_builder" {
+                    return Ok(Value::StringBuilder(String::new()));
+                }
+
+                if arg_values.len() >= 1 {
+                    if let Value::StringBuilder(buffer) = &arg_values[0] {
+                        let mut buffer = buffer.clone();
+                        
+                        if fn_name == "append_char" && arg_values.len() == 2 {
+                            if let Value::Char(c) = &arg_values[1] {
+                                buffer.push(*c);
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "append_str" && arg_values.len() == 2 {
+                            if let Value::String(s) = &arg_values[1] {
+                                buffer.push_str(s);
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "append_int" && arg_values.len() == 2 {
+                            if let Value::Int(n) = &arg_values[1] {
+                                buffer.push_str(&n.to_string());
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "append_bool" && arg_values.len() == 2 {
+                            if let Value::Bool(b) = &arg_values[1] {
+                                buffer.push_str(&b.to_string());
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "append_float" && arg_values.len() == 2 {
+                            if let Value::Float(f) = &arg_values[1] {
+                                buffer.push_str(&f.to_string());
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "to_string" {
+                            return Ok(Value::String(buffer.clone()));
+                        }
+                        
+                        if fn_name == "clear" {
+                            buffer.clear();
+                            return Ok(Value::StringBuilder(buffer));
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(buffer.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(buffer.is_empty()));
+                        }
+                        
+                        if fn_name == "capacity" {
+                            // For simplicity, capacity = len (no pre-allocation yet)
+                            return Ok(Value::Int(buffer.len() as i64));
+                        }
+                    }
+                }
+
+                // StringBuilder built-in methods
+                if fn_name == "StringBuilder::new" || fn_name == "new_builder" {
+                    return Ok(Value::StringBuilder(String::new()));
+                }
+
+                if arg_values.len() >= 1 {
+                    if let Value::StringBuilder(buffer) = &arg_values[0] {
+                        let mut buffer = buffer.clone();
+                        
+                        if fn_name == "append_char" && arg_values.len() == 2 {
+                            if let Value::Char(c) = &arg_values[1] {
+                                buffer.push(*c);
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "append_str" && arg_values.len() == 2 {
+                            if let Value::String(s) = &arg_values[1] {
+                                buffer.push_str(s);
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "append_int" && arg_values.len() == 2 {
+                            if let Value::Int(n) = &arg_values[1] {
+                                buffer.push_str(&n.to_string());
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "append_bool" && arg_values.len() == 2 {
+                            if let Value::Bool(b) = &arg_values[1] {
+                                buffer.push_str(&b.to_string());
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "append_float" && arg_values.len() == 2 {
+                            if let Value::Float(f) = &arg_values[1] {
+                                buffer.push_str(&f.to_string());
+                                return Ok(Value::StringBuilder(buffer));
+                            }
+                        }
+                        
+                        if fn_name == "to_string" {
+                            return Ok(Value::String(buffer.clone()));
+                        }
+                        
+                        if fn_name == "clear" {
+                            buffer.clear();
+                            return Ok(Value::StringBuilder(buffer));
+                        }
+                        
+                        if fn_name == "len" {
+                            return Ok(Value::Int(buffer.len() as i64));
+                        }
+                        
+                        if fn_name == "is_empty" {
+                            return Ok(Value::Bool(buffer.is_empty()));
+                        }
+                        
+                        if fn_name == "capacity" {
+                            // For simplicity, capacity = len (no pre-allocation yet)
+                            return Ok(Value::Int(buffer.len() as i64));
                         }
                     }
                 }

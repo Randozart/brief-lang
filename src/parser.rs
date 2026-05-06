@@ -2460,6 +2460,10 @@ let span = self.current_span();
                 self.expect(Token::Gt)?;
                 Type::HashSet(Box::new(inner_type))
             }
+            Some(Ok(Token::TypeStringBuilder)) => {
+                self.advance();
+                Type::StringBuilder
+            }
             Some(Ok(Token::TypeVoid)) => {
                 self.advance();
                 Type::Void

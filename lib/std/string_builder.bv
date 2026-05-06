@@ -1,0 +1,86 @@
+// StringBuilder - Efficient string building
+// Avoids O(n²) concatenation by using internal buffer
+
+// ===== NATIVE DEFINITIONS =====
+
+// Construction
+defn new_builder() -> StringBuilder [true][result.len() == 0] {
+    term StringBuilder::empty();
+};
+
+defn with_capacity(capacity: Int) -> StringBuilder [capacity > 0][result.len() == 0] {
+    term StringBuilder::with_capacity(capacity);
+};
+
+// Append operations
+defn append_char(builder: StringBuilder, c: Char) 
+    [true][result.len() == builder.len() + 1] 
+    -> StringBuilder 
+{
+    term builder.append_char(c);
+};
+
+defn append_str(builder: StringBuilder, s: String) 
+    [true][result.len() == builder.len() + s.len()] 
+    -> StringBuilder 
+{
+    term builder.append_str(s);
+};
+
+defn append_int(builder: StringBuilder, n: Int) 
+    [true][result.len() >= builder.len()] 
+    -> StringBuilder 
+{
+    term builder.append_int(n);
+};
+
+defn append_bool(builder: StringBuilder, b: Bool) 
+    [true][result.len() >= builder.len()] 
+    -> StringBuilder 
+{
+    term builder.append_bool(b);
+};
+
+defn append_float(builder: StringBuilder, f: Float) 
+    [true][result.len() >= builder.len()] 
+    -> StringBuilder 
+{
+    term builder.append_float(f);
+};
+
+// Conversion
+defn to_string(builder: StringBuilder) 
+    [true][result.len() == builder.len()] 
+    -> String 
+{
+    term builder.to_string();
+};
+
+defn clear(builder: StringBuilder) 
+    [true][result.len() == 0] 
+    -> StringBuilder 
+{
+    term StringBuilder::empty();
+};
+
+// Metadata
+defn len(builder: StringBuilder) 
+    [true][result >= 0] 
+    -> Int 
+{
+    term builder.len();
+};
+
+defn is_empty(builder: StringBuilder) 
+    [true][result == true || result == false] 
+    -> Bool 
+{
+    term builder.len() == 0;
+};
+
+defn capacity(builder: StringBuilder) 
+    [true][result >= builder.len()] 
+    -> Int 
+{
+    term builder.capacity();
+};

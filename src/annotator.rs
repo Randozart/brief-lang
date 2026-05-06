@@ -186,6 +186,7 @@ impl Annotator {
             Type::HashSet(inner) => {
                 format!("HashSet<{}>", self.type_to_string(inner))
             }
+            Type::StringBuilder => "StringBuilder".to_string(),
             Type::Vector(inner, size) => {
                 format!("Vector<{}>[{}]", self.type_to_string(inner), size)
             }
