@@ -78,6 +78,11 @@ pub enum Token {
     #[token("escape")]
     #[token("ESCAPE")]
     Escape,
+    #[token("unification")]
+    #[token("UNIFICATION")]
+    #[token("unify")]
+    #[token("UNIFY")]
+    Unification,
     #[token("import")]
     #[token("IMPORT")]
     Import,

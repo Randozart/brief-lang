@@ -628,6 +628,41 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         term (StmtEscape(value), state);
     };
     
+    // Unification statement
+    unification tok(KeywordUnification) = {
+        &state = advance(state);
+        
+        // Get pattern name
+        let tok = current_token(state);
+        unification tok(TokenIdentifier(name)) = {
+            &state = advance(state);
+        };
+        [!tok.is_identifier()] {
+            term Err("Expected pattern name after unification");
+        };
+        
+        // Get pattern (in parentheses)
+        state = expect_token(state, DelimLParen)?;
+        let pattern_tok = current_token(state);
+        unification pattern_tok(TokenIdentifier(pattern)) = {
+            &state = advance(state);
+        };
+        [!pattern_tok.is_identifier()] {
+            term Err("Expected pattern in parentheses");
+        };
+        state = expect_token(state, DelimRParen)?;
+        
+        // Get equals sign
+        state = expect_token(state, OpEq)?;
+        
+        // Get expression
+        let (expr, new_state) = parse_expression(state)?;
+        &state = new_state;
+        
+        state = expect_token(state, OpSemicolon)?;
+        term (StmtUnification(name, pattern, Box::new(expr)), state);
+    };
+    
     // Guarded statement
     unification tok(DelimLBracket) = {
         &state = advance(state);
