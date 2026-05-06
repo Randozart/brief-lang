@@ -7,7 +7,7 @@ Historical and supplementary documentation for the Brief compiler.
 | File | Description |
 |------|-------------|
 | `BRIEF-DATALOG_RESEARCH.md` | Research on Datalog integration |
-| `BRIEF_LANGUAGE_REFERENCE.md` | Language reference (v0.11.0) - compare with spec/LANGUAGE-TUTORIAL.md |
+| `BRIEF_LANGUAGE_REFERENCE.md` | Language reference (v0.12.0) - compare with spec/LANGUAGE-TUTORIAL.md |
 | `HARDWARE_BACKEND.md` | Hardware backend development guide |
 | `HARDWARE_CONFIG.md` | Hardware configuration guide |
 | `ISSUES.md` | Known issues log |

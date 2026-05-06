@@ -4,7 +4,7 @@
 
 ## Brief Doesn't Break
 
-**Status:** v0.11.0 - Self-Hosting Capable ✅  
+**Status:** v0.12.0 - Self-Hosting Capable ✅  
 **Implementation Time:** 1 workday (2026-05-06)  
 **Tests:** 148/148 passing ✅
 
@@ -414,7 +414,7 @@ brief-compiler/
 
 ## Roadmap
 
-### ✅ Complete (v0.11.0)
+### ✅ Complete (v0.12.0)
 - [x] Complete compiler frontend
 - [x] 4 production backends (AArch64, x86-64, Rust, C)
 - [x] 300+ standard library functions
@@ -465,4 +465,4 @@ Apache 2.0
 ---
 
 *Last updated: 2026-05-06*  
-*Version: Brief v0.11.0*
+*Version: Brief v0.12.0*

@@ -93,4 +93,4 @@ Start with [01-basics.md](01-basics.md) to learn the fundamentals!
 ---
 
 *Last updated: 2026-05-06*  
-*Version: Brief v0.11.0*
+*Version: Brief v0.12.0*

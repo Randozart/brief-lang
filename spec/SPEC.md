@@ -1,6 +1,6 @@
 # Brief Language Specification
 
-**Version:** v0.11.0  
+**Version:** v0.12.0  
 **Date:** 2026-05-06  
 **Status:** Development (stable core, experimental backends)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl)
@@ -30,7 +30,7 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 
 ### 1.3 Versioning
 
-* **Semantic**: `v0.11.0` (development, core stable)
+* **Semantic**: `v0.12.0` (development, core stable)
 * **Date-based**: `2026-05-06`
 
 ### 1.4 Compiler Architecture
@@ -2000,4 +2000,4 @@ txn main() [true][true] {
 
 ---
 
-*Last updated: Brief v0.11.0 (2026-05-06)*
+*Last updated: Brief v0.12.0 (2026-05-06)*

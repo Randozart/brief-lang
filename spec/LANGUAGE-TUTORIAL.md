@@ -1485,4 +1485,4 @@ txn good_check() [input != 0][result != 0] {
 
 ---
 
-*Last updated: Brief v0.11.0 (2026-05-06)*
+*Last updated: Brief v0.12.0 (2026-05-06)*

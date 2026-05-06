@@ -1,0 +1,473 @@
+# Complete Examples
+
+Real-world Brief programs demonstrating all features.
+
+## 1. Counter Application
+
+```brief
+// counter.rbv
+rstruct Counter {
+    count: Int = 0;
+    
+    txn increment() [count < 100][count == @count + 1] {
+        &count = count + 1;
+        term;
+    };
+    
+    txn decrement() [count > 0][count == @count - 1] {
+        &count = count - 1;
+        term;
+    };
+    
+    txn reset() [true][count == 0] {
+        &count = 0;
+        term;
+    };
+    
+    view {
+        <div class="counter">
+            <h1 b-text="count"></h1>
+            <button b-trigger:click="increment">+</button>
+            <button b-trigger:click="decrement">-</button>
+            <button b-trigger:click="reset">Reset</button>
+        </div>
+    }
+}
+```
+
+## 2. Bank Account System
+
+```brief
+// bank.bv
+let balance: Int = 1000;
+let overdraft_protection: Bool = false;
+
+txn deposit(amount: Int) 
+    [amount > 0]
+    [balance == @balance + amount]
+{
+    &balance = balance + amount;
+    term;
+};
+
+txn withdraw(amount: Int) 
+    [amount > 0 && (balance >= amount || overdraft_protection)]
+    [balance == @balance - amount]
+{
+    &balance = balance - amount;
+    term;
+};
+
+txn transfer(to_account: Int, amount: Int)
+    [amount > 0 && balance >= amount]
+    [balance == @balance - amount]
+{
+    &balance = balance - amount;
+    send_to(to_account, amount);
+    term;
+};
+
+rct txn apply_interest() 
+    [balance > 10000]
+    [balance == @balance + (@balance * 5 / 100)]
+{
+    let interest = balance * 5 / 100;
+    &balance = balance + interest;
+    term;
+};
+
+txn enable_overdraft() 
+    [!overdraft_protection]
+    [overdraft_protection == true]
+{
+    &overdraft_protection = true;
+    term;
+};
+```
+
+## 3. Shopping Cart
+
+```brief
+// shopping_cart.rbv
+rstruct ShoppingCart {
+    items: Int = 0,
+    total: Float = 0.0,
+    discount_applied: Bool = false;
+    
+    txn add_item(name: String, price: Float, quantity: Int)
+        [price > 0 && quantity > 0]
+        [items == @items + quantity && total == @total + (price * quantity)]
+    {
+        &items = items + quantity;
+        &total = total + (price * quantity);
+        term;
+    };
+    
+    txn remove_item(quantity: Int)
+        [quantity > 0 && quantity <= items]
+        [items == @items - quantity]
+    {
+        &items = items - quantity;
+        term;
+    };
+    
+    txn clear_cart() [items > 0][items == 0 && total == 0.0] {
+        &items = 0;
+        &total = 0.0;
+        &discount_applied = false;
+        term;
+    };
+    
+    rct txn apply_bulk_discount() 
+        [items > 10 && total > 100.0 && !discount_applied]
+        [total < @total && discount_applied == true]
+    {
+        let discount: Float = total * 0.1;
+        &total = total - discount;
+        &discount_applied = true;
+        term;
+    };
+    
+    view {
+        <div class="shopping-cart">
+            <h1>Shopping Cart</h1>
+            
+            <div class="stats">
+                <p>Items: <span b-text="items"></span></p>
+                <p>Total: $<span b-text="total"></span></p>
+                <p b-show="discount_applied">Discount Applied! (10% off)</p>
+            </div>
+            
+            <div class="actions">
+                <button b-trigger:click="add_item('Laptop', 999.99, 1)">
+                    Add Laptop
+                </button>
+                <button b-trigger:click="add_item('Mouse', 29.99, 1)">
+                    Add Mouse
+                </button>
+            </div>
+            
+            <div class="controls">
+                <button b-trigger:click="remove_item(1)">Remove One</button>
+                <button b-trigger:click="clear_cart()">Clear Cart</button>
+            </div>
+        </div>
+    }
+}
+```
+
+## 4. Todo List
+
+```brief
+// todo.rbv
+rstruct TodoList {
+    todos: List<Todo> = [],
+    filter: String = "all";
+    
+    struct Todo {
+        id: Int,
+        text: String,
+        completed: Bool
+    };
+    
+    txn add_todo(text: String) [text.len() > 0][todos.len() == @todos.len() + 1] {
+        let new_todo = Todo {
+            id: todos.len(),
+            text: text,
+            completed: false
+        };
+        &todos = todos.append(new_todo);
+        term;
+    };
+    
+    txn toggle_todo(id: Int) [id >= 0 && id < todos.len()][true] {
+        let todo = todos[id];
+        &todos = todos.set(id, Todo {
+            id: todo.id,
+            text: todo.text,
+            completed: !todo.completed
+        });
+        term;
+    };
+    
+    txn remove_todo(id: Int) [id >= 0 && id < todos.len()][todos.len() == @todos.len() - 1] {
+        &todos = todos.remove(id);
+        term;
+    };
+    
+    txn clear_completed() [true][true] {
+        let mut filtered: List<Todo> = [];
+        let i: Int = 0;
+        [i < todos.len()] {
+            [!todos[i].completed] {
+                filtered = filtered.append(todos[i]);
+            };
+            i = i + 1;
+        };
+        &todos = filtered;
+        term;
+    };
+    
+    view {
+        <div class="todo-app">
+            <h1>Todo List</h1>
+            
+            <input type="text" b-model="newTodoText" placeholder="Add todo..." />
+            <button b-trigger:click="add_todo(newTodoText)">Add</button>
+            
+            <ul>
+                <li b-for="todo in todos">
+                    <input 
+                        type="checkbox" 
+                        b-model="todo.completed"
+                        b-trigger:change="toggle_todo(todo.id)"
+                    />
+                    <span b-text="todo.text"></span>
+                    <button b-trigger:click="remove_todo(todo.id)">Delete</button>
+                </li>
+            </ul>
+            
+            <button b-trigger:click="clear_completed()">Clear Completed</button>
+        </div>
+    }
+}
+```
+
+## 5. Traffic Light System
+
+```brief
+// traffic_light.bv
+enum LightState { Red, Yellow, Green }
+let state: LightState = LightState::Red;
+let timer: Int = 0;
+
+rct txn change_to_green() 
+    [state == LightState::Red && timer >= 60]
+    [state == LightState::Green]
+{
+    &state = LightState::Green;
+    &timer = 0;
+    term;
+};
+
+rct txn change_to_yellow() 
+    [state == LightState::Green && timer >= 30]
+    [state == LightState::Yellow]
+{
+    &state = LightState::Yellow;
+    &timer = 0;
+    term;
+};
+
+rct txn change_to_red() 
+    [state == LightState::Yellow && timer >= 5]
+    [state == LightState::Red]
+{
+    &state = LightState::Red;
+    &timer = 0;
+    term;
+};
+
+rct txn increment_timer() [true][timer == @timer + 1] {
+    &timer = timer + 1;
+    term;
+};
+```
+
+## 6. Producer-Consumer Pattern
+
+```brief
+// producer_consumer.bv
+let buffer: List<Int> = [];
+let buffer_size: Int = 10;
+let produced: Int = 0;
+let consumed: Int = 0;
+
+rct async txn produce() 
+    [buffer.len() < buffer_size && produced < 100]
+    [produced == @produced + 1 && buffer.len() == @buffer.len() + 1]
+{
+    &produced = produced + 1;
+    &buffer = buffer.append(produced);
+    term;
+};
+
+rct async txn consume() 
+    [buffer.len() > 0]
+    [consumed == @consumed + 1 && buffer.len() == @buffer.len() - 1]
+{
+    let item = buffer[0];
+    &buffer = buffer.drop(1);
+    &consumed = consumed + 1;
+    process(item);
+    term;
+};
+
+defn process(item: Int) {
+    println("Processed: " + String(item));
+    term;
+};
+```
+
+## 7. File Processor with FFI
+
+```brief
+// file_processor.bv
+import std.io;
+import std.string;
+
+frgn sig read_file(path: String) -> Result<String, IOError> from "io.toml";
+frgn sig write_file(path: String, content: String) -> Result<Void, IOError> from "io.toml";
+
+txn process_file(input_path: String, output_path: String) 
+    [true]
+    [true]
+{
+    let read_result = read_file(input_path);
+    
+    [read_result.is_ok()] {
+        let content = read_result.value;
+        let processed = string.to_upper(content);
+        
+        let write_result = write_file(output_path, processed);
+        [write_result.is_ok()] {
+            println("File processed successfully");
+        };
+        [write_result.is_err()] {
+            println("Write error: " + write_result.error.message);
+        };
+    };
+    
+    [read_result.is_err()] {
+        println("Read error: " + read_result.error.message);
+    };
+    
+    term;
+};
+```
+
+## 8. State Machine: Vending Machine
+
+```brief
+// vending_machine.bv
+enum MachineState { Idle, Selection, Payment, Dispensing }
+let state: MachineState = MachineState::Idle;
+let credit: Int = 0;
+let selected_item: String = "";
+
+rct txn insert_coin(amount: Int) 
+    [state == MachineState::Idle || state == MachineState::Selection]
+    [credit == @credit + amount]
+{
+    &credit = credit + amount;
+    &state = MachineState::Selection;
+    term;
+};
+
+rct txn select_item(item: String, price: Int) 
+    [state == MachineState::Selection && credit >= price]
+    [selected_item == item]
+{
+    &selected_item = item;
+    &state = MachineState::Payment;
+    term;
+};
+
+rct txn dispense_item() 
+    [state == MachineState::Payment]
+    [state == MachineState::Idle && credit == @credit - price && selected_item == ""]
+{
+    dispense(selected_item);
+    &credit = credit - price;
+    &selected_item = "";
+    &state = MachineState::Idle;
+    term;
+};
+
+rct txn refund() 
+    [state == MachineState::Selection && credit > 0]
+    [state == MachineState::Idle && credit == 0]
+{
+    refund_money(credit);
+    &credit = 0;
+    &state = MachineState::Idle;
+    term;
+};
+```
+
+## 9. Reactive Dashboard
+
+```brief
+// dashboard.rbv
+rstruct Dashboard {
+    temperature: Float = 20.0,
+    humidity: Float = 50.0,
+    alerts: List<String> = [],
+    last_updated: Int = 0;
+    
+    rct txn update_sensor_data() [true][last_updated == current_time()] {
+        &temperature = read_temperature();
+        &humidity = read_humidity();
+        &last_updated = current_time();
+        term;
+    };
+    
+    rct txn check_temperature_alert() 
+        [temperature > 30.0 || temperature < 10.0]
+        [alerts.contains("Temperature warning")]
+    {
+        &alerts = alerts.append("Temperature warning: " + String(temperature) + "°C");
+        term;
+    };
+    
+    rct txn check_humidity_alert() 
+        [humidity > 80.0 || humidity < 20.0]
+        [alerts.contains("Humidity warning")]
+    {
+        &alerts = alerts.append("Humidity warning: " + String(humidity) + "%");
+        term;
+    };
+    
+    rct txn clear_old_alerts() [alerts.len() > 10][alerts.len() <= 10] {
+        &alerts = alerts.drop(1);
+        term;
+    };
+    
+    view {
+        <div class="dashboard">
+            <h1>Environmental Dashboard</h1>
+            
+            <div class="sensor">
+                <h2>Temperature</h2>
+                <p b-text="temperature + '°C'"></p>
+            </div>
+            
+            <div class="sensor">
+                <h2>Humidity</h2>
+                <p b-text="humidity + '%'"></p>
+            </div>
+            
+            <div class="alerts" b-show="alerts.len() > 0">
+                <h2>Alerts</h2>
+                <ul>
+                    <li b-for="alert in alerts" b-text="alert"></li>
+                </ul>
+            </div>
+            
+            <p class="updated" b-text="'Last updated: ' + last_updated"></p>
+        </div>
+    }
+}
+```
+
+## Exercises
+
+1. Build a chat application with reactive message updates
+2. Create a weather app that fetches data via FFI
+3. Implement a reactive stock ticker
+4. Build a smart home controller with multiple sensors
+5. Create a multiplayer game lobby with real-time updates
+
+---
+
+*Next: [09-patterns.md](09-patterns.md) - Common patterns and best practices*

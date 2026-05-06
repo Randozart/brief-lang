@@ -1,6 +1,6 @@
 # Brief Language Reference Guide
 
-**Version:** v0.11.0
+**Version:** v0.12.0
 **Date:** 2026-04-23
 **Status:** Development
 
