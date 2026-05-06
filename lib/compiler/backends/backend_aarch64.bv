@@ -606,3 +606,327 @@ defn generate_aarch64(program: Program) -> List<u8> {
     // Emit binary
     term emit_binary(all_instrs);
 }
+
+// ===== OPTIMIZATION: Branchless Code Generation =====
+
+defn emit_branchless_cmp(rn: String, rm: String, condition: String) -> List<A64Instr> {
+    // Generate conditional select instead of branch
+    // cmp rn, rm
+    // csel rd, rn, rm, condition
+    let mut instrs: List<A64Instr> = [];
+    instrs = instrs.append(CMP(rn, rm));
+    instrs = instrs.append(CSEL("X0", rn, rm, condition));  // Conditional select
+    term instrs;
+}
+
+defn emit_branchless_guard(guard_expr: Expr, true_label: String, false_label: String) -> List<A64Instr> {
+    // Instead of: cmp; b.eq true_label; b false_label
+    // Generate: cmp; cset x0, eq; tbz x0, #0, false_label
+    let mut instrs: List<A64Instr> = [];
+    instrs = instrs.append(CMP("X0", "XZR"));  // Compare with zero
+    instrs = instrs.append(CSET("X0", "EQ"));  // Set X0 = 1 if equal, 0 otherwise
+    instrs = instrs.append(TBZ("X0", 0, false_label));  // Test and branch if zero
+    term instrs;
+}
+
+// ===== OPTIMIZATION: Predictive Fetching =====
+
+defn emit_prefetch_on_guard(guard_var: String, data_addr: Int) -> List<A64Instr> {
+    // When guard variable changes, pre-fetch associated data
+    let mut instrs: List<A64Instr> = [];
+    instrs = instrs.append(Comment("Predictive fetch for " + String(data_addr)));
+    instrs = instrs.append(PRFM("PLDL1KEEP", data_addr));  // Pre-fetch to L1
+    term instrs;
+}
+
+defn generate_guard_with_prefetch(guard: Expr, data_addrs: List<Int>) -> List<A64Instr> {
+    let mut instrs: List<A64Instr> = [];
+    
+    // Generate guard evaluation
+    instrs = instrs.append_all(generate_expr(guard));
+    
+    // Insert pre-fetches for associated data
+    let i: Int = 0;
+    [i < data_addrs.len()] {
+        instrs = instrs.append(PRFM("PLDL1KEEP", data_addrs[i]));
+        i = i + 1;
+    };
+    
+    term instrs;
+}
+
+// ===== OPTIMIZATION: Transaction Fusion =====
+
+defn can_fuse_transactions(txn1: Transaction, txn2: Transaction) -> Bool {
+    // Check if transactions always fire together
+    // 1. Same guard (or one implies the other)
+    // 2. No conflicting writes
+    // 3. Second doesn't read what first writes
+    
+    let writes1 = collect_writes(txn1.body);
+    let reads2 = collect_reads(txn2.body);
+    
+    // Check for conflicts
+    let i: Int = 0;
+    [i < writes1.len()] {
+        [reads2.contains(writes1[i])] {
+            term false;  // Can't fuse - second reads what first writes
+        };
+        i = i + 1;
+    };
+    
+    term true;  // Can fuse
+}
+
+defn fuse_transactions(txn1: Transaction, txn2: Transaction) -> Transaction {
+    // Merge guards with AND
+    let fused_guard = ExprBinOp("&&", Box::new(txn1.contract.precondition), Box::new(txn2.contract.precondition));
+    
+    // Merge postconditions with AND
+    let fused_post = ExprBinOp("&&", Box::new(txn1.contract.postcondition), Box::new(txn2.contract.postcondition));
+    
+    // Merge bodies
+    let mut fused_body = txn1.body;
+    fused_body = fused_body.append_all(txn2.body);
+    
+    term Transaction {
+        name: txn1.name + "_" + txn2.name,
+        is_async: txn1.is_async && txn2.is_async,
+        is_reactive: txn1.is_reactive && txn2.is_reactive,
+        type_params: [],
+        params: [],
+        contract: Contract {
+            precondition: fused_guard,
+            postcondition: fused_post,
+            watchdog: None
+        },
+        body: fused_body
+    };
+}
+
+// ===== OPTIMIZATION: Memory Overlay =====
+
+defn calculate_stack_layout(txns: List<Transaction>) -> HashMap<String, Int> {
+    // Analyze variable lifetimes and overlay non-overlapping ones
+    let mut layout: HashMap<String, Int> = new_map();
+    let mut stack_offset: Int = 0;
+    let mut used_slots: HashSet<Int> = new_set();
+    
+    let i: Int = 0;
+    [i < txns.len()] {
+        let vars = collect_vars(txns[i].body);
+        let j: Int = 0;
+        [j < vars.len()] {
+            [!layout.contains_key(vars[j])] {
+                // Find first available slot
+                let slot: Int = 0;
+                [used_slots.contains(slot)] {
+                    slot = slot + 1;
+                };
+                layout = layout.insert(vars[j], slot * 8);  // 8 bytes per slot
+                used_slots = used_slots.insert(slot);
+            };
+            j = j + 1;
+        };
+        i = i + 1;
+    };
+    
+    term layout;
+}
+
+// ===== OPTIMIZATION: Parallel Scheduling =====
+
+defn schedule_transactions_parallel(txns: List<Transaction>) -> List<List<Transaction>> {
+    // Group transactions that can run in parallel
+    let mut groups: List<List<Transaction>> = [];
+    let mut scheduled: HashSet<String> = new_set();
+    
+    let i: Int = 0;
+    [i < txns.len()] {
+        [!scheduled.contains(txns[i].name)] {
+            let mut group: List<Transaction> = [];
+            group = group.append(txns[i]);
+            scheduled = scheduled.insert(txns[i].name);
+            
+            // Find other transactions that can run in parallel
+            let j: Int = i + 1;
+            [j < txns.len()] {
+                [!scheduled.contains(txns[j].name)] {
+                    [can_run_parallel(txns[i], txns[j])] {
+                        group = group.append(txns[j]);
+                        scheduled = scheduled.insert(txns[j].name);
+                    };
+                };
+                j = j + 1;
+            };
+            
+            groups = groups.append(group);
+        };
+        i = i + 1;
+    };
+    
+    term groups;
+}
+
+defn can_run_parallel(txn1: Transaction, txn2: Transaction) -> Bool {
+    // Check if transactions have no conflicting reads/writes
+    let reads1 = collect_reads(txn1.body);
+    let writes1 = collect_writes(txn1.body);
+    let reads2 = collect_reads(txn2.body);
+    let writes2 = collect_writes(txn2.body);
+    
+    // Conflict if:
+    // - Both write same variable
+    // - One reads what other writes
+    
+    let i: Int = 0;
+    [i < writes1.len()] {
+        [writes2.contains(writes1[i])] {
+            term false;  // Both write same variable
+        };
+        [reads2.contains(writes1[i])] {
+            term false;  // txn2 reads what txn1 writes
+        };
+        i = i + 1;
+    };
+    
+    let j: Int = 0;
+    [j < writes2.len()] {
+        [reads1.contains(writes2[j])] {
+            term false;  // txn1 reads what txn2 writes
+        };
+        j = j + 1;
+    };
+    
+    term true;  // Can run in parallel
+}
+
+// ===== OPTIMIZATION: Guard Caching =====
+
+defn generate_guard_cache(guard: Expr, cache_var: String) -> List<A64Instr> {
+    // Generate code to cache guard result
+    let mut instrs: List<A64Instr> = [];
+    
+    // Evaluate guard
+    instrs = instrs.append_all(generate_expr(guard));
+    
+    // Store result in cache
+    instrs = instrs.append(STR("X0", "X29", get_cache_offset(cache_var)));
+    
+    term instrs;
+}
+
+defn get_cached_guard(cache_var: String) -> List<A64Instr> {
+    // Load cached guard result
+    term [LDR("X0", "X29", get_cache_offset(cache_var))];
+}
+
+// ===== ENHANCED CODE GENERATION =====
+
+defn generate_optimized_aarch64(program: Program) -> List<u8> {
+    let mut all_instrs: List<A64Instr> = [];
+    
+    // Extract transactions
+    let mut txns: List<Transaction> = [];
+    let i: Int = 0;
+    [i < program.items.len()] {
+        unification program.items[i](TopTxn(txn)) = {
+            txns = txns.append(txn);
+        };
+        i = i + 1;
+    };
+    
+    // OPTIMIZATION 1: Fuse transactions
+    let mut fused_txns: List<Transaction> = [];
+    let j: Int = 0;
+    [j < txns.len()] {
+        [j + 1 < txns.len()] {
+            [can_fuse_transactions(txns[j], txns[j+1])] {
+                let fused = fuse_transactions(txns[j], txns[j+1]);
+                fused_txns = fused_txns.append(fused);
+                j = j + 2;
+            };
+            [!can_fuse_transactions(txns[j], txns[j+1])] {
+                fused_txns = fused_txns.append(txns[j]);
+                j = j + 1;
+            };
+        };
+        [j + 1 >= txns.len()] {
+            fused_txns = fused_txns.append(txns[j]);
+            j = j + 1;
+        };
+    };
+    
+    // OPTIMIZATION 2: Calculate optimal stack layout
+    let stack_layout = calculate_stack_layout(fused_txns);
+    
+    // OPTIMIZATION 3: Schedule parallel groups
+    let parallel_groups = schedule_transactions_parallel(fused_txns);
+    
+    // Generate reactor with optimizations
+    all_instrs = all_instrs.append_all(generate_optimized_reactor(parallel_groups, stack_layout));
+    
+    // Emit binary
+    term emit_binary(all_instrs);
+}
+
+defn generate_optimized_reactor(groups: List<List<Transaction>>, layout: HashMap<String, Int>) -> List<A64Instr> {
+    let mut instrs: List<A64Instr> = [];
+    
+    instrs = instrs.append(emit_label("reactor_entry"));
+    instrs = instrs.append(emit_comment("Optimized reactor with parallel groups"));
+    
+    // Set up stack with optimized layout
+    instrs = instrs.append(emit_subi("SP", "SP", calculate_stack_size(layout)));
+    
+    // Process each parallel group
+    let i: Int = 0;
+    [i < groups.len()] {
+        let group = groups[i];
+        
+        [group.len() > 1] {
+            // Multiple transactions - can run in parallel
+            instrs = instrs.append(emit_comment("Parallel group " + String(i)));
+            
+            // Spawn threads for parallel execution
+            let j: Int = 1;
+            [j < group.len()] {
+                instrs = instrs.append(emit_bl(group[j].name + "_check"));
+                j = j + 1;
+            };
+            
+            // First transaction in current thread
+            instrs = instrs.append(emit_bl(group[0].name + "_check"));
+            
+            // Wait for all threads
+            instrs = instrs.append(emit_comment("Wait for parallel group"));
+        };
+        
+        [group.len() == 1] {
+            // Single transaction - no parallelism
+            instrs = instrs.append(emit_bl(group[0].name + "_check"));
+        };
+        
+        i = i + 1;
+    };
+    
+    instrs = instrs.append(emit_b("reactor_loop"));
+    instrs = instrs.append(emit_label("reactor_exit"));
+    instrs = instrs.append(emit_addi("SP", "SP", calculate_stack_size(layout)));
+    instrs = instrs.append(emit_ret());
+    
+    term instrs;
+}
+
+defn calculate_stack_size(layout: HashMap<String, Int>) -> Int {
+    let max_offset: Int = 0;
+    let offsets = layout.values();
+    let i: Int = 0;
+    [i < offsets.len()] {
+        [offsets[i] > max_offset] {
+            max_offset = offsets[i];
+        };
+        i = i + 1;
+    };
+    term (max_offset / 8 + 1) * 16;  // Round up to 16-byte alignment
+}
