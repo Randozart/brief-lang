@@ -85,6 +85,8 @@ pub enum RuntimeError {
     ContractViolation(String),
     UnhandledOutcome(String),
     UndefinedForeignFunction(String),
+    /// Transaction escaped - this is not an error, but a valid cancellation path
+    Escaped,
 }
 
 // Helper functions for JSON serialization stdlib
@@ -325,16 +327,26 @@ impl Interpreter {
                         if pre_val == Value::Bool(true) {
                             self.prior_state = self.state.clone();
 
+                            let mut transaction_escaped = false;
                             let mut transaction_failed = false;
                             for stmt in &txn.body {
-                                if let Err(_e) = self.exec_stmt(stmt) {
-                                    self.state = self.prior_state.clone();
-                                    transaction_failed = true;
+                                if let Err(e) = self.exec_stmt(stmt) {
+                                    match e {
+                                        RuntimeError::Escaped => {
+                                            // Escape cancels the transaction - valid path
+                                            transaction_escaped = true;
+                                        }
+                                        _ => {
+                                            // Actual error - restore state
+                                            self.state = self.prior_state.clone();
+                                            transaction_failed = true;
+                                        }
+                                    }
                                     break;
                                 }
                             }
 
-                            if !transaction_failed {
+                            if !transaction_failed && !transaction_escaped {
                                 let post_val = self.eval_expr(&txn.contract.post_condition)?;
                                 if post_val != Value::Bool(true) {
                                     self.state = self.prior_state.clone();
@@ -342,6 +354,7 @@ impl Interpreter {
                                     executed = true;
                                 }
                             }
+                            // If escaped, state is already restored and we continue
                         }
                     }
                 }
@@ -416,9 +429,8 @@ impl Interpreter {
                 }
             }
             Statement::Escape(_expr_opt) => {
-                return Err(RuntimeError::ContractViolation(
-                    "Transaction escaped".to_string(),
-                ));
+                // Escape cancels the transaction - not an error, just a cancellation
+                return Err(RuntimeError::Escaped);
             }
             Statement::Guarded {
                 condition,

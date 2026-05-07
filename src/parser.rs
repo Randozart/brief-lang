@@ -2183,6 +2183,41 @@ let span = self.current_span();
                 self.expect(Token::Semicolon)?;
                 Ok(Statement::Escape(expr))
             }
+            Some(Ok(Token::Unification)) => {
+                // uni pattern = expr;  (or UNI pattern = expr;)
+                // Pattern can be: identifier or Variant(identifier)
+                self.advance();
+                
+                // Get the first token (variant name or simple pattern)
+                // Variant names can be identifiers OR type tokens like Data, Ok, Err
+                let first = match self.current_token() {
+                    Some(Ok(Token::Identifier(name))) => name.clone(),
+                    Some(Ok(Token::TypeData)) => "Data".to_string(),
+                    Some(Ok(Token::Ok)) => "Ok".to_string(),
+                    Some(Ok(Token::Err)) => "Err".to_string(),
+                    _ => return self.spanned_err("Expected pattern after uni".to_string()),
+                };
+                self.advance();
+                
+                // Check if followed by ( for variant pattern: Variant(field)
+                let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance(); // consume (
+                    let field = self.expect_identifier()?;
+                    self.expect(Token::RParen)?;
+                    format!("{}:{}", first, field)
+                } else {
+                    first
+                };
+                
+                self.expect(Token::Eq)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::Semicolon)?;
+                Ok(Statement::Unification {
+                    name: "uni".to_string(),
+                    pattern,
+                    expr,
+                })
+            }
             Some(Ok(Token::Asm)) => {
                 self.advance();
                 // Parse: asm "instruction" { "clobber1", "clobber2" };

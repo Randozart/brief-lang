@@ -7,38 +7,23 @@ Brief provides powerful built-in data types with O(1) operations.
 Hash-based key-value storage with O(1) lookup.
 
 ```brief
-// Construction
+// Construction - use a transaction to modify state
 let map: HashMap<String, Int> = new_map();
 
-// Insert
-map = map.insert("age", 42);
-map = map.insert("count", 100);
-
-// Lookup (returns Option<V>)
-let age = map.get("age");
-[age.is_some()] {
-    let val = age.unwrap();
-    println("Age: " + String(val));
+txn add_to_map [true][map.contains_key("age")] {
+    map = map.insert("age", 42);
+    map = map.insert("count", 100);
+    term;
 };
 
-// Check existence
-[map.contains_key("age")] {
-    println("Has age key");
+// Lookup (use in transactions or functions)
+defn get_age(m: HashMap<String, Int>) -> Int {
+    let val = m.get("age");
+    [val.is_some()] {
+        term val.unwrap();
+    };
+    term 0;
 };
-
-// Remove
-map = map.remove("count");
-
-// Metadata
-let len = map.len();
-[map.is_empty()] {
-    println("Map is empty");
-};
-
-// Iteration
-let keys = map.keys();
-let values = map.values();
-let pairs = map.iter();  // List<(K, V)>
 ```
 
 ### Example: Word Counter

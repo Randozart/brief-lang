@@ -1,0 +1,351 @@
+// WebAssembly Backend for Brief Compiler
+// Generates .wasm binary modules from Brief programs
+// 
+// WebAssembly is a stack-based virtual machine with linear memory.
+// This backend uses guard-based execution for branchless code generation.
+
+use std::wasm;
+
+// ============================================================================
+// WASM Module Structure
+// ============================================================================
+
+// WebAssembly module builder
+// Generates complete .wasm binaries with all required sections
+transaction build_wasm_module(program: Program) -> WasmModule
+
+// Core WASM sections
+transaction build_type_section(types: Vec<FunctionType>) -> TypeSection
+transaction build_import_section(imports: Vec<Import>) -> ImportSection
+transaction build_function_section(signatures: Vec<TypeIndex>) -> FunctionSection
+transaction build_table_section(tables: Vec<Table>) -> TableSection
+transaction build_memory_section(memories: Vec<Memory>) -> MemorySection
+transaction build_global_section(globals: Vec<Global>) -> GlobalSection
+transaction build_export_section(exports: Vec<Export>) -> ExportSection
+transaction build_start_section(start_func: FunctionIndex) -> StartSection
+transaction build_element_section(elements: Vec<Element>) -> ElementSection
+transaction build_code_section(functions: Vec<FunctionBody>) -> CodeSection
+transaction build_data_section(data_segments: Vec<DataSegment>) -> DataSection
+
+// ============================================================================
+// WASM Type System
+// ============================================================================
+
+// Map Brief types to WASM types
+// Brief int -> i32, Brief float -> f64, Brief bool -> i32
+transaction map_brief_type_to_wasm(brief_type: Type) -> WasmType
+    [brief_type = Type::Int => WasmType::I32]
+    [brief_type = Type::Float => WasmType::F64]
+    [brief_type = Type::Bool => WasmType::I32]
+    [brief_type = Type::U64 => WasmType::I64]
+    [brief_type = Type::Ptr => WasmType::I32]
+
+// Function signature conversion
+transaction convert_signature(brief_sig: FunctionSignature) -> FunctionType
+    [result_type = map_brief_type_to_wasm(brief_sig.return_type)]
+    [param_types = map_all(brief_sig.params, map_brief_type_to_wasm)]
+    [FunctionType { params: param_types, result: result_type }]
+
+// ============================================================================
+// WASM Instruction Generation
+// ============================================================================
+
+// Convert Brief expressions to WASM instructions
+transaction expr_to_wasm(expr: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+
+// Arithmetic operations
+transaction compile_add(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [left_instrs = expr_to_wasm(left, ctx)]
+    [right_instrs = expr_to_wasm(right, ctx)]
+    [left_instrs ++ right_instrs ++ [WasmInstr::I32Add]]
+
+transaction compile_sub(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [left_instrs = expr_to_wasm(left, ctx)]
+    [right_instrs = expr_to_wasm(right, ctx)]
+    [left_instrs ++ right_instrs ++ [WasmInstr::I32Sub]]
+
+transaction compile_mul(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [left_instrs = expr_to_wasm(left, ctx)]
+    [right_instrs = expr_to_wasm(right, ctx)]
+    [left_instrs ++ right_instrs ++ [WasmInstr::I32Mul]]
+
+transaction compile_div(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [left_instrs = expr_to_wasm(left, ctx)]
+    [right_instrs = expr_to_wasm(right, ctx)]
+    [left_instrs ++ right_instrs ++ [WasmInstr::I32DivS]]
+
+// Comparison operations (return i32 bool)
+transaction compile_eq(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [left_instrs = expr_to_wasm(left, ctx)]
+    [right_instrs = expr_to_wasm(right, ctx)]
+    [left_instrs ++ right_instrs ++ [WasmInstr::I32Eq]]
+
+transaction compile_lt(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [left_instrs = expr_to_wasm(left, ctx)]
+    [right_instrs = expr_to_wasm(right, ctx)]
+    [left_instrs ++ right_instrs ++ [WasmInstr::I32LtS]]
+
+transaction compile_gt(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [left_instrs = expr_to_wasm(left, ctx)]
+    [right_instrs = expr_to_wasm(right, ctx)]
+    [left_instrs ++ right_instrs ++ [WasmInstr::I32GtS]]
+
+// ============================================================================
+// Guard-Based Execution (Branchless)
+// ============================================================================
+
+// Convert guard-based transactions to WASM
+// Uses select instruction instead of branches
+transaction compile_guarded_txn(guard: Expr, body: Vec<Statement>, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [guard_instrs = expr_to_wasm(guard, ctx)]
+    [body_instrs = compile_statements(body, ctx)]
+    
+    // Stack: [guard_value, ...body_results...]
+    // Use select to conditionally execute
+    [guard_instrs ++ body_instrs ++ [WasmInstr::Select]]
+
+// Compile reactive transactions (rct)
+// Fires while guard is true, reaches equilibrium
+transaction compile_rct_txn(name: String, guard: Expr, body: Vec<Statement>, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [guard_instrs = expr_to_wasm(guard, ctx)]
+    [body_instrs = compile_statements(body, ctx)]
+    
+    // Loop with guard check (using br_table for branchless exit)
+    [guard_instrs ++ 
+     [WasmInstr::Block(BlockType::Void), 
+      WasmInstr::Loop(BlockType::Void)] ++
+     body_instrs ++
+     expr_to_wasm(guard, ctx) ++
+     [WasmInstr::BrIf(0),  // Continue if guard true
+      WasmInstr::End, 
+      WasmInstr::End]]
+
+// ============================================================================
+// Memory Management
+// ============================================================================
+
+// Linear memory layout for WASM
+// Page 0: Stack (grows down from 64KB)
+// Page 1-N: Heap (grows up from 64KB)
+// Page M: Globals and constants
+
+transaction setup_wasm_memory(config: &MemoryConfig) -> Memory
+    [initial_pages = config.min_pages]
+    [max_pages = config.max_pages]
+    [Memory { min: initial_pages, max: max_pages }]
+
+// Stack allocation in WASM
+// Uses local variables for stack frame
+transaction allocate_stack_frame(locals: Vec<Local>) -> Vec<WasmInstr>
+    [map(locals, |local| WasmInstr::Local(local.index))]
+
+// Heap allocation via memory.grow
+transaction compile_heap_alloc(size: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
+    [size_instrs = expr_to_wasm(size, ctx)]
+    [size_instrs ++ 
+     [WasmInstr::I32Const(65536),  // Page size
+      WasmInstr::I32DivU,
+      WasmInstr::MemoryGrow(0)]]
+
+// ============================================================================
+// FFI and Imports
+// ============================================================================
+
+// Import host functions (JavaScript, native)
+transaction build_import(module: String, name: String, sig: FunctionType) -> Import
+    [Import { module, name, kind: ImportKind::Function(sig) }]
+
+// Standard WASI imports
+transaction build_wasi_imports() -> Vec<Import>
+    [vec![
+        build_import("wasi_snapshot_preview1", "fd_write", fd_write_signature()),
+        build_import("wasi_snapshot_preview1", "proc_exit", proc_exit_signature()),
+    ]]
+
+// Metropolitan FFI imports for shared memory
+transaction build_metropolitan_imports() -> Vec<Import>
+    [vec![
+        build_import("metro", "negotiate", negotiate_signature()),
+        build_import("metro", "share", share_signature()),
+        build_import("metro", "sync", sync_signature()),
+    ]]
+
+// ============================================================================
+// Code Generation Context
+// ============================================================================
+
+struct CodeGenContext {
+    // Current function being compiled
+    current_function: Option<FunctionId>,
+    
+    // Local variable mapping (Brief var -> WASM local index)
+    locals: HashMap<VarId, LocalIndex>,
+    
+    // Next available local index
+    next_local: LocalIndex,
+    
+    // Label stack for control flow
+    label_stack: Vec<Label>,
+    
+    // Type information
+    types: HashMap<TypeId, FunctionType>,
+}
+
+transaction create_codegen_context() -> CodeGenContext
+    [CodeGenContext {
+        current_function: None,
+        locals: HashMap::new(),
+        next_local: 0,
+        label_stack: Vec::new(),
+        types: HashMap::new(),
+    }]
+
+// ============================================================================
+// Main Compilation Pipeline
+// ============================================================================
+
+transaction compile_to_wasm(program: Program, config: WasmConfig) -> WasmModule
+    [ctx = create_codegen_context()]
+    
+    // Build type section from function signatures
+    [types = collect_function_types(&program)]
+    [type_section = build_type_section(types)]
+    
+    // Build imports (WASI + user imports)
+    [imports = build_wasi_imports()]
+    [import_section = build_import_section(imports)]
+    
+    // Build function bodies
+    [functions = map(program.functions, |f| compile_function(f, &ctx))]
+    [code_section = build_code_section(functions)]
+    
+    // Build exports
+    [exports = collect_exports(&program)]
+    [export_section = build_export_section(exports)]
+    
+    // Assemble module
+    [WasmModule {
+        type_section,
+        import_section,
+        function_section: build_function_section(function_signatures),
+        table_section: build_table_section(vec![]),
+        memory_section: build_memory_section(vec![setup_wasm_memory(&config.memory)]),
+        global_section: build_global_section(vec![]),
+        export_section,
+        start_section: None,
+        element_section: build_element_section(vec![]),
+        code_section,
+        data_section: build_data_section(vec![]),
+    }]
+
+// ============================================================================
+// Optimization Passes
+// ============================================================================
+
+// Branchless optimization using select
+transaction optimize_branchless(code: Vec<WasmInstr>) -> Vec<WasmInstr>
+    // Replace if-then-else with select where possible
+    [pattern_match(code, |instrs| {
+        [If, condition, then_branch, Else, else_branch, End] =>
+            [condition, then_branch, else_branch, Select]
+    })]
+
+// Tail call optimization
+transaction optimize_tail_calls(code: Vec<WasmInstr>) -> Vec<WasmInstr>
+    // Replace call + return with return_call (WASM tail calls)
+    [pattern_match(code, |instrs| {
+        [Call(func_idx), Return] => [ReturnCall(func_idx)]
+    })]
+
+// Constant folding
+transaction optimize_constants(code: Vec<WasmInstr>) -> Vec<WasmInstr>
+    // Evaluate constant expressions at compile time
+    [fold_constants(code)]
+
+// ============================================================================
+// WASM Binary Encoding
+// ============================================================================
+
+// Encode WASM module to binary format
+transaction encode_wasm_module(module: WasmModule) -> Vec<u8>
+    [magic = [0x00, 0x61, 0x73, 0x6D]]  // \0asm
+    [version = [0x01, 0x00, 0x00, 0x00]]  // Version 1
+    
+    [type_bytes = encode_section(SectionId::Type, module.type_section)]
+    [import_bytes = encode_section(SectionId::Import, module.import_section)]
+    [function_bytes = encode_section(SectionId::Function, module.function_section)]
+    [table_bytes = encode_section(SectionId::Table, module.table_section)]
+    [memory_bytes = encode_section(SectionId::Memory, module.memory_section)]
+    [global_bytes = encode_section(SectionId::Global, module.global_section)]
+    [export_bytes = encode_section(SectionId::Export, module.export_section)]
+    [start_bytes = encode_section(SectionId::Start, module.start_section)]
+    [element_bytes = encode_section(SectionId::Element, module.element_section)]
+    [code_bytes = encode_section(SectionId::Code, module.code_section)]
+    [data_bytes = encode_section(SectionId::Data, module.data_section)]
+    
+    [magic ++ version ++ 
+     type_bytes ++ import_bytes ++ function_bytes ++
+     table_bytes ++ memory_bytes ++ global_bytes ++
+     export_bytes ++ start_bytes ++ element_bytes ++
+     code_bytes ++ data_bytes]
+
+// LEB128 encoding for WASM integers
+transaction encode_leb128(value: u32) -> Vec<u8>
+    [if value < 128 then [value as u8]
+     else [(value & 0x7F | 0x80) as u8] ++ encode_leb128(value >> 7)]
+
+// ============================================================================
+// Runtime Support
+// ============================================================================
+
+// WASM runtime configuration
+struct WasmConfig {
+    // Memory configuration
+    memory: MemoryConfig,
+    
+    // Optimization level
+    optimize: OptimizationLevel,
+    
+    // Debug info
+    debug: bool,
+    
+    // Target environment (browser, node, wasi)
+    target: WasmTarget,
+}
+
+struct MemoryConfig {
+    min_pages: u32,
+    max_pages: u32,
+    heap_start: u32,
+    stack_size: u32,
+}
+
+enum WasmTarget {
+    Browser,
+    Node,
+    WASI,
+    Bare,
+}
+
+enum OptimizationLevel {
+    None,
+    Speed,
+    Size,
+}
+
+// ============================================================================
+// Exports
+// ============================================================================
+
+// Main entry point for WASM backend
+export transaction compile_wasm(program: Program, output: &mut String)
+    [config = WasmConfig::default()]
+    [module = compile_to_wasm(program, config)]
+    [optimized_module = optimize_wasm_module(module, config.optimize)]
+    [binary = encode_wasm_module(optimized_module)]
+    [output = format!("// WASM binary: {} bytes\n", binary.len())]
+
+// Generate WAT (WebAssembly Text Format) for debugging
+export transaction generate_wat(module: WasmModule) -> String
+    [wat = format_wat_text(module)]
+    [wat]

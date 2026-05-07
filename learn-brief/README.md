@@ -104,20 +104,20 @@
 let counter: Int = 0;
 const MAX_SIZE: Int = 100;
 
-// Transaction
-txn increment() [counter < 100][counter == @counter + 1] {
+// Transaction (no parentheses if no params)
+txn increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
 
 // Reactive transaction
-rct txn auto_reset() [counter >= 100][counter == 0] {
+rct txn auto_reset [counter >= 100][counter == 0] {
     &counter = 0;
     term;
 };
 
-// Function
-defn add(a: Int, b: Int) [a >= 0 && b >= 0][result == a + b] -> Int {
+// Function (no contracts required, but meaningful ones are recommended)
+defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
 

@@ -1,0 +1,488 @@
+// SystemVerilog Backend for Brief Compiler
+// Generates synthesizable SystemVerilog from Brief programs
+// 
+// SystemVerilog is a hardware description and verification language.
+// This backend uses modern SV features for concise, efficient RTL.
+
+use std::verilog;
+
+// ============================================================================
+// Module Structure
+// ============================================================================
+
+// Generate SystemVerilog module
+transaction build_module(name: String, ports: Vec<Port>, body: Vec<ModuleItem>) -> Module
+    [Module {
+        name,
+        parameters: vec![],
+        ports,
+        body,
+    }]
+
+// Port declaration with direction and type
+transaction build_port(name: String, direction: PortDirection, data_type: SvType) -> Port
+    [Port { name, direction, data_type }]
+
+// Parameter declaration
+transaction build_parameter(name: String, value: Expr) -> Parameter
+    [Parameter { name, value }]
+
+// ============================================================================
+// Type Mapping (Brief to SystemVerilog)
+// ============================================================================
+
+// Map Brief types to SystemVerilog types
+transaction map_brief_type_to_sv(brief_type: Type) -> SvType
+    [brief_type = Type::Bool => SvType::Logic(1)]
+    [brief_type = Type::Int => SvType::Logic(32)]
+    [brief_type = Type::U64 => SvType::Logic(64)]
+    [brief_type = Type::Float => SvType::Real]
+    [brief_type = Type::Ptr => SvType::Logic(32)]
+    [brief_type = Type::Array(size, elem_type) => 
+        SvType::UnpackedArray(*size, map_brief_type_to_sv(*elem_type))]
+
+// Clock and reset
+transaction build_clock_port() -> Port
+    [build_port("clk", PortDirection::Input, SvType::Logic(1))]
+
+transaction build_reset_port() -> Port
+    [build_port("rst", PortDirection::Input, SvType::Logic(1))]
+
+// ============================================================================
+// Transaction to Always Process
+// ============================================================================
+
+// Convert reactive transaction to always_ff process
+transaction compile_rct_always(txn: Transaction, ctx: &SvContext) -> AlwaysProcess
+    [guard_signal = compile_guard(txn.guard, ctx)]
+    [body_assignments = compile_transaction_body(txn.body, ctx)]
+    
+    [AlwaysProcess {
+        kind: AlwaysKind::FF,
+        sensitivity: vec!["posedge clk", "posedge rst"],
+        body: vec![
+            Statement::If(IfStatement {
+                condition: "rst",
+                then_branch: vec![
+                    Statement::Assignment(txn.output.clone(), "0")
+                ],
+                else_branch: vec![
+                    Statement::If(IfStatement {
+                        condition: guard_signal,
+                        then_branch: body_assignments,
+                        else_branch: vec![],
+                    })
+                ],
+            })
+        ],
+    }]
+
+// Convert pure transaction to always_comb
+transaction compile_pure_always(txn: Transaction, ctx: &SvContext) -> AlwaysProcess
+    [input_signals = collect_inputs(txn.body, ctx)]
+    [output_expr = compile_expression(txn.output_expr, ctx)]
+    
+    [AlwaysProcess {
+        kind: AlwaysKind::Comb,
+        sensitivity: vec!["*"],
+        body: vec![
+            Statement::Assignment(txn.output.clone(), output_expr)
+        ],
+    }]
+
+// ============================================================================
+// Guard Compilation (Branchless Hardware)
+// ============================================================================
+
+// Compile guard to hardware enable signal
+transaction compile_guard(expr: Expr, ctx: &SvContext) -> String
+    [expr = Expr::BinOp(BinOp::And, left, right) =>
+        format!("({} && {})", compile_guard(*left, ctx), compile_guard(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Or, left, right) =>
+        format!("({} || {})", compile_guard(*left, ctx), compile_guard(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Eq, left, right) =>
+        format!("({} == {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Ne, left, right) =>
+        format!("({} != {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Lt, left, right) =>
+        format!("({} < {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Gt, left, right) =>
+        format!("({} > {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::Var(name) => name.clone()]
+    
+    [expr = Expr::Const(Const::Bool(true)) => "1'b1".to_string()]
+    [expr = Expr::Const(Const::Bool(false)) => "1'b0".to_string()]
+    [expr = Expr::Const(Const::Int(n)) => format!("32'd{}", n)]
+
+// ============================================================================
+// Expression Compilation
+// ============================================================================
+
+// Compile Brief expression to SystemVerilog
+transaction compile_expr(expr: Expr, ctx: &SvContext) -> String
+    [expr = Expr::BinOp(BinOp::Add, left, right) =>
+        format!("({} + {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Sub, left, right) =>
+        format!("({} - {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Mul, left, right) =>
+        format!("({} * {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Div, left, right) =>
+        format!("({} / {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Mod, left, right) =>
+        format!("({} % {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::And, left, right) =>
+        format!("({} & {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Or, left, right) =>
+        format!("({} | {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Xor, left, right) =>
+        format!("({} ^ {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Shl, left, right) =>
+        format!("({} << {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Shr, left, right) =>
+        format!("({} >> {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::Var(name) => name.clone()]
+    
+    [expr = Expr::Const(Const::Int(n)) => format!("32'd{}", n)]
+    [expr = Expr::Const(Const::Bool(true)) => "1'b1".to_string()]
+    [expr = Expr::Const(Const::Bool(false)) => "1'b0".to_string()]
+
+// ============================================================================
+// Signal Declaration
+// ============================================================================
+
+// Generate logic declarations
+transaction declare_signals(program: &Program, ctx: &SvContext) -> Vec<LogicDeclaration>
+    [map(program.variables, |var| LogicDeclaration {
+        name: var.name.clone(),
+        data_type: map_brief_type_to_sv(var.type_),
+        kind: if var.mutable then SignalKind::Var else SignalKind::Wire,
+    })]
+
+// Generate typedef for custom types
+transaction generate_typedef(name: String, base_type: SvType) -> Typedef
+    [Typedef { name, base_type }]
+
+// ============================================================================
+// Interface Generation
+// ============================================================================
+
+// Generate SystemVerilog interface for FFI
+transaction generate_interface(name: String, signals: Vec<Signal>) -> Interface
+    [Interface {
+        name,
+        signals,
+        modports: vec![
+            Modport {
+                name: "master",
+                directions: build_master_directions(&signals),
+            },
+            Modport {
+                name: "slave",
+                directions: build_slave_directions(&signals),
+            },
+        ],
+    }]
+
+// Metropolitan FFI interface
+transaction generate_metro_interface() -> Interface
+    [generate_interface("metro_if", vec![
+        Signal { name: "req", direction: PortDirection::Input, data_type: SvType::Logic(1) },
+        Signal { name: "ack", direction: PortDirection::Output, data_type: SvType::Logic(1) },
+        Signal { name: "addr", direction: PortDirection::Input, data_type: SvType::Logic(32) },
+        Signal { name: "data", direction: PortDirection::InOut, data_type: SvType::Logic(64) },
+        Signal { name: "len", direction: PortDirection::Input, data_type: SvType::Logic(16) },
+    ])]
+
+// ============================================================================
+// FSM Generation
+// ============================================================================
+
+// Generate FSM from transaction dependencies
+transaction generate_fsm(txns: Vec<Transaction>) -> FsmBlock
+    [states = identify_states(txns)]
+    [state_encoding = OneHotEncoding(states.len())]
+    
+    [FsmBlock {
+        state_type: Typedef {
+            name: "state_t",
+            base_type: SvType::Logic(states.len()),
+        },
+        state_register: "state_q",
+        next_state_logic: "state_d",
+        state_transitions: build_transition_logic(txns, &states),
+        output_logic: build_output_logic(txns, &states),
+    }]
+
+// Three-process FSM style
+transaction generate_three_process_fsm(fsm: &FsmBlock) -> Vec<AlwaysProcess>
+    [vec![
+        // State register (sequential)
+        AlwaysProcess {
+            kind: AlwaysKind::FF,
+            sensitivity: vec!["posedge clk", "posedge rst"],
+            body: fsm.state_register_logic(),
+        },
+        // Next state logic (combinational)
+        AlwaysProcess {
+            kind: AlwaysKind::Comb,
+            sensitivity: vec!["*"],
+            body: fsm.next_state_logic(),
+        },
+        // Output logic (combinational)
+        AlwaysProcess {
+            kind: AlwaysKind::Comb,
+            sensitivity: vec!["*"],
+            body: fsm.output_logic(),
+        },
+    ]]
+
+// ============================================================================
+// Memory Inference
+// ============================================================================
+
+// Infer block RAM from array
+transaction infer_block_ram(array: &Variable) -> LogicDeclaration
+    [LogicDeclaration {
+        name: array.name.clone(),
+        data_type: map_brief_type_to_sv(array.element_type),
+        dimensions: vec![array.size],
+        attributes: vec!["(* ram_style = \"block\" *)"],
+    }]
+
+// Infer shift register from array
+transaction infer_shift_register(array: &Variable) -> LogicDeclaration
+    [LogicDeclaration {
+        name: array.name.clone(),
+        data_type: map_brief_type_to_sv(array.element_type),
+        dimensions: vec![array.size],
+        attributes: vec!["(* rom_style = \"shift_register\" *)"],
+    }]
+
+// ============================================================================
+// Assertion Generation
+// ============================================================================
+
+// Generate assertions from contracts
+transaction generate_assertions(contracts: Vec<Contract>) -> Vec<Assertion>
+    [map(contracts, |contract| Assertion {
+        kind: AssertionKind::Property,
+        condition: compile_expr(contract.condition, &SvContext::new()),
+        message: format!("Contract violation: {}", contract.description),
+        severity: if contract.critical then Severity::Error else Severity::Warning,
+    })]
+
+// Generate cover properties for verification
+transaction generate_cover_points(program: &Program) -> Vec<CoverPoint>
+    [map(program.transactions, |txn| CoverPoint {
+        name: format!("txn_{}_fired", txn.name),
+        expression: compile_guard(txn.guard, &SvContext::new()),
+    })]
+
+// ============================================================================
+// Code Generation Context
+// ============================================================================
+
+struct SvContext {
+    // Module name
+    module_name: String,
+    
+    // Clock frequency (Hz)
+    clock_frequency: u64,
+    
+    // Target technology
+    target_tech: TargetTechnology,
+    
+    // Signal declarations
+    signals: HashMap<String, LogicDeclaration>,
+    
+    // Module parameters
+    parameters: HashMap<String, Parameter>,
+}
+
+enum TargetTechnology {
+    Generic,
+    Xilinx7Series,
+    XilinxUltraScale,
+    IntelCyclone,
+    IntelStratix,
+    Asic,
+}
+
+// ============================================================================
+// Main Compilation Pipeline
+// ============================================================================
+
+transaction compile_to_systemverilog(program: Program, config: SvConfig) -> SvDesign
+    [ctx = SvContext {
+        module_name: program.name.clone(),
+        clock_frequency: config.clock_frequency,
+        target_tech: config.target_tech,
+        signals: HashMap::new(),
+        parameters: HashMap::new(),
+    }]
+    
+    // Build module with ports
+    [ports = build_port_list(&program, &ctx)]
+    
+    // Add clock and reset if needed
+    [ports = if config.add_clock_reset {
+        ports ++ vec![build_clock_port(), build_reset_port()]
+    } else {
+        ports
+    }]
+    
+    // Declare all signals
+    [signals = declare_signals(&program, &ctx)]
+    
+    // Compile transactions to always processes
+    [always_blocks = map(program.transactions, |txn| {
+        if txn.reactive {
+            compile_rct_always(txn, &ctx)
+        } else {
+            compile_pure_always(txn, &ctx)
+        }
+    })]
+    
+    // Generate assertions from contracts
+    [assertions = generate_assertions(program.contracts)]
+    
+    [SvDesign {
+        module: build_module(program.name.clone(), ports, vec![
+            ModuleItem::Signals(signals),
+            ModuleItem::AlwaysBlocks(always_blocks),
+            ModuleItem::Assertions(assertions),
+        ]),
+    }]
+
+// ============================================================================
+// SystemVerilog Output Generation
+// ============================================================================
+
+transaction generate_systemverilog_file(design: SvDesign) -> String
+    [header = generate_header()]
+    [module_text = format_module(&design.module)]
+    
+    [header ++ "\n\n" ++ module_text]
+
+transaction generate_header() -> String
+    ["// Generated by Brief Compiler\n// https://github.com/brief-lang/brief\n// Auto-generated SystemVerilog code\n\n`timescale 1ns/1ps"]
+
+// ============================================================================
+// Optimization Passes
+// ============================================================================
+
+// Resource sharing
+transaction optimize_resource_sharing(blocks: Vec<AlwaysProcess>) -> Vec<AlwaysProcess>
+    // Share operators across multiple always blocks
+    [identify_shared_operations(blocks)]
+    [allocate_shared_resources(blocks)]
+    [rewrite_with_muxes(blocks)]
+
+// Pipelining
+transaction optimize_pipelining(blocks: Vec<AlwaysProcess>) -> Vec<AlwaysProcess>
+    // Insert pipeline stages for timing closure
+    [identify_critical_paths(blocks)]
+    [insert_pipeline_registers(blocks)]
+
+// Register retiming
+transaction optimize_retiming(blocks: Vec<AlwaysProcess>) -> Vec<AlwaysProcess>
+    // Move registers for better timing
+    [analyze_register_positions(blocks)]
+    [retime_registers(blocks)]
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+struct SvConfig {
+    // Clock frequency in Hz
+    clock_frequency: u64,
+    
+    // Target technology
+    target_tech: TargetTechnology,
+    
+    // Optimization level
+    optimize: OptimizationLevel,
+    
+    // Add clock/reset ports
+    add_clock_reset: bool,
+    
+    // Generate testbench
+    generate_testbench: bool,
+    
+    // Reset polarity
+    reset_polarity: ResetPolarity,
+    
+    // FSM encoding style
+    fsm_encoding: FsmEncoding,
+}
+
+enum FsmEncoding {
+    OneHot,
+    Binary,
+    Gray,
+    Auto,
+}
+
+// ============================================================================
+// Testbench Generation
+// ============================================================================
+
+transaction generate_testbench(design: SvDesign, tests: Vec<TestCase>) -> String
+    [tb_module = build_testbench_module(&design)]
+    [test_sequences = generate_test_sequences(tests)]
+    
+    [format_module(&tb_module) ++ "\n" ++ test_sequences]
+
+// ============================================================================
+// Exports
+// ============================================================================
+
+// Main entry point for SystemVerilog backend
+export transaction compile_verilog(program: Program, output: &mut String)
+    [config = SvConfig {
+        clock_frequency: 100_000_000,  // 100 MHz
+        target_tech: TargetTechnology::Generic,
+        optimize: OptimizationLevel::Speed,
+        add_clock_reset: true,
+        generate_testbench: false,
+        reset_polarity: ResetPolarity::ActiveHigh,
+        fsm_encoding: FsmEncoding::OneHot,
+    }]
+    
+    [design = compile_to_systemverilog(program, config)]
+    [optimized_design = optimize_sv_design(design, config.optimize)]
+    [output = generate_systemverilog_file(optimized_design)]
+
+// Generate with testbench
+export transaction compile_verilog_with_tb(program: Program, output: &mut String, tb_output: &mut String)
+    [config = SvConfig {
+        clock_frequency: 100_000_000,
+        target_tech: TargetTechnology::Generic,
+        optimize: OptimizationLevel::Speed,
+        add_clock_reset: true,
+        generate_testbench: true,
+        reset_polarity: ResetPolarity::ActiveHigh,
+        fsm_encoding: FsmEncoding::OneHot,
+    }]
+    
+    [design = compile_to_systemverilog(program, config)]
+    [output = generate_systemverilog_file(design)]
+    [tests = generate_test_cases(&program)]
+    [tb_output = generate_testbench(design, tests)]

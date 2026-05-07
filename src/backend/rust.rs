@@ -220,7 +220,7 @@ impl RustBackend {
             Expr::Integer(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Bool(b) => b.to_string(),
-            Expr::String(s) => format!("\"{}\"", s),
+            Expr::String(s) => format!("\"{}\".to_string()", s),
             Expr::Identifier(n) => format!("self.{}", n),
             Expr::OwnedRef(n) => format!("self.{}", n),
             Expr::PriorState(n) => format!("self.{}", n),

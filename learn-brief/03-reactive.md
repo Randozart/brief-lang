@@ -8,13 +8,13 @@ Add `rct` to make a transaction reactive:
 
 ```brief
 // Passive transaction (must be called explicitly)
-txn increment() [counter < 100][counter == @counter + 1] {
+txn increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
 
 // Reactive transaction (fires automatically)
-rct txn auto_increment() [counter < 100][counter == @counter + 1] {
+rct txn auto_increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
@@ -77,14 +77,13 @@ Reactive transactions can trigger each other:
 let count: Int = 0;
 let done: Bool = false;
 
-rct txn increment() [count < 10 && !done][count == @count + 1] {
+rct txn increment [count < 10 && !done][count == @count + 1] {
     &count = count + 1;
     term;
 };
 
-rct txn finish() [count >= 10 && !done][done == true] {
+rct txn finish [count >= 10 && !done][done == true] {
     &done = true;
-    println("Done!");
     term;
 };
 ```
@@ -101,16 +100,17 @@ rct txn finish() [count >= 10 && !done][done == true] {
 Add `async` for concurrent execution (compiler verifies safety):
 
 ```brief
-rct async txn fetch_data() [needs_update][data != @data] {
-    let result = http_get(url);
-    [result.is_ok()] {
-        &data = result.value;
-    };
+let needs_update: Bool = false;
+let data: Int = 0;
+let processed_data: Int = -1;
+let processed: Bool = false;
+
+rct async txn fetch_data [needs_update][data != @data] {
+    &data = data + 1;
     term;
 };
 
-rct async txn process_data() [data != @processed_data][processed == true] {
-    process(data);
+rct async txn process_data [data != processed_data][processed == true] {
     &processed_data = data;
     &processed = true;
     term;
@@ -139,17 +139,17 @@ rct txn on_button_click() [button_clicked][handled == true] {
 enum State { Idle, Running, Done }
 let state: State = State::Idle;
 
-rct txn start() [state == State::Idle][state == State::Running] {
+rct txn start [state == State::Idle][state == State::Running] {
     &state = State::Running;
     term;
 };
 
-rct txn finish() [state == State::Running][state == State::Done] {
+rct txn finish [state == State::Running][state == State::Done] {
     &state = State::Done;
     term;
 };
 
-rct txn reset() [state == State::Done][state == State::Idle] {
+rct txn reset [state == State::Done][state == State::Idle] {
     &state = State::Idle;
     term;
 };

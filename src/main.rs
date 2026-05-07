@@ -1742,19 +1742,7 @@ fn run_verilog(
     // Hardware validation
     let is_ebv = file_path.extension().map(|e| e == "ebv").unwrap_or(false);
     
-    // Load DBVS if hw_config is a .dbv
-    let dbvs_engine = if hw_config_path.extension().and_then(|s| s.to_str()) == Some("dbv") {
-        let dbv_content = fs::read_to_string(hw_config_path)?;
-        let dbv = crate::dbrief::parse_dbrief(&dbv_content)?;
-//         if let Some(schema_path) = dbv.schema_path {
-//             let schema_content = fs::read_to_string(schema_path)?;
-//             Some(crate::dbrief::compile_dbvs(&schema_content)?)
-//         } else {
-//             None
-//         }
-    } else {
-        None
-    };
+    let dbvs_engine: Option<crate::dbrief::DbvsEngine> = None;
 
     let hw_diagnostics = hardware_validator::HardwareValidator::validate(
         &program,
@@ -1762,6 +1750,7 @@ fn run_verilog(
         "vhdl",
         is_ebv,
         target_spec.as_ref(),
+        dbvs_engine.as_ref(),
     );
 
     if !hw_diagnostics.is_empty() {

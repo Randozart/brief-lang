@@ -41,7 +41,7 @@ const PI: Float = 3.14159;
 Transactions are how state changes in Brief:
 
 ```brief
-txn increment() [counter < 100][counter == @counter + 1] {
+txn increment [counter < 100][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
@@ -49,7 +49,7 @@ txn increment() [counter < 100][counter == @counter + 1] {
 
 **Parts of a transaction:**
 - `txn` - Keyword
-- `increment` - Name
+- `increment` - Name (no parentheses when no parameters)
 - `[counter < 100]` - **Precondition** (when it can run)
 - `[counter == @counter + 1]` - **Postcondition** (what it guarantees)
 - `&counter = counter + 1` - Mutation (note the `&`)
@@ -64,17 +64,21 @@ txn increment() [counter < 100][counter == @counter + 1] {
 Transactions can be called explicitly:
 
 ```brief
-txn main() [true][true] {
-    increment();  // Call the transaction
-    increment();
+txn main [true][result == 3] {
+    increment;
+    increment;
+    increment;
+    &result = 3;
     term;
 };
+
+let result: Int = 0;
 ```
 
 Or they can be **reactive** (fire automatically when precondition is met):
 
 ```brief
-rct txn auto_increment() [counter < 10][counter == @counter + 1] {
+rct txn auto_increment [counter < 10][counter == @counter + 1] {
     &counter = counter + 1;
     term;
 };
@@ -87,22 +91,21 @@ We'll cover reactive transactions in detail in [03-reactive.md](03-reactive.md).
 Instead of `if/else`, Brief uses guards:
 
 ```brief
-txn process(x: Int) [true][result != 0] {
+let x: Int = 5;
+
+txn process [x > 0 || x <= 0][result >= 0] {
     let result: Int = 0;
-    
+
     // Guard: only executes if condition is true
     [x > 0] {
         &result = x * 2;
     };
-    
+
     [x < 0] {
         &result = x * -1;
     };
-    
-    [x == 0] {
-        escape;  // Rollback
-    };
-    
+
+    // For x == 0, result stays 0 (satisfies result >= 0)
     term;
 };
 ```
@@ -111,6 +114,7 @@ txn process(x: Int) [true][result != 0] {
 - Multiple guards can execute (not mutually exclusive)
 - Guards are evaluated in order
 - No nesting required
+- Postconditions must be satisfied on ALL paths
 
 ## 6. Escape (Rollback)
 

@@ -150,6 +150,12 @@ pub struct PathConstraint {
 }
 
 #[derive(Debug, Clone)]
+pub enum PathKind {
+    Term(Vec<Option<Expr>>),
+    Escape,
+}
+
+#[derive(Debug, Clone)]
 pub struct SymbolicState {
     pub vars: HashMap<String, SymbolicValue>,
     pub constraints: Vec<PathConstraint>,
@@ -375,7 +381,12 @@ impl SymbolicExecutor {
     ) {
         let term_paths = self.enumerate_paths(body, state.clone());
 
-        for (path_idx, (path_state, term_outputs)) in term_paths.iter().enumerate() {
+        for (path_idx, (path_state, path_kind)) in term_paths.iter().enumerate() {
+            // Escape paths cancel the transaction - postconditions are vacuously satisfied
+            if let PathKind::Escape = path_kind {
+                continue;
+            }
+
             if !self.implies(pre_condition, path_state, post_condition) {
                 let mut err = ProofError::new("P008", "contract verification failed");
                 err.explanation = format!(
@@ -413,7 +424,7 @@ impl SymbolicExecutor {
         &self,
         body: &[Statement],
         state: SymbolicState,
-    ) -> Vec<(SymbolicState, Vec<Option<Expr>>)> {
+    ) -> Vec<(SymbolicState, PathKind)> {
         let mut paths = Vec::new();
         self.enumerate_paths_recursive(body, state, &mut paths);
         paths
@@ -423,11 +434,11 @@ impl SymbolicExecutor {
         &self,
         body: &[Statement],
         state: SymbolicState,
-        paths: &mut Vec<(SymbolicState, Vec<Option<Expr>>)>,
+        paths: &mut Vec<(SymbolicState, PathKind)>,
     ) {
         let mut current_state = state;
         let mut terminated = false;
-        let mut term_outputs: Vec<Option<Expr>> = Vec::new();
+        let mut path_kind: PathKind = PathKind::Term(Vec::new());
 
         for stmt in body {
             if terminated {
@@ -473,24 +484,25 @@ impl SymbolicExecutor {
                     let mut false_paths = Vec::new();
                     self.enumerate_paths_recursive(&body[1..], false_state, &mut false_paths);
 
-                    for (s, outputs) in true_paths.into_iter().chain(false_paths.into_iter()) {
-                        paths.push((s, outputs));
+                    for (s, pk) in true_paths.into_iter().chain(false_paths.into_iter()) {
+                        paths.push((s, pk));
                     }
                     return;
                 }
                 Statement::Term(outputs) => {
                     terminated = true;
-                    term_outputs = outputs.clone();
+                    path_kind = PathKind::Term(outputs.clone());
                 }
                 Statement::Escape(_) => {
                     terminated = true;
+                    path_kind = PathKind::Escape;
                 }
                 Statement::Expression(_) | Statement::Unification { .. } => {}
             }
         }
 
         if terminated {
-            paths.push((current_state, term_outputs));
+            paths.push((current_state, path_kind));
         }
     }
 
@@ -2286,6 +2298,109 @@ mod tests {
         assert!(
             has_trivial_pre && has_trivial_post,
             "Expected both P009 and P010 errors for definition, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_escape_skips_postcondition_check() {
+        let code = r#"
+            let count: Int = 0;
+
+            txn maybe_increment [count >= 0][count == @count + 1] {
+                [count > 0] { &count = count + 1; term; };
+                escape;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_contract_error = errors.iter().any(|e| e.code == "P008");
+        assert!(
+            !has_contract_error,
+            "Escape path should not trigger postcondition check, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_term_path_still_checked() {
+        // Term paths should still be checked against postcondition
+        // Using a case the symbolic executor can detect
+        let code = r#"
+            let count: Int = 0;
+
+            txn bad_increment [count >= 0][count == 0] {
+                [count > 0] { &count = 5; term; };
+                escape;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // The term path sets count = 5, which violates count == 0
+        // The symbolic executor should detect this
+        let has_contract_error = errors.iter().any(|e| e.code == "P008");
+        assert!(
+            has_contract_error,
+            "Term path should be checked against postcondition, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_rct_txn_no_parameters() {
+        let code = r#"
+            let count: Int = 0;
+
+            rct txn bad_rct(x: Int) [true][true] {
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let result = parser.parse();
+
+        assert!(
+            result.is_err(),
+            "rct transaction with parameters should fail to parse"
+        );
+    }
+
+    #[test]
+    fn test_regular_txn_optional_parameters() {
+        let code = r#"
+            let count: Int = 0;
+
+            txn with_param(x: Int) [x > 0][count == @count + x] {
+                &count = count + x;
+                term;
+            };
+
+            txn without_param [count >= 0][count == @count + 1] {
+                &count = count + 1;
+                term;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        let has_error = errors.iter().any(|e| !e.is_warning);
+        assert!(
+            !has_error,
+            "Regular transactions with/without parameters should work, got errors: {:?}",
             errors
         );
     }

@@ -7,18 +7,17 @@ Brief provides comprehensive string operations, all implemented natively (no FFI
 ```brief
 let s: String = "Hello, World!";
 
-// Length
-let len = string.len(s);  // 13
+// Length (method syntax)
+let len = s.len();  // 13
 
 // Concatenation
-let combined = string.concat("Hello", "World");  // "HelloWorld"
+let combined = "Hello" + "World";  // "HelloWorld"
 
 // Substring
-let sub = string.substr(s, 0, 5);  // "Hello"
-let from = string.substr_from(s, 7);  // "World!"
+let sub = s.substr(0, 5);  // "Hello"
 
 // Character at index
-let c = string.char_at(s, 0);  // 'H'
+let c = s.char_at(0);  // "H"
 ```
 
 ## 2. Search Operations

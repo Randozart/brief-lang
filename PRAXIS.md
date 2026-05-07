@@ -1,21 +1,56 @@
-# Brief Philosophy: Topology Over Timing
+# Brief Praxis: Topology Over Timing
 
 **Version:** 0.12.0  
-**Status:** Core Design Principle ✅
+**Status:** Core Design Principle
+
+---
+
+## Index
+
+1. [The Fundamental Insight](#the-fundamental-insight)
+2. [Core Principles](#core-principles)
+   - [The Program Counter is for Humans, not Hardware](#the-program-counter-is-for-humans-not-hardware)
+   - [If/Else is Just a Multiplexer](#ifelse-is-just-a-multiplexer)
+   - [While Loops are Logical Pressure](#while-loops-are-logical-pressure)
+   - [Fixed-Point Synthesis: Loops as Difference Equations](#fixed-point-synthesis-loops-as-difference-equations)
+   - [Memory is Topology, Not Scavenger Hunt](#memory-is-topology-not-scavenger-hunt)
+     - [Predictive Fetching](#a-predictive-fetching)
+     - [Memory Overlay (Proven Safe)](#b-memory-overlay-proven-safe)
+     - [Spatial Garbage Collection](#c-spatial-garbage-collection)
+3. [Hyper-Optimization Strategies](#hyper-optimization-strategies)
+   - [Transaction Fusion](#strategy-1-transaction-fusion)
+   - [Transaction Chaining as Logic Synthesis](#transaction-chaining-as-logic-synthesis)
+   - [Guard Pre-Computation](#strategy-2-guard-pre-computation)
+   - [Reactive Batching](#strategy-3-reactive-batching)
+   - [Memory Layout Optimization](#strategy-4-memory-layout-optimization)
+   - [Parallel Transaction Scheduling](#strategy-5-parallel-transaction-scheduling)
+     - [Hardware Re-wiring](#hardware-re-wiring)
+   - [Spatial Collapse (O(N) → O(1))](#strategy-6-spatial-collapse-on--o1)
+4. [Transpilation Guidelines](#transpilation-guidelines)
+   - [For AArch64/x86-64 Binary](#for-aarch64x86-64-binary)
+   - [For WASM](#for-wasm)
+   - [For VHDL/SystemVerilog](#for-vhdlsystemverilog)
+   - [For Rust/C](#for-rustc)
+5. [The Non-Von Neumann Advantage](#the-non-von-neumann-advantage)
+6. [Why This Matters](#why-this-matters)
+   - [For Performance](#for-performance)
+   - [For Correctness](#for-correctness)
+   - [For Sanity](#for-sanity)
+   - [The Loom: Execution as Path-Finding](#the-loom-execution-as-path-finding)
+7. [The Derived Methodology](#the-derived-methodology)
+8. [Next Steps for Compiler Development](#next-steps-for-compiler-development)
 
 ---
 
 ## The Fundamental Insight
 
-**Brief is not a programming language. It is a language for describing the shape of computation.**
+**Brief is not a programming language, so much as it is a language for describing the shape of computation.**
 
-Traditional languages force you to write **instructions** (do this, then that). Brief lets you write **relationships** (when this is true, that must become true). The execution is not a sequence—it is the universe settling into consistency.
-
----
+Traditional languages force you to write **instructions** (do this, then that). Traditionally, these are your imperative languages, which admittedly maps well onto our understanding of driving a CPU. Brief lets you write **relationships** (when this is true, that must become true). The execution is not a sequence, but a tiny, well-contrained computational universe settling into equilibrium. And the compiler will make sure to block an attempt at defining a universe that isn't internally verifiable.
 
 ## Core Principles
 
-### 1. The Program Counter is a Lie
+### The Program Counter is for Humans, not Hardware
 
 In C, Rust, Python: the CPU follows a single finger pointing at instructions one by one.
 
@@ -37,7 +72,7 @@ rct txn door_locked() [player_at_door && !has_key][door.state == LOCKED] { ... }
 
 ---
 
-### 2. If/Else is Just a Multiplexer
+### If/Else is Just a Multiplexer
 
 Traditional:
 ```c
@@ -63,7 +98,7 @@ rct txn do_B [!x][B_done == true] { ... }
 
 ---
 
-### 3. While Loops are Logical Pressure
+### While Loops are Logical Pressure
 
 Traditional:
 ```c
@@ -104,7 +139,37 @@ lea eax, [eax + ecx]  ; x = x + iterations (single instruction!)
 
 ---
 
-### 4. Memory is Topology, Not Scavenger Hunt
+### Fixed-Point Synthesis: Loops as Difference Equations
+
+When you define `let count = 0` and a transaction that increments while `count < 10`, you aren't commanding a computer—you're defining a **vector in state space**.
+
+The SMT solver asks: *"Where does this vector end?"*
+- Starting point: `0`
+- Slope: `+1`
+- Boundary: `10`
+- **Fixed Point (Equilibrium):** `10`
+
+```brief
+let count = 0;
+rct txn count_up [count < 10][count == @count + 1] {
+    &count = count + 1;
+    term;
+};
+```
+
+**Machine Code Generation:**
+```asm
+; Traditional: 10 iterations of increment
+mov ecx, 10
+sub ecx, eax
+lea eax, [eax + ecx]  ; count = 0 + 10 = 10 (single operation)
+```
+
+The compiler didn't "optimize a loop"—it **solved a difference equation.** The loop ceases to exist; time becomes algebra.
+
+---
+
+### Memory is Topology, Not Scavenger Hunt
 
 Traditional: pointers, heap, GC, cache misses.
 
@@ -188,9 +253,9 @@ destroy_temp:
 
 ---
 
-### 5. Contracts are Compile-Time Physics
+### Contracts are Compile-Time Physics
 
-The SMT solver doesn't "check" your code—it **simulates the physics of your logical universe**.
+The SMT solver doesn't "check" your code. It simulates the physics of your logical universe by figuring out what must be true when at which time to run what. And it's allergic to paradoxes.
 
 **Counterexample = Physics Violation:**
 ```brief
@@ -229,8 +294,6 @@ sub [balance], 100  ; No check needed - proven safe
 
 **Result:** 30-50% fewer instructions, zero branch mispredictions.
 
----
-
 ## Hyper-Optimization Strategies
 
 ### Strategy 1: Transaction Fusion
@@ -251,6 +314,37 @@ rct txn A_B [x > 0 && y < 100][x == @x - 1 && y == @y + 1] {
 ```
 
 **Benefit:** Half the transaction overhead, better cache locality.
+
+---
+
+### Transaction Chaining as Logic Synthesis
+
+In hardware, this is called **Logic Depth**.
+
+```brief
+rct txn setup() [init][ready == true] { ... }
+rct txn compute() [ready][result == func(data)] { ... }
+rct txn output() [result][complete == true] { ... }
+```
+
+**Traditional (3 clock cycles):**
+```
+Task A → Task B → Task C
+```
+
+**Brief (1 logical pulse):**
+The compiler analyzes: if A's postcondition is B's precondition, it **fuses the gates**.
+
+```verilog
+// Generated as a single wide pipeline
+always_ff @(posedge clk) begin
+    {ready_next, result_next, complete_next} <=
+        {compute_next_logic, output_next_logic};
+end
+```
+
+On CPU: the difference between branches and a **branchless expression**.
+On FPGA: the difference between a state machine and a **combinatorial datapath**.
 
 ---
 
@@ -305,7 +399,6 @@ rct txn update_sum_batched()
 **Benefit:** Reduces transaction count from O(n) to O(1).
 
 ---
-
 ### Strategy 4: Memory Layout Optimization
 
 Use transaction access patterns to optimize memory layout:
@@ -336,7 +429,6 @@ struct Entity_Optimized {
 **Benefit:** Better cache utilization, fewer cache misses.
 
 ---
-
 ### Strategy 5: Parallel Transaction Scheduling
 
 When transactions are proven independent, schedule in parallel:
@@ -356,6 +448,49 @@ wait_all();
 ```
 
 **Benefit:** Automatic parallelization, no race conditions possible.
+
+#### Hardware Re-wiring
+
+On FPGA/ASIC: The compiler generates a **dynamically routed datapath**:
+- AXI interconnects re-route to match the "shape" of current transactions
+- The OS isn't just "running" code—it is **re-wiring itself** to match the transaction topology
+- Each transaction is a logic block reconfigured based on program state
+
+```verilog
+// Generated: Route selection based on active transactions
+always_comb begin
+    case (transaction_active)
+        3'b001: interconnects = physics_routing;
+        3'b010: interconnects = ai_routing;
+        3'b100: interconnects = render_routing;
+        3'b111: interconnects = fused_routing;  // All three
+    endcase
+end
+```
+
+**Result:** The hardware adapts its topology to the computational shape.
+
+---
+
+### Strategy 6: Spatial Collapse (O(N) → O(1))
+
+Traditional raycasting:
+```c
+while (!hit_wall) { step(); }  // N iterations
+```
+
+Brief: The compiler analyzes the **Shape** of the world (BSP tree) and the **Vector** of the ray. If the map is static (a Fact), it synthesizes the collision point as a direct mathematical lookup:
+
+```brief
+struct Ray { origin: Vec3, direction: Vec3 }
+struct BSPNode { left: Box, right: Box, wall: Wall }
+
+rct txn cast_ray() [valid_ray][collision_point == solve_bsp(ray, bsp)]
+```
+
+**The result:** Zero iterations. The distance to the wall is a **proven constant**.
+
+**General principle:** If the compiler can prove the iteration count, it doesn't just unroll the loop—it **collapses time into space.** The repeated operation becomes a Physical Constant.
 
 ---
 
@@ -390,9 +525,7 @@ wait_all();
 3. **Use atomic operations** for async transaction coordination
 4. **Pre-fetch data** in guard evaluation functions
 
----
-
-## The Artist's Advantage
+## The Non-Von Neumann Advantage
 
 Traditional programmers think in **sequences**. Brief programmers think in **shapes**.
 
@@ -415,8 +548,6 @@ Traditional programmers think in **sequences**. Brief programmers think in **sha
 
 **The shape is the truth. The execution is just the universe agreeing with itself.**
 
----
-
 ## Why This Matters
 
 ### For Performance
@@ -437,18 +568,26 @@ Traditional programmers think in **sequences**. Brief programmers think in **sha
 - **No "works on my machine"** (mathematically verified)
 - **No "let me just add a quick hack"** (compiler rejects invalid logic)
 
----
+### The Loom: Execution as Path-Finding
 
-## The Mad Scientist Methodology
+Traditional coding is **knitting**—one stitch at a time. For a 10×10 square, click the needles 100 times.
+
+Brief is a **loom**. You set the warp (initial state) and the weft (transactions), then press the lever. The entire pattern appears at once because the structure **enforces** it.
+
+**Execution is just the compiler finding the shortest mathematical path between "What is true now" and "What must be true next."**
+
+By removing the while loop, you didn't just clean the code—you made **Time** optional. If the math can prove the result, "execution time" drops to the physical limit of the silicon.
+
+**You've stopped building clocks. You've started building scales.**
+
+## The Derived Methodology
 
 1. **Define the shape** (structs, types, relationships)
 2. **Define the allowed changes** (transactions with contracts)
 3. **Let the compiler build the machine** (transpilation)
 4. **Let the SMT solver find the bugs** (verification)
 
-**You are not writing code. You are defining the laws of physics for a tiny universe.**
-
----
+**You are not writing code. You are defining the laws of physics for a tiny universe captured in silicon.**
 
 ## Next Steps for Compiler Development
 
@@ -472,6 +611,6 @@ Traditional programmers think in **sequences**. Brief programmers think in **sha
 
 ---
 
-*Last updated: 2026-05-06*  
+*Last updated: 2026-05-07*  
 *Version: Brief v0.12.0*  
-*Status: Core Philosophy Documented ✅*
+*Status: Core Philosophy Documented*

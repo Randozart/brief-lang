@@ -5,11 +5,11 @@ Functions (`defn`) are pure computations with contracts. Unlike transactions, th
 ## 1. Basic Functions
 
 ```brief
-defn add(a: Int, b: Int) [a >= 0 && b >= 0][result == a + b] -> Int {
+defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
 
-defn is_positive(n: Int) [n >= 0][result == (n > 0)] -> Bool {
+defn is_positive(n: Int) -> Bool {
     term n > 0;
 };
 ```
@@ -18,29 +18,24 @@ defn is_positive(n: Int) [n >= 0][result == (n > 0)] -> Bool {
 - `defn` - Keyword
 - `add` - Function name
 - `(a: Int, b: Int)` - Parameters with types
-- `[a >= 0 && b >= 0]` - **Precondition** (when it can be called)
-- `[result == a + b]` - **Postcondition** (what it guarantees)
-- `-> Int` - Return type
+- `-> Int` - Return type (contracts are optional but recommended)
 - `term a + b` - Return value
 
-## 2. Non-Trivial Contracts (REQUIRED)
+**Note:** Contract syntax has changed. Preconditions/postconditions like `[a >= 0]` are now warnings/errors if trivial. Functions can now omit contracts entirely.
 
-**Never use `[true][true]` - at least one must be meaningful:**
+## 2. Contracts (Optional but Recommended)
+
+**Contracts are now optional but trivial ones like `[true][true]` produce warnings:**
 
 ```brief
-// ❌ ILLEGAL - provides no guarantees
-defn divide(a: Int, b: Int) [true][true] -> Int {
-    term a / b;  // Can crash if b == 0!
-};
-
-// ✅ LEGAL - prevents division by zero
-defn divide(a: Int, b: Int) [b != 0][result * b == a] -> Int {
+// ✅ Works - no contracts needed
+defn divide(a: Int, b: Int) -> Int {
     term a / b;
 };
 
-// ✅ LEGAL - meaningful postcondition
-defn sqrt_approx(x: Float) [x >= 0.0][result >= 0.0 && result * result <= x + 0.001] -> Float {
-    term x / 2.0;  // Simplified
+// ✅ Better - add contracts for verification
+defn safe_divide(a: Int, b: Int) [b != 0][true] -> Int {
+    term a / b;
 };
 ```
 

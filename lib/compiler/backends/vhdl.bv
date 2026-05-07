@@ -1,0 +1,443 @@
+// VHDL Backend for Brief Compiler
+// Generates synthesizable VHDL from Brief programs
+// 
+// VHDL is a hardware description language for FPGA/ASIC design.
+// This backend maps transactions to concurrent processes and signals.
+
+use std::vhdl;
+
+// ============================================================================
+// VHDL Entity Architecture
+// ============================================================================
+
+// Generate VHDL entity declaration
+transaction build_entity(name: String, ports: Vec<Port>) -> Entity
+    [Entity {
+        name,
+        generic_params: vec![],
+        ports,
+    }]
+
+// Generate VHDL architecture body
+transaction build_architecture(entity_name: String, body: Vec<ArchitectureItem>) -> Architecture
+    [Architecture {
+        entity_name,
+        name: "behavioral",
+        signals: vec![],
+        processes: body,
+    }]
+
+// Port declaration
+transaction build_port(name: String, direction: PortDirection, data_type: VhdlType) -> Port
+    [Port { name, direction, data_type }]
+
+// ============================================================================
+// Type Mapping (Brief to VHDL)
+// ============================================================================
+
+// Map Brief types to VHDL types
+transaction map_brief_type_to_vhdl(brief_type: Type) -> VhdlType
+    [brief_type = Type::Bool => VhdlType::StdLogic]
+    [brief_type = Type::Int => VhdlType::StdLogicVector(32)]
+    [brief_type = Type::U64 => VhdlType::StdLogicVector(64)]
+    [brief_type = Type::Float => VhdlType::Real]
+    [brief_type = Type::Ptr => VhdlType::StdLogicVector(32)]
+    [brief_type = Type::Array(size, elem_type) => 
+        VhdlType::Array(*size, map_brief_type_to_vhdl(*elem_type))]
+
+// Clock and reset signals
+transaction build_clock_signal() -> Signal
+    [Signal {
+        name: "clk",
+        data_type: VhdlType::StdLogic,
+    }]
+
+transaction build_reset_signal() -> Signal
+    [Signal {
+        name: "rst",
+        data_type: VhdlType::StdLogic,
+    }]
+
+// ============================================================================
+// Transaction to Process Conversion
+// ============================================================================
+
+// Convert reactive transaction to VHDL process
+// Each rct txn becomes a clocked process
+transaction compile_rct_process(txn: Transaction, ctx: &VhdlContext) -> Process
+    [guard_signal = compile_guard(txn.guard, ctx)]
+    [body_signals = compile_transaction_body(txn.body, ctx)]
+    
+    [Process {
+        sensitivity_list: vec!["clk", "rst"],
+        statements: vec![
+            ProcessStatement::If(IfStatement {
+                condition: "rst = '1'",
+                then_branch: vec![SignalAssignment(txn.output, "0")],
+                else_branch: vec![
+                    ProcessStatement::If(IfStatement {
+                        condition: format!("{} = '1' and rising_edge(clk)", guard_signal),
+                        then_branch: body_signals,
+                        else_branch: vec![],
+                    })
+                ],
+            })
+        ],
+    }]
+
+// Convert pure transaction to combinational logic
+transaction compile_pure_process(txn: Transaction, ctx: &VhdlContext) -> Process
+    [input_signals = collect_inputs(txn.body, ctx)]
+    [output_expr = compile_expression(txn.output_expr, ctx)]
+    
+    [Process {
+        sensitivity_list: input_signals,
+        statements: vec![
+            SignalAssignment(txn.output, output_expr)
+        ],
+    }]
+
+// ============================================================================
+// Guard Compilation (Branchless)
+// ============================================================================
+
+// Compile guard expression to hardware signal
+// Guards become enable signals for registers
+transaction compile_guard(expr: Expr, ctx: &VhdlContext) -> String
+    [expr = Expr::BinOp(BinOp::And, left, right) =>
+        format!("({} and {})", compile_guard(*left, ctx), compile_guard(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Or, left, right) =>
+        format!("({} or {})", compile_guard(*left, ctx), compile_guard(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Eq, left, right) =>
+        format!("({} = {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Lt, left, right) =>
+        format!("{} < {}", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::Var(name) => name.clone()]
+    
+    [expr = Expr::Const(Const::Bool(true)) => "'1'".to_string()]
+    [expr = Expr::Const(Const::Bool(false)) => "'0'".to_string()]
+    [expr = Expr::Const(Const::Int(n)) => format!("std_logic_vector(to_unsigned({}, 32))", n)]
+
+// ============================================================================
+// Expression Compilation
+// ============================================================================
+
+// Compile Brief expression to VHDL expression
+transaction compile_expr(expr: Expr, ctx: &VhdlContext) -> String
+    [expr = Expr::BinOp(BinOp::Add, left, right) =>
+        format!("({} + {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Sub, left, right) =>
+        format!("({} - {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Mul, left, right) =>
+        format!("({} * {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Div, left, right) =>
+        format!("({} / {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::And, left, right) =>
+        format!("({} and {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::BinOp(BinOp::Or, left, right) =>
+        format!("({} or {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
+    
+    [expr = Expr::Var(name) => name.clone()]
+    
+    [expr = Expr::Const(Const::Int(n)) => format!("{}", n)]
+    [expr = Expr::Const(Const::Bool(true)) => "true".to_string()]
+    [expr = Expr::Const(Const::Bool(false)) => "false".to_string()]
+
+// ============================================================================
+// Signal Declaration
+// ============================================================================
+
+// Generate signal declarations for all variables
+transaction declare_signals(program: &Program, ctx: &VhdlContext) -> Vec<Signal>
+    [map(program.variables, |var| Signal {
+        name: var.name.clone(),
+        data_type: map_brief_type_to_vhdl(var.type_),
+    })]
+
+// Internal signals for intermediate computations
+transaction declare_internal_signals(txns: Vec<Transaction>) -> Vec<Signal>
+    [flat_map(txns, |txn| {
+        collect_temporaries(txn.body)
+    })]
+
+// ============================================================================
+// Component Instantiation
+// ============================================================================
+
+// Instantiate hardware components (ALU, multiplier, etc.)
+transaction instantiate_component(name: String, component_type: String, port_map: PortMap) -> ComponentInstantiation
+    [ComponentInstantiation {
+        label: name,
+        component_name: component_type,
+        port_map,
+    }]
+
+// Standard ALU component
+transaction build_alu_instance(id: u32, inputs: Vec<String>, output: String) -> ComponentInstantiation
+    [instantiate_component(
+        format!("alu_{}", id),
+        "ALU",
+        PortMap {
+            "a": inputs[0].clone(),
+            "b": inputs[1].clone(),
+            "op": "000".to_string(),  // ADD
+            "result": output.clone(),
+        }
+    )]
+
+// Register file component
+transaction build_register_file(size: u32, ports: Vec<RegPort>) -> ComponentInstantiation
+    [instantiate_component(
+        "reg_file",
+        "RegisterFile",
+        build_regfile_port_map(size, ports)
+    )]
+
+// ============================================================================
+// Memory Inference
+// ============================================================================
+
+// Infer block RAM from array declarations
+transaction infer_block_ram(array: &Variable, ctx: &VhdlContext) -> Signal
+    [Signal {
+        name: array.name.clone(),
+        data_type: VhdlType::ArrayType(
+            array.size,
+            map_brief_type_to_vhdl(array.element_type)
+        ),
+        attribute: Some("ram_style = \"BLOCK\"".to_string()),
+    }]
+
+// Infer distributed RAM for small arrays
+transaction infer_distributed_ram(array: &Variable, ctx: &VhdlContext) -> Signal
+    [Signal {
+        name: array.name.clone(),
+        data_type: VhdlType::ArrayType(
+            array.size,
+            map_brief_type_to_vhdl(array.element_type)
+        ),
+        attribute: Some("ram_style = \"DISTRIBUTED\"".to_string()),
+    }]
+
+// ============================================================================
+// FSM Generation from Transactions
+// ============================================================================
+
+// Generate finite state machine from transaction dependencies
+transaction generate_fsm(txns: Vec<Transaction>) -> FSM
+    [states = identify_execution_states(txns)]
+    [transitions = build_state_transitions(txns, &states)]
+    
+    [FSM {
+        states,
+        transitions,
+        state_register: "state_reg",
+        next_state_logic: "state_next",
+        output_logic: build_moore_outputs(txns, &states),
+    }]
+
+// One-hot encoding for FSM states
+transaction encode_fsm_onehot(fsm: &FSM) -> Vec<Signal>
+    [map(fsm.states, |state| Signal {
+        name: format!("state_{}", state.name),
+        data_type: VhdlType::StdLogic,
+    })]
+
+// ============================================================================
+// Timing Constraints
+// ============================================================================
+
+// Generate timing constraints for synthesis
+transaction generate_timing_constraints(clock_period: f64) -> XdcConstraints
+    [XdcConstraints {
+        clock: format!("create_clock -period {} [get_ports clk]", clock_period),
+        input_delay: "set_input_delay -clock clk 0 [all_inputs]".to_string(),
+        output_delay: "set_output_delay -clock clk 0 [all_outputs]".to_string(),
+    }]
+
+// False path constraints for guard signals
+transaction generate_false_paths(guards: Vec<String>) -> Vec<String>
+    [map(guards, |guard| format!("set_false_path -from {}", guard))]
+
+// ============================================================================
+// Code Generation Context
+// ============================================================================
+
+struct VhdlContext {
+    // Entity name
+    entity_name: String,
+    
+    // Clock frequency (Hz)
+    clock_frequency: u64,
+    
+    // Target FPGA family
+    target_family: FpgaFamily,
+    
+    // Signal declarations
+    signals: HashMap<String, Signal>,
+    
+    // Component declarations
+    components: HashMap<String, Component>,
+}
+
+enum FpgaFamily {
+    Xilinx7Series,
+    XilinxUltraScale,
+    IntelCyclone,
+    IntelStratix,
+    LatticeECP5,
+}
+
+// ============================================================================
+// Main Compilation Pipeline
+// ============================================================================
+
+transaction compile_to_vhdl(program: Program, config: VhdlConfig) -> VhdlDesign
+    [ctx = VhdlContext {
+        entity_name: program.name.clone(),
+        clock_frequency: config.clock_frequency,
+        target_family: config.target_family,
+        signals: HashMap::new(),
+        components: HashMap::new(),
+    }]
+    
+    // Build entity with ports
+    [ports = build_port_list(&program, &ctx)]
+    [entity = build_entity(program.name.clone(), ports)]
+    
+    // Declare all signals
+    [signals = declare_signals(&program, &ctx)]
+    
+    // Compile transactions to processes
+    [processes = map(program.transactions, |txn| {
+        if txn.reactive {
+            compile_rct_process(txn, &ctx)
+        } else {
+            compile_pure_process(txn, &ctx)
+        }
+    })]
+    
+    // Build architecture
+    [architecture = build_architecture(
+        program.name.clone(),
+        processes
+    )]
+    
+    [VhdlDesign { entity, architecture, signals }]
+
+// ============================================================================
+// VHDL Output Generation
+// ============================================================================
+
+transaction generate_vhdl_file(design: VhdlDesign) -> String
+    [header = generate_header()]
+    [library_clause = "library IEEE;\nuse IEEE.STD_LOGIC_1164.ALL;\nuse IEEE.NUMERIC_STD.ALL;"]
+    
+    [entity_text = format_entity(&design.entity)]
+    [architecture_text = format_architecture(&design.architecture, &design.signals)]
+    
+    [header ++ "\n" ++ library_clause ++ "\n\n" ++ entity_text ++ "\n" ++ architecture_text]
+
+transaction generate_header() -> String
+    ["-- Generated by Brief Compiler\n-- https://github.com/brief-lang/brief\n-- Auto-generated VHDL code"]
+
+// ============================================================================
+// Optimization Passes
+// ============================================================================
+
+// Resource sharing optimization
+transaction optimize_resource_sharing(processes: Vec<Process>) -> Vec<Process>
+    // Share ALUs and multipliers across operations
+    [identify_shared_operations(processes)]
+    [allocate_shared_resources(processes)]
+    [rewrite_processes_with_muxes(processes)]
+
+// Pipelining optimization
+transaction optimize_pipelining(processes: Vec<Process>) -> Vec<Process>
+    // Insert pipeline registers for long combinational paths
+    [identify_critical_paths(processes)]
+    [insert_pipeline_stages(processes)]
+
+// Guard merging optimization
+transaction optimize_guards(processes: Vec<Process>) -> Vec<Process>
+    // Merge common guard conditions
+    [identify_common_guards(processes)]
+    [factor_out_guard_logic(processes)]
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+struct VhdlConfig {
+    // Clock frequency in Hz
+    clock_frequency: u64,
+    
+    // Target FPGA family
+    target_family: FpgaFamily,
+    
+    // Optimization level
+    optimize: OptimizationLevel,
+    
+    // Generate testbench
+    generate_testbench: bool,
+    
+    // Reset polarity (active high/low)
+    reset_polarity: ResetPolarity,
+}
+
+enum ResetPolarity {
+    ActiveHigh,
+    ActiveLow,
+}
+
+// ============================================================================
+// Testbench Generation
+// ============================================================================
+
+transaction generate_testbench(design: VhdlDesign, test_vectors: Vec<TestVector>) -> String
+    [tb_entity = build_testbench_entity(&design)]
+    [tb_architecture = build_testbench_architecture(&design, test_vectors)]
+    
+    [format_entity(&tb_entity) ++ "\n" ++ format_architecture(&tb_architecture, &vec![])]
+
+// ============================================================================
+// Exports
+// ============================================================================
+
+// Main entry point for VHDL backend
+export transaction compile_vhdl(program: Program, output: &mut String)
+    [config = VhdlConfig {
+        clock_frequency: 100_000_000,  // 100 MHz
+        target_family: FpgaFamily::Xilinx7Series,
+        optimize: OptimizationLevel::Speed,
+        generate_testbench: false,
+        reset_polarity: ResetPolarity::ActiveHigh,
+    }]
+    
+    [design = compile_to_vhdl(program, config)]
+    [optimized_design = optimize_vhdl_design(design, config.optimize)]
+    [output = generate_vhdl_file(optimized_design)]
+
+// Generate with testbench
+export transaction compile_vhdl_with_tb(program: Program, output: &mut String, tb_output: &mut String)
+    [config = VhdlConfig {
+        clock_frequency: 100_000_000,
+        target_family: FpgaFamily::Xilinx7Series,
+        optimize: OptimizationLevel::Speed,
+        generate_testbench: true,
+        reset_polarity: ResetPolarity::ActiveHigh,
+    }]
+    
+    [design = compile_to_vhdl(program, config)]
+    [output = generate_vhdl_file(design)]
+    [test_vectors = generate_test_vectors(&program)]
+    [tb_output = generate_testbench(design, test_vectors)]

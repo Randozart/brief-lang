@@ -1,7 +1,9 @@
+pub mod aarch64;
 pub mod c;
 pub mod rust;
 pub mod verilog;
 pub mod vhdl;
 pub mod wasm;
+pub mod x86_64;
 pub mod tcl_generator;
 pub mod cobol;

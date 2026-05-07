@@ -82,6 +82,8 @@ pub enum Token {
     #[token("UNIFICATION")]
     #[token("unify")]
     #[token("UNIFY")]
+    #[token("uni")]
+    #[token("UNI")]
     Unification,
     #[token("import")]
     #[token("IMPORT")]

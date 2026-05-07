@@ -28,6 +28,8 @@ Most programming languages are built around _operations in sequence_. Brief desc
     *   **In Hardware:** The compiler builds the roads directly out of copper.
 *   **Variable Logic:** The logic remains invariant while the material changes. A square is a square whether it's drawn in the sand or forged in steel.
 
+**Deep Dive:** See [PRAXIS.md](PRAXIS.md) for the complete philosophical and technical framework behind *"Topology Over Timing,"* including Fixed-Point Synthesis, Transaction Chaining, and the Hyper-Optimization strategies that make Brief slightly different from most imperative languages.
+
 ## Quick Start
 
 ### 1. Build the Compiler
@@ -322,7 +324,7 @@ cargo test --lib lexer::tests
 - `tests/tier2/` - String processing tests
 - `tests/backends/` - Backend tests (planned)
 
-**See:** [TESTING_SUMMARY.md](TESTING_SUMMARY.md) for complete results.
+**See:** [docs/reports/TESTING_SUMMARY.md](docs/reports/TESTING_SUMMARY.md) for complete results.
 
 ---
 
@@ -341,7 +343,7 @@ The Brief compiler can now:
 - ~10,000 lines of compiler code
 - ~7,500 lines of documentation
 
-**See:** [SELF_HOSTING_COMPLETE.md](SELF_HOSTING_COMPLETE.md) for the full story.
+**See:** [docs/milestones/SELF_HOSTING_COMPLETE.md](docs/milestones/SELF_HOSTING_COMPLETE.md) for the full story.
 
 ## Project Structure
 
@@ -383,10 +385,14 @@ brief-compiler/
 ├── spec/                         # Language specification
 ├── tests/                        # Test files
 └── docs/                         # Documentation
-    ├── SELF_HOSTING_COMPLETE.md
-    ├── SELF_HOSTING_PLAN.md
+    ├── milestones/                # Milestone reports
+    │   ├── SELF_HOSTING_COMPLETE.md
+    │   ├── SELF_HOSTING_PLAN.md
+    │   └── TIER*_COMPLETE.md
+    ├── reports/                   # Status reports
+    │   ├── TESTING_SUMMARY.md
+    │   └── ...
     ├── OPTIMIZATIONS.md
-    ├── TESTING_SUMMARY.md
     └── ...
 ```
 

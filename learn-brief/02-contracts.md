@@ -7,10 +7,13 @@ Contracts are the heart of Brief. They're not just documentation - the compiler 
 The precondition declares **when** a transaction can run:
 
 ```brief
-txn withdraw(amount: Int) [amount > 0 && balance >= amount] {
+txn withdraw [amount > 0 && balance >= amount][balance == @balance - amount] {
     &balance = balance - amount;
     term;
 };
+
+let balance: Int = 100;
+let amount: Int = 10;
 ```
 
 **This transaction can ONLY run when:**
@@ -189,8 +192,9 @@ txn critical_operation() [true][done] ![1000ms] {
 // bank_account.bv
 let balance: Int = 1000;
 let overdraft_protection: Bool = true;
+let amount: Int = 0;
 
-txn deposit(amount: Int) 
+txn deposit
     [amount > 0]
     [balance == @balance + amount]
 {
@@ -198,7 +202,7 @@ txn deposit(amount: Int)
     term;
 };
 
-txn withdraw(amount: Int) 
+txn withdraw
     [amount > 0 && (balance >= amount || overdraft_protection)]
     [balance == @balance - amount]
 {
@@ -206,16 +210,15 @@ txn withdraw(amount: Int)
     term;
 };
 
-txn transfer(to_account: String, amount: Int)
+txn transfer
     [amount > 0 && balance >= amount]
     [balance == @balance - amount]
 {
     &balance = balance - amount;
-    send_to(to_account, amount);
     term;
 };
 
-txn enable_overdraft()
+txn enable_overdraft
     [!overdraft_protection]
     [overdraft_protection == true]
 {
