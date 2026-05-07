@@ -6,11 +6,17 @@
 
 **Status:** v0.12.0 - Self-Hosting Capable
 
-Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions.
+Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. Due to this, it transpiles well to many imperative languages by inferring what instructions must happen for each new state to become true, and writing that in the target code. Due to its declarative nature, this means it handles both software transpilation (C, Rust, Assembly, COBOL), hardware transpilation (SystemVerilog, VHDL), embedded transpilation, web transpilation (by combining WASM, HTML, CSS and SVG, and gluing these together with a thing layer of JS. Also TypeScript and TSX).
 
-**Brief is the first language that can mathematically prove its own compiler is correct.**
+The main sources of inspiration are Rust (by Graydon Hoare and the Rust community) and Dialog (by Linus Åkesson). Specifically the fact that both have a very strict compiler, that catches bad code before it ever compiles, simply through smart conventions. Especially the declarative nature is inspired by Dialog, as a direct successor of Prolog, since Dialog showed that setting up a series of predicates could be sufficient to have a compiler figure out a complex runtime capable of simulating a world. As such, everything in Brief is designed to, in some way, aid in predictable runtime cascades. You set up the first billiard ball, and based on the variables present, the rest of the balls predictably scatter.
 
----
+Note that much of this language design was inspired by designing a language that would be impossible for an LLM to get wrong. Therefore it feels important to me to disclaim a lot of AI has been used in building this compiler. The design is fully my own (Randy Smits-Schreuder Goedheijt), but much of the programming was handled by LLMs, and the verification by hand and a series of unit tests (which LLMs somehow manage to cut the corners of). As such, you will find comments, markdown files and many more typical signs of LLM usage in this repository. These all exist to help steer the LLM into *correctly* modifying and applying the design decisions I have made, as it would otherwise be prone to hallucinate a novel language like this.
+
+If you've gotten this far, I thank you for reading, and I hope you will have enjoyed your *Brief* time here so far.
+
+Regards,
+
+**Randy**
 
 ## The Thesis: Topology over Timing
 
@@ -21,8 +27,6 @@ Most programming languages are built around _operations in sequence_. Brief desc
     *   **In Software:** The compiler hires a worker (the CPU) to walk these roads in order.
     *   **In Hardware:** The compiler builds the roads directly out of copper.
 *   **Variable Logic:** The logic remains invariant while the material changes. A square is a square whether it's drawn in the sand or forged in steel.
-
----
 
 ## Quick Start
 
@@ -78,8 +82,6 @@ txn main() [true][true] {
 ./target/debug/brief-compiler compile counter.bv --target x86_64.toml
 ```
 
----
-
 ## Language Variants
 
 | Type | File Extension | Description | Targets |
@@ -90,8 +92,6 @@ txn main() [true][true] {
 | **Data Brief** | `.dbv` | Configuration data | All targets |
 | **Data Brief Schema** | `.dbvs` | Schema definitions | All targets |
 | **Data Brief Lines** | `.dbvl` | Line-based databases | All targets |
-
----
 
 ## Key Features
 
@@ -149,8 +149,6 @@ The compiler proves:
 - All contracts are satisfied
 - No deadlocks in async code
 
----
-
 ## Compiler Architecture
 
 ```
@@ -165,18 +163,16 @@ Type Checker (typechecker.bv) → Typed AST
 Proof Engine (proof_engine.bv) → Verified AST
     ↓
 Backends
-├── AArch64 (aarch64.bv) - ARM64 binary ✅
-├── x86-64 (x86_64.bv) - AMD64 binary ✅
-├── Rust (rust.bv) - Rust source ✅
-├── C (c.bv) - C source ✅
-├── WASM (wasm.bv) - WebAssembly ⏳
-├── VHDL (vhdl.bv) - FPGA ⏳
-└── SystemVerilog (verilog.bv) - FPGA/ASIC ⏳
+├── AArch64 (aarch64.bv) - ARM64 binary 
+├── x86-64 (x86_64.bv) - AMD64 binary 
+├── Rust (rust.bv) - Rust source 
+├── C (c.bv) - C source 
+├── WASM (wasm.bv) - WebAssembly 
+├── VHDL (vhdl.bv) - FPGA 
+└── SystemVerilog (verilog.bv) - FPGA/ASIC 
 ```
 
 **All phases implemented in pure Brief** (no FFI for core compiler).
-
----
 
 ## Standard Library
 
@@ -213,8 +209,6 @@ Backends
 - `find`, `any`, `all`
 
 **Total:** 300+ native functions across 15+ modules
-
----
 
 ## Learning Brief
 
@@ -296,8 +290,6 @@ rct txn apply_discount()
 
 See [examples/](examples/) for more.
 
----
-
 ## Performance
 
 | Component | Complexity | Optimization |
@@ -311,8 +303,6 @@ See [examples/](examples/) for more.
 | **Code Generation** | O(n) | Single pass |
 
 **See:** [OPTIMIZATIONS.md](OPTIMIZATIONS.md) for complete analysis.
-
----
 
 ## Testing
 
@@ -352,8 +342,6 @@ The Brief compiler can now:
 - ~7,500 lines of documentation
 
 **See:** [SELF_HOSTING_COMPLETE.md](SELF_HOSTING_COMPLETE.md) for the full story.
-
----
 
 ## Project Structure
 
@@ -402,8 +390,6 @@ brief-compiler/
     └── ...
 ```
 
----
-
 ## Roadmap
 
 ### ✅ Complete (v0.12.0)
@@ -426,16 +412,12 @@ brief-compiler/
 - [ ] Debugger integration
 - [ ] Performance profiler
 
----
-
 ## Contributing
 
 1. Read [CONTRIBUTING.md](CONTRIBUTING.md) (planned)
 2. Check [OPTIMIZATIONS.md](OPTIMIZATIONS.md) for CS guidelines
 3. See [lib/compiler/README.md](lib/compiler/README.md) for architecture
 4. Run tests: `cargo test --lib`
-
----
 
 ## License
 
