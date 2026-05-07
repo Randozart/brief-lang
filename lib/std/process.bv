@@ -3,12 +3,12 @@
 
 // ===== PROCESS SPAWNING (FFI) =====
 
-frgn sig __spawn(command: String, args: List<String>) -> Result<Int, IOError> from "process.toml";
-frgn sig __spawn_with_output(command: String, args: List<String>) -> Result<(Int, String, String), IOError> from "process.toml";
-frgn sig __env_var(name: String) -> Option<String> from "process.toml";
-frgn sig __set_env_var(name: String, value: String) -> Result<Void, IOError> from "process.toml";
-frgn sig __current_dir() -> Result<String, IOError> from "process.toml";
-frgn sig __set_current_dir(path: String) -> Result<Void, IOError> from "process.toml";
+frgn sig __spawn(command: String, args: List<String>) -> Result<Int, IOError> from "process.dbvs";
+frgn sig __spawn_with_output(command: String, args: List<String>) -> Result<(Int, String, String), IOError> from "process.dbvs";
+frgn sig __env_var(name: String) -> Option<String> from "process.dbvs";
+frgn sig __set_env_var(name: String, value: String) -> Result<Void, IOError> from "process.dbvs";
+frgn sig __current_dir() -> Result<String, IOError> from "process.dbvs";
+frgn sig __set_current_dir(path: String) -> Result<Void, IOError> from "process.dbvs";
 
 // ===== NATIVE WRAPPERS =====
 

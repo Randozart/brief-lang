@@ -6,29 +6,29 @@
 // ===== PURE FOREIGN (requires system time) =====
 
 // Current time
-frgn __now() -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __now_millis() -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __now_micros() -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __now() -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __now_millis() -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __now_micros() -> Result<Int, TimeError> from "std/bindings/time.dbvs";
 // Time component extraction
-frgn __year(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __month(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __day(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __hour(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __minute(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __second(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __weekday(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __yearday(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __year(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __month(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __day(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __hour(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __minute(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __second(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __weekday(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __yearday(timestamp: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
 // Time creation
-frgn __timestamp(year: Int, month: Int, day: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __timestamp(year: Int, month: Int, day: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
 // Formatting
-frgn __format_timestamp(timestamp: Int, format: String) -> Result<String, TimeError> from "std/bindings/time.toml";
-frgn __format_date(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.toml";
-frgn __format_time(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.toml";
-frgn __format_datetime(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.toml";
+frgn __format_timestamp(timestamp: Int, format: String) -> Result<String, TimeError> from "std/bindings/time.dbvs";
+frgn __format_date(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.dbvs";
+frgn __format_time(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.dbvs";
+frgn __format_datetime(timestamp: Int) -> Result<String, TimeError> from "std/bindings/time.dbvs";
 // Parsing
-frgn __parse_timestamp(s: String) -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __parse_datetime(s: String) -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __parse_timestamp(s: String) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __parse_datetime(s: String) -> Result<Int, TimeError> from "std/bindings/time.dbvs";
 // ===== NATIVE DEFINITIONS =====
 
 // Duration helpers - native arithmetic
@@ -79,8 +79,8 @@ defn diff_days(t1: Int, t2: Int) [result == (t1 - t2) / 86400] -> Int {
 };
 
 // Constants - these could be frgn or defn
-frgn __seconds_per_minute() -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __seconds_per_hour() -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __seconds_per_day() -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __millis_per_second() -> Result<Int, TimeError> from "std/bindings/time.toml";
-frgn __micros_per_second() -> Result<Int, TimeError> from "std/bindings/time.toml";
+frgn __seconds_per_minute() -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __seconds_per_hour() -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __seconds_per_day() -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __millis_per_second() -> Result<Int, TimeError> from "std/bindings/time.dbvs";
+frgn __micros_per_second() -> Result<Int, TimeError> from "std/bindings/time.dbvs";

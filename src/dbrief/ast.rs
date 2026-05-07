@@ -53,6 +53,13 @@ pub struct DbriefRegister {
     pub name: Option<String>,
     pub register_type: DbriefType,
     pub check: Option<DbriefContract>,
+    // FFI metadata (for Metropolitan FFI bindings)
+    pub location: Option<String>,
+    pub target: Option<String>,
+    pub description: Option<String>,
+    pub input_params: Vec<(String, DbriefType)>,
+    pub output_type: Option<DbriefType>,
+    pub error_type: Option<DbriefType>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

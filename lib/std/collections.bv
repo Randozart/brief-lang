@@ -6,22 +6,22 @@
 // ===== PURE FOREIGN (truly generic, requires runtime) =====
 
 // Filter - requires predicate function (can't be native)
-frgn __filter(list: List<T>, pred: T -> Bool) -> Result<List<T>, CollectionsError> from "std/bindings/collections.toml"
+frgn __filter(list: List<T>, pred: T -> Bool) -> Result<List<T>, CollectionsError> from "std/bindings/collections.dbvs"
 
 // Map - requires transform function (can't be native)
-frgn __map(list: List<T>, transform: T -> U) -> Result<List<U>, CollectionsError> from "std/bindings/collections.toml"
+frgn __map(list: List<T>, transform: T -> U) -> Result<List<U>, CollectionsError> from "std/bindings/collections.dbvs"
 
 // Reduce - requires reducer function (can't be native)
-frgn __reduce(list: List<T>, initial: U, reducer: (U, T) -> U) -> Result<U, CollectionsError> from "std/bindings/collections.toml"
+frgn __reduce(list: List<T>, initial: U, reducer: (U, T) -> U) -> Result<U, CollectionsError> from "std/bindings/collections.dbvs"
 
 // Unique - requires comparison (can't be native without Eq trait)
-frgn __unique(list: List<T>) -> Result<List<T>, CollectionsError> from "std/bindings/collections.toml"
+frgn __unique(list: List<T>) -> Result<List<T>, CollectionsError> from "std/bindings/collections.dbvs"
 
 // Sort - requires comparison (can't be native without Ord trait)
-frgn __sort(list: List<T>) -> Result<List<T>, CollectionsError> from "std/bindings/collections.toml"
+frgn __sort(list: List<T>) -> Result<List<T>, CollectionsError> from "std/bindings/collections.dbvs"
 
 // Reverse - requires iteration
-frgn __reverse(list: List<T>) -> Result<List<T>, CollectionsError> from "std/bindings/collections.toml"
+frgn __reverse(list: List<T>) -> Result<List<T>, CollectionsError> from "std/bindings/collections.dbvs"
 
 // ===== NATIVE DEFINITIONS =====
 

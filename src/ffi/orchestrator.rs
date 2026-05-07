@@ -24,16 +24,19 @@
 //!
 //! Manages the memory pipe and coordinates the FFI call flow.
 
+use super::metropolitan::MetropolitanHub;
 use super::native_mapper::NativeMapper;
 use super::protocol::Mapper;
 use super::sentinel::Sentinel;
 use super::types::{FfiValue, MemoryLayout};
 use crate::ast::ForeignBinding;
 use crate::interpreter::{ForeignFn, RuntimeError, Value};
+use std::sync::Arc;
 
 pub struct Orchestrator {
     mapper: NativeMapper,
     sentinel: Sentinel,
+    metro_hub: Arc<MetropolitanHub>,
 }
 
 impl Orchestrator {
@@ -41,7 +44,20 @@ impl Orchestrator {
         Self {
             mapper: NativeMapper,
             sentinel: Sentinel::new(),
+            metro_hub: Arc::new(MetropolitanHub::new()),
         }
+    }
+
+    pub fn with_metro_hub(metro_hub: Arc<MetropolitanHub>) -> Self {
+        Self {
+            mapper: NativeMapper,
+            sentinel: Sentinel::new(),
+            metro_hub,
+        }
+    }
+
+    pub fn metro_hub(&self) -> &MetropolitanHub {
+        &self.metro_hub
     }
 
     pub fn call(

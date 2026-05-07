@@ -9,41 +9,41 @@
 // ===== PURE FOREIGN (requires bit manipulation/complex algorithms) =====
 
 // Base64
-frgn __base64_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __base64_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __base64_url_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __base64_url_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __base64_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __base64_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __base64_url_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __base64_url_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
 // Hex
-frgn __hex_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __hex_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __hex_encode_bytes(list: List<Int>) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __hex_decode_bytes(s: String) -> Result<List<Int>, EncodingError> from "std/bindings/encoding.toml"
+frgn __hex_encode(data: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __hex_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __hex_encode_bytes(list: List<Int>) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __hex_decode_bytes(s: String) -> Result<List<Int>, EncodingError> from "std/bindings/encoding.dbvs"
 
 // URL Encoding
-frgn __url_encode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __url_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __url_encode_component(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __url_decode_component(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __url_encode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __url_decode(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __url_encode_component(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __url_decode_component(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
 // HTML Encoding
-frgn __html_escape(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __html_unescape(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __html_escape(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __html_unescape(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
 // Unicode
-frgn __utf8_encode(s: String) -> Result<List<Int>, EncodingError> from "std/bindings/encoding.toml"
-frgn __utf8_decode(list: List<Int>) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __codepoint_to_char(code: Int) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __char_to_codepoint(c: String) -> Result<Int, EncodingError> from "std/bindings/encoding.toml";
+frgn __utf8_encode(s: String) -> Result<List<Int>, EncodingError> from "std/bindings/encoding.dbvs"
+frgn __utf8_decode(list: List<Int>) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __codepoint_to_char(code: Int) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __char_to_codepoint(c: String) -> Result<Int, EncodingError> from "std/bindings/encoding.dbvs";
 // Hashing
-frgn __md5(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __sha1(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __sha256(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __sha512(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __md5(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __sha1(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __sha256(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __sha512(s: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
 // UUID
-frgn __uuid_v4() -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __is_uuid(s: String) -> Result<Bool, EncodingError> from "std/bindings/encoding.toml";
+frgn __uuid_v4() -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __is_uuid(s: String) -> Result<Bool, EncodingError> from "std/bindings/encoding.dbvs";
 // URI Components
-frgn __uri_parse(s: String) -> Result<Data, EncodingError> from "std/bindings/encoding.toml";
-frgn __uri_build(data: Data) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
-frgn __uri_get_param(url: String, key: String) -> Result<String, EncodingError> from "std/bindings/encoding.toml";
+frgn __uri_parse(s: String) -> Result<Data, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __uri_build(data: Data) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
+frgn __uri_get_param(url: String, key: String) -> Result<String, EncodingError> from "std/bindings/encoding.dbvs";
 // ===== NATIVE DEFINITIONS =====
 
 // Simple hex digit to int

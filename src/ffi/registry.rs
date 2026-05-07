@@ -110,37 +110,36 @@ impl FunctionRegistry {
         self.functions.iter()
     }
 
-    /// Load all bindings from std/bindings/*.toml and std/bindings/*.dbvs
+    /// Load all bindings from std/bindings/*.dbvs (Metropolitan FFI)
     pub fn load_from_bindings_dir(&mut self) {
         let bindings_dir = Self::bindings_dir();
-        let mut toml_count = 0;
         let mut dbvs_count = 0;
+        let mut metro_channels = 0;
 
         if let Ok(entries) = std::fs::read_dir(&bindings_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 let ext = path.extension().and_then(|s| s.to_str());
                 
-                if ext == Some("toml") {
-                    if let Err(e) = self.load_from_toml(&path) {
-                        eprintln!("[WARN] Failed to load binding {}: {}", path.display(), e);
-                    } else {
-                        toml_count += 1;
-                    }
-                } else if ext == Some("dbvs") {
+                if ext == Some("dbvs") {
                     if let Err(e) = self.load_from_dbvs(&path) {
                         eprintln!("[WARN] Failed to load DBVS binding {}: {}", path.display(), e);
                     } else {
                         dbvs_count += 1;
+                    }
+                } else if ext == Some("toml") {
+                    // TOML files are deprecated - log warning but still load for backward compat
+                    eprintln!("[WARN] TOML bindings are deprecated, use .dbvs: {}", path.display());
+                    if let Err(e) = self.load_from_toml(&path) {
+                        eprintln!("[WARN] Failed to load legacy TOML binding {}: {}", path.display(), e);
                     }
                 }
             }
         }
 
         eprintln!(
-            "[INFO] FFI Registry loaded {} functions ({} TOML files, {} DBVS files)",
+            "[INFO] FFI Registry loaded {} functions from {} DBVS schemas (Metropolitan FFI)",
             self.functions.len(),
-            toml_count,
             dbvs_count
         );
     }
@@ -154,13 +153,23 @@ impl FunctionRegistry {
             .map_err(|e| format!("Failed to parse DBVS: {}", e))?;
         
         for register in &program.registers {
-            // Extract location from register fields
-            if let Some(name) = &register.name {
-                // Look for location in the register's metadata
-                // For now, we use the register name as a key to find implementations
-                if let Some(func) = resolve_location_to_impl(name) {
-                    self.register(name.clone(), func);
-                }
+            // Skip registers without a name (not FFI bindings)
+            let name = register.name.as_ref()
+                .ok_or_else(|| "Register missing 'as' name".to_string())?;
+            
+            // Skip registers without a location (not FFI bindings)
+            let location = register.location.as_ref()
+                .ok_or_else(|| format!("Register '{}' missing 'location' field", name))?;
+            
+            // Register the function implementation
+            if let Some(func) = resolve_location_to_impl(location) {
+                self.register(location.clone(), func);
+            } else {
+                eprintln!(
+                    "[WARN] No implementation for location '{}' in {}",
+                    location,
+                    path.display()
+                );
             }
         }
         

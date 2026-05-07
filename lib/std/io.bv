@@ -17,12 +17,12 @@ defn input() -> String [true][true] {
 
 // ===== FILE IO (FFI Signatures) =====
 
-frgn sig __read_file(path: String) -> Result<String, IOError> from "io.toml";
-frgn sig __write_file(path: String, content: String) -> Result<Void, IOError> from "io.toml";
-frgn sig __file_exists(path: String) -> Result<Bool, IOError> from "io.toml";
-frgn sig __delete_file(path: String) -> Result<Void, IOError> from "io.toml";
-frgn sig __list_directory(path: String) -> Result<List<String>, IOError> from "io.toml";
-frgn sig __create_dir(path: String) -> Result<Void, IOError> from "io.toml";
+frgn sig __read_file(path: String) -> Result<String, IOError> from "io.dbvs";
+frgn sig __write_file(path: String, content: String) -> Result<Void, IOError> from "io.dbvs";
+frgn sig __file_exists(path: String) -> Result<Bool, IOError> from "io.dbvs";
+frgn sig __delete_file(path: String) -> Result<Void, IOError> from "io.dbvs";
+frgn sig __list_directory(path: String) -> Result<List<String>, IOError> from "io.dbvs";
+frgn sig __create_dir(path: String) -> Result<Void, IOError> from "io.dbvs";
 
 // ===== NATIVE WRAPPERS =====
 

@@ -183,26 +183,151 @@ impl DbriefParser {
         self.skip_whitespace();
         
         let address = self.parse_address()?;
-        self.consume(':')?;
         self.skip_whitespace();
         
-        let register_type = self.parse_type()?;
-        
-        let check = if self.starts_with("CHECK") || self.starts_with("check") {
-            self.consume_keyword("CHECK")?;
-            Some(self.parse_check()?)
+        // Parse optional "as" name
+        let name = if self.starts_with("as") || self.starts_with("AS") {
+            self.consume_keyword("as")?;
+            self.skip_whitespace();
+            Some(self.parse_string()?)
         } else {
             None
         };
-
-        self.consume(';')?;
+        
+        // Check for block syntax { ... } or colon syntax : Type
+        let (register_type, check, location, target, description, input_params, output_type, error_type) = 
+            if self.peek() == Some('{') {
+                self.consume('{')?;
+                let mut reg_type: Option<DbriefType> = None;
+                let mut chk: Option<DbriefContract> = None;
+                let mut loc: Option<String> = None;
+                let mut tgt: Option<String> = None;
+                let mut desc: Option<String> = None;
+                let mut inputs: Vec<(String, DbriefType)> = Vec::new();
+                let mut out_type: Option<DbriefType> = None;
+                let mut err_type: Option<DbriefType> = None;
+                
+                loop {
+                    self.skip_whitespace();
+                    if self.peek() == Some('}') {
+                        self.advance();
+                        break;
+                    }
+                    
+                    let field = self.parse_identifier()?;
+                    self.consume(':')?;
+                    self.skip_whitespace();
+                    
+                    match field.to_lowercase().as_str() {
+                        "type" => {
+                            reg_type = Some(self.parse_type()?);
+                        }
+                        "check" => {
+                            chk = Some(self.parse_check()?);
+                        }
+                        "location" => {
+                            loc = Some(self.parse_string()?);
+                        }
+                        "target" => {
+                            tgt = Some(self.parse_string()?);
+                        }
+                        "description" => {
+                            desc = Some(self.parse_string()?);
+                        }
+                        "input" => {
+                            self.consume('(')?;
+                            loop {
+                                self.skip_whitespace();
+                                if self.peek() == Some(')') {
+                                    self.advance();
+                                    break;
+                                }
+                                let param_name = self.parse_identifier()?;
+                                self.consume(':')?;
+                                let param_type = self.parse_type()?;
+                                inputs.push((param_name, param_type));
+                                self.skip_whitespace();
+                                if self.peek() == Some(',') {
+                                    self.advance();
+                                }
+                            }
+                        }
+                        "output" => {
+                            out_type = Some(self.parse_type()?);
+                        }
+                        "error" => {
+                            err_type = Some(self.parse_type()?);
+                        }
+                        _ => {
+                            // Skip unknown field value
+                            self.skip_to_semicolon()?;
+                        }
+                    }
+                    
+                    if self.peek() == Some(';') {
+                        self.advance();
+                    }
+                }
+                
+                (reg_type.unwrap_or(DbriefType::Data), chk, loc, tgt, desc, inputs, out_type, err_type)
+            } else {
+                self.consume(':')?;
+                self.skip_whitespace();
+                let reg_type = self.parse_type()?;
+                
+                let chk = if self.starts_with("CHECK") || self.starts_with("check") {
+                    self.consume_keyword("CHECK")?;
+                    Some(self.parse_check()?)
+                } else {
+                    None
+                };
+                
+                self.consume(';')?;
+                (reg_type, chk, None, None, None, Vec::new(), None, None)
+            };
         
         Ok(DbriefRegister {
             address,
-            name: None,
+            name,
             register_type,
             check,
+            location,
+            target,
+            description,
+            input_params,
+            output_type,
+            error_type,
         })
+    }
+
+    fn parse_string(&mut self) -> Result<String, String> {
+        self.skip_whitespace();
+        if self.peek() == Some('"') {
+            self.advance(); // consume opening quote
+            let mut s = String::new();
+            while let Some(c) = self.peek() {
+                if c == '"' {
+                    self.advance(); // consume closing quote
+                    return Ok(s);
+                }
+                s.push(c);
+                self.advance();
+            }
+            Err("Unterminated string".to_string())
+        } else {
+            // Parse as identifier
+            self.parse_identifier()
+        }
+    }
+
+    fn skip_to_semicolon(&mut self) -> Result<(), String> {
+        while let Some(c) = self.peek() {
+            if c == ';' {
+                return Ok(());
+            }
+            self.advance();
+        }
+        Err("Expected semicolon".to_string())
     }
 
     fn parse_alias(&mut self) -> Result<DbriefAlias, String> {
