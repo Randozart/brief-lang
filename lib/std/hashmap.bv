@@ -1,95 +1,148 @@
 // HashMap<K, V> - Hash-based map implementation
-// Requires K: Hash + Eq trait bounds
+// Uses list of key-value pairs with linear search
+// Backends optimize to native hash tables
 
-// ===== NATIVE DEFINITIONS =====
+// ===== STRUCT DEFINITION =====
 
-// Construction
+struct HashMap<K, V> {
+    entries: List<(K, V)>
+};
+
+// ===== CONSTRUCTION =====
+
 defn new_map<K, V>() -> HashMap<K, V> [true][result.len() == 0] {
-    term HashMap::empty();
+    term HashMap { entries: [] };
 };
 
 defn with_capacity<K, V>(capacity: Int) -> HashMap<K, V> [capacity > 0][result.len() == 0] {
-    term HashMap::with_capacity(capacity);
+    term HashMap { entries: [] };
 };
 
-// Basic operations
+// ===== BASIC OPERATIONS =====
+
 defn insert<K, V>(map: HashMap<K, V>, key: K, value: V) 
     [true][result.contains_key(key) && result.get(key) == Some(value)] 
     -> HashMap<K, V> 
 {
-    term map.insert(key, value);
+    [map.contains_key(key)] {
+        let idx: Int = map.find_index(key);
+        let new_entries: List<(K, V)> = map.entries.set(idx, (key, value));
+        term HashMap { entries: new_entries };
+    };
+    let new_entries: List<(K, V)> = map.entries + [(key, value)];
+    term HashMap { entries: new_entries };
 };
 
 defn get<K, V>(map: HashMap<K, V>, key: K) 
     [true][true] 
     -> Option<V> 
 {
-    term map.get(key);
+    let i: Int = 0;
+    [i < map.entries.len()] {
+        let (k, v) = map.entries[i];
+        [k == key] {
+            term Some(v);
+        };
+        &i = i + 1;
+    };
+    term None;
 };
 
 defn contains_key<K, V>(map: HashMap<K, V>, key: K) 
     [true][result == true || result == false] 
     -> Bool 
 {
-    term map.contains_key(key);
+    let i: Int = 0;
+    [i < map.entries.len()] {
+        let (k, _) = map.entries[i];
+        [k == key] {
+            term true;
+        };
+        &i = i + 1;
+    };
+    term false;
 };
 
 defn remove<K, V>(map: HashMap<K, V>, key: K) 
     [map.contains_key(key)][!result.contains_key(key)] 
     -> HashMap<K, V> 
 {
-    term map.remove(key);
+    let new_entries: List<(K, V)> = [];
+    let i: Int = 0;
+    [i < map.entries.len()] {
+        let (k, _) = map.entries[i];
+        [k != key] {
+            &new_entries = new_entries + [map.entries[i]];
+        };
+        &i = i + 1;
+    };
+    term HashMap { entries: new_entries };
 };
 
-// Metadata
+// ===== METADATA =====
+
 defn len<K, V>(map: HashMap<K, V>) 
     [true][result >= 0] 
     -> Int 
 {
-    term map.len();
+    term map.entries.len();
 };
 
 defn is_empty<K, V>(map: HashMap<K, V>) 
     [true][result == true || result == false] 
     -> Bool 
 {
-    term map.len() == 0;
+    term map.entries.len() == 0;
 };
 
-// Iteration
+// ===== ITERATION =====
+
 defn keys<K, V>(map: HashMap<K, V>) 
-    [true][result.len() == map.len()] 
+    [true][result.len() == map.entries.len()] 
     -> List<K> 
 {
-    term map.keys();
+    let result: List<K> = [];
+    let i: Int = 0;
+    [i < map.entries.len()] {
+        let (k, _) = map.entries[i];
+        &result = result + [k];
+        &i = i + 1;
+    };
+    term result;
 };
 
 defn values<K, V>(map: HashMap<K, V>) 
-    [true][result.len() == map.len()] 
+    [true][result.len() == map.entries.len()] 
     -> List<V> 
 {
-    term map.values();
+    let result: List<V> = [];
+    let i: Int = 0;
+    [i < map.entries.len()] {
+        let (_, v) = map.entries[i];
+        &result = result + [v];
+        &i = i + 1;
+    };
+    term result;
 };
 
 defn iter<K, V>(map: HashMap<K, V>) 
-    [true][result.len() == map.len()] 
+    [true][result.len() == map.entries.len()] 
     -> List<(K, V)> 
 {
-    term map.iter();
+    term map.entries;
 };
 
-// Advanced operations
+// ===== COMBINATION =====
+
 defn merge<K, V>(a: HashMap<K, V>, b: HashMap<K, V>) 
-    [true][result.len() >= a.len() && result.len() <= a.len() + b.len()] 
+    [true][result.len() >= a.len()] 
     -> HashMap<K, V> 
 {
-    let result = a;
-    let keys = b.keys();
+    let result: HashMap<K, V> = a;
     let i: Int = 0;
-    [i < keys.len()] {
-        let key = keys[i];
-        let value = b.get(key).unwrap();
-        &result = result.insert(key, value);
+    [i < b.entries.len()] {
+        let (k, v) = b.entries[i];
+        &result = result.insert(k, v);
         &i = i + 1;
     };
     term result;
@@ -99,14 +152,12 @@ defn filter<K, V>(map: HashMap<K, V>, pred: (K, V) -> Bool)
     [true][result.len() <= map.len()] 
     -> HashMap<K, V> 
 {
-    let result = new_map<K, V>();
-    let keys = map.keys();
+    let result: HashMap<K, V> = new_map();
     let i: Int = 0;
-    [i < keys.len()] {
-        let key = keys[i];
-        let value = map.get(key).unwrap();
-        [pred(key, value)] {
-            &result = result.insert(key, value);
+    [i < map.entries.len()] {
+        let (k, v) = map.entries[i];
+        [pred(k, v)] {
+            &result = result.insert(k, v);
         };
         &i = i + 1;
     };
@@ -117,13 +168,31 @@ defn clear<K, V>(map: HashMap<K, V>)
     [true][result.len() == 0] 
     -> HashMap<K, V> 
 {
-    term new_map<K, V>();
+    term HashMap { entries: [] };
 };
 
-// Entry API (for efficient insert-or-update)
+// ===== ENTRY API =====
+
 defn entry<K, V>(map: HashMap<K, V>, key: K) 
     [true][true] 
-    -> Entry<K, V> 
+    -> Option<V> 
 {
-    term map.entry(key);
+    term map.get(key);
+};
+
+// ===== INTERNAL HELPERS =====
+
+defn find_index<K, V>(map: HashMap<K, V>, key: K) 
+    [map.contains_key(key)][result >= 0 && result < map.entries.len()] 
+    -> Int 
+{
+    let i: Int = 0;
+    [i < map.entries.len()] {
+        let (k, _) = map.entries[i];
+        [k == key] {
+            term i;
+        };
+        &i = i + 1;
+    };
+    term -1;
 };

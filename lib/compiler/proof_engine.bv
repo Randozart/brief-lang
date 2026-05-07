@@ -75,28 +75,28 @@ defn state_is_visited(state: SymbolicState, key: String) -> Bool {
 
 defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     // Literals
-    unification expr(ExprInt(n)) = {
+    uni expr(ExprInt(n)) = {
         term SymInt(n);
     };
     
-    unification expr(ExprFloat(f)) = {
+    uni expr(ExprFloat(f)) = {
         term SymFloat(f);
     };
     
-    unification expr(ExprBool(b)) = {
+    uni expr(ExprBool(b)) = {
         term SymBool(b);
     };
     
-    unification expr(ExprChar(c)) = {
+    uni expr(ExprChar(c)) = {
         term SymChar(c);
     };
     
-    unification expr(ExprString(s)) = {
+    uni expr(ExprString(s)) = {
         term SymString(s);
     };
     
     // Variables
-    unification expr(ExprVar(name)) = {
+    uni expr(ExprVar(name)) = {
         [state.vars.contains_key(name)] {
             term state.vars.get(name).unwrap();
         };
@@ -104,19 +104,19 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     };
     
     // Prior state (@var)
-    unification expr(ExprPriorState(name)) = {
+    uni expr(ExprPriorState(name)) = {
         term SymVar("@" + name);
     };
     
     // Binary operations
-    unification expr(ExprBinOp(op, left, right)) = {
+    uni expr(ExprBinOp(op, left, right)) = {
         let left_sym = eval_symbolic(*left, state);
         let right_sym = eval_symbolic(*right, state);
         term SymBinaryOp(op, Box::new(left_sym), Box::new(right_sym));
     };
     
     // Unary operations
-    unification expr(ExprUnaryOp(op, operand)) = {
+    uni expr(ExprUnaryOp(op, operand)) = {
         let operand_sym = eval_symbolic(*operand, state);
         term SymUnaryOp(op, Box::new(operand_sym));
     };
@@ -128,12 +128,12 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
 // ===== SIMPLIFICATION =====
 
 defn simplify(sym: SymbolicValue) -> SymbolicValue {
-    unification sym(SymBinaryOp(op, left, right)) = {
+    uni sym(SymBinaryOp(op, left, right)) = {
         let left_simp = simplify(*left);
         let right_simp = simplify(*right);
         
         // Constant folding
-        unification (left_simp, right_simp) = (SymInt(l), SymInt(r)) = {
+        uni (left_simp, right_simp) = (SymInt(l), SymInt(r)) = {
             [op == "+"] { term SymInt(l + r); };
             [op == "-"] { term SymInt(l - r); };
             [op == "*"] { term SymInt(l * r); };
@@ -141,14 +141,14 @@ defn simplify(sym: SymbolicValue) -> SymbolicValue {
             [op == "%"] { [r != 0] { term SymInt(l % r); }; };
         };
         
-        unification (left_simp, right_simp) = (SymFloat(l), SymFloat(r)) = {
+        uni (left_simp, right_simp) = (SymFloat(l), SymFloat(r)) = {
             [op == "+"] { term SymFloat(l + r); };
             [op == "-"] { term SymFloat(l - r); };
             [op == "*"] { term SymFloat(l * r); };
             [op == "/"] { [r != 0.0] { term SymFloat(l / r); }; };
         };
         
-        unification (left_simp, right_simp) = (SymBool(l), SymBool(r)) = {
+        uni (left_simp, right_simp) = (SymBool(l), SymBool(r)) = {
             [op == "&&"] { term SymBool(l && r); };
             [op == "||"] { term SymBool(l || r); };
             [op == "=="] { term SymBool(l == r); };
@@ -156,35 +156,35 @@ defn simplify(sym: SymbolicValue) -> SymbolicValue {
         };
         
         // Identity operations
-        unification (op, left_simp, right_simp) = ("+", SymInt(0), _) = {
+        uni (op, left_simp, right_simp) = ("+", SymInt(0), _) = {
             term right_simp;
         };
-        unification (op, left_simp, right_simp) = ("+", _, SymInt(0)) = {
+        uni (op, left_simp, right_simp) = ("+", _, SymInt(0)) = {
             term left_simp;
         };
-        unification (op, left_simp, right_simp) = ("*", SymInt(1), _) = {
+        uni (op, left_simp, right_simp) = ("*", SymInt(1), _) = {
             term right_simp;
         };
-        unification (op, left_simp, right_simp) = ("*", _, SymInt(1)) = {
+        uni (op, left_simp, right_simp) = ("*", _, SymInt(1)) = {
             term left_simp;
         };
-        unification (op, left_simp, right_simp) = ("*", _, SymInt(0)) = {
+        uni (op, left_simp, right_simp) = ("*", _, SymInt(0)) = {
             term SymInt(0);
         };
-        unification (op, left_simp, right_simp) = ("*", SymInt(0), _) = {
+        uni (op, left_simp, right_simp) = ("*", SymInt(0), _) = {
             term SymInt(0);
         };
         
         term SymBinaryOp(op, Box::new(left_simp), Box::new(right_simp));
     };
     
-    unification sym(SymUnaryOp(op, operand)) = {
+    uni sym(SymUnaryOp(op, operand)) = {
         let operand_simp = simplify(*operand);
         
-        unification (op, operand_simp) = ("-", SymInt(n)) = {
+        uni (op, operand_simp) = ("-", SymInt(n)) = {
             term SymInt(-n);
         };
-        unification (op, operand_simp) = ("!", SymBool(b)) = {
+        uni (op, operand_simp) = ("!", SymBool(b)) = {
             term SymBool(!b);
         };
         
@@ -198,7 +198,7 @@ defn simplify(sym: SymbolicValue) -> SymbolicValue {
 
 defn check_constraint(constraint: SymbolicValue) -> Bool {
     let simp = simplify(constraint);
-    unification simp(SymBool(b)) = {
+    uni simp(SymBool(b)) = {
         term b;
     };
     term true;  // Unknown constraints assumed satisfiable
@@ -250,13 +250,13 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
             let rest = remaining.drop(1);
             
             // Handle guarded statements (branching)
-            unification stmt(StmtGuarded(condition, body)) = {
+            uni stmt(StmtGuarded(condition, body)) = {
                 // Evaluate condition symbolically
                 let cond_sym = eval_symbolic(*condition, state);
                 let cond_simp = simplify(cond_sym);
                 
                 // True branch
-                unification cond_simp(SymBool(true)) = {
+                uni cond_simp(SymBool(true)) = {
                     let new_state = state_add_constraint(state, cond_simp);
                     let new_stmts = body;
                     new_stmts = new_stmts.append_all(rest);
@@ -264,13 +264,13 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
                 };
                 
                 // False branch
-                unification cond_simp(SymBool(false)) = {
+                uni cond_simp(SymBool(false)) = {
                     // Skip guarded block
                     work_queue = work_queue.append((rest, state, constraints));
                 };
                 
                 // Unknown - explore both paths
-                [!unification cond_simp(SymBool(_)) = true] {
+                [!uni cond_simp(SymBool(_)) = true] {
                     // True path
                     let true_state = state_add_constraint(state, SymBool(true));
                     let true_stmts = body;
@@ -284,7 +284,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
             };
             
             // Non-branching statement
-            [!unification stmt(StmtGuarded(_, _)) = true] {
+            [!uni stmt(StmtGuarded(_, _)) = true] {
                 let new_state = execute_statement_symbolic(stmt, state);
                 work_queue = work_queue.append((rest, new_state, constraints));
             };
@@ -297,14 +297,14 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
 }
 
 defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> SymbolicState {
-    unification stmt(StmtLet(name, _, Some(init))) = {
+    uni stmt(StmtLet(name, _, Some(init))) = {
         let value = eval_symbolic(*init, state);
         term state_assign(state, name, value);
     };
     
-    unification stmt(StmtAssign(lhs, rhs)) = {
+    uni stmt(StmtAssign(lhs, rhs)) = {
         // Extract variable name from lhs
-        unification *lhs(ExprVar(name)) = {
+        uni *lhs(ExprVar(name)) = {
             let value = eval_symbolic(*rhs, state);
             term state_assign(state, name, value);
         };
@@ -358,7 +358,7 @@ defn verify_contract(txn: Transaction) -> ProofResult {
             let post_simp = simplify(post_sym);
             
             // Check if postcondition holds
-            unification post_simp(SymBool(false)) = {
+            uni post_simp(SymBool(false)) = {
                 &all_verified = false;
                 &counterexample = Some(CounterExample {
                     inputs: path.final_state.vars,
@@ -382,10 +382,10 @@ defn verify_precondition(precondition: Expr, state: SymbolicState) -> Bool {
     let pre_sym = eval_symbolic(precondition, state);
     let pre_simp = simplify(pre_sym);
     
-    unification pre_simp(SymBool(true)) = {
+    uni pre_simp(SymBool(true)) = {
         term true;
     };
-    unification pre_simp(SymBool(false)) = {
+    uni pre_simp(SymBool(false)) = {
         term false;
     };
     term true;  // Unknown preconditions assumed satisfiable
@@ -395,10 +395,10 @@ defn verify_postcondition(postcondition: Expr, state: SymbolicState) -> Bool {
     let post_sym = eval_symbolic(postcondition, state);
     let post_simp = simplify(post_sym);
     
-    unification post_simp(SymBool(true)) = {
+    uni post_simp(SymBool(true)) = {
         term true;
     };
-    unification post_simp(SymBool(false)) = {
+    uni post_simp(SymBool(false)) = {
         term false;
     };
     term true;  // Unknown postconditions need manual verification
@@ -462,17 +462,45 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
     
     let i: Int = 0;
     [i < stmts.len()] {
-        unification stmts[i](StmtLet(name, _, _)) = {
+        uni stmts[i](StmtLet(name, _, _)) = {
             writes = writes.append(name);
         };
-        unification stmts[i](StmtAssign(lhs, _)) = {
-            unification *lhs(ExprVar(name)) = {
+        uni stmts[i](StmtAssign(lhs, _)) = {
+            uni *lhs(ExprVar(name)) = {
                 writes = writes.append(name);
             };
+            uni *lhs(ExprFieldAccess(obj, field)) = {
+                // Field writes count as writing the base variable
+                let obj_reads = collect_reads_expr(*obj);
+                writes = writes.append_all(obj_reads);
+            };
+            uni *lhs(ExprIndex(arr, _)) = {
+                let arr_reads = collect_reads_expr(*arr);
+                writes = writes.append_all(arr_reads);
+            };
         };
-        unification stmts[i](StmtGuarded(_, body)) = {
+        uni stmts[i](StmtGuarded(_, body)) = {
             let nested = collect_writes(body);
             writes = writes.append_all(nested);
+        };
+        uni stmts[i](StmtLoop(body)) = {
+            let nested = collect_writes(body);
+            writes = writes.append_all(nested);
+        };
+        uni stmts[i](StmtWhile(_, body)) = {
+            let nested = collect_writes(body);
+            writes = writes.append_all(nested);
+        };
+        uni stmts[i](StmtFor(name, _, body)) = {
+            writes = writes.append(name);
+            let nested = collect_writes(body);
+            writes = writes.append_all(nested);
+        };
+        uni stmts[i](StmtIf(_, then_body, else_body)) = {
+            let then_writes = collect_writes(then_body);
+            let else_writes = collect_writes(else_body);
+            writes = writes.append_all(then_writes);
+            writes = writes.append_all(else_writes);
         };
         &i = i + 1;
     };
@@ -583,9 +611,117 @@ defn dfs_cycle(node: String, deps: HashMap<String, List<String>>,
     term (false, []);
 }
 
-defn collect_reads(stmts: List<Statement>) -> List<String> {
-    // Simplified - would need to traverse expressions
+defn collect_reads_expr(expr: Expr) -> List<String> {
+    uni expr(ExprVar(name)) = {
+        term [name];
+    };
+    
+    uni expr(ExprPriorState(name)) = {
+        term ["@" + name];
+    };
+    
+    uni expr(ExprBinOp(_, left, right)) = {
+        let left_reads = collect_reads_expr(*left);
+        let right_reads = collect_reads_expr(*right);
+        term left_reads.append_all(right_reads);
+    };
+    
+    uni expr(ExprUnaryOp(_, operand)) = {
+        term collect_reads_expr(*operand);
+    };
+    
+    uni expr(ExprFieldAccess(obj, _)) = {
+        term collect_reads_expr(*obj);
+    };
+    
+    uni expr(ExprIndex(arr, idx)) = {
+        let arr_reads = collect_reads_expr(*arr);
+        let idx_reads = collect_reads_expr(*idx);
+        term arr_reads.append_all(idx_reads);
+    };
+    
+    uni expr(ExprCall(_, args)) = {
+        let reads: List<String> = [];
+        let i: Int = 0;
+        [i < args.len()] {
+            reads = reads.append_all(collect_reads_expr(args[i]));
+            &i = i + 1;
+        };
+        term reads;
+    };
+    
+    uni expr(ExprList(items)) = {
+        let reads: List<String> = [];
+        let i: Int = 0;
+        [i < items.len()] {
+            reads = reads.append_all(collect_reads_expr(items[i]));
+            &i = i + 1;
+        };
+        term reads;
+    };
+    
+    uni expr(ExprStruct(_, fields)) = {
+        let reads: List<String> = [];
+        let i: Int = 0;
+        [i < fields.len()] {
+            reads = reads.append_all(collect_reads_expr(fields[i].1));
+            &i = i + 1;
+        };
+        term reads;
+    };
+    
+    // Literals don't read variables
     term [];
+}
+
+defn collect_reads(stmts: List<Statement>) -> List<String> {
+    let reads: List<String> = [];
+    
+    let i: Int = 0;
+    [i < stmts.len()] {
+        uni stmts[i](StmtLet(_, _, Some(init))) = {
+            reads = reads.append_all(collect_reads_expr(*init));
+        };
+        uni stmts[i](StmtAssign(lhs, rhs)) = {
+            reads = reads.append_all(collect_reads_expr(*lhs));
+            reads = reads.append_all(collect_reads_expr(*rhs));
+        };
+        uni stmts[i](StmtTerm(values)) = {
+            let j: Int = 0;
+            [j < values.len()] {
+                [values[j].is_some()] {
+                    reads = reads.append_all(collect_reads_expr(values[j].unwrap()));
+                };
+                &j = j + 1;
+            };
+        };
+        uni stmts[i](StmtGuarded(condition, body)) = {
+            reads = reads.append_all(collect_reads_expr(*condition));
+            reads = reads.append_all(collect_reads(body));
+        };
+        uni stmts[i](StmtLoop(body)) = {
+            reads = reads.append_all(collect_reads(body));
+        };
+        uni stmts[i](StmtWhile(cond, body)) = {
+            reads = reads.append_all(collect_reads_expr(*cond));
+            reads = reads.append_all(collect_reads(body));
+        };
+        uni stmts[i](StmtFor(_, iter, body)) = {
+            reads = reads.append_all(collect_reads_expr(*iter));
+            reads = reads.append_all(collect_reads(body));
+        };
+        uni stmts[i](StmtIf(cond, then_body, else_body)) = {
+            reads = reads.append_all(collect_reads_expr(*cond));
+            reads = reads.append_all(collect_reads(then_body));
+            reads = reads.append_all(collect_reads(else_body));
+        };
+        uni stmts[i](StmtExpr(expr)) = {
+            reads = reads.append_all(collect_reads_expr(*expr));
+        };
+        &i = i + 1;
+    };
+    
+    term reads;
 }
 
 // ===== VERIFICATION CONDITIONS =====
@@ -619,7 +755,7 @@ defn check_vc(vc: VerificationCondition) -> Result<(), String> {
     
     // Check if conclusion holds
     let conclusion_simp = simplify(vc.conclusion);
-    unification conclusion_simp(SymBool(false)) = {
+    uni conclusion_simp(SymBool(false)) = {
         term Err("Verification condition failed");
     };
     
@@ -629,26 +765,26 @@ defn check_vc(vc: VerificationCondition) -> Result<(), String> {
 // ===== UTILITY FUNCTIONS =====
 
 defn sym_to_string(sym: SymbolicValue) -> String {
-    unification sym(SymInt(n)) = {
+    uni sym(SymInt(n)) = {
         term String(n);
     };
-    unification sym(SymFloat(f)) = {
+    uni sym(SymFloat(f)) = {
         term String(f);
     };
-    unification sym(SymBool(b)) = {
+    uni sym(SymBool(b)) = {
         [b] { term "true"; };
         term "false";
     };
-    unification sym(SymString(s)) = {
+    uni sym(SymString(s)) = {
         term "\"" + s + "\"";
     };
-    unification sym(SymChar(c)) = {
+    uni sym(SymChar(c)) = {
         term "'" + char_to_string(c) + "'";
     };
-    unification sym(SymVar(name)) = {
+    uni sym(SymVar(name)) = {
         term name;
     };
-    unification sym(SymBinaryOp(op, left, right)) = {
+    uni sym(SymBinaryOp(op, left, right)) = {
         let sb = new_builder();
         sb = sb.append_char('(');
         sb = sb.append_str(sym_to_string(*left));
@@ -659,7 +795,7 @@ defn sym_to_string(sym: SymbolicValue) -> String {
         sb = sb.append_char(')');
         term sb.to_string();
     };
-    unification sym(SymUnaryOp(op, operand)) = {
+    uni sym(SymUnaryOp(op, operand)) = {
         let sb = new_builder();
         sb = sb.append_char('(');
         sb = sb.append_str(op);
@@ -667,7 +803,7 @@ defn sym_to_string(sym: SymbolicValue) -> String {
         sb = sb.append_char(')');
         term sb.to_string();
     };
-    unification sym(SymUnknown) = {
+    uni sym(SymUnknown) = {
         term "?";
     };
     term "?";

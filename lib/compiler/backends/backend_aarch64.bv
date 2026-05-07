@@ -17,6 +17,21 @@ enum A64Instr {
     AND(String, String, String),    // and Rd, Rn, Rm
     ORR(String, String, String),    // orr Rd, Rn, Rm
     EOR(String, String, String),    // eor Rd, Rn, Rm
+    MOV(String, String),            // mov Rd, Rm (alias of ORR Rd, XZR, Rm)
+    
+    // Shift operations
+    LSL(String, String, Int),       // lsl Rd, Rn, #imm
+    LSR(String, String, Int),       // lsr Rd, Rn, #imm
+    ASR(String, String, Int),       // asr Rd, Rn, #imm
+    ROR(String, String, Int),       // ror Rd, Rn, #imm
+    
+    // Stack operations (pair)
+    STP(String, String, String, Int),  // stp Rt1, Rt2, [Rn, #offset]
+    LDP(String, String, String, Int),  // ldp Rt1, Rt2, [Rn, #offset]
+    
+    // Conditional operations
+    CSEL(String, String, String, String),  // csel Rd, Rn, Rm, cond
+    CSET(String, String),           // cset Rd, cond
     
     // Memory operations
     LDR(String, String, Int),       // ldr Rd, [Rn, #offset]
@@ -34,6 +49,7 @@ enum A64Instr {
     BGT(String),                    // bgt label
     BLE(String),                    // ble label
     BGE(String),                    // bge label
+    TBZ(String, Int, String),       // tbz Rt, #bit, label
     
     // Compare
     CMP(String, String),            // cmp Rn, Rm
@@ -43,6 +59,7 @@ enum A64Instr {
     NOP,                            // nop
     RET,                            // ret
     SVC(Int),                       // svc #imm
+    PRFM(String, Int),              // prfm prfop, addr
     
     // Labels
     Label(String),                  // label:
@@ -56,7 +73,8 @@ struct RegisterAllocator {
     var_to_reg: HashMap<String, String>,
     reg_to_var: HashMap<String, String>,
     spill_slots: HashMap<String, Int>,
-    next_spill: Int
+    next_spill: Int,
+    spill_instrs: List<A64Instr>  // Instructions generated during spilling
 }
 
 defn new_regalloc() -> RegisterAllocator {
@@ -65,19 +83,26 @@ defn new_regalloc() -> RegisterAllocator {
         var_to_reg: new_map(),
         reg_to_var: new_map(),
         spill_slots: new_map(),
-        next_spill: 0
+        next_spill: 0,
+        spill_instrs: []
     };
 }
 
 // AArch64 has 31 general-purpose registers (X0-X30)
 // X29 = FP (frame pointer), X30 = LR (link register)
+// X18 = Platform register (reserved on some platforms)
 defn callee_saved_regs() -> List<String> {
-    term ["X19", "X20", "X21", "X22", "X23", "X24", "X25", "X26", "X27", "X28", "X29"];
+    term ["X19", "X20", "X21", "X22", "X23", "X24", "X25", "X26", "X27", "X28"];
 }
 
 defn caller_saved_regs() -> List<String> {
     term ["X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "X9", 
-          "X10", "X11", "X12", "X13", "X14", "X15", "X16", "X17", "X18"];
+          "X10", "X11", "X12", "X13", "X14", "X15", "X16", "X17"];
+}
+
+defn all_allocatable_regs() -> List<String> {
+    let regs = caller_saved_regs();
+    regs.append_all(callee_saved_regs());
 }
 
 defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, RegisterAllocator) {
@@ -92,7 +117,8 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
                 var_to_reg: alloc.var_to_reg,
                 reg_to_var: alloc.reg_to_var,
                 spill_slots: alloc.spill_slots,
-                next_spill: alloc.next_spill
+                next_spill: alloc.next_spill,
+                spill_instrs: alloc.spill_instrs
             });
         };
     };
@@ -109,14 +135,69 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
                 var_to_reg: alloc.var_to_reg,
                 reg_to_var: alloc.reg_to_var,
                 spill_slots: alloc.spill_slots,
-                next_spill: alloc.next_spill
+                next_spill: alloc.next_spill,
+                spill_instrs: alloc.spill_instrs
             });
         };
         &i = i + 1;
     };
     
-    // Need to spill - for now, just use X16
-    term ("X16", alloc);
+    // Need to spill - pick a register and spill it to stack
+    let spill_reg = regs[0];  // Spill X0 first
+    let spill_offset = alloc.next_spill * 8;  // 8 bytes per slot
+    
+    let mut spill_instrs = alloc.spill_instrs;
+    spill_instrs = spill_instrs.append(STR(spill_reg, "X29", spill_offset));
+    
+    let mut new_spill_slots = alloc.spill_slots;
+    new_spill_slots = new_spill_slots.insert(spill_reg, spill_offset);
+    
+    let used = alloc.used_regs;
+    // Note: we reuse the spilled register, so it stays "used"
+    
+    term (spill_reg, RegisterAllocator {
+        used_regs: used,
+        var_to_reg: alloc.var_to_reg,
+        reg_to_var: alloc.reg_to_var,
+        spill_slots: new_spill_slots,
+        next_spill: alloc.next_spill + 1,
+        spill_instrs: spill_instrs
+    });
+}
+
+defn spill_reg(alloc: RegisterAllocator, reg: String, var_name: String) -> (Int, RegisterAllocator) {
+    let offset = alloc.next_spill * 8;
+    let instr = STR(reg, "X29", offset);
+    
+    let new_spill_slots = alloc.spill_slots;
+    new_spill_slots.insert(var_name, offset);
+    
+    let new_spill_instrs = alloc.spill_instrs;
+    new_spill_instrs.append(instr);
+    
+    let used = alloc.used_regs;
+    used.remove(reg);
+    
+    let new_var_to_reg = alloc.var_to_reg;
+    new_var_to_reg.remove(var_name);
+    
+    term (offset, RegisterAllocator {
+        used_regs: used,
+        var_to_reg: new_var_to_reg,
+        reg_to_var: alloc.reg_to_var,
+        spill_slots: new_spill_slots,
+        next_spill: alloc.next_spill + 1,
+        spill_instrs: new_spill_instrs
+    });
+}
+
+defn reload_reg(alloc: RegisterAllocator, reg: String, var_name: String) -> (List<A64Instr>, RegisterAllocator) {
+    [alloc.spill_slots.contains_key(var_name)] {
+        let offset = alloc.spill_slots.get(var_name).unwrap();
+        let instrs = [LDR(reg, "X29", offset)];
+        term (instrs, alloc);
+    };
+    term ([], alloc);
 }
 
 defn free_reg(alloc: RegisterAllocator, reg: String) -> RegisterAllocator {
@@ -127,8 +208,400 @@ defn free_reg(alloc: RegisterAllocator, reg: String) -> RegisterAllocator {
         var_to_reg: alloc.var_to_reg,
         reg_to_var: alloc.reg_to_var,
         spill_slots: alloc.spill_slots,
-        next_spill: alloc.next_spill
+        next_spill: alloc.next_spill,
+        spill_instrs: alloc.spill_instrs
     };
+}
+
+defn assign_var_to_reg(alloc: RegisterAllocator, var_name: String, reg: String) -> RegisterAllocator {
+    let new_var_to_reg = alloc.var_to_reg;
+    new_var_to_reg.insert(var_name, reg);
+    let new_reg_to_var = alloc.reg_to_var;
+    new_reg_to_var.insert(reg, var_name);
+    term RegisterAllocator {
+        used_regs: alloc.used_regs,
+        var_to_reg: new_var_to_reg,
+        reg_to_var: new_reg_to_var,
+        spill_slots: alloc.spill_slots,
+        next_spill: alloc.next_spill,
+        spill_instrs: alloc.spill_instrs
+    };
+}
+
+defn lookup_var_reg(alloc: RegisterAllocator, var_name: String) -> Option<String> {
+    term alloc.var_to_reg.get(var_name);
+}
+
+// ===== MEMORY LAYOUT PASS =====
+
+struct MemoryLayout {
+    var_offsets: HashMap<String, Int>,      // Variable -> stack offset
+    param_offsets: HashMap<String, Int>,    // Parameter -> stack offset
+    total_stack_size: Int,                   // Total stack bytes needed
+    alignment: Int                           // Stack alignment (16 bytes for AArch64)
+}
+
+defn new_memory_layout() -> MemoryLayout {
+    term MemoryLayout {
+        var_offsets: new_map(),
+        param_offsets: new_map(),
+        total_stack_size: 0,
+        alignment: 16
+    };
+}
+
+defn compute_memory_layout(txns: List<Transaction>) -> MemoryLayout {
+    let mut layout = new_memory_layout();
+    let mut offset: Int = 0;
+    
+    // First pass: collect all variables from all transactions
+    let i: Int = 0;
+    [i < txns.len()] {
+        let txn = txns[i];
+        
+        // Parameters get first slots
+        let j: Int = 0;
+        [j < txn.params.len()] {
+            layout.param_offsets = layout.param_offsets.insert(txn.params[j].name, offset);
+            offset = offset + 8;  // 8 bytes per parameter
+            &j = j + 1;
+        };
+        
+        // Collect variables from body
+        let vars = collect_vars_from_stmts(txn.body);
+        let k: Int = 0;
+        [k < vars.len()] {
+            [!layout.var_offsets.contains_key(vars[k])] {
+                layout.var_offsets = layout.var_offsets.insert(vars[k], offset);
+                offset = offset + 8;
+            };
+            &k = k + 1;
+        };
+        
+        &i = i + 1;
+    };
+    
+    // Round up to 16-byte alignment (AAPCS requirement)
+    let aligned_size = ((offset + 15) / 16) * 16;
+    layout.total_stack_size = aligned_size;
+    
+    term layout;
+}
+
+defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
+    let vars: List<String> = [];
+    
+    let i: Int = 0;
+    [i < stmts.len()] {
+        uni stmts[i](StmtLet(name, _, _)) = {
+            vars = vars.append(name);
+        };
+        uni stmts[i](StmtAssign(lhs, _)) = {
+            uni *lhs(ExprVar(name)) = {
+                vars = vars.append(name);
+            };
+        };
+        uni stmts[i](StmtFor(name, _, _)) = {
+            vars = vars.append(name);
+        };
+        uni stmts[i](StmtGuarded(_, body)) = {
+            let nested = collect_vars_from_stmts(body);
+            vars = vars.append_all(nested);
+        };
+        uni stmts[i](StmtLoop(body)) = {
+            let nested = collect_vars_from_stmts(body);
+            vars = vars.append_all(nested);
+        };
+        uni stmts[i](StmtWhile(_, body)) = {
+            let nested = collect_vars_from_stmts(body);
+            vars = vars.append_all(nested);
+        };
+        uni stmts[i](StmtIf(_, then_b, else_b)) = {
+            let then_vars = collect_vars_from_stmts(then_b);
+            let else_vars = collect_vars_from_stmts(else_b);
+            vars = vars.append_all(then_vars);
+            vars = vars.append_all(else_vars);
+        };
+        &i = i + 1;
+    };
+    
+    term vars;
+}
+
+defn get_stack_offset(layout: MemoryLayout, var_name: String) -> Option<Int> {
+    [layout.var_offsets.contains_key(var_name)] {
+        term Some(layout.var_offsets.get(var_name).unwrap());
+    };
+    [layout.param_offsets.contains_key(var_name)] {
+        term Some(layout.param_offsets.get(var_name).unwrap());
+    };
+    term None;
+}
+
+defn generate_prologue(layout: MemoryLayout) -> List<A64Instr> {
+    let instrs: List<A64Instr> = [];
+    
+    // Save frame pointer
+    instrs = instrs.append(STP("X29", "X30", "SP", -16));  // Store pair FP, LR
+    instrs = instrs.append(MOV("X29", "SP"));                // FP = SP
+    instrs = instrs.append(SUBI("SP", "SP", layout.total_stack_size));  // Allocate stack
+    
+    term instrs;
+}
+
+defn generate_epilogue(layout: MemoryLayout) -> List<A64Instr> {
+    let instrs: List<A64Instr> = [];
+    
+    instrs = instrs.append(ADDI("SP", "X29", 0));   // SP = FP
+    instrs = instrs.append(LDP("X29", "X30", "SP", 16));  // Restore FP, LR
+    instrs = instrs.append(RET);
+    
+    term instrs;
+}
+
+// ===== BIT-PACKED STRUCT LAYOUT =====
+
+struct BitFieldLayout {
+    field_name: String,
+    bit_start: Int,
+    bit_width: Int,
+    byte_offset: Int,  // Which byte contains the start bit
+    mask: Int          // Mask to extract the field
+}
+
+struct PackedStructLayout {
+    fields: List<BitFieldLayout>,
+    total_bits: Int,
+    total_bytes: Int,
+    is_mmio: Bool,
+    mmio_base_addr: Int
+}
+
+defn new_packed_layout() -> PackedStructLayout {
+    term PackedStructLayout {
+        fields: [],
+        total_bits: 0,
+        total_bytes: 0,
+        is_mmio: false,
+        mmio_base_addr: 0
+    };
+}
+
+defn bit_width_for_type(type_name: String, bit_range: Option<Int>) -> Int {
+    [type_name == "Bool"] { term 1; };
+    [type_name == "Char"] { term 8; };
+    [type_name == "Int"] {
+        [bit_range.is_some()] { term bit_range.unwrap(); };
+        term 64;
+    };
+    [type_name == "UInt"] {
+        [bit_range.is_some()] { term bit_range.unwrap(); };
+        term 64;
+    };
+    [type_name == "Float"] { term 64; };
+    term 64;  // Default to 64-bit
+}
+
+defn compute_packed_layout(fields: List<(String, String, Option<Int>)>, mmio_base: Option<Int>) -> PackedStructLayout {
+    let mut layout = new_packed_layout();
+    let mut current_bit: Int = 0;
+    
+    [mmio_base.is_some()] {
+        layout.is_mmio = true;
+        layout.mmio_base_addr = mmio_base.unwrap();
+    };
+    
+    let i: Int = 0;
+    [i < fields.len()] {
+        let (name, type_name, bit_range) = fields[i];
+        let width = bit_width_for_type(type_name, bit_range);
+        
+        let byte_offset = current_bit / 8;
+        let mask = compute_mask(width);
+        
+        let field_layout = BitFieldLayout {
+            field_name: name,
+            bit_start: current_bit,
+            bit_width: width,
+            byte_offset: byte_offset,
+            mask: mask
+        };
+        
+        layout.fields = layout.fields.append(field_layout);
+        current_bit = current_bit + width;
+        
+        &i = i + 1;
+    };
+    
+    layout.total_bits = current_bit;
+    layout.total_bytes = ((current_bit + 7) / 8);
+    
+    term layout;
+}
+
+defn compute_mask(width: Int) -> Int {
+    [width >= 64] { term -1; };  // All bits set
+    term (1 << width) - 1;
+}
+
+defn find_field_layout(layout: PackedStructLayout, field_name: String) -> Option<BitFieldLayout> {
+    let i: Int = 0;
+    [i < layout.fields.len()] {
+        [layout.fields[i].field_name == field_name] {
+            term Some(layout.fields[i]);
+        };
+        &i = i + 1;
+    };
+    term None;
+}
+
+// Generate instructions to load a bit-field from memory
+defn emit_load_bitfield(base_reg: String, field: BitFieldLayout, dest_reg: String, is_mmio: Bool) -> List<A64Instr> {
+    let instrs: List<A64Instr> = [];
+    
+    [is_mmio] {
+        // MMIO: use load with volatile semantics (simplified as regular LDR)
+        instrs = instrs.append(LDR(dest_reg, base_reg, field.byte_offset));
+    };
+    [!is_mmio] {
+        // Regular memory
+        instrs = instrs.append(LDR(dest_reg, base_reg, field.byte_offset));
+    };
+    
+    // Extract the bit field
+    // 1. Right shift to align field to LSB
+    [field.bit_start > 0] {
+        let shift = field.bit_start % 8;  // Shift within the byte
+        [shift > 0] {
+            instrs = instrs.append(LSR(dest_reg, dest_reg, shift));
+        };
+    };
+    
+    // 2. Apply mask to isolate field
+    instrs = instrs.append(ANDI(dest_reg, dest_reg, field.mask));
+    
+    term instrs;
+}
+
+// Generate instructions to store a bit-field to memory
+defn emit_store_bitfield(base_reg: String, field: BitFieldLayout, value_reg: String, is_mmio: Bool) -> List<A64Instr> {
+    let instrs: List<A64Instr> = [];
+    let temp_reg = "X16";  // Temporary register
+    
+    // Load current value
+    instrs = instrs.append(LDR(temp_reg, base_reg, field.byte_offset));
+    
+    // Clear the field bits in current value
+    let inverted_mask = NOT(field.mask);
+    let clear_mask_reg = "X17";
+    instrs = instrs.append(MOVI(clear_mask_reg, inverted_mask));
+    instrs = instrs.append(AND(temp_reg, temp_reg, clear_mask_reg));
+    
+    // Position new value
+    let shift = field.bit_start % 8;
+    [shift > 0] {
+        instrs = instrs.append(LSL(value_reg, value_reg, shift));
+    };
+    
+    // Mask the new value to ensure it fits
+    instrs = instrs.append(ANDI(value_reg, value_reg, field.mask));
+    
+    // Combine with cleared value
+    instrs = instrs.append(ORR(temp_reg, temp_reg, value_reg));
+    
+    // Store back
+    [is_mmio] {
+        instrs = instrs.append(STR(temp_reg, base_reg, field.byte_offset));
+    };
+    [!is_mmio] {
+        instrs = instrs.append(STR(temp_reg, base_reg, field.byte_offset));
+    };
+    
+    term instrs;
+}
+
+// ===== MMIO REGISTER MAPPING =====
+
+struct MMIORegister {
+    name: String,
+    address: Int,
+    width: Int,  // in bits
+    access: String  // "RO", "WO", "RW"
+}
+
+struct MMIORegion {
+    name: String,
+    base_address: Int,
+    size: Int,
+    registers: List<MMIORegister>
+}
+
+defn new_mmio_region(name: String, base: Int, size: Int) -> MMIORegion {
+    term MMIORegion {
+        name: name,
+        base_address: base,
+        size: size,
+        registers: []
+    };
+}
+
+defn add_mmio_register(region: MMIORegion, name: String, offset: Int, width: Int, access: String) -> MMIORegion {
+    let reg = MMIORegister {
+        name: name,
+        address: region.base_address + offset,
+        width: width,
+        access: access
+    };
+    let regs = region.registers;
+    regs.append(reg);
+    term MMIORegion {
+        name: region.name,
+        base_address: region.base_address,
+        size: region.size,
+        registers: regs
+    };
+}
+
+defn find_mmio_register(region: MMIORegion, name: String) -> Option<MMIORegister> {
+    let i: Int = 0;
+    [i < region.registers.len()] {
+        [region.registers[i].name == name] {
+            term Some(region.registers[i]);
+        };
+        &i = i + 1;
+    };
+    term None;
+}
+
+// Generate MMIO load instruction
+defn emit_mmio_load(base_reg: String, reg: MMIORegister, dest_reg: String) -> List<A64Instr> {
+    let offset = reg.address - base_reg;  // Simplified - would need base address
+    let instrs: List<A64Instr> = [];
+    
+    [reg.width <= 32] {
+        instrs = instrs.append(LDR(dest_reg, base_reg, offset));
+    };
+    [reg.width > 32] {
+        instrs = instrs.append(LDR(dest_reg, base_reg, offset));
+    };
+    
+    term instrs;
+}
+
+// Generate MMIO store instruction
+defn emit_mmio_store(base_reg: String, reg: MMIORegister, value_reg: String) -> List<A64Instr> {
+    let offset = reg.address - base_reg;
+    let instrs: List<A64Instr> = [];
+    
+    [reg.access == "RO"] {
+        // Read-only register - emit warning comment
+        instrs = instrs.append(Comment("WARNING: Attempted write to read-only register " + reg.name));
+    };
+    [reg.access != "RO"] {
+        instrs = instrs.append(STR(value_reg, base_reg, offset));
+    };
+    
+    term instrs;
 }
 
 // ===== INSTRUCTION EMISSION =====
@@ -211,9 +684,14 @@ defn emit_comment(text: String) -> A64Instr {
 
 // ===== BINARY ENCODING =====
 
-defn encode_instr(instr: A64Instr) -> List<u8> {
-    unification instr(ADDI(rd, rn, imm)) = {
-        // ADD (immediate): 0001000100iiiiii iiiiiiRRRRR RRRRR00000000000
+defn instr_byte_size(instr: A64Instr) -> Int {
+    uni instr(Label(_)) = { term 0; };
+    uni instr(Comment(_)) = { term 0; };
+    term 4;  // All AArch64 instructions are 4 bytes
+}
+
+defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, Int>) -> List<u8> {
+    uni instr(ADDI(rd, rn, imm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
         let imm12 = imm AND 0xFFF;
@@ -221,8 +699,7 @@ defn encode_instr(instr: A64Instr) -> List<u8> {
         term u32_to_le_bytes(enc);
     };
     
-    unification instr(SUBI(rd, rn, imm)) = {
-        // SUB (immediate): 0101000100iiiiii iiiiiiRRRRR RRRRR00000000000
+    uni instr(SUBI(rd, rn, imm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
         let imm12 = imm AND 0xFFF;
@@ -230,8 +707,7 @@ defn encode_instr(instr: A64Instr) -> List<u8> {
         term u32_to_le_bytes(enc);
     };
     
-    unification instr(ADD(rd, rn, rm)) = {
-        // ADD (register): 0000101100000000 000000RRRRR RRRRRMMMMM
+    uni instr(ADD(rd, rn, rm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
         let rm_num = reg_to_num(rm);
@@ -239,83 +715,295 @@ defn encode_instr(instr: A64Instr) -> List<u8> {
         term u32_to_le_bytes(enc);
     };
     
-    unification instr(MOVI(rd, imm)) = {
-        // MOVZ (move wide): 1001001010000000 iiiiiiRRRRR RRRRR00000000000
+    uni instr(SUB(rd, rn, rm)) = {
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let rm_num = reg_to_num(rm);
+        let enc = 0x4B000000 | (rm_num << 16) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(MOV(rd, rm)) = {
+        // MOV Rd, Rm is ORR Rd, XZR, Rm
+        let rd_num = reg_to_num(rd);
+        let rm_num = reg_to_num(rm);
+        let enc = 0xAA0003E0 | (rm_num << 16) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(LSL(rd, rn, imm)) = {
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let imm6 = imm AND 0x3F;
+        let enc = 0xD3600000 | (imm6 << 10) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(LSR(rd, rn, imm)) = {
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let imm6 = imm AND 0x3F;
+        let enc = 0xD3400000 | (imm6 << 10) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(ASR(rd, rn, imm)) = {
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let imm6 = imm AND 0x3F;
+        let enc = 0xD3420000 | (imm6 << 10) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(ROR(rd, rn, imm)) = {
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let imm6 = imm AND 0x3F;
+        let enc = 0x9AC00000 | (imm6 << 10) | (rn_num << 5) | rd_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(STP(rt1, rt2, rn, offset)) = {
+        let rt1_num = reg_to_num(rt1);
+        let rt2_num = reg_to_num(rt2);
+        let rn_num = reg_to_num(rn);
+        let imm7 = (offset / 8) AND 0x7F;  // Scaled by 8
+        let enc = 0xA9000000 | (imm7 << 15) | (rt2_num << 10) | (rn_num << 5) | rt1_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(LDP(rt1, rt2, rn, offset)) = {
+        let rt1_num = reg_to_num(rt1);
+        let rt2_num = reg_to_num(rt2);
+        let rn_num = reg_to_num(rn);
+        let imm7 = (offset / 8) AND 0x7F;  // Scaled by 8
+        let enc = 0xA9400000 | (imm7 << 15) | (rt2_num << 10) | (rn_num << 5) | rt1_num;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(MOVI(rd, imm)) = {
         let rd_num = reg_to_num(rd);
         let imm16 = imm AND 0xFFFF;
         let enc = 0x92800000 | (imm16 << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
     
-    unification instr(LDR(rd, rn, offset)) = {
-        // LDR (literal): 00011000iiiiiiii iiiiiiRRRRR RRRRR00000000000
+    uni instr(LDR(rd, rn, offset)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm19 = (offset / 4) AND 0x7FFFF;
-        let enc = 0x18000000 | (imm19 << 5) | rd_num;
+        let imm12 = (offset / 8) AND 0xFFF;  // Scaled by 8 for 64-bit
+        let enc = 0xF9400000 | (imm12 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
     
-    unification instr(STR(rd, rn, offset)) = {
-        // STR (register offset): 1111100000000000 000000RRRRR RRRRRMMMMM
+    uni instr(STR(rd, rn, offset)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let rm_num = reg_to_num(offset);  // Using offset as register for simplicity
-        let enc = 0xF8000000 | (rm_num << 16) | (rn_num << 5) | rd_num;
+        let imm12 = (offset / 8) AND 0xFFF;  // Scaled by 8 for 64-bit
+        let enc = 0xF9000000 | (imm12 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
     
-    unification instr(CMP(rn, rm)) = {
-        // SUBS (compare): 0110101100000000 000000RRRRR RRRRRMMMMM
+    uni instr(CMP(rn, rm)) = {
         let rn_num = reg_to_num(rn);
         let rm_num = reg_to_num(rm);
-        let enc = 0x6B000000 | (rm_num << 16) | (rn_num << 5) | 31;  // R31 = zero reg
+        let enc = 0x6B000000 | (rm_num << 16) | (rn_num << 5) | 31;
         term u32_to_le_bytes(enc);
     };
     
-    unification instr(B(label)) = {
-        // B (branch): 000101iiiiiiiii iiiiiiiiiiiiiiiiiiii
-        // Placeholder - actual encoding needs label resolution
-        term [0x14, 0x00, 0x00, 0x00];
+    uni instr(CMP_IMM(rn, imm)) = {
+        let rn_num = reg_to_num(rn);
+        let imm12 = imm AND 0xFFF;
+        let enc = 0x71000000 | (imm12 << 10) | (rn_num << 5) | 31;
+        term u32_to_le_bytes(enc);
     };
     
-    unification instr(BL(label)) = {
-        // BL (branch with link): 100101iiiiiiiii iiiiiiiiiiiiiiiiiiii
+    uni instr(B(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;  // PC-relative, divided by 4
+            let enc = 0x14000000 | (offset AND 0x3FFFFFF);
+            term u32_to_le_bytes(enc);
+        };
+        term [0x14, 0x00, 0x00, 0x00];  // Placeholder if label not found
+    };
+    
+    uni instr(BL(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;
+            let enc = 0x94000000 | (offset AND 0x3FFFFFF);
+            term u32_to_le_bytes(enc);
+        };
         term [0x94, 0x00, 0x00, 0x00];
     };
     
-    unification instr(BEQ(label)) = {
-        // B.EQ: 01010100iiiiiiiii iiiiiiiiiiiiiiiiiiii
+    uni instr(BEQ(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;
+            let enc = 0x54000000 | (offset AND 0xFFFFF);  // 20-bit offset, condition 0000 = EQ
+            term u32_to_le_bytes(enc);
+        };
         term [0x54, 0x00, 0x00, 0x00];
     };
     
-    unification instr(BNE(label)) = {
-        // B.NE: 01010100iiiiiiiii iiiiiiiiiiiiiiiiiiii
+    uni instr(BNE(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;
+            let enc = 0x54000001 | (offset AND 0xFFFFF);  // Condition 0001 = NE
+            term u32_to_le_bytes(enc);
+        };
         term [0x54, 0x01, 0x00, 0x00];
     };
     
-    unification instr(RET) = {
-        // RET: 1101011000111111 00000000000 00000000000
-        term [0xD6, 0x5F, 0x03, 0xC0];
+    uni instr(BLT(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;
+            let enc = 0x5400000A | (offset AND 0xFFFFF);  // Condition 1010 = LT
+            term u32_to_le_bytes(enc);
+        };
+        term [0x54, 0x0A, 0x00, 0x00];
     };
     
-    unification instr(NOP) = {
-        // NOP: D503201F
+    uni instr(BGT(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;
+            let enc = 0x5400000C | (offset AND 0xFFFFF);  // Condition 1100 = GT
+            term u32_to_le_bytes(enc);
+        };
+        term [0x54, 0x0C, 0x00, 0x00];
+    };
+    
+    uni instr(BLE(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;
+            let enc = 0x5400000E | (offset AND 0xFFFFF);  // Condition 1110 = LE
+            term u32_to_le_bytes(enc);
+        };
+        term [0x54, 0x0E, 0x00, 0x00];
+    };
+    
+    uni instr(BGE(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;
+            let enc = 0x5400000A | (offset AND 0xFFFFF);  // Condition 1010 = GE (actually CS)
+            term u32_to_le_bytes(enc);
+        };
+        term [0x54, 0x0A, 0x00, 0x00];
+    };
+    
+    uni instr(BR(reg)) = {
+        let rn_num = reg_to_num(reg);
+        let enc = 0xD61F0000 | (rn_num << 5);
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(CSEL(rd, rn, rm, cond)) = {
+        let rd_num = reg_to_num(rd);
+        let rn_num = reg_to_num(rn);
+        let rm_num = reg_to_num(rm);
+        let cond_code = cond_to_num(cond);
+        // CSEL: 110101010000RmRnRdcond
+        let enc = 0x9A800000 | (rm_num << 16) | (rn_num << 5) | rd_num | cond_code;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(CSET(rd, cond)) = {
+        let rd_num = reg_to_num(rd);
+        let cond_code = cond_to_num(cond);
+        // CSET is CSEL Rd, XZR, XZR, cond with inverted condition
+        let inv_cond = invert_cond(cond);
+        let inv_code = cond_to_num(inv_cond);
+        let enc = 0x9A9F07C0 | (rd_num << 5) | inv_code;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(TBZ(rt, bit, label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = (target - pc) / 4;
+            let rt_num = reg_to_num(rt);
+            let b5 = (bit >> 5) AND 1;
+            let b40 = bit AND 0x1F;
+            let enc = 0x36000000 | (b5 << 31) | (offset AND 0x7FFFF) << 5 | (b40 << 19) | rt_num;
+            term u32_to_le_bytes(enc);
+        };
+        term [0x36, 0x00, 0x00, 0x00];
+    };
+    
+    uni instr(PRFM(prfop, addr)) = {
+        // PRFM (immediate): simplified encoding
+        let addr_reg = 0;  // Would need proper address mode
+        let prfop_code = prfop_to_num(prfop);
+        let enc = 0xD8000000 | (prfop_code << 10) | addr_reg;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(RET) = {
+        term [0xC0, 0x03, 0x5F, 0xD6];
+    };
+    
+    uni instr(NOP) = {
         term [0x1F, 0x20, 0x03, 0xD5];
     };
     
-    unification instr(Label(_)) = {
-        // Labels don't emit code
+    uni instr(SVC(imm)) = {
+        let enc = 0xD4000001 | (imm AND 0xFFFF) << 5;
+        term u32_to_le_bytes(enc);
+    };
+    
+    uni instr(Label(_)) = {
         term [];
     };
     
-    unification instr(Comment(_)) = {
-        // Comments don't emit code
+    uni instr(Comment(_)) = {
         term [];
     };
     
-    // Default - unimplemented
     term [0x00, 0x00, 0x00, 0x00];
+}
+
+defn resolve_labels(instrs: List<A64Instr>) -> HashMap<String, Int> {
+    let labels: HashMap<String, Int> = new_map();
+    let pc: Int = 0;
+    
+    let i: Int = 0;
+    [i < instrs.len()] {
+        uni instrs[i](Label(name)) = {
+            labels = labels.insert(name, pc);
+        };
+        [!uni instrs[i](Label(_)) = true] {
+            pc = pc + instr_byte_size(instrs[i]);
+        };
+        &i = i + 1;
+    };
+    
+    term labels;
+}
+
+defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
+    // Pass 1: Resolve all label positions
+    let labels = resolve_labels(instrs);
+    
+    // Pass 2: Encode instructions with resolved labels
+    let binary: List<u8> = [];
+    let pc: Int = 0;
+    
+    let i: Int = 0;
+    [i < instrs.len()] {
+        let bytes = encode_instr_with_labels(instrs[i], pc, labels);
+        binary = binary.append_all(bytes);
+        pc = pc + instr_byte_size(instrs[i]);
+        &i = i + 1;
+    };
+    
+    term binary;
 }
 
 defn reg_to_num(reg: String) -> u32 {
@@ -355,6 +1043,55 @@ defn reg_to_num(reg: String) -> u32 {
 
 defn u32_to_le_bytes(n: u32) -> List<u8> {
     term [(n AND 0xFF) as u8, ((n >> 8) AND 0xFF) as u8, ((n >> 16) AND 0xFF) as u8, ((n >> 24) AND 0xFF) as u8];
+}
+
+defn cond_to_num(cond: String) -> u32 {
+    [cond == "EQ"] { term 0x0; };
+    [cond == "NE"] { term 0x1; };
+    [cond == "CS"] { term 0x2; };
+    [cond == "CC"] { term 0x3; };
+    [cond == "MI"] { term 0x4; };
+    [cond == "PL"] { term 0x5; };
+    [cond == "VS"] { term 0x6; };
+    [cond == "VC"] { term 0x7; };
+    [cond == "HI"] { term 0x8; };
+    [cond == "LS"] { term 0x9; };
+    [cond == "GE"] { term 0xA; };
+    [cond == "LT"] { term 0xB; };
+    [cond == "GT"] { term 0xC; };
+    [cond == "LE"] { term 0xD; };
+    [cond == "AL"] { term 0xE; };
+    term 0xE;  // Default: AL (always)
+}
+
+defn invert_cond(cond: String) -> String {
+    [cond == "EQ"] { term "NE"; };
+    [cond == "NE"] { term "EQ"; };
+    [cond == "CS"] { term "CC"; };
+    [cond == "CC"] { term "CS"; };
+    [cond == "MI"] { term "PL"; };
+    [cond == "PL"] { term "MI"; };
+    [cond == "VS"] { term "VC"; };
+    [cond == "VC"] { term "VS"; };
+    [cond == "HI"] { term "LS"; };
+    [cond == "LS"] { term "HI"; };
+    [cond == "GE"] { term "LT"; };
+    [cond == "LT"] { term "GE"; };
+    [cond == "GT"] { term "LE"; };
+    [cond == "LE"] { term "GT"; };
+    term "AL";
+}
+
+defn prfop_to_num(prfop: String) -> u32 {
+    [prfop == "PLDL1KEEP"] { term 0x0; };
+    [prfop == "PLDL1STRM"] { term 0x1; };
+    [prfop == "PLDL2KEEP"] { term 0x2; };
+    [prfop == "PLDL2STRM"] { term 0x3; };
+    [prfop == "PLDL3KEEP"] { term 0x4; };
+    [prfop == "PLDL3STRM"] { term 0x5; };
+    [prfop == "PSTL1KEEP"] { term 0x8; };
+    [prfop == "PSTL1STRM"] { term 0x9; };
+    term 0x0;
 }
 
 // ===== REACTOR LOOP GENERATION =====
@@ -450,7 +1187,7 @@ defn generate_statement_list(stmts: List<Statement>, alloc: RegisterAllocator) -
 }
 
 defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64Instr>, RegisterAllocator) {
-    unification stmt(StmtLet(name, _, Some(init))) = {
+    uni stmt(StmtLet(name, _, Some(init))) = {
         // let name = init;
         let (expr_instrs, new_alloc) = generate_expr(*init, alloc);
         let (reg, final_alloc) = alloc_reg(new_alloc, None);
@@ -463,7 +1200,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         term (instrs, final_alloc);
     };
     
-    unification stmt(StmtAssign(lhs, rhs)) = {
+    uni stmt(StmtAssign(lhs, rhs)) = {
         // lhs = rhs;
         let (expr_instrs, new_alloc) = generate_expr(*rhs, alloc);
         
@@ -474,7 +1211,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         term (instrs, new_alloc);
     };
     
-    unification stmt(StmtTerm(values)) = {
+    uni stmt(StmtTerm(values)) = {
         // term [values];
         let instrs: List<A64Instr> = [];
         let current_alloc = alloc;
@@ -493,7 +1230,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         term (instrs, current_alloc);
     };
     
-    unification stmt(StmtGuarded(condition, body)) = {
+    uni stmt(StmtGuarded(condition, body)) = {
         // [condition] { body }
         let (cond_instrs, new_alloc) = generate_expr(*condition, alloc);
         
@@ -519,13 +1256,13 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
 }
 
 defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, RegisterAllocator) {
-    unification expr(ExprInt(n)) = {
+    uni expr(ExprInt(n)) = {
         let (reg, new_alloc) = alloc_reg(alloc, None);
         let instrs = [emit_mov(reg, n as Int)];
         term (instrs, new_alloc);
     };
     
-    unification expr(ExprVar(name)) = {
+    uni expr(ExprVar(name)) = {
         // Load variable from memory
         let (reg, new_alloc) = alloc_reg(alloc, None);
         let instrs = [
@@ -535,7 +1272,7 @@ defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, Reg
         term (instrs, new_alloc);
     };
     
-    unification expr(ExprBinOp(op, left, right)) = {
+    uni expr(ExprBinOp(op, left, right)) = {
         // Generate code for left operand
         let (left_instrs, left_alloc) = generate_expr(*left, alloc);
         
@@ -561,21 +1298,6 @@ defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, Reg
     term ([], alloc);
 }
 
-// ===== BINARY OUTPUT =====
-
-defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
-    let binary: List<u8> = [];
-    
-    let i: Int = 0;
-    [i < instrs.len()] {
-        let bytes = encode_instr(instrs[i]);
-        binary = binary.append_all(bytes);
-        &i = i + 1;
-    };
-    
-    term binary;
-}
-
 // ===== MAIN ENTRY POINT =====
 
 defn generate_aarch64(program: Program) -> List<u8> {
@@ -585,7 +1307,7 @@ defn generate_aarch64(program: Program) -> List<u8> {
     let txns: List<Transaction> = [];
     let i: Int = 0;
     [i < program.items.len()] {
-        unification program.items[i](TopTxn(txn)) = {
+        uni program.items[i](TopTxn(txn)) = {
             txns = txns.append(txn);
         };
         &i = i + 1;
@@ -830,7 +1552,7 @@ defn generate_optimized_aarch64(program: Program) -> List<u8> {
     let mut txns: List<Transaction> = [];
     let i: Int = 0;
     [i < program.items.len()] {
-        unification program.items[i](TopTxn(txn)) = {
+        uni program.items[i](TopTxn(txn)) = {
             txns = txns.append(txn);
         };
         i = i + 1;

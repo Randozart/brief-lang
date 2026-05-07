@@ -139,95 +139,299 @@ defn x64_emit_label(name: String) -> X64Instr {
 
 // ===== BINARY ENCODING =====
 
-defn x64_encode_instr(instr: X64Instr) -> List<u8> {
-    unification instr(MOV(rd, rs)) = {
-        // mov r64, r64: 48 89 C0 + reg codes
+defn x64_instr_byte_size(instr: X64Instr) -> Int {
+    uni instr(Label(_)) = { term 0; };
+    uni instr(Comment(_)) = { term 0; };
+    uni instr(RET) = { term 1; };
+    uni instr(NOP) = { term 1; };
+    uni instr(PUSH(_)) = { term 1; };
+    uni instr(POP(_)) = { term 1; };
+    uni instr(LEAVE) = { term 1; };
+    uni instr(JE(_)) = { term 6; };   // 0F 84 + rel32
+    uni instr(JNE(_)) = { term 6; };  // 0F 85 + rel32
+    uni instr(JL(_)) = { term 6; };   // 0F 8C + rel32
+    uni instr(JG(_)) = { term 6; };   // 0F 8F + rel32
+    uni instr(JLE(_)) = { term 6; };  // 0F 8E + rel32
+    uni instr(JGE(_)) = { term 6; };  // 0F 8D + rel32
+    uni instr(JMP(_)) = { term 5; };  // E9 + rel32
+    uni instr(CALL(_)) = { term 5; }; // E8 + rel32
+    term 4;  // Default for most instructions
+}
+
+defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<String, Int>) -> List<u8> {
+    uni instr(MOV(rd, rs)) = {
         let rd_num = x64_reg_to_num(rd);
         let rs_num = x64_reg_to_num(rs);
         term [0x48, 0x89, 0xC0 | (rd_num) | (rs_num << 3)];
     };
     
-    unification instr(MOV_IMM(rd, imm)) = {
-        // mov r64, imm32: 48 B8 + imm (64-bit)
+    uni instr(MOV_IMM(rd, imm)) = {
         let rd_num = x64_reg_to_num(rd);
         let bytes = [0x48, 0xB8 | rd_num];
         bytes = bytes.append_all(u64_to_le_bytes(imm as u64));
         term bytes;
     };
     
-    unification instr(ADD(rd, rs)) = {
-        // add r64, r64: 48 01 C0 + reg codes
+    uni instr(MOV_MEM(rd, rn, offset)) = {
+        let rd_num = x64_reg_to_num(rd);
+        let rn_num = x64_reg_to_num(rn);
+        let imm8 = offset AND 0xFF;
+        term [0x48, 0x8B, 0x40 | rn_num | (rd_num << 3), imm8 as u8];
+    };
+    
+    uni instr(MOV_MEM_IMM(rn, offset, imm)) = {
+        let rn_num = x64_reg_to_num(rn);
+        let imm8 = offset AND 0xFF;
+        let imm32 = imm AND 0xFFFFFFFF;
+        let bytes = [0x48, 0xC7, 0x40 | rn_num | (0 << 3), imm8 as u8];
+        bytes = bytes.append_all(u32_to_le_bytes(imm32 as u32));
+        term bytes;
+    };
+    
+    uni instr(ADD(rd, rs)) = {
         let rd_num = x64_reg_to_num(rd);
         let rs_num = x64_reg_to_num(rs);
         term [0x48, 0x01, 0xC0 | (rd_num) | (rs_num << 3)];
     };
     
-    unification instr(ADD_IMM(rd, imm)) = {
-        // add r64, imm32: 48 83 C0 + reg + imm8
+    uni instr(ADD_IMM(rd, imm)) = {
         let rd_num = x64_reg_to_num(rd);
         term [0x48, 0x83, 0xC0 | rd_num, imm as u8];
     };
     
-    unification instr(SUB(rd, rs)) = {
-        // sub r64, r64: 48 29 C0 + reg codes
+    uni instr(SUB(rd, rs)) = {
         let rd_num = x64_reg_to_num(rd);
         let rs_num = x64_reg_to_num(rs);
         term [0x48, 0x29, 0xC0 | (rd_num) | (rs_num << 3)];
     };
     
-    unification instr(SUB_IMM(rd, imm)) = {
-        // sub r64, imm32: 48 83 E8 + reg + imm8
+    uni instr(SUB_IMM(rd, imm)) = {
         let rd_num = x64_reg_to_num(rd);
         term [0x48, 0x83, 0xE8 | rd_num, imm as u8];
     };
     
-    unification instr(CMP(rn, rm)) = {
-        // cmp r64, r64: 48 39 F0 + reg codes
+    uni instr(IMUL(rd, rs)) = {
+        let rd_num = x64_reg_to_num(rd);
+        let rs_num = x64_reg_to_num(rs);
+        term [0x48, 0x0F, 0xAF, 0xC0 | (rd_num) | (rs_num << 3)];
+    };
+    
+    uni instr(IMUL_IMM(rd, imm)) = {
+        let rd_num = x64_reg_to_num(rd);
+        let imm8 = imm AND 0xFF;
+        term [0x48, 0x6B, 0xC0 | rd_num, imm8 as u8];
+    };
+    
+    uni instr(AND(rd, rs)) = {
+        let rd_num = x64_reg_to_num(rd);
+        let rs_num = x64_reg_to_num(rs);
+        term [0x48, 0x21, 0xC0 | (rd_num) | (rs_num << 3)];
+    };
+    
+    uni instr(OR(rd, rs)) = {
+        let rd_num = x64_reg_to_num(rd);
+        let rs_num = x64_reg_to_num(rs);
+        term [0x48, 0x09, 0xC0 | (rd_num) | (rs_num << 3)];
+    };
+    
+    uni instr(XOR(rd, rs)) = {
+        let rd_num = x64_reg_to_num(rd);
+        let rs_num = x64_reg_to_num(rs);
+        term [0x48, 0x31, 0xC0 | (rd_num) | (rs_num << 3)];
+    };
+    
+    uni instr(NOT(rd)) = {
+        let rd_num = x64_reg_to_num(rd);
+        term [0x48, 0xF7, 0xD0 | rd_num];
+    };
+    
+    uni instr(NEG(rd)) = {
+        let rd_num = x64_reg_to_num(rd);
+        term [0x48, 0xF7, 0xD8 | rd_num];
+    };
+    
+    uni instr(CMP(rn, rm)) = {
         let rn_num = x64_reg_to_num(rn);
         let rm_num = x64_reg_to_num(rm);
         term [0x48, 0x39, 0xF0 | (rn_num) | (rm_num << 3)];
     };
     
-    unification instr(JE(label)) = {
-        // je rel32: 0F 84 + rel32 (placeholder)
+    uni instr(CMP_IMM(rn, imm)) = {
+        let rn_num = x64_reg_to_num(rn);
+        term [0x48, 0x83, 0xF8 | rn_num, imm as u8];
+    };
+    
+    uni instr(TEST(rn, rm)) = {
+        let rn_num = x64_reg_to_num(rn);
+        let rm_num = x64_reg_to_num(rm);
+        term [0x48, 0x85, 0xC0 | (rn_num) | (rm_num << 3)];
+    };
+    
+    uni instr(JE(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = target - (pc + 6);  // rel32 from end of instruction
+            let enc = offset as i32;
+            let bytes = [0x0F, 0x84];
+            bytes.append_all(u32_to_le_bytes(enc as u32));
+        };
         term [0x0F, 0x84, 0x00, 0x00, 0x00, 0x00];
     };
     
-    unification instr(JNE(label)) = {
-        // jne rel32: 0F 85 + rel32
+    uni instr(JNE(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = target - (pc + 6);
+            let enc = offset as i32;
+            let bytes = [0x0F, 0x85];
+            bytes.append_all(u32_to_le_bytes(enc as u32));
+        };
         term [0x0F, 0x85, 0x00, 0x00, 0x00, 0x00];
     };
     
-    unification instr(JMP(label)) = {
-        // jmp rel32: E9 + rel32
+    uni instr(JL(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = target - (pc + 6);
+            let enc = offset as i32;
+            let bytes = [0x0F, 0x8C];
+            bytes.append_all(u32_to_le_bytes(enc as u32));
+        };
+        term [0x0F, 0x8C, 0x00, 0x00, 0x00, 0x00];
+    };
+    
+    uni instr(JG(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = target - (pc + 6);
+            let enc = offset as i32;
+            let bytes = [0x0F, 0x8F];
+            bytes.append_all(u32_to_le_bytes(enc as u32));
+        };
+        term [0x0F, 0x8F, 0x00, 0x00, 0x00, 0x00];
+    };
+    
+    uni instr(JLE(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = target - (pc + 6);
+            let enc = offset as i32;
+            let bytes = [0x0F, 0x8E];
+            bytes.append_all(u32_to_le_bytes(enc as u32));
+        };
+        term [0x0F, 0x8E, 0x00, 0x00, 0x00, 0x00];
+    };
+    
+    uni instr(JGE(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = target - (pc + 6);
+            let enc = offset as i32;
+            let bytes = [0x0F, 0x8D];
+            bytes.append_all(u32_to_le_bytes(enc as u32));
+        };
+        term [0x0F, 0x8D, 0x00, 0x00, 0x00, 0x00];
+    };
+    
+    uni instr(JMP(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = target - (pc + 5);  // rel32 from end of instruction
+            let enc = offset as i32;
+            let bytes = [0xE9];
+            bytes.append_all(u32_to_le_bytes(enc as u32));
+        };
         term [0xE9, 0x00, 0x00, 0x00, 0x00];
     };
     
-    unification instr(CALL(label)) = {
-        // call rel32: E8 + rel32
+    uni instr(CALL(label)) = {
+        [labels.contains_key(label)] {
+            let target = labels.get(label).unwrap();
+            let offset = target - (pc + 5);
+            let enc = offset as i32;
+            let bytes = [0xE8];
+            bytes.append_all(u32_to_le_bytes(enc as u32));
+        };
         term [0xE8, 0x00, 0x00, 0x00, 0x00];
     };
     
-    unification instr(RET) = {
-        // ret: C3
+    uni instr(RET) = {
         term [0xC3];
     };
     
-    unification instr(NOP) = {
-        // nop: 90
+    uni instr(NOP) = {
         term [0x90];
     };
     
-    unification instr(Label(_)) = {
+    uni instr(PUSH(reg)) = {
+        let reg_num = x64_reg_to_num(reg);
+        term [0x50 | reg_num];
+    };
+    
+    uni instr(POP(reg)) = {
+        let reg_num = x64_reg_to_num(reg);
+        term [0x58 | reg_num];
+    };
+    
+    uni instr(LEAVE) = {
+        term [0xC9];
+    };
+    
+    uni instr(ENTER(size, _)) = {
+        let imm16 = size AND 0xFFFF;
+        term [0xC8, imm16 as u8, ((imm16 >> 8) AND 0xFF) as u8, 0x00];
+    };
+    
+    uni instr(Label(_)) = {
         term [];
     };
     
-    unification instr(Comment(_)) = {
+    uni instr(Comment(_)) = {
         term [];
     };
     
-    // Default
     term [0x90];  // nop
+}
+
+defn x64_resolve_labels(instrs: List<X64Instr>) -> HashMap<String, Int> {
+    let labels: HashMap<String, Int> = new_map();
+    let pc: Int = 0;
+    
+    let i: Int = 0;
+    [i < instrs.len()] {
+        uni instrs[i](Label(name)) = {
+            labels = labels.insert(name, pc);
+        };
+        [!uni instrs[i](Label(_)) = true] {
+            pc = pc + x64_instr_byte_size(instrs[i]);
+        };
+        &i = i + 1;
+    };
+    
+    term labels;
+}
+
+defn x64_emit_binary(instrs: List<X64Instr>) -> List<u8> {
+    // Pass 1: Resolve all label positions
+    let labels = x64_resolve_labels(instrs);
+    
+    // Pass 2: Encode instructions with resolved labels
+    let binary: List<u8> = [];
+    let pc: Int = 0;
+    
+    let i: Int = 0;
+    [i < instrs.len()] {
+        let bytes = x64_encode_instr_with_labels(instrs[i], pc, labels);
+        binary = binary.append_all(bytes);
+        pc = pc + x64_instr_byte_size(instrs[i]);
+        &i = i + 1;
+    };
+    
+    term binary;
+}
+
+defn u32_to_le_bytes(n: u32) -> List<u8> {
+    term [(n AND 0xFF) as u8, ((n >> 8) AND 0xFF) as u8, ((n >> 16) AND 0xFF) as u8, ((n >> 24) AND 0xFF) as u8];
 }
 
 defn u64_to_le_bytes(n: u64) -> List<u8> {
@@ -289,19 +493,6 @@ defn x64_generate_transaction_check(txn: Transaction) -> List<X64Instr> {
     term instrs;
 }
 
-defn x64_emit_binary(instrs: List<X64Instr>) -> List<u8> {
-    let binary: List<u8> = [];
-    
-    let i: Int = 0;
-    [i < instrs.len()] {
-        let bytes = x64_encode_instr(instrs[i]);
-        binary = binary.append_all(bytes);
-        &i = i + 1;
-    };
-    
-    term binary;
-}
-
 defn generate_x86_64(program: Program) -> List<u8> {
     let all_instrs: List<X64Instr> = [];
     
@@ -309,7 +500,7 @@ defn generate_x86_64(program: Program) -> List<u8> {
     let txns: List<Transaction> = [];
     let i: Int = 0;
     [i < program.items.len()] {
-        unification program.items[i](TopTxn(txn)) = {
+        uni program.items[i](TopTxn(txn)) = {
             txns = txns.append(txn);
         };
         &i = i + 1;

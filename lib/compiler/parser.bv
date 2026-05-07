@@ -83,47 +83,47 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
     let tok = current_token(state);
     
     // Keywords
-    unification tok(KeywordLet) = {
+    uni tok(KeywordLet) = {
         let (decl, state) = parse_state_decl(state)?;
         term (TopState(decl), state);
     };
     
-    unification tok(KeywordConst) = {
+    uni tok(KeywordConst) = {
         let (const, state) = parse_constant(state)?;
         term (TopConst(const), state);
     };
     
-    unification tok(KeywordTxn) = {
+    uni tok(KeywordTxn) = {
         let (txn, state) = parse_transaction(state)?;
         term (TopTxn(txn), state);
     };
     
-    unification tok(KeywordRct) = {
+    uni tok(KeywordRct) = {
         let (txn, state) = parse_transaction(state)?;
         term (TopTxn(txn), state);
     };
     
-    unification tok(KeywordDefn) = {
+    uni tok(KeywordDefn) = {
         let (defn, state) = parse_definition(state)?;
         term (TopDefn(defn), state);
     };
     
-    unification tok(KeywordSig) = {
+    uni tok(KeywordSig) = {
         let (sig, state) = parse_signature(state)?;
         term (TopSig(sig), state);
     };
     
-    unification tok(KeywordStruct) = {
+    uni tok(KeywordStruct) = {
         let (struct_def, state) = parse_struct(state)?;
         term (TopStruct(struct_def), state);
     };
     
-    unification tok(KeywordEnum) = {
+    uni tok(KeywordEnum) = {
         let (enum_def, state) = parse_enum(state)?;
         term (TopEnum(enum_def), state);
     };
     
-    unification tok(KeywordImport) = {
+    uni tok(KeywordImport) = {
         let (import, state) = parse_import(state)?;
         term (TopImport(import), state);
     };
@@ -154,7 +154,7 @@ defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState),
     
     // Get name
     let tok = current_token(state);
-    unification tok(TokenIdentifier(name)) = {
+    uni tok(TokenIdentifier(name)) = {
         &state = advance(state);
     };
     [!tok.is_identifier()] {
@@ -210,7 +210,7 @@ defn parse_definition(state: ParserState) -> Result<(Definition, ParserState), S
     
     // Get name
     let tok = current_token(state);
-    unification tok(TokenIdentifier(name)) = {
+    uni tok(TokenIdentifier(name)) = {
         &state = advance(state);
     };
     [!tok.is_identifier()] {
@@ -474,38 +474,38 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
     let tok = current_token(state);
     
     // Literals
-    unification tok(TokenInt(n)) = {
+    uni tok(TokenInt(n)) = {
         &state = advance(state);
         term (make_int(n), state);
     };
     
-    unification tok(TokenFloat(f)) = {
+    uni tok(TokenFloat(f)) = {
         &state = advance(state);
         term (make_float(f), state);
     };
     
-    unification tok(TokenString(s)) = {
+    uni tok(TokenString(s)) = {
         &state = advance(state);
         term (make_string(s), state);
     };
     
-    unification tok(TokenChar(c)) = {
+    uni tok(TokenChar(c)) = {
         &state = advance(state);
         term (make_char(c), state);
     };
     
-    unification tok(KeywordTrue) = {
+    uni tok(KeywordTrue) = {
         &state = advance(state);
         term (make_bool(true), state);
     };
     
-    unification tok(KeywordFalse) = {
+    uni tok(KeywordFalse) = {
         &state = advance(state);
         term (make_bool(false), state);
     };
     
     // Identifier
-    unification tok(TokenIdentifier(_)) = {
+    uni tok(TokenIdentifier(_)) = {
         let name = tok.unwrap_identifier();
         &state = advance(state);
         
@@ -522,10 +522,10 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
     };
     
     // Prior state (@var)
-    unification tok(OpAt) = {
+    uni tok(OpAt) = {
         &state = advance(state);
         let tok = current_token(state);
-        unification tok(TokenIdentifier(name)) = {
+        uni tok(TokenIdentifier(name)) = {
             &state = advance(state);
             term (make_prior_state(name), state);
         };
@@ -533,7 +533,7 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
     };
     
     // Parenthesized expression
-    unification tok(DelimLParen) = {
+    uni tok(DelimLParen) = {
         &state = advance(state);
         let (expr, new_state) = parse_expression(state)?;
         &state = new_state;
@@ -542,7 +542,7 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
     };
     
     // List literal
-    unification tok(DelimLBracket) = {
+    uni tok(DelimLBracket) = {
         &state = advance(state);
         let (elements, new_state) = parse_expr_list(state)?;
         &state = new_state;
@@ -575,7 +575,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     let tok = current_token(state);
     
     // Let binding
-    unification tok(KeywordLet) = {
+    uni tok(KeywordLet) = {
         let (stmt, new_state) = parse_let(state)?;
         term (stmt, new_state);
     };
@@ -595,7 +595,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     };
     
     // Term statement
-    unification tok(KeywordTerm) = {
+    uni tok(KeywordTerm) = {
         &state = advance(state);
         
         let values: List<Option<Box<Expr>>> = [];
@@ -614,7 +614,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     };
     
     // Escape statement
-    unification tok(KeywordEscape) = {
+    uni tok(KeywordEscape) = {
         &state = advance(state);
         
         let value: Option<Box<Expr>> = None;
@@ -629,22 +629,22 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     };
     
     // Unification statement
-    unification tok(KeywordUnification) = {
+    uni tok(KeywordUnification) = {
         &state = advance(state);
         
         // Get pattern name
         let tok = current_token(state);
-        unification tok(TokenIdentifier(name)) = {
+        uni tok(TokenIdentifier(name)) = {
             &state = advance(state);
         };
         [!tok.is_identifier()] {
-            term Err("Expected pattern name after unification");
+            term Err("Expected pattern name after uni");
         };
         
         // Get pattern (in parentheses)
         state = expect_token(state, DelimLParen)?;
         let pattern_tok = current_token(state);
-        unification pattern_tok(TokenIdentifier(pattern)) = {
+        uni pattern_tok(TokenIdentifier(pattern)) = {
             &state = advance(state);
         };
         [!pattern_tok.is_identifier()] {
@@ -664,7 +664,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     };
     
     // Guarded statement
-    unification tok(DelimLBracket) = {
+    uni tok(DelimLBracket) = {
         &state = advance(state);
         let (condition, new_state) = parse_expression(state)?;
         &state = new_state;
@@ -686,7 +686,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     };
     
     // Block
-    unification tok(DelimLBrace) = {
+    uni tok(DelimLBrace) = {
         let (stmts, new_state) = parse_block(state)?;
         term (ExprBlock(stmts), state);
     };
@@ -704,7 +704,7 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
     state = expect_token(state, KeywordLet)?;
     
     let tok = current_token(state);
-    unification tok(TokenIdentifier(name)) = {
+    uni tok(TokenIdentifier(name)) = {
         &state = advance(state);
     };
     [!tok.is_identifier()] {
@@ -751,37 +751,37 @@ defn parse_block(state: ParserState) -> Result<(List<Statement>, ParserState), S
 defn parse_type(state: ParserState) -> Result<(Type, ParserState), String> {
     let tok = current_token(state);
     
-    unification tok(KeywordInt) = {
+    uni tok(KeywordInt) = {
         &state = advance(state);
         term (TypeInt, state);
     };
     
-    unification tok(KeywordUInt) = {
+    uni tok(KeywordUInt) = {
         &state = advance(state);
         term (TypeUInt, state);
     };
     
-    unification tok(KeywordFloat) = {
+    uni tok(KeywordFloat) = {
         &state = advance(state);
         term (TypeFloat, state);
     };
     
-    unification tok(KeywordString) = {
+    uni tok(KeywordString) = {
         &state = advance(state);
         term (TypeString, state);
     };
     
-    unification tok(KeywordBool) = {
+    uni tok(KeywordBool) = {
         &state = advance(state);
         term (TypeBool, state);
     };
     
-    unification tok(KeywordChar) = {
+    uni tok(KeywordChar) = {
         &state = advance(state);
         term (TypeChar, state);
     };
     
-    unification tok(KeywordVoid) = {
+    uni tok(KeywordVoid) = {
         &state = advance(state);
         term (TypeVoid, state);
     };
@@ -795,7 +795,7 @@ defn parse_type_params(state: ParserState) -> Result<(List<String>, ParserState)
     let params: List<String> = [];
     [current_token(state) != OpGt] {
         let tok = current_token(state);
-        unification tok(TokenIdentifier(name)) = {
+        uni tok(TokenIdentifier(name)) = {
             &params = params.append(name);
             &state = advance(state);
         };
@@ -818,7 +818,7 @@ defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), Stri
     let params: List<Param> = [];
     [current_token(state) != DelimRParen] {
         let tok = current_token(state);
-        unification tok(TokenIdentifier(name)) = {
+        uni tok(TokenIdentifier(name)) = {
             &state = advance(state);
         };
         [!tok.is_identifier()] {

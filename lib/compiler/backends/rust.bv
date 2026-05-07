@@ -12,7 +12,7 @@ defn generate_rust(program: Program) -> String {
     output = output.append_str("// Global state\n");
     let i: Int = 0;
     [i < program.items.len()] {
-        unification program.items[i](TopState(decl)) = {
+        uni program.items[i](TopState(decl)) = {
             output = output.append_str("static mut ");
             output = output.append_str(decl.name);
             output = output.append_str(": ");
@@ -34,7 +34,7 @@ defn generate_rust(program: Program) -> String {
     // Generate transactions
     let j: Int = 0;
     [j < program.items.len()] {
-        unification program.items[j](TopTxn(txn)) = {
+        uni program.items[j](TopTxn(txn)) = {
             output = output.append_str(generate_rust_transaction(txn));
             output = output.append_str("\n");
         };
@@ -53,14 +53,14 @@ defn generate_rust(program: Program) -> String {
 }
 
 defn type_to_rust(ty: Type) -> String {
-    unification ty(TypeInt) = { term "i64"; };
-    unification ty(TypeUInt) = { term "u64"; };
-    unification ty(TypeFloat) = { term "f64"; };
-    unification ty(TypeBool) = { term "bool"; };
-    unification ty(TypeString) = { term "String"; };
-    unification ty(TypeChar) = { term "char"; };
-    unification ty(TypeVoid) = { term "()"; };
-    unification ty(TypeList(inner)) = {
+    uni ty(TypeInt) = { term "i64"; };
+    uni ty(TypeUInt) = { term "u64"; };
+    uni ty(TypeFloat) = { term "f64"; };
+    uni ty(TypeBool) = { term "bool"; };
+    uni ty(TypeString) = { term "String"; };
+    uni ty(TypeChar) = { term "char"; };
+    uni ty(TypeVoid) = { term "()"; };
+    uni ty(TypeList(inner)) = {
         let sb = new_builder();
         sb = sb.append_str("Vec<");
         sb = sb.append_str(type_to_rust(*inner));
@@ -107,7 +107,7 @@ defn generate_rust_block(stmts: List<Statement>) -> String {
 }
 
 defn generate_rust_statement(stmt: Statement) -> String {
-    unification stmt(StmtLet(name, var_type, init)) = {
+    uni stmt(StmtLet(name, var_type, init)) = {
         let output = new_builder();
         output = output.append_str("let ");
         output = output.append_str(name);
@@ -123,7 +123,7 @@ defn generate_rust_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    unification stmt(StmtAssign(lhs, rhs)) = {
+    uni stmt(StmtAssign(lhs, rhs)) = {
         let output = new_builder();
         output = output.append_str(expr_to_rust(*lhs));
         output = output.append_str(" = ");
@@ -132,7 +132,7 @@ defn generate_rust_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    unification stmt(StmtTerm(values)) = {
+    uni stmt(StmtTerm(values)) = {
         let output = new_builder();
         output = output.append_str("return ");
         [values.len() > 0] {
@@ -142,7 +142,7 @@ defn generate_rust_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    unification stmt(StmtGuarded(condition, body)) = {
+    uni stmt(StmtGuarded(condition, body)) = {
         let output = new_builder();
         output = output.append_str("if ");
         output = output.append_str(expr_to_rust(*condition));
@@ -156,23 +156,23 @@ defn generate_rust_statement(stmt: Statement) -> String {
 }
 
 defn expr_to_rust(expr: Expr) -> String {
-    unification expr(ExprInt(n)) = {
+    uni expr(ExprInt(n)) = {
         term String(n);
     };
-    unification expr(ExprFloat(f)) = {
+    uni expr(ExprFloat(f)) = {
         term String(f);
     };
-    unification expr(ExprBool(b)) = {
+    uni expr(ExprBool(b)) = {
         [b] { term "true"; };
         term "false";
     };
-    unification expr(ExprVar(name)) = {
+    uni expr(ExprVar(name)) = {
         term name;
     };
-    unification expr(ExprPriorState(name)) = {
+    uni expr(ExprPriorState(name)) = {
         term name + "_old";
     };
-    unification expr(ExprBinOp(op, left, right)) = {
+    uni expr(ExprBinOp(op, left, right)) = {
         let sb = new_builder();
         sb = sb.append_str("(");
         sb = sb.append_str(expr_to_rust(*left));
@@ -204,7 +204,7 @@ defn generate_rust_reactor(program: Program) -> String {
     // Call each transaction
     let i: Int = 0;
     [i < program.items.len()] {
-        unification program.items[i](TopTxn(txn)) = {
+        uni program.items[i](TopTxn(txn)) = {
             output = output.append_str("        ");
             output = output.append_str(txn.name);
             output = output.append_str("();\n");

@@ -174,6 +174,7 @@ pub struct Interpreter {
     pub ffi_bindings: HashMap<String, ForeignSignature>,
     pub ffi_name_to_location: HashMap<String, String>,
     pub orchestrator: Orchestrator,
+    pub metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub,
 }
 
 impl Interpreter {
@@ -187,6 +188,7 @@ impl Interpreter {
             ffi_bindings: HashMap::new(),
             ffi_name_to_location: HashMap::new(),
             orchestrator: Orchestrator::new(),
+            metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub::new(),
         }
     }
 

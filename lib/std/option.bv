@@ -1,144 +1,156 @@
+// Option<T> - Represents optional values
+// Eliminates null pointer exceptions
 
-// ===== FUNCTIONAL METHODS (Tier 1.6) =====
+// ===== ENUM DEFINITION =====
 
-// Map over Option
-defn option_map<T, U>(opt: Option<T>, f: T -> U) -> Option<U> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        let val = opt.unwrap();
-        term Some(f(val));
+enum Option<T> {
+    Some(T),
+    None
+};
+
+// ===== CONSTRUCTION =====
+
+defn some<T>(value: T) [true][result.is_some()] -> Option<T> {
+    term Some(value);
+};
+
+defn none<T>() [true][result.is_none()] -> Option<T> {
+    term None;
+};
+
+// ===== INSPECTION =====
+
+defn is_some<T>(opt: Option<T>) [true][result == true || result == false] -> Bool {
+    uni opt(Some(_)) = {
+        term true;
+    };
+    uni opt(None) = {
+        term false;
+    };
+    term false;
+};
+
+defn is_none<T>(opt: Option<T>) [true][result == true || result == false] -> Bool {
+    uni opt(Some(_)) = {
+        term false;
+    };
+    uni opt(None) = {
+        term true;
+    };
+    term false;
+};
+
+// ===== EXTRACTION =====
+
+defn unwrap<T>(opt: Option<T>) [opt.is_some()][true] -> T {
+    uni opt(Some(v)) = {
+        term v;
+    };
+    uni opt(None) = {
+        term panic("called unwrap on None");
+    };
+    term panic("unreachable");
+};
+
+defn unwrap_or<T>(opt: Option<T>, default: T) [true][true] -> T {
+    uni opt(Some(v)) = {
+        term v;
+    };
+    uni opt(None) = {
+        term default;
+    };
+    term default;
+};
+
+defn unwrap_or_else<T>(opt: Option<T>, fallback: () -> T) [true][true] -> T {
+    uni opt(Some(v)) = {
+        term v;
+    };
+    uni opt(None) = {
+        term fallback();
+    };
+    term fallback();
+};
+
+// ===== TRANSFORMATION =====
+
+defn map<T, U>(opt: Option<T>, f: T -> U) [true][true] -> Option<U> {
+    uni opt(Some(v)) = {
+        term Some(f(v));
+    };
+    uni opt(None) = {
+        term None;
     };
     term None;
 };
 
-// And_then (flat map)
-defn option_and_then<T, U>(opt: Option<T>, f: T -> Option<U>) -> Option<U> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        let val = opt.unwrap();
-        term f(val);
+defn and_then<T, U>(opt: Option<T>, f: T -> Option<U>) [true][true] -> Option<U> {
+    uni opt(Some(v)) = {
+        term f(v);
+    };
+    uni opt(None) = {
+        term None;
     };
     term None;
 };
 
-// Or_else
-defn option_or_else<T>(opt: Option<T>, f: () -> Option<T>) -> Option<T> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        term opt;
+defn or_else<T>(opt: Option<T>, fallback: () -> Option<T>) [true][true] -> Option<T> {
+    uni opt(Some(v)) = {
+        term Some(v);
     };
-    term f();
+    uni opt(None) = {
+        term fallback();
+    };
+    term fallback();
 };
 
-// Filter
-defn option_filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        let val = opt.unwrap();
-        [pred(val)] {
-            term Some(val);
+defn filter<T>(opt: Option<T>, pred: T -> Bool) [true][true] -> Option<T> {
+    uni opt(Some(v)) = {
+        [pred(v)] {
+            term Some(v);
         };
+        term None;
+    };
+    uni opt(None) = {
+        term None;
     };
     term None;
 };
 
-// Or
-defn option_or<T>(opt: Option<T>, other: Option<T>) -> Option<T> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        term opt;
-    };
-    term other;
-};
+// ===== COMBINATION =====
 
-// Xor (one or the other, not both)
-defn option_xor<T>(opt: Option<T>, other: Option<T>) -> Option<T> 
-    [true][true] 
-{
-    let has_opt = opt.is_some();
-    let has_other = other.is_some();
-    [has_opt && !has_other] {
-        term opt;
-    };
-    [!has_opt && has_other] {
-        term other;
-    };
-    term None;
-};
-
-// ===== FUNCTIONAL METHODS (Tier 1.6) =====
-
-// Map over Option
-defn option_map<T, U>(opt: Option<T>, f: T -> U) -> Option<U> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        let val = opt.unwrap();
-        term Some(f(val));
-    };
-    term None;
-};
-
-// And_then (flat map)
-defn option_and_then<T, U>(opt: Option<T>, f: T -> Option<U>) -> Option<U> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        let val = opt.unwrap();
-        term f(val);
-    };
-    term None;
-};
-
-// Or_else
-defn option_or_else<T>(opt: Option<T>, f: () -> Option<T>) -> Option<T> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        term opt;
-    };
-    term f();
-};
-
-// Filter
-defn option_filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        let val = opt.unwrap();
-        [pred(val)] {
-            term Some(val);
+defn zip<T, U>(a: Option<T>, b: Option<U>) [true][true] -> Option<(T, U)> {
+    uni a(Some(x)) = {
+        uni b(Some(y)) = {
+            term Some((x, y));
         };
+        uni b(None) = {
+            term None;
+        };
+        term None;
+    };
+    uni a(None) = {
+        term None;
     };
     term None;
 };
 
-// Or
-defn option_or<T>(opt: Option<T>, other: Option<T>) -> Option<T> 
-    [true][true] 
-{
-    [opt.is_some()] {
-        term opt;
+defn ok_or<T, E>(opt: Option<T>, err: E) [true][true] -> Result<T, E> {
+    uni opt(Some(v)) = {
+        term Ok(v);
     };
-    term other;
+    uni opt(None) = {
+        term Err(err);
+    };
+    term Err(err);
 };
 
-// Xor (one or the other, not both)
-defn option_xor<T>(opt: Option<T>, other: Option<T>) -> Option<T> 
-    [true][true] 
-{
-    let has_opt = opt.is_some();
-    let has_other = other.is_some();
-    [has_opt && !has_other] {
-        term opt;
+defn ok_or_else<T, E>(opt: Option<T>, err_fn: () -> E) [true][true] -> Result<T, E> {
+    uni opt(Some(v)) = {
+        term Ok(v);
     };
-    [!has_opt && has_other] {
-        term other;
+    uni opt(None) = {
+        term Err(err_fn());
     };
-    term None;
+    term Err(err_fn());
 };

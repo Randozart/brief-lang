@@ -33,6 +33,7 @@ pub mod error;   // NEW: Error handling
 pub mod loader;
 pub mod mapper;
 pub mod mappers;
+pub mod metropolitan;  // Metropolitan FFI - Shared Memory Negotiation
 pub mod native_mapper;
 pub mod orchestrator;
 pub mod protocol;
@@ -44,6 +45,7 @@ pub mod types;
 pub mod validator;
 
 pub use error::{ErrorConventions, ErrVariant, generate_bounds_check, generate_null_check};  // NEW
+pub use metropolitan::{MetropolitanChannel, MetropolitanHub, MetroStatus, SharedRegion};
 
 pub use loader::load_binding;
 pub use mapper::{create_mapper_registry, find_mapper};

@@ -1,0 +1,161 @@
+// Math FFI Bindings Schema
+// Defines mathematical operations available via FFI
+
+import "std/types.dbvs";
+
+// Error type for math operations
+enum MathError {
+    DomainError,
+    Overflow,
+    Underflow,
+    InvalidInput
+}
+
+// Result type for math operations that can fail
+struct MathResult {
+    success: Float,
+    error: MathError
+}
+
+// Function: sqrt - Compute square root
+// Input: value (Float)
+// Output: Float (success) or MathError
+register 0x00 as "sqrt" {
+    type: Fn(Float) -> Result<Float, MathError>;
+    location: "std::f64::sqrt";
+    target: native;
+    description: "Compute square root of a float";
+    check: [value >= 0.0];
+}
+
+// Function: pow - Raise to power
+// Input: base (Float), exponent (Float)
+// Output: Float
+register 0x01 as "pow" {
+    type: Fn(Float, Float) -> Result<Float, MathError>;
+    location: "std::f64::powf";
+    target: native;
+    description: "Raise float to a power";
+    check: [true];
+}
+
+// Function: abs_float - Absolute value
+// Input: value (Float)
+// Output: Float
+register 0x02 as "abs_float" {
+    type: Fn(Float) -> Float;
+    location: "std::f64::abs";
+    target: native;
+    description: "Compute absolute value of float";
+    check: [true];
+}
+
+// Function: floor - Round down
+// Input: value (Float)
+// Output: Float
+register 0x03 as "floor" {
+    type: Fn(Float) -> Float;
+    location: "std::f64::floor";
+    target: native;
+    description: "Round float down to nearest integer";
+    check: [true];
+}
+
+// Function: ceil - Round up
+// Input: value (Float)
+// Output: Float
+register 0x04 as "ceil" {
+    type: Fn(Float) -> Float;
+    location: "std::f64::ceil";
+    target: native;
+    description: "Round float up to nearest integer";
+    check: [true];
+}
+
+// Function: round - Round to nearest
+// Input: value (Float)
+// Output: Float
+register 0x05 as "round" {
+    type: Fn(Float) -> Float;
+    location: "std::f64::round";
+    target: native;
+    description: "Round float to nearest integer";
+    check: [true];
+}
+
+// Function: sin - Sine
+// Input: radians (Float)
+// Output: Float
+register 0x06 as "sin" {
+    type: Fn(Float) -> Float;
+    location: "std::f64::sin";
+    target: native;
+    description: "Compute sine of angle in radians";
+    check: [true];
+}
+
+// Function: cos - Cosine
+// Input: radians (Float)
+// Output: Float
+register 0x07 as "cos" {
+    type: Fn(Float) -> Float;
+    location: "std::f64::cos";
+    target: native;
+    description: "Compute cosine of angle in radians";
+    check: [true];
+}
+
+// Function: tan - Tangent
+// Input: radians (Float)
+// Output: Float
+register 0x08 as "tan" {
+    type: Fn(Float) -> Float;
+    location: "std::f64::tan";
+    target: native;
+    description: "Compute tangent of angle in radians";
+    check: [true];
+}
+
+// Function: log - Natural logarithm
+// Input: value (Float)
+// Output: Float
+register 0x09 as "log" {
+    type: Fn(Float) -> Result<Float, MathError>;
+    location: "std::f64::ln";
+    target: native;
+    description: "Compute natural logarithm";
+    check: [value > 0.0];
+}
+
+// Function: exp - Exponential
+// Input: value (Float)
+// Output: Float
+register 0x0A as "exp" {
+    type: Fn(Float) -> Float;
+    location: "std::f64::exp";
+    target: native;
+    description: "Compute e raised to the power";
+    check: [true];
+}
+
+// Function: min_float - Minimum of two floats
+// Input: a (Float), b (Float)
+// Output: Float
+register 0x0B as "min_float" {
+    type: Fn(Float, Float) -> Float;
+    location: "f64::min";
+    target: native;
+    description: "Return minimum of two floats";
+    check: [true];
+}
+
+// Function: max_float - Maximum of two floats
+// Input: a (Float), b (Float)
+// Output: Float
+register 0x0C as "max_float" {
+    type: Fn(Float, Float) -> Float;
+    location: "f64::max";
+    target: native;
+    description: "Return maximum of two floats";
+    check: [true];
+}

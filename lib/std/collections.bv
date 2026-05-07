@@ -12,7 +12,7 @@ frgn __filter(list: List<T>, pred: T -> Bool) -> Result<List<T>, CollectionsErro
 frgn __map(list: List<T>, transform: T -> U) -> Result<List<U>, CollectionsError> from "std/bindings/collections.toml"
 
 // Reduce - requires reducer function (can't be native)
-frgn __reduce(list: List<T>, initial: U, reducer: (U, T) -> Result<U) -> U, CollectionsError> from "std/bindings/collections.toml"
+frgn __reduce(list: List<T>, initial: U, reducer: (U, T) -> U) -> Result<U, CollectionsError> from "std/bindings/collections.toml"
 
 // Unique - requires comparison (can't be native without Eq trait)
 frgn __unique(list: List<T>) -> Result<List<T>, CollectionsError> from "std/bindings/collections.toml"

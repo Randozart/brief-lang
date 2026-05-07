@@ -1,0 +1,157 @@
+// HashSet<T> - Hash-based set implementation
+// Uses list with uniqueness enforcement
+// Backends optimize to native hash sets
+
+// ===== STRUCT DEFINITION =====
+
+struct HashSet<T> {
+    items: List<T>
+};
+
+// ===== CONSTRUCTION =====
+
+defn new_set<T>() -> HashSet<T> [true][result.len() == 0] {
+    term HashSet { items: [] };
+};
+
+defn with_capacity<T>(capacity: Int) -> HashSet<T> [capacity > 0][result.len() == 0] {
+    term HashSet { items: [] };
+};
+
+// ===== OPERATIONS =====
+
+defn insert<T>(set: HashSet<T>, item: T) 
+    [true][result.contains(item)] 
+    -> HashSet<T> 
+{
+    [set.contains(item)] {
+        term set;
+    };
+    term HashSet { items: set.items + [item] };
+};
+
+defn remove<T>(set: HashSet<T>, item: T) 
+    [set.contains(item)][!result.contains(item)] 
+    -> HashSet<T> 
+{
+    let new_items: List<T> = [];
+    let i: Int = 0;
+    [i < set.items.len()] {
+        [set.items[i] != item] {
+            &new_items = new_items + [set.items[i]];
+        };
+        &i = i + 1;
+    };
+    term HashSet { items: new_items };
+};
+
+defn contains<T>(set: HashSet<T>, item: T) 
+    [true][result == true || result == false] 
+    -> Bool 
+{
+    let i: Int = 0;
+    [i < set.items.len()] {
+        [set.items[i] == item] {
+            term true;
+        };
+        &i = i + 1;
+    };
+    term false;
+};
+
+// ===== SET OPERATIONS =====
+
+defn union<T>(a: HashSet<T>, b: HashSet<T>) 
+    [true][result.len() >= a.len() && result.len() >= b.len()] 
+    -> HashSet<T> 
+{
+    let result: HashSet<T> = a;
+    let i: Int = 0;
+    [i < b.items.len()] {
+        &result = result.insert(b.items[i]);
+        &i = i + 1;
+    };
+    term result;
+};
+
+defn intersection<T>(a: HashSet<T>, b: HashSet<T>) 
+    [true][result.len() <= a.len() && result.len() <= b.len()] 
+    -> HashSet<T> 
+{
+    let result: HashSet<T> = new_set();
+    let i: Int = 0;
+    [i < a.items.len()] {
+        [b.contains(a.items[i])] {
+            &result = result.insert(a.items[i]);
+        };
+        &i = i + 1;
+    };
+    term result;
+};
+
+defn difference<T>(a: HashSet<T>, b: HashSet<T>) 
+    [true][result.len() <= a.len()] 
+    -> HashSet<T> 
+{
+    let result: HashSet<T> = new_set();
+    let i: Int = 0;
+    [i < a.items.len()] {
+        [!b.contains(a.items[i])] {
+            &result = result.insert(a.items[i]);
+        };
+        &i = i + 1;
+    };
+    term result;
+};
+
+// ===== METADATA =====
+
+defn len<T>(set: HashSet<T>) 
+    [true][result >= 0] 
+    -> Int 
+{
+    term set.items.len();
+};
+
+defn is_empty<T>(set: HashSet<T>) 
+    [true][result == true || result == false] 
+    -> Bool 
+{
+    term set.items.len() == 0;
+};
+
+// ===== ITERATION =====
+
+defn iter<T>(set: HashSet<T>) 
+    [true][result.len() == set.len()] 
+    -> List<T> 
+{
+    term set.items;
+};
+
+defn to_list<T>(set: HashSet<T>) 
+    [true][result.len() == set.len()] 
+    -> List<T> 
+{
+    term set.items;
+};
+
+defn from_list<T>(items: List<T>) 
+    [true][result.len() <= items.len()] 
+    -> HashSet<T> 
+{
+    let result: HashSet<T> = new_set();
+    let i: Int = 0;
+    [i < items.len()] {
+        &result = result.insert(items[i]);
+        &i = i + 1;
+    };
+    term result;
+};
+
+defn clear<T>(set: HashSet<T>) 
+    [true][result.len() == 0] 
+    -> HashSet<T> 
+{
+    term HashSet { items: [] };
+};

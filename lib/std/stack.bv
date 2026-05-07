@@ -1,53 +1,63 @@
 // Stack<T> - LIFO data structure
+// Implemented as a list with push/pop semantics
 
-// Construction
-defn new_stack<T>() -> Stack<T> [true][result.len() == 0] {
-    term Stack::empty();
+// ===== STRUCT DEFINITION =====
+
+struct Stack<T> {
+    items: List<T>
 };
 
-defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][result.len() == 0] {
-    term Stack::with_capacity(capacity);
+// ===== CONSTRUCTION =====
+
+defn new_stack<T>() -> Stack<T> [true][result.is_empty()] {
+    term Stack { items: [] };
 };
 
-// Stack operations
-defn push<T>(stack: Stack<T>, item: T) 
-    [true][result.len() == stack.len() + 1] 
-    -> Stack<T> 
-{
-    term stack.push(item);
+defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][result.is_empty()] {
+    term Stack { items: [] };
 };
 
-defn pop<T>(stack: Stack<T>) 
-    [stack.len() > 0][result.len() == stack.len() - 1] 
-    -> Option<(T, Stack<T>)> 
-{
-    term stack.pop();
+// ===== OPERATIONS =====
+
+defn push<T>(stack: Stack<T>, item: T) [true][result.len() == stack.len() + 1] -> Stack<T> {
+    term Stack { items: stack.items + [item] };
 };
 
-defn peek<T>(stack: Stack<T>) 
-    [stack.len() > 0][true] 
-    -> Option<T> 
-{
-    term stack.peek();
+defn pop<T>(stack: Stack<T>) [!stack.is_empty()][result.len() == stack.len() - 1] -> Stack<T> {
+    [stack.is_empty()] {
+        term stack;
+    };
+    let items: List<T> = stack.items[0..stack.len()-1];
+    term Stack { items: items };
 };
 
-defn is_empty<T>(stack: Stack<T>) 
-    [true][result == true || result == false] 
-    -> Bool 
-{
-    term stack.len() == 0;
+defn peek<T>(stack: Stack<T>) [!stack.is_empty()][true] -> Option<T> {
+    [stack.is_empty()] {
+        term None;
+    };
+    term Some(stack.items[stack.len()-1]);
 };
 
-defn len<T>(stack: Stack<T>) 
-    [true][result >= 0] 
-    -> Int 
-{
-    term stack.len();
+defn top<T>(stack: Stack<T>) [!stack.is_empty()][true] -> T {
+    term stack.items[stack.len()-1];
 };
 
-defn clear<T>(stack: Stack<T>) 
-    [true][result.len() == 0] 
-    -> Stack<T> 
-{
-    term new_stack<T>();
+// ===== METADATA =====
+
+defn len<T>(stack: Stack<T>) [true][result >= 0] -> Int {
+    term stack.items.len();
+};
+
+defn is_empty<T>(stack: Stack<T>) [true][result == true || result == false] -> Bool {
+    term stack.items.len() == 0;
+};
+
+// ===== CONVERSION =====
+
+defn to_list<T>(stack: Stack<T>) [true][result.len() == stack.len()] -> List<T> {
+    term stack.items;
+};
+
+defn from_list<T>(items: List<T>) [true][result.len() == items.len()] -> Stack<T> {
+    term Stack { items: items };
 };

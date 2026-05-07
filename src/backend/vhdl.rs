@@ -171,7 +171,7 @@ impl VhdlGenerator {
                 let inner_vhdl = self.brief_type_to_vhdl(inner);
                 format!("array(0 to {}) of {}", n - 1, inner_vhdl)
             }
-            Type::Option(inner) => self.brief_type_to_vhdl(inner),
+            // Option, HashMap, etc. are regular structs - handled by default case
             _ => "std_logic_vector(31 downto 0)".to_string(),
         }
     }

@@ -1,86 +1,97 @@
 // StringBuilder - Efficient string building
 // Avoids O(n²) concatenation by using internal buffer
 
-// ===== NATIVE DEFINITIONS =====
+// ===== STRUCT DEFINITION =====
 
-// Construction
+struct StringBuilder {
+    buffer: String
+};
+
+// ===== CONSTRUCTION =====
+
 defn new_builder() -> StringBuilder [true][result.len() == 0] {
-    term StringBuilder::empty();
+    term StringBuilder { buffer: "" };
 };
 
 defn with_capacity(capacity: Int) -> StringBuilder [capacity > 0][result.len() == 0] {
-    term StringBuilder::with_capacity(capacity);
+    term StringBuilder { buffer: "" };
 };
 
-// Append operations
+// ===== APPEND OPERATIONS =====
+
 defn append_char(builder: StringBuilder, c: Char) 
     [true][result.len() == builder.len() + 1] 
     -> StringBuilder 
 {
-    term builder.append_char(c);
+    term StringBuilder { buffer: builder.buffer + c };
 };
 
 defn append_str(builder: StringBuilder, s: String) 
     [true][result.len() == builder.len() + s.len()] 
     -> StringBuilder 
 {
-    term builder.append_str(s);
+    term StringBuilder { buffer: builder.buffer + s };
 };
 
 defn append_int(builder: StringBuilder, n: Int) 
     [true][result.len() >= builder.len()] 
     -> StringBuilder 
 {
-    term builder.append_int(n);
+    term StringBuilder { buffer: builder.buffer + n };
 };
 
 defn append_bool(builder: StringBuilder, b: Bool) 
     [true][result.len() >= builder.len()] 
     -> StringBuilder 
 {
-    term builder.append_bool(b);
+    [b] {
+        term StringBuilder { buffer: builder.buffer + "true" };
+    };
+    term StringBuilder { buffer: builder.buffer + "false" };
 };
 
 defn append_float(builder: StringBuilder, f: Float) 
     [true][result.len() >= builder.len()] 
     -> StringBuilder 
 {
-    term builder.append_float(f);
+    term StringBuilder { buffer: builder.buffer + f };
 };
 
-// Conversion
+// ===== CONVERSION =====
+
 defn to_string(builder: StringBuilder) 
     [true][result.len() == builder.len()] 
     -> String 
 {
-    term builder.to_string();
+    term builder.buffer;
 };
 
 defn clear(builder: StringBuilder) 
     [true][result.len() == 0] 
     -> StringBuilder 
 {
-    term StringBuilder::empty();
+    term StringBuilder { buffer: "" };
 };
 
-// Metadata
+// ===== METADATA =====
+
 defn len(builder: StringBuilder) 
     [true][result >= 0] 
     -> Int 
 {
-    term builder.len();
+    term builder.buffer.len();
 };
 
 defn is_empty(builder: StringBuilder) 
     [true][result == true || result == false] 
     -> Bool 
 {
-    term builder.len() == 0;
+    term builder.buffer.len() == 0;
 };
 
 defn capacity(builder: StringBuilder) 
     [true][result >= builder.len()] 
     -> Int 
 {
-    term builder.capacity();
+    term builder.buffer.len();
 };

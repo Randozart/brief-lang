@@ -140,56 +140,56 @@ enum Token {
 
 // Check if token is a keyword
 defn is_keyword(tok: Token) -> Bool {
-    unification tok(KeywordLet) = true;
-    unification tok(KeywordConst) = true;
-    unification tok(KeywordTxn) = true;
-    unification tok(KeywordRct) = true;
-    unification tok(KeywordAsync) = true;
-    unification tok(KeywordDefn) = true;
-    unification tok(KeywordSig) = true;
-    unification tok(KeywordFrgn) = true;
-    unification tok(KeywordStruct) = true;
-    unification tok(KeywordEnum) = true;
-    unification tok(KeywordImport) = true;
-    unification tok(KeywordTrue) = true;
-    unification tok(KeywordFalse) = true;
+    uni tok(KeywordLet) = true;
+    uni tok(KeywordConst) = true;
+    uni tok(KeywordTxn) = true;
+    uni tok(KeywordRct) = true;
+    uni tok(KeywordAsync) = true;
+    uni tok(KeywordDefn) = true;
+    uni tok(KeywordSig) = true;
+    uni tok(KeywordFrgn) = true;
+    uni tok(KeywordStruct) = true;
+    uni tok(KeywordEnum) = true;
+    uni tok(KeywordImport) = true;
+    uni tok(KeywordTrue) = true;
+    uni tok(KeywordFalse) = true;
     term false;
 };
 
 // Get keyword as string
 defn keyword_to_string(tok: Token) -> String {
-    unification tok(KeywordLet) = "let";
-    unification tok(KeywordConst) = "const";
-    unification tok(KeywordTxn) = "txn";
-    unification tok(KeywordRct) = "rct";
-    unification tok(KeywordAsync) = "async";
-    unification tok(KeywordTerm) = "term";
-    unification tok(KeywordEscape) = "escape";
-    unification tok(KeywordDefn) = "defn";
-    unification tok(KeywordSig) = "sig";
-    unification tok(KeywordFrgn) = "frgn";
-    unification tok(KeywordSyscall) = "syscall";
-    unification tok(KeywordStruct) = "struct";
-    unification tok(KeywordRstruct) = "rstruct";
-    unification tok(KeywordEnum) = "enum";
-    unification tok(KeywordImport) = "import";
-    unification tok(KeywordFrom) = "from";
-    unification tok(KeywordAs) = "as";
-    unification tok(KeywordTrue) = "true";
-    unification tok(KeywordFalse) = "false";
+    uni tok(KeywordLet) = "let";
+    uni tok(KeywordConst) = "const";
+    uni tok(KeywordTxn) = "txn";
+    uni tok(KeywordRct) = "rct";
+    uni tok(KeywordAsync) = "async";
+    uni tok(KeywordTerm) = "term";
+    uni tok(KeywordEscape) = "escape";
+    uni tok(KeywordDefn) = "defn";
+    uni tok(KeywordSig) = "sig";
+    uni tok(KeywordFrgn) = "frgn";
+    uni tok(KeywordSyscall) = "syscall";
+    uni tok(KeywordStruct) = "struct";
+    uni tok(KeywordRstruct) = "rstruct";
+    uni tok(KeywordEnum) = "enum";
+    uni tok(KeywordImport) = "import";
+    uni tok(KeywordFrom) = "from";
+    uni tok(KeywordAs) = "as";
+    uni tok(KeywordTrue) = "true";
+    uni tok(KeywordFalse) = "false";
     term "";
 };
 
 // Check if token is an operator
 defn is_operator(tok: Token) -> Bool {
-    unification tok(OpPlus) = true;
-    unification tok(OpMinus) = true;
-    unification tok(OpStar) = true;
-    unification tok(OpSlash) = true;
-    unification tok(OpEqEq) = true;
-    unification tok(OpNeq) = true;
-    unification tok(OpLt) = true;
-    unification tok(OpGt) = true;
+    uni tok(OpPlus) = true;
+    uni tok(OpMinus) = true;
+    uni tok(OpStar) = true;
+    uni tok(OpSlash) = true;
+    uni tok(OpEqEq) = true;
+    uni tok(OpNeq) = true;
+    uni tok(OpLt) = true;
+    uni tok(OpGt) = true;
     // ... etc
     term false;
 };
@@ -197,41 +197,41 @@ defn is_operator(tok: Token) -> Bool {
 // Get operator precedence (higher = binds tighter)
 defn operator_precedence(tok: Token) -> Int {
     // Multiplication/division (highest)
-    unification tok(OpStar) = 11;
-    unification tok(OpSlash) = 11;
-    unification tok(OpPercent) = 11;
+    uni tok(OpStar) = 11;
+    uni tok(OpSlash) = 11;
+    uni tok(OpPercent) = 11;
     
     // Addition/subtraction
-    unification tok(OpPlus) = 10;
-    unification tok(OpMinus) = 10;
+    uni tok(OpPlus) = 10;
+    uni tok(OpMinus) = 10;
     
     // Comparisons
-    unification tok(OpLt) = 8;
-    unification tok(OpGt) = 8;
-    unification tok(OpLtEq) = 8;
-    unification tok(OpGtEq) = 8;
+    uni tok(OpLt) = 8;
+    uni tok(OpGt) = 8;
+    uni tok(OpLtEq) = 8;
+    uni tok(OpGtEq) = 8;
     
     // Equality
-    unification tok(OpEqEq) = 7;
-    unification tok(OpNeq) = 7;
+    uni tok(OpEqEq) = 7;
+    uni tok(OpNeq) = 7;
     
     // Logical AND
-    unification tok(OpAnd) = 5;
+    uni tok(OpAnd) = 5;
     
     // Logical OR
-    unification tok(OpOr) = 4;
+    uni tok(OpOr) = 4;
     
     // Assignment (lowest)
-    unification tok(OpEq) = 1;
+    uni tok(OpEq) = 1;
     
     term 0;
 };
 
 // Check if operator is right-associative
 defn is_right_associative(tok: Token) -> Bool {
-    unification tok(OpEq) = true;
-    unification tok(OpPlusEq) = true;
-    unification tok(OpMinusEq) = true;
+    uni tok(OpEq) = true;
+    uni tok(OpPlusEq) = true;
+    uni tok(OpMinusEq) = true;
     term false;
 };
 
@@ -245,41 +245,41 @@ defn token_eq(a: Token, b: Token) -> Bool {
 defn token_to_string(tok: Token) -> String {
     let sb = new_builder();
     
-    unification tok(TokenInt(n)) = {
+    uni tok(TokenInt(n)) = {
         sb = sb.append_str("Int(");
         sb = sb.append_int(n);
         sb = sb.append_char(')');
     };
     
-    unification tok(TokenFloat(f)) = {
+    uni tok(TokenFloat(f)) = {
         sb = sb.append_str("Float(");
         // Float to string would go here
         sb = sb.append_char(')');
     };
     
-    unification tok(TokenString(s)) = {
+    uni tok(TokenString(s)) = {
         sb = sb.append_str("String(\"");
         sb = sb.append_str(s);
         sb = sb.append_str("\")");
     };
     
-    unification tok(TokenChar(c)) = {
+    uni tok(TokenChar(c)) = {
         sb = sb.append_str("Char('");
         sb = sb.append_char(c);
         sb = sb.append_str("')");
     };
     
-    unification tok(TokenIdentifier(name)) = {
+    uni tok(TokenIdentifier(name)) = {
         sb = sb.append_str("Identifier(");
         sb = sb.append_str(name);
         sb = sb.append_char(')');
     };
     
-    unification tok(TokenEof) = {
+    uni tok(TokenEof) = {
         sb = sb.append_str("Eof");
     };
     
-    unification tok(TokenError(msg)) = {
+    uni tok(TokenError(msg)) = {
         sb = sb.append_str("Error(");
         sb = sb.append_str(msg);
         sb = sb.append_char(')');
@@ -297,22 +297,22 @@ defn token_to_string(tok: Token) -> String {
 
 // Check if token is a literal
 defn is_literal(tok: Token) -> Bool {
-    unification tok(TokenInt(_)) = true;
-    unification tok(TokenFloat(_)) = true;
-    unification tok(TokenString(_)) = true;
-    unification tok(TokenChar(_)) = true;
-    unification tok(KeywordTrue) = true;
-    unification tok(KeywordFalse) = true;
+    uni tok(TokenInt(_)) = true;
+    uni tok(TokenFloat(_)) = true;
+    uni tok(TokenString(_)) = true;
+    uni tok(TokenChar(_)) = true;
+    uni tok(KeywordTrue) = true;
+    uni tok(KeywordFalse) = true;
     term false;
 };
 
 // Get literal value as string
 defn literal_to_string(tok: Token) -> String {
-    unification tok(TokenInt(n)) = String(n);
-    unification tok(TokenFloat(f)) = String(f);
-    unification tok(TokenString(s)) = s;
-    unification tok(TokenChar(c)) = char_to_string(c);
-    unification tok(KeywordTrue) = "true";
-    unification tok(KeywordFalse) = "false";
+    uni tok(TokenInt(n)) = String(n);
+    uni tok(TokenFloat(f)) = String(f);
+    uni tok(TokenString(s)) = s;
+    uni tok(TokenChar(c)) = char_to_string(c);
+    uni tok(KeywordTrue) = "true";
+    uni tok(KeywordFalse) = "false";
     term "";
 };

@@ -1,0 +1,177 @@
+// String FFI Bindings Schema
+// Defines string manipulation and conversion functions available via FFI
+
+import "std/types.dbvs";
+
+// Error type for string operations
+enum StringError {
+    InvalidUtf8,
+    OutOfBounds,
+    ParseError,
+    EmptyString
+}
+
+// Function: string_length - Get string length
+// Input: text (String)
+// Output: Int (length in bytes)
+register 0x00 as "string_length" {
+    type: Fn(String) -> Int;
+    location: "std::string::String::len";
+    target: native;
+    description: "Get length of string in bytes";
+    check: [true];
+}
+
+// Function: substring - Extract substring
+// Input: text (String), start (Int), length (Int)
+// Output: String
+register 0x01 as "substring" {
+    type: Fn(String, Int, Int) -> Result<String, StringError>;
+    location: "std::string::String::chars";
+    target: native;
+    description: "Extract substring from start position for length";
+    check: [start >= 0 && length >= 0];
+}
+
+// Function: string_replace - Replace all occurrences
+// Input: text (String), pattern (String), replacement (String)
+// Output: String
+register 0x02 as "string_replace" {
+    type: Fn(String, String, String) -> String;
+    location: "std::string::String::replace";
+    target: native;
+    description: "Replace all occurrences of pattern with replacement";
+    check: [true];
+}
+
+// Function: string_contains - Check for substring
+// Input: text (String), substring (String)
+// Output: Bool
+register 0x03 as "string_contains" {
+    type: Fn(String, String) -> Bool;
+    location: "std::string::String::contains";
+    target: native;
+    description: "Check if string contains substring";
+    check: [true];
+}
+
+// Function: string_starts_with - Check prefix
+// Input: text (String), prefix (String)
+// Output: Bool
+register 0x04 as "string_starts_with" {
+    type: Fn(String, String) -> Bool;
+    location: "std::string::String::starts_with";
+    target: native;
+    description: "Check if string starts with prefix";
+    check: [true];
+}
+
+// Function: string_ends_with - Check suffix
+// Input: text (String), suffix (String)
+// Output: Bool
+register 0x05 as "string_ends_with" {
+    type: Fn(String, String) -> Bool;
+    location: "std::string::String::ends_with";
+    target: native;
+    description: "Check if string ends with suffix";
+    check: [true];
+}
+
+// Function: string_to_upper - Convert to uppercase
+// Input: text (String)
+// Output: String
+register 0x06 as "string_to_upper" {
+    type: Fn(String) -> String;
+    location: "std::string::String::to_uppercase";
+    target: native;
+    description: "Convert string to uppercase";
+    check: [true];
+}
+
+// Function: string_to_lower - Convert to lowercase
+// Input: text (String)
+// Output: String
+register 0x07 as "string_to_lower" {
+    type: Fn(String) -> String;
+    location: "std::string::String::to_lowercase";
+    target: native;
+    description: "Convert string to lowercase";
+    check: [true];
+}
+
+// Function: string_trim - Remove whitespace
+// Input: text (String)
+// Output: String
+register 0x08 as "string_trim" {
+    type: Fn(String) -> String;
+    location: "std::string::String::trim";
+    target: native;
+    description: "Remove leading and trailing whitespace";
+    check: [true];
+}
+
+// Function: string_split - Split by delimiter
+// Input: text (String), delimiter (String)
+// Output: String (first part)
+register 0x09 as "string_split" {
+    type: Fn(String, String) -> String;
+    location: "std::string::String::split";
+    target: native;
+    description: "Split string by delimiter (returns first part)";
+    check: [true];
+}
+
+// Function: parse_int - Parse string as integer
+// Input: text (String)
+// Output: Int
+register 0x0A as "parse_int" {
+    type: Fn(String) -> Result<Int, StringError>;
+    location: "std::str::FromStr::from_str";
+    target: native;
+    description: "Parse string as signed integer";
+    check: [true];
+}
+
+// Function: parse_float - Parse string as float
+// Input: text (String)
+// Output: Float
+register 0x0B as "parse_float" {
+    type: Fn(String) -> Result<Float, StringError>;
+    location: "std::str::FromStr::from_str";
+    target: native;
+    description: "Parse string as floating-point number";
+    check: [true];
+}
+
+// Function: int_to_string - Convert int to string
+// Input: value (Int)
+// Output: String
+register 0x0C as "int_to_string" {
+    type: Fn(Int) -> String;
+    location: "std::string::ToString::to_string";
+    target: native;
+    description: "Convert integer to string";
+    check: [true];
+}
+
+// Function: float_to_string - Convert float to string
+// Input: value (Float)
+// Output: String
+register 0x0D as "float_to_string" {
+    type: Fn(Float) -> String;
+    location: "std::string::ToString::to_string";
+    target: native;
+    description: "Convert float to string";
+    check: [true];
+}
+
+// Function: string_concat - Concatenate strings
+// Input: left (String), right (String)
+// Output: String
+register 0x0E as "string_concat" {
+    type: Fn(String, String) -> String;
+    location: "std::string::String::push_str";
+    target: native;
+    description: "Concatenate two strings";
+    check: [true];
+}

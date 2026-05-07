@@ -1,53 +1,63 @@
 // Queue<T> - FIFO data structure
+// Implemented as a list with enqueue/dequeue semantics
 
-// Construction
-defn new_queue<T>() -> Queue<T> [true][result.len() == 0] {
-    term Queue::empty();
+// ===== STRUCT DEFINITION =====
+
+struct Queue<T> {
+    items: List<T>
 };
 
-defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][result.len() == 0] {
-    term Queue::with_capacity(capacity);
+// ===== CONSTRUCTION =====
+
+defn new_queue<T>() -> Queue<T> [true][result.is_empty()] {
+    term Queue { items: [] };
 };
 
-// Queue operations
-defn enqueue<T>(queue: Queue<T>, item: T) 
-    [true][result.len() == queue.len() + 1] 
-    -> Queue<T> 
-{
-    term queue.enqueue(item);
+defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][result.is_empty()] {
+    term Queue { items: [] };
 };
 
-defn dequeue<T>(queue: Queue<T>) 
-    [queue.len() > 0][result.len() == queue.len() - 1] 
-    -> Option<(T, Queue<T>)> 
-{
-    term queue.dequeue();
+// ===== OPERATIONS =====
+
+defn enqueue<T>(queue: Queue<T>, item: T) [true][result.len() == queue.len() + 1] -> Queue<T> {
+    term Queue { items: queue.items + [item] };
 };
 
-defn front<T>(queue: Queue<T>) 
-    [queue.len() > 0][true] 
-    -> Option<T> 
-{
-    term queue.front();
+defn dequeue<T>(queue: Queue<T>) [!queue.is_empty()][result.len() == queue.len() - 1] -> Queue<T> {
+    [queue.is_empty()] {
+        term queue;
+    };
+    let items: List<T> = queue.items[1..queue.len()];
+    term Queue { items: items };
 };
 
-defn is_empty<T>(queue: Queue<T>) 
-    [true][result == true || result == false] 
-    -> Bool 
-{
-    term queue.len() == 0;
+defn front<T>(queue: Queue<T>) [!queue.is_empty()][true] -> Option<T> {
+    [queue.is_empty()] {
+        term None;
+    };
+    term Some(queue.items[0]);
 };
 
-defn len<T>(queue: Queue<T>) 
-    [true][result >= 0] 
-    -> Int 
-{
-    term queue.len();
+defn head<T>(queue: Queue<T>) [!queue.is_empty()][true] -> T {
+    term queue.items[0];
 };
 
-defn clear<T>(queue: Queue<T>) 
-    [true][result.len() == 0] 
-    -> Queue<T> 
-{
-    term new_queue<T>();
+// ===== METADATA =====
+
+defn len<T>(queue: Queue<T>) [true][result >= 0] -> Int {
+    term queue.items.len();
+};
+
+defn is_empty<T>(queue: Queue<T>) [true][result == true || result == false] -> Bool {
+    term queue.items.len() == 0;
+};
+
+// ===== CONVERSION =====
+
+defn to_list<T>(queue: Queue<T>) [true][result.len() == queue.len()] -> List<T> {
+    term queue.items;
+};
+
+defn from_list<T>(items: List<T>) [true][result.len() == items.len()] -> Queue<T> {
+    term Queue { items: items };
 };

@@ -104,10 +104,10 @@ enum FFIStatus {
 
 defn write_status(region: SharedRegion, offset: Int, status: FFIStatus) -> Result<Void, String> {
     let status_word: Int = 0;
-    unification status(StatusReady) = { &status_word = 0; };
-    unification status(StatusProcessing) = { &status_word = 1; };
-    unification status(StatusComplete) = { &status_word = 2; };
-    unification status(StatusError(code)) = { &status_word = 0x80000000 | code; };
+    uni status(StatusReady) = { &status_word = 0; };
+    uni status(StatusProcessing) = { &status_word = 1; };
+    uni status(StatusComplete) = { &status_word = 2; };
+    uni status(StatusError(code)) = { &status_word = 0x80000000 | code; };
     
     // Write status_word to memory at offset
     term Ok();
@@ -215,7 +215,7 @@ defn metropolitan_receive(channel: MetropolitanChannel, timeout_ms: Int) -> Resu
     [time.now() - start_time < timeout_ms] {
         let status = read_status(channel.sync_region, 8)?;
         
-        unification status(StatusComplete) = {
+        uni status(StatusComplete) = {
             memory_barrier();
             // Read response from response_region
             let response = read_from_shared(channel.response_region, 0, 4096)?;
@@ -223,7 +223,7 @@ defn metropolitan_receive(channel: MetropolitanChannel, timeout_ms: Int) -> Resu
             term Ok(response);
         };
         
-        unification status(StatusError(code)) = {
+        uni status(StatusError(code)) = {
             term Err("Foreign error: " + String(code));
         };
         

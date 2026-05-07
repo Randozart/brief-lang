@@ -378,7 +378,7 @@ impl<'a> Parser<'a> {
                 let frgn_binding = self.parse_frgn_binding()?;
                 Ok(frgn_binding)
             }
-            Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) => {
+            Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) | Some(Ok(Token::Registry)) => {
                 let resource = self.parse_resource()?;
                 Ok(resource)
             }
@@ -571,6 +571,15 @@ impl<'a> Parser<'a> {
             "Bool" => Ok(Type::Bool),
             "void" => Ok(Type::Void),
             "Data" => Ok(Type::Data),
+            // Shorthand sized types (syntactic sugar for Int/UInt @/xN)
+            "u8" => Ok(Type::Constrained(Box::new(Type::UInt), BitRange::Any(8))),
+            "i8" => Ok(Type::Constrained(Box::new(Type::Int), BitRange::Any(8))),
+            "u16" => Ok(Type::Constrained(Box::new(Type::UInt), BitRange::Any(16))),
+            "i16" => Ok(Type::Constrained(Box::new(Type::Int), BitRange::Any(16))),
+            "u32" => Ok(Type::Constrained(Box::new(Type::UInt), BitRange::Any(32))),
+            "i32" => Ok(Type::Constrained(Box::new(Type::Int), BitRange::Any(32))),
+            "u64" => Ok(Type::Constrained(Box::new(Type::UInt), BitRange::Any(64))),
+            "i64" => Ok(Type::Constrained(Box::new(Type::Int), BitRange::Any(64))),
             other => Ok(Type::Custom(other.to_string())),
         }
     }
@@ -593,6 +602,15 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::TypeBool)) => { self.advance(); Ok("Bool".to_string()) }
             Some(Ok(Token::TypeVoid)) => { self.advance(); Ok("void".to_string()) }
             Some(Ok(Token::TypeData)) => { self.advance(); Ok("Data".to_string()) }
+            // Shorthand sized types
+            Some(Ok(Token::TypeU8)) => { self.advance(); Ok("u8".to_string()) }
+            Some(Ok(Token::TypeI8)) => { self.advance(); Ok("i8".to_string()) }
+            Some(Ok(Token::TypeU16)) => { self.advance(); Ok("u16".to_string()) }
+            Some(Ok(Token::TypeI16)) => { self.advance(); Ok("i16".to_string()) }
+            Some(Ok(Token::TypeU32)) => { self.advance(); Ok("u32".to_string()) }
+            Some(Ok(Token::TypeI32)) => { self.advance(); Ok("i32".to_string()) }
+            Some(Ok(Token::TypeU64)) => { self.advance(); Ok("u64".to_string()) }
+            Some(Ok(Token::TypeI64)) => { self.advance(); Ok("i64".to_string()) }
             Some(Ok(Token::Err)) => { self.advance(); Ok("Err".to_string()) }
             other => self.spanned_err(format!("Expected type name, found {:?}", other)),
         }
@@ -1294,27 +1312,48 @@ impl<'a> Parser<'a> {
         let mut is_override = false;
 
         // Optional mapping before colon
+        // Supports: @ address / bit-spec, @ / bit-spec, @ stack:offset, @ heap:offset, [bit-spec]
             loop {
                 if let Some(Ok(Token::At)) = self.current_token() {
                     self.advance();
-                    match self.current_token() {
-                        Some(Ok(Token::Integer(n))) => {
-                            address = Some(*n as u64);
-                            self.advance();
+                    // Check for / immediately after @ (auto-allocate with bit-spec)
+                    if let Some(Ok(Token::Slash)) = self.current_token() {
+                        self.advance();
+                        bit_range = Some(self.parse_bit_range()?);
+                    } else {
+                        match self.current_token() {
+                            Some(Ok(Token::Integer(n))) => {
+                                address = Some(*n as u64);
+                                self.advance();
+                                // Handle slash shorthand: @0x1000/x16 or @0x1000/0
+                                if let Some(Ok(Token::Slash)) = self.current_token() {
+                                    self.advance();
+                                    bit_range = Some(self.parse_bit_range()?);
+                                }
+                            }
+                            Some(Ok(Token::Identifier(id))) if id == "stack" => {
+                                self.advance();
+                                self.expect(Token::Colon)?;
+                                let offset = self.expect_integer()?;
+                                address = Some(offset as u64);
+                            }
+                            Some(Ok(Token::Identifier(id))) if id == "heap" => {
+                                self.advance();
+                                self.expect(Token::Colon)?;
+                                let offset = self.expect_integer()?;
+                                address = Some(offset as u64);
+                            }
+                            Some(Ok(Token::Identifier(id))) => {
+                                // Named address variable
+                                address = Some(0); // TODO: resolve named address
+                                self.advance();
+                                if let Some(Ok(Token::Slash)) = self.current_token() {
+                                    self.advance();
+                                    bit_range = Some(self.parse_bit_range()?);
+                                }
+                            }
+                            _ => return self.spanned_err("Expected address mode after @: raw, stack, heap, or /".to_string()),
                         }
-                        Some(Ok(Token::Identifier(id))) if id == "stack" => {
-                            self.advance();
-                            self.expect(Token::Colon)?;
-                            let offset = self.expect_integer()?;
-                            address = Some(offset as u64);
-                        }
-                        Some(Ok(Token::Identifier(id))) if id == "heap" => {
-                            self.advance();
-                            self.expect(Token::Colon)?;
-                            let offset = self.expect_integer()?;
-                            address = Some(offset as u64);
-                        }
-                        _ => return self.spanned_err("Expected address mode after @: raw, stack, or heap".to_string()),
                     }
                 } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
@@ -1332,17 +1371,32 @@ impl<'a> Parser<'a> {
         loop {
             if let Some(Ok(Token::At)) = self.current_token() {
                 self.advance();
-                match self.current_token() {
-                    Some(Ok(Token::Integer(n))) => {
-                        address = Some(*n as u64);
-                        self.advance();
-                    }
-                    _ => return self.spanned_err("Expected integer address after '@'".to_string()),
-                }
-                // Handle slash shorthand: @0x1000/x16 or @0x1000/0
+                // Check for / immediately after @ (auto-allocate with bit-spec)
                 if let Some(Ok(Token::Slash)) = self.current_token() {
                     self.advance();
                     bit_range = Some(self.parse_bit_range()?);
+                } else {
+                    match self.current_token() {
+                        Some(Ok(Token::Integer(n))) => {
+                            address = Some(*n as u64);
+                            self.advance();
+                            // Handle slash shorthand: @0x1000/x16 or @0x1000/0
+                            if let Some(Ok(Token::Slash)) = self.current_token() {
+                                self.advance();
+                                bit_range = Some(self.parse_bit_range()?);
+                            }
+                        }
+                        Some(Ok(Token::Identifier(id))) => {
+                            // Named address variable
+                            address = Some(0); // TODO: resolve named address
+                            self.advance();
+                            if let Some(Ok(Token::Slash)) = self.current_token() {
+                                self.advance();
+                                bit_range = Some(self.parse_bit_range()?);
+                            }
+                        }
+                        _ => return self.spanned_err("Expected integer address or / after '@'".to_string()),
+                    }
                 }
             } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
@@ -1543,27 +1597,33 @@ let span = self.current_span();
         loop {
             if let Some(Ok(Token::At)) = self.current_token() {
                 self.advance();
-                match self.current_token() {
-                    Some(Ok(Token::Integer(n))) => {
-                        address = crate::ast::LinkRef::Explicit(*n as u64);
-                        self.advance();
-                    }
-                    Some(Ok(Token::Link)) => {
-                        self.advance();
-                        // @ link <name> - use identifier after link keyword
-                        let link_name = self.expect_identifier()?;
-                        address = crate::ast::LinkRef::Linked(link_name);
-                    }
-                    Some(Ok(Token::Identifier(name))) => {
-                        // Backward compat: @ identifier as link reference
-                        address = crate::ast::LinkRef::Linked(name.clone());
-                        self.advance();
-                    }
-                    _ => return self.spanned_err("Expected integer address or 'link <name>' after '@'".to_string()),
-                }
+                // Check for / immediately after @ (auto-allocate with bit-spec)
                 if let Some(Ok(Token::Slash)) = self.current_token() {
                     self.advance();
                     bit_range = Some(self.parse_bit_range()?);
+                } else {
+                    match self.current_token() {
+                        Some(Ok(Token::Integer(n))) => {
+                            address = crate::ast::LinkRef::Explicit(*n as u64);
+                            self.advance();
+                        }
+                        Some(Ok(Token::Link)) => {
+                            self.advance();
+                            // @ link <name> - use identifier after link keyword
+                            let link_name = self.expect_identifier()?;
+                            address = crate::ast::LinkRef::Linked(link_name);
+                        }
+                        Some(Ok(Token::Identifier(name))) => {
+                            // Backward compat: @ identifier as link reference
+                            address = crate::ast::LinkRef::Linked(name.clone());
+                            self.advance();
+                        }
+                        _ => return self.spanned_err("Expected integer address, 'link <name>', or / after '@'".to_string()),
+                    }
+                    if let Some(Ok(Token::Slash)) = self.current_token() {
+                        self.advance();
+                        bit_range = Some(self.parse_bit_range()?);
+                    }
                 }
             } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
@@ -2477,44 +2537,42 @@ let span = self.current_span();
                 self.advance();
                 Type::Char
             }
-            Some(Ok(Token::TypeHashMap)) => {
+            // Shorthand sized integer types (syntactic sugar for Int/UInt @/xN)
+            Some(Ok(Token::TypeU8)) => {
                 self.advance();
-                // Parse HashMap<K, V>
-                self.expect(Token::Lt)?;
-                let key_type = self.parse_type()?;
-                self.expect(Token::Comma)?;
-                let value_type = self.parse_type()?;
-                self.expect(Token::Gt)?;
-                Type::HashMap(Box::new(key_type), Box::new(value_type))
+                Type::Constrained(Box::new(Type::UInt), BitRange::Any(8))
             }
-            Some(Ok(Token::TypeHashSet)) => {
+            Some(Ok(Token::TypeI8)) => {
                 self.advance();
-                // Parse HashSet<T>
-                self.expect(Token::Lt)?;
-                let inner_type = self.parse_type()?;
-                self.expect(Token::Gt)?;
-                Type::HashSet(Box::new(inner_type))
+                Type::Constrained(Box::new(Type::Int), BitRange::Any(8))
             }
-            Some(Ok(Token::TypeStringBuilder)) => {
+            Some(Ok(Token::TypeU16)) => {
                 self.advance();
-                Type::StringBuilder
+                Type::Constrained(Box::new(Type::UInt), BitRange::Any(16))
             }
-            Some(Ok(Token::TypeStack)) => {
+            Some(Ok(Token::TypeI16)) => {
                 self.advance();
-                // Parse Stack<T>
-                self.expect(Token::Lt)?;
-                let inner_type = self.parse_type()?;
-                self.expect(Token::Gt)?;
-                Type::Stack(Box::new(inner_type))
+                Type::Constrained(Box::new(Type::Int), BitRange::Any(16))
             }
-            Some(Ok(Token::TypeQueue)) => {
+            Some(Ok(Token::TypeU32)) => {
                 self.advance();
-                // Parse Queue<T>
-                self.expect(Token::Lt)?;
-                let inner_type = self.parse_type()?;
-                self.expect(Token::Gt)?;
-                Type::Queue(Box::new(inner_type))
+                Type::Constrained(Box::new(Type::UInt), BitRange::Any(32))
             }
+            Some(Ok(Token::TypeI32)) => {
+                self.advance();
+                Type::Constrained(Box::new(Type::Int), BitRange::Any(32))
+            }
+            Some(Ok(Token::TypeU64)) => {
+                self.advance();
+                Type::Constrained(Box::new(Type::UInt), BitRange::Any(64))
+            }
+            Some(Ok(Token::TypeI64)) => {
+                self.advance();
+                Type::Constrained(Box::new(Type::Int), BitRange::Any(64))
+            }
+            // Note: HashMap, HashSet, StringBuilder, Stack, Queue are parsed as
+            // regular identifiers (Custom/Applied types) defined in stdlib.
+            // No special AST variants - keeps the language philosophically pure.
             Some(Ok(Token::TypeVoid)) => {
                 self.advance();
                 Type::Void
@@ -2530,12 +2588,17 @@ let span = self.current_span();
         };
 
         // Check for bit-width decorator: Type@/N or Type@/0..7 or Type@/xN
+        // Only consume @ if followed by / (bit-range constraint)
+        // If @ is followed by something else (address), leave it for the caller
         if let Some(Ok(Token::At)) = self.current_token() {
             if let Some(Ok(Token::Slash)) = self.peek() {
                 self.advance(); // consume @
                 self.advance(); // consume /
-                // Skip constraint parsing for now - use the base type
+                let br = self.parse_bit_range()?;
+                // Wrap the type in a Constrained type with the bit range
+                ty = Type::Constrained(Box::new(ty), br);
             }
+            // If @ is not followed by /, don't consume it - let the caller handle it
         }
         if let Some(Ok(Token::Lt)) = self.current_token() {
             self.advance();
@@ -3372,6 +3435,85 @@ mod parser_tests {
             }
         } else {
             panic!("Expected Transaction item");
+        }
+    }
+
+    #[test]
+    fn test_parse_shorthand_types() {
+        // Test u8 shorthand
+        let s = r#"let x: u8 = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse u8 type");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Constrained(inner, BitRange::Any(8)) if matches!(**inner, Type::UInt)));
+        }
+
+        // Test i16 shorthand
+        let s = r#"let y: i16 = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse i16 type");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Constrained(inner, BitRange::Any(16)) if matches!(**inner, Type::Int)));
+        }
+
+        // Test u32 shorthand
+        let s = r#"let z: u32 = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse u32 type");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Constrained(inner, BitRange::Any(32)) if matches!(**inner, Type::UInt)));
+        }
+
+        // Test i64 shorthand
+        let s = r#"let w: i64 = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse i64 type");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Constrained(inner, BitRange::Any(64)) if matches!(**inner, Type::Int)));
+        }
+    }
+
+    #[test]
+    fn test_parse_at_slash_bit_spec() {
+        // Test @ /x16 (auto-allocate with bit count)
+        let s = r#"let x: Int @ /x16 = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse @ /x16 syntax: {:?}", result.err());
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            // Bit range is now part of the type (Constrained)
+            assert!(matches!(&decl.ty, Type::Constrained(_, BitRange::Any(16))));
+        }
+
+        // Test @ /3..5 (auto-allocate with bit range)
+        let s = r#"let y: UInt @ /3..5 = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse @ /3..5 syntax: {:?}", result.err());
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Constrained(_, BitRange::Range(3, 5))));
+        }
+
+        // Test @ 0x1000/x8 (fixed address with bit count)
+        let s = r#"let z: u8 @ 0x1000/x8 = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse @ 0x1000/x8 syntax: {:?}", result.err());
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert_eq!(decl.address, Some(0x1000));
+        }
+
+        // Test @ /x1 (single bit auto-allocate)
+        let s = r#"let flag: Bool @ /x1 = false;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse @ /x1 syntax: {:?}", result.err());
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Constrained(_, BitRange::Any(1))));
         }
     }
 }

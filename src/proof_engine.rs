@@ -1649,25 +1649,12 @@ impl ProofEngine {
                         .join(", ")
                 )
             }
-            Type::Option(inner) => {
-                format!("Option<{}>", self.type_name(inner))
-            }
             Type::Enum(name) => name.clone(),
             Type::UInt => "UInt".to_string(),
             Type::Char => "Char".to_string(),
-            Type::HashMap(key, value) => {
-                format!("HashMap<{}, {}>", self.type_name(key), self.type_name(value))
-            }
-            Type::HashSet(inner) => {
-                format!("HashSet<{}>", self.type_name(inner))
-            }
-            Type::StringBuilder => "StringBuilder".to_string(),
-            Type::Stack(inner) => {
-                format!("Stack<{}>", self.type_name(inner))
-            }
-            Type::Queue(inner) => {
-                format!("Queue<{}>", self.type_name(inner))
-            }
+            // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
+            // are regular structs/enums defined in stdlib, handled via
+            // Custom/Applied/Enum variants.
             Type::Vector(inner, size) => format!("Vector<{}>[{}]", self.type_name(inner), size),
             Type::Constrained(inner, _) => self.type_name(inner),
         }

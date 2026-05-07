@@ -112,6 +112,11 @@ pub enum Token {
     #[token("rsrc")]
     #[token("RSRC")]
     Rsrc,
+    #[token("reg")]
+    #[token("REG")]
+    #[token("registry")]
+    #[token("REGISTRY")]
+    Registry,
     #[token("struct")]
     #[token("STRUCT")]
     Struct,
@@ -348,22 +353,32 @@ pub enum Token {
     TypeString,
     #[token("Bool")]
     TypeBool,
-    #[token("Char")]  // NEW: Char type keyword
-    TypeChar,
-    #[token("HashMap")]  // HashMap type keyword
-    TypeHashMap,
-    #[token("HashSet")]  // HashSet type keyword
-    TypeHashSet,
-    #[token("StringBuilder")]  // StringBuilder type keyword
-    TypeStringBuilder,
-    #[token("Stack")]  // Stack type keyword
-    TypeStack,
-    #[token("Queue")]  // Queue type keyword
-    TypeQueue,
+    #[token("void")]
+    TypeVoid,
     #[token("Data")]
     TypeData,
-    #[token("Void")]
-    TypeVoid,
+    #[token("Char")]  // NEW: Char type keyword
+    TypeChar,
+    // Note: HashMap, HashSet, StringBuilder, Stack, Queue are regular identifiers
+    // defined in stdlib, not special type keywords. This keeps the language pure.
+
+    // Shorthand sized integer types (syntactic sugar for Int/UInt @/xN)
+    #[token("i8")]
+    TypeI8,
+    #[token("u8")]
+    TypeU8,
+    #[token("i16")]
+    TypeI16,
+    #[token("u16")]
+    TypeU16,
+    #[token("i32")]
+    TypeI32,
+    #[token("u32")]
+    TypeU32,
+    #[token("i64")]
+    TypeI64,
+    #[token("u64")]
+    TypeU64,
 
     // Identifiers
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]

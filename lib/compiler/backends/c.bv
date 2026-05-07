@@ -14,7 +14,7 @@ defn generate_c(program: Program) -> String {
     output = output.append_str("// Global state\n");
     let i: Int = 0;
     [i < program.items.len()] {
-        unification program.items[i](TopState(decl)) = {
+        uni program.items[i](TopState(decl)) = {
             output = output.append_str(type_to_c(decl.state_type));
             output = output.append_str(" ");
             output = output.append_str(decl.name);
@@ -32,7 +32,7 @@ defn generate_c(program: Program) -> String {
     // Generate transactions
     let j: Int = 0;
     [j < program.items.len()] {
-        unification program.items[j](TopTxn(txn)) = {
+        uni program.items[j](TopTxn(txn)) = {
             output = output.append_str(generate_c_transaction(txn));
             output = output.append_str("\n");
         };
@@ -52,12 +52,12 @@ defn generate_c(program: Program) -> String {
 }
 
 defn type_to_c(ty: Type) -> String {
-    unification ty(TypeInt) = { term "int64_t"; };
-    unification ty(TypeUInt) = { term "uint64_t"; };
-    unification ty(TypeFloat) = { term "double"; };
-    unification ty(TypeBool) = { term "bool"; };
-    unification ty(TypeChar) = { term "char"; };
-    unification ty(TypeVoid) = { term "void"; };
+    uni ty(TypeInt) = { term "int64_t"; };
+    uni ty(TypeUInt) = { term "uint64_t"; };
+    uni ty(TypeFloat) = { term "double"; };
+    uni ty(TypeBool) = { term "bool"; };
+    uni ty(TypeChar) = { term "char"; };
+    uni ty(TypeVoid) = { term "void"; };
     term "void"
 }
 
@@ -95,7 +95,7 @@ defn generate_c_block(stmts: List<Statement>) -> String {
 }
 
 defn generate_c_statement(stmt: Statement) -> String {
-    unification stmt(StmtLet(name, var_type, init)) = {
+    uni stmt(StmtLet(name, var_type, init)) = {
         let output = new_builder();
         output = output.append_str(type_to_c(var_type.unwrap()));
         output = output.append_str(" ");
@@ -108,7 +108,7 @@ defn generate_c_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    unification stmt(StmtAssign(lhs, rhs)) = {
+    uni stmt(StmtAssign(lhs, rhs)) = {
         let output = new_builder();
         output = output.append_str(expr_to_c(*lhs));
         output = output.append_str(" = ");
@@ -117,7 +117,7 @@ defn generate_c_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    unification stmt(StmtTerm(values)) = {
+    uni stmt(StmtTerm(values)) = {
         let output = new_builder();
         output = output.append_str("return");
         [values.len() > 0] {
@@ -128,7 +128,7 @@ defn generate_c_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    unification stmt(StmtGuarded(condition, body)) = {
+    uni stmt(StmtGuarded(condition, body)) = {
         let output = new_builder();
         output = output.append_str("if (");
         output = output.append_str(expr_to_c(*condition));
@@ -142,23 +142,23 @@ defn generate_c_statement(stmt: Statement) -> String {
 }
 
 defn expr_to_c(expr: Expr) -> String {
-    unification expr(ExprInt(n)) = {
+    uni expr(ExprInt(n)) = {
         term String(n);
     };
-    unification expr(ExprFloat(f)) = {
+    uni expr(ExprFloat(f)) = {
         term String(f);
     };
-    unification expr(ExprBool(b)) = {
+    uni expr(ExprBool(b)) = {
         [b] { term "true"; };
         term "false";
     };
-    unification expr(ExprVar(name)) = {
+    uni expr(ExprVar(name)) = {
         term name;
     };
-    unification expr(ExprPriorState(name)) = {
+    uni expr(ExprPriorState(name)) = {
         term name + "_old";
     };
-    unification expr(ExprBinOp(op, left, right)) = {
+    uni expr(ExprBinOp(op, left, right)) = {
         let sb = new_builder();
         sb = sb.append_str("(");
         sb = sb.append_str(expr_to_c(*left));
@@ -190,7 +190,7 @@ defn generate_c_reactor(program: Program) -> String {
     // Call each transaction
     let i: Int = 0;
     [i < program.items.len()] {
-        unification program.items[i](TopTxn(txn)) = {
+        uni program.items[i](TopTxn(txn)) = {
             output = output.append_str("        ");
             output = output.append_str(txn.name);
             output = output.append_str("();\n");

@@ -249,7 +249,7 @@ struct Program {
 
 // Get expression precedence
 defn expr_precedence(expr: Expr) -> Int {
-    unification expr(ExprBinOp(op, _, _)) = {
+    uni expr(ExprBinOp(op, _, _)) = {
         [op == "*"] { term 11; };
         [op == "/"] { term 11; };
         [op == "%"] { term 11; };
@@ -269,21 +269,21 @@ defn expr_precedence(expr: Expr) -> Int {
 
 // Check if expression is literal
 defn is_literal_expr(expr: Expr) -> Bool {
-    unification expr(ExprInt(_)) = true;
-    unification expr(ExprFloat(_)) = true;
-    unification expr(ExprString(_)) = true;
-    unification expr(ExprChar(_)) = true;
-    unification expr(ExprBool(_)) = true;
+    uni expr(ExprInt(_)) = true;
+    uni expr(ExprFloat(_)) = true;
+    uni expr(ExprString(_)) = true;
+    uni expr(ExprChar(_)) = true;
+    uni expr(ExprBool(_)) = true;
     term false;
 }
 
 // Get expression type (simple inference)
 defn infer_expr_type(expr: Expr) -> Option<Type> {
-    unification expr(ExprInt(_)) = Some(TypeInt);
-    unification expr(ExprFloat(_)) = Some(TypeFloat);
-    unification expr(ExprString(_)) = Some(TypeString);
-    unification expr(ExprChar(_)) = Some(TypeChar);
-    unification expr(ExprBool(_)) = Some(TypeBool);
+    uni expr(ExprInt(_)) = Some(TypeInt);
+    uni expr(ExprFloat(_)) = Some(TypeFloat);
+    uni expr(ExprString(_)) = Some(TypeString);
+    uni expr(ExprChar(_)) = Some(TypeChar);
+    uni expr(ExprBool(_)) = Some(TypeBool);
     term None;
 }
 

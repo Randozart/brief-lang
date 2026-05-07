@@ -110,11 +110,9 @@ pub enum Type {
     Void,
     UInt,
     Char,  // Unicode codepoint type
-    HashMap(Box<Type>, Box<Type>),  // HashMap<K, V>
-    HashSet(Box<Type>),  // HashSet<T>
-    StringBuilder,  // Efficient string building
-    Stack(Box<Type>),  // NEW: Stack<T>
-    Queue(Box<Type>),  // NEW: Queue<T>
+    // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
+    // are defined as regular structs/enums in stdlib, not as AST variants.
+    // This keeps the language philosophically pure - no magic types.
     Custom(String),
     Union(Vec<Type>),
     ContractBound(Box<Type>, Box<Expr>),
@@ -123,7 +121,6 @@ pub enum Type {
     Applied(String, Vec<Type>),
     Sig(String),
     Vector(Box<Type>, usize),
-    Option(Box<Type>),
     Enum(String),
     Constrained(Box<Type>, BitRange),
 }
