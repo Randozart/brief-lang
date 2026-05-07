@@ -153,6 +153,11 @@ impl Annotator {
                 .map(|t| self.type_to_string(t))
                 .collect::<Vec<_>>()
                 .join(" | "),
+            Type::Tuple(types) => format!("({})", types
+                .iter()
+                .map(|t| self.type_to_string(t))
+                .collect::<Vec<_>>()
+                .join(", ")),
             Type::ContractBound(inner, _) => self.type_to_string(inner),
             Type::Generic(name, type_args) => {
                 format!(
@@ -456,6 +461,13 @@ impl Annotator {
             Expr::Block(stmts, expr) => {
                 let stmts_str = stmts.iter().map(|s| format!("  {:?}", s)).collect::<Vec<_>>().join(";\n");
                 format!("{{\n{}\n  {}\n}}", stmts_str, self.format_expr(expr))
+            }
+            Expr::TupleDestructure(names, expr) => {
+                format!("({}) = {}", names.join(", "), self.format_expr(expr))
+            }
+            Expr::Tuple(exprs) => {
+                let exprs_str = exprs.iter().map(|e| self.format_expr(e)).collect::<Vec<_>>().join(", ");
+                format!("({})", exprs_str)
             }
         }
     }

@@ -1439,7 +1439,7 @@ impl ProofEngine {
             Expr::PatternMatch { value, .. } => {
                 self.collect_identifiers(value, vars);
             }
-            Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) => {}
+            Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) => {}
         }
     }
 
@@ -1699,6 +1699,11 @@ impl ProofEngine {
                 .map(|t| self.type_name(t))
                 .collect::<Vec<_>>()
                 .join("|"),
+            Type::Tuple(types) => format!("({})", types
+                .iter()
+                .map(|t| self.type_name(t))
+                .collect::<Vec<_>>()
+                .join(", ")),
             Type::ContractBound(inner, _) => self.type_name(inner),
             Type::TypeVar(name) => name.clone(),
             Type::Generic(name, type_args) => {

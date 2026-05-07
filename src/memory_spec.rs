@@ -197,6 +197,10 @@ fn format_type(ty: &Type) -> String {
             let inner: Vec<_> = types.iter().map(format_type).collect();
             inner.join(" | ")
         }
+        Type::Tuple(types) => {
+            let inner: Vec<_> = types.iter().map(format_type).collect();
+            format!("({})", inner.join(", "))
+        }
         Type::ContractBound(inner, _) => format_type(inner),
         Type::TypeVar(name) => name.clone(),
         Type::Generic(name, params) => {
@@ -235,6 +239,7 @@ fn estimate_type_size(ty: &Type) -> usize {
         Type::Char => 4,
         Type::Custom(_) => 8,
         Type::Union(types) => types.iter().map(estimate_type_size).max().unwrap_or(8),
+        Type::Tuple(types) => types.iter().map(estimate_type_size).sum(),
         Type::ContractBound(inner, _) => estimate_type_size(inner),
         Type::TypeVar(_) => 8,
         Type::Generic(_, _) => 8,

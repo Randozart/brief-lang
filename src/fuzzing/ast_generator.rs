@@ -185,6 +185,7 @@ pub fn arb_struct_def(max_depth: usize) -> impl Strategy<Value = TopLevel> {
     ).prop_map(|(name, fields)| {
         TopLevel::Struct(StructDefinition {
             name,
+            type_params: Vec::new(),
             fields,
             transactions: Vec::new(),
             view_html: None,

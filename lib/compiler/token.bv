@@ -246,53 +246,53 @@ defn token_to_string(tok: Token) -> String {
     let sb = new_builder();
     
     uni tok(TokenInt(n)) = {
-        sb = sb.append_str("Int(");
-        sb = sb.append_int(n);
-        sb = sb.append_char(')');
+        sb = append_str(sb, "Int(");
+        sb = append_int(sb, n);
+        sb = append_char(sb, ')');
     };
     
     uni tok(TokenFloat(f)) = {
-        sb = sb.append_str("Float(");
+        sb = append_str(sb, "Float(");
         // Float to string would go here
-        sb = sb.append_char(')');
+        sb = append_char(sb, ')');
     };
     
     uni tok(TokenString(s)) = {
-        sb = sb.append_str("String(\"");
-        sb = sb.append_str(s);
-        sb = sb.append_str("\")");
+        sb = append_str(sb, "String(\"");
+        sb = append_str(sb, s);
+        sb = append_str(sb, "\")");
     };
     
     uni tok(TokenChar(c)) = {
-        sb = sb.append_str("Char('");
-        sb = sb.append_char(c);
-        sb = sb.append_str("')");
+        sb = append_str(sb, "Char('");
+        sb = append_char(sb, c);
+        sb = append_str(sb, "')");
     };
     
     uni tok(TokenIdentifier(name)) = {
-        sb = sb.append_str("Identifier(");
-        sb = sb.append_str(name);
-        sb = sb.append_char(')');
+        sb = append_str(sb, "Identifier(");
+        sb = append_str(sb, name);
+        sb = append_char(sb, ')');
     };
     
     uni tok(TokenEof) = {
-        sb = sb.append_str("Eof");
+        sb = append_str(sb, "Eof");
     };
     
     uni tok(TokenError(msg)) = {
-        sb = sb.append_str("Error(");
-        sb = sb.append_str(msg);
-        sb = sb.append_char(')');
+        sb = append_str(sb, "Error(");
+        sb = append_str(sb, msg);
+        sb = append_char(sb, ')');
     };
     
     // Keywords
     [is_keyword(tok)] {
-        sb = sb.append_str("Keyword(");
-        sb = sb.append_str(keyword_to_string(tok));
-        sb = sb.append_char(')');
+        sb = append_str(sb, "Keyword(");
+        sb = append_str(sb, keyword_to_string(tok));
+        sb = append_char(sb, ')');
     };
     
-    term sb.to_string();
+    term to_string(sb);
 };
 
 // Check if token is a literal

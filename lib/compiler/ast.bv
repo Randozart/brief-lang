@@ -16,23 +16,23 @@ enum Expr {
     ExprPriorState(String),  // @var
     
     // Binary operations
-    ExprBinOp(String, Box<Expr>, Box<Expr>),  // op, left, right
+    ExprBinOp(String, Expr, Expr),  // op, left, right
     
     // Unary operations
-    ExprUnaryOp(String, Box<Expr>),  // op, operand
+    ExprUnaryOp(String, Expr),  // op, operand
     
     // Calls and access
     ExprCall(String, List<Expr>),  // name, args
-    ExprFieldAccess(Box<Expr>, String),  // object, field
-    ExprIndex(Box<Expr>, Box<Expr>),  // array, index
-    ExprSlice(Box<Expr>, Option<Box<Expr>>, Option<Box<Expr>>),  // arr, start, end
+    ExprFieldAccess(Expr, String),  // object, field
+    ExprIndex(Expr, Expr),  // array, index
+    ExprSlice(Expr, Option<Expr>, Option<Expr>),  // arr, start, end
     
     // Containers
     ExprList(List<Expr>),
     ExprTuple(List<Expr>),
     
     // Type operations
-    ExprCast(Box<Expr>, Type),  // expr, target_type
+    ExprCast(Expr, Type),  // expr, target_type
     
     // Blocks
     ExprBlock(List<Statement>)
@@ -42,25 +42,25 @@ enum Expr {
 
 enum Statement {
     // Assignment
-    StmtAssign(Box<Expr>, Box<Expr>),  // lhs, rhs
+    StmtAssign(Expr, Expr),  // lhs, rhs
     
     // Let binding
-    StmtLet(String, Option<Type>, Option<Box<Expr>>),  // name, type, init
+    StmtLet(String, Option<Type>, Option<Expr>),  // name, type, init
     
     // Expression statement
-    StmtExpr(Box<Expr>),
+    StmtExpr(Expr),
     
     // Term statement
-    StmtTerm(List<Option<Box<Expr>>>),  // return values
+    StmtTerm(List<Option<Expr>>),  // return values
     
     // Escape statement
-    StmtEscape(Option<Box<Expr>>),  // escape value
+    StmtEscape(Option<Expr>),  // escape value
     
     // Guarded statement
-    StmtGuarded(Box<Expr>, List<Statement>),  // condition, body
+    StmtGuarded(Expr, List<Statement>),  // condition, body
     
     // Unification
-    StmtUnification(String, String, Box<Expr>),  // name, pattern, expr
+    StmtUnification(String, String, Expr),  // name, pattern, expr
     
     // Inline assembly
     StmtAsm(String, List<String>)  // asm code, clobbers
@@ -124,20 +124,20 @@ enum Type {
     TypeChar,
     TypeData,
     TypeVoid,
-    TypeVector(Box<Type>, Int),
-    TypeOption(Box<Type>),
-    TypeResult(Box<Type>, Box<Type>),
-    TypeList(Box<Type>),
-    TypeHashMap(Box<Type>, Box<Type>),
-    TypeHashSet(Box<Type>),
-    TypeStack(Box<Type>),
-    TypeQueue(Box<Type>),
+    TypeVector(Type, Int),
+    TypeOption(Type),
+    TypeResult(Type, Type),
+    TypeList(Type),
+    TypeHashMap(Type, Type),
+    TypeHashSet(Type),
+    TypeStack(Type),
+    TypeQueue(Type),
     TypeStringBuilder,
     TypeNamed(String, List<Type>),
     TypeTuple(List<Type>),
     TypeUnion(List<Type>),
     TypeSig(String),
-    TypeConstrained(Box<Type>, BitRange)
+    TypeConstrained(Type, BitRange)
 }
 
 struct BitRange {
@@ -188,13 +188,13 @@ enum ViewElement {
     ViewHtml(String, List<ViewAttr>, List<ViewElement>),  // tag, attrs, children
     ViewComponent(String, List<ViewAttr>, List<ViewElement>),  // component, attrs, children
     ViewText(String),  // text content
-    ViewExpr(Box<Expr>)  // embedded expression
+    ViewExpr(Expr)  // embedded expression
 }
 
 enum ViewAttr {
     AttrNormal(String, String),  // name, value
-    AttrBText(String, Box<Expr>),  // b-text binding
-    AttrBShow(String, Box<Expr>),  // b-show binding
+    AttrBText(String, Expr),  // b-text binding
+    AttrBShow(String, Expr),  // b-show binding
     AttrBTrigger(String, String),  // b-trigger binding
     AttrBModel(String, String)  // b-model binding
 }
@@ -289,12 +289,12 @@ defn infer_expr_type(expr: Expr) -> Option<Type> {
 
 // Create binary expression
 defn make_binop(op: String, left: Expr, right: Expr) -> Expr {
-    term ExprBinOp(op, Box::new(left), Box::new(right));
+    term ExprBinOp(op, left, right);
 }
 
 // Create unary expression
 defn make_unaryop(op: String, operand: Expr) -> Expr {
-    term ExprUnaryOp(op, Box::new(operand));
+    term ExprUnaryOp(op, operand);
 }
 
 // Create variable expression

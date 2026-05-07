@@ -178,38 +178,39 @@ impl Desugarer {
                     items.push(TopLevel::Definition(self.expand_implicit_terms_defn(defn)));
                 }
                 TopLevel::Struct(s) => {
-                    for field in &s.fields {
-                        let ty = match &field.ty {
-                            Type::Int => Type::Int,
-                            Type::Float => Type::Float,
-                            Type::Bool => Type::Bool,
-                            Type::String => Type::String,
-                            Type::Applied(name, _) if name == "List" => {
-                                Type::Applied("List".to_string(), vec![])
-                            }
-                            _ => Type::Int,
-                        };
-                        let initial_expr = match &ty {
-                            Type::Int => Some(Expr::Integer(0)),
-                            Type::Float => Some(Expr::Integer(0)),
-                            Type::Bool => Some(Expr::Bool(false)),
-                            Type::String => Some(Expr::String("".to_string())),
-                            Type::Applied(name, _) if name == "List" => {
-                                Some(Expr::ListLiteral(vec![]))
-                            }
-                            _ => Some(Expr::Integer(0)),
-                        };
-                        self.generated_state.push(StateDecl {
-                    attrs: Vec::new(),
-                            name: field.name.clone(),
-                            ty,
-                            expr: initial_expr,
-                            address: None,
-                            bit_range: None,
-                            is_override: false,
-                            os_mode: false,
-                            span: None,
-                        });
+                    // Only generate state for struct fields if the struct has transactions
+                    // (i.e., it's a hardware component, not a pure data type)
+                    if !s.transactions.is_empty() {
+                        for field in &s.fields {
+                            let ty = match &field.ty {
+                                Type::Int => Type::Int,
+                                Type::Float => Type::Float,
+                                Type::Bool => Type::Bool,
+                                Type::String => Type::String,
+                                other => other.clone(),
+                            };
+                            let initial_expr = match &ty {
+                                Type::Int => Some(Expr::Integer(0)),
+                                Type::Float => Some(Expr::Integer(0)),
+                                Type::Bool => Some(Expr::Bool(false)),
+                                Type::String => Some(Expr::String("".to_string())),
+                                Type::Applied(name, _) if name == "List" => {
+                                    Some(Expr::ListLiteral(vec![]))
+                                }
+                                _ => Some(Expr::Bool(false)),
+                            };
+                            self.generated_state.push(StateDecl {
+                        attrs: Vec::new(),
+                                name: field.name.clone(),
+                                ty,
+                                expr: initial_expr,
+                                address: None,
+                                bit_range: None,
+                                is_override: false,
+                                os_mode: false,
+                                span: None,
+                            });
+                        }
                     }
                     for txn in &s.transactions {
                         let txn_name = if txn.name.contains('.') {
@@ -225,38 +226,38 @@ impl Desugarer {
                     items.push(item.clone());
                 }
                 TopLevel::RStruct(rs) => {
-                    for field in &rs.fields {
-                        let ty = match &field.ty {
-                            Type::Int => Type::Int,
-                            Type::Float => Type::Float,
-                            Type::Bool => Type::Bool,
-                            Type::String => Type::String,
-                            Type::Applied(name, _) if name == "List" => {
-                                Type::Applied("List".to_string(), vec![])
-                            }
-                            _ => Type::Int,
-                        };
-                        let initial_expr = match &ty {
-                            Type::Int => Some(Expr::Integer(0)),
-                            Type::Float => Some(Expr::Integer(0)),
-                            Type::Bool => Some(Expr::Bool(false)),
-                            Type::String => Some(Expr::String("".to_string())),
-                            Type::Applied(name, _) if name == "List" => {
-                                Some(Expr::ListLiteral(vec![]))
-                            }
-                            _ => Some(Expr::Integer(0)),
-                        };
-                        self.generated_state.push(StateDecl {
-                    attrs: Vec::new(),
-                            name: field.name.clone(),
-                            ty,
-                            expr: initial_expr,
-                            address: None,
-                            bit_range: None,
-                            is_override: false,
-                            os_mode: false,
-                            span: None,
-                        });
+                    // Only generate state for struct fields if the struct has transactions
+                    if !rs.transactions.is_empty() {
+                        for field in &rs.fields {
+                            let ty = match &field.ty {
+                                Type::Int => Type::Int,
+                                Type::Float => Type::Float,
+                                Type::Bool => Type::Bool,
+                                Type::String => Type::String,
+                                other => other.clone(),
+                            };
+                            let initial_expr = match &ty {
+                                Type::Int => Some(Expr::Integer(0)),
+                                Type::Float => Some(Expr::Integer(0)),
+                                Type::Bool => Some(Expr::Bool(false)),
+                                Type::String => Some(Expr::String("".to_string())),
+                                Type::Applied(name, _) if name == "List" => {
+                                    Some(Expr::ListLiteral(vec![]))
+                                }
+                                _ => Some(Expr::Bool(false)),
+                            };
+                            self.generated_state.push(StateDecl {
+                        attrs: Vec::new(),
+                                name: field.name.clone(),
+                                ty,
+                                expr: initial_expr,
+                                address: None,
+                                bit_range: None,
+                                is_override: false,
+                                os_mode: false,
+                                span: None,
+                            });
+                        }
                     }
                     for txn in &rs.transactions {
                         let txn_name = if txn.name.contains('.') {
@@ -271,6 +272,7 @@ impl Desugarer {
                     }
                     items.push(TopLevel::Struct(StructDefinition {
                         name: rs.name.clone(),
+                        type_params: Vec::new(),
                         fields: rs.fields.clone(),
                         transactions: rs.transactions.clone(),
                         view_html: Some(rs.view_html.clone()),

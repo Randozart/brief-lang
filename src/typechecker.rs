@@ -57,6 +57,7 @@ pub struct TypeChecker {
     ffi_results: RefCell<HashMap<String, ResultCheckStatus>>,
     foreign_bindings: HashMap<String, ForeignSignature>,
     pub target: CompilationTarget,
+    enum_variants: HashMap<String, String>,  // variant_name -> enum_name
 }
 
 impl TypeChecker {
@@ -74,6 +75,7 @@ impl TypeChecker {
             ffi_results: RefCell::new(HashMap::new()),
             foreign_bindings: HashMap::new(),
             target: CompilationTarget::Interpreter,
+            enum_variants: HashMap::new(),
         }
     }
 
@@ -128,6 +130,136 @@ impl TypeChecker {
                 bound_defn: None,
             },
         );
+
+        // StringBuilder functions
+        self.signatures.insert(
+            "new_builder".to_string(),
+            Signature {
+                name: "new_builder".to_string(),
+                input_types: vec![],
+                result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "append_str".to_string(),
+            Signature {
+                name: "append_str".to_string(),
+                input_types: vec![Type::Custom("StringBuilder".to_string()), Type::String],
+                result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "append_char".to_string(),
+            Signature {
+                name: "append_char".to_string(),
+                input_types: vec![Type::Custom("StringBuilder".to_string()), Type::Char],
+                result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "append_int".to_string(),
+            Signature {
+                name: "append_int".to_string(),
+                input_types: vec![Type::Custom("StringBuilder".to_string()), Type::Int],
+                result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "to_string".to_string(),
+            Signature {
+                name: "to_string".to_string(),
+                input_types: vec![Type::Custom("StringBuilder".to_string())],
+                result_type: ResultType::Projection(vec![Type::String]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "String".to_string(),
+            Signature {
+                name: "String".to_string(),
+                input_types: vec![Type::Int],
+                result_type: ResultType::Projection(vec![Type::String]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "char_to_string".to_string(),
+            Signature {
+                name: "char_to_string".to_string(),
+                input_types: vec![Type::Char],
+                result_type: ResultType::Projection(vec![Type::String]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        // Register stdlib enum variants for type checking
+        // Option<T>
+        self.enum_variants.insert("Some".to_string(), "Option".to_string());
+        self.enum_variants.insert("None".to_string(), "Option".to_string());
+        // Result<T, E>
+        self.enum_variants.insert("Ok".to_string(), "Result".to_string());
+        self.enum_variants.insert("Err".to_string(), "Result".to_string());
+
+        // Option<T> methods
+        self.signatures.insert(
+            "is_some".to_string(),
+            Signature {
+                name: "is_some".to_string(),
+                input_types: vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "is_none".to_string(),
+            Signature {
+                name: "is_none".to_string(),
+                input_types: vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "unwrap".to_string(),
+            Signature {
+                name: "unwrap".to_string(),
+                input_types: vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])],
+                result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
     }
 
     pub fn check_program(&mut self, program: &mut Program) -> Vec<TypeError> {
@@ -153,6 +285,16 @@ impl TypeChecker {
                     // Collect foreign binding signature for type inference
                     self.foreign_bindings
                         .insert(name.clone(), signature.clone());
+                }
+                TopLevel::Enum(enum_def) => {
+                    for variant in &enum_def.variants {
+                        let variant_name = match variant {
+                            crate::ast::EnumVariant::Unit(name) => name.clone(),
+                            crate::ast::EnumVariant::Tuple(name, _) => name.clone(),
+                            crate::ast::EnumVariant::Struct(name, _) => name.clone(),
+                        };
+                        self.enum_variants.insert(variant_name, enum_def.name.clone());
+                    }
                 }
                 _ => {}
             }
@@ -708,6 +850,16 @@ impl TypeChecker {
                         ResultType::TrueAssertion => Type::Bool,
                         ResultType::VoidType => Type::Void,
                     }
+                } else if let Some(defn) = self.definitions.get(name) {
+                    if let Some(ref output_type) = defn.output_type {
+                        output_type.all_types().first().cloned().unwrap_or(Type::Void)
+                    } else if !defn.outputs.is_empty() {
+                        defn.outputs.first().cloned().unwrap_or(Type::Void)
+                    } else {
+                        Type::Void
+                    }
+                } else if let Some(enum_name) = self.enum_variants.get(name) {
+                    Type::Custom(enum_name.clone())
                 } else {
                     Type::Custom(name.clone())
                 }
@@ -814,15 +966,41 @@ impl TypeChecker {
             | (Type::Float, Type::Float)
             | (Type::String, Type::String)
             | (Type::Bool, Type::Bool)
-            | (Type::Void, Type::Void) => true,
+            | (Type::Void, Type::Void)
+            | (Type::Char, Type::Char)
+            | (Type::Data, Type::Data) => true,
             (Type::Int, Type::UInt) | (Type::UInt, Type::Int) => true,
             (Type::Vector(ia, sa), Type::Vector(ib, sb)) => {
                 sa == sb && self.types_compatible(ia, ib)
             }
-            (Type::Custom(an), Type::Custom(bn)) => an == bn,
+            (Type::Applied(an, aa), Type::Applied(bn, ba)) => {
+                an == bn && aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b))
+            }
             (Type::Sig(an), Type::Sig(bn)) => an == bn,
             (Type::Union(types), t) | (t, Type::Union(types)) => {
                 types.iter().any(|u| self.types_compatible(u, t))
+            }
+            // Enum variant subtyping: if 'a' is a variant of enum 'b', they're compatible
+            (Type::Custom(variant_name), Type::Applied(enum_name, _)) => {
+                self.enum_variants.get(variant_name.as_str())
+                    .map(|parent| parent == enum_name)
+                    .unwrap_or(false)
+            }
+            // Custom types: exact match or variant-of-enum relationship
+            (Type::Custom(a_name), Type::Custom(b_name)) => {
+                if a_name == b_name {
+                    true
+                } else if let Some(parent) = self.enum_variants.get(a_name.as_str()) {
+                    parent == b_name
+                } else {
+                    false
+                }
+            }
+            // TypeVar is compatible with any type (generic placeholder)
+            (Type::TypeVar(_), _) | (_, Type::TypeVar(_)) => true,
+            // Generic types with same name and compatible args
+            (Type::Generic(an, aa), Type::Generic(bn, ba)) => {
+                an == bn && aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b))
             }
             _ => false,
         }
@@ -830,7 +1008,7 @@ impl TypeChecker {
 
     fn validate_type(&self, ty: &Type) {
         match ty {
-            Type::Union(types) => {
+            Type::Union(types) | Type::Tuple(types) => {
                 for t in types {
                     self.validate_type(t);
                 }

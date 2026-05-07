@@ -575,6 +575,13 @@ impl VerilogGenerator {
                 self.output
                     .push_str(&format!("    logic [7:0] {}_tag;\n", name));
             }
+            Type::Tuple(types) => {
+                self.output
+                    .push_str(&format!("    // Tuple type signals for {}\n", name));
+                for (i, t) in types.iter().enumerate() {
+                    self.emit_type_signals(&format!("{}_{}", name, i), t, range, address);
+                }
+            }
             Type::Vector(inner, size) => {
                 let width = self.get_bit_width(inner, range);
                 let signed = if matches!(**inner, Type::Int) {

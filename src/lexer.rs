@@ -188,6 +188,8 @@ pub enum Token {
     BoolFalse,
 
     // Time units (lowercase and UPPERCASE)
+    // Note: single-char units removed to avoid conflicts with variable names
+    // Use: sec/s, ms, cycles/cyc, min/minute instead
     #[token("cycles")]
     #[token("CYCLES")]
     Cycles,
@@ -197,8 +199,6 @@ pub enum Token {
     #[token("ms")]
     #[token("MS")]
     Ms,
-    #[token("s")]
-    #[token("S")]
     #[token("sec")]
     #[token("SEC")]
     #[token("seconds")]
@@ -261,6 +261,8 @@ pub enum Token {
     BitXor,
     #[token("->")]
     Arrow,
+    #[token("_")]
+    Underscore,
 
     // Punctuation
     #[token("#[")]

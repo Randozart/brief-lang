@@ -814,6 +814,22 @@ impl<'a> Parser<'a> {
         self.expect(Token::Struct)?;
         let name = self.expect_identifier()?;
 
+        // Parse optional type parameters: <K, V>
+        let mut type_params = Vec::new();
+        if let Some(Ok(Token::Lt)) = self.current_token() {
+            self.advance();
+            loop {
+                let param = self.expect_identifier()?;
+                type_params.push(param);
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::Gt)?;
+        }
+
         self.expect(Token::LBrace)?;
 
         let mut fields = Vec::new();
@@ -908,6 +924,7 @@ impl<'a> Parser<'a> {
         }
         Ok(StructDefinition {
             name,
+            type_params,
             fields,
             transactions,
             view_html: None,
@@ -2184,7 +2201,45 @@ let span = self.current_span();
         match self.current_token() {
             Some(Ok(Token::Let)) => {
                 self.advance();
-                let name = self.expect_identifier()?;
+                
+                // Check for tuple destructuring: let (a, b) = expr;
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut names = Vec::new();
+                    loop {
+                        names.push(self.expect_identifier()?);
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    
+                    let ty = if let Some(Ok(Token::Colon)) = self.current_token() {
+                        self.advance();
+                        Some(self.parse_type()?)
+                    } else {
+                        None
+                    };
+                    
+                    self.expect(Token::Eq)?;
+                    let expr = self.parse_expression()?;
+                    self.expect(Token::Semicolon)?;
+                    
+                    // Create nested let statements for each tuple element
+                    // For now, create a single Let with the first name and use tuple indexing
+                    // A more complete solution would create multiple let statements
+                    Ok(Statement::Let {
+                        name: names.join(","),
+                        ty,
+                        expr: Some(Expr::TupleDestructure(names, Box::new(expr))),
+                        address: None,
+                        bit_range: None,
+                        is_override: false,
+                    })
+                } else {
+                    let name = self.expect_identifier()?;
 
                 let mut address: Option<u64> = None;
                 let mut bit_range: Option<BitRange> = None;
@@ -2248,6 +2303,7 @@ let span = self.current_span();
                     bit_range,
                     is_override,
                 })
+                }
             }
             Some(Ok(Token::Term)) => {
                 self.advance();
@@ -2290,8 +2346,35 @@ let span = self.current_span();
                     let var_name = first;
                     self.advance(); // consume (
                     
-                    // Parse pattern - could be Variant or Variant(data)
+                    // Parse pattern - could be Variant or Variant(data) or just _
                     let pattern_name = match self.current_token() {
+                        Some(Ok(Token::Underscore)) => {
+                            self.advance();
+                            // Simple wildcard pattern
+                            let pattern = "_".to_string();
+                            self.expect(Token::RParen)?;
+                            self.expect(Token::Eq)?;
+                            let expr = if let Some(Ok(Token::LBrace)) = self.current_token() {
+                                self.advance();
+                                let mut stmts = Vec::new();
+                                loop {
+                                    if let Some(Ok(Token::RBrace)) = self.current_token() {
+                                        self.advance();
+                                        break;
+                                    }
+                                    stmts.push(self.parse_statement()?);
+                                }
+                                Expr::Block(stmts, Box::new(Expr::Bool(true)))
+                            } else {
+                                self.parse_expression()?
+                            };
+                            self.expect(Token::Semicolon)?;
+                            return Ok(Statement::Unification {
+                                name: var_name,
+                                pattern,
+                                expr,
+                            });
+                        }
                         Some(Ok(Token::Identifier(name))) => name.clone(),
                         Some(Ok(Token::TypeData)) => "Data".to_string(),
                         Some(Ok(Token::Ok)) => "Ok".to_string(),
@@ -2344,12 +2427,28 @@ let span = self.current_span();
                     };
                     self.advance();
                     
-                    // Check for pattern data: Variant(field) or just Variant
+                    // Check for pattern data: Variant(field1, field2, ...) or Variant(_) or just Variant
                     let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
                         self.advance();
-                        let field = self.expect_identifier()?;
+                        let mut fields = Vec::new();
+                        loop {
+                            if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                                fields.push(name.clone());
+                                self.advance();
+                            } else if let Some(Ok(Token::Underscore)) = self.current_token() {
+                                fields.push("_".to_string());
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
                         self.expect(Token::RParen)?;
-                        format!("{}:{}", pattern_name, field)
+                        format!("{}({})", pattern_name, fields.join(","))
                     } else {
                         pattern_name.clone()
                     };
@@ -2722,8 +2821,27 @@ let span = self.current_span();
             }
             Some(Ok(Token::LParen)) => {
                 self.advance();
-                self.expect(Token::RParen)?;
-                Type::Void
+                // Check if it's a tuple type or empty ()
+                if let Some(Ok(Token::RParen)) = self.current_token() {
+                    self.advance();
+                    Type::Void
+                } else {
+                    let mut tuple_types = Vec::new();
+                    tuple_types.push(self.parse_type()?);
+                    while let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                        if let Some(Ok(Token::RParen)) = self.current_token() {
+                            break;
+                        }
+                        tuple_types.push(self.parse_type()?);
+                    }
+                    self.expect(Token::RParen)?;
+                    if tuple_types.len() == 1 {
+                        tuple_types.remove(0)
+                    } else {
+                        Type::Tuple(tuple_types)
+                    }
+                }
             }
             Some(Ok(tok)) => return self.spanned_err(format!("Expected type, found {:?}", tok)),
             Some(Err(_)) => return self.spanned_err("Lexer error".to_string()),
@@ -3349,6 +3467,35 @@ let span = self.current_span();
                     Ok(Expr::Identifier("Void".to_string()))
                 }
             }
+            Some(Ok(Token::Ok)) | Some(Ok(Token::Err)) | Some(Ok(Token::Some)) | Some(Ok(Token::None)) => {
+                let name = match self.current_token() {
+                    Some(Ok(Token::Ok)) => "Ok".to_string(),
+                    Some(Ok(Token::Err)) => "Err".to_string(),
+                    Some(Ok(Token::Some)) => "Some".to_string(),
+                    Some(Ok(Token::None)) => "None".to_string(),
+                    _ => unreachable!(),
+                };
+                self.advance();
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call(name, args))
+                } else {
+                    Ok(Expr::Identifier(name))
+                }
+            }
             Some(Ok(Token::LBrace)) => {
                 // Object literal: { field: value, ... }
                 self.advance();
@@ -3373,9 +3520,26 @@ let span = self.current_span();
             }
             Some(Ok(Token::LParen)) => {
                 self.advance();
+                // Check if it's a tuple or just a parenthesized expression
                 let expr = self.parse_expression()?;
-                self.expect(Token::RParen)?;
-                Ok(expr)
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    // It's a tuple
+                    self.advance();
+                    let mut elements = vec![expr];
+                    loop {
+                        elements.push(self.parse_expression()?);
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Tuple(elements))
+                } else {
+                    self.expect(Token::RParen)?;
+                    Ok(expr)
+                }
             }
             Some(Ok(Token::LBracket)) => {
                 self.advance();

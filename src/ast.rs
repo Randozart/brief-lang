@@ -115,6 +115,7 @@ pub enum Type {
     // This keeps the language philosophically pure - no magic types.
     Custom(String),
     Union(Vec<Type>),
+    Tuple(Vec<Type>),
     ContractBound(Box<Type>, Box<Expr>),
     TypeVar(String),
     Generic(String, Vec<Type>),
@@ -341,6 +342,10 @@ pub enum Expr {
     },
     // Block expression: { stmts...; last_expr }
     Block(Vec<Statement>, Box<Expr>),
+    // Tuple destructuring: let (a, b) = expr;
+    TupleDestructure(Vec<String>, Box<Expr>),
+    // Tuple literal: (a, b, c)
+    Tuple(Vec<Expr>),
 }
 
 impl Expr {
@@ -688,6 +693,7 @@ pub enum TopLevel {
 #[derive(Debug, Clone)]
 pub struct StructDefinition {
     pub name: String,
+    pub type_params: Vec<String>,
     pub fields: Vec<StructField>,
     pub transactions: Vec<Transaction>,
     pub view_html: Option<String>,
@@ -720,6 +726,7 @@ impl StructDefinition {
     pub fn new(name: String) -> Self {
         StructDefinition {
             name,
+            type_params: Vec::new(),
             fields: Vec::new(),
             transactions: Vec::new(),
             view_html: None,
