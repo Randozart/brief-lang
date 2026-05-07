@@ -1,0 +1,321 @@
+// Shared Memory - POSIX shm and mmap wrappers for Metropolitan FFI
+// Tier 8: Infrastructure
+
+// ===== SHM ERROR TYPE =====
+
+enum ShmError {
+    ShmAlreadyExists(String),
+    ShmNotFound(String),
+    ShmPermissionDenied,
+    ShmInvalidName(String),
+    ShmNoSpace,
+    ShmOther(String)
+}
+
+// ===== POSIX SHM OPERATIONS (FFI) =====
+
+frgn sig __shm_open(name: String, flags: Int, mode: Int) -> Result<Int, ShmError> from "shm.dbvs";
+frgn sig __shm_unlink(name: String) -> Result<Void, ShmError> from "shm.dbvs";
+frgn sig __ftruncate_shm(fd: Int, length: Int) -> Result<Void, ShmError> from "shm.dbvs";
+frgn sig __shm_list() -> Result<List<String>, ShmError> from "shm.dbvs";
+frgn sig __shm_exists(name: String) -> Bool from "shm.dbvs";
+frgn sig __shm_size(name: String) -> Result<Int, ShmError> from "shm.dbvs";
+
+// ===== NATIVE WRAPPERS =====
+
+// O_CREAT | O_RDWR flags for creating a new shared memory object
+let O_CREAT_RDWR: Int = 0x0202;
+
+// Default permission mode (0644)
+let SHM_MODE_DEFAULT: Int = 0o644;
+
+defn shm_create(name: String, size: Int) -> Result<Int, ShmError> {
+    let fd = __shm_open(name, O_CREAT_RDWR, SHM_MODE_DEFAULT);
+    [fd.is_ok()] {
+        let _ = __ftruncate_shm(fd.value, size);
+        term Ok(fd.value);
+    };
+    term fd;
+}
+
+defn shm_open_existing(name: String) -> Result<Int, ShmError> {
+    // O_RDWR = 0x0002
+    term __shm_open(name, 2, 0);
+}
+
+defn shm_close(name: String) -> Result<Void, ShmError> {
+    term __shm_unlink(name);
+}
+
+defn shm_exists(name: String) -> Bool {
+    term __shm_exists(name);
+}
+
+defn shm_list() -> Result<List<String>, ShmError> {
+    term __shm_list();
+}
+
+defn shm_get_size(name: String) -> Result<Int, ShmError> {
+    term __shm_size(name);
+}
+
+// ===== METROPOLITAN HEADER CONSTANTS =====
+
+// 32-byte header layout offsets
+let METRO_HEADER_SIZE: Int = 32;
+let METRO_OFFSET_STATUS: Int = 0;
+let METRO_OFFSET_CAS_LOCK: Int = 4;
+let METRO_OFFSET_PAYLOAD_SIZE: Int = 8;
+let METRO_OFFSET_MAX_CAPACITY: Int = 12;
+let METRO_OFFSET_ERROR_CODE: Int = 16;
+let METRO_OFFSET_PAYLOAD: Int = 32;
+
+// Status word values
+let METRO_STATUS_IDLE: Int = 0;
+let METRO_STATUS_CONSUMER_REQ: Int = 1;
+let METRO_STATUS_PROVIDER_ACK: Int = 2;
+let METRO_STATUS_PROVIDER_RES: Int = 3;
+let METRO_STATUS_ERROR: Int = 4;
+
+// ===== MMAP ERROR TYPE =====
+
+enum MmapError {
+    MmapInvalidAddress,
+    MmapInvalidLength,
+    MmapPermissionDenied,
+    MmapNoMemory,
+    MmapBoundsError(String),
+    MmapOther(String)
+}
+
+// ===== MMAP OPERATIONS (FFI) =====
+
+frgn sig __mmap_anonymous(length: Int, prot: Int, flags: Int) -> Result<Int, MmapError> from "mmap.dbvs";
+frgn sig __munmap(addr: Int, length: Int) -> Result<Void, MmapError> from "mmap.dbvs";
+frgn sig __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError> from "mmap.dbvs";
+frgn sig __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError> from "mmap.dbvs";
+frgn sig __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError> from "mmap.dbvs";
+frgn sig __mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError> from "mmap.dbvs";
+frgn sig __mmap_write_u32(addr: Int, offset: Int, value: Int) -> Result<Void, MmapError> from "mmap.dbvs";
+
+// PROT_READ | PROT_WRITE flags
+let PROT_READ_WRITE: Int = 0x03;
+let MAP_ANONYMOUS_SHARED: Int = 0x22;
+
+// ===== NATIVE MMAP WRAPPERS =====
+
+defn mmap_alloc(size: Int) -> Result<Int, MmapError> [size > 0][result.is_ok() || result.is_err()] {
+    term __mmap_anonymous(size, PROT_READ_WRITE, MAP_ANONYMOUS_SHARED);
+}
+
+defn mmap_free(addr: Int, size: Int) -> Result<Void, MmapError> {
+    term __munmap(addr, size);
+}
+
+defn mmap_write_bytes(addr: Int, offset: Int, data: List<Int>) -> Result<Void, MmapError> {
+    let len = data.len();
+    term __mmap_write(addr, offset, data, len);
+}
+
+defn mmap_read_bytes(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError> {
+    term __mmap_read(addr, offset, length);
+}
+
+// ===== METROPOLITAN CHANNEL OPERATIONS =====
+
+// Write a u32 status word to the Metropolitan header
+defn metro_write_status(addr: Int, status: Int) -> Result<Void, MmapError> {
+    term __mmap_write_u32(addr, METRO_OFFSET_STATUS, status);
+}
+
+// Read the u32 status word from the Metropolitan header
+defn metro_read_status(addr: Int) -> Result<Int, MmapError> {
+    term __mmap_read_u32(addr, METRO_OFFSET_STATUS);
+}
+
+// Write payload size to the Metropolitan header
+defn metro_write_payload_size(addr: Int, size: Int) -> Result<Void, MmapError> {
+    term __mmap_write_u32(addr, METRO_OFFSET_PAYLOAD_SIZE, size);
+}
+
+// Read payload size from the Metropolitan header
+defn metro_read_payload_size(addr: Int) -> Result<Int, MmapError> {
+    term __mmap_read_u32(addr, METRO_OFFSET_PAYLOAD_SIZE);
+}
+
+// Write max capacity to the Metropolitan header
+defn metro_write_max_capacity(addr: Int, capacity: Int) -> Result<Void, MmapError> {
+    term __mmap_write_u32(addr, METRO_OFFSET_MAX_CAPACITY, capacity);
+}
+
+// Initialize a Metropolitan channel header (set all fields to defaults)
+defn metro_init_header(addr: Int, capacity: Int) -> Result<Void, MmapError> {
+    metro_write_status(addr, METRO_STATUS_IDLE)?;
+    metro_write_payload_size(addr, 0)?;
+    metro_write_max_capacity(addr, capacity)?;
+    term __mmap_write_u32(addr, METRO_OFFSET_CAS_LOCK, 0);
+}
+
+// Wait for the channel to be idle (spin-wait with timeout)
+defn metro_wait_idle(addr: Int, timeout_ms: Int) -> Result<Void, MmapError> {
+    let start: Int = 0;
+    [time.now() - start < timeout_ms] {
+        let status = metro_read_status(addr);
+        [status.is_ok()] {
+            [status.value == METRO_STATUS_IDLE] {
+                term Ok();
+            };
+        };
+        time.sleep_ms(1);
+    };
+    term Err(MmapOther("Timeout waiting for idle"));
+}
+
+// Signal a request by setting status word
+defn metro_signal_request(addr: Int) -> Result<Void, MmapError> {
+    metro_write_status(addr, METRO_STATUS_CONSUMER_REQ)
+}
+
+// Signal a response by setting status word
+defn metro_signal_response(addr: Int) -> Result<Void, MmapError> {
+    metro_write_status(addr, METRO_STATUS_PROVIDER_RES)
+}
+
+// Signal acknowledgment by setting status word
+defn metro_signal_ack(addr: Int) -> Result<Void, MmapError> {
+    metro_write_status(addr, METRO_STATUS_PROVIDER_ACK)
+}
+
+// Reset channel to idle state
+defn metro_reset(addr: Int) -> Result<Void, MmapError> {
+    metro_write_status(addr, METRO_STATUS_IDLE)?;
+    metro_write_payload_size(addr, 0)
+}
+
+// ===== ATOMIC OPERATIONS (FFI) =====
+
+enum AtomicError {
+    AtomicInvalidAddress,
+    AtomicAlignmentError,
+    AtomicOther(String)
+}
+
+frgn sig __atomic_load_u32(addr: Int, offset: Int) -> Result<Int, AtomicError> from "atomic.dbvs";
+frgn sig __atomic_store_u32(addr: Int, offset: Int, value: Int) -> Result<Void, AtomicError> from "atomic.dbvs";
+frgn sig __atomic_cas_u32(addr: Int, offset: Int, expected: Int, new_value: Int) -> Result<Int, AtomicError> from "atomic.dbvs";
+frgn sig __atomic_fence() -> Result<Void, AtomicError> from "atomic.dbvs";
+frgn sig __atomic_xchg_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError> from "atomic.dbvs";
+frgn sig __atomic_add_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError> from "atomic.dbvs";
+
+// ===== ATOMIC WRAPPERS =====
+
+defn atomic_load(addr: Int, offset: Int) -> Result<Int, AtomicError> {
+    term __atomic_load_u32(addr, offset);
+}
+
+defn atomic_store(addr: Int, offset: Int, value: Int) -> Result<Void, AtomicError> {
+    term __atomic_store_u32(addr, offset, value);
+}
+
+defn atomic_cas(addr: Int, offset: Int, expected: Int, new_value: Int) -> Result<Int, AtomicError> {
+    term __atomic_cas_u32(addr, offset, expected, new_value);
+}
+
+defn atomic_fence() -> Result<Void, AtomicError> {
+    term __atomic_fence();
+}
+
+defn atomic_xchg(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError> {
+    term __atomic_xchg_u32(addr, offset, value);
+}
+
+defn atomic_add(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError> {
+    term __atomic_add_u32(addr, offset, value);
+}
+
+// ===== ATOMIC METROPOLITAN OPERATIONS =====
+
+// Atomic status word read
+defn metro_atomic_status(addr: Int) -> Result<Int, AtomicError> {
+    term __atomic_load_u32(addr, METRO_OFFSET_STATUS);
+}
+
+// Atomic status word write
+defn metro_atomic_set_status(addr: Int, status: Int) -> Result<Void, AtomicError> {
+    term __atomic_store_u32(addr, METRO_OFFSET_STATUS, status);
+}
+
+// Atomic CAS on status word (for lock-free handshakes)
+defn metro_atomic_cas_status(addr: Int, expected: Int, new_value: Int) -> Result<Int, AtomicError> {
+    term __atomic_cas_u32(addr, METRO_OFFSET_STATUS, expected, new_value);
+}
+
+// Atomic CAS on the lock field
+defn metro_atomic_acquire_lock(addr: Int) -> Result<Int, AtomicError> {
+    // Try to set CAS_LOCK from 0 to 1
+    term __atomic_cas_u32(addr, METRO_OFFSET_CAS_LOCK, 0, 1);
+}
+
+// Release the lock
+defn metro_atomic_release_lock(addr: Int) -> Result<Void, AtomicError> {
+    term __atomic_store_u32(addr, METRO_OFFSET_CAS_LOCK, 0);
+}
+
+// ===== METROPOLITAN CHANNEL STRUCT =====
+
+struct MetroChannel {
+    name: String,
+    addr: Int,
+    capacity: Int
+}
+
+defn metro_channel_create(name: String, capacity: Int) -> Result<MetroChannel, String> {
+    let shm_name = "metro_" + name;
+    let addr = mmap_alloc(METRO_HEADER_SIZE + capacity);
+    [addr.is_ok()] {
+        metro_init_header(addr.value, capacity)?;
+        term Ok(MetroChannel {
+            name: name,
+            addr: addr.value,
+            capacity: capacity
+        });
+    };
+    term Err("Failed to allocate shared memory");
+}
+
+defn metro_channel_destroy(channel: MetroChannel) -> Result<Void, String> {
+    term mmap_free(channel.addr, METRO_HEADER_SIZE + channel.capacity);
+}
+
+defn metro_channel_send(channel: MetroChannel, data: List<Int>) -> Result<Void, String> {
+    let len = data.len();
+    [len <= channel.capacity] {
+        metro_wait_idle(channel.addr, 5000)?;
+        mmap_write_bytes(channel.addr, METRO_OFFSET_PAYLOAD, data)?;
+        metro_write_payload_size(channel.addr, len)?;
+        metro_signal_request(channel.addr)?;
+        term Ok();
+    };
+    term Err("Payload exceeds channel capacity");
+}
+
+defn metro_channel_recv(channel: MetroChannel, timeout_ms: Int) -> Result<List<Int>, String> {
+    let start: Int = 0;
+    [time.now() - start < timeout_ms] {
+        let status = metro_read_status(channel.addr);
+        [status.is_ok()] {
+            [status.value == METRO_STATUS_CONSUMER_REQ] {
+                let size = metro_read_payload_size(channel.addr);
+                [size.is_ok()] {
+                    let data = mmap_read_bytes(channel.addr, METRO_OFFSET_PAYLOAD, size.value);
+                    [data.is_ok()] {
+                        metro_reset(channel.addr)?;
+                        term Ok(data.value);
+                    };
+                };
+            };
+        };
+        time.sleep_ms(1);
+    };
+    term Err("Timeout waiting for request");
+}

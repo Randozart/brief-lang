@@ -187,12 +187,27 @@ pub struct DbriefEnum {
 }
 
 #[derive(Debug, Clone)]
+pub struct DbriefServiceField {
+    pub direction: String, // "INPUT" or "OUTPUT"
+    pub name: String,
+    pub field_type: DbriefType,
+}
+
+#[derive(Debug, Clone)]
+pub struct DbriefService {
+    pub name: String,
+    pub fields: Vec<DbriefServiceField>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct DbriefProgram {
     pub imports: Vec<ImportStmt>,
     pub registers: Vec<DbriefRegister>,
     pub aliases: Vec<DbriefAlias>,
     pub structs: Vec<DbriefStruct>,
     pub enums: Vec<DbriefEnum>,
+    pub services: Vec<DbriefService>,
     pub rules: Vec<DbriefRule>,
     pub records: Vec<DbriefRecord>,
     pub checks: Vec<DbriefContract>,
@@ -205,6 +220,7 @@ pub struct DbvsProgram {
     pub registers: Vec<DbriefRegister>,
     pub structs: Vec<DbriefStruct>,
     pub enums: Vec<DbriefEnum>,
+    pub services: Vec<DbriefService>,
     pub aliases: Vec<DbriefAlias>,
 }
 

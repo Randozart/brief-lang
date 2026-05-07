@@ -32,6 +32,7 @@ impl DbriefParser {
             aliases: Vec::new(),
             structs: Vec::new(),
             enums: Vec::new(),
+            services: Vec::new(),
             rules: Vec::new(),
             records: Vec::new(),
             checks: Vec::new(),
@@ -70,6 +71,12 @@ impl DbriefParser {
                 }
                 Some('s') if self.starts_with("struct") => {
                     program.structs.push(self.parse_struct()?);
+                }
+                Some('S') if self.starts_with("SERVICE") => {
+                    program.services.push(self.parse_service()?);
+                }
+                Some('s') if self.starts_with("service") => {
+                    program.services.push(self.parse_service()?);
                 }
                 Some('E') if self.starts_with("ENUM") => {
                     program.enums.push(self.parse_enum()?);
@@ -417,6 +424,51 @@ impl DbriefParser {
         }
 
         Ok(DbriefEnum { name, variants })
+    }
+
+    fn parse_service(&mut self) -> Result<DbriefService, String> {
+        self.consume_keyword("SERVICE")?;
+        self.skip_whitespace();
+
+        let name = self.parse_identifier()?;
+        self.consume('{')?;
+
+        let mut fields = Vec::new();
+        loop {
+            self.skip_whitespace();
+            if self.peek() == Some('}') {
+                self.advance();
+                break;
+            }
+
+            let direction = self.parse_identifier()?;
+            let direction_upper = direction.to_uppercase();
+            if direction_upper != "INPUT" && direction_upper != "OUTPUT" {
+                return Err(format!(
+                    "Service field direction must be INPUT or OUTPUT, got '{}'",
+                    direction
+                ));
+            }
+
+            self.skip_whitespace();
+            let field_name = self.parse_identifier()?;
+            self.consume(':')?;
+            self.skip_whitespace();
+            let field_type = self.parse_type()?;
+            self.consume(';')?;
+
+            fields.push(DbriefServiceField {
+                direction: direction_upper,
+                name: field_name,
+                field_type,
+            });
+        }
+
+        Ok(DbriefService {
+            name,
+            fields,
+            description: None,
+        })
     }
 
     fn parse_rule(&mut self) -> Result<DbriefRule, String> {
@@ -995,12 +1047,13 @@ mod tests {
 pub fn parse_dbvs(input: &str) -> Result<DbvsProgram, String> {
     let mut parser = DbriefParser::new(input.to_string());
     let mut program = parser.parse()?;
-    
+
     Ok(DbvsProgram {
         imports: program.imports,
         registers: program.registers,
         structs: program.structs,
         enums: program.enums,
+        services: program.services,
         aliases: program.aliases,
     })
 }
@@ -1061,10 +1114,59 @@ mod dbvs_tests {
         let result = parse_dbvs(input);
         assert!(result.is_ok());
         let program = result.unwrap();
-        
+
         for alias in &program.aliases {
             assert!(alias.address.is_none(), "dbvs aliases should not have addresses");
         }
+    }
+
+    #[test]
+    fn test_parse_service_basic() {
+        let input = r#"
+            SERVICE ImageClassifier {
+                INPUT img_data: Vector[UInt[8], 4096];
+                OUTPUT label: String;
+                OUTPUT confidence: Float;
+            }
+        "#;
+        let result = parse_dbvs(input);
+        assert!(result.is_ok(), "Failed to parse service: {:?}", result);
+        let program = result.unwrap();
+        assert_eq!(program.services.len(), 1);
+
+        let service = &program.services[0];
+        assert_eq!(service.name, "ImageClassifier");
+        assert_eq!(service.fields.len(), 3);
+
+        let input_field = &service.fields[0];
+        assert_eq!(input_field.direction, "INPUT");
+        assert_eq!(input_field.name, "img_data");
+
+        let output_field = &service.fields[1];
+        assert_eq!(output_field.direction, "OUTPUT");
+        assert_eq!(output_field.name, "label");
+    }
+
+    #[test]
+    fn test_parse_service_multiple() {
+        let input = r#"
+            SERVICE WeatherApi {
+                INPUT city: String;
+                OUTPUT temperature: Float;
+                OUTPUT humidity: Float;
+            }
+
+            SERVICE ImageClassifier {
+                INPUT img_data: Vector[UInt[8], 4096];
+                OUTPUT label: String;
+            }
+        "#;
+        let result = parse_dbvs(input);
+        assert!(result.is_ok(), "Failed to parse services: {:?}", result);
+        let program = result.unwrap();
+        assert_eq!(program.services.len(), 2);
+        assert_eq!(program.services[0].name, "WeatherApi");
+        assert_eq!(program.services[1].name, "ImageClassifier");
     }
 }
 

@@ -17,3 +17,4 @@
 //! Property-based fuzzing using proptest to verify compiler correctness.
 
 pub mod ast_generator;
+pub mod concolic;
