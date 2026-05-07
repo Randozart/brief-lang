@@ -222,6 +222,15 @@ impl Reactor {
                 }
             }
             Statement::Unification { .. } => Ok(StmtResult::Continue),
+            Statement::LocalTrigger { name, expr, .. } => {
+                // Local trigger: evaluate expression if present, store result
+                if let Some(e) = expr {
+                    let value = interp.eval_expr(e)?;
+                    interp.state.insert(name.clone(), value);
+                }
+                // TODO: Full async yield/await semantics with rollback support
+                Ok(StmtResult::Continue)
+            }
         }
     }
 }

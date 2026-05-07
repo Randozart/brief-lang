@@ -24,7 +24,7 @@
 
 use brief_compiler::{
     annotator, ast, backend, dbrief, desugarer, errors, hardware_validator, import_resolver, interpreter,
-    linkage, lsp, manifest, parser, proof_engine, rbv, typechecker, view_compiler,
+    linkage, lsp, manifest, memory_spec, parser, proof_engine, rbv, typechecker, view_compiler,
     target_spec::{self, TargetSpec},
 };
 use notify::Watcher;
@@ -32,6 +32,51 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// Emit memory spec file if requested
+fn emit_memory_spec_if_requested(
+    program: &ast::Program,
+    out_dir: Option<&Path>,
+    stem: &str,
+    emit: bool,
+    format: &str,
+    target: &str,
+) {
+    if !emit {
+        return;
+    }
+
+    let mut spec = memory_spec::MemorySpec::new(target);
+    spec.collect_from_program(program);
+
+    let out_path = out_dir.map(|d| d.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    fs::create_dir_all(&out_path).ok();
+
+    let (content, ext) = if format == "toml" {
+        match spec.to_toml() {
+            Ok(c) => (c, "toml"),
+            Err(e) => {
+                eprintln!("Warning: Failed to serialize memory spec to TOML: {}", e);
+                return;
+            }
+        }
+    } else {
+        match spec.to_json() {
+            Ok(c) => (c, "json"),
+            Err(e) => {
+                eprintln!("Warning: Failed to serialize memory spec to JSON: {}", e);
+                return;
+            }
+        }
+    };
+
+    let spec_path = out_path.join(format!("{}_memory_spec.{}", stem, ext));
+    if let Err(e) = fs::write(&spec_path, &content) {
+        eprintln!("Warning: Failed to write memory spec: {}", e);
+    } else {
+        println!("  Memory spec written: {}", spec_path.display());
+    }
+}
 
 fn format_hardware_diagnostics(
     diags: &[errors::Diagnostic],
@@ -308,6 +353,8 @@ fn print_usage(program: &str) {
     eprintln!("  --no-stdlib          Disable standard library bindings");
     eprintln!("  --stdlib-path <path> Use custom standard library path");
     eprintln!("  --target <spec>      Target spec TOML (e.g., hosted_c.toml, linux_kernel.toml)");
+    eprintln!("  --emit-memory-spec   Output memory allocation spec alongside compiled code");
+    eprintln!("  --memory-spec-toml   Output memory spec as TOML (default: JSON)");
     eprintln!("  -v, --verbose        Verbose output");
     eprintln!("  --quiet, --whisper   Minimal output (for CI/automated use)");
     eprintln!("  -h, --help           Show this help");
@@ -606,6 +653,8 @@ fn run_build(
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
     out_dir: Option<&Path>,
+    emit_memory_spec: bool,
+    memory_spec_format: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Detect source type from extension
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -614,7 +663,7 @@ fn run_build(
         "bv" => {
             // .bv files: Transpile to Rust and compile to native executable
             println!("Building .bv file: transpiling to Rust...");
-            run_rust(file_path, out_dir, no_stdlib, stdlib_path, None)?;
+            run_rust(file_path, out_dir, no_stdlib, stdlib_path, None, emit_memory_spec, memory_spec_format)?;
             
             // Try to compile the generated Rust
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
@@ -1097,6 +1146,8 @@ fn run_rust(
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
     target_spec: Option<TargetSpec>,
+    emit_memory_spec: bool,
+    memory_spec_format: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to Native Rust: {}", file_path.display());
 
@@ -1146,6 +1197,16 @@ fn run_rust(
     fs::write(&out_path, &output)?;
     println!("  Native Rust generated: {}", out_path.display());
 
+    // Emit memory spec if requested
+    emit_memory_spec_if_requested(
+        &program,
+        out_dir,
+        stem,
+        emit_memory_spec,
+        memory_spec_format,
+        "rust",
+    );
+
     Ok(out_path)
 }
 
@@ -1154,6 +1215,12 @@ fn run_compile_unified(args: &[String]) {
     let mut target: Option<&str> = None;
     let mut out_dir = None;
     let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
+    let emit_memory_spec = args.contains(&"--emit-memory-spec".to_string());
+    let memory_spec_format = if args.contains(&"--memory-spec-toml".to_string()) {
+        "toml"
+    } else {
+        "json"
+    };
 
     // Parse arguments
     let mut i = 2;
@@ -1271,7 +1338,7 @@ fn run_compile_unified(args: &[String]) {
             }
         },
         "rust" => {
-            match run_rust_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref()) {
+            match run_rust_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref(), emit_memory_spec, memory_spec_format) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1363,8 +1430,10 @@ fn run_rust_compile(
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
     target: Option<&TargetSpec>,
+    emit_memory_spec: bool,
+    memory_spec_format: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_rust(file_path, out_dir, no_stdlib, stdlib_path, target.cloned())
+    run_rust(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), emit_memory_spec, memory_spec_format)
 }
 
 fn run_cobol_compile(
@@ -2521,6 +2590,12 @@ fn main() {
 
     let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
     let no_stdlib = args.contains(&"--no-stdlib".to_string());
+    let emit_memory_spec = args.contains(&"--emit-memory-spec".to_string());
+    let memory_spec_format = if args.contains(&"--memory-spec-toml".to_string()) {
+        "toml"
+    } else {
+        "json"
+    };
     let stdlib_path = args
         .iter()
         .position(|a| a == "--stdlib-path")
@@ -2581,7 +2656,7 @@ fn main() {
 
             if let Some(path) = file_path {
                 let out = out_dir.as_deref();
-                match run_build(&path, verbose, no_stdlib, stdlib_path, out) {
+                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format) {
                     Ok(output) => {
                         println!("Build complete: {}", output.display());
                     }
@@ -2619,7 +2694,7 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), None) {
+                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), None, emit_memory_spec, memory_spec_format) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }

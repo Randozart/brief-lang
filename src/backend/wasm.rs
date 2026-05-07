@@ -1358,6 +1358,16 @@ impl WasmGenerator {
                     name, pattern, expr_code
                 ));
             }
+            Statement::LocalTrigger { name, ty, expr, .. } => {
+                // Local trigger: async wait point inside transaction
+                let _ty_debug = format!("{:?}", ty);
+                let expr_code = expr.as_ref().map(|e| self.expr_to_js_value(e)).unwrap_or_default();
+                output.push_str(&format!(
+                    "        // trg! {}: {} = {}\n",
+                    name, _ty_debug, expr_code
+                ));
+                // TODO: Emit async yield/await code for local triggers
+            }
         }
     }
 

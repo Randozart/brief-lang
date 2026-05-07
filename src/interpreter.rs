@@ -446,6 +446,15 @@ impl Interpreter {
                 }
             }
             Statement::Unification { .. } => {}
+            Statement::LocalTrigger { name, expr, .. } => {
+                // Local trigger: await async event inside transaction
+                // For now, evaluate the expression if present and store the result
+                if let Some(e) = expr {
+                    let value = self.eval_expr(e)?;
+                    self.state.insert(name.clone(), value);
+                }
+                // TODO: Full async yield/await semantics with rollback support
+            }
         }
         Ok(())
     }

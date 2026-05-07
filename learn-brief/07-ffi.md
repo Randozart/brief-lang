@@ -8,13 +8,13 @@ Declare foreign functions with `frgn sig`:
 
 ```brief
 // C function: double sqrt(double x);
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn sig sqrt(x: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
 
 // Rust function: fn log_message(msg: &str);
-frgn! sig log_message(msg: String) -> void from "io.toml";
+frgn! sig log_message(msg: String) -> void from "std/bindings/io.dbvs";
 
 // Python function: def read_file(path: str) -> str;
-frgn sig read_file(path: String) -> Result<String, IOError> from "io.toml";
+frgn sig read_file(path: String) -> Result<String, IOError> from "std/bindings/io.dbvs";
 ```
 
 **FFI Keywords:**
@@ -23,7 +23,29 @@ frgn sig read_file(path: String) -> Result<String, IOError> from "io.toml";
 - `syscall` - Kernel call returning `Result<Int, E>`
 - `syscall!` - Kernel call returning `void`
 
-## 2. Calling Foreign Functions
+## 2. DBVS FFI Schemas
+
+FFI bindings are defined in `.dbvs` (DBrief Schema) files, not TOML. Each binding specifies the function signature, location, target language, and contracts:
+
+```brief
+// std/bindings/math.dbvs
+register 0x00 as "sqrt" {
+    type: Fn(Float) -> Result<Float, MathError>;
+    location: "std::f64::sqrt";
+    target: native;
+    description: "Compute square root of a float";
+    check: [value >= 0.0];
+}
+```
+
+**DBVS Register Fields:**
+- `type` - Function signature (Brief type syntax)
+- `location` - Target implementation path (e.g., `std::f64::sqrt`)
+- `target` - Target language (`native`, `c`, `rust`, `python`)
+- `description` - Human-readable description
+- `check` - Precondition contract
+
+## 3. Calling Foreign Functions
 
 ```brief
 import std.math;
@@ -45,7 +67,7 @@ txn calculate() [true][true] {
 };
 ```
 
-## 3. Error Handling
+## 4. Error Handling
 
 Always handle FFI errors:
 
@@ -64,7 +86,7 @@ let result = read_file("data.txt");
 };
 ```
 
-## 4. Metropolitan FFI (Zero-Copy)
+## 5. Metropolitan FFI (Zero-Copy)
 
 For high-performance FFI, use Metropolitan FFI:
 
@@ -89,9 +111,29 @@ term;
 - ✅ Built-in synchronization
 - ✅ 10-100x faster than traditional FFI
 
-See [METROPOLITAN_FFI.md](../METROPOLITAN_FFI.md) for complete guide.
+**How it works:**
+1. Brief creates shared memory regions via OS-level `mmap`
+2. Foreign side receives generated C/Rust/Python headers with memory addresses
+3. Both sides communicate through atomic status words
+4. No context switches or syscalls after setup
 
-## 5. Type Mapping
+### Generating Foreign Side Code
+
+The Metropolitan Hub can generate headers for the foreign side:
+
+```rust
+// In your Rust code
+let hub = MetropolitanHub::new();
+let channel = hub.create_channel("ml_inference", "rust", 4096, 4096)?;
+
+// Generate Rust module for foreign side
+let rust_code = hub.generate_rust_module("ml_inference")?;
+// Write rust_code to a file and compile it
+```
+
+See [METROPOLITAN_FFI.md](../docs/METROPOLITAN_FFI.md) for complete guide.
+
+## 6. Type Mapping
 
 | Brief Type | C Type | Rust Type | Python Type |
 |------------|--------|-----------|-------------|
@@ -103,16 +145,19 @@ See [METROPOLITAN_FFI.md](../METROPOLITAN_FFI.md) for complete guide.
 | `Char` | `char32_t` | `char` | `str` (len=1) |
 | `String` | `const char*` | `&str` | `str` |
 | `Data` | `uint8_t*` | `&[u8]` | `bytes` |
+| `u8` | `uint8_t` | `u8` | `int` |
+| `i32` | `int32_t` | `i32` | `int` |
+| `u64` | `uint64_t` | `u64` | `int` |
 
-## 6. Complete Example: Database Access
+## 7. Complete Example: Database Access
 
 ```brief
 // database.bv
 
 // Foreign function signatures
-frgn sig db_connect(host: String, port: Int) -> Result<DbHandle, DbError> from "db.toml";
-frgn sig db_query(handle: DbHandle, sql: String) -> Result<ResultSet, DbError> from "db.toml";
-frgn sig db_close(handle: DbHandle) -> Result<Void, DbError> from "db.toml";
+frgn sig db_connect(host: String, port: Int) -> Result<DbHandle, DbError> from "db.dbvs";
+frgn sig db_query(handle: DbHandle, sql: String) -> Result<ResultSet, DbError> from "db.dbvs";
+frgn sig db_close(handle: DbHandle) -> Result<Void, DbError> from "db.dbvs";
 
 struct DbHandle {
     id: Int
@@ -146,13 +191,13 @@ txn connect_to_database() [true][true] {
 };
 ```
 
-## 7. Complete Example: HTTP Client
+## 8. Complete Example: HTTP Client
 
 ```brief
 // http_client.bv
 
-frgn sig http_get(url: String) -> Result<String, HttpError> from "http.toml";
-frgn sig http_post(url: String, body: String) -> Result<String, HttpError> from "http.toml";
+frgn sig http_get(url: String) -> Result<String, HttpError> from "http.dbvs";
+frgn sig http_post(url: String, body: String) -> Result<String, HttpError> from "http.dbvs";
 
 defn fetch_json(url: String) -> Result<String, String> {
     let result = http_get(url);
@@ -186,7 +231,7 @@ txn main() [true][true] {
 
 ## Exercises
 
-1. Create FFI bindings for a C math library
+1. Create FFI bindings for a C math library using a `.dbvs` schema
 2. Implement a Python plugin system using Metropolitan FFI
 3. Build a database wrapper with error handling
 4. Create an HTTP client with timeout support

@@ -129,8 +129,15 @@ pub enum Token {
     #[token("enum")]
     #[token("ENUM")]
     Enum,
+    #[token("trg!")]
+    #[token("TRG!")]
+    #[token("trigger!")]
+    #[token("TRIGGER!")]
+    TrgBang,
     #[token("trg")]
     #[token("TRG")]
+    #[token("trigger")]
+    #[token("TRIGGER")]
     Trg,
     #[token("link")]
     #[token("LINK")]

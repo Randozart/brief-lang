@@ -2421,6 +2421,28 @@ let span = self.current_span();
                     })
                 }
             }
+            Some(Ok(Token::TrgBang)) => {
+                self.advance();
+                let name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let ty = self.parse_type()?;
+                let expr = if let Some(Ok(Token::Eq)) = self.current_token() {
+                    self.advance();
+                    Some(self.parse_expression()?)
+                } else {
+                    None
+                };
+                self.expect(Token::Semicolon)?;
+                let span = self.current_span();
+                Ok(Statement::LocalTrigger { name, ty, expr, span })
+            }
+            Some(Ok(Token::Trg)) => {
+                self.spanned_err(
+                    "Local triggers introduce asynchronous rollback risks. \
+                     You must use 'trg!' or 'trigger!' to explicitly acknowledge this boundary. \
+                     (Top-level trigger declarations use 'trg' without '!')".to_string(),
+                )
+            }
             _ => {
                 // Expression statement or Assignment/Unification
                 let expr = self.parse_expression()?;
@@ -3514,6 +3536,77 @@ mod parser_tests {
         assert!(result.is_ok(), "Should parse @ /x1 syntax: {:?}", result.err());
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
             assert!(matches!(&decl.ty, Type::Constrained(_, BitRange::Any(1))));
+        }
+    }
+
+    #[test]
+    fn test_parse_local_trigger_bang() {
+        // Test trg! inside transaction
+        let s = r#"txn Foo [true][true] { trg! resp: Int = fetch(); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse trg! inside transaction: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            assert_eq!(txn.body.len(), 2);
+            match &txn.body[0] {
+                Statement::LocalTrigger { name, ty, expr, .. } => {
+                    assert_eq!(name, "resp");
+                    assert!(matches!(ty, Type::Int));
+                    assert!(expr.is_some());
+                }
+                _ => panic!("Expected LocalTrigger statement"),
+            }
+        } else {
+            panic!("Expected Transaction item");
+        }
+    }
+
+    #[test]
+    fn test_parse_local_trigger_bang_aliases() {
+        // Test trigger! alias
+        let s = r#"txn Foo [true][true] { trigger! resp: Bool = check(); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse trigger! inside transaction: {:?}", result.err());
+
+        // Test TRG! uppercase
+        let s = r#"txn Foo [true][true] { TRG! resp: UInt = read(); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse TRG! inside transaction: {:?}", result.err());
+
+        // Test TRIGGER! uppercase
+        let s = r#"txn Foo [true][true] { TRIGGER! resp: String = get(); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse TRIGGER! inside transaction: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_local_trigger_without_bang_errors() {
+        // Test that plain trg inside transaction gives helpful error
+        let s = r#"txn Foo [true][true] { trg resp: Int = fetch(); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_err(), "Should error on plain trg inside transaction");
+        if let Err(e) = result {
+            let msg = format!("{}", e);
+            assert!(msg.contains("trg!"), "Error should mention trg!: {}", msg);
+            assert!(msg.contains("rollback"), "Error should mention rollback risk: {}", msg);
+        }
+    }
+
+    #[test]
+    fn test_parse_top_level_trigger_without_bang() {
+        // Test that top-level trg (without !) still works
+        let s = r#"trg button: Bool @ 0x1000;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Top-level trg without ! should parse: {:?}", result.err());
+        if let TopLevel::Trigger(trg) = &result.unwrap().items[0] {
+            assert_eq!(trg.name, "button");
+        } else {
+            panic!("Expected Trigger item");
         }
     }
 }

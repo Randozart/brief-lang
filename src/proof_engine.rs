@@ -497,7 +497,7 @@ impl SymbolicExecutor {
                     terminated = true;
                     path_kind = PathKind::Escape;
                 }
-                Statement::Expression(_) | Statement::Unification { .. } => {}
+                Statement::Expression(_) | Statement::Unification { .. } | Statement::LocalTrigger { .. } => {}
             }
         }
 
@@ -1865,6 +1865,7 @@ impl ProofEngine {
                 }
             }
             Statement::Unification { .. } => {}
+            Statement::LocalTrigger { .. } => {}
         }
     }
 

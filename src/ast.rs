@@ -481,6 +481,15 @@ pub enum Statement {
         clobbers: Vec<String>,
         span: Option<Span>,
     },
+
+    // Local trigger declaration (inside transactions): trg! name: Type = expr;
+    // The ! suffix is a psychological speedbump warning of async rollback risk
+    LocalTrigger {
+        name: String,
+        ty: Type,
+        expr: Option<Expr>,
+        span: Option<Span>,
+    },
 }
 
 #[derive(Debug, Clone)]
