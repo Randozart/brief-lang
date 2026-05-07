@@ -421,7 +421,7 @@ brief-compiler/
 
 ## License
 
-Apache 2.0 with excplicit runtime exception
+Apache 2.0 with explicit runtime exception
 
 ---
 
