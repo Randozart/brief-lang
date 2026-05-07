@@ -423,12 +423,12 @@ This plan distills three major architectural initiatives from the conversation:
 7. ✅ Stub handling in all backends (wasm, interpreter, reactor, proof_engine)
 8. ✅ Unit tests for trg! parsing (4 new tests)
 
-### Phase 2: Trigger Elevation (Core Language Change)
-5. Local `trg!` declarations in transactions - AST, parser, typechecker
-6. Pre-evaluation guard system - proof engine, reactor, interpreter
-7. Symbolic invalidation for `trg` variables - proof engine
-8. System triggers stdlib - `lib/std/system.bv`
-9. Software trigger config bindings - DBVS schema, FFI registry
+### Phase 2: Trigger Elevation (Core Language Change) - COMPLETE
+5. ✅ Local `trg!` declarations in transactions - AST, parser, typechecker
+6. ✅ Pre-evaluation guard system - proof engine, reactor, interpreter
+7. ✅ Symbolic invalidation for `trg` variables - proof engine
+8. ✅ System triggers stdlib - `lib/std/system.bv`
+9. ✅ Software trigger config bindings - DBVS schema, FFI registry
 
 ### Phase 3: Fuzzing Infrastructure (Testing)
 10. AST generator (proptest Arbitrary) - `src/fuzzing/`
