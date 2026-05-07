@@ -453,6 +453,10 @@ impl Annotator {
             }
             Expr::ForAll { var, expr } => format!("forall {} in {}", var, self.format_expr(expr)),
             Expr::Exists { var, expr } => format!("exists {} in {}", var, self.format_expr(expr)),
+            Expr::Block(stmts, expr) => {
+                let stmts_str = stmts.iter().map(|s| format!("  {:?}", s)).collect::<Vec<_>>().join(";\n");
+                format!("{{\n{}\n  {}\n}}", stmts_str, self.format_expr(expr))
+            }
         }
     }
 }

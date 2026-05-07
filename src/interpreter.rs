@@ -1576,7 +1576,7 @@ let s_val = self.eval_expr(s)?;
                 
                 Ok(Value::List(result))
             }
-            Expr::ForAll { .. } | Expr::Exists { .. } => {
+            Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) => {
                 Err(RuntimeError::TypeMismatch(
                     "Quantifier expressions not supported in interpreter".to_string(),
                 ))

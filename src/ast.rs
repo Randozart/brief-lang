@@ -339,6 +339,8 @@ pub enum Expr {
         var: String,
         expr: Box<Expr>,
     },
+    // Block expression: { stmts...; last_expr }
+    Block(Vec<Statement>, Box<Expr>),
 }
 
 impl Expr {
@@ -434,7 +436,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     // Assignment: &lhs = expr; or lhs = expr;
     Assignment {

@@ -40,6 +40,8 @@ pub struct Parser<'a> {
     peek: Option<(Result<Token, ()>, logos::Span)>,
     comments: Vec<Comment>,
     current_line: usize,
+    /// Track if we consumed a >> that should serve as > for parent generic level
+    shr_consumed_as_gt: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -55,6 +57,7 @@ impl<'a> Parser<'a> {
             peek,
             comments: Vec::new(),
             current_line: 1,
+            shr_consumed_as_gt: false,
         }
     }
 
@@ -833,14 +836,16 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Eq)?;
                             Some(self.parse_expression()?)
                         } else {
-                            // No initializer - error
-                            return self.spanned_err(format!(
-                                "struct field '{}' must have initial value (e.g., let {} = 0;)",
-                                field_name, field_name
-                            ));
+                            // No initializer - field will be uninitialized
+                            None
                         };
 
-                        self.expect(Token::Semicolon)?;
+                        // Accept both semicolon and comma as field separator
+                        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                            self.advance();
+                        } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        }
                         fields.push(StructField {
                             name: field_name,
                             ty: field_type,
@@ -869,13 +874,16 @@ impl<'a> Parser<'a> {
                             self.advance(); // consume '='
                             Some(self.parse_expression()?)
                         } else {
-                            return self.spanned_err(format!(
-                                "struct field '{}' must have initial value (e.g., let {} = 0;)",
-                                field_name, field_name
-                            ));
+                            // No initializer - field will be uninitialized
+                            None
                         };
 
-                        self.expect(Token::Semicolon)?;
+                        // Accept both semicolon and comma as field separator
+                        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                            self.advance();
+                        } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        }
                         fields.push(StructField {
                             name: field_name,
                             ty: field_type,
@@ -894,7 +902,10 @@ impl<'a> Parser<'a> {
         }
 
         let span = self.current_span();
-        self.expect(Token::Semicolon)?;
+        // Semicolon after struct is optional
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
         Ok(StructDefinition {
             name,
             fields,
@@ -943,14 +954,16 @@ impl<'a> Parser<'a> {
                             self.advance(); // consume '='
                             Some(self.parse_expression()?)
                         } else {
-                            // No initializer - error
-                            return self.spanned_err(format!(
-                                "rstruct field '{}' must have initial value (e.g., let {} = 0;)",
-                                field_name, field_name
-                            ));
+                            // No initializer - field will be uninitialized
+                            None
                         };
 
-                        self.expect(Token::Semicolon)?;
+                        // Accept both semicolon and comma as field separator
+                        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                            self.advance();
+                        } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        }
                         fields.push(StructField {
                             name: field_name,
                             ty: field_type,
@@ -985,13 +998,16 @@ impl<'a> Parser<'a> {
                             self.advance(); // consume '='
                             Some(self.parse_expression()?)
                         } else {
-                            return self.spanned_err(format!(
-                                "rstruct field '{}' must have initial value (e.g., let {} = 0;)",
-                                field_name, field_name
-                            ));
+                            // No initializer - field will be uninitialized
+                            None
                         };
 
-                        self.expect(Token::Semicolon)?;
+                        // Accept both semicolon and comma as field separator
+                        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                            self.advance();
+                        } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        }
                         fields.push(StructField {
                             name: field_name,
                             ty: field_type,
@@ -1052,7 +1068,10 @@ impl<'a> Parser<'a> {
         }
 
         let span = self.current_span();
-        self.expect(Token::Semicolon)?;
+        // Semicolon after rstruct is optional
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
 
         Ok(RStructDefinition {
             name,
@@ -1108,7 +1127,7 @@ impl<'a> Parser<'a> {
                     self.advance();
 
                     // Check for tuple variant: Ok(T) or Err(E)
-                    let variant = if let Some(Ok(Token::LParen)) = self.peek() {
+                    let variant = if let Some(Ok(Token::LParen)) = self.current_token() {
                         self.expect(Token::LParen)?;
                         let mut inner_types = Vec::new();
                         loop {
@@ -1890,7 +1909,10 @@ let span = self.current_span();
             self.expect(Token::LBrace)?;
             let body = self.parse_body()?;
             self.expect(Token::RBrace)?;
-            self.expect(Token::Semicolon)?;
+            // Semicolon after function body is optional
+            if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                self.advance();
+            }
             body
         };
 
@@ -2244,39 +2266,138 @@ let span = self.current_span();
                 Ok(Statement::Escape(expr))
             }
             Some(Ok(Token::Unification)) => {
-                // uni pattern = expr;  (or UNI pattern = expr;)
-                // Pattern can be: identifier or Variant(identifier)
+                // Two syntaxes supported:
+                // 1. uni pattern = expr; (current Brief style)
+                // 2. uni variable(Pattern) = result; (Brief compiler library style)
                 self.advance();
                 
-                // Get the first token (variant name or simple pattern)
-                // Variant names can be identifiers OR type tokens like Data, Ok, Err
+                // Get the first token - could be variable name or pattern
                 let first = match self.current_token() {
                     Some(Ok(Token::Identifier(name))) => name.clone(),
                     Some(Ok(Token::TypeData)) => "Data".to_string(),
                     Some(Ok(Token::Ok)) => "Ok".to_string(),
                     Some(Ok(Token::Err)) => "Err".to_string(),
+                    Some(Ok(Token::Some)) => "Some".to_string(),
+                    Some(Ok(Token::None)) => "None".to_string(),
                     _ => return self.spanned_err("Expected pattern after uni".to_string()),
                 };
                 self.advance();
                 
-                // Check if followed by ( for variant pattern: Variant(field)
-                let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
+                // Check what follows: ( for library style or = for current style
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    // Library style: uni variable(Pattern) = result;
+                    // First token was the variable name, now parse the pattern
+                    let var_name = first;
                     self.advance(); // consume (
-                    let field = self.expect_identifier()?;
+                    
+                    // Parse pattern - could be Variant or Variant(data)
+                    let pattern_name = match self.current_token() {
+                        Some(Ok(Token::Identifier(name))) => name.clone(),
+                        Some(Ok(Token::TypeData)) => "Data".to_string(),
+                        Some(Ok(Token::Ok)) => "Ok".to_string(),
+                        Some(Ok(Token::Err)) => "Err".to_string(),
+                        Some(Ok(Token::Some)) => "Some".to_string(),
+                        Some(Ok(Token::None)) => "None".to_string(),
+                        Some(Ok(Token::TypeInt)) => "Int".to_string(),
+                        Some(Ok(Token::TypeString)) => "String".to_string(),
+                        Some(Ok(Token::TypeBool)) => "Bool".to_string(),
+                        Some(Ok(Token::TypeChar)) => "Char".to_string(),
+                        Some(Ok(Token::Let)) => "KeywordLet".to_string(),
+                        Some(Ok(Token::Const)) => "KeywordConst".to_string(),
+                        Some(Ok(Token::Txn)) => "KeywordTxn".to_string(),
+                        Some(Ok(Token::Rct)) => "KeywordRct".to_string(),
+                        Some(Ok(Token::Async)) => "KeywordAsync".to_string(),
+                        Some(Ok(Token::Term)) => "KeywordTerm".to_string(),
+                        Some(Ok(Token::Escape)) => "KeywordEscape".to_string(),
+                        Some(Ok(Token::Defn)) => "KeywordDefn".to_string(),
+                        Some(Ok(Token::Sig)) => "KeywordSig".to_string(),
+                        Some(Ok(Token::Frgn)) => "KeywordFrgn".to_string(),
+                        Some(Ok(Token::Struct)) => "KeywordStruct".to_string(),
+                        Some(Ok(Token::Enum)) => "KeywordEnum".to_string(),
+                        Some(Ok(Token::Import)) => "KeywordImport".to_string(),
+                        Some(Ok(Token::From)) => "KeywordFrom".to_string(),
+                        Some(Ok(Token::As)) => "KeywordAs".to_string(),
+                        Some(Ok(Token::BoolTrue)) => "KeywordTrue".to_string(),
+                        Some(Ok(Token::BoolFalse)) => "KeywordFalse".to_string(),
+                        Some(Ok(Token::TypeFloat)) => "Float".to_string(),
+                        Some(Ok(Token::TypeVoid)) => "Void".to_string(),
+                        Some(Ok(Token::TypeUInt)) => "UInt".to_string(),
+                        Some(Ok(Token::Rstruct)) => "KeywordRstruct".to_string(),
+                        Some(Ok(Token::Registry)) => "KeywordRegistry".to_string(),
+                        Some(Ok(Token::Trg)) => "KeywordTrg".to_string(),
+                        Some(Ok(Token::TrgBang)) => "KeywordTrgBang".to_string(),
+                        Some(Ok(Token::Syscall)) => "KeywordSyscall".to_string(),
+                        Some(Ok(Token::Resource)) => "KeywordResource".to_string(),
+                        Some(Ok(Token::Rsrc)) => "KeywordRsrc".to_string(),
+                        Some(Ok(Token::Link)) => "KeywordLink".to_string(),
+                        Some(Ok(Token::Asm)) => "KeywordAsm".to_string(),
+                        Some(Ok(Token::Stage)) => "KeywordStage".to_string(),
+                        Some(Ok(Token::On)) => "KeywordOn".to_string(),
+                        Some(Ok(Token::Forall)) => "KeywordForall".to_string(),
+                        Some(Ok(Token::Exists)) => "KeywordExists".to_string(),
+                        Some(Ok(Token::Within)) => "KeywordWithin".to_string(),
+                        Some(Ok(Token::Bank)) => "KeywordBank".to_string(),
+                        Some(Ok(Token::Match)) => "KeywordMatch".to_string(),
+                        Some(Ok(Token::Unification)) => "KeywordUnification".to_string(),
+                        Some(Ok(Token::Render)) => "KeywordRender".to_string(),
+                        _ => return self.spanned_err(format!("Expected pattern variant, found {:?}", self.current_token()).to_string()),
+                    };
+                    self.advance();
+                    
+                    // Check for pattern data: Variant(field) or just Variant
+                    let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.advance();
+                        let field = self.expect_identifier()?;
+                        self.expect(Token::RParen)?;
+                        format!("{}:{}", pattern_name, field)
+                    } else {
+                        pattern_name.clone()
+                    };
+                    
                     self.expect(Token::RParen)?;
-                    format!("{}:{}", first, field)
+                    self.expect(Token::Eq)?;
+                    // Check for block-style result: { stmts... }
+                    let expr = if let Some(Ok(Token::LBrace)) = self.current_token() {
+                        self.advance();
+                        let mut stmts = Vec::new();
+                        loop {
+                            if let Some(Ok(Token::RBrace)) = self.current_token() {
+                                self.advance();
+                                break;
+                            }
+                            stmts.push(self.parse_statement()?);
+                        }
+                        // Block needs a final expression - use a placeholder for now
+                        Expr::Block(stmts, Box::new(Expr::Bool(true)))
+                    } else {
+                        self.parse_expression()?
+                    };
+                    self.expect(Token::Semicolon)?;
+                    Ok(Statement::Unification {
+                        name: var_name,
+                        pattern,
+                        expr,
+                    })
                 } else {
-                    first
-                };
-                
-                self.expect(Token::Eq)?;
-                let expr = self.parse_expression()?;
-                self.expect(Token::Semicolon)?;
-                Ok(Statement::Unification {
-                    name: "uni".to_string(),
-                    pattern,
-                    expr,
-                })
+                    // Current Brief style: uni pattern = expr;
+                    let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.advance();
+                        let field = self.expect_identifier()?;
+                        self.expect(Token::RParen)?;
+                        format!("{}:{}", first, field)
+                    } else {
+                        first
+                    };
+                    
+                    self.expect(Token::Eq)?;
+                    let expr = self.parse_expression()?;
+                    self.expect(Token::Semicolon)?;
+                    Ok(Statement::Unification {
+                        name: "uni".to_string(),
+                        pattern,
+                        expr,
+                    })
+                }
             }
             Some(Ok(Token::Asm)) => {
                 self.advance();
@@ -2627,13 +2748,36 @@ let span = self.current_span();
             let mut type_args = Vec::new();
             loop {
                 type_args.push(self.parse_type()?);
+                // Check if child level consumed Shr as Gt
+                if self.shr_consumed_as_gt {
+                    // Child consumed >> which serves as our closing > too
+                    self.shr_consumed_as_gt = false;
+                    ty = Type::Applied(
+                        match &ty {
+                            Type::Custom(name) => name.clone(),
+                            _ => return self.spanned_err("Generic type must have a base name".to_string()),
+                        },
+                        type_args,
+                    );
+                    return Ok(ty);
+                }
                 if let Some(Ok(Token::Comma)) = self.current_token() {
                     self.advance();
                 } else {
                     break;
                 }
             }
-            self.expect(Token::Gt)?;
+            // Handle >> as two > tokens in generic context
+            if let Some(Ok(Token::Gt)) = self.current_token() {
+                self.advance();
+            } else if let Some(Ok(Token::Shr)) = self.current_token() {
+                // >> in generic context means two > tokens
+                // Mark that we consumed Shr as Gt for parent level
+                self.shr_consumed_as_gt = true;
+                self.advance();
+            } else {
+                return self.spanned_err("Expected '>' to close generic type arguments".to_string());
+            }
             ty = Type::Applied(
                 match &ty {
                     Type::Custom(name) => name.clone(),
@@ -2931,9 +3075,37 @@ let span = self.current_span();
         loop {
             if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
-                let index = self.parse_expression()?;
-                self.expect(Token::RBracket)?;
-                expr = Expr::ListIndex(Box::new(expr), Box::new(index));
+                // Check for slice: start..end or start..end..stride
+                let first = self.parse_expression()?;
+                if let Some(Ok(Token::DotDot)) = self.current_token() {
+                    self.advance();
+                    let second = self.parse_expression()?;
+                    // Check for stride: start..end..stride
+                    if let Some(Ok(Token::DotDot)) = self.current_token() {
+                        self.advance();
+                        let stride = self.parse_expression()?;
+                        self.expect(Token::RBracket)?;
+                        expr = Expr::Slice {
+                            value: Box::new(expr),
+                            start: Some(Box::new(first)),
+                            end: Some(Box::new(second)),
+                            stride: Some(Box::new(stride)),
+                            mask: None,
+                        };
+                    } else {
+                        self.expect(Token::RBracket)?;
+                        expr = Expr::Slice {
+                            value: Box::new(expr),
+                            start: Some(Box::new(first)),
+                            end: Some(Box::new(second)),
+                            stride: None,
+                            mask: None,
+                        };
+                    }
+                } else {
+                    self.expect(Token::RBracket)?;
+                    expr = Expr::ListIndex(Box::new(expr), Box::new(first));
+                }
             } else if let Some(Ok(Token::Dot)) = self.current_token() {
                 self.advance();
                 let member_name = self.expect_identifier()?;

@@ -448,4 +448,17 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::Char('x'))));
         assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
     }
+
+    #[test]
+    fn test_nested_generic_tokens() {
+        // Test that >> is lexed as Shr, not two Gt tokens
+        let mut lexer = Token::lexer("List<List<Int>>");
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("List".to_string()))));
+        assert_eq!(lexer.next(), Some(Ok(Token::Lt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("List".to_string()))));
+        assert_eq!(lexer.next(), Some(Ok(Token::Lt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Shr)));  // >> is Shr
+        assert_eq!(lexer.next(), None);
+    }
 }
