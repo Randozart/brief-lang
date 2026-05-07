@@ -159,6 +159,10 @@ pub enum PathKind {
 pub struct SymbolicState {
     pub vars: HashMap<String, SymbolicValue>,
     pub constraints: Vec<PathConstraint>,
+    /// Variables marked as triggers (volatile) - each read creates a new symbolic value
+    pub volatile_vars: HashSet<String>,
+    /// Counter for generating unique symbolic variable names for volatile reads
+    pub volatile_read_counter: HashMap<String, usize>,
 }
 
 impl SymbolicState {
@@ -166,6 +170,36 @@ impl SymbolicState {
         SymbolicState {
             vars: HashMap::new(),
             constraints: Vec::new(),
+            volatile_vars: HashSet::new(),
+            volatile_read_counter: HashMap::new(),
+        }
+    }
+
+    /// Mark a variable as volatile (trigger-marked). Reads will create new symbolic values.
+    pub fn mark_volatile(&mut self, name: &str) {
+        self.volatile_vars.insert(name.to_string());
+    }
+
+    /// Check if a variable is volatile (trigger-marked)
+    pub fn is_volatile(&self, name: &str) -> bool {
+        self.volatile_vars.contains(name)
+    }
+
+    /// Get the symbolic value for a variable. For volatile variables, creates a new
+    /// symbolic value each time (simulating that the value may have changed).
+    pub fn get_value(&mut self, name: &str) -> SymbolicValue {
+        if self.is_volatile(name) {
+            // Each read of a volatile variable gets a unique symbolic name
+            let counter = self.volatile_read_counter.entry(name.to_string()).or_insert(0);
+            *counter += 1;
+            let volatile_name = format!("{}@t{}", name, counter);
+            SymbolicValue::Symbolic(volatile_name)
+        } else {
+            // Stable variable: return the stored value or create a symbolic one
+            self.vars
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| SymbolicValue::Symbolic(name.to_string()))
         }
     }
 
@@ -184,11 +218,19 @@ impl SymbolicState {
 
 pub struct SymbolicExecutor {
     errors: Vec<ProofError>,
+    /// Variables marked as triggers (volatile) - each read creates a new symbolic value
+    volatile_vars: HashSet<String>,
 }
 
 impl SymbolicExecutor {
     pub fn new() -> Self {
-        SymbolicExecutor { errors: Vec::new() }
+        SymbolicExecutor { errors: Vec::new(), volatile_vars: HashSet::new() }
+    }
+
+    /// Set the set of volatile (trigger-marked) variable names
+    pub fn with_volatile_vars(mut self, vars: HashSet<String>) -> Self {
+        self.volatile_vars = vars;
+        self
     }
 
     pub fn verify_transaction(&mut self, txn: &Transaction) -> Vec<ProofError> {
@@ -197,6 +239,10 @@ impl SymbolicExecutor {
             let post = &txn.contract.post_condition;
 
             let mut state = self.init_state_from_precondition(pre);
+            // Mark volatile (trigger) variables
+            for var in &self.volatile_vars {
+                state.mark_volatile(var);
+            }
             // ADDED: Inject parameters into symbolic state
             for (p_name, _) in &txn.parameters {
                 state.vars.insert(p_name.clone(), SymbolicValue::Symbolic(p_name.clone()));
@@ -211,6 +257,9 @@ impl SymbolicExecutor {
             );
 
             let mut state = self.init_state_from_precondition(pre);
+            for var in &self.volatile_vars {
+                state.mark_volatile(var);
+            }
             for (p_name, _) in &txn.parameters {
                 state.vars.insert(p_name.clone(), SymbolicValue::Symbolic(p_name.clone()));
             }
@@ -232,6 +281,9 @@ impl SymbolicExecutor {
             }
         } else {
             let mut state = self.init_state_from_precondition(&txn.contract.pre_condition);
+            for var in &self.volatile_vars {
+                state.mark_volatile(var);
+            }
             for (p_name, _) in &txn.parameters {
                 state.vars.insert(p_name.clone(), SymbolicValue::Symbolic(p_name.clone()));
             }
@@ -579,6 +631,10 @@ impl SymbolicExecutor {
         match expr {
             Expr::Bool(b) => *b,
             Expr::Identifier(name) => {
+                // Volatile (trigger) variables are never provably truthy
+                if state.is_volatile(name) {
+                    return false;
+                }
                 if let Some(val) = state.vars.get(name) {
                     match val {
                         SymbolicValue::Concrete(n) => *n != 0,
@@ -603,6 +659,12 @@ impl SymbolicExecutor {
     }
 
     fn eval_eq(&self, l: &Expr, r: &Expr, state: &SymbolicState) -> bool {
+        // Two reads of the same volatile variable are NOT guaranteed equal
+        if let (Expr::Identifier(ln), Expr::Identifier(rn)) = (l, r) {
+            if ln == rn && state.is_volatile(ln) {
+                return false; // Volatile: each read may differ
+            }
+        }
         let lv = self.eval_numeric(l, state);
         let rv = self.eval_numeric(r, state);
         match (lv, rv) {
@@ -631,6 +693,10 @@ impl SymbolicExecutor {
         match expr {
             Expr::Integer(n) => Some(*n),
             Expr::Identifier(name) => {
+                // Volatile (trigger) variables are never concretely evaluable
+                if state.is_volatile(name) {
+                    return None;
+                }
                 if let Some(val) = state.vars.get(name) {
                     match val {
                         SymbolicValue::Concrete(n) => Some(*n),
@@ -727,7 +793,15 @@ impl ProofEngine {
     }
 
     fn verify_contracts(&mut self, program: &Program) {
-        let mut sym_exec = SymbolicExecutor::new();
+        // Collect all trigger variable names (volatile variables)
+        let mut volatile_vars = HashSet::new();
+        for item in &program.items {
+            if let TopLevel::Trigger(trg) = item {
+                volatile_vars.insert(trg.name.clone());
+            }
+        }
+
+        let mut sym_exec = SymbolicExecutor::new().with_volatile_vars(volatile_vars);
 
         for item in &program.items {
             match item {
@@ -2363,7 +2437,7 @@ mod tests {
         );
     }
 
-    #[test]
+     #[test]
     fn test_regular_txn_optional_parameters() {
         let code = r#"
             let count: Int = 0;
@@ -2390,6 +2464,56 @@ mod tests {
             !has_error,
             "Regular transactions with/without parameters should work, got errors: {:?}",
             errors
+        );
+    }
+
+    #[test]
+    fn test_volatile_trigger_variables() {
+        // Test that trigger variables are marked as volatile
+        let mut state = SymbolicState::new();
+        state.mark_volatile("sensor");
+        state.vars.insert("sensor".to_string(), SymbolicValue::Concrete(42));
+        state.vars.insert("stable".to_string(), SymbolicValue::Concrete(42));
+
+        // Volatile variable should be recognized as volatile
+        assert!(state.is_volatile("sensor"));
+        assert!(!state.is_volatile("stable"));
+
+        // eval_numeric should return None for volatile variables
+        let exec = SymbolicExecutor::new();
+        let sensor_expr = Expr::Identifier("sensor".to_string());
+        let stable_expr = Expr::Identifier("stable".to_string());
+
+        assert!(
+            exec.eval_numeric(&sensor_expr, &state).is_none(),
+            "Volatile variable should not be concretely evaluable"
+        );
+        assert!(
+            exec.eval_numeric(&stable_expr, &state).is_some(),
+            "Stable variable should be concretely evaluable"
+        );
+    }
+
+    #[test]
+    fn test_volatile_eq_not_assumed() {
+        // Test that x == x is NOT assumed true for volatile variables
+        let mut state = SymbolicState::new();
+        state.mark_volatile("trigger");
+
+        let exec = SymbolicExecutor::new();
+        let x = Expr::Identifier("trigger".to_string());
+        let y = Expr::Identifier("trigger".to_string());
+
+        // For volatile variables, x == x should NOT be provable
+        assert!(
+            !exec.eval_eq(&x, &y, &state),
+            "Two reads of volatile variable should not be assumed equal"
+        );
+
+        // For non-volatile variables, x == x should be true
+        assert!(
+            exec.eval_eq(&x, &y, &SymbolicState::new()),
+            "Two reads of stable variable should be equal"
         );
     }
 }

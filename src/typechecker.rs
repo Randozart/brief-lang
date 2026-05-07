@@ -643,6 +643,23 @@ impl TypeChecker {
                     self.check_statement(s, is_async);
                 }
             }
+            Statement::LocalTrigger { name, ty, expr, .. } => {
+                // Local trigger: trg! name: Type = expr;
+                // Type-check the expression if present
+                if let Some(e) = expr {
+                    self.check_expr_for_ffi_errors(e);
+                    let expr_ty = self.infer_expression(e);
+                    if !self.types_compatible(&expr_ty, ty) {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: self.type_to_string(ty),
+                            found: self.type_to_string(&expr_ty),
+                            context: format!("trg! {} (local trigger)", name),
+                        });
+                    }
+                }
+                // Declare the trigger variable in the local transaction scope
+                self.declare_variable(name, ty.clone());
+            }
             _ => {}
         }
     }
