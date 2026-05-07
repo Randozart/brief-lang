@@ -224,6 +224,7 @@ cd learn-brief
 2. **[01-basics.md](learn-brief/01-basics.md)** - Variables, types, transactions
 3. **[02-contracts.md](learn-brief/02-contracts.md)** - Preconditions & postconditions
 4. **[03-reactive.md](learn-brief/03-reactive.md)** - Reactive transactions
+5. **[11-triggers.md](learn-brief/11-triggers.md)** - Triggers and reactive I/O (`trg`, `trg!`)
 
 **Full documentation:**
 - [spec/SPEC.md](spec/SPEC.md) - Complete language specification

@@ -508,9 +508,11 @@ impl LspServer {
 
     fn handle_completion(&self, id: lsp_server::RequestId, _params: Value) {
         let mut keywords = vec![
-            "txn", "rct", "let", "const", "sig", "defn", "trg", "import", "from", "term", "escape",
+            "txn", "rct", "let", "const", "sig", "defn", "trg", "trg!", "trigger", "trigger!",
+            "import", "from", "term", "escape",
             "async", "Int", "UInt", "Float", "String", "Bool", "Data", "Void",
-            "TXN", "RCT", "LET", "CONST", "SIG", "DEFN", "TRG", "IMPORT", "FROM", "TERM", "ESCAPE",
+            "TXN", "RCT", "LET", "CONST", "SIG", "DEFN", "TRG", "TRG!", "TRIGGER", "TRIGGER!",
+            "IMPORT", "FROM", "TERM", "ESCAPE",
             "ASYNC", "REGISTER", "ALIAS", "RULE", "CHECK", "IMPORT", "Ok", "Err", "Some", "None",
             "TRUE", "FALSE", "null", "NULL",
         ];

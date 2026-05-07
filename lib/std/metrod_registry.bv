@@ -1,0 +1,105 @@
+// Metro Daemon Registry Types
+// Data structures used by the metrod daemon to track services
+
+// ===== SERVICE ENTRY =====
+
+struct ServiceEntry {
+    name: String,
+    shm_name: String,
+    addr: Int,
+    capacity: Int,
+    payload_size: Int,
+    input_fields: Int,
+    output_fields: Int,
+    registered_at: Int,
+    active: Bool
+}
+
+// ===== REGISTRATION REQUEST =====
+
+struct RegisterRequest {
+    name: String,
+    capacity: Int,
+    input_fields: Int,
+    output_fields: Int
+}
+
+// ===== REGISTRATION RESPONSE =====
+
+enum RegisterResult {
+    RegisterOk(String, Int),
+    RegisterExists(String),
+    RegisterError(String)
+}
+
+// ===== LOOKUP REQUEST =====
+
+struct LookupRequest {
+    name: String
+}
+
+// ===== LOOKUP RESPONSE =====
+
+struct LookupResponse {
+    found: Bool,
+    shm_name: String,
+    addr: Int,
+    capacity: Int,
+    header_offset: Int,
+    payload_offset: Int
+}
+
+// ===== DEREGISTER REQUEST =====
+
+struct DeregisterRequest {
+    name: String
+}
+
+// ===== DAEMON STATUS =====
+
+struct DaemonStatus {
+    service_count: Int,
+    total_memory: Int,
+    uptime_ms: Int,
+    version: String
+}
+
+// ===== MEMORY SPEC JSON FIELDS =====
+
+struct MemorySpecChannel {
+    address: String,
+    header_offset: Int,
+    payload_offset: Int,
+    capacity: Int,
+    input_fields: Int,
+    output_fields: Int
+}
+
+// ===== HELPER: Calculate payload size from service definition =====
+
+defn calculate_payload_size(input_fields: Int, output_fields: Int) -> Int {
+    // Each field gets up to 256 bytes of payload space
+    let field_size: Int = 256;
+    term (input_fields + output_fields) * field_size;
+}
+
+// ===== HELPER: Generate shm name from service name =====
+
+defn make_shm_name(service_name: String) -> String {
+    term "metro_" + service_name;
+}
+
+// ===== HELPER: Format memory spec as JSON string =====
+
+defn format_memory_spec(entry: ServiceEntry) -> String {
+    let spec: String = "{";
+    let spec = spec + "\"channel\": {";
+    let spec = spec + "\"address\": \"" + entry.shm_name + "\",";
+    let spec = spec + "\"header_offset\": 0,";
+    let spec = spec + "\"payload_offset\": 32,";
+    let spec = spec + "\"capacity\": " + to_string(entry.capacity) + ",";
+    let spec = spec + "\"input_fields\": " + to_string(entry.input_fields) + ",";
+    let spec = spec + "\"output_fields\": " + to_string(entry.output_fields);
+    let spec = spec + "}}";
+    term spec;
+}

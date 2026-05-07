@@ -209,6 +209,24 @@ impl RustBackend {
                     self.statement_to_rust(output, s);
                 }
             }
+            Statement::LocalTrigger { name, ty, expr, .. } => {
+                // Local trigger: async wait point inside transaction
+                let _ty_str = match ty {
+                    Type::Int => "i64",
+                    Type::UInt => "u64",
+                    Type::Float => "f64",
+                    Type::Bool => "bool",
+                    Type::String => "String",
+                    _ => "i64",
+                };
+                if let Some(e) = expr {
+                    let expr_code = self.expr_to_rust(e);
+                    output.push_str(&format!("        // trg! {}: await {}\n", name, expr_code));
+                } else {
+                    output.push_str(&format!("        // trg! {}: await external event\n", name));
+                }
+                // TODO: Full async yield/await semantics with rollback support
+            }
             _ => {
                 output.push_str("        // statement type not implemented\n");
             }

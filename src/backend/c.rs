@@ -755,6 +755,23 @@ output.push_str("static void init_wrapper(void) {\n");
                     output.push_str(&format!("    {};\n", expr_code));
                 }
             }
+            Statement::LocalTrigger { name, ty, expr, .. } => {
+                // Local trigger: async wait point inside transaction
+                let _ty_c = match ty {
+                    Type::Int | Type::UInt => "int64_t",
+                    Type::Float => "double",
+                    Type::Bool => "int",
+                    Type::String => "char*",
+                    _ => "int64_t",
+                };
+                if let Some(e) = expr {
+                    let expr_code = self.expr_to_c(e);
+                    output.push_str(&format!("    /* trg! {}: await {} */\n", name, expr_code));
+                } else {
+                    output.push_str(&format!("    /* trg! {}: await external event */\n", name));
+                }
+                // TODO: Full async yield/await semantics with rollback support
+            }
             _ => {
                 output.push_str("    /* statement not implemented */\n");
             }

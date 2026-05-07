@@ -335,6 +335,14 @@ impl Annotator {
                     .unwrap_or_default();
                 format!("{}escape{};\n", spaces, val)
             }
+            Statement::LocalTrigger { name, ty, expr, .. } => {
+                let ty_str = self.type_to_string(ty);
+                let expr_str = expr
+                    .as_ref()
+                    .map(|e| format!(" = {}", self.format_expr(e)))
+                    .unwrap_or_default();
+                format!("{}trg! {}: {}{};\n", spaces, name, ty_str, expr_str)
+            }
             _ => String::new(),
         }
     }
