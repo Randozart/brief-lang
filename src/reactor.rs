@@ -91,6 +91,70 @@ impl Reactor {
         self.dirty_preconditions.clear();
     }
 
+    /// Pre-evaluation guard: Check if a transaction will provably escape
+    /// before running it. This avoids firing FFI calls in transactions that
+    /// would just roll back anyway.
+    ///
+    /// Returns true if any escape guard condition is currently true.
+    fn will_escape(&self, txn: &ReactiveTransaction, interp: &mut Interpreter) -> bool {
+        for stmt in &txn.body {
+            if self.contains_escape_guard(stmt, interp) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Recursively check if a statement contains a guarded escape that would fire
+    fn contains_escape_guard(&self, stmt: &Statement, interp: &mut Interpreter) -> bool {
+        match stmt {
+            Statement::Guarded { condition, statements } => {
+                // Check if this guard's condition is currently true
+                if let Ok(cond_val) = interp.eval_expr(condition) {
+                    if cond_val == Value::Bool(true) {
+                        // Check if any statement in the guard body is an escape
+                        for s in statements {
+                            if self.contains_escape(s) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                // Recursively check nested guards
+                for s in statements {
+                    if self.contains_escape_guard(s, interp) {
+                        return true;
+                    }
+                }
+                false
+            }
+            Statement::LocalTrigger { expr, .. } => {
+                // Check if the trigger expression's result would trigger an escape
+                // For now, just check the expression itself
+                if let Some(e) = expr {
+                    if self.contains_escape_in_expr(e, interp) {
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if a statement is an escape
+    fn contains_escape(&self, stmt: &Statement) -> bool {
+        matches!(stmt, Statement::Escape(_))
+    }
+
+    /// Check if an expression contains patterns that would lead to escape
+    /// (e.g., error checks on FFI calls)
+    fn contains_escape_in_expr(&self, _expr: &Expr, _interp: &mut Interpreter) -> bool {
+        // TODO: Analyze expressions for error patterns that would trigger escapes
+        // For now, conservative: don't skip
+        false
+    }
+
     pub fn run(&self, interp: &mut Interpreter) -> Result<bool, crate::interpreter::RuntimeError> {
         let mut any_executed = false;
 
@@ -98,6 +162,12 @@ impl Reactor {
             if let Some(txn) = self.transactions.get(txn_idx) {
                 let pre_val = interp.eval_expr(&txn.contract.pre_condition)?;
                 if pre_val == Value::Bool(true) {
+                    // PRE-EVALUATION GUARD: Check if any escape conditions are provably true
+                    // before running the transaction. If so, skip entirely to avoid FFI side effects.
+                    if self.will_escape(txn, interp) {
+                        continue;
+                    }
+
                     interp.prior_state = interp.state.clone();
 
                     let mut term_executed = false;
