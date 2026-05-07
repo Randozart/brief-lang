@@ -430,8 +430,8 @@ This plan distills three major architectural initiatives from the conversation:
 8. ✅ System triggers stdlib - `lib/std/system.bv`
 9. ✅ Software trigger config bindings - DBVS schema, FFI registry
 
-### Phase 3: Fuzzing Infrastructure (Testing)
-10. AST generator (proptest Arbitrary) - `src/fuzzing/`
+### Phase 3: Fuzzing Infrastructure (Testing) - IN PROGRESS
+10. ✅ AST generator (proptest Arbitrary) - `src/fuzzing/`
 11. Frontend no-panic fuzzer - `tests/fuzz_frontend.rs`
 12. Safe differential backend fuzzer (Unicorn) - `tests/fuzz_backend.rs`
 13. Concolic fuzzer (proof-guided) - `src/fuzzing/concolic.rs`
