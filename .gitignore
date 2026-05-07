@@ -79,3 +79,15 @@ dist/
 .env.local
 *.log
 CODICIL_CHECKING.md
+
+# ============================================
+# SELF-HOSTING BUILD ARTIFACTS
+# ============================================
+*.rs
+brief-self-hosted
+metrod*
+test_*
+test_dbv.c
+test_cases/
+test_rstruct-build/
+test_schema/

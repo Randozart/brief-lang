@@ -14,12 +14,12 @@ enum ShmError {
 
 // ===== POSIX SHM OPERATIONS (FFI) =====
 
-frgn sig __shm_open(name: String, flags: Int, mode: Int) -> Result<Int, ShmError> from "shm.dbvs";
-frgn sig __shm_unlink(name: String) -> Result<Void, ShmError> from "shm.dbvs";
-frgn sig __ftruncate_shm(fd: Int, length: Int) -> Result<Void, ShmError> from "shm.dbvs";
-frgn sig __shm_list() -> Result<List<String>, ShmError> from "shm.dbvs";
-frgn sig __shm_exists(name: String) -> Bool from "shm.dbvs";
-frgn sig __shm_size(name: String) -> Result<Int, ShmError> from "shm.dbvs";
+frgn __shm_open(name: String, flags: Int, mode: Int) -> Result<Int, ShmError>;
+frgn __shm_unlink(name: String) -> Result<Void, ShmError>;
+frgn __ftruncate_shm(fd: Int, length: Int) -> Result<Void, ShmError>;
+frgn __shm_list() -> Result<List<String>, ShmError>;
+frgn __shm_exists(name: String) -> Bool;
+frgn __shm_size(name: String) -> Result<Int, ShmError>;
 
 // ===== NATIVE WRAPPERS =====
 
@@ -90,13 +90,13 @@ enum MmapError {
 
 // ===== MMAP OPERATIONS (FFI) =====
 
-frgn sig __mmap_anonymous(length: Int, prot: Int, flags: Int) -> Result<Int, MmapError> from "mmap.dbvs";
-frgn sig __munmap(addr: Int, length: Int) -> Result<Void, MmapError> from "mmap.dbvs";
-frgn sig __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError> from "mmap.dbvs";
-frgn sig __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError> from "mmap.dbvs";
-frgn sig __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError> from "mmap.dbvs";
-frgn sig __mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError> from "mmap.dbvs";
-frgn sig __mmap_write_u32(addr: Int, offset: Int, value: Int) -> Result<Void, MmapError> from "mmap.dbvs";
+frgn __mmap_anonymous(length: Int, prot: Int, flags: Int) -> Result<Int, MmapError>;
+frgn __munmap(addr: Int, length: Int) -> Result<Void, MmapError>;
+frgn __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError>;
+frgn __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError>;
+frgn __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError>;
+frgn __mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError>;
+frgn __mmap_write_u32(addr: Int, offset: Int, value: Int) -> Result<Void, MmapError>;
 
 // PROT_READ | PROT_WRITE flags
 let PROT_READ_WRITE: Int = 0x03;
@@ -200,12 +200,12 @@ enum AtomicError {
     AtomicOther(String)
 }
 
-frgn sig __atomic_load_u32(addr: Int, offset: Int) -> Result<Int, AtomicError> from "atomic.dbvs";
-frgn sig __atomic_store_u32(addr: Int, offset: Int, value: Int) -> Result<Void, AtomicError> from "atomic.dbvs";
-frgn sig __atomic_cas_u32(addr: Int, offset: Int, expected: Int, new_value: Int) -> Result<Int, AtomicError> from "atomic.dbvs";
-frgn sig __atomic_fence() -> Result<Void, AtomicError> from "atomic.dbvs";
-frgn sig __atomic_xchg_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError> from "atomic.dbvs";
-frgn sig __atomic_add_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError> from "atomic.dbvs";
+frgn __atomic_load_u32(addr: Int, offset: Int) -> Result<Int, AtomicError>;
+frgn __atomic_store_u32(addr: Int, offset: Int, value: Int) -> Result<Void, AtomicError>;
+frgn __atomic_cas_u32(addr: Int, offset: Int, expected: Int, new_value: Int) -> Result<Int, AtomicError>;
+frgn __atomic_fence() -> Result<Void, AtomicError>;
+frgn __atomic_xchg_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError>;
+frgn __atomic_add_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError>;
 
 // ===== ATOMIC WRAPPERS =====
 

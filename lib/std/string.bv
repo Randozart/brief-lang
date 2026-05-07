@@ -6,47 +6,47 @@
 // ===== PURE FOREIGN (requires external implementation) =====
 
 // Case conversion
-frgn __to_lower(s: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
-frgn __to_upper(s: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
-frgn __to_title(s: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
-frgn __is_lower(s: String) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
-frgn __is_upper(s: String) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
+frgn __to_lower(s: String) -> Result<String, StringError>;
+frgn __to_upper(s: String) -> Result<String, StringError>;
+frgn __to_title(s: String) -> Result<String, StringError>;
+frgn __is_lower(s: String) -> Result<Bool, StringError>;
+frgn __is_upper(s: String) -> Result<Bool, StringError>;
 // Whitespace checking
-frgn __is_whitespace(s: String) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
-frgn __is_alpha(s: String) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
-frgn __is_alphanumeric(s: String) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
-frgn __is_numeric(s: String) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
+frgn __is_whitespace(s: String) -> Result<Bool, StringError>;
+frgn __is_alpha(s: String) -> Result<Bool, StringError>;
+frgn __is_alphanumeric(s: String) -> Result<Bool, StringError>;
+frgn __is_numeric(s: String) -> Result<Bool, StringError>;
 // Complex search (requires iteration)
-frgn __contains_at(haystack: String, needle: String, start: Int) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
-frgn __find_from(s: String, needle: String, start: Int) -> Result<Int, StringError> from "std/bindings/string.dbvs";
-frgn __rfind(s: String, needle: String) -> Result<Int, StringError> from "std/bindings/string.dbvs";
+frgn __contains_at(haystack: String, needle: String, start: Int) -> Result<Bool, StringError>;
+frgn __find_from(s: String, needle: String, start: Int) -> Result<Int, StringError>;
+frgn __rfind(s: String, needle: String) -> Result<Int, StringError>;
 // Character operations
-frgn __get_chars(s: String) -> Result<List<String>, StringError> from "std/bindings/string.dbvs"
-frgn __utf8_len(s: String) -> Result<Int, StringError> from "std/bindings/string.dbvs";
+frgn __get_chars(s: String) -> Result<List<String>, StringError>
+frgn __utf8_len(s: String) -> Result<Int, StringError>;
 // Escaping
-frgn __escape(s: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
-frgn __unescape(s: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
-frgn __quote(s: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
-frgn __unquote(s: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
+frgn __escape(s: String) -> Result<String, StringError>;
+frgn __unescape(s: String) -> Result<String, StringError>;
+frgn __quote(s: String) -> Result<String, StringError>;
+frgn __unquote(s: String) -> Result<String, StringError>;
 // Encoding
-frgn __bytes(s: String) -> Result<List<Int>, StringError> from "std/bindings/string.dbvs"
-frgn __from_bytes(list: List<Int>) -> Result<String, StringError> from "std/bindings/string.dbvs";
+frgn __bytes(s: String) -> Result<List<Int>, StringError>
+frgn __from_bytes(list: List<Int>) -> Result<String, StringError>;
 // Complex replacement
-frgn __replace_all(s: String, old: String, new: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
+frgn __replace_all(s: String, old: String, new: String) -> Result<String, StringError>;
 // Split variations
-frgn __splitn(s: String, delim: String, n: Int) -> Result<List<String>, StringError> from "std/bindings/string.dbvs"
-frgn __rsplit(s: String, delim: String) -> Result<List<String>, StringError> from "std/bindings/string.dbvs"
-frgn __words(s: String) -> Result<List<String>, StringError> from "std/bindings/string.dbvs"
+frgn __splitn(s: String, delim: String, n: Int) -> Result<List<String>, StringError>
+frgn __rsplit(s: String, delim: String) -> Result<List<String>, StringError>
+frgn __words(s: String) -> Result<List<String>, StringError>
 
 // Truncation
-frgn __truncate(s: String, max_len: Int) -> Result<String, StringError> from "std/bindings/string.dbvs";
-frgn __truncate_with(s: String, max_len: Int, suffix: String) -> Result<String, StringError> from "std/bindings/string.dbvs";
+frgn __truncate(s: String, max_len: Int) -> Result<String, StringError>;
+frgn __truncate_with(s: String, max_len: Int, suffix: String) -> Result<String, StringError>;
 // Comparison
-frgn __eq_ignore_case(a: String, b: String) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
-frgn __cmp(s1: String, s2: String) -> Result<Int, StringError> from "std/bindings/string.dbvs";
+frgn __eq_ignore_case(a: String, b: String) -> Result<Bool, StringError>;
+frgn __cmp(s1: String, s2: String) -> Result<Int, StringError>;
 // Parsing
-frgn __parse_float(s: String) -> Result<Float, StringError> from "std/bindings/string.dbvs";
-frgn __to_bool(s: String) -> Result<Bool, StringError> from "std/bindings/string.dbvs";
+frgn __parse_float(s: String) -> Result<Float, StringError>;
+frgn __to_bool(s: String) -> Result<Bool, StringError>;
 // ===== NATIVE DEFINITIONS =====
 
 // Length

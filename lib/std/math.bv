@@ -6,51 +6,51 @@
 // ===== PURE FOREIGN (requires external implementation) =====
 
 // Trigonometry
-frgn __sin(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __cos(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __tan(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __asin(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __acos(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __atan(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __atan2(y: Float, x: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __sinh(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __cosh(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __tanh(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
+frgn __sin(n: Float) -> Result<Float, MathError>;
+frgn __cos(n: Float) -> Result<Float, MathError>;
+frgn __tan(n: Float) -> Result<Float, MathError>;
+frgn __asin(n: Float) -> Result<Float, MathError>;
+frgn __acos(n: Float) -> Result<Float, MathError>;
+frgn __atan(n: Float) -> Result<Float, MathError>;
+frgn __atan2(y: Float, x: Float) -> Result<Float, MathError>;
+frgn __sinh(n: Float) -> Result<Float, MathError>;
+frgn __cosh(n: Float) -> Result<Float, MathError>;
+frgn __tanh(n: Float) -> Result<Float, MathError>;
 // Advanced math
-frgn __sqrt(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __cbrt(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __pow(base: Float, exp: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __powi(base: Float, exp: Int) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __exp(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __exp2(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __ln(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __log(n: Float, base: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __log2(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __log10(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
+frgn __sqrt(n: Float) -> Result<Float, MathError>;
+frgn __cbrt(n: Float) -> Result<Float, MathError>;
+frgn __pow(base: Float, exp: Float) -> Result<Float, MathError>;
+frgn __powi(base: Float, exp: Int) -> Result<Float, MathError>;
+frgn __exp(n: Float) -> Result<Float, MathError>;
+frgn __exp2(n: Float) -> Result<Float, MathError>;
+frgn __ln(n: Float) -> Result<Float, MathError>;
+frgn __log(n: Float, base: Float) -> Result<Float, MathError>;
+frgn __log2(n: Float) -> Result<Float, MathError>;
+frgn __log10(n: Float) -> Result<Float, MathError>;
 // Float-specific rounding
-frgn __floor(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __ceil(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __round(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __trunc(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __fract(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
+frgn __floor(n: Float) -> Result<Float, MathError>;
+frgn __ceil(n: Float) -> Result<Float, MathError>;
+frgn __round(n: Float) -> Result<Float, MathError>;
+frgn __trunc(n: Float) -> Result<Float, MathError>;
+frgn __fract(n: Float) -> Result<Float, MathError>;
 // Float checks
-frgn __is_nan(n: Float) -> Result<Bool, MathError> from "std/bindings/math.dbvs";
-frgn __is_infinite(n: Float) -> Result<Bool, MathError> from "std/bindings/math.dbvs";
-frgn __is_finite(n: Float) -> Result<Bool, MathError> from "std/bindings/math.dbvs";
-frgn __is_normal(n: Float) -> Result<Bool, MathError> from "std/bindings/math.dbvs";
+frgn __is_nan(n: Float) -> Result<Bool, MathError>;
+frgn __is_infinite(n: Float) -> Result<Bool, MathError>;
+frgn __is_finite(n: Float) -> Result<Bool, MathError>;
+frgn __is_normal(n: Float) -> Result<Bool, MathError>;
 // Float operations
-frgn __signum_float(n: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __clamp_float(val: Float, min: Float, max: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __min_float(a: Float, b: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __max_float(a: Float, b: Float) -> Result<Float, MathError> from "std/bindings/math.dbvs";
+frgn __signum_float(n: Float) -> Result<Float, MathError>;
+frgn __clamp_float(val: Float, min: Float, max: Float) -> Result<Float, MathError>;
+frgn __min_float(a: Float, b: Float) -> Result<Float, MathError>;
+frgn __max_float(a: Float, b: Float) -> Result<Float, MathError>;
 // Integer-specific
-frgn __div_rem(a: Int, b: Int) -> Result<Int, MathError> from "std/bindings/math.dbvs";
-frgn __gcd(a: Int, b: Int) -> Result<Int, MathError> from "std/bindings/math.dbvs";
-frgn __lcm(a: Int, b: Int) -> Result<Int, MathError> from "std/bindings/math.dbvs";
-frgn __signum(n: Int) -> Result<Int, MathError> from "std/bindings/math.dbvs";
+frgn __div_rem(a: Int, b: Int) -> Result<Int, MathError>;
+frgn __gcd(a: Int, b: Int) -> Result<Int, MathError>;
+frgn __lcm(a: Int, b: Int) -> Result<Int, MathError>;
+frgn __signum(n: Int) -> Result<Int, MathError>;
 // Random
-frgn __random() -> Result<Float, MathError> from "std/bindings/math.dbvs";
-frgn __random_int(min: Int, max: Int) -> Result<Int, MathError> from "std/bindings/math.dbvs";
+frgn __random() -> Result<Float, MathError>;
+frgn __random_int(min: Int, max: Int) -> Result<Int, MathError>;
 // ===== NATIVE DEFINITIONS =====
 
 // Absolute value (Int)

@@ -1,1 +1,0 @@
-/home/randozart/Desktop/Projects/brief-compiler/test_rstruct-build/target/wasm32-unknown-unknown/release/test_rstruct.wasm: /home/randozart/Desktop/Projects/brief-compiler/test_rstruct-build/src/lib.rs /home/randozart/Desktop/Projects/brief-compiler/test_rstruct-build/src/test_rstruct.rs

@@ -9,42 +9,42 @@
 // ===== PURE FOREIGN (requires Data type implementation) =====
 
 // Parse & Serialize
-frgn __parse(s: String) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __stringify(data: Data) -> Result<String, JsonError> from "std/bindings/json.dbvs";
-frgn __to_json(data: Data) -> Result<String, JsonError> from "std/bindings/json.dbvs";
-frgn __from_json(s: String) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
+frgn __parse(s: String) -> Result<Data, JsonError>;
+frgn __stringify(data: Data) -> Result<String, JsonError>;
+frgn __to_json(data: Data) -> Result<String, JsonError>;
+frgn __from_json(s: String) -> Result<Data, JsonError>;
 // Type Check
-frgn __is_null(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.dbvs";
-frgn __is_bool(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.dbvs";
-frgn __is_number(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.dbvs";
-frgn __is_string(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.dbvs";
-frgn __is_array(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.dbvs";
-frgn __is_object(data: Data) -> Result<Bool, JsonError> from "std/bindings/json.dbvs";
+frgn __is_null(data: Data) -> Result<Bool, JsonError>;
+frgn __is_bool(data: Data) -> Result<Bool, JsonError>;
+frgn __is_number(data: Data) -> Result<Bool, JsonError>;
+frgn __is_string(data: Data) -> Result<Bool, JsonError>;
+frgn __is_array(data: Data) -> Result<Bool, JsonError>;
+frgn __is_object(data: Data) -> Result<Bool, JsonError>;
 // Get Values
-frgn __get_bool(data: Data, key: String) -> Result<Bool, JsonError> from "std/bindings/json.dbvs";
-frgn __get_number(data: Data, key: String) -> Result<Float, JsonError> from "std/bindings/json.dbvs";
-frgn __get_string(data: Data, key: String) -> Result<String, JsonError> from "std/bindings/json.dbvs";
-frgn __get_array(data: Data, key: String) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __get_object(data: Data, key: String) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
+frgn __get_bool(data: Data, key: String) -> Result<Bool, JsonError>;
+frgn __get_number(data: Data, key: String) -> Result<Float, JsonError>;
+frgn __get_string(data: Data, key: String) -> Result<String, JsonError>;
+frgn __get_array(data: Data, key: String) -> Result<Data, JsonError>;
+frgn __get_object(data: Data, key: String) -> Result<Data, JsonError>;
 // Array Access
-frgn __get_index(data: Data, index: Int) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __array_len(data: Data) -> Result<Int, JsonError> from "std/bindings/json.dbvs";
-frgn __array_push(data: Data, item: Data) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __array_pop(data: Data) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __array_shift(data: Data) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
+frgn __get_index(data: Data, index: Int) -> Result<Data, JsonError>;
+frgn __array_len(data: Data) -> Result<Int, JsonError>;
+frgn __array_push(data: Data, item: Data) -> Result<Data, JsonError>;
+frgn __array_pop(data: Data) -> Result<Data, JsonError>;
+frgn __array_shift(data: Data) -> Result<Data, JsonError>;
 // Object Operations
-frgn __keys(data: Data) -> Result<List<String>, JsonError> from "std/bindings/json.dbvs"
-frgn __values(data: Data) -> Result<List<Data>, JsonError> from "std/bindings/json.dbvs"
-frgn __has_key(data: Data, key: String) -> Result<Bool, JsonError> from "std/bindings/json.dbvs";
+frgn __keys(data: Data) -> Result<List<String>, JsonError>
+frgn __values(data: Data) -> Result<List<Data>, JsonError>
+frgn __has_key(data: Data, key: String) -> Result<Bool, JsonError>;
 // Create Values
-frgn __null() -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __bool_val(b: Bool) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __number_val(n: Float) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __string_val(s: String) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __array_val(list: List<Data>) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
-frgn __object_val(map: Data) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
+frgn __null() -> Result<Data, JsonError>;
+frgn __bool_val(b: Bool) -> Result<Data, JsonError>;
+frgn __number_val(n: Float) -> Result<Data, JsonError>;
+frgn __string_val(s: String) -> Result<Data, JsonError>;
+frgn __array_val(list: List<Data>) -> Result<Data, JsonError>;
+frgn __object_val(map: Data) -> Result<Data, JsonError>;
 // Merge
-frgn __merge(a: Data, b: Data) -> Result<Data, JsonError> from "std/bindings/json.dbvs";
+frgn __merge(a: Data, b: Data) -> Result<Data, JsonError>;
 // ===== NATIVE DEFINITIONS =====
 
 // Pretty Print - simple version

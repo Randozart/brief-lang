@@ -58,6 +58,7 @@ pub struct TypeChecker {
     foreign_bindings: HashMap<String, ForeignSignature>,
     pub target: CompilationTarget,
     enum_variants: HashMap<String, String>,  // variant_name -> enum_name
+    struct_fields: HashMap<String, HashMap<String, Type>>,  // struct_name -> {field_name -> type}
 }
 
 impl TypeChecker {
@@ -76,6 +77,7 @@ impl TypeChecker {
             foreign_bindings: HashMap::new(),
             target: CompilationTarget::Interpreter,
             enum_variants: HashMap::new(),
+            struct_fields: HashMap::new(),
         }
     }
 
@@ -223,6 +225,66 @@ impl TypeChecker {
         // Result<T, E>
         self.enum_variants.insert("Ok".to_string(), "Result".to_string());
         self.enum_variants.insert("Err".to_string(), "Result".to_string());
+        // Token (compiler library)
+        self.enum_variants.insert("TokenInt".to_string(), "Token".to_string());
+        self.enum_variants.insert("TokenFloat".to_string(), "Token".to_string());
+        self.enum_variants.insert("TokenString".to_string(), "Token".to_string());
+        self.enum_variants.insert("TokenChar".to_string(), "Token".to_string());
+        self.enum_variants.insert("TokenIdentifier".to_string(), "Token".to_string());
+        self.enum_variants.insert("TokenEof".to_string(), "Token".to_string());
+        self.enum_variants.insert("TokenError".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordLet".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordConst".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordTxn".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordRct".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordAsync".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordTerm".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordEscape".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordDefn".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordSig".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordFrgn".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordStruct".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordEnum".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordImport".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordFrom".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordAs".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordTrue".to_string(), "Token".to_string());
+        self.enum_variants.insert("KeywordFalse".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpPlus".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpMinus".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpStar".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpSlash".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpPercent".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpEq".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpBang".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpAmp".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpPipe".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpCaret".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpTilde".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpQuestion".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpAt".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpDot".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpColon".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpSemicolon".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpComma".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpEqEq".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpNeq".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpLt".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpGt".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpLtEq".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpGtEq".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpAnd".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpOr".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpLtLt".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpGtGt".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpArrow".to_string(), "Token".to_string());
+        self.enum_variants.insert("OpFatArrow".to_string(), "Token".to_string());
+        self.enum_variants.insert("DelimLParen".to_string(), "Token".to_string());
+        self.enum_variants.insert("DelimRParen".to_string(), "Token".to_string());
+        self.enum_variants.insert("DelimLBrace".to_string(), "Token".to_string());
+        self.enum_variants.insert("DelimRBrace".to_string(), "Token".to_string());
+        self.enum_variants.insert("DelimLBracket".to_string(), "Token".to_string());
+        self.enum_variants.insert("DelimRBracket".to_string(), "Token".to_string());
 
         // Option<T> methods
         self.signatures.insert(
@@ -255,6 +317,167 @@ impl TypeChecker {
                 name: "unwrap".to_string(),
                 input_types: vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])],
                 result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        // Character classification functions
+        self.signatures.insert(
+            "is_whitespace".to_string(),
+            Signature {
+                name: "is_whitespace".to_string(),
+                input_types: vec![Type::Char],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "is_digit".to_string(),
+            Signature {
+                name: "is_digit".to_string(),
+                input_types: vec![Type::Char],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "is_alpha".to_string(),
+            Signature {
+                name: "is_alpha".to_string(),
+                input_types: vec![Type::Char],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "is_alphanumeric".to_string(),
+            Signature {
+                name: "is_alphanumeric".to_string(),
+                input_types: vec![Type::Char],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "is_hex_digit".to_string(),
+            Signature {
+                name: "is_hex_digit".to_string(),
+                input_types: vec![Type::Char],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        // String conversion functions
+        self.signatures.insert(
+            "to_int".to_string(),
+            Signature {
+                name: "to_int".to_string(),
+                input_types: vec![Type::String],
+                result_type: ResultType::Projection(vec![Type::Int]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "to_float".to_string(),
+            Signature {
+                name: "to_float".to_string(),
+                input_types: vec![Type::String],
+                result_type: ResultType::Projection(vec![Type::Float]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        // String len
+        self.signatures.insert(
+            "len".to_string(),
+            Signature {
+                name: "len".to_string(),
+                input_types: vec![Type::String],
+                result_type: ResultType::Projection(vec![Type::Int]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        // List append
+        self.signatures.insert(
+            "list_append".to_string(),
+            Signature {
+                name: "list_append".to_string(),
+                input_types: vec![Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())]), Type::TypeVar("T".to_string())],
+                result_type: ResultType::Projection(vec![Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        // Result<T, E> methods
+        self.signatures.insert(
+            "is_ok".to_string(),
+            Signature {
+                name: "is_ok".to_string(),
+                input_types: vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "is_err".to_string(),
+            Signature {
+                name: "is_err".to_string(),
+                input_types: vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "unwrap".to_string(),
+            Signature {
+                name: "unwrap".to_string(),
+                input_types: vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])],
+                result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "unwrap_err".to_string(),
+            Signature {
+                name: "unwrap_err".to_string(),
+                input_types: vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])],
+                result_type: ResultType::Projection(vec![Type::TypeVar("E".to_string())]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -295,6 +518,13 @@ impl TypeChecker {
                         };
                         self.enum_variants.insert(variant_name, enum_def.name.clone());
                     }
+                }
+                TopLevel::Struct(struct_def) => {
+                    let mut fields = HashMap::new();
+                    for field in &struct_def.fields {
+                        fields.insert(field.name.clone(), field.ty.clone());
+                    }
+                    self.struct_fields.insert(struct_def.name.clone(), fields);
                 }
                 _ => {}
             }
@@ -751,22 +981,37 @@ impl TypeChecker {
                 }
             }
             Statement::Let { name, ty, expr, .. } => {
-                let inferred_expr_ty = expr.as_ref().map(|e| {
-                    self.check_expr_for_ffi_errors(e);
-                    self.infer_expression(e)
-                });
-                let final_ty = ty.clone().or(inferred_expr_ty.clone());
-                if let Some(final_type) = final_ty {
-                    if let (Some(_), Some(expr_ty)) = (expr, &inferred_expr_ty) {
-                        if !self.types_compatible(expr_ty, &final_type) {
-                            self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                                expected: self.type_to_string(&final_type),
-                                found: self.type_to_string(expr_ty),
-                                context: format!("let {}", name),
-                            });
+                // Handle tuple destructuring: let (a, b) = expr;
+                // Parser stores names as comma-separated string
+                let names: Vec<&str> = name.split(',').collect();
+                if names.len() > 1 {
+                    // Tuple destructuring
+                    let expr_ty = expr.as_ref().map(|e| self.infer_expression(e));
+                    if let (Some(expr), Some(Type::Tuple(types))) = (expr, expr_ty) {
+                        if types.len() == names.len() {
+                            for (var_name, var_ty) in names.iter().zip(types.iter()) {
+                                self.declare_variable(var_name.trim(), var_ty.clone());
+                            }
                         }
                     }
-                    self.declare_variable(name, final_type);
+                } else {
+                    let inferred_expr_ty = expr.as_ref().map(|e| {
+                        self.check_expr_for_ffi_errors(e);
+                        self.infer_expression(e)
+                    });
+                    let final_ty = ty.clone().or(inferred_expr_ty.clone());
+                    if let Some(final_type) = final_ty {
+                        if let (Some(_), Some(expr_ty)) = (expr, &inferred_expr_ty) {
+                            if !self.types_compatible(expr_ty, &final_type) {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: self.type_to_string(&final_type),
+                                    found: self.type_to_string(expr_ty),
+                                    context: format!("let {}", name),
+                                });
+                            }
+                        }
+                        self.declare_variable(name, final_type);
+                    }
                 }
             }
             Statement::Guarded {
@@ -820,6 +1065,7 @@ impl TypeChecker {
                 Type::Float
             }
             Expr::String(_) => Type::String,
+            Expr::Char(_) => Type::Char,
             Expr::Bool(_) => Type::Bool,
             Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => self
                 .lookup_variable(name)
@@ -836,20 +1082,54 @@ impl TypeChecker {
             | Expr::Or(_, _)
             | Expr::And(_, _) => Type::Bool,
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.infer_expression(e),
-            Expr::Call(name, _) => {
+            Expr::Call(name, args) => {
                 if let Some(fb) = self.foreign_bindings.get(name) {
                     fb.success_output
                         .first()
                         .map(|(_, ty)| ty.clone())
                         .unwrap_or(Type::Void)
-                } else if let Some(sig) = self.signatures.get(name) {
-                    match &sig.result_type {
-                        ResultType::Projection(types) => {
-                            types.first().cloned().unwrap_or(Type::Void)
+                } else if name == "unwrap" && !args.is_empty() {
+                    // Special handling for unwrap: extract inner type from Option/Result
+                    let arg_ty = self.infer_expression(&args[0]);
+                    match &arg_ty {
+                        Type::Applied(inner_name, type_args) if inner_name == "Option" && !type_args.is_empty() => {
+                            type_args[0].clone()
                         }
-                        ResultType::TrueAssertion => Type::Bool,
-                        ResultType::VoidType => Type::Void,
+                        Type::Applied(inner_name, type_args) if inner_name == "Result" && !type_args.is_empty() => {
+                            type_args[0].clone()
+                        }
+                        _ => Type::TypeVar("T".to_string()),
                     }
+                } else if name == "is_some" || name == "is_none" {
+                    Type::Bool
+                } else if name == "is_ok" || name == "is_err" {
+                    Type::Bool
+                } else if name == "unwrap_err" && !args.is_empty() {
+                    let arg_ty = self.infer_expression(&args[0]);
+                    match &arg_ty {
+                        Type::Applied(inner_name, type_args) if inner_name == "Result" && type_args.len() >= 2 => {
+                            type_args[1].clone()
+                        }
+                        _ => Type::TypeVar("E".to_string()),
+                    }
+                } else if let Some(sig) = self.signatures.get(name) {
+                    // Handle generic type substitution for unwrap/is_some/etc
+                    let result_types = match &sig.result_type {
+                        ResultType::Projection(types) => types.clone(),
+                        ResultType::TrueAssertion => vec![Type::Bool],
+                        ResultType::VoidType => vec![Type::Void],
+                    };
+                    // Try to substitute TypeVars based on input types
+                    if !args.is_empty() && !sig.input_types.is_empty() {
+                        let arg_ty = self.infer_expression(&args[0]);
+                        let substitutions = self.extract_type_substitutions(&sig.input_types[0], &arg_ty);
+                        if !substitutions.is_empty() {
+                            if let Some(ty) = result_types.first() {
+                                return self.substitute_type_vars(ty, &substitutions);
+                            }
+                        }
+                    }
+                    result_types.first().cloned().unwrap_or(Type::Void)
                 } else if let Some(defn) = self.definitions.get(name) {
                     if let Some(ref output_type) = defn.output_type {
                         output_type.all_types().first().cloned().unwrap_or(Type::Void)
@@ -858,6 +1138,21 @@ impl TypeChecker {
                     } else {
                         Type::Void
                     }
+                } else if name == "Ok" {
+                    // Ok(value) -> Result<T, E> where T is inferred from value
+                    let ok_type = args.first().map(|e| self.infer_expression(e)).unwrap_or(Type::TypeVar("T".to_string()));
+                    Type::Applied("Result".to_string(), vec![ok_type, Type::TypeVar("E".to_string())])
+                } else if name == "Err" {
+                    // Err(value) -> Result<T, E> where E is inferred from value
+                    let err_type = args.first().map(|e| self.infer_expression(e)).unwrap_or(Type::TypeVar("E".to_string()));
+                    Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), err_type])
+                } else if name == "Some" {
+                    // Some(value) -> Option<T> where T is inferred from value
+                    let some_type = args.first().map(|e| self.infer_expression(e)).unwrap_or(Type::TypeVar("T".to_string()));
+                    Type::Applied("Option".to_string(), vec![some_type])
+                } else if name == "None" {
+                    // None -> Option<T>
+                    Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])
                 } else if let Some(enum_name) = self.enum_variants.get(name) {
                     Type::Custom(enum_name.clone())
                 } else {
@@ -889,6 +1184,46 @@ impl TypeChecker {
                 }
                 self.infer_expression(value)
             },
+            Expr::FieldAccess(obj, field) => {
+                // Look up the field type from the struct definition
+                let obj_ty = self.infer_expression(obj);
+                if let Type::Custom(struct_name) = &obj_ty {
+                    if let Some(fields) = self.struct_fields.get(struct_name) {
+                        if let Some(field_ty) = fields.get(field) {
+                            return field_ty.clone();
+                        }
+                    }
+                }
+                // Fallback: return the object type
+                obj_ty
+            },
+            Expr::StructInstance(name, _fields) => {
+                Type::Custom(name.clone())
+            },
+            Expr::Tuple(elements) => {
+                let types: Vec<Type> = elements.iter().map(|e| self.infer_expression(e)).collect();
+                Type::Tuple(types)
+            },
+            Expr::TupleDestructure(_names, expr) => {
+                self.infer_expression(expr)
+            },
+            Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+                let l_ty = self.infer_expression(l);
+                let r_ty = self.infer_expression(r);
+                if self.types_compatible(&l_ty, &Type::Int) || self.types_compatible(&l_ty, &Type::UInt) {
+                    l_ty
+                } else {
+                    Type::Int
+                }
+            },
+            Expr::ListLen(e) => Type::Int,
+            Expr::PatternMatch { .. } => Type::Bool,
+            Expr::ForAll { .. } | Expr::Exists { .. } => Type::Bool,
+            Expr::Block(_stmts, last_expr) => self.infer_expression(last_expr),
+            Expr::ObjectLiteral(fields) => {
+                // Infer from first field value type, or default to Custom
+                fields.first().map(|(_, v)| self.infer_expression(v)).unwrap_or(Type::Custom("Object".to_string()))
+            },
             _ => Type::Custom("unknown".to_string()),
         }
     }
@@ -906,6 +1241,45 @@ impl TypeChecker {
             name == "Error"
         } else {
             false
+        }
+    }
+
+    fn extract_type_substitutions(&self, expected: &Type, actual: &Type) -> HashMap<String, Type> {
+        let mut subs = HashMap::new();
+        match (expected, actual) {
+            (Type::TypeVar(name), actual_ty) => {
+                subs.insert(name.clone(), actual_ty.clone());
+            }
+            (Type::Applied(en, ea), Type::Applied(an, aa)) if en == an && ea.len() == aa.len() => {
+                for (e, a) in ea.iter().zip(aa.iter()) {
+                    let s = self.extract_type_substitutions(e, a);
+                    subs.extend(s);
+                }
+            }
+            _ => {}
+        }
+        subs
+    }
+
+    fn substitute_type_vars(&self, ty: &Type, subs: &HashMap<String, Type>) -> Type {
+        match ty {
+            Type::TypeVar(name) => subs.get(name).cloned().unwrap_or(ty.clone()),
+            Type::Applied(name, args) => {
+                Type::Applied(name.clone(), args.iter().map(|a| self.substitute_type_vars(a, subs)).collect())
+            }
+            Type::Generic(name, args) => {
+                Type::Generic(name.clone(), args.iter().map(|a| self.substitute_type_vars(a, subs)).collect())
+            }
+            Type::Union(types) => {
+                Type::Union(types.iter().map(|t| self.substitute_type_vars(t, subs)).collect())
+            }
+            Type::Tuple(types) => {
+                Type::Tuple(types.iter().map(|t| self.substitute_type_vars(t, subs)).collect())
+            }
+            Type::Vector(inner, size) => {
+                Type::Vector(Box::new(self.substitute_type_vars(inner, subs)), *size)
+            }
+            other => other.clone(),
         }
     }
 
@@ -955,6 +1329,7 @@ impl TypeChecker {
             }
             (Type::Int, Type::Int) => int_type,
             (Type::Float, _) | (_, Type::Float) => float_type,
+            (Type::String, Type::String) => Type::String,
             _ => Type::Custom("unknown".to_string()),
         }
     }
@@ -998,6 +1373,10 @@ impl TypeChecker {
             }
             // TypeVar is compatible with any type (generic placeholder)
             (Type::TypeVar(_), _) | (_, Type::TypeVar(_)) => true,
+            // Tuple types: compatible if same length and each element is compatible
+            (Type::Tuple(aa), Type::Tuple(ba)) => {
+                aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b))
+            }
             // Generic types with same name and compatible args
             (Type::Generic(an, aa), Type::Generic(bn, ba)) => {
                 an == bn && aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b))

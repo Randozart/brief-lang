@@ -316,3 +316,13 @@ defn literal_to_string(tok: Token) -> String {
     uni tok(KeywordFalse) = "false";
     term "";
 };
+
+defn unwrap_identifier(tok: Token) -> String {
+    uni tok(TokenIdentifier(name)) = name;
+    term "";
+};
+
+defn is_identifier(tok: Token) -> Bool {
+    uni tok(TokenIdentifier(_)) = true;
+    term false;
+};

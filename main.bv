@@ -1,0 +1,30 @@
+// Brief Compiler - Main Entry Point (Ouroboros Proof)
+// Proof of self-hosting: Brief compiles a program that uses the Brief compiler library
+// This file uses the Brief-written lexer to tokenize Brief source code
+
+import compiler.token;
+import compiler.ast;
+import compiler.lexer;
+
+// ===== COMPILER FUNCTIONS =====
+
+defn count_tokens(source: String) -> Int [true][true] {
+    // Step 1: Tokenize using the Brief-written lexer
+    let lex = new_lexer(source);
+    let result = tokenize(lex);
+    uni result(Ok(pair)) = {
+        let (tokens, _state) = pair;
+        term tokens.len();
+    };
+    uni result(Err(_e)) = {
+        term 0;
+    };
+}
+
+// ===== MAIN TRANSACTION =====
+
+txn compile_main [true][true] {
+    let source: String = "let x: Int = 0;\n\n txn test [true][true] {\n   term;\n };";
+    let count = count_tokens(source);
+    term;
+};

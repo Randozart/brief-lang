@@ -3,61 +3,85 @@
 
 // ===== PROCESS SPAWNING (FFI) =====
 
-frgn sig __spawn(command: String, args: List<String>) -> Result<Int, IOError> from "process.dbvs";
-frgn sig __spawn_with_output(command: String, args: List<String>) -> Result<(Int, String, String), IOError> from "process.dbvs";
-frgn sig __env_var(name: String) -> Option<String> from "process.dbvs";
-frgn sig __set_env_var(name: String, value: String) -> Result<Void, IOError> from "process.dbvs";
-frgn sig __current_dir() -> Result<String, IOError> from "process.dbvs";
-frgn sig __set_current_dir(path: String) -> Result<Void, IOError> from "process.dbvs";
+frgn __spawn(command: String, args: List<String>) -> Result<Int, String>;
+frgn __spawn_with_output(command: String, args: List<String>) -> Result<String, String>;
+frgn __env_var(name: String) -> Result<String, String>;
+frgn __set_env_var(name: String, value: String) -> Result<Void, String>;
+frgn __current_dir() -> Result<String, String>;
+frgn __set_current_dir(path: String) -> Result<Void, String>;
 
 // ===== NATIVE WRAPPERS =====
 
-defn spawn(command: String, args: List<String>) -> Result<Int, IOError> {
-    term __spawn(command, args);
+defn spawn(command: String, args: List<String>) -> Int [true][true] {
+    let result = __spawn(command, args);
+    [result.is_ok()] {
+        term result.value;
+    };
+    term -1;
 };
 
-defn spawn_with_output(command: String, args: List<String>) -> Result<(Int, String, String), IOError> {
-    term __spawn_with_output(command, args);
+defn spawn_with_output(command: String, args: List<String>) -> String [true][true] {
+    let result = __spawn_with_output(command, args);
+    [result.is_ok()] {
+        term result.value;
+    };
+    term "";
 };
 
-defn env_var(name: String) -> Option<String> {
-    term __env_var(name);
+defn env_var(name: String) -> String [true][true] {
+    let result = __env_var(name);
+    [result.is_ok()] {
+        term result.value;
+    };
+    term "";
 };
 
-defn set_env_var(name: String, value: String) -> Result<Void, IOError> {
-    term __set_env_var(name, value);
+defn set_env_var(name: String, value: String) -> Bool [true][true] {
+    let result = __set_env_var(name, value);
+    [result.is_ok()] {
+        term true;
+    };
+    term false;
 };
 
-defn current_dir() -> Result<String, IOError> {
-    term __current_dir();
+defn current_dir() -> String [true][true] {
+    let result = __current_dir();
+    [result.is_ok()] {
+        term result.value;
+    };
+    term "";
 };
 
-defn set_current_dir(path: String) -> Result<Void, IOError> {
-    term __set_current_dir(path);
+defn set_current_dir(path: String) -> Bool [true][true] {
+    let result = __set_current_dir(path);
+    [result.is_ok()] {
+        term true;
+    };
+    term false;
 };
 
 // ===== CONVENIENCE FUNCTIONS =====
 
-defn run_command(command: String) -> Bool [true][result == true || result == false] {
+defn run_command(command: String) -> Bool [true][true] {
     let result = spawn(command, []);
-    [result.is_ok()] {
-        term result.value == 0;
+    [result == 0] {
+        term true;
     };
     term false;
 };
 
-defn run_command_with_args(command: String, args: List<String>) -> Bool [true][result == true || result == false] {
+defn run_command_with_args(command: String, args: List<String>) -> Bool [true][true] {
     let result = spawn(command, args);
-    [result.is_ok()] {
-        term result.value == 0;
+    [result == 0] {
+        term true;
     };
     term false;
 };
 
-defn get_env_or_default(name: String, default: String) -> String [true][result.len() >= 0] {
-    let opt = env_var(name);
-    [opt.is_some()] {
-        term opt.unwrap();
+defn get_env_or_default(name: String, default: String) -> String [true][true] {
+    let val = env_var(name);
+    [val != ""] {
+        term val;
     };
     term default;
 };

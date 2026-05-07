@@ -1,8 +1,8 @@
 // Standard HTTP Library
 // Foreign function declarations for WASM target
 
-frgn __http_get(url: String) -> Result<String, HttpError> from "std/bindings/http.dbvs";
-frgn __http_post(url: String, body: String) -> Result<String, HttpError> from "std/bindings/http.dbvs";
+frgn __http_get(url: String) -> Result<String, HttpError>;
+frgn __http_post(url: String, body: String) -> Result<String, HttpError>;
 defn http_get(url: String) -> Result<String, String> [true][true] {
     let body = __http_get(url);
     term Ok(body);
