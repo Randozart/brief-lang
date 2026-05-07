@@ -1,0 +1,80 @@
+// System Triggers - Standard OS-level event triggers for Regular Brief
+// These triggers map to OS events (signals, stdin, filesystem, network)
+// and provide a reactive I/O model without blocking calls.
+
+// ===== SIGNAL TRIGGERS =====
+
+// SIGINT (Ctrl+C) - fires when user sends interrupt signal
+trg sigint: Bool;
+
+// SIGTERM - fires when process receives termination signal
+trg sigterm: Bool;
+
+// SIGHUP - fires when terminal hangs up
+trg sighup: Bool;
+
+// ===== STDIN TRIGGERS =====
+
+// stdin_line - fires when a complete line is available on stdin
+trg stdin_line: String;
+
+// stdin_ready - fires when stdin has data available to read
+trg stdin_ready: Bool;
+
+// ===== TIMER TRIGGERS =====
+
+// clock_tick_1hz - fires once per second
+trg clock_tick_1hz: Int;
+
+// clock_tick_10hz - fires 10 times per second
+trg clock_tick_10hz: Int;
+
+// clock_tick_100hz - fires 100 times per second
+trg clock_tick_100hz: Int;
+
+// ===== STDOUT TRIGGERS =====
+
+// stdout_ready - fires when stdout buffer has space
+trg stdout_ready: Bool;
+
+// ===== FILESYSTEM TRIGGERS =====
+
+// file_event - fires when a watched file changes (path of changed file)
+trg file_event: String;
+
+// ===== NETWORK TRIGGERS =====
+
+// network_data - fires when data arrives on a monitored socket
+trg network_data: String;
+
+// network_connected - fires when a connection is established
+trg network_connected: Bool;
+
+// network_disconnected - fires when a connection drops
+trg network_disconnected: Bool;
+
+// ===== HELPER TRANSACTIONS =====
+
+// Reactive stdin reader - accumulates lines from stdin
+let stdin_buffer: List<String> = [];
+
+rct txn read_stdin_line[sigint == false && stdin_line.len() > 0] {
+    &stdin_buffer = stdin_buffer + [stdin_line];
+    term;
+};
+
+// Reactive signal handler - sets state on signals
+let shutting_down: Bool = false;
+
+rct txn handle_sigint[sigint == true] {
+    &shutting_down = true;
+    term;
+};
+
+// Reactive timer counter
+let tick_count: Int = 0;
+
+rct txn count_ticks[clock_tick_1hz > 0] {
+    &tick_count = tick_count + 1;
+    term;
+};
