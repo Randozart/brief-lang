@@ -167,9 +167,18 @@ impl VhdlGenerator {
             Type::Int => "signed(31 downto 0)".to_string(),
             Type::Float => "real".to_string(),
             Type::String => "string".to_string(),
-            Type::Vector(inner, n) => {
+            Type::Vector(inner, dims) => {
                 let inner_vhdl = self.brief_type_to_vhdl(inner);
-                format!("array(0 to {}) of {}", n - 1, inner_vhdl)
+                // Build nested array syntax for multidimensional
+                let mut result = inner_vhdl;
+                for d in dims.iter().rev() {
+                    let size = match d {
+                        crate::ast::Dimension::Anonymous(s) => *s,
+                        crate::ast::Dimension::Named(_, s) => *s,
+                    };
+                    result = format!("array(0 to {}) of {}", size - 1, result);
+                }
+                result
             }
             // Option, HashMap, etc. are regular structs - handled by default case
             _ => "std_logic_vector(31 downto 0)".to_string(),

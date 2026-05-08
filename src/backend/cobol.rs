@@ -295,9 +295,13 @@ impl CobolBackend {
             Type::Custom(s) if s == "dec" || s == "decimal" => "PIC S9(13)V99 COMP-3".to_string(),
             Type::String => "PIC X(256)".to_string(),
             Type::Bool => "PIC X".to_string(),
-            Type::Vector(ty, size) => {
+            Type::Vector(ty, dims) => {
                 let inner = self.get_cobol_type(ty, &[]);
-                format!("OCCURS {} TIMES {}", size, inner)
+                let total: usize = dims.iter().map(|d| match d {
+                    crate::ast::Dimension::Anonymous(s) => *s,
+                    crate::ast::Dimension::Named(_, s) => *s,
+                }).product();
+                format!("OCCURS {} TIMES {}", total, inner)
             }
             _ => "PIC S9(18) COMP-5".to_string(),
         }

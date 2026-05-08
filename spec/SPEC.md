@@ -143,7 +143,7 @@ type_params ::= "<" identifier ("," identifier)* ">"
 
 type ::= "Int" | "UInt" | "Float" | "String" | "Bool" | "Void" | "Data" | "Char"
        | identifier
-       | "Vector" "[" type ("," Int)? "]"  // Vector type with optional size
+       | "Vector" "<" type "," dimension ("," dimension)* ">"  // Multidimensional vector
        | "Option" "[" type "]"  // Optional type
        | "Result" "[" type "," type "]"  // Result type (for FFI)
        | "List" "[" type "]"  // Dynamic list
@@ -151,6 +151,9 @@ type ::= "Int" | "UInt" | "Float" | "String" | "Bool" | "Void" | "Data" | "Char"
        | type "Union" "[" type ("," type)* "]"  // Union type
        | "(" type ("," type)* ")"  // Tuple type
        | "const" type  // Const-qualified type
+
+dimension ::= identifier ":" integer  // Named dimension, e.g., width:50
+            | integer                  // Anonymous dimension, e.g., 50
 
 output_types ::= type ("," type)*  // Multi-output: (A, B, C)
 ```

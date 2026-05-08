@@ -1168,7 +1168,14 @@ impl TypeChecker {
             }
             Expr::ListIndex(list_expr, _) => match self.infer_expression(list_expr) {
                 Type::Applied(_, args) if !args.is_empty() => args[0].clone(),
-                Type::Vector(inner, _) => *inner,
+                Type::Vector(inner, dims) => {
+                    // For multidimensional, indexing returns the inner type with one fewer dimension
+                    if dims.len() > 1 {
+                        Type::Vector(inner.clone(), dims[1..].to_vec())
+                    } else {
+                        *inner.clone()
+                    }
+                }
                 _ => Type::TypeVar("T".to_string()),
             },
             Expr::Slice { value, mask, .. } => {
@@ -1276,8 +1283,11 @@ impl TypeChecker {
             Type::Tuple(types) => {
                 Type::Tuple(types.iter().map(|t| self.substitute_type_vars(t, subs)).collect())
             }
-            Type::Vector(inner, size) => {
-                Type::Vector(Box::new(self.substitute_type_vars(inner, subs)), *size)
+            Type::Vector(inner, dims) => {
+                Type::Vector(
+                    Box::new(self.substitute_type_vars(inner, subs)),
+                    dims.clone()
+                )
             }
             other => other.clone(),
         }
@@ -1285,9 +1295,29 @@ impl TypeChecker {
 
     fn check_geometry(&self, lhs: &Type, rhs: &Type) -> bool {
         match (lhs, rhs) {
-            (Type::Vector(inner_lhs, size_lhs), Type::Vector(inner_rhs, size_rhs)) => {
-                (*size_lhs == 0 || *size_rhs == 0 || size_lhs == size_rhs)
-                    && self.check_geometry(inner_lhs, inner_rhs)
+            (Type::Vector(inner_lhs, dims_lhs), Type::Vector(inner_rhs, dims_rhs)) => {
+                // Check if dimensions match (or one is empty/wildcard)
+                let dims_match = dims_lhs.is_empty() || dims_rhs.is_empty() || {
+                    if dims_lhs.len() != dims_rhs.len() {
+                        false
+                    } else {
+                        dims_lhs.iter().zip(dims_rhs.iter()).all(|(l, r)| {
+                            match (l, r) {
+                                (crate::ast::Dimension::Anonymous(sl), crate::ast::Dimension::Anonymous(sr)) => {
+                                    *sl == 0 || *sr == 0 || sl == sr
+                                }
+                                (crate::ast::Dimension::Named(_, sl), crate::ast::Dimension::Named(_, sr)) => {
+                                    *sl == 0 || *sr == 0 || sl == sr
+                                }
+                                (crate::ast::Dimension::Anonymous(sl), crate::ast::Dimension::Named(_, sr)) |
+                                (crate::ast::Dimension::Named(_, sl), crate::ast::Dimension::Anonymous(sr)) => {
+                                    *sl == 0 || *sr == 0 || sl == sr
+                                }
+                            }
+                        })
+                    }
+                };
+                dims_match && self.check_geometry(inner_lhs, inner_rhs)
             }
             (Type::Vector(inner, _), scalar) | (scalar, Type::Vector(inner, _)) => {
                 self.types_compatible(inner, scalar)
@@ -1300,16 +1330,31 @@ impl TypeChecker {
         let l_ty = self.infer_expression(l);
         let r_ty = self.infer_expression(r);
         match (&l_ty, &r_ty) {
-            (Type::Vector(inner_l, size_l), Type::Vector(inner_r, size_r)) if size_l == size_r => {
-                Type::Vector(
-                    Box::new(self.binary_op_type_scalar(inner_l, inner_r, int_type, float_type)),
-                    *size_l,
-                )
+            (Type::Vector(inner_l, dims_l), Type::Vector(inner_r, dims_r)) => {
+                // Check if dimensions match
+                let dims_match = dims_l.len() == dims_r.len() && {
+                    dims_l.iter().zip(dims_r.iter()).all(|(ld, rd)| {
+                        match (ld, rd) {
+                            (crate::ast::Dimension::Anonymous(sl), crate::ast::Dimension::Anonymous(sr)) => sl == sr,
+                            (crate::ast::Dimension::Named(_, sl), crate::ast::Dimension::Named(_, sr)) => sl == sr,
+                            (crate::ast::Dimension::Anonymous(sl), crate::ast::Dimension::Named(_, sr)) |
+                            (crate::ast::Dimension::Named(_, sl), crate::ast::Dimension::Anonymous(sr)) => sl == sr,
+                        }
+                    })
+                };
+                if dims_match {
+                    Type::Vector(
+                        Box::new(self.binary_op_type_scalar(inner_l, inner_r, int_type, float_type)),
+                        dims_l.clone(),
+                    )
+                } else {
+                    Type::Custom("vector_dimension_mismatch".to_string())
+                }
             }
-            (Type::Vector(inner, size), scalar) | (scalar, Type::Vector(inner, size)) => {
+            (Type::Vector(inner, dims), scalar) | (scalar, Type::Vector(inner, dims)) => {
                 Type::Vector(
                     Box::new(self.binary_op_type_scalar(inner, scalar, int_type, float_type)),
-                    *size,
+                    dims.clone(),
                 )
             }
             _ => self.binary_op_type_scalar(&l_ty, &r_ty, int_type, float_type),
@@ -1345,8 +1390,15 @@ impl TypeChecker {
             | (Type::Char, Type::Char)
             | (Type::Data, Type::Data) => true,
             (Type::Int, Type::UInt) | (Type::UInt, Type::Int) => true,
-            (Type::Vector(ia, sa), Type::Vector(ib, sb)) => {
-                sa == sb && self.types_compatible(ia, ib)
+            (Type::Vector(ia, da), Type::Vector(ib, db)) => {
+                da.len() == db.len() && da.iter().zip(db.iter()).all(|(l, r)| {
+                    match (l, r) {
+                        (crate::ast::Dimension::Anonymous(sl), crate::ast::Dimension::Anonymous(sr)) => sl == sr,
+                        (crate::ast::Dimension::Named(nl, sl), crate::ast::Dimension::Named(nr, sr)) => nl == nr && sl == sr,
+                        (crate::ast::Dimension::Anonymous(sl), crate::ast::Dimension::Named(_, sr)) |
+                        (crate::ast::Dimension::Named(_, sl), crate::ast::Dimension::Anonymous(sr)) => sl == sr,
+                    }
+                }) && self.types_compatible(ia, ib)
             }
             (Type::Applied(an, aa), Type::Applied(bn, ba)) => {
                 an == bn && aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b))

@@ -212,7 +212,13 @@ fn format_type(ty: &Type) -> String {
             format!("{}<{}>", name, inner.join(", "))
         }
         Type::Sig(name) => format!("sig:{}", name),
-        Type::Vector(elem, size) => format!("Vec<{}; {}>", format_type(elem), size),
+        Type::Vector(elem, dims) => {
+            let total_size: usize = dims.iter().map(|d| match d {
+                crate::ast::Dimension::Anonymous(s) => *s,
+                crate::ast::Dimension::Named(_, s) => *s,
+            }).product();
+            format!("Vec<{}; {}>", format_type(elem), total_size)
+        }
         Type::Enum(name) => format!("enum:{}", name),
         Type::Constrained(inner, bit_range) => {
             format!("{}@/{}", format_type(inner), format_bit_range(bit_range))
@@ -245,7 +251,13 @@ fn estimate_type_size(ty: &Type) -> usize {
         Type::Generic(_, _) => 8,
         Type::Applied(_, _) => 8,
         Type::Sig(_) => 8,
-        Type::Vector(elem, size) => estimate_type_size(elem) * size,
+        Type::Vector(elem, dims) => {
+            let total_size: usize = dims.iter().map(|d| match d {
+                crate::ast::Dimension::Anonymous(s) => *s,
+                crate::ast::Dimension::Named(_, s) => *s,
+            }).product();
+            estimate_type_size(elem) * total_size
+        }
         Type::Enum(_) => 8,
         Type::Constrained(_, BitRange::Single(_)) => 1,
         Type::Constrained(_, BitRange::Any(n)) => (*n + 7) / 8,

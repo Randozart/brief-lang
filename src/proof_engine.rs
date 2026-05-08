@@ -1734,7 +1734,13 @@ impl ProofEngine {
             // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
             // are regular structs/enums defined in stdlib, handled via
             // Custom/Applied/Enum variants.
-            Type::Vector(inner, size) => format!("Vector<{}>[{}]", self.type_name(inner), size),
+            Type::Vector(inner, dims) => {
+                let dims_str: Vec<String> = dims.iter().map(|d| match d {
+                    crate::ast::Dimension::Anonymous(s) => format!("{}", s),
+                    crate::ast::Dimension::Named(n, s) => format!("{}:{}", n, s),
+                }).collect();
+                format!("Vector<{}, {}>", self.type_name(inner), dims_str.join(", "))
+            }
             Type::Constrained(inner, _) => self.type_name(inner),
         }
     }

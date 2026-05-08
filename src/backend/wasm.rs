@@ -247,13 +247,22 @@ impl WasmGenerator {
 
     fn get_rust_type_for_arm(ty: &Type, bit_range: &Option<BitRange>) -> String {
         // Handle Vector types first - generate array
-        if let Type::Vector(inner, size) = ty {
+        if let Type::Vector(inner, dims) = ty {
             let inner_type = if let Some(br) = bit_range {
                 Self::rust_type_from_bit_range(br)
             } else {
                 Self::get_rust_type_for_arm(inner, &None)
             };
-            return format!("[{}; {}]", inner_type, size);
+            // Build nested array syntax for multidimensional
+            let mut result = inner_type;
+            for d in dims.iter().rev() {
+                let size = match d {
+                    crate::ast::Dimension::Anonymous(s) => *s,
+                    crate::ast::Dimension::Named(_, s) => *s,
+                };
+                result = format!("[{}; {}]", result, size);
+            }
+            return result;
         }
 
         // If bit_range is specified for scalar, use it
@@ -315,7 +324,13 @@ impl WasmGenerator {
                         Type::String => SignalType::String,
                         Type::Applied(name, _) if name == "List" => SignalType::List,
                         Type::Generic(name, _) if name == "List" => SignalType::List,
-                        Type::Vector(_, size) => SignalType::Vector(*size),
+                        Type::Vector(_, dims) => {
+                            let total: usize = dims.iter().map(|d| match d {
+                                crate::ast::Dimension::Anonymous(s) => *s,
+                                crate::ast::Dimension::Named(_, s) => *s,
+                            }).product();
+                            SignalType::Vector(total)
+                        }
                         Type::Constrained(inner, _) => match **inner {
                             Type::Int => SignalType::Int,
                             Type::UInt => SignalType::Int,

@@ -288,7 +288,7 @@ impl VerilogGenerator {
                                 let direction = io_cfg.direction.as_deref().unwrap_or("output");
 
                                 match &decl.ty {
-                                    Type::Vector(inner, size) => {
+                                    Type::Vector(inner, dims) => {
                                         let element_bits =
                                             self.get_bit_width(inner, decl.bit_range.as_ref());
                                         let signed = if matches!(**inner, Type::Int) {
@@ -296,6 +296,11 @@ impl VerilogGenerator {
                                         } else {
                                             ""
                                         };
+
+                                        let total_size: usize = dims.iter().map(|d| match d {
+                                            crate::ast::Dimension::Anonymous(s) => *s,
+                                            crate::ast::Dimension::Named(_, s) => *s,
+                                        }).product();
 
                                         let mut attr = "";
                                         let addr_str_upper = format!("0x{:08X}", addr);
@@ -333,7 +338,7 @@ impl VerilogGenerator {
                                                 "".to_string()
                                             },
                                             decl.name,
-                                            size - 1,
+                                            total_size - 1,
                                             attr,
                                             io_cfg.pin
                                         ));
@@ -582,7 +587,7 @@ impl VerilogGenerator {
                     self.emit_type_signals(&format!("{}_{}", name, i), t, range, address);
                 }
             }
-            Type::Vector(inner, size) => {
+            Type::Vector(inner, dims) => {
                 let width = self.get_bit_width(inner, range);
                 let signed = if matches!(**inner, Type::Int) {
                     "signed "
@@ -594,6 +599,12 @@ impl VerilogGenerator {
                 } else {
                     "".to_string()
                 };
+
+                // Calculate total size (product of all dimensions)
+                let total_size: usize = dims.iter().map(|d| match d {
+                    crate::ast::Dimension::Anonymous(s) => *s,
+                    crate::ast::Dimension::Named(_, s) => *s,
+                }).product();
 
                 let mut attr = "";
                 let mut suffix = "";
@@ -630,7 +641,7 @@ impl VerilogGenerator {
                     signed,
                     width_str,
                     name,
-                    size - 1,
+                    total_size - 1,
                     suffix
                 ));
             }
@@ -854,7 +865,13 @@ impl VerilogGenerator {
         }
 
         let (is_vector, vector_size) = match &decl.ty {
-            Type::Vector(_, size) => (true, *size),
+            Type::Vector(_, dims) => {
+                let total_size: usize = dims.iter().map(|d| match d {
+                    crate::ast::Dimension::Anonymous(s) => *s,
+                    crate::ast::Dimension::Named(_, s) => *s,
+                }).product();
+                (true, total_size)
+            }
             _ => (false, 1),
         };
 
@@ -1212,8 +1229,12 @@ impl VerilogGenerator {
             .iter()
             .filter_map(|item| {
                 if let TopLevel::StateDecl(decl) = item {
-                    if let Type::Vector(_, size) = &decl.ty {
-                        if *size > 1 {
+                    if let Type::Vector(_, dims) = &decl.ty {
+                        let total: usize = dims.iter().map(|d| match d {
+                            crate::ast::Dimension::Anonymous(s) => *s,
+                            crate::ast::Dimension::Named(_, s) => *s,
+                        }).product();
+                        if total > 1 {
                             return Some(decl.name.clone());
                         }
                     }
@@ -1673,11 +1694,15 @@ impl VerilogGenerator {
 
                     if let Some(mem_cfg) = mem_cfg {
                         // Check size
-                        if let Type::Vector(_, size) = &decl.ty {
-                            if *size > mem_cfg.size {
+                        if let Type::Vector(_, dims) = &decl.ty {
+                            let total_size: usize = dims.iter().map(|d| match d {
+                                crate::ast::Dimension::Anonymous(s) => *s,
+                                crate::ast::Dimension::Named(_, s) => *s,
+                            }).product();
+                            if total_size > mem_cfg.size {
                                 return Err(format!(
                                     "Vector '{}' size ({}) exceeds hardware memory size ({}) at address 0x{:x}",
-                                    decl.name, size, mem_cfg.size, addr
+                                    decl.name, total_size, mem_cfg.size, addr
                                 ));
                             }
                         }

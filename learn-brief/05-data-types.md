@@ -352,4 +352,93 @@ txn list_all() [true][true] {
 
 ---
 
+## 7. Vectors: Multidimensional Arrays
+
+Vectors are fixed-size, contiguous memory arrays optimized for hardware and SIMD operations.
+
+### Declaration
+
+```brief
+// 1D vector
+let vec: Vector<Int, 100>;
+
+// 2D matrix
+let mat: Vector<Int, 10, 20>;
+
+// 3D tensor
+let tensor: Vector<Float, 3, 32, 32>;
+
+// Named dimensions (for readability)
+let persons: Vector<Person, width:50, height:50, depth:40, time:10>;
+```
+
+### Syntax
+
+- `Vector<T, dim1, dim2, ...>` - First argument is the element type, rest are dimensions
+- Dimensions can be **anonymous** (just numbers) or **named** (`name:size`)
+- Names are purely syntactic - they don't affect memory layout
+- Total elements = product of all dimensions
+
+### Accessing Elements
+
+```brief
+let mat: Vector<Int, 10, 20>;
+
+// 2D access
+let x = mat[5, 10];
+
+// Slicing - get a row
+let row: Vector<Int, 20> = mat[5, :];
+
+// Range slicing
+let sub: Vector<Int, 5, 5> = mat[0..5, 0..5];
+```
+
+### Filtering with Semicolon
+
+The semicolon separates coordinates from filter conditions:
+
+```brief
+let persons: Vector<Person, 50, 50>;
+
+// Filter: all persons where age > 18
+persons[: age > 18].adult = true;
+
+// Slice + filter: at row 5, where age > 18
+persons[5, ; age > 18].processed = true;
+
+// Range + stride + filter
+persons[0..50:2; city == "NYC"].region = "East";
+```
+
+### Why Vectors Instead of Lists
+
+| Feature | List<T> | Vector<T, dims> |
+|---------|---------|--------------|
+| Size | Dynamic | Fixed at compile time |
+| Memory | Heap-allocated | Contiguous buffer |
+| Access | O(n) scan | O(1) direct |
+| Hardware | Limited | Full SIMD support |
+| Use case | Runtime data | Buffers, tensors |
+
+### Example: Image Processing
+
+```brief
+struct Pixel {
+    r: UInt,
+    g: UInt,
+    b: UInt
+}
+
+let frame: Vector<Pixel, width:1920, height:1080>;
+
+// Brighten all red pixels > 200
+frame[: r > 200].r = 255;
+
+// Process every 4th pixel
+frame[width::4, height::4].r = frame[width::4, height::4].r / 2;
+```
+
+---
+
 *Next: [06-string.md](06-string.md) - String manipulation and operations*

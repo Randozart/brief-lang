@@ -15,7 +15,12 @@
    - Key features overview
    - Quick start guide
 
-2. **[01-basics.md](01-basics.md)** - Variables, Types, Transactions
+2. **[00a-base-design.md](00a-base-design.md)** - The Brief Mindset
+   - How to read Brief code
+   - Symbol meanings and heuristics
+   - The "feel" of the language
+
+3. **[01-basics.md](01-basics.md)** - Variables, Types, Transactions
    - State declarations (`let`)
    - Basic types (Int, String, Bool, Char)
    - Transaction syntax

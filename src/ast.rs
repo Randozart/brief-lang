@@ -101,6 +101,12 @@ pub enum BitRange {
 
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Dimension {
+    Anonymous(usize),
+    Named(String, usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Int,
     Float,
@@ -121,7 +127,7 @@ pub enum Type {
     Generic(String, Vec<Type>),
     Applied(String, Vec<Type>),
     Sig(String),
-    Vector(Box<Type>, usize),
+    Vector(Box<Type>, Vec<Dimension>),
     Enum(String),
     Constrained(Box<Type>, BitRange),
 }

@@ -2896,16 +2896,53 @@ let span = self.current_span();
             } else {
                 return self.spanned_err("Expected '>' to close generic type arguments".to_string());
             }
-            ty = Type::Applied(
-                match &ty {
-                    Type::Custom(name) => name.clone(),
-                    _ => return self.spanned_err("Generic type must have a base name".to_string()),
-                },
-                type_args,
-            );
+            
+            // Special handling for Vector<T, dim1, dim2, ...> syntax
+            if let Type::Custom(name) = &ty {
+                if name == "Vector" && type_args.len() >= 2 {
+                    // First arg is element type, rest are dimensions
+                    let inner = Box::new(type_args[0].clone());
+                    let mut dimensions = Vec::new();
+                    for arg in &type_args[1..] {
+                        match arg {
+                            Type::Custom(dim_name) => {
+                                // Named dimension: name:size - but we need to parse this differently
+                                // For now, treat as anonymous with size from a constant
+                                return self.spanned_err("Named dimensions must be in 'name:size' format".to_string());
+                            }
+                            _ => {
+                                // Extract size from type - should be an integer literal type
+                                // For simplicity, we'll handle this in a helper
+                                if let Some(size) = Self::extract_dimension_size(arg) {
+                                    dimensions.push(crate::ast::Dimension::Anonymous(size));
+                                } else {
+                                    return self.spanned_err("Vector dimension must be an integer".to_string());
+                                }
+                            }
+                        }
+                    }
+                    ty = Type::Vector(inner, dimensions);
+                } else {
+                    ty = Type::Applied(
+                        match &ty {
+                            Type::Custom(name) => name.clone(),
+                            _ => return self.spanned_err("Generic type must have a base name".to_string()),
+                        },
+                        type_args,
+                    );
+                }
+            } else {
+                ty = Type::Applied(
+                    match &ty {
+                        Type::Custom(name) => name.clone(),
+                        _ => return self.spanned_err("Generic type must have a base name".to_string()),
+                    },
+                    type_args,
+                );
+            }
         }
 
-        // Check for vector dimension: Type[N]
+        // Check for vector dimension: Type[N] (backward compatible)
         while let Some(Ok(Token::LBracket)) = self.current_token() {
             if !matches!(self.peek(), Some(Ok(Token::Integer(_)))) {
                 break;
@@ -2915,7 +2952,7 @@ let span = self.current_span();
                 let size = *n as usize;
                 self.advance();
                 self.expect(Token::RBracket)?;
-                ty = Type::Vector(Box::new(ty), size);
+                ty = Type::Vector(Box::new(ty), vec![crate::ast::Dimension::Anonymous(size)]);
             } else {
                 return self.spanned_err("Expected vector size".to_string());
             }
@@ -3698,6 +3735,14 @@ let span = self.current_span();
                 stride,
                 mask,
             },
+        }
+    }
+
+    /// Extract dimension size from a Type for Vector parsing
+    fn extract_dimension_size(ty: &Type) -> Option<usize> {
+        match ty {
+            Type::Custom(s) => s.parse::<usize>().ok(),
+            _ => None,
         }
     }
 }

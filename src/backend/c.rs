@@ -847,6 +847,13 @@ output.push_str("static void init_wrapper(void) {\n");
             Type::Float => "double".to_string(),
             Type::Bool => "bool".to_string(),
             Type::String => "char *".to_string(),
+            Type::Vector(_, dims) => {
+                let total: usize = dims.iter().map(|d| match d {
+                    crate::ast::Dimension::Anonymous(s) => *s,
+                    crate::ast::Dimension::Named(_, s) => *s,
+                }).product();
+                format!("int32_t[{}]", total)
+            }
             _ => "int32_t".to_string(),
         }
     }
@@ -858,6 +865,7 @@ output.push_str("static void init_wrapper(void) {\n");
             Type::Float => "0.0".to_string(),
             Type::Bool => "false".to_string(),
             Type::String => "NULL".to_string(),
+            Type::Vector(_, _) => "{0}".to_string(),
             _ => "0".to_string(),
         }
     }

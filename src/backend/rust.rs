@@ -267,7 +267,13 @@ impl RustBackend {
             Type::Float => "f64".to_string(),
             Type::Bool => "bool".to_string(),
             Type::String => "String".to_string(),
-            Type::Vector(inner, size) => format!("Vec<{}>", Self::get_rust_type(inner)),
+            Type::Vector(inner, dims) => {
+                let dims_str: Vec<String> = dims.iter().map(|d| match d {
+                    crate::ast::Dimension::Anonymous(s) => format!("{}", s),
+                    crate::ast::Dimension::Named(_, s) => format!("{}", s),
+                }).collect();
+                format!("Vec<{}>[{}]", Self::get_rust_type(inner), dims_str.join("]["))
+            }
             Type::Constrained(inner, _) => Self::get_rust_type(inner),
             _ => "i32".to_string(),
         }
