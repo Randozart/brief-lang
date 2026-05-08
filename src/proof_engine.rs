@@ -1181,8 +1181,8 @@ impl ProofEngine {
                             .push("e.g., '[count == @count + 1]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     } else if pre_is_trivial {
-                        // Only precondition trivial - error
-                        let mut err = ProofError::new("P009", "trivial precondition");
+                        // Only precondition trivial - warning (post is non-trivial)
+                        let mut err = ProofError::new_warning("P009", "trivial precondition");
                         err.explanation = format!(
                             "transaction '{}' has precondition '[true]' which is always satisfied",
                             txn.name
@@ -1199,8 +1199,8 @@ impl ProofEngine {
                             .push("e.g., '[count > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     } else if post_is_trivial {
-                        // Only postcondition trivial - error  
-                        let mut err = ProofError::new("P010", "trivial postcondition");
+                        // Only postcondition trivial - warning (pre is non-trivial)
+                        let mut err = ProofError::new_warning("P010", "trivial postcondition");
                         err.explanation = format!(
                             "transaction '{}' has postcondition '[true]' which is always satisfied",
                             txn.name
