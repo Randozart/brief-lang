@@ -1146,6 +1146,7 @@ impl ProofEngine {
                     let post_is_trivial = matches!(&txn.contract.post_condition, Expr::Bool(true));
 
                     if pre_is_trivial && post_is_trivial {
+                        // BOTH trivial - hard error
                         let mut err = ProofError::new("P009", "trivial precondition");
                         err.explanation = format!(
                             "transaction '{}' has precondition '[true]' which is always satisfied",
@@ -1180,7 +1181,8 @@ impl ProofEngine {
                             .push("e.g., '[count == @count + 1]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     } else if pre_is_trivial {
-                        let mut err = ProofError::new_warning("P009", "trivial precondition");
+                        // Only precondition trivial - error
+                        let mut err = ProofError::new("P009", "trivial precondition");
                         err.explanation = format!(
                             "transaction '{}' has precondition '[true]' which is always satisfied",
                             txn.name
@@ -1188,7 +1190,7 @@ impl ProofEngine {
                         err.proof_chain
                             .push("1. '[true]' accepts any state".to_string());
                         err.proof_chain
-                            .push("2. consider specifying actual preconditions".to_string());
+                            .push("2. this provides no compile-time safety".to_string());
                         err.hints.push(format!(
                             "specify what state is required before '{}' runs",
                             txn.name
@@ -1197,7 +1199,8 @@ impl ProofEngine {
                             .push("e.g., '[count > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     } else if post_is_trivial {
-                        let mut err = ProofError::new_warning("P010", "trivial postcondition");
+                        // Only postcondition trivial - error  
+                        let mut err = ProofError::new("P010", "trivial postcondition");
                         err.explanation = format!(
                             "transaction '{}' has postcondition '[true]' which is always satisfied",
                             txn.name
@@ -1205,7 +1208,7 @@ impl ProofEngine {
                         err.proof_chain
                             .push("1. '[true]' accepts any state".to_string());
                         err.proof_chain
-                            .push("2. consider specifying actual postconditions".to_string());
+                            .push("2. this provides no compile-time safety".to_string());
                         err.hints.push(format!(
                             "specify what state '{}' guarantees after running",
                             txn.name

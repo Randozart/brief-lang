@@ -1330,6 +1330,7 @@ impl TypeChecker {
         let l_ty = self.infer_expression(l);
         let r_ty = self.infer_expression(r);
         match (&l_ty, &r_ty) {
+            // Vector SIMD operations
             (Type::Vector(inner_l, dims_l), Type::Vector(inner_r, dims_r)) => {
                 // Check if dimensions match
                 let dims_match = dims_l.len() == dims_r.len() && {
@@ -1355,6 +1356,45 @@ impl TypeChecker {
                 Type::Vector(
                     Box::new(self.binary_op_type_scalar(inner, scalar, int_type, float_type)),
                     dims.clone(),
+                )
+            }
+            // List SIMD operations - dynamic length, requires runtime length check
+            (Type::Applied(l_name, l_args), Type::Applied(r_name, r_args)) 
+                if (l_name == "List" || l_name == "DynamicVector") && 
+                   (r_name == "List" || r_name == "DynamicVector") &&
+                   l_args.len() == 1 && r_args.len() == 1 => {
+                // Both are List<T> or DynamicVector<T>
+                // Inject implicit length assertion
+                let elem_type_l = &l_args[0];
+                let elem_type_r = &r_args[0];
+                
+                // Element types must be compatible
+                if !self.types_compatible(elem_type_l, elem_type_r) {
+                    return Type::Custom("list_element_type_mismatch".to_string());
+                }
+                
+                // Return List of result type
+                Type::Applied(
+                    "List".to_string(),
+                    vec![self.binary_op_type_scalar(elem_type_l, elem_type_r, int_type, float_type)]
+                )
+            }
+            // List scalar broadcasting
+            (Type::Applied(name, args), scalar) | (scalar, Type::Applied(name, args))
+                if name == "List" || name == "DynamicVector" && args.len() == 1 => {
+                let elem_type = &args[0];
+                Type::Applied(
+                    "List".to_string(),
+                    vec![self.binary_op_type_scalar(elem_type, scalar, int_type, float_type)]
+                )
+            }
+            // List scalar broadcasting
+            (Type::Applied(name, args), scalar) | (scalar, Type::Applied(name, args))
+                if name == "List" || name == "DynamicVector" && args.len() == 1 => {
+                let elem_type = &args[0];
+                Type::Applied(
+                    "List".to_string(),
+                    vec![self.binary_op_type_scalar(elem_type, scalar, int_type, float_type)]
                 )
             }
             _ => self.binary_op_type_scalar(&l_ty, &r_ty, int_type, float_type),

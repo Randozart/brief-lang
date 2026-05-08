@@ -34,11 +34,12 @@ Square brackets are for **logical checks and verification**. This is the primary
 };
 ```
 
-**Exception**: Vector array types use brackets, but the context makes it clear:
+**Vector format**: `Vector<T, dim1, dim2, ...>` with commas, not angle brackets for dimensions
 
 ```brief
-let items: Vector<Int>;   // Type declaration - obviously not a check
-let x = items[0];    // Index access
+let items: Vector<Int, 10>;   // Type declaration - obviously not a check
+let x = items[5];             // Index access
+let matrix: Vector<Int, 10, 20>;    // 2D vector
 ```
 
 ---
@@ -341,7 +342,7 @@ That's why `rct txn` is different from a `while` loop: the reactor pattern inclu
 
 ## Why Lists and Vectors, Not Regular Arrays
 
-Brief provides **`List<T>`** and **`Vector<T>`**, not traditional arrays. This is deliberate.
+Brief provides **`List<T>`** and **`Vector<T, dim1, dim2, ...>`**, not traditional arrays. This is deliberate.
 
 ### Spatial Thinking, Not Sequential
 
@@ -350,18 +351,33 @@ Regular arrays force you to think sequentially: `array[0]`, `array[1]`, `array[2
 Lists and Vectors encourage **spatial thinking**:
 
 ```brief
-let items: List<Int> = [1, 2, 3, 4];    // List - growable
-let buffer: Vector<Int>;                 // Vector - fixed, contiguous
+let items: List<Int> = [1, 2, 3, 4];                      // List - growable
+let buffer: Vector<Int, 100>;                             // 1D vector - fixed size
+let matrix: Vector<Int, 10, 20>;                         // 2D matrix
+let tensor: Float, 3, 32, 32>;                         // 3D tensor
+let persons: Vector<Person, width:50, height:50>;           // Named dimensions
 ```
 
 When Brief compiles to hardware (`.ebv` → SystemVerilog/VHDL) or uses SIMD operations, the compiler can reason about the **entire structure at once**, not just iterate sequentially.
 
 ### The Difference
 
-- **`List<T>`** - Dynamic, growable, like a linked list
-- **`Vector<T>`** - Fixed-size, contiguous memory, ideal for hardware
+- **`List<T>`** - Dynamic, growable, heap-allocated
+- **`Vector<T, dims...>`** - Fixed-size, contiguous memory, multidimensional, hardware-friendly
 
-Choosing between them forces you to think about your access pattern upfront.
+### Vector Declaration Syntax
+
+Vectors use **angle brackets** with commas for multiple dimensions:
+- First argument is the **element type**
+- Remaining arguments are **dimensions**
+- Dimensions can be **anonymous** (just numbers) or **named** (`name:size`)
+
+```brief
+Vector<Int, 10, 20>                             // 2D, 10x20
+Vector<Person, width:50, height:50, time:10>      // Named dimensions
+```
+
+Choosing between List and Vector forces you to think about your access pattern upfront.
 
 ---
 

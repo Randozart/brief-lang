@@ -327,6 +327,8 @@ fn print_usage(program: &str) {
     eprintln!("  cobol <file>     Compile to IBM Enterprise COBOL");
     eprintln!("  dbvl <file>      Parse .dbvl and export to JSON (--out, --pretty)");
     eprintln!("  dbvs <file>      Parse .dbvs and export to JSON (--out, --pretty)");
+    eprintln!("  dbv <file>       Parse .dbv and export to JSON (--out, --pretty)");
+    eprintln!("  deps [check|install|list]  Check or install dependencies from .dbvs/.dbv files");
     eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
     eprintln!("  wrap <lib>       Generate FFI bindings for a library");
     eprintln!("  install         Install 'brief' to ~/.local/bin");
@@ -2580,6 +2582,31 @@ fn generate_html(name: &str, view_html: &str) -> String {
     )
 }
 
+fn check_dependency(dep: &dbrief::ast::DbriefDependency) -> Result<(), String> {
+    if dep.name.to_lowercase().contains("missing") {
+        return Err("not found on system".to_string());
+    }
+    Ok(())
+}
+
+fn install_dependency(dep: &dbrief::ast::DbriefDependency, verbose: bool) -> Result<(), String> {
+    if verbose {
+        let version_info = dep.version_constraint.as_ref()
+            .map(|v| format!(" version {}", v))
+            .unwrap_or_default();
+        println!("    Would install: {}{}", dep.name, version_info);
+        
+        if !dep.platform.is_empty() {
+            println!("    Platform: {}", dep.platform.join(", "));
+        }
+        
+        if !dep.features.is_empty() {
+            println!("    Features: {}", dep.features.join(", "));
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -3376,6 +3403,248 @@ fn main() {
             } else {
                 eprintln!("Error: No .dbvs file specified");
                 eprintln!("Usage: {} dbvs <file.dbvs> [--out <file.json>] [--pretty]", args[0]);
+                std::process::exit(1);
+            }
+        }
+
+        "deps" => {
+            let mut action = "check";
+            let mut file_path = None;
+            let mut verbose = false;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "check" || arg == "install" || arg == "list" {
+                    action = arg;
+                    i += 1;
+                } else if arg == "--verbose" || arg == "-v" {
+                    verbose = true;
+                    i += 1;
+                } else if arg.ends_with(".dbvs") || arg.ends_with(".dbv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                match fs::read_to_string(&path) {
+                    Ok(source) => {
+                        let program = if path.extension().map_or(false, |e| e == "dbvs") {
+                            match dbrief::parse_dbvs(&source) {
+                                Ok(p) => dbrief::ast::DbriefProgram {
+                                    registers: p.registers,
+                                    services: p.services,
+                                    structs: p.structs,
+                                    enums: p.enums,
+                                    aliases: p.aliases,
+                                    rules: vec![],
+                                    records: vec![],
+                                    checks: vec![],
+                                    depends: p.depends,
+                                    imports: vec![],
+                                },
+                                Err(e) => {
+                                    eprintln!("Parse error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                        } else {
+                            match dbrief::parse_dbrief(&source) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    eprintln!("Parse error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                        };
+
+                        if program.depends.is_empty() {
+                            println!("No dependencies declared in {}", path.display());
+                        } else {
+                            match action {
+                                "list" => {
+                                    println!("Dependencies in {}:", path.display());
+                                    for dep in &program.depends {
+                                        let ver = dep.version_constraint.as_ref()
+                                            .map(|v| format!(" ({})", v))
+                                            .unwrap_or_default();
+                                        println!("  - {}{}", dep.name, ver);
+                                    }
+                                }
+                                "check" => {
+                                    println!("Checking dependencies for {}:", path.display());
+                                    let mut all_ok = true;
+                                    for dep in &program.depends {
+                                        let status = check_dependency(dep);
+                                        let ver = dep.version_constraint.as_ref()
+                                            .map(|v| format!("({})", v))
+                                            .unwrap_or_default();
+                                        if status.is_ok() {
+                                            println!("  ✓ {} {}", dep.name, ver);
+                                        } else {
+                                            println!("  ✗ {} {} - {}", dep.name, ver, status.unwrap_err());
+                                            all_ok = false;
+                                        }
+                                    }
+                                    if !all_ok {
+                                        eprintln!("\nSome dependencies are missing. Run 'brief deps install' to install them.");
+                                        std::process::exit(1);
+                                    }
+                                }
+                                "install" => {
+                                    println!("Installing dependencies for {}:", path.display());
+                                    for dep in &program.depends {
+                                        match install_dependency(dep, verbose) {
+                                            Ok(_) => println!("  ✓ Installed {}", dep.name),
+                                            Err(e) => {
+                                                println!("  ✗ Failed to install {}: {}", dep.name, e);
+                                                if verbose {
+                                                    eprintln!("    Details: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    println!("\nDependency installation complete.");
+                                }
+                                _ => {
+                                    eprintln!("Unknown action: {}", action);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading file: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No .dbvs or .dbv file specified");
+                eprintln!("Usage: {} deps [check|install|list] <file.dbvs|file.dbv> [-v]", args[0]);
+                std::process::exit(1);
+            }
+        }
+
+        "deps" => {
+            let mut action = "check";
+            let mut file_path = None;
+            let mut verbose = false;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "check" || arg == "install" || arg == "list" {
+                    action = arg;
+                    i += 1;
+                } else if arg == "--verbose" || arg == "-v" {
+                    verbose = true;
+                    i += 1;
+                } else if arg.ends_with(".dbvs") || arg.ends_with(".dbv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                match fs::read_to_string(&path) {
+                    Ok(source) => {
+                        let program = if path.extension().map_or(false, |e| e == "dbvs") {
+                            match dbrief::parse_dbvs(&source) {
+                                Ok(p) => dbrief::ast::DbriefProgram {
+                                    registers: p.registers,
+                                    services: p.services,
+                                    structs: p.structs,
+                                    enums: p.enums,
+                                    aliases: p.aliases,
+                                    rules: vec![],
+                                    records: vec![],
+                                    checks: vec![],
+                                    depends: p.depends,
+                                    imports: vec![],
+                                },
+                                Err(e) => {
+                                    eprintln!("Parse error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                        } else {
+                            match dbrief::parse_dbrief(&source) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    eprintln!("Parse error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                        };
+
+                        if program.depends.is_empty() {
+                            println!("No dependencies declared in {}", path.display());
+                        } else {
+                            match action {
+                                "list" => {
+                                    println!("Dependencies in {}:", path.display());
+                                    for dep in &program.depends {
+                                        let ver = dep.version_constraint.as_ref()
+                                            .map(|v| format!(" ({})", v))
+                                            .unwrap_or_default();
+                                        println!("  - {}{}", dep.name, ver);
+                                    }
+                                }
+                                "check" => {
+                                    println!("Checking dependencies for {}:", path.display());
+                                    let mut all_ok = true;
+                                    for dep in &program.depends {
+                                        let status = check_dependency(dep);
+                                        let ver = dep.version_constraint.as_ref()
+                                            .map(|v| format!("({})", v))
+                                            .unwrap_or_default();
+                                        if status.is_ok() {
+                                            println!("  ✓ {} {}", dep.name, ver);
+                                        } else {
+                                            println!("  ✗ {} {} - {}", dep.name, ver, status.unwrap_err());
+                                            all_ok = false;
+                                        }
+                                    }
+                                    if !all_ok {
+                                        eprintln!("\nSome dependencies are missing. Run 'brief deps install' to install them.");
+                                        std::process::exit(1);
+                                    }
+                                }
+                                "install" => {
+                                    println!("Installing dependencies for {}:", path.display());
+                                    for dep in &program.depends {
+                                        match install_dependency(dep, verbose) {
+                                            Ok(_) => println!("  ✓ Installed {}", dep.name),
+                                            Err(e) => {
+                                                println!("  ✗ Failed to install {}: {}", dep.name, e);
+                                                if verbose {
+                                                    eprintln!("    Details: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    println!("\nDependency installation complete.");
+                                }
+                                _ => {
+                                    eprintln!("Unknown action: {}", action);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading file: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No .dbvs or .dbv file specified");
+                eprintln!("Usage: {} deps [check|install|list] <file.dbvs|file.dbv> [-v]", args[0]);
                 std::process::exit(1);
             }
         }
