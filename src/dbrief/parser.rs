@@ -317,8 +317,10 @@ impl DbriefParser {
             self.skip_whitespace();
             Some(self.parse_string()?)
         } else {
-            None
+None
         };
+        
+        self.skip_whitespace();
         
         // Check for block syntax { ... } or colon syntax : Type
         let (register_type, check, location, target, description, input_params, output_type, error_type) = 
@@ -646,7 +648,10 @@ impl DbriefParser {
     }
 
     fn parse_check(&mut self) -> Result<DbriefContract, String> {
-        self.consume_keyword("CHECK")?;
+        // Accept optional CHECK keyword (block format may have already consumed it)
+        if self.starts_with("CHECK") || self.starts_with("check") {
+            self.consume_keyword("CHECK")?;
+        }
         self.consume('[')?;
         
         let mut conditions = Vec::new();
@@ -744,17 +749,26 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
         
         match tok.to_lowercase().as_str() {
             "bool" => Ok(DbriefType::Bool),
-            "int" => {
-                self.consume('[')?;
-                let size: usize = self.parse_number::<usize>()?;
-                self.consume(']')?;
-                Ok(DbriefType::Int(size))
+            "int" | "Int" => {
+                // Allow just "Int" as a generic integer (defaults to 32-bit)
+                if self.peek() == Some('[') {
+                    self.consume('[')?;
+                    let size: usize = self.parse_number::<usize>()?;
+                    self.consume(']')?;
+                    Ok(DbriefType::Int(size))
+                } else {
+                    Ok(DbriefType::Int(32)) // Default to 32-bit
+                }
             }
-            "uint" => {
-                self.consume('[')?;
-                let size: usize = self.parse_number::<usize>()?;
-                self.consume(']')?;
-                Ok(DbriefType::UInt(size))
+            "uint" | "Uint" => {
+                if self.peek() == Some('[') {
+                    self.consume('[')?;
+                    let size: usize = self.parse_number::<usize>()?;
+                    self.consume(']')?;
+                    Ok(DbriefType::UInt(size))
+                } else {
+                    Ok(DbriefType::UInt(32)) // Default to 32-bit
+                }
             }
             "float" => Ok(DbriefType::Float),
             "string" => Ok(DbriefType::String),
