@@ -1,6 +1,10 @@
 // Parser - Recursive descent parser for Brief
 // Tier 4: Parser Components
 
+import token;
+import ast;
+import std.collections;
+
 // ===== PARSER STATE =====
 
 struct ParserState {
@@ -12,7 +16,7 @@ struct ParserState {
 // ===== PARSER CONSTRUCTION =====
 
 defn new_parser(tokens: List<Token>) -> ParserState {
-    let current = tokens.get(0).unwrap_or(TokenEof);
+    let current = unwrap_or(get(tokens, 0), TokenEof);
     term ParserState {
         tokens: tokens,
         position: 0,
@@ -28,7 +32,7 @@ defn current_token(state: ParserState) -> Token {
 
 defn peek_token(state: ParserState, offset: Int) -> Token {
     let pos = state.position + offset;
-    [pos < state.tokens.len()] {
+    [pos < len(state.tokens)] {
         term state.tokens[pos];
     };
     term TokenEof;
@@ -36,7 +40,7 @@ defn peek_token(state: ParserState, offset: Int) -> Token {
 
 defn advance(state: ParserState) -> ParserState {
     let new_pos = state.position + 1;
-    [new_pos < state.tokens.len()] {
+    [new_pos < len(state.tokens)] {
         let new_current = state.tokens[new_pos];
         term ParserState {
             tokens: state.tokens,
@@ -74,7 +78,7 @@ defn parse_program(state: ParserState) -> Result<Program, String> {
         let result = parse_top_level(state);
         uni result(Ok(pair)) = {
             let (item, new_state) = pair;
-            &items = items.append(item);
+            &items = append(items, item);
             &state = new_state;
         };
         uni result(Err(e)) = {
@@ -92,7 +96,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_state_decl(state);
         uni result(Ok(pair)) = {
             let (decl, new_state) = pair;
-            term (TopState(decl), new_state);
+            term Ok((TopState(decl), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -103,7 +107,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_constant(state);
         uni result(Ok(pair)) = {
             let (c, new_state) = pair;
-            term (TopConst(c), new_state);
+            term Ok((TopConst(c), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -114,7 +118,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_transaction(state);
         uni result(Ok(pair)) = {
             let (t, new_state) = pair;
-            term (TopTxn(t), new_state);
+            term Ok((TopTxn(t), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -125,7 +129,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_transaction(state);
         uni result(Ok(pair)) = {
             let (t, new_state) = pair;
-            term (TopTxn(t), new_state);
+            term Ok((TopTxn(t), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -136,7 +140,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_definition(state);
         uni result(Ok(pair)) = {
             let (d, new_state) = pair;
-            term (TopDefn(d), new_state);
+            term Ok((TopDefn(d), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -147,7 +151,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_signature(state);
         uni result(Ok(pair)) = {
             let (s, new_state) = pair;
-            term (TopSig(s), new_state);
+            term Ok((TopSig(s), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -158,7 +162,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_struct(state);
         uni result(Ok(pair)) = {
             let (struct_def, new_state) = pair;
-            term (TopStruct(struct_def), new_state);
+            term Ok((TopStruct(struct_def), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -169,7 +173,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_enum(state);
         uni result(Ok(pair)) = {
             let (enum_def, new_state) = pair;
-            term (TopEnum(enum_def), new_state);
+            term Ok((TopEnum(enum_def), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -180,7 +184,7 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         let result = parse_import(state);
         uni result(Ok(pair)) = {
             let (imp, new_state) = pair;
-            term (TopImport(imp), new_state);
+            term Ok((TopImport(imp), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -218,7 +222,7 @@ defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState),
     uni tok(TokenIdentifier(name)) = {
         &state = advance(state);
     };
-    [!tok.is_identifier()] {
+    [!is_identifier(tok)] {
         term Err("Expected transaction name");
     };
     
@@ -271,7 +275,7 @@ defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState),
     };
     
     let txn_obj = Transaction {
-        name: tok.unwrap_identifier(),
+        name: unwrap_identifier(tok),
         is_async: is_async,
         is_reactive: is_reactive,
         type_params: type_params,
@@ -280,7 +284,7 @@ defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState),
         body: body
     };
     
-    term (txn_obj, state);
+    term Ok((txn_obj, state));
 }
 
 // ===== DEFINITION PARSING =====
@@ -298,7 +302,7 @@ defn parse_definition(state: ParserState) -> Result<(Definition, ParserState), S
     uni tok(TokenIdentifier(name)) = {
         &state = advance(state);
     };
-    [!tok.is_identifier()] {
+    [!is_identifier(tok)] {
         term Err("Expected function name");
     };
     
@@ -365,7 +369,7 @@ defn parse_definition(state: ParserState) -> Result<(Definition, ParserState), S
     };
     
     let defn_obj = Definition {
-        name: tok.unwrap_identifier(),
+        name: unwrap_identifier(tok),
         type_params: type_params,
         params: params,
         output_type: output_type,
@@ -373,7 +377,7 @@ defn parse_definition(state: ParserState) -> Result<(Definition, ParserState), S
         body: body
     };
     
-    term (defn_obj, state);
+    term Ok((defn_obj, state));
 }
 
 // ===== CONTRACT PARSING =====
@@ -471,28 +475,24 @@ defn parse_contract(state: ParserState) -> Result<(Contract, ParserState), Strin
         watchdog: watchdog
     };
     
-    term (contract, state);
+    term Ok((contract, state));
 }
 
 // ===== EXPRESSION PARSING =====
-
-defn parse_expression(state: ParserState) -> Result<(Expr, ParserState), String> {
-    parse_or_expr(state)
-}
 
 defn parse_or_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
     let result = parse_and_expr(state);
     uni result(Ok(pair)) = {
         let (left, new_state) = pair;
-        let ms: ParserState = new_state;
+        let ms_state: ParserState = new_state;
         let ml: Expr = left;
         
-        [current_token(ms) == OpOr] {
-            &ms = advance(ms);
-            let result = parse_or_expr(ms);
+        [current_token(ms_state) == OpOr] {
+            &ms_state = advance(ms_state);
+            let result = parse_or_expr(ms_state);
             uni result(Ok(pair)) = {
                 let (right, new_state) = pair;
-                &ms = new_state;
+                &ms_state = new_state;
                 &ml = make_binop("||", ml, right);
             };
             uni result(Err(e)) = {
@@ -500,7 +500,7 @@ defn parse_or_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
             };
         };
         
-        term (ml, ms);
+        term Ok((ml, ms_state));
     };
     uni result(Err(e)) = {
         term Err(e);
@@ -511,276 +511,226 @@ defn parse_and_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
     let result = parse_equality_expr(state);
     uni result(Ok(pair)) = {
         let (left, new_state) = pair;
-        &state = new_state;
+        let ms_state: ParserState = new_state;
+        let ml: Expr = left;
+        
+        [current_token(ms_state) == OpAnd] {
+            &ms_state = advance(ms_state);
+            let result = parse_and_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("&&", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        term Ok((ml, ms_state));
     };
     uni result(Err(e)) = {
         term Err(e);
     };
-    
-    let left: Expr = state.current_token;
-    let result = parse_equality_expr(state);
-    uni result(Ok(pair)) = {
-        let (l, new_state) = pair;
-        &left = l;
-        &state = new_state;
-    };
-    uni result(Err(e)) = {
-        term Err(e);
-    };
-    
-    [current_token(state) == OpAnd] {
-        &state = advance(state);
-        let result = parse_and_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("&&", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    term (left, state);
 }
 
 defn parse_equality_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
     let result = parse_comparison_expr(state);
     uni result(Ok(pair)) = {
         let (left, new_state) = pair;
-        &state = new_state;
+        let ms_state: ParserState = new_state;
+        let ml: Expr = left;
+        
+        [current_token(ms_state) == OpEqEq] {
+            &ms_state = advance(ms_state);
+            let result = parse_comparison_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("==", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        [current_token(ms_state) == OpNeq] {
+            &ms_state = advance(ms_state);
+            let result = parse_comparison_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("!=", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        term Ok((ml, ms_state));
     };
     uni result(Err(e)) = {
         term Err(e);
     };
-    
-    let left: Expr = state.current_token;
-    let result = parse_comparison_expr(state);
-    uni result(Ok(pair)) = {
-        let (l, new_state) = pair;
-        &left = l;
-        &state = new_state;
-    };
-    uni result(Err(e)) = {
-        term Err(e);
-    };
-    
-    [current_token(state) == OpEqEq] {
-        &state = advance(state);
-        let result = parse_comparison_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("==", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    [current_token(state) == OpNeq] {
-        &state = advance(state);
-        let result = parse_comparison_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("!=", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    term (left, state);
 }
 
 defn parse_comparison_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
     let result = parse_additive_expr(state);
     uni result(Ok(pair)) = {
         let (left, new_state) = pair;
-        &state = new_state;
+        let ms_state: ParserState = new_state;
+        let ml: Expr = left;
+        
+        [current_token(ms_state) == OpLt] {
+            &ms_state = advance(ms_state);
+            let result = parse_additive_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("<", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        [current_token(ms_state) == OpGt] {
+            &ms_state = advance(ms_state);
+            let result = parse_additive_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop(">", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        [current_token(ms_state) == OpLtEq] {
+            &ms_state = advance(ms_state);
+            let result = parse_additive_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("<=", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        [current_token(ms_state) == OpGtEq] {
+            &ms_state = advance(ms_state);
+            let result = parse_additive_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop(">=", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        term Ok((ml, ms_state));
     };
     uni result(Err(e)) = {
         term Err(e);
     };
-    
-    let left: Expr = state.current_token;
-    let result = parse_additive_expr(state);
-    uni result(Ok(pair)) = {
-        let (l, new_state) = pair;
-        &left = l;
-        &state = new_state;
-    };
-    uni result(Err(e)) = {
-        term Err(e);
-    };
-    
-    [current_token(state) == OpLt] {
-        &state = advance(state);
-        let result = parse_additive_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("<", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    [current_token(state) == OpGt] {
-        &state = advance(state);
-        let result = parse_additive_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop(">", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    [current_token(state) == OpLtEq] {
-        &state = advance(state);
-        let result = parse_additive_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("<=", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    [current_token(state) == OpGtEq] {
-        &state = advance(state);
-        let result = parse_additive_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop(">=", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    term (left, state);
 }
 
 defn parse_additive_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
     let result = parse_multiplicative_expr(state);
     uni result(Ok(pair)) = {
         let (left, new_state) = pair;
-        &state = new_state;
+        let ms_state: ParserState = new_state;
+        let ml: Expr = left;
+        
+        [current_token(ms_state) == OpPlus] {
+            &ms_state = advance(ms_state);
+            let result = parse_additive_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("+", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        [current_token(ms_state) == OpMinus] {
+            &ms_state = advance(ms_state);
+            let result = parse_additive_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("-", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        term Ok((ml, ms_state));
     };
     uni result(Err(e)) = {
         term Err(e);
     };
-    
-    let left: Expr = state.current_token;
-    let result = parse_multiplicative_expr(state);
-    uni result(Ok(pair)) = {
-        let (l, new_state) = pair;
-        &left = l;
-        &state = new_state;
-    };
-    uni result(Err(e)) = {
-        term Err(e);
-    };
-    
-    [current_token(state) == OpPlus] {
-        &state = advance(state);
-        let result = parse_additive_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("+", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    [current_token(state) == OpMinus] {
-        &state = advance(state);
-        let result = parse_additive_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("-", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    term (left, state);
 }
 
 defn parse_multiplicative_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
     let result = parse_unary_expr(state);
     uni result(Ok(pair)) = {
         let (left, new_state) = pair;
-        &state = new_state;
+        let ms_state: ParserState = new_state;
+        let ml: Expr = left;
+        
+        [current_token(ms_state) == OpStar] {
+            &ms_state = advance(ms_state);
+            let result = parse_multiplicative_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("*", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        [current_token(ms_state) == OpSlash] {
+            &ms_state = advance(ms_state);
+            let result = parse_multiplicative_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("/", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        [current_token(ms_state) == OpPercent] {
+            &ms_state = advance(ms_state);
+            let result = parse_multiplicative_expr(ms_state);
+            uni result(Ok(pair)) = {
+                let (right, new_state) = pair;
+                &ms_state = new_state;
+                &ml = make_binop("%", ml, right);
+            };
+            uni result(Err(e)) = {
+                term Err(e);
+            };
+        };
+        
+        term Ok((ml, ms_state));
     };
     uni result(Err(e)) = {
         term Err(e);
     };
-    
-    let left: Expr = state.current_token;
-    let result = parse_unary_expr(state);
-    uni result(Ok(pair)) = {
-        let (l, new_state) = pair;
-        &left = l;
-        &state = new_state;
-    };
-    uni result(Err(e)) = {
-        term Err(e);
-    };
-    
-    [current_token(state) == OpStar] {
-        &state = advance(state);
-        let result = parse_unary_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("*", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    [current_token(state) == OpSlash] {
-        &state = advance(state);
-        let result = parse_unary_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("/", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    [current_token(state) == OpPercent] {
-        &state = advance(state);
-        let result = parse_unary_expr(state);
-        uni result(Ok(pair)) = {
-            let (right, new_state) = pair;
-            &state = new_state;
-            &left = make_binop("%", left, right);
-        };
-        uni result(Err(e)) = {
-            term Err(e);
-        };
-    };
-    
-    term (left, state);
 }
 
 defn parse_unary_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
@@ -789,7 +739,7 @@ defn parse_unary_expr(state: ParserState) -> Result<(Expr, ParserState), String>
         let result = parse_unary_expr(state);
         uni result(Ok(pair)) = {
             let (operand, new_state) = pair;
-            term (make_unaryop("-", operand), new_state);
+            term Ok((make_unaryop("-", operand), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -801,7 +751,7 @@ defn parse_unary_expr(state: ParserState) -> Result<(Expr, ParserState), String>
         let result = parse_unary_expr(state);
         uni result(Ok(pair)) = {
             let (operand, new_state) = pair;
-            term (make_unaryop("!", operand), new_state);
+            term Ok((make_unaryop("!", operand), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -813,14 +763,14 @@ defn parse_unary_expr(state: ParserState) -> Result<(Expr, ParserState), String>
         let result = parse_unary_expr(state);
         uni result(Ok(pair)) = {
             let (operand, new_state) = pair;
-            term (make_unaryop("~", operand), new_state);
+            term Ok((make_unaryop("~", operand), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
         };
     };
     
-    parse_primary_expr(state)
+    term parse_primary_expr(state);
 }
 
 defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), String> {
@@ -828,36 +778,36 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
     
     uni tok(TokenInt(n)) = {
         &state = advance(state);
-        term (make_int(n), state);
+        term Ok((make_int(n), state));
     };
     
     uni tok(TokenFloat(f)) = {
         &state = advance(state);
-        term (make_float(f), state);
+        term Ok((make_float(f), state));
     };
     
     uni tok(TokenString(s)) = {
         &state = advance(state);
-        term (make_string(s), state);
+        term Ok((make_string(s), state));
     };
     
     uni tok(TokenChar(c)) = {
         &state = advance(state);
-        term (make_char(c), state);
+        term Ok((make_char(c), state));
     };
     
     uni tok(KeywordTrue) = {
         &state = advance(state);
-        term (make_bool(true), state);
+        term Ok((make_bool(true), state));
     };
     
     uni tok(KeywordFalse) = {
         &state = advance(state);
-        term (make_bool(false), state);
+        term Ok((make_bool(false), state));
     };
     
     uni tok(TokenIdentifier(_)) = {
-        let name = tok.unwrap_identifier();
+        let name = unwrap_identifier(tok);
         &state = advance(state);
         
         [current_token(state) == DelimLParen] {
@@ -873,14 +823,14 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
             
             let result = expect_token(state, DelimRParen);
             uni result(Ok(new_state)) = {
-                term (make_call(name, args), new_state);
+                term Ok((make_call(name, args), new_state));
             };
             uni result(Err(e)) = {
                 term Err(e);
             };
         };
         
-        term (make_var(name), state);
+        term Ok((make_var(name), state));
     };
     
     uni tok(OpAt) = {
@@ -888,7 +838,7 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
         let tok = current_token(state);
         uni tok(TokenIdentifier(name)) = {
             &state = advance(state);
-            term (make_prior_state(name), state);
+            term Ok((make_prior_state(name), state));
         };
         term Err("Expected identifier after @");
     };
@@ -906,7 +856,7 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
         
         let result = expect_token(state, DelimRParen);
         uni result(Ok(new_state)) = {
-            term (expr, new_state);
+            term Ok((expr, new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -918,7 +868,7 @@ defn parse_primary_expr(state: ParserState) -> Result<(Expr, ParserState), Strin
         let result = parse_expr_list(state);
         uni result(Ok(pair)) = {
             let (elements, new_state) = pair;
-            term (ExprList(elements), new_state);
+            term Ok((ExprList(elements), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -936,7 +886,7 @@ defn parse_expr_list(state: ParserState) -> Result<(List<Expr>, ParserState), St
         let result = parse_expression(state);
         uni result(Ok(pair)) = {
             let (expr, new_state) = pair;
-            &elements = elements.append(expr);
+            &elements = append(elements, expr);
             &state = new_state;
         };
         uni result(Err(e)) = {
@@ -948,7 +898,11 @@ defn parse_expr_list(state: ParserState) -> Result<(List<Expr>, ParserState), St
         };
     };
     
-    term (elements, state);
+    term Ok((elements, state));
+}
+
+defn parse_expression(state: ParserState) -> Result<(Expr, ParserState), String> {
+    term parse_or_expr(state);
 }
 
 // ===== STATEMENT PARSING =====
@@ -960,14 +914,14 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         let result = parse_let(state);
         uni result(Ok(pair)) = {
             let (stmt, new_state) = pair;
-            term (stmt, new_state);
+            term Ok((stmt, new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
         };
     };
     
-    [tok.is_identifier() || tok == OpAt] {
+    [is_identifier(tok) || tok == OpAt] {
         let result = parse_expression(state);
         uni result(Ok(pair)) = {
             let (expr, new_state) = pair;
@@ -990,7 +944,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
             
             let result = expect_token(state, OpSemicolon);
             uni result(Ok(new_state)) = {
-                term (StmtAssign(Box::new(expr), Box::new(rhs)), new_state);
+                term Ok((StmtAssign(expr, rhs), new_state));
             };
             uni result(Err(e)) = {
                 term Err(e);
@@ -1001,12 +955,12 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     uni tok(KeywordTerm) = {
         &state = advance(state);
         
-        let values: List<Option<Box<Expr>>> = [];
+        let values: List<Option<Expr>> = [];
         [current_token(state) != OpSemicolon] {
             let result = parse_expression(state);
             uni result(Ok(pair)) = {
                 let (expr, new_state) = pair;
-                &values = values.append(Some(Box::new(expr)));
+                &values = append(values, Some(expr));
                 &state = new_state;
             };
             uni result(Err(e)) = {
@@ -1020,7 +974,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         
         let result = expect_token(state, OpSemicolon);
         uni result(Ok(new_state)) = {
-            term (StmtTerm(values), new_state);
+            term Ok((StmtTerm(values), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -1030,12 +984,12 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
     uni tok(KeywordEscape) = {
         &state = advance(state);
         
-        let value: Option<Box<Expr>> = None;
+        let value: Option<Expr> = None;
         [current_token(state) != OpSemicolon] {
             let result = parse_expression(state);
             uni result(Ok(pair)) = {
                 let (expr, new_state) = pair;
-                &value = Some(Box::new(expr));
+                &value = Some(expr);
                 &state = new_state;
             };
             uni result(Err(e)) = {
@@ -1045,7 +999,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         
         let result = expect_token(state, OpSemicolon);
         uni result(Ok(new_state)) = {
-            term (StmtEscape(value), new_state);
+            term Ok((StmtEscape(value), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -1059,7 +1013,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         uni tok(TokenIdentifier(name)) = {
             &state = advance(state);
         };
-        [!tok.is_identifier()] {
+        [!is_identifier(tok)] {
             term Err("Expected pattern name after uni");
         };
         
@@ -1075,7 +1029,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         uni pattern_tok(TokenIdentifier(pattern)) = {
             &state = advance(state);
         };
-        [!pattern_tok.is_identifier()] {
+        [!is_identifier(pattern_tok)] {
             term Err("Expected pattern in parentheses");
         };
         
@@ -1106,7 +1060,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         
         let result = expect_token(state, OpSemicolon);
         uni result(Ok(new_state)) = {
-            term (StmtUnification(name, pattern, Box::new(expr)), new_state);
+            term Ok((StmtUnification(name, pattern, expr), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -1148,7 +1102,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
             let result = parse_statement(state);
             uni result(Ok(pair)) = {
                 let (stmt, new_state) = pair;
-                &body = body.append(stmt);
+                &body = append(body, stmt);
                 &state = new_state;
             };
             uni result(Err(e)) = {
@@ -1156,21 +1110,21 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
             };
         };
         
-        term (StmtGuarded(Box::new(condition), body), state);
+        term Ok((StmtGuarded(condition, body), state));
     };
     
     uni tok(DelimLBrace) = {
         let result = parse_block(state);
         uni result(Ok(pair)) = {
             let (stmts, new_state) = pair;
-            term (ExprBlock(stmts), new_state);
+            term Ok((ExprBlock(stmts), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
         };
     };
     
-    {
+    [true] {
         let result = parse_expression(state);
         uni result(Ok(pair)) = {
             let (expr, new_state) = pair;
@@ -1182,7 +1136,7 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         
         let result = expect_token(state, OpSemicolon);
         uni result(Ok(new_state)) = {
-            term (StmtExpr(Box::new(expr)), new_state);
+            term Ok((StmtExpr(expr), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -1203,7 +1157,7 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
     uni tok(TokenIdentifier(name)) = {
         &state = advance(state);
     };
-    [!tok.is_identifier()] {
+    [!is_identifier(tok)] {
         term Err("Expected variable name");
     };
     
@@ -1221,13 +1175,13 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
         };
     };
     
-    let init_value: Option<Box<Expr>> = None;
+    let init_value: Option<Expr> = None;
     [current_token(state) == OpEq] {
         &state = advance(state);
         let result = parse_expression(state);
         uni result(Ok(pair)) = {
             let (expr, new_state) = pair;
-            &init_value = Some(Box::new(expr));
+            &init_value = Some(expr);
             &state = new_state;
         };
         uni result(Err(e)) = {
@@ -1237,7 +1191,7 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
     
     let result = expect_token(state, OpSemicolon);
     uni result(Ok(new_state)) = {
-        term (StmtLet(name, var_type, init_value), new_state);
+        term Ok((StmtLet(name, var_type, init_value), new_state));
     };
     uni result(Err(e)) = {
         term Err(e);
@@ -1258,7 +1212,7 @@ defn parse_block(state: ParserState) -> Result<(List<Statement>, ParserState), S
         let result = parse_statement(state);
         uni result(Ok(pair)) = {
             let (stmt, new_state) = pair;
-            &stmts = stmts.append(stmt);
+            &stmts = append(stmts, stmt);
             &state = new_state;
         };
         uni result(Err(e)) = {
@@ -1268,7 +1222,7 @@ defn parse_block(state: ParserState) -> Result<(List<Statement>, ParserState), S
     
     let result = expect_token(state, DelimRBrace);
     uni result(Ok(new_state)) = {
-        term (stmts, new_state);
+        term Ok((stmts, new_state));
     };
     uni result(Err(e)) = {
         term Err(e);
@@ -1282,37 +1236,37 @@ defn parse_type(state: ParserState) -> Result<(Type, ParserState), String> {
     
     uni tok(KeywordInt) = {
         &state = advance(state);
-        term (TypeInt, state);
+        term Ok((TypeInt, state));
     };
     
     uni tok(KeywordUInt) = {
         &state = advance(state);
-        term (TypeUInt, state);
+        term Ok((TypeUInt, state));
     };
     
     uni tok(KeywordFloat) = {
         &state = advance(state);
-        term (TypeFloat, state);
+        term Ok((TypeFloat, state));
     };
     
     uni tok(KeywordString) = {
         &state = advance(state);
-        term (TypeString, state);
+        term Ok((TypeString, state));
     };
     
     uni tok(KeywordBool) = {
         &state = advance(state);
-        term (TypeBool, state);
+        term Ok((TypeBool, state));
     };
     
     uni tok(KeywordChar) = {
         &state = advance(state);
-        term (TypeChar, state);
+        term Ok((TypeChar, state));
     };
     
     uni tok(KeywordVoid) = {
         &state = advance(state);
-        term (TypeVoid, state);
+        term Ok((TypeVoid, state));
     };
     
     term Err("Unknown type: " + token_to_string(tok));
@@ -1331,10 +1285,10 @@ defn parse_type_params(state: ParserState) -> Result<(List<String>, ParserState)
     [current_token(state) != OpGt] {
         let tok = current_token(state);
         uni tok(TokenIdentifier(name)) = {
-            &params = params.append(name);
+            &params = append(params, name);
             &state = advance(state);
         };
-        [!tok.is_identifier()] {
+        [!is_identifier(tok)] {
             term Err("Expected type parameter name");
         };
         
@@ -1345,7 +1299,7 @@ defn parse_type_params(state: ParserState) -> Result<(List<String>, ParserState)
     
     let result = expect_token(state, OpGt);
     uni result(Ok(new_state)) = {
-        term (params, new_state);
+        term Ok((params, new_state));
     };
     uni result(Err(e)) = {
         term Err(e);
@@ -1367,7 +1321,7 @@ defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), Stri
         uni tok(TokenIdentifier(name)) = {
             &state = advance(state);
         };
-        [!tok.is_identifier()] {
+        [!is_identifier(tok)] {
             term Err("Expected parameter name");
         };
         
@@ -1392,7 +1346,7 @@ defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), Stri
             name: name,
             param_type: param_type
         };
-        &params = params.append(param);
+        &params = append(params, param);
         
         [current_token(state) == OpComma] {
             &state = advance(state);
@@ -1401,7 +1355,7 @@ defn parse_params(state: ParserState) -> Result<(List<Param>, ParserState), Stri
     
     let result = expect_token(state, DelimRParen);
     uni result(Ok(new_state)) = {
-        term (params, new_state);
+        term Ok((params, new_state));
     };
     uni result(Err(e)) = {
         term Err(e);

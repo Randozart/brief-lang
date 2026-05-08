@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum DbriefAddress {
     Numeric(u64),
     Hex(u64),
@@ -23,14 +24,14 @@ pub enum DbriefAddress {
     Remote(RemoteSpec),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct RemoteSpec {
     pub protocol: String,
     pub location: String,
     pub register: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum DbriefLiteral {
     Bool(bool),
     Int(i64),
@@ -41,19 +42,18 @@ pub enum DbriefLiteral {
     Vector(Vec<DbriefLiteral>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DbriefRecord {
     pub address: DbriefAddress,
     pub fields: Vec<(String, DbriefLiteral)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefRegister {
     pub address: DbriefAddress,
     pub name: Option<String>,
     pub register_type: DbriefType,
     pub check: Option<DbriefContract>,
-    // FFI metadata (for Metropolitan FFI bindings)
     pub location: Option<String>,
     pub target: Option<String>,
     pub description: Option<String>,
@@ -62,7 +62,7 @@ pub struct DbriefRegister {
     pub error_type: Option<DbriefType>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum DbriefType {
     Bool,
     Int(usize),
@@ -80,7 +80,7 @@ pub enum DbriefType {
     Enum(Vec<String>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefAlias {
     pub name: String,
     pub alias_type: DbriefType,
@@ -88,12 +88,12 @@ pub struct DbriefAlias {
     pub optional: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefContract {
     pub conditions: Vec<DbriefExpr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum DbriefExpr {
     Bool(bool),
     Int(i64),
@@ -108,7 +108,7 @@ pub enum DbriefExpr {
     Call(String, Vec<DbriefExpr>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum BinaryOp {
     Add, Sub, Mul, Div, Mod,
     Eq, Ne, Lt, Le, Gt, Ge,
@@ -116,25 +116,25 @@ pub enum BinaryOp {
     Contains,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum UnaryOp {
     Not,
     Neg,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefRule {
     pub head: RuleHead,
     pub body: Vec<RuleBody>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RuleHead {
     pub name: String,
     pub params: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum RuleBody {
     Fact(String, Vec<(String, DbriefExpr)>),
     Not(Box<RuleBody>),
@@ -142,20 +142,20 @@ pub enum RuleBody {
     Or(Box<RuleBody>, Box<RuleBody>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum DbriefQuery {
     Pipeline(QueryPipeline),
     Bracket(DbriefAddress, DbriefExpr),
     Logical(DbriefAddress, DbriefExpr),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct QueryPipeline {
     pub source: DbriefAddress,
     pub operations: Vec<QueryOp>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum QueryOp {
     Filter(DbriefExpr),
     Map(Vec<DbriefExpr>),
@@ -174,33 +174,33 @@ pub enum QueryOp {
     LeftJoin(DbriefAddress, String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefStruct {
     pub name: String,
     pub fields: Vec<(String, DbriefType)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefEnum {
     pub name: String,
     pub variants: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefServiceField {
-    pub direction: String, // "INPUT" or "OUTPUT"
+    pub direction: String,
     pub name: String,
     pub field_type: DbriefType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefService {
     pub name: String,
     pub fields: Vec<DbriefServiceField>,
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefProgram {
     pub imports: Vec<ImportStmt>,
     pub registers: Vec<DbriefRegister>,
@@ -213,8 +213,7 @@ pub struct DbriefProgram {
     pub checks: Vec<DbriefContract>,
 }
 
-/// DBrief Schema (.dbvs) - Template definitions for hardware registers
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbvsProgram {
     pub imports: Vec<ImportStmt>,
     pub registers: Vec<DbriefRegister>,
@@ -224,28 +223,27 @@ pub struct DbvsProgram {
     pub aliases: Vec<DbriefAlias>,
 }
 
-/// DBrief Mutable Database (.dbvl) - Line-based mutable records
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbvlProgram {
     pub imports: Vec<ImportStmt>,
     pub records: Vec<DbvlRecord>,
     pub operations: Vec<DbvlOperation>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DbvlRecord {
     pub address: DbriefAddress,
     pub fields: Vec<(String, DbriefLiteral)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum DbvlOperation {
     Insert { address: DbriefAddress, fields: Vec<(String, DbriefLiteral)> },
     Update { address: DbriefAddress, filter: Option<DbriefExpr>, set: Vec<(String, DbriefLiteral)> },
     Delete { address: DbriefAddress, filter: Option<DbriefExpr> },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ImportStmt {
     pub path: String,
     pub alias: Option<String>,

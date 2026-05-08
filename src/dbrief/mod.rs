@@ -166,3 +166,36 @@ pub fn compile_dbvl(input: &str) -> Result<DbvlEngine, String> {
     let program = parse_dbvl(input)?;
     Ok(DbvlEngine::new(program))
 }
+
+/// Serialize a DbvlProgram to JSON
+pub fn dbvl_to_json(program: &DbvlProgram, pretty: bool) -> Result<String, String> {
+    if pretty {
+        serde_json::to_string_pretty(program)
+            .map_err(|e| format!("JSON serialization error: {}", e))
+    } else {
+        serde_json::to_string(program)
+            .map_err(|e| format!("JSON serialization error: {}", e))
+    }
+}
+
+/// Serialize a DbriefProgram to JSON (full program with schema + data)
+pub fn dbrief_to_json(program: &DbriefProgram, pretty: bool) -> Result<String, String> {
+    if pretty {
+        serde_json::to_string_pretty(program)
+            .map_err(|e| format!("JSON serialization error: {}", e))
+    } else {
+        serde_json::to_string(program)
+            .map_err(|e| format!("JSON serialization error: {}", e))
+    }
+}
+
+/// Serialize a DbvsProgram to JSON (schema only)
+pub fn dbvs_to_json(program: &DbvsProgram, pretty: bool) -> Result<String, String> {
+    if pretty {
+        serde_json::to_string_pretty(program)
+            .map_err(|e| format!("JSON serialization error: {}", e))
+    } else {
+        serde_json::to_string(program)
+            .map_err(|e| format!("JSON serialization error: {}", e))
+    }
+}

@@ -325,6 +325,8 @@ fn print_usage(program: &str) {
     eprintln!("  verilog <file>   Compile to SystemVerilog (FPGA, with --tcl flag)");
     eprintln!("  vhdl <file>      Compile to VHDL (FPGA, with PSL assertions)");
     eprintln!("  cobol <file>     Compile to IBM Enterprise COBOL");
+    eprintln!("  dbvl <file>      Parse .dbvl and export to JSON (--out, --pretty)");
+    eprintln!("  dbvs <file>      Parse .dbvs and export to JSON (--out, --pretty)");
     eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
     eprintln!("  wrap <lib>       Generate FFI bindings for a library");
     eprintln!("  install         Install 'brief' to ~/.local/bin");
@@ -3246,6 +3248,136 @@ fn main() {
 
         "install" => {
             run_install();
+        }
+
+        "dbvl" => {
+            let mut file_path = None;
+            let mut out_file = None;
+            let mut pretty = false;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_file = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--pretty" {
+                    pretty = true;
+                    i += 1;
+                } else if arg.ends_with(".dbvl") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                match fs::read_to_string(&path) {
+                    Ok(source) => {
+                        match dbrief::parse_dbvl(&source) {
+                            Ok(program) => {
+                                match dbrief::dbvl_to_json(&program, pretty) {
+                                    Ok(json) => {
+                                        if let Some(out) = out_file {
+                                            if let Err(e) = fs::write(&out, &json) {
+                                                eprintln!("Error writing output: {}", e);
+                                                std::process::exit(1);
+                                            }
+                                            println!("  JSON written: {}", out.display());
+                                        } else {
+                                            println!("{}", json);
+                                        }
+                                        println!("  Parsed {} records from {}", program.records.len(), path.display());
+                                    }
+                                    Err(e) => {
+                                        eprintln!("JSON serialization error: {}", e);
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Parse error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading file: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No .dbvl file specified");
+                eprintln!("Usage: {} dbvl <file.dbvl> [--out <file.json>] [--pretty]", args[0]);
+                std::process::exit(1);
+            }
+        }
+
+        "dbvs" => {
+            let mut file_path = None;
+            let mut out_file = None;
+            let mut pretty = false;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_file = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--pretty" {
+                    pretty = true;
+                    i += 1;
+                } else if arg.ends_with(".dbvs") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                match fs::read_to_string(&path) {
+                    Ok(source) => {
+                        match dbrief::parse_dbvs(&source) {
+                            Ok(program) => {
+                                match dbrief::dbvs_to_json(&program, pretty) {
+                                    Ok(json) => {
+                                        if let Some(out) = out_file {
+                                            if let Err(e) = fs::write(&out, &json) {
+                                                eprintln!("Error writing output: {}", e);
+                                                std::process::exit(1);
+                                            }
+                                            println!("  JSON written: {}", out.display());
+                                        } else {
+                                            println!("{}", json);
+                                        }
+                                        println!("  Parsed {} registers, {} structs, {} aliases from {}",
+                                            program.registers.len(), program.structs.len(),
+                                            program.aliases.len(), path.display());
+                                    }
+                                    Err(e) => {
+                                        eprintln!("JSON serialization error: {}", e);
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Parse error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading file: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No .dbvs file specified");
+                eprintln!("Usage: {} dbvs <file.dbvs> [--out <file.json>] [--pretty]", args[0]);
+                std::process::exit(1);
+            }
         }
 
         "-h" | "--help" | "help" => {

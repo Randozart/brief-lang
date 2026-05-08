@@ -49,6 +49,7 @@ enum Token {
     KeywordForall,
     KeywordExists,
     KeywordWithin,
+    KeywordUnification,
     
     // Hardware
     KeywordTrg,
@@ -153,6 +154,7 @@ defn is_keyword(tok: Token) -> Bool {
     uni tok(KeywordImport) = true;
     uni tok(KeywordTrue) = true;
     uni tok(KeywordFalse) = true;
+    uni tok(KeywordUnification) = true;
     term false;
 };
 
@@ -177,6 +179,7 @@ defn keyword_to_string(tok: Token) -> String {
     uni tok(KeywordAs) = "as";
     uni tok(KeywordTrue) = "true";
     uni tok(KeywordFalse) = "false";
+    uni tok(KeywordUnification) = "unification";
     term "";
 };
 
@@ -325,4 +328,14 @@ defn unwrap_identifier(tok: Token) -> String {
 defn is_identifier(tok: Token) -> Bool {
     uni tok(TokenIdentifier(_)) = true;
     term false;
+};
+
+defn is_string_token(tok: Token) -> Bool {
+    uni tok(TokenString(_)) = true;
+    term false;
+};
+
+defn unwrap_string(tok: Token) -> String {
+    uni tok(TokenString(s)) = s;
+    term "";
 };

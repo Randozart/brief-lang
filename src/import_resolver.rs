@@ -244,6 +244,27 @@ self.loaded_modules.insert(
             }
         }
 
+        // For std.* imports, also search from project root's lib/ directory
+        if !found_both && found_path.is_none() && path_str.starts_with("std.") {
+            // Walk up from source_dir to find project root (where Cargo.toml exists)
+            let mut current = source_dir.clone();
+            while let Some(parent) = current.parent() {
+                if parent.join("Cargo.toml").exists() {
+                    let std_path = parent.join("lib").join(format!("{}.bv", module_path));
+                    let std_ebv = parent.join("lib").join(format!("{}.ebv", module_path));
+                    if std_path.exists() && std_ebv.exists() {
+                        found_both = true;
+                    } else if std_path.exists() {
+                        found_path = Some(std_path);
+                    } else if std_ebv.exists() {
+                        found_path = Some(std_ebv);
+                    }
+                    break;
+                }
+                current = parent.to_path_buf();
+            }
+        }
+
         if !found_both && found_path.is_none() {
             let direct_bv = source_dir.join(format!("{}.bv", module_path));
             let direct_ebv = source_dir.join(format!("{}.ebv", module_path));

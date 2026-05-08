@@ -35,7 +35,11 @@ enum Expr {
     ExprCast(Expr, Type),  // expr, target_type
     
     // Blocks
-    ExprBlock(List<Statement>)
+    ExprBlock(List<Statement>),
+    
+    // Quantifiers
+    ExprForAll(String, Expr),  // var, body
+    ExprExists(String, Expr)   // var, body
 }
 
 // ===== STATEMENTS =====
@@ -226,6 +230,13 @@ struct StateDecl {
     initial_value: Option<Expr>
 }
 
+struct ForeignBinding {
+    name: String,
+    sig_type: Type,
+    toml_path: Option<String>,
+    target: String
+}
+
 // ===== PROGRAM =====
 
 enum TopLevel {
@@ -238,7 +249,8 @@ enum TopLevel {
     TopImport(Import),
     TopConst(Constant),
     TopState(StateDecl),
-    TopRender(String, ViewBody)  // name, body
+    TopRender(String, ViewBody),  // name, body
+    TopForeign(ForeignBinding)
 }
 
 struct Program {
