@@ -152,6 +152,7 @@ defn read_identifier(state: LexerState) -> (Token, LexerState) {
     [text == "frgn"] { term (KeywordFrgn, state); };
     [text == "struct"] { term (KeywordStruct, state); };
     [text == "enum"] { term (KeywordEnum, state); };
+    [text == "data"] { term (KeywordData, state); };
     [text == "import"] { term (KeywordImport, state); };
     [text == "from"] { term (KeywordFrom, state); };
     [text == "as"] { term (KeywordAs, state); };

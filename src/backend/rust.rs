@@ -81,12 +81,128 @@ impl RustBackend {
         output.push_str("    }\n");
         output.push_str("}\n\n");
 
+        // Output struct definitions
+        for item in &program.items {
+            if let TopLevel::Struct(struct_def) = item {
+                output.push_str("#[derive(Debug, Clone)]\n");
+                if !struct_def.type_params.is_empty() {
+                    let params = struct_def.type_params.join(", ");
+                    output.push_str(&format!("pub struct {}<{}> {{\n", struct_def.name, params));
+                } else {
+                    output.push_str(&format!("pub struct {} {{\n", struct_def.name));
+                }
+                for field in &struct_def.fields {
+                    let rust_type = Self::get_rust_type(&field.ty);
+                    output.push_str(&format!("    pub {}: {},\n", field.name, rust_type));
+                }
+                output.push_str("}\n\n");
+            }
+        }
+
+        // Output enum definitions
+        for item in &program.items {
+            if let TopLevel::Enum(enum_def) = item {
+                output.push_str("#[derive(Debug, Clone)]\n");
+                output.push_str(&format!("pub enum {} {{\n", enum_def.name));
+                for variant in &enum_def.variants {
+                    match variant {
+                        crate::ast::EnumVariant::Unit(name) => {
+                            output.push_str(&format!("    {},\n", name));
+                        }
+                        crate::ast::EnumVariant::Tuple(name, types) => {
+                            let type_strs: Vec<String> = types.iter().map(|t| Self::get_rust_type(t)).collect();
+                            output.push_str(&format!("    {}({}),\n", name, type_strs.join(", ")));
+                        }
+                        crate::ast::EnumVariant::Struct(name, fields) => {
+                            let field_strs: Vec<String> = fields.iter()
+                                .map(|(f, t)| format!("{}: {}", f, Self::get_rust_type(t)))
+                                .collect();
+                            output.push_str(&format!("    {} {{ {} }},\n", name, field_strs.join(", ")));
+                        }
+                    }
+                }
+                output.push_str("}\n\n");
+            }
+        }
+
+        // Output constant definitions
+        for item in &program.items {
+            if let TopLevel::Constant(const_def) = item {
+                let rust_type = Self::get_rust_type(&const_def.ty);
+                let expr_code = self.expr_to_rust_no_self(&const_def.expr);
+                output.push_str(&format!("pub const {}: {} = {};\n\n", const_def.name, rust_type, expr_code));
+            }
+        }
+
+        // Output struct definitions
+        for item in &program.items {
+            if let TopLevel::Struct(struct_def) = item {
+                output.push_str("#[derive(Debug, Clone)]\n");
+                if !struct_def.type_params.is_empty() {
+                    let params = struct_def.type_params.join(", ");
+                    output.push_str(&format!("pub struct {}<{}> {{\n", struct_def.name, params));
+                } else {
+                    output.push_str(&format!("pub struct {} {{\n", struct_def.name));
+                }
+                for field in &struct_def.fields {
+                    let rust_type = Self::get_rust_type(&field.ty);
+                    output.push_str(&format!("    pub {}: {},\n", field.name, rust_type));
+                }
+                output.push_str("}\n\n");
+            }
+        }
+
+        // Output enum definitions
+        for item in &program.items {
+            if let TopLevel::Enum(enum_def) = item {
+                output.push_str("#[derive(Debug, Clone)]\n");
+                output.push_str(&format!("pub enum {} {{\n", enum_def.name));
+                for variant in &enum_def.variants {
+                    match variant {
+                        crate::ast::EnumVariant::Unit(name) => {
+                            output.push_str(&format!("    {},\n", name));
+                        }
+                        crate::ast::EnumVariant::Tuple(name, types) => {
+                            let type_strs: Vec<String> = types.iter().map(|t| Self::get_rust_type(t)).collect();
+                            output.push_str(&format!("    {}({}),\n", name, type_strs.join(", ")));
+                        }
+                        crate::ast::EnumVariant::Struct(name, fields) => {
+                            let field_strs: Vec<String> = fields.iter()
+                                .map(|(f, t)| format!("{}: {}", f, Self::get_rust_type(t)))
+                                .collect();
+                            output.push_str(&format!("    {} {{ {} }},\n", name, field_strs.join(", ")));
+                        }
+                    }
+                }
+                output.push_str("}\n\n");
+            }
+        }
+
+        // Output constant definitions
+        for item in &program.items {
+            if let TopLevel::Constant(const_def) = item {
+                let rust_type = Self::get_rust_type(&const_def.ty);
+                let expr_code = self.expr_to_rust_no_self(&const_def.expr);
+                output.push_str(&format!("pub const {}: {} = {};\n\n", const_def.name, rust_type, expr_code));
+            }
+        }
+
         output.push_str("impl State {\n");
 
         for (txn_name, txn) in self.collect_transactions(program) {
+            let params: Vec<String> = txn.parameters.iter()
+                .map(|(n, t)| format!("{}: {}", n, Self::get_rust_type(t)))
+                .collect();
+            let param_str = if params.is_empty() {
+                "&mut self".to_string()
+            } else {
+                format!("&mut self, {}", params.join(", "))
+            };
+            
+            let return_type = "bool";
             output.push_str(&format!(
-                "    pub fn {}(&mut self) -> bool {{\n",
-                Self::sanitize_name(&txn.name)
+                "    pub fn {}({}) -> {} {{\n",
+                Self::sanitize_name(&txn_name), param_str, return_type
             ));
             output.push_str(&format!(
                 "        // pre: {:?}\n",
@@ -106,6 +222,35 @@ impl RustBackend {
         }
 
         output.push_str("}\n\n");
+
+        // Output standalone definitions (not inside State)
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                let params: Vec<String> = defn.parameters.iter()
+                    .map(|(n, t)| format!("{}: {}", n, Self::get_rust_type(t)))
+                    .collect();
+                let return_type = match &defn.output_type {
+                    Some(ot) => {
+                        let types: Vec<String> = ot.all_types().iter().map(|t| Self::get_rust_type(t)).collect();
+                        if types.len() == 1 { types[0].clone() } else { format!("({})", types.join(", ")) }
+                    }
+                    None => "()".to_string(),
+                };
+                let param_str = if params.is_empty() {
+                    "&self".to_string()
+                } else {
+                    format!("&self, {}", params.join(", "))
+                };
+                output.push_str(&format!(
+                    "    pub fn {}({}) -> {} {{\n",
+                    defn.name, param_str, return_type
+                ));
+                for stmt in &defn.body {
+                    self.statement_to_rust(&mut output, stmt);
+                }
+                output.push_str("    }\n\n");
+            }
+        }
 
         output.push_str("fn main() {\n");
         output.push_str("    println!(\"Brief kernel starting\\n\");\n");
@@ -158,17 +303,36 @@ impl RustBackend {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
                 let name = match lhs {
-                    Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                    Expr::Identifier(n) => n.clone(),
+                    Expr::OwnedRef(n) => format!("self.{}", n),
+                    Expr::FieldAccess(obj, field) => {
+                        format!("{}.{}", self.expr_to_rust_no_self(obj), field)
+                    }
                     _ => return,
                 };
                 let expr_code = self.expr_to_rust(expr);
-                output.push_str(&format!("        self.{} = {};\n", name, expr_code));
+                output.push_str(&format!("        {} = {};\n", name, expr_code));
             }
-            Statement::Let { name, expr, .. } => {
+            Statement::Let { name, ty, expr, .. } => {
                 if let Some(e) = expr {
                     let expr_code = self.expr_to_rust(e);
-                    output.push_str(&format!("        let mut {} = {};\n", name, expr_code));
+                    if let Some(t) = ty {
+                        let rust_ty = Self::get_rust_type(t);
+                        output.push_str(&format!("        let {}: {} = {};\n", name, rust_ty, expr_code));
+                    } else {
+                        output.push_str(&format!("        let {} = {};\n", name, expr_code));
+                    }
+                } else if let Some(t) = ty {
+                    let rust_ty = Self::get_rust_type(t);
+                    let default = Self::get_default_value(t);
+                    output.push_str(&format!("        let {}: {} = {};\n", name, rust_ty, default));
                 }
+            }
+            Statement::Unification { name, pattern, expr } => {
+                let expr_code = self.expr_to_rust(expr);
+                output.push_str(&format!("        // uni {}({}) = {}\n", name, pattern, expr_code));
+                output.push_str(&format!("        if let {}({}) = {} {{\n", name, pattern, expr_code));
+                output.push_str("        }\n");
             }
             Statement::InlineAsm { asm_string, clobbers, .. } => {
                 let clobber_list = if clobbers.is_empty() {
@@ -193,24 +357,47 @@ impl RustBackend {
                     ));
                 }
             }
-            Statement::Term(_) => {
-                output.push_str("        // transaction complete\n");
+            Statement::Term(values) => {
+                if values.is_empty() {
+                    output.push_str("        return;\n");
+                } else if values.len() == 1 {
+                    if let Some(v) = &values[0] {
+                        let expr_code = self.expr_to_rust(v);
+                        output.push_str(&format!("        return {};\n", expr_code));
+                    } else {
+                        output.push_str("        return;\n");
+                    }
+                } else {
+                    let vals: Vec<String> = values.iter().map(|v| {
+                        match v {
+                            Some(e) => self.expr_to_rust(e),
+                            None => "()".to_string(),
+                        }
+                    }).collect();
+                    output.push_str(&format!("        return ({});\n", vals.join(", ")));
+                }
+            }
+            Statement::Escape(value) => {
+                if let Some(v) = value {
+                    let expr_code = self.expr_to_rust(v);
+                    output.push_str(&format!("        return {};\n", expr_code));
+                } else {
+                    output.push_str("        return;\n");
+                }
             }
             Statement::Expression(expr) => {
                 let expr_code = self.expr_to_rust(expr);
                 output.push_str(&format!("        {};\n", expr_code));
             }
-            Statement::Escape(_) => {
-                output.push_str("        return false; // transaction escaped\n");
-            }
             Statement::Guarded { condition, statements } => {
-                output.push_str("        // [guard] not fully implemented in native backend\n");
+                let cond_code = self.expr_to_rust(condition);
+                output.push_str(&format!("        if {} {{\n", cond_code));
                 for s in statements {
                     self.statement_to_rust(output, s);
                 }
+                output.push_str("        }\n");
             }
             Statement::LocalTrigger { name, ty, expr, .. } => {
-                // Local trigger: async wait point inside transaction
                 let _ty_str = match ty {
                     Type::Int => "i64",
                     Type::UInt => "u64",
@@ -225,7 +412,6 @@ impl RustBackend {
                 } else {
                     output.push_str(&format!("        // trg! {}: await external event\n", name));
                 }
-                // TODO: Full async yield/await semantics with rollback support
             }
             _ => {
                 output.push_str("        // statement type not implemented\n");
@@ -239,11 +425,11 @@ impl RustBackend {
             Expr::Float(f) => f.to_string(),
             Expr::Bool(b) => b.to_string(),
             Expr::String(s) => format!("\"{}\".to_string()", s),
-            Expr::Identifier(n) => format!("self.{}", n),
+            Expr::Char(c) => format!("'{}'", c),
+            Expr::Identifier(n) => n.clone(),
             Expr::OwnedRef(n) => format!("self.{}", n),
             Expr::PriorState(n) => format!("self.{}", n),
             Expr::Add(a, b) => {
-                // Check for List SIMD addition
                 if self.is_list_expr(a) && self.is_list_expr(b) {
                     let left = self.expr_to_rust(a);
                     let right = self.expr_to_rust(b);
@@ -267,12 +453,10 @@ impl RustBackend {
                     let right = self.expr_to_rust(b);
                     format!("{{\n            let len = std::cmp::min({}.len(), {}.len());\n            let mut result = Vec::with_capacity(len);\n            for i in 0..len {{\n                result.push({}[i] * {}[i]);\n            }}\n            result\n        }}", left, right, left, right)
                 } else if self.is_list_expr(a) && !self.is_list_expr(b) {
-                    // Scalar broadcast: list * scalar
                     let left = self.expr_to_rust(a);
                     let right = self.expr_to_rust(b);
                     format!("{{\n            let mut result = {}.clone();\n            for i in 0..result.len() {{\n                result[i] = result[i] * {};\n            }}\n            result\n        }}", left, right)
                 } else if !self.is_list_expr(a) && self.is_list_expr(b) {
-                    // Scalar broadcast: scalar * list
                     let left = self.expr_to_rust(a);
                     let right = self.expr_to_rust(b);
                     format!("{{\n            let mut result = {}.clone();\n            for i in 0..result.len() {{\n                result[i] = {} * result[i];\n            }}\n            result\n        }}", right, left)
@@ -289,6 +473,7 @@ impl RustBackend {
                     format!("({} / {})", self.expr_to_rust(a), self.expr_to_rust(b))
                 }
             }
+            Expr::Mod(a, b) => format!("({} % {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Eq(a, b) => format!("({} == {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Ne(a, b) => format!("({} != {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Lt(a, b) => format!("({} < {})", self.expr_to_rust(a), self.expr_to_rust(b)),
@@ -299,17 +484,137 @@ impl RustBackend {
             Expr::Or(a, b) => format!("({} || {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Not(a) => format!("!{}", self.expr_to_rust(a)),
             Expr::Neg(a) => format!("-{}", self.expr_to_rust(a)),
-            Expr::ListLen(inner) => {
-                format!("{}.len()", self.expr_to_rust(inner))
-            }
-            Expr::ListIndex(list, idx) => {
-                format!("{}[{}]", self.expr_to_rust(list), self.expr_to_rust(idx))
-            }
+            Expr::BitNot(a) => format!("!{}", self.expr_to_rust(a)),
+            Expr::BitAnd(a, b) => format!("({} & {})", self.expr_to_rust(a), self.expr_to_rust(b)),
+            Expr::BitOr(a, b) => format!("({} | {})", self.expr_to_rust(a), self.expr_to_rust(b)),
+            Expr::BitXor(a, b) => format!("({} ^ {})", self.expr_to_rust(a), self.expr_to_rust(b)),
+            Expr::Shl(a, b) => format!("({} << {})", self.expr_to_rust(a), self.expr_to_rust(b)),
+            Expr::Shr(a, b) => format!("({} >> {})", self.expr_to_rust(a), self.expr_to_rust(b)),
+            Expr::ListLen(inner) => format!("{}.len()", self.expr_to_rust(inner)),
+            Expr::ListIndex(list, idx) => format!("{}[{}]", self.expr_to_rust(list), self.expr_to_rust(idx)),
             Expr::ListLiteral(elems) => {
                 let items: Vec<String> = elems.iter().map(|e| self.expr_to_rust(e)).collect();
                 format!("vec![{}]", items.join(", "))
             }
+            Expr::FieldAccess(obj, field) => format!("{}.{}", self.expr_to_rust(obj), field),
+            Expr::StructInstance(name, fields) => {
+                let field_strs: Vec<String> = fields.iter()
+                    .map(|(f, e)| format!("{}: {}", f, self.expr_to_rust(e)))
+                    .collect();
+                format!("{} {{ {} }}", name, field_strs.join(", "))
+            }
+            Expr::Call(name, args) => {
+                let args_str: Vec<String> = args.iter().map(|e| self.expr_to_rust(e)).collect();
+                format!("{}({})", name, args_str.join(", "))
+            }
+            Expr::Tuple(elems) => {
+                let items: Vec<String> = elems.iter().map(|e| self.expr_to_rust(e)).collect();
+                format!("({})", items.join(", "))
+            }
+            Expr::ForAll { var, expr } => {
+                format!("/* forall {} */ {}", var, self.expr_to_rust(expr))
+            }
+            Expr::Exists { var, expr } => {
+                format!("/* exists {} */ {}", var, self.expr_to_rust(expr))
+            }
+            Expr::Slice { value, start, end, .. } => {
+                let val = self.expr_to_rust(value);
+                match (start, end) {
+                    (Some(s), Some(e)) => format!("{}[{}..{}]", val, self.expr_to_rust(s), self.expr_to_rust(e)),
+                    (Some(s), None) => format!("{}[{}..]", val, self.expr_to_rust(s)),
+                    (None, Some(e)) => format!("{}[..{}]", val, self.expr_to_rust(e)),
+                    (None, None) => format!("{}", val),
+                }
+            }
+            Expr::MultiSlice { value, coordinates, .. } => {
+                let val = self.expr_to_rust(value);
+                let coords: Vec<String> = coordinates.iter().map(|c| {
+                    match c {
+                        crate::ast::SliceCoordinate::Index(e) => self.expr_to_rust(e),
+                        crate::ast::SliceCoordinate::Range { start, end } => {
+                            match (start, end) {
+                                (Some(s), Some(e)) => format!("{}..{}", self.expr_to_rust(s), self.expr_to_rust(e)),
+                                (Some(s), None) => format!("{}..", self.expr_to_rust(s)),
+                                (None, Some(e)) => format!("..{}", self.expr_to_rust(e)),
+                                (None, None) => "..".to_string(),
+                            }
+                        }
+                        crate::ast::SliceCoordinate::Named { name, coord } => {
+                            format!("{}:{}", name, self.expr_to_rust_slice_coord(coord))
+                        }
+                    }
+                }).collect();
+                format!("{}[{}]", val, coords.join(", "))
+            }
+            Expr::PatternMatch { value, variant, fields } => {
+                let fields_str = fields.join(", ");
+                format!("match *{} {{ {}({}) => true, _ => false }}", self.expr_to_rust(value), variant, fields_str)
+            }
+            Expr::Block(stmts, last_expr) => {
+                let mut block = "{\n".to_string();
+                for stmt in stmts {
+                    block.push_str("            ");
+                    self.statement_to_rust(&mut block, stmt);
+                }
+                block.push_str(&format!("            {}\n        }}", self.expr_to_rust(last_expr)));
+                block
+            }
+            Expr::TupleDestructure(names, expr) => {
+                let names_str = names.join(", ");
+                format!("let ({}) = {}", names_str, self.expr_to_rust(expr))
+            }
+            Expr::ObjectLiteral(fields) => {
+                let field_strs: Vec<String> = fields.iter()
+                    .map(|(f, e)| format!("{}: {}", f, self.expr_to_rust(e)))
+                    .collect();
+                format!("{{ {} }}", field_strs.join(", "))
+            }
             _ => "0 /* expr not implemented */".to_string(),
+        }
+    }
+
+    fn expr_to_rust_no_self(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Identifier(n) => n.clone(),
+            Expr::FieldAccess(obj, field) => format!("{}.{}", self.expr_to_rust_no_self(obj), field),
+            Expr::StructInstance(name, fields) => {
+                let field_strs: Vec<String> = fields.iter()
+                    .map(|(f, e)| format!("{}: {}", f, self.expr_to_rust_no_self(e)))
+                    .collect();
+                format!("{} {{ {} }}", name, field_strs.join(", "))
+            }
+            Expr::Call(name, args) => {
+                let args_str: Vec<String> = args.iter().map(|e| self.expr_to_rust_no_self(e)).collect();
+                format!("{}({})", name, args_str.join(", "))
+            }
+            Expr::Integer(n) => n.to_string(),
+            Expr::Float(f) => f.to_string(),
+            Expr::Bool(b) => b.to_string(),
+            Expr::String(s) => format!("\"{}\"", s),
+            Expr::ListLiteral(elems) => {
+                let items: Vec<String> = elems.iter().map(|e| self.expr_to_rust_no_self(e)).collect();
+                format!("vec![{}]", items.join(", "))
+            }
+            Expr::Tuple(elems) => {
+                let items: Vec<String> = elems.iter().map(|e| self.expr_to_rust_no_self(e)).collect();
+                format!("({})", items.join(", "))
+            }
+            Expr::Add(a, b) => format!("({} + {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Sub(a, b) => format!("({} - {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Mul(a, b) => format!("({} * {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Div(a, b) => format!("({} / {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Mod(a, b) => format!("({} % {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Eq(a, b) => format!("({} == {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Ne(a, b) => format!("({} != {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Lt(a, b) => format!("({} < {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Le(a, b) => format!("({} <= {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Gt(a, b) => format!("({} > {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Ge(a, b) => format!("({} >= {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::And(a, b) => format!("({} && {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Or(a, b) => format!("({} || {})", self.expr_to_rust_no_self(a), self.expr_to_rust_no_self(b)),
+            Expr::Not(a) => format!("!{}", self.expr_to_rust_no_self(a)),
+            Expr::Neg(a) => format!("-{}", self.expr_to_rust_no_self(a)),
+            _ => self.expr_to_rust(expr),
         }
     }
 
@@ -324,28 +629,100 @@ impl RustBackend {
         }
     }
 
+    fn expr_to_rust_slice_coord(&self, coord: &crate::ast::SliceCoordinate) -> String {
+        match coord {
+            crate::ast::SliceCoordinate::Index(e) => self.expr_to_rust(e),
+            crate::ast::SliceCoordinate::Range { start, end } => {
+                match (start, end) {
+                    (Some(s), Some(e)) => format!("{}..{}", self.expr_to_rust(s), self.expr_to_rust(e)),
+                    (Some(s), None) => format!("{}..", self.expr_to_rust(s)),
+                    (None, Some(e)) => format!("..{}", self.expr_to_rust(e)),
+                    (None, None) => "..".to_string(),
+                }
+            }
+            crate::ast::SliceCoordinate::Named { name, coord } => {
+                format!("{}:{}", name, self.expr_to_rust_slice_coord(coord))
+            }
+        }
+    }
+
     fn get_rust_type(ty: &Type) -> String {
         match ty {
-            Type::Int => "i32".to_string(),
-            Type::UInt => "u32".to_string(),
+            Type::Int => "i64".to_string(),
+            Type::UInt => "u64".to_string(),
             Type::Float => "f64".to_string(),
             Type::Bool => "bool".to_string(),
             Type::String => "String".to_string(),
-            Type::Vector(inner, dims) => {
-                // Calculate total size
-                let total_size: usize = dims.iter().map(|d| match d {
-                    crate::ast::Dimension::Anonymous(s) => *s,
-                    crate::ast::Dimension::Named(_, s) => *s,
-                }).product();
-                // For Rust, use a flat array or Vec with capacity
+            Type::Char => "char".to_string(),
+            Type::Data => "Vec<u8>".to_string(),
+            Type::Void => "()".to_string(),
+            Type::Vector(inner, _dims) => {
                 format!("Vec<{}>", Self::get_rust_type(inner))
             }
-            Type::Applied(name, args) if name == "List" => {
-                let elem_type = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i32".to_string());
-                format!("Vec<{}>", elem_type)
+            Type::Applied(name, args) => {
+                match name.as_str() {
+                    "List" => {
+                        let elem_type = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i64".to_string());
+                        format!("Vec<{}>", elem_type)
+                    }
+                    "Option" => {
+                        let inner = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i64".to_string());
+                        format!("Option<{}>", inner)
+                    }
+                    "Result" => {
+                        let ok = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i64".to_string());
+                        let err = args.get(1).map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "String".to_string());
+                        format!("Result<{}, {}>", ok, err)
+                    }
+                    "HashMap" => {
+                        let k = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "String".to_string());
+                        let v = args.get(1).map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i64".to_string());
+                        format!("std::collections::HashMap<{}, {}>", k, v)
+                    }
+                    "HashSet" => {
+                        let inner = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i64".to_string());
+                        format!("std::collections::HashSet<{}>", inner)
+                    }
+                    "Stack" => {
+                        let inner = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i64".to_string());
+                        format!("Vec<{}>", inner)
+                    }
+                    "Queue" => {
+                        let inner = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i64".to_string());
+                        format!("std::collections::VecDeque<{}>", inner)
+                    }
+                    _ => {
+                        if args.is_empty() {
+                            name.clone()
+                        } else {
+                            let args_str: Vec<String> = args.iter().map(|t| Self::get_rust_type(t)).collect();
+                            format!("{}<{}>", name, args_str.join(", "))
+                        }
+                    }
+                }
             }
+            Type::Tuple(types) => {
+                let inner: Vec<String> = types.iter().map(|t| Self::get_rust_type(t)).collect();
+                format!("({})", inner.join(", "))
+            }
+            Type::Union(_types) => {
+                // Union types are handled via enums in Brief
+                "i64".to_string()
+            }
+            Type::Custom(name) => name.clone(),
+            Type::Enum(name) => name.clone(),
+            Type::Sig(name) => format!("Box<dyn Fn() -> {}>", name),
+            Type::TypeVar(name) => name.clone(),
+            Type::Generic(name, args) => {
+                if args.is_empty() {
+                    name.clone()
+                } else {
+                    let args_str: Vec<String> = args.iter().map(|t| Self::get_rust_type(t)).collect();
+                    format!("{}<{}>", name, args_str.join(", "))
+                }
+            }
+            Type::ContractBound(inner, _) => Self::get_rust_type(inner),
             Type::Constrained(inner, _) => Self::get_rust_type(inner),
-            _ => "i32".to_string(),
         }
     }
 
@@ -356,8 +733,23 @@ impl RustBackend {
             Type::Float => "0.0".to_string(),
             Type::Bool => "false".to_string(),
             Type::String => "String::new()".to_string(),
+            Type::Char => "'\\0'".to_string(),
+            Type::Data => "Vec::new()".to_string(),
+            Type::Void => "()".to_string(),
             Type::Vector(_, _) => "Vec::new()".to_string(),
             Type::Applied(name, _) if name == "List" => "Vec::new()".to_string(),
+            Type::Applied(name, args) if name == "Option" => {
+                let inner = args.first().map(|t| Self::get_default_value(t)).unwrap_or_else(|| "0".to_string());
+                format!("Some({})", inner)
+            }
+            Type::Applied(name, _) if name == "Result" => "Ok(0)".to_string(),
+            Type::Applied(name, _) if name == "HashMap" => "std::collections::HashMap::new()".to_string(),
+            Type::Applied(name, _) if name == "HashSet" => "std::collections::HashSet::new()".to_string(),
+            Type::Tuple(types) => {
+                let defaults: Vec<String> = types.iter().map(|t| Self::get_default_value(t)).collect();
+                format!("({})", defaults.join(", "))
+            }
+            Type::Custom(_) => "Default::default()".to_string(),
             _ => "0".to_string(),
         }
     }

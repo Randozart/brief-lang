@@ -483,6 +483,135 @@ impl TypeChecker {
                 bound_defn: None,
             },
         );
+
+        self.signatures.insert(
+            "unwrap_or".to_string(),
+            Signature {
+                name: "unwrap_or".to_string(),
+                input_types: vec![
+                    Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())]),
+                    Type::TypeVar("T".to_string()),
+                ],
+                result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "get".to_string(),
+            Signature {
+                name: "get".to_string(),
+                input_types: vec![
+                    Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())]),
+                    Type::Int,
+                ],
+                result_type: ResultType::Projection(vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "len".to_string(),
+            Signature {
+                name: "len".to_string(),
+                input_types: vec![Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])],
+                result_type: ResultType::Projection(vec![Type::Int]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "append".to_string(),
+            Signature {
+                name: "append".to_string(),
+                input_types: vec![
+                    Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())]),
+                    Type::TypeVar("T".to_string()),
+                ],
+                result_type: ResultType::Projection(vec![Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "char_to_string".to_string(),
+            Signature {
+                name: "char_to_string".to_string(),
+                input_types: vec![Type::Char],
+                result_type: ResultType::Projection(vec![Type::String]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "String".to_string(),
+            Signature {
+                name: "String".to_string(),
+                input_types: vec![Type::Int],
+                result_type: ResultType::Projection(vec![Type::String]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "Some".to_string(),
+            Signature {
+                name: "Some".to_string(),
+                input_types: vec![Type::TypeVar("T".to_string())],
+                result_type: ResultType::Projection(vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "None".to_string(),
+            Signature {
+                name: "None".to_string(),
+                input_types: vec![],
+                result_type: ResultType::Projection(vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "Ok".to_string(),
+            Signature {
+                name: "Ok".to_string(),
+                input_types: vec![Type::TypeVar("T".to_string())],
+                result_type: ResultType::Projection(vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
+
+        self.signatures.insert(
+            "Err".to_string(),
+            Signature {
+                name: "Err".to_string(),
+                input_types: vec![Type::TypeVar("E".to_string())],
+                result_type: ResultType::Projection(vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])]),
+                source: None,
+                alias: None,
+                bound_defn: None,
+            },
+        );
     }
 
     pub fn check_program(&mut self, program: &mut Program) -> Vec<TypeError> {

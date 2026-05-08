@@ -24,7 +24,7 @@ struct CompilerState {
 
 // ===== MAIN ENTRY POINT =====
 
-defn compile_file(path: String, verbose: Bool) -> Result<String, String> [true][true] {
+defn compile_file(path: String, verbose: Bool) -> Result<String, String> [path.len() > 0][result.is_ok() || result.is_err()] {
     // Step 1: Read source file
     let result = __read_file(path);
     uni result(Ok(source)) = {
@@ -35,10 +35,9 @@ defn compile_file(path: String, verbose: Bool) -> Result<String, String> [true][
         };
         
         // Step 2: Tokenize
-        let lexer = new_lexer(state.source);
-        let result = tokenize(lexer);
+        let result = tokenize(state.source);
         uni result(Ok(pair)) = {
-            let (tokens, new_state) = pair;
+            let (tokens, lexer_state) = pair;
             
             [state.verbose] {
                 let sb = new_builder();
@@ -81,7 +80,7 @@ defn compile_file(path: String, verbose: Bool) -> Result<String, String> [true][
 
 // ===== GENERATE RUST OUTPUT =====
 
-defn generate_rust(program: Program, state: CompilerState) -> String [true][true] {
+defn generate_rust(program: Program, state: CompilerState) -> String [state.source.len() > 0][result.len() > 0] {
     let output = new_builder();
     
     // Header
@@ -98,7 +97,7 @@ defn generate_rust(program: Program, state: CompilerState) -> String [true][true
 
 // ===== CLI HELPERS =====
 
-defn print_usage() -> String [true][true] {
+defn print_usage() -> String [true][result.len() > 0] {
     let sb = new_builder();
     sb = sb.append_str("Brief Compiler (self-hosted)\n");
     sb = sb.append_str("Usage: brief-compile <file.bv> [--verbose]\n");
@@ -106,7 +105,7 @@ defn print_usage() -> String [true][true] {
     term sb.to_string();
 }
 
-defn parse_args(args: List<String>) -> String [true][true] {
+defn parse_args(args: List<String>) -> String [args.len() > 0 || args.len() == 0][result.len() >= 0] {
     let file_path: String = "";
     
     let i: Int = 0;
@@ -124,7 +123,7 @@ defn parse_args(args: List<String>) -> String [true][true] {
 
 // ===== MAIN TRANSACTION =====
 
-txn compile_main [true][true] {
+txn compile_main [true][term] {
     let args: List<String> = [];
     let file_path = parse_args(args);
     let verbose: Bool = false;

@@ -21,7 +21,7 @@ frgn __contains_at(haystack: String, needle: String, start: Int) -> Result<Bool,
 frgn __find_from(s: String, needle: String, start: Int) -> Result<Int, StringError>;
 frgn __rfind(s: String, needle: String) -> Result<Int, StringError>;
 // Character operations
-frgn __get_chars(s: String) -> Result<List<String>, StringError>
+frgn __get_chars(s: String) -> Result<List<String>, StringError>;
 frgn __utf8_len(s: String) -> Result<Int, StringError>;
 // Escaping
 frgn __escape(s: String) -> Result<String, StringError>;
@@ -29,14 +29,14 @@ frgn __unescape(s: String) -> Result<String, StringError>;
 frgn __quote(s: String) -> Result<String, StringError>;
 frgn __unquote(s: String) -> Result<String, StringError>;
 // Encoding
-frgn __bytes(s: String) -> Result<List<Int>, StringError>
+frgn __bytes(s: String) -> Result<List<Int>, StringError>;
 frgn __from_bytes(list: List<Int>) -> Result<String, StringError>;
 // Complex replacement
 frgn __replace_all(s: String, old: String, new: String) -> Result<String, StringError>;
 // Split variations
-frgn __splitn(s: String, delim: String, n: Int) -> Result<List<String>, StringError>
-frgn __rsplit(s: String, delim: String) -> Result<List<String>, StringError>
-frgn __words(s: String) -> Result<List<String>, StringError>
+frgn __splitn(s: String, delim: String, n: Int) -> Result<List<String>, StringError>;
+frgn __rsplit(s: String, delim: String) -> Result<List<String>, StringError>;
+frgn __words(s: String) -> Result<List<String>, StringError>;
 
 // Truncation
 frgn __truncate(s: String, max_len: Int) -> Result<String, StringError>;

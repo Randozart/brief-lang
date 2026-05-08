@@ -41,6 +41,8 @@ enum Token {
     KeywordRstruct,
     KeywordEnum,
     KeywordType,
+    KeywordData,
+    KeywordData,
     
     // Control
     KeywordImport,
@@ -174,6 +176,8 @@ defn keyword_to_string(tok: Token) -> String {
     uni tok(KeywordStruct) = "struct";
     uni tok(KeywordRstruct) = "rstruct";
     uni tok(KeywordEnum) = "enum";
+    uni tok(KeywordType) = "type";
+    uni tok(KeywordData) = "data";
     uni tok(KeywordImport) = "import";
     uni tok(KeywordFrom) = "from";
     uni tok(KeywordAs) = "as";

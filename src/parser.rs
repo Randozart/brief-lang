@@ -129,14 +129,28 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(name)
             }
-            Some(Ok(Token::TypeData)) => {
-                self.advance();
-                Ok("Data".to_string())
-            }
-            Some(Ok(Token::TypeInt)) => {
-                self.advance();
-                Ok("Int".to_string())
-            }
+            Some(Ok(Token::TypeData)) => { self.advance(); Ok("Data".to_string()) }
+            Some(Ok(Token::TypeInt)) => { self.advance(); Ok("Int".to_string()) }
+            Some(Ok(Token::Some)) => { self.advance(); Ok("Some".to_string()) }
+            Some(Ok(Token::None)) => { self.advance(); Ok("None".to_string()) }
+            Some(Ok(Token::Ok)) => { self.advance(); Ok("Ok".to_string()) }
+            Some(Ok(Token::Err)) => { self.advance(); Ok("Err".to_string()) }
+            Some(Ok(Token::Sig)) => { self.advance(); Ok("sig".to_string()) }
+            Some(Ok(Token::Defn)) => { self.advance(); Ok("defn".to_string()) }
+            Some(Ok(Token::Let)) => { self.advance(); Ok("let".to_string()) }
+            Some(Ok(Token::Txn)) => { self.advance(); Ok("txn".to_string()) }
+            Some(Ok(Token::Rct)) => { self.advance(); Ok("rct".to_string()) }
+            Some(Ok(Token::Frgn)) => { self.advance(); Ok("frgn".to_string()) }
+            Some(Ok(Token::Struct)) => { self.advance(); Ok("struct".to_string()) }
+            Some(Ok(Token::Enum)) => { self.advance(); Ok("enum".to_string()) }
+            Some(Ok(Token::Import)) => { self.advance(); Ok("import".to_string()) }
+            Some(Ok(Token::Term)) => { self.advance(); Ok("term".to_string()) }
+            Some(Ok(Token::Const)) => { self.advance(); Ok("const".to_string()) }
+            Some(Ok(Token::BoolTrue)) => { self.advance(); Ok("true".to_string()) }
+            Some(Ok(Token::BoolFalse)) => { self.advance(); Ok("false".to_string()) }
+            Some(Ok(Token::Unification)) => { self.advance(); Ok("uni".to_string()) }
+            Some(Ok(Token::Escape)) => { self.advance(); Ok("escape".to_string()) }
+            Some(Ok(Token::Async)) => { self.advance(); Ok("async".to_string()) }
             _ => Err(SyntaxError::UnexpectedToken {
                 expected: "identifier".to_string(),
                 found: format!("{:?}", self.current_token()),
@@ -718,8 +732,7 @@ impl<'a> Parser<'a> {
                 loop {
                     let field_name = self.expect_identifier()?;
                     self.expect(Token::Colon)?;
-                    let field_type_name = self.parse_type_name_token()?;
-                    let field_type = self.string_to_type(&field_type_name)?;
+                    let field_type = self.parse_type()?;
                     success_output.push((field_name, field_type));
 
                     if let Some(Ok(Token::Comma)) = self.current_token() {
@@ -731,15 +744,14 @@ impl<'a> Parser<'a> {
                 self.expect(Token::RParen)?;
             } else {
                 // Single-field success output: T -> becomes (result: T)
-                let success_type_name = self.parse_type_name_token()?;
-                let success_type = self.string_to_type(&success_type_name)?;
+                let success_type = self.parse_type()?;
                 success_output.push(("result".to_string(), success_type));
             }
 
             self.expect(Token::Comma)?;
 
-            // Parse error type (just the name)
-            let _error_type_name = self.parse_type_name_token()?;
+            // Parse error type
+            let _error_type = self.parse_type()?;
 
             self.expect(Token::Gt)?;
             success_output
@@ -1105,7 +1117,7 @@ impl<'a> Parser<'a> {
 
         // Parse optional type parameters: <T, E>
         let mut type_params = Vec::new();
-        if let Some(Ok(Token::Lt)) = self.peek() {
+        if let Some(Ok(Token::Lt)) = self.current_token() {
             self.expect(Token::Lt)?;
             loop {
                 let param_name = self.expect_identifier()?;
@@ -1137,7 +1149,246 @@ impl<'a> Parser<'a> {
             match token {
                 Ok(Token::RBrace) => {
                     self.advance();
+                    if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                    }
                     break;
+                }
+                Ok(Token::Some) => {
+                    let variant_name_str = "Some".to_string();
+                    self.advance();
+
+                    // Check for tuple variant: Ok(T) or Err(E)
+                    let variant = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.expect(Token::LParen)?;
+                        let mut inner_types = Vec::new();
+                        loop {
+                            let inner_type = self.parse_type()?;
+                            inner_types.push(inner_type);
+                            match self.current_token() {
+                                Some(Ok(Token::Comma)) => {
+                                    self.advance();
+                                }
+                                Some(Ok(Token::RParen)) => {
+                                    self.advance();
+                                    break;
+                                }
+                                _ => {
+                                    return self.spanned_err(
+                                        "Expected ',' or ')' in enum variant".to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        EnumVariant::Tuple(variant_name_str, inner_types)
+                    } else {
+                        EnumVariant::Unit(variant_name_str)
+                    };
+
+                    variants.push(variant);
+
+                    // Consume optional comma
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                }
+                Ok(Token::None) => {
+                    let variant_name_str = "None".to_string();
+                    self.advance();
+                    variants.push(EnumVariant::Unit(variant_name_str));
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                }
+                Ok(Token::Ok) => {
+                    let variant_name_str = "Ok".to_string();
+                    self.advance();
+
+                    let variant = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.expect(Token::LParen)?;
+                        let mut inner_types = Vec::new();
+                        loop {
+                            let inner_type = self.parse_type()?;
+                            inner_types.push(inner_type);
+                            match self.current_token() {
+                                Some(Ok(Token::Comma)) => {
+                                    self.advance();
+                                }
+                                Some(Ok(Token::RParen)) => {
+                                    self.advance();
+                                    break;
+                                }
+                                _ => {
+                                    return self.spanned_err(
+                                        "Expected ',' or ')' in enum variant".to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        EnumVariant::Tuple(variant_name_str, inner_types)
+                    } else {
+                        EnumVariant::Unit(variant_name_str)
+                    };
+
+                    variants.push(variant);
+
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                }
+                Ok(Token::Err) => {
+                    let variant_name_str = "Err".to_string();
+                    self.advance();
+
+                    let variant = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.expect(Token::LParen)?;
+                        let mut inner_types = Vec::new();
+                        loop {
+                            let inner_type = self.parse_type()?;
+                            inner_types.push(inner_type);
+                            match self.current_token() {
+                                Some(Ok(Token::Comma)) => {
+                                    self.advance();
+                                }
+                                Some(Ok(Token::RParen)) => {
+                                    self.advance();
+                                    break;
+                                }
+                                _ => {
+                                    return self.spanned_err(
+                                        "Expected ',' or ')' in enum variant".to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        EnumVariant::Tuple(variant_name_str, inner_types)
+                    } else {
+                        EnumVariant::Unit(variant_name_str)
+                    };
+
+                    variants.push(variant);
+
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                }
+                Ok(Token::Identifier(variant_name)) => {
+                    let variant_name_str = variant_name.to_string();
+                    self.advance();
+
+                    // Check for tuple variant: Ok(T) or Err(E)
+                    let variant = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.expect(Token::LParen)?;
+                        let mut inner_types = Vec::new();
+                        loop {
+                            let inner_type = self.parse_type()?;
+                            inner_types.push(inner_type);
+                            match self.current_token() {
+                                Some(Ok(Token::Comma)) => {
+                                    self.advance();
+                                }
+                                Some(Ok(Token::RParen)) => {
+                                    self.advance();
+                                    break;
+                                }
+                                _ => {
+                                    return self.spanned_err(
+                                        "Expected ',' or ')' in enum variant".to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        EnumVariant::Tuple(variant_name_str, inner_types)
+                    } else {
+                        EnumVariant::Unit(variant_name_str)
+                    };
+
+                    variants.push(variant);
+
+                    // Consume optional comma
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                }
+                Ok(Token::None) => {
+                    let variant_name_str = "None".to_string();
+                    self.advance();
+                    variants.push(EnumVariant::Unit(variant_name_str));
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                }
+                Ok(Token::Ok) => {
+                    let variant_name_str = "Ok".to_string();
+                    self.advance();
+
+                    let variant = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.expect(Token::LParen)?;
+                        let mut inner_types = Vec::new();
+                        loop {
+                            let inner_type = self.parse_type()?;
+                            inner_types.push(inner_type);
+                            match self.current_token() {
+                                Some(Ok(Token::Comma)) => {
+                                    self.advance();
+                                }
+                                Some(Ok(Token::RParen)) => {
+                                    self.advance();
+                                    break;
+                                }
+                                _ => {
+                                    return self.spanned_err(
+                                        "Expected ',' or ')' in enum variant".to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        EnumVariant::Tuple(variant_name_str, inner_types)
+                    } else {
+                        EnumVariant::Unit(variant_name_str)
+                    };
+
+                    variants.push(variant);
+
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                }
+                Ok(Token::Err) => {
+                    let variant_name_str = "Err".to_string();
+                    self.advance();
+
+                    let variant = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.expect(Token::LParen)?;
+                        let mut inner_types = Vec::new();
+                        loop {
+                            let inner_type = self.parse_type()?;
+                            inner_types.push(inner_type);
+                            match self.current_token() {
+                                Some(Ok(Token::Comma)) => {
+                                    self.advance();
+                                }
+                                Some(Ok(Token::RParen)) => {
+                                    self.advance();
+                                    break;
+                                }
+                                _ => {
+                                    return self.spanned_err(
+                                        "Expected ',' or ')' in enum variant".to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        EnumVariant::Tuple(variant_name_str, inner_types)
+                    } else {
+                        EnumVariant::Unit(variant_name_str)
+                    };
+
+                    variants.push(variant);
+
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
                 }
                 Ok(Token::Identifier(variant_name)) => {
                     let variant_name_str = variant_name.to_string();
@@ -1894,29 +2145,39 @@ let span = self.current_span();
             Vec::new()
         };
 
-        let (outputs, output_names, output_type) =
-            if let Some(Ok(Token::Arrow)) = self.current_token() {
+        let (outputs, output_names, output_type, contract) =
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                // Contract before arrow: defn name(params) [pre][post] -> Type
+                let contract = self.parse_contract()?;
+                if let Some(Ok(Token::Arrow)) = self.current_token() {
+                    self.advance();
+                    let (outputs, output_names) = self.parse_output_types_with_names(&parameters)?;
+                    let output_type = if outputs.len() > 1 {
+                        Some(crate::ast::OutputType::Tuple(outputs.clone()))
+                    } else {
+                        None
+                    };
+                    (outputs, output_names, output_type, contract)
+                } else {
+                    (Vec::new(), Vec::new(), None, contract)
+                }
+            } else if let Some(Ok(Token::Arrow)) = self.current_token() {
                 self.advance();
                 let (outputs, output_names) = self.parse_output_types_with_names(&parameters)?;
-
-                // Detect if this is a union or tuple
-                let output_type = if outputs.is_empty() {
-                    None
-                } else if outputs.len() == 1 {
-                    // Single output - no special OutputType needed
-                    None
-                } else {
-                    // Multiple outputs - need to determine if union or tuple
+                let output_type = if outputs.len() > 1 {
                     Some(crate::ast::OutputType::Tuple(outputs.clone()))
+                } else {
+                    None
                 };
-
-                (outputs, output_names, output_type)
+                let contract = if let Some(Ok(Token::LBracket)) = self.current_token() {
+                    self.parse_contract()?
+                } else {
+                    Contract::new(Expr::Bool(true), Expr::Bool(true))
+                };
+                (outputs, output_names, output_type, contract)
             } else {
-                (Vec::new(), Vec::new(), None)
+                (Vec::new(), Vec::new(), None, Contract::new(Expr::Bool(true), Expr::Bool(true)))
             };
-
-        // Contract comes AFTER output types for defn
-        let contract = self.parse_contract()?;
 
         // Lambda-style: allow ; termination (no body)
         let body = if let Some(Ok(Token::Semicolon)) = self.current_token() {
@@ -2821,10 +3082,17 @@ let span = self.current_span();
             }
             Some(Ok(Token::LParen)) => {
                 self.advance();
-                // Check if it's a tuple type or empty ()
+                // Check if it's a tuple type or empty () or function type () -> T
                 if let Some(Ok(Token::RParen)) = self.current_token() {
                     self.advance();
-                    Type::Void
+                    // Check for function type: () -> T
+                    if let Some(Ok(Token::Arrow)) = self.current_token() {
+                        self.advance();
+                        let return_type = self.parse_type()?;
+                        Type::Applied("Fn".to_string(), vec![Type::Tuple(vec![]), return_type])
+                    } else {
+                        Type::Void
+                    }
                 } else {
                     let mut tuple_types = Vec::new();
                     tuple_types.push(self.parse_type()?);
@@ -2836,7 +3104,12 @@ let span = self.current_span();
                         tuple_types.push(self.parse_type()?);
                     }
                     self.expect(Token::RParen)?;
-                    if tuple_types.len() == 1 {
+                    // Check for function type: (A, B) -> R
+                    if let Some(Ok(Token::Arrow)) = self.current_token() {
+                        self.advance();
+                        let return_type = self.parse_type()?;
+                        Type::Applied("Fn".to_string(), vec![Type::Tuple(tuple_types), return_type])
+                    } else if tuple_types.len() == 1 {
                         tuple_types.remove(0)
                     } else {
                         Type::Tuple(tuple_types)
@@ -2993,6 +3266,20 @@ let span = self.current_span();
             } else {
                 return self.spanned_err("Expected vector size".to_string());
             }
+        }
+
+        // Check for function type: Type -> Type (e.g., T -> U or (A, B) -> R)
+        if let Some(Ok(Token::Arrow)) = self.current_token() {
+            self.advance();
+            let return_type = self.parse_type()?;
+            ty = Type::Applied("Fn".to_string(), vec![ty, return_type]);
+        }
+
+        // Check for function type: Type -> Type (e.g., T -> U or (A, B) -> R)
+        if let Some(Ok(Token::Arrow)) = self.current_token() {
+            self.advance();
+            let return_type = self.parse_type()?;
+            ty = Type::Applied("Fn".to_string(), vec![ty, return_type]);
         }
 
         // Check for union: Type | Type
@@ -3395,6 +3682,246 @@ let span = self.current_span();
                     Ok(Expr::StructInstance(name, fields))
                 // Check if it's a function call
                 } else if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                        // Empty args
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call(name, args))
+                } else {
+                    Ok(Expr::Identifier(name))
+                }
+            }
+            Some(Ok(Token::Sig)) | Some(Ok(Token::Defn)) | Some(Ok(Token::Let)) | Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Frgn)) | Some(Ok(Token::Struct)) | Some(Ok(Token::Enum)) | Some(Ok(Token::Import)) | Some(Ok(Token::Term)) | Some(Ok(Token::Const)) | Some(Ok(Token::BoolTrue)) | Some(Ok(Token::BoolFalse)) | Some(Ok(Token::Unification)) | Some(Ok(Token::Escape)) | Some(Ok(Token::Async)) | Some(Ok(Token::Some)) | Some(Ok(Token::None)) | Some(Ok(Token::Ok)) | Some(Ok(Token::Err)) => {
+                let name = match self.current_token() {
+                    Some(Ok(Token::Sig)) => "sig".to_string(),
+                    Some(Ok(Token::Defn)) => "defn".to_string(),
+                    Some(Ok(Token::Let)) => "let".to_string(),
+                    Some(Ok(Token::Txn)) => "txn".to_string(),
+                    Some(Ok(Token::Rct)) => "rct".to_string(),
+                    Some(Ok(Token::Frgn)) => "frgn".to_string(),
+                    Some(Ok(Token::Struct)) => "struct".to_string(),
+                    Some(Ok(Token::Enum)) => "enum".to_string(),
+                    Some(Ok(Token::Import)) => "import".to_string(),
+                    Some(Ok(Token::Term)) => "term".to_string(),
+                    Some(Ok(Token::Const)) => "const".to_string(),
+                    Some(Ok(Token::BoolTrue)) => "true".to_string(),
+                    Some(Ok(Token::BoolFalse)) => "false".to_string(),
+                    Some(Ok(Token::Unification)) => "uni".to_string(),
+                    Some(Ok(Token::Escape)) => "escape".to_string(),
+                    Some(Ok(Token::Async)) => "async".to_string(),
+                    Some(Ok(Token::Some)) => "Some".to_string(),
+                    Some(Ok(Token::None)) => "None".to_string(),
+                    Some(Ok(Token::Ok)) => "Ok".to_string(),
+                    Some(Ok(Token::Err)) => "Err".to_string(),
+                    _ => unreachable!(),
+                };
+                self.advance();
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call(name, args))
+                } else {
+                    Ok(Expr::Identifier(name))
+                }
+            }
+            Some(Ok(Token::Sig)) | Some(Ok(Token::Defn)) | Some(Ok(Token::Let)) | Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Frgn)) | Some(Ok(Token::Struct)) | Some(Ok(Token::Enum)) | Some(Ok(Token::Import)) | Some(Ok(Token::Term)) | Some(Ok(Token::Const)) | Some(Ok(Token::BoolTrue)) | Some(Ok(Token::BoolFalse)) | Some(Ok(Token::Unification)) | Some(Ok(Token::Escape)) | Some(Ok(Token::Async)) | Some(Ok(Token::Some)) | Some(Ok(Token::None)) | Some(Ok(Token::Ok)) | Some(Ok(Token::Err)) => {
+                let name = match self.current_token() {
+                    Some(Ok(Token::Sig)) => "sig".to_string(),
+                    Some(Ok(Token::Defn)) => "defn".to_string(),
+                    Some(Ok(Token::Let)) => "let".to_string(),
+                    Some(Ok(Token::Txn)) => "txn".to_string(),
+                    Some(Ok(Token::Rct)) => "rct".to_string(),
+                    Some(Ok(Token::Frgn)) => "frgn".to_string(),
+                    Some(Ok(Token::Struct)) => "struct".to_string(),
+                    Some(Ok(Token::Enum)) => "enum".to_string(),
+                    Some(Ok(Token::Import)) => "import".to_string(),
+                    Some(Ok(Token::Term)) => "term".to_string(),
+                    Some(Ok(Token::Const)) => "const".to_string(),
+                    Some(Ok(Token::BoolTrue)) => "true".to_string(),
+                    Some(Ok(Token::BoolFalse)) => "false".to_string(),
+                    Some(Ok(Token::Unification)) => "uni".to_string(),
+                    Some(Ok(Token::Escape)) => "escape".to_string(),
+                    Some(Ok(Token::Async)) => "async".to_string(),
+                    Some(Ok(Token::Some)) => "Some".to_string(),
+                    Some(Ok(Token::None)) => "None".to_string(),
+                    Some(Ok(Token::Ok)) => "Ok".to_string(),
+                    Some(Ok(Token::Err)) => "Err".to_string(),
+                    _ => unreachable!(),
+                };
+                self.advance();
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call(name, args))
+                } else {
+                    Ok(Expr::Identifier(name))
+                }
+            }
+            Some(Ok(Token::Some)) | Some(Ok(Token::None)) | Some(Ok(Token::Ok)) | Some(Ok(Token::Err)) => {
+                let name = match self.current_token() {
+                    Some(Ok(Token::Some)) => "Some".to_string(),
+                    Some(Ok(Token::None)) => "None".to_string(),
+                    Some(Ok(Token::Ok)) => "Ok".to_string(),
+                    Some(Ok(Token::Err)) => "Err".to_string(),
+                    _ => unreachable!(),
+                };
+                self.advance();
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                        // Empty args
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call(name, args))
+                } else {
+                    Ok(Expr::Identifier(name))
+                }
+            }
+            Some(Ok(Token::Sig)) | Some(Ok(Token::Defn)) | Some(Ok(Token::Let)) | Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Frgn)) | Some(Ok(Token::Struct)) | Some(Ok(Token::Enum)) | Some(Ok(Token::Import)) | Some(Ok(Token::Term)) | Some(Ok(Token::Const)) | Some(Ok(Token::BoolTrue)) | Some(Ok(Token::BoolFalse)) | Some(Ok(Token::Unification)) | Some(Ok(Token::Escape)) | Some(Ok(Token::Async)) | Some(Ok(Token::Some)) | Some(Ok(Token::None)) | Some(Ok(Token::Ok)) | Some(Ok(Token::Err)) => {
+                let name = match self.current_token() {
+                    Some(Ok(Token::Sig)) => "sig".to_string(),
+                    Some(Ok(Token::Defn)) => "defn".to_string(),
+                    Some(Ok(Token::Let)) => "let".to_string(),
+                    Some(Ok(Token::Txn)) => "txn".to_string(),
+                    Some(Ok(Token::Rct)) => "rct".to_string(),
+                    Some(Ok(Token::Frgn)) => "frgn".to_string(),
+                    Some(Ok(Token::Struct)) => "struct".to_string(),
+                    Some(Ok(Token::Enum)) => "enum".to_string(),
+                    Some(Ok(Token::Import)) => "import".to_string(),
+                    Some(Ok(Token::Term)) => "term".to_string(),
+                    Some(Ok(Token::Const)) => "const".to_string(),
+                    Some(Ok(Token::BoolTrue)) => "true".to_string(),
+                    Some(Ok(Token::BoolFalse)) => "false".to_string(),
+                    Some(Ok(Token::Unification)) => "uni".to_string(),
+                    Some(Ok(Token::Escape)) => "escape".to_string(),
+                    Some(Ok(Token::Async)) => "async".to_string(),
+                    Some(Ok(Token::Some)) => "Some".to_string(),
+                    Some(Ok(Token::None)) => "None".to_string(),
+                    Some(Ok(Token::Ok)) => "Ok".to_string(),
+                    Some(Ok(Token::Err)) => "Err".to_string(),
+                    _ => unreachable!(),
+                };
+                self.advance();
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call(name, args))
+                } else {
+                    Ok(Expr::Identifier(name))
+                }
+            }
+            Some(Ok(Token::Sig)) | Some(Ok(Token::Defn)) | Some(Ok(Token::Let)) | Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Frgn)) | Some(Ok(Token::Struct)) | Some(Ok(Token::Enum)) | Some(Ok(Token::Import)) | Some(Ok(Token::Term)) | Some(Ok(Token::Const)) | Some(Ok(Token::BoolTrue)) | Some(Ok(Token::BoolFalse)) | Some(Ok(Token::Unification)) | Some(Ok(Token::Escape)) | Some(Ok(Token::Async)) | Some(Ok(Token::Some)) | Some(Ok(Token::None)) | Some(Ok(Token::Ok)) | Some(Ok(Token::Err)) => {
+                let name = match self.current_token() {
+                    Some(Ok(Token::Sig)) => "sig".to_string(),
+                    Some(Ok(Token::Defn)) => "defn".to_string(),
+                    Some(Ok(Token::Let)) => "let".to_string(),
+                    Some(Ok(Token::Txn)) => "txn".to_string(),
+                    Some(Ok(Token::Rct)) => "rct".to_string(),
+                    Some(Ok(Token::Frgn)) => "frgn".to_string(),
+                    Some(Ok(Token::Struct)) => "struct".to_string(),
+                    Some(Ok(Token::Enum)) => "enum".to_string(),
+                    Some(Ok(Token::Import)) => "import".to_string(),
+                    Some(Ok(Token::Term)) => "term".to_string(),
+                    Some(Ok(Token::Const)) => "const".to_string(),
+                    Some(Ok(Token::BoolTrue)) => "true".to_string(),
+                    Some(Ok(Token::BoolFalse)) => "false".to_string(),
+                    Some(Ok(Token::Unification)) => "uni".to_string(),
+                    Some(Ok(Token::Escape)) => "escape".to_string(),
+                    Some(Ok(Token::Async)) => "async".to_string(),
+                    Some(Ok(Token::Some)) => "Some".to_string(),
+                    Some(Ok(Token::None)) => "None".to_string(),
+                    Some(Ok(Token::Ok)) => "Ok".to_string(),
+                    Some(Ok(Token::Err)) => "Err".to_string(),
+                    _ => unreachable!(),
+                };
+                self.advance();
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call(name, args))
+                } else {
+                    Ok(Expr::Identifier(name))
+                }
+            }
+            Some(Ok(Token::Some)) | Some(Ok(Token::None)) | Some(Ok(Token::Ok)) | Some(Ok(Token::Err)) => {
+                let name = match self.current_token() {
+                    Some(Ok(Token::Some)) => "Some".to_string(),
+                    Some(Ok(Token::None)) => "None".to_string(),
+                    Some(Ok(Token::Ok)) => "Ok".to_string(),
+                    Some(Ok(Token::Err)) => "Err".to_string(),
+                    _ => unreachable!(),
+                };
+                self.advance();
+                if let Some(Ok(Token::LParen)) = self.current_token() {
                     self.advance();
                     let mut args = Vec::new();
                     if let Some(Ok(Token::RParen)) = self.current_token() {
