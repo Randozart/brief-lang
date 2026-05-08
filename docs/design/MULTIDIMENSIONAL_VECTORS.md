@@ -1,8 +1,57 @@
 # Multidimensional Vectors and Named Dimensions
 
-**Status**: Proposed  
+**Status**: Implemented (Core)  
 **Created**: 2026-05-08  
+**Updated**: 2026-05-08  
 **Purpose**: Add multidimensional vector syntax, named dimensions, and struct property filtering to Brief
+
+---
+
+## Implementation Status
+
+### ✅ Completed
+- Multidimensional vector declaration: `Vector<T, dim1, dim2, ...>`
+- Named dimensions: `Vector<T, width:50, height:50>`
+- AST: `SliceCoordinate` enum (Index, Range, Named)
+- AST: `MultiSlice` expression variant
+- Parser: multidimensional slice parsing with commas
+- Parser: named dimension slicing (`time:5`)
+- Parser: range slicing (`0..10`, `5..`, `..10`)
+- Parser: striding (`::2`)
+- Parser: vectorized filtering (`; condition`)
+- Typechecker: Vector SIMD operations
+- Typechecker: List SIMD type inference
+- All backends updated (Rust, C, Cobol, VHDL, Verilog, WASM)
+- Spec updated with new grammar
+- Learn-brief documentation updated
+
+### 🔄 In Progress
+- List SIMD code generation backends (strip-mining for AArch64, AXI-Stream for FPGA)
+- Proof engine length assertions for List operations
+
+---
+
+## Implementation Status
+
+### ✅ Completed
+- Multidimensional vector declaration: `Vector<T, dim1, dim2, ...>`
+- Named dimensions: `Vector<T, width:50, height:50>`
+- AST: `SliceCoordinate` enum (Index, Range, Named)
+- AST: `MultiSlice` expression variant
+- Parser: multidimensional slice parsing with commas
+- Parser: named dimension slicing (`time:5`)
+- Parser: range slicing (`0..10`, `5..`, `..10`)
+- Parser: striding (`::2`)
+- Parser: vectorized filtering (`; condition`)
+- Typechecker: Vector SIMD operations
+- Typechecker: List SIMD type inference
+- All backends updated (Rust, C, Cobol, VHDL, Verilog, WASM)
+- Spec updated with new grammar
+- Learn-brief documentation updated
+
+### 🔄 In Progress
+- List SIMD code generation backends (strip-mining for AArch64, AXI-Stream for FPGA)
+- Proof engine length assertions for List operations
 
 ---
 

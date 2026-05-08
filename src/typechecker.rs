@@ -1381,16 +1381,7 @@ impl TypeChecker {
             }
             // List scalar broadcasting
             (Type::Applied(name, args), scalar) | (scalar, Type::Applied(name, args))
-                if name == "List" || name == "DynamicVector" && args.len() == 1 => {
-                let elem_type = &args[0];
-                Type::Applied(
-                    "List".to_string(),
-                    vec![self.binary_op_type_scalar(elem_type, scalar, int_type, float_type)]
-                )
-            }
-            // List scalar broadcasting
-            (Type::Applied(name, args), scalar) | (scalar, Type::Applied(name, args))
-                if name == "List" || name == "DynamicVector" && args.len() == 1 => {
+                if (name == "List" || name == "DynamicVector") && args.len() == 1 => {
                 let elem_type = &args[0];
                 Type::Applied(
                     "List".to_string(),

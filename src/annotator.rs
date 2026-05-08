@@ -473,6 +473,25 @@ impl Annotator {
                 let exprs_str = exprs.iter().map(|e| self.format_expr(e)).collect::<Vec<_>>().join(", ");
                 format!("({})", exprs_str)
             }
+            Expr::MultiSlice { value, coordinates, mask } => {
+                let coords_str = coordinates.iter().map(|c| self.format_slice_coordinate(c)).collect::<Vec<_>>().join(", ");
+                let mask_str = mask.as_ref().map(|m| format!("; {}", self.format_expr(m))).unwrap_or_default();
+                format!("{}[{}{}]", self.format_expr(value), coords_str, mask_str)
+            }
+        }
+    }
+
+    fn format_slice_coordinate(&self, coord: &crate::ast::SliceCoordinate) -> String {
+        match coord {
+            crate::ast::SliceCoordinate::Index(expr) => self.format_expr(expr),
+            crate::ast::SliceCoordinate::Range { start, end } => {
+                let start_str = start.as_ref().map(|s| self.format_expr(s)).unwrap_or_default();
+                let end_str = end.as_ref().map(|e| self.format_expr(e)).unwrap_or_default();
+                format!("{}..{}", start_str, end_str)
+            }
+            crate::ast::SliceCoordinate::Named { name, coord } => {
+                format!("{}:{}", name, self.format_slice_coordinate(coord))
+            }
         }
     }
 }

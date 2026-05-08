@@ -392,6 +392,57 @@ let row: Vector<Int, 20> = mat[5, :];
 
 // Range slicing
 let sub: Vector<Int, 5, 5> = mat[0..5, 0..5];
+
+// Named dimension slicing
+let persons: Vector<Person, width:50, height:50, time:10>;
+let frame: Vector<Person, 50, 50> = persons[time:5];
+let slice: Vector<Person, 50> = persons[time:5, width:10];
+```
+
+### Slicing Syntax
+
+Brief supports powerful slicing with commas for multiple dimensions:
+
+```brief
+let mat: Vector<Int, 10, 20>;
+
+// Single index per dimension
+mat[5, 10]           // Returns element at [5][10]
+
+// Range slicing
+mat[0..5, 0..10]     // Returns Vector<Int, 5, 10>
+mat[5.., ..10]       // From 5 to end, from 0 to 10
+
+// Striding
+mat[::2, ::4]        // Every 2nd row, every 4th column
+mat[0..10:2, ::3]    // Range with stride
+
+// Named dimensions
+persons[time:5, width:0..10]
+persons[time::2, width:5]  // Every 2nd time step, at width=5
+```
+
+### Slicing Syntax
+
+Brief supports powerful slicing with commas for multiple dimensions:
+
+```brief
+let mat: Vector<Int, 10, 20>;
+
+// Single index per dimension
+mat[5, 10]           // Returns element at [5][10]
+
+// Range slicing
+mat[0..5, 0..10]     // Returns Vector<Int, 5, 10>
+mat[5.., ..10]       // From 5 to end, from 0 to 10
+
+// Striding
+mat[::2, ::4]        // Every 2nd row, every 4th column
+mat[0..10:2, ::3]    // Range with stride
+
+// Named dimensions
+persons[time:5, width:0..10]
+persons[time::2, width:5]  // Every 2nd time step, at width=5
 ```
 
 ### Filtering with Semicolon

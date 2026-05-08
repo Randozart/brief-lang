@@ -1576,9 +1576,9 @@ let s_val = self.eval_expr(s)?;
                 
                 Ok(Value::List(result))
             }
-            Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) => {
+            Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) | Expr::MultiSlice { .. } => {
                 Err(RuntimeError::TypeMismatch(
-                    "Quantifier expressions not supported in interpreter".to_string(),
+                    "Quantifier and multidimensional slice expressions not supported in interpreter".to_string(),
                 ))
             }
         }

@@ -286,6 +286,17 @@ impl ForeignBinding {
     }
 }
 
+/// A single coordinate in a multidimensional slice
+#[derive(Debug, Clone, PartialEq)]
+pub enum SliceCoordinate {
+    /// Single index: `5`
+    Index(Box<Expr>),
+    /// Range: `0..10`, `5..`, `..10`
+    Range { start: Option<Box<Expr>>, end: Option<Box<Expr>> },
+    /// Named dimension: `time:5` or `time:0..10`
+    Named { name: String, coord: Box<SliceCoordinate> },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Integer(i64),
@@ -326,6 +337,12 @@ pub enum Expr {
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,
         stride: Option<Box<Expr>>,
+        mask: Option<Box<Expr>>,
+    },
+    // Multidimensional slice: vec[coord1, coord2, ...; mask]
+    MultiSlice {
+        value: Box<Expr>,
+        coordinates: Vec<SliceCoordinate>,
         mask: Option<Box<Expr>>,
     },
 

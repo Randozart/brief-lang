@@ -224,7 +224,12 @@ field_access ::= expression "." identifier
 
 index_access ::= expression "[" expression "]"
 
-slice ::= expression "[" expression? ":" expression? "]"
+slice ::= expression "[" coordinate ("," coordinate)* (";" condition)? "]"
+
+coordinate ::= expression                    // Single index: 5
+             | expression? ".." expression?  // Range: 0..10, ..10, 5..
+             | "::" expression               // Stride: ::2
+             | identifier ":" coordinate     // Named dimension: time:5
 
 tuple ::= "(" (expression ("," expression)*)? ")"
 
@@ -336,7 +341,12 @@ field_access ::= expression "." identifier
 
 index_access ::= expression "[" expression "]"
 
-slice ::= expression "[" expression? ":" expression? "]"
+slice ::= expression "[" coordinate ("," coordinate)* (";" condition)? "]"
+
+coordinate ::= expression                    // Single index: 5
+             | expression? ".." expression?  // Range: 0..10, ..10, 5..
+             | "::" expression               // Stride: ::2
+             | identifier ":" coordinate     // Named dimension: time:5
 
 tuple ::= "(" (expression ("," expression)*)? ")"
 

@@ -1442,7 +1442,7 @@ impl ProofEngine {
             Expr::PatternMatch { value, .. } => {
                 self.collect_identifiers(value, vars);
             }
-            Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) => {}
+            Expr::Slice { .. } | Expr::MultiSlice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) => {}
         }
     }
 

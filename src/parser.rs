@@ -3231,8 +3231,20 @@ let span = self.current_span();
         loop {
             if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
-                let result = self.parse_bracket_contents()?;
-                expr = self.bracket_contents_to_expr(expr, result);
+                // Check if this is a multidimensional slice by looking ahead for commas
+                // before any `;`, `..`, `::`, or `]`
+                let is_multi = self.peek_multidimensional_slice();
+                if is_multi {
+                    let result = self.parse_multi_slice()?;
+                    expr = Expr::MultiSlice {
+                        value: Box::new(expr),
+                        coordinates: result.coordinates,
+                        mask: result.mask,
+                    };
+                } else {
+                    let result = self.parse_bracket_contents()?;
+                    expr = self.bracket_contents_to_expr(expr, result);
+                }
             } else if let Some(Ok(Token::Dot)) = self.current_token() {
                 self.advance();
                 let member_name = self.expect_identifier()?;
@@ -3782,6 +3794,146 @@ let span = self.current_span();
             _ => None,
         }
     }
+
+    /// Peek ahead to check if this is a multidimensional slice (has commas before `;`, `..`, `::`, or `]`)
+    fn peek_multidimensional_slice(&self) -> bool {
+        // Save current position and scan ahead
+        let mut pos = self.pos;
+        let input = &self.source;
+        let bytes = input.as_bytes();
+        
+        // Skip whitespace
+        while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t' || bytes[pos] == b'\n' || bytes[pos] == b'\r') {
+            pos += 1;
+        }
+        
+        if pos >= bytes.len() {
+            return false;
+        }
+        
+        // If starts with `]`, `;`, `..`, `::`, it's not multidimensional
+        if bytes[pos] == b']' || bytes[pos] == b';' {
+            return false;
+        }
+        if pos + 1 < bytes.len() && bytes[pos] == b'.' && bytes[pos + 1] == b'.' {
+            return false;
+        }
+        if pos + 1 < bytes.len() && bytes[pos] == b':' && bytes[pos + 1] == b':' {
+            return false;
+        }
+        
+        // Scan until we find a comma, semicolon, or closing bracket
+        let mut found_colon = false;
+        while pos < bytes.len() {
+            match bytes[pos] {
+                b',' => return true,  // Found comma = multidimensional
+                b';' | b']' => return false,  // Found semicolon or bracket = single dimension
+                b'.' => {
+                    if pos + 1 < bytes.len() && bytes[pos + 1] == b'.' {
+                        return false;  // Found ..
+                    }
+                }
+                b':' => {
+                    if found_colon {
+                        // :: means stride, not multidimensional
+                        return false;
+                    }
+                    found_colon = true;
+                }
+                _ => {}
+            }
+            pos += 1;
+        }
+        false
+    }
+
+    /// Parse a multidimensional slice: vec[coord1, coord2, ...; mask]
+    fn parse_multi_slice(&mut self) -> Result<MultiSliceResult, SyntaxError> {
+        let mut coordinates = Vec::new();
+        let mut mask: Option<Box<Expr>> = None;
+        
+        loop {
+            // Parse a single coordinate
+            let coord = self.parse_slice_coordinate()?;
+            coordinates.push(coord);
+            
+            // Check what comes next
+            if let Some(Ok(Token::Comma)) = self.current_token() {
+                self.advance(); // consume comma, continue to next coordinate
+            } else if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                self.advance(); // consume semicolon
+                mask = Some(Box::new(self.parse_expression()?));
+                break;
+            } else if let Some(Ok(Token::RBracket)) = self.current_token() {
+                break;
+            } else {
+                return self.spanned_err("Expected ',', ';', or ']' in multidimensional slice".to_string());
+            }
+        }
+        
+        self.expect(Token::RBracket)?;
+        
+        Ok(MultiSliceResult { coordinates, mask })
+    }
+
+    /// Parse a single slice coordinate: index, range, or named
+    fn parse_slice_coordinate(&mut self) -> Result<crate::ast::SliceCoordinate, SyntaxError> {
+        // Check for named dimension: identifier:coord
+        if let Some(Ok(Token::Identifier(_))) = self.current_token() {
+            // Save the identifier name before advancing
+            let name = match self.current_token() {
+                Some(Ok(Token::Identifier(n))) => n.clone(),
+                _ => unreachable!(),
+            };
+            self.advance();
+            
+            if let Some(Ok(Token::Colon)) = self.current_token() {
+                self.advance(); // consume colon
+                // Parse the coordinate part after the name
+                let coord = self.parse_slice_coordinate_inner()?;
+                return Ok(crate::ast::SliceCoordinate::Named {
+                    name,
+                    coord: Box::new(coord),
+                });
+            } else {
+                // Not a named dimension, treat as identifier expression
+                let expr = Expr::Identifier(name);
+                return Ok(crate::ast::SliceCoordinate::Index(Box::new(expr)));
+            }
+        }
+        
+        self.parse_slice_coordinate_inner()
+    }
+
+    /// Parse the inner part of a coordinate (index or range)
+    fn parse_slice_coordinate_inner(&mut self) -> Result<crate::ast::SliceCoordinate, SyntaxError> {
+        if let Some(Ok(Token::DotDot)) = self.current_token() {
+            // ..end range
+            self.advance();
+            let end = Some(Box::new(self.parse_expression()?));
+            Ok(crate::ast::SliceCoordinate::Range { start: None, end })
+        } else {
+            let start = self.parse_expression()?;
+            if let Some(Ok(Token::DotDot)) = self.current_token() {
+                // start.. or start..end range
+                self.advance();
+                let end = if let Some(Ok(Token::Comma)) | Some(Ok(Token::Semicolon)) | Some(Ok(Token::RBracket)) = self.current_token() {
+                    None // start.. (open-ended)
+                } else {
+                    Some(Box::new(self.parse_expression()?))
+                };
+                Ok(crate::ast::SliceCoordinate::Range { start: Some(Box::new(start)), end })
+            } else {
+                // Single index
+                Ok(crate::ast::SliceCoordinate::Index(Box::new(start)))
+            }
+        }
+    }
+}
+
+struct MultiSliceResult {
+    coordinates: Vec<crate::ast::SliceCoordinate>,
+    mask: Option<Box<Expr>>,
 }
 
 #[cfg(test)]

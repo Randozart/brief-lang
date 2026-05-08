@@ -259,7 +259,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             let _ = eval_symbolic(value, state);
             SymbolicValue::Unknown
         }
-        Expr::Slice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) => SymbolicValue::Unknown,
+        Expr::Slice { .. } | Expr::MultiSlice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) => SymbolicValue::Unknown,
     }
 }
 
