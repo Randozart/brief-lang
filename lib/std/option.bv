@@ -46,10 +46,7 @@ defn unwrap<T>(opt: Option<T>) [opt.is_some()][true] -> T {
     uni opt(Some(v)) = {
         term v;
     };
-    uni opt(None) = {
-        term panic("called unwrap on None");
-    };
-    term panic("unreachable");
+    // None case impossible - precondition guarantees opt.is_some()
 };
 
 defn unwrap_or<T>(opt: Option<T>, default: T) [true][true] -> T {
