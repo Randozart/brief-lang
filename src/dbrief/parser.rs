@@ -36,6 +36,7 @@ impl DbriefParser {
             rules: Vec::new(),
             records: Vec::new(),
             checks: Vec::new(),
+            depends: Vec::new(),
         };
 
         while !self.is_eof() {
@@ -54,46 +55,60 @@ impl DbriefParser {
                 Some('i') if self.starts_with("import") => {
                     self.parse_import(&mut program)?;
                 }
-                Some('R') if self.starts_with("REGISTER") => {
+                // DEPENDS - new keyword (abbreviations: dep, deps)
+                Some('D') if self.starts_with("DEPENDS") || self.starts_with("DEPS") || self.starts_with("DEP") => {
+                    self.parse_depends(&mut program)?;
+                }
+                Some('d') if self.starts_with("depends") || self.starts_with("deps") || self.starts_with("dep") => {
+                    self.parse_depends(&mut program)?;
+                }
+                // REGISTER (abbreviations: reg, regs)
+                Some('R') if self.starts_with("REGISTER") || self.starts_with("REGS") || self.starts_with("REG") => {
                     program.registers.push(self.parse_register()?);
                 }
-                Some('r') if self.starts_with("register") => {
+                Some('r') if self.starts_with("register") || self.starts_with("regs") || self.starts_with("reg") => {
                     program.registers.push(self.parse_register()?);
                 }
-                Some('A') if self.starts_with("ALIAS") => {
+                // ALIAS (abbreviation: ali)
+                Some('A') if self.starts_with("ALIAS") || self.starts_with("ALIAS?") || self.starts_with("ALI") => {
                     program.aliases.push(self.parse_alias()?);
                 }
-                Some('a') if self.starts_with("alias") => {
+                Some('a') if self.starts_with("alias") || self.starts_with("alias?") || self.starts_with("ali") => {
                     program.aliases.push(self.parse_alias()?);
                 }
-                Some('S') if self.starts_with("STRUCT") => {
+                // STRUCT (abbreviations: stru, str)
+                Some('S') if self.starts_with("STRUCT") || self.starts_with("STRU") || self.starts_with("STR") => {
                     program.structs.push(self.parse_struct()?);
                 }
-                Some('s') if self.starts_with("struct") => {
+                Some('s') if self.starts_with("struct") || self.starts_with("stru") || self.starts_with("str") => {
                     program.structs.push(self.parse_struct()?);
                 }
-                Some('S') if self.starts_with("SERVICE") => {
+                // SERVICE (abbreviations: serv, svc)
+                Some('S') if self.starts_with("SERVICE") || self.starts_with("SERV") || self.starts_with("SVC") => {
                     program.services.push(self.parse_service()?);
                 }
-                Some('s') if self.starts_with("service") => {
+                Some('s') if self.starts_with("service") || self.starts_with("serv") || self.starts_with("svc") => {
                     program.services.push(self.parse_service()?);
                 }
-                Some('E') if self.starts_with("ENUM") => {
+                // ENUM (abbreviations: en, e)
+                Some('E') if self.starts_with("ENUM") || self.starts_with("EN") => {
                     program.enums.push(self.parse_enum()?);
                 }
-                Some('e') if self.starts_with("enum") => {
+                Some('e') if self.starts_with("enum") || self.starts_with("en") => {
                     program.enums.push(self.parse_enum()?);
                 }
-                Some('R') if self.starts_with("RULE") => {
+                // RULE (abbreviations: rl, rul)
+                Some('R') if self.starts_with("RULE") || self.starts_with("RL") || self.starts_with("RUL") => {
                     program.rules.push(self.parse_rule()?);
                 }
-                Some('r') if self.starts_with("rule") => {
+                Some('r') if self.starts_with("rule") || self.starts_with("rl") || self.starts_with("rul") => {
                     program.rules.push(self.parse_rule()?);
                 }
-                Some('C') if self.starts_with("CHECK") => {
+                // CHECK (abbreviation: chk)
+                Some('C') if self.starts_with("CHECK") || self.starts_with("CHK") => {
                     program.checks.push(self.parse_check()?);
                 }
-                Some('c') if self.starts_with("check") => {
+                Some('c') if self.starts_with("check") || self.starts_with("chk") => {
                     program.checks.push(self.parse_check()?);
                 }
                 Some('@') => {
@@ -185,8 +200,112 @@ impl DbriefParser {
         Ok(())
     }
 
+    fn parse_depends(&mut self, program: &mut DbriefProgram) -> Result<(), String> {
+        // Consume DEPENDS (or dep/deps)
+        if self.starts_with("DEPENDS") {
+            self.pos += 7;
+        } else if self.starts_with("DEPS") {
+            self.pos += 4;
+        } else if self.starts_with("DEP") {
+            self.pos += 3;
+        } else if self.starts_with("depends") {
+            self.pos += 7;
+        } else if self.starts_with("deps") {
+            self.pos += 4;
+        } else if self.starts_with("dep") {
+            self.pos += 3;
+        }
+        
+        self.skip_whitespace();
+        
+        // Parse package name (string)
+        let name = self.parse_string_literal()?;
+        self.skip_whitespace();
+        
+        let mut version_constraint: Option<String> = None;
+        let mut platform: Vec<String> = Vec::new();
+        let mut features: Vec<String> = Vec::new();
+        let mut source: Option<String> = None;
+        
+        // Parse remaining clauses
+        while !self.starts_with(";") && !self.is_eof() {
+            let kw = self.parse_identifier()?;
+            self.skip_whitespace();
+            
+            match kw.to_uppercase().as_str() {
+                "VERSION" | "VER" | "V" => {
+                    version_constraint = Some(self.parse_string_literal()?);
+                }
+                "PLATFORM" | "PLAT" | "P" => {
+                    if self.peek() == Some('[') {
+                        self.consume('[')?;
+                        while !self.starts_with("]") && !self.is_eof() {
+                            let p = self.parse_identifier()?;
+                            platform.push(p);
+                            if self.peek() == Some(',') {
+                                self.consume(',')?;
+                                self.skip_whitespace();
+                            }
+                        }
+                        self.consume(']')?;
+                    } else {
+                        platform.push(self.parse_identifier()?);
+                    }
+                }
+                "FEATURES" | "FEAT" | "F" => {
+                    if self.peek() == Some('[') {
+                        self.consume('[')?;
+                        while !self.starts_with("]") && !self.is_eof() {
+                            let f = self.parse_identifier()?;
+                            features.push(f);
+                            if self.peek() == Some(',') {
+                                self.consume(',')?;
+                                self.skip_whitespace();
+                            }
+                        }
+                        self.consume(']')?;
+                    } else {
+                        features.push(self.parse_identifier()?);
+                    }
+                }
+                "SOURCE" | "SRC" | "S" => {
+                    source = Some(self.parse_string_literal()?);
+                }
+                _ => {
+                    return Err(format!("Unknown DEPENDS clause: {}", kw));
+                }
+            }
+            self.skip_whitespace();
+        }
+        
+        self.consume(';')?;
+        
+        program.depends.push(DbriefDependency {
+            name,
+            version_constraint,
+            platform,
+            features,
+            source,
+        });
+        
+        Ok(())
+    }
+
     fn parse_register(&mut self) -> Result<DbriefRegister, String> {
-        self.consume_keyword("REGISTER")?;
+        // Handle both full keyword and abbreviations
+        if self.starts_with("REGISTER") || self.starts_with("register") {
+            self.consume_keyword("REGISTER")?;
+        } else if self.starts_with("REGS") {
+            self.pos += 4;
+        } else if self.starts_with("regs") {
+            self.pos += 4;
+        } else if self.starts_with("REG") {
+            self.pos += 3;
+        } else if self.starts_with("reg") {
+            self.pos += 3;
+        } else {
+            return Err("Expected REGISTER".to_string());
+        }
         self.skip_whitespace();
         
         let address = self.parse_address()?;
@@ -343,8 +462,12 @@ impl DbriefParser {
         let optional = self.starts_with("ALIAS?") || self.starts_with("alias?");
         if optional {
             self.pos += "ALIAS?".len();
+        } else if self.starts_with("ALIAS") || self.starts_with("alias") {
+            self.pos += 5;
+        } else if self.starts_with("ALI") || self.starts_with("ali") {
+            self.pos += 3;
         } else {
-            self.consume_keyword("ALIAS")?;
+            return Err("Expected ALIAS or ALI".to_string());
         }
         self.skip_whitespace();
         
@@ -375,7 +498,16 @@ impl DbriefParser {
     }
 
     fn parse_struct(&mut self) -> Result<DbriefStruct, String> {
-        self.consume_keyword("STRUCT")?;
+        // Accept STRUCT, STR, STRU (case insensitive)
+        if self.starts_with("STRUCT") || self.starts_with("struct") {
+            self.pos += 6;
+        } else if self.starts_with("STRU") || self.starts_with("stru") {
+            self.pos += 4;
+        } else if self.starts_with("STR") || self.starts_with("str") {
+            self.pos += 3;
+        } else {
+            return Err("Expected STRUCT, STR, or STRU".to_string());
+        }
         self.skip_whitespace();
         
         let name = self.parse_identifier()?;
@@ -427,7 +559,16 @@ impl DbriefParser {
     }
 
     fn parse_service(&mut self) -> Result<DbriefService, String> {
-        self.consume_keyword("SERVICE")?;
+        // Accept SERVICE, SERV, SVC (case insensitive)
+        if self.starts_with("SERVICE") || self.starts_with("service") {
+            self.pos += 7;
+        } else if self.starts_with("SERV") || self.starts_with("serv") {
+            self.pos += 4;
+        } else if self.starts_with("SVC") || self.starts_with("svc") {
+            self.pos += 3;
+        } else {
+            return Err("Expected SERVICE, SERV, or SVC".to_string());
+        }
         self.skip_whitespace();
 
         let name = self.parse_identifier()?;
@@ -1055,6 +1196,7 @@ pub fn parse_dbvs(input: &str) -> Result<DbvsProgram, String> {
         enums: program.enums,
         services: program.services,
         aliases: program.aliases,
+        depends: program.depends,
     })
 }
 
@@ -1076,6 +1218,7 @@ pub fn parse_dbvl(input: &str) -> Result<DbvlProgram, String> {
         imports: program.imports,
         records,
         operations,
+        depends: program.depends,
     })
 }
 

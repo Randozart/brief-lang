@@ -201,6 +201,15 @@ pub struct DbriefService {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DbriefDependency {
+    pub name: String,
+    pub version_constraint: Option<String>,
+    pub platform: Vec<String>,
+    pub features: Vec<String>,
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DbriefProgram {
     pub imports: Vec<ImportStmt>,
     pub registers: Vec<DbriefRegister>,
@@ -211,6 +220,7 @@ pub struct DbriefProgram {
     pub rules: Vec<DbriefRule>,
     pub records: Vec<DbriefRecord>,
     pub checks: Vec<DbriefContract>,
+    pub depends: Vec<DbriefDependency>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -221,6 +231,7 @@ pub struct DbvsProgram {
     pub enums: Vec<DbriefEnum>,
     pub services: Vec<DbriefService>,
     pub aliases: Vec<DbriefAlias>,
+    pub depends: Vec<DbriefDependency>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -228,6 +239,7 @@ pub struct DbvlProgram {
     pub imports: Vec<ImportStmt>,
     pub records: Vec<DbvlRecord>,
     pub operations: Vec<DbvlOperation>,
+    pub depends: Vec<DbriefDependency>,
 }
 
 #[derive(Debug, Clone, Serialize)]
