@@ -242,10 +242,53 @@ impl RustBackend {
             Expr::Identifier(n) => format!("self.{}", n),
             Expr::OwnedRef(n) => format!("self.{}", n),
             Expr::PriorState(n) => format!("self.{}", n),
-            Expr::Add(a, b) => format!("({} + {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Sub(a, b) => format!("({} - {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Mul(a, b) => format!("({} * {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::Div(a, b) => format!("({} / {})", self.expr_to_rust(a), self.expr_to_rust(b)),
+            Expr::Add(a, b) => {
+                // Check for List SIMD addition
+                if self.is_list_expr(a) && self.is_list_expr(b) {
+                    let left = self.expr_to_rust(a);
+                    let right = self.expr_to_rust(b);
+                    format!("{{\n            let len = std::cmp::min({}.len(), {}.len());\n            let mut result = Vec::with_capacity(len);\n            for i in 0..len {{\n                result.push({}[i] + {}[i]);\n            }}\n            result\n        }}", left, right, left, right)
+                } else {
+                    format!("({} + {})", self.expr_to_rust(a), self.expr_to_rust(b))
+                }
+            }
+            Expr::Sub(a, b) => {
+                if self.is_list_expr(a) && self.is_list_expr(b) {
+                    let left = self.expr_to_rust(a);
+                    let right = self.expr_to_rust(b);
+                    format!("{{\n            let len = std::cmp::min({}.len(), {}.len());\n            let mut result = Vec::with_capacity(len);\n            for i in 0..len {{\n                result.push({}[i] - {}[i]);\n            }}\n            result\n        }}", left, right, left, right)
+                } else {
+                    format!("({} - {})", self.expr_to_rust(a), self.expr_to_rust(b))
+                }
+            }
+            Expr::Mul(a, b) => {
+                if self.is_list_expr(a) && self.is_list_expr(b) {
+                    let left = self.expr_to_rust(a);
+                    let right = self.expr_to_rust(b);
+                    format!("{{\n            let len = std::cmp::min({}.len(), {}.len());\n            let mut result = Vec::with_capacity(len);\n            for i in 0..len {{\n                result.push({}[i] * {}[i]);\n            }}\n            result\n        }}", left, right, left, right)
+                } else if self.is_list_expr(a) && !self.is_list_expr(b) {
+                    // Scalar broadcast: list * scalar
+                    let left = self.expr_to_rust(a);
+                    let right = self.expr_to_rust(b);
+                    format!("{{\n            let mut result = {}.clone();\n            for i in 0..result.len() {{\n                result[i] = result[i] * {};\n            }}\n            result\n        }}", left, right)
+                } else if !self.is_list_expr(a) && self.is_list_expr(b) {
+                    // Scalar broadcast: scalar * list
+                    let left = self.expr_to_rust(a);
+                    let right = self.expr_to_rust(b);
+                    format!("{{\n            let mut result = {}.clone();\n            for i in 0..result.len() {{\n                result[i] = {} * result[i];\n            }}\n            result\n        }}", right, left)
+                } else {
+                    format!("({} * {})", self.expr_to_rust(a), self.expr_to_rust(b))
+                }
+            }
+            Expr::Div(a, b) => {
+                if self.is_list_expr(a) && self.is_list_expr(b) {
+                    let left = self.expr_to_rust(a);
+                    let right = self.expr_to_rust(b);
+                    format!("{{\n            let len = std::cmp::min({}.len(), {}.len());\n            let mut result = Vec::with_capacity(len);\n            for i in 0..len {{\n                result.push({}[i] / {}[i]);\n            }}\n            result\n        }}", left, right, left, right)
+                } else {
+                    format!("({} / {})", self.expr_to_rust(a), self.expr_to_rust(b))
+                }
+            }
             Expr::Eq(a, b) => format!("({} == {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Ne(a, b) => format!("({} != {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Lt(a, b) => format!("({} < {})", self.expr_to_rust(a), self.expr_to_rust(b)),
@@ -256,7 +299,28 @@ impl RustBackend {
             Expr::Or(a, b) => format!("({} || {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Not(a) => format!("!{}", self.expr_to_rust(a)),
             Expr::Neg(a) => format!("-{}", self.expr_to_rust(a)),
+            Expr::ListLen(inner) => {
+                format!("{}.len()", self.expr_to_rust(inner))
+            }
+            Expr::ListIndex(list, idx) => {
+                format!("{}[{}]", self.expr_to_rust(list), self.expr_to_rust(idx))
+            }
+            Expr::ListLiteral(elems) => {
+                let items: Vec<String> = elems.iter().map(|e| self.expr_to_rust(e)).collect();
+                format!("vec![{}]", items.join(", "))
+            }
             _ => "0 /* expr not implemented */".to_string(),
+        }
+    }
+
+    fn is_list_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier(_) => true,
+            Expr::FieldAccess(obj, _) => self.is_list_expr(obj),
+            Expr::ListIndex(inner, _) => self.is_list_expr(inner),
+            Expr::ListLiteral(_) => true,
+            Expr::Slice { .. } | Expr::MultiSlice { .. } => true,
+            _ => false,
         }
     }
 
@@ -276,6 +340,10 @@ impl RustBackend {
                 // For Rust, use a flat array or Vec with capacity
                 format!("Vec<{}>", Self::get_rust_type(inner))
             }
+            Type::Applied(name, args) if name == "List" => {
+                let elem_type = args.first().map(|t| Self::get_rust_type(t)).unwrap_or_else(|| "i32".to_string());
+                format!("Vec<{}>", elem_type)
+            }
             Type::Constrained(inner, _) => Self::get_rust_type(inner),
             _ => "i32".to_string(),
         }
@@ -289,6 +357,7 @@ impl RustBackend {
             Type::Bool => "false".to_string(),
             Type::String => "String::new()".to_string(),
             Type::Vector(_, _) => "Vec::new()".to_string(),
+            Type::Applied(name, _) if name == "List" => "Vec::new()".to_string(),
             _ => "0".to_string(),
         }
     }
@@ -298,8 +367,3 @@ impl RustBackend {
     }
 }
 
-impl Default for RustBackend {
-    fn default() -> Self {
-        Self::new()
-    }
-}

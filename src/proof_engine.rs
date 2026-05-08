@@ -788,6 +788,7 @@ impl ProofEngine {
         self.check_sig_projections(program);
         self.check_ffi_error_handling(program);
         self.check_circular_dependencies(program);
+        self.check_list_simd_lengths(program);
         self.verify_contracts(program);
         self.errors.clone()
     }
@@ -1294,6 +1295,156 @@ impl ProofEngine {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// Check that List SIMD operations have provable length equality
+    /// When two Lists are used in a binary operation (e.g., list_a * list_b),
+    /// their lengths must be provably equal from the precondition.
+    fn check_list_simd_lengths(&mut self, program: &Program) {
+        for item in &program.items {
+            match item {
+                TopLevel::Transaction(txn) => {
+                    self.check_list_simd_lengths_in_body(&txn.body, &txn.contract.pre_condition, &format!("transaction '{}'", txn.name));
+                }
+                TopLevel::Definition(defn) => {
+                    self.check_list_simd_lengths_in_body(&defn.body, &defn.contract.pre_condition, &format!("definition '{}'", defn.name));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn check_list_simd_lengths_in_body(&mut self, body: &[Statement], precondition: &Expr, context: &str) {
+        let mut list_ops = Vec::new();
+        self.collect_list_simd_ops(body, &mut list_ops);
+
+        for (left, right, span) in list_ops {
+            // Extract list names from the expressions
+            let left_list = self.extract_list_name(&left);
+            let right_list = self.extract_list_name(&right);
+
+            if let (Some(left_name), Some(right_name)) = (left_list, right_list) {
+                if left_name != right_name {
+                    // Different lists - check if length equality is provable from precondition
+                    let len_expr = Expr::Eq(
+                        Box::new(Expr::ListLen(Box::new(Expr::Identifier(left_name.clone())))),
+                        Box::new(Expr::ListLen(Box::new(Expr::Identifier(right_name.clone())))),
+                    );
+
+                    // Check if precondition implies length equality
+                    if !self.expr_implies(precondition, &len_expr) {
+                        let mut err = ProofError::new("P020", "List SIMD length mismatch");
+                        err.explanation = format!(
+                            "{}: SIMD operation between '{}' and '{}' requires provable length equality",
+                            context, left_name, right_name
+                        );
+                        err.proof_chain.push(format!("1. '{}' and '{}' are different lists", left_name, right_name));
+                        err.proof_chain.push("2. Length equality cannot be proven from precondition".to_string());
+                        err.hints.push(format!("Add precondition: ['{}.len() == {}.len()']", left_name, right_name));
+                        err.hints.push("Or use slicing to ensure equal lengths: let safe_a = a[0..min(a.len(), b.len())]".to_string());
+                        if let Some(s) = span {
+                            err = err.with_span(s.clone());
+                        }
+                        self.errors.push(err);
+                    }
+                }
+            }
+        }
+    }
+
+    fn extract_list_name(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Identifier(name) => Some(name.clone()),
+            Expr::FieldAccess(obj, _) => self.extract_list_name(obj),
+            Expr::ListIndex(inner, _) => self.extract_list_name(inner),
+            _ => None,
+        }
+    }
+
+    /// Check if precondition implies the given expression
+    /// Simple check: if the expression or its negation appears in the precondition
+    fn expr_implies(&self, precondition: &Expr, target: &Expr) -> bool {
+        // Direct match
+        if self.exprs_equal(precondition, target) {
+            return true;
+        }
+
+        // Check if target is part of an AND chain in precondition
+        if let Expr::And(left, right) = precondition {
+            return self.expr_implies(left, target) || self.expr_implies(right, target);
+        }
+
+        false
+    }
+
+    fn exprs_equal(&self, a: &Expr, b: &Expr) -> bool {
+        match (a, b) {
+            (Expr::Eq(l1, r1), Expr::Eq(l2, r2)) => {
+                self.exprs_equal(l1, l2) && self.exprs_equal(r1, r2)
+            }
+            (Expr::ListLen(l1), Expr::ListLen(l2)) => self.exprs_equal(l1, l2),
+            (Expr::Identifier(n1), Expr::Identifier(n2)) => n1 == n2,
+            _ => false,
+        }
+    }
+
+    fn collect_list_simd_ops(&self, body: &[Statement], ops: &mut Vec<(Expr, Expr, Option<Span>)>) {
+        for stmt in body {
+            match stmt {
+                Statement::Assignment { expr, .. } => {
+                    self.collect_list_simd_ops_in_expr(expr, ops);
+                }
+                Statement::Guarded { condition, statements, .. } => {
+                    self.collect_list_simd_ops_in_expr(condition, ops);
+                    self.collect_list_simd_ops(statements, ops);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_list_simd_ops_in_expr(&self, expr: &Expr, ops: &mut Vec<(Expr, Expr, Option<Span>)>) {
+        match expr {
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
+                // Check if both sides could be List types
+                if self.could_be_list(l) && self.could_be_list(r) {
+                    ops.push((l.as_ref().clone(), r.as_ref().clone(), None));
+                }
+                self.collect_list_simd_ops_in_expr(l, ops);
+                self.collect_list_simd_ops_in_expr(r, ops);
+            }
+            Expr::ListLiteral(elems) => {
+                for elem in elems {
+                    self.collect_list_simd_ops_in_expr(elem, ops);
+                }
+            }
+            Expr::Slice { value, mask, .. } => {
+                self.collect_list_simd_ops_in_expr(value, ops);
+                if let Some(m) = mask {
+                    self.collect_list_simd_ops_in_expr(m, ops);
+                }
+            }
+            Expr::MultiSlice { value, mask, .. } => {
+                self.collect_list_simd_ops_in_expr(value, ops);
+                if let Some(m) = mask {
+                    self.collect_list_simd_ops_in_expr(m, ops);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn could_be_list(&self, expr: &Expr) -> bool {
+        // Only consider expressions that are clearly list-like
+        // This is conservative to avoid false positives on scalar types
+        match expr {
+            Expr::ListLiteral(_) => true,
+            Expr::ListIndex(inner, _) => self.could_be_list(inner),
+            Expr::Slice { .. } | Expr::MultiSlice { .. } => true,
+            // Don't assume identifiers are lists - they could be scalars
+            // Only flag if we see explicit list operations
+            _ => false,
         }
     }
 
