@@ -2863,6 +2863,43 @@ let span = self.current_span();
         }
         if let Some(Ok(Token::Lt)) = self.current_token() {
             self.advance();
+            
+            // Special handling for Vector<T, dim1, dim2, ...> 
+            // Parse element type first, then dimensions as integers
+            if let Type::Custom(name) = &ty {
+                if name == "Vector" {
+                    // First: parse the element type
+                    let inner = Box::new(self.parse_type()?);
+                    
+                    // Parse dimensions as integers
+                    let mut dimensions = Vec::new();
+                    while let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance(); // consume comma
+                        
+                        // Try to parse as integer first
+                        if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                            dimensions.push(crate::ast::Dimension::Anonymous(*n as usize));
+                            self.advance();
+                        } else {
+                            return self.spanned_err("Vector dimension must be an integer".to_string());
+                        }
+                    }
+                    
+                    // Expect closing >
+                    if let Some(Ok(Token::Gt)) = self.current_token() {
+                        self.advance();
+                    } else if let Some(Ok(Token::Shr)) = self.current_token() {
+                        self.shr_consumed_as_gt = true;
+                        self.advance();
+                    } else {
+                        return self.spanned_err("Expected '>' to close Vector type".to_string());
+                    }
+                    
+                    return Ok(Type::Vector(inner, dimensions));
+                }
+            }
+            
+            // Standard generic type parsing
             let mut type_args = Vec::new();
             loop {
                 type_args.push(self.parse_type()?);

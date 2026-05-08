@@ -268,11 +268,13 @@ impl RustBackend {
             Type::Bool => "bool".to_string(),
             Type::String => "String".to_string(),
             Type::Vector(inner, dims) => {
-                let dims_str: Vec<String> = dims.iter().map(|d| match d {
-                    crate::ast::Dimension::Anonymous(s) => format!("{}", s),
-                    crate::ast::Dimension::Named(_, s) => format!("{}", s),
-                }).collect();
-                format!("Vec<{}>[{}]", Self::get_rust_type(inner), dims_str.join("]["))
+                // Calculate total size
+                let total_size: usize = dims.iter().map(|d| match d {
+                    crate::ast::Dimension::Anonymous(s) => *s,
+                    crate::ast::Dimension::Named(_, s) => *s,
+                }).product();
+                // For Rust, use a flat array or Vec with capacity
+                format!("Vec<{}>", Self::get_rust_type(inner))
             }
             Type::Constrained(inner, _) => Self::get_rust_type(inner),
             _ => "i32".to_string(),

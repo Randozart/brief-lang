@@ -1210,4 +1210,21 @@ mod dbvl_tests {
         let program = result.unwrap();
         assert_eq!(program.records.len(), 2);
     }
+
+    #[test]
+    fn test_dbvl_to_json() {
+        use crate::dbrief::dbvl_to_json;
+        
+        let input = "@1 { name: \"Alice\"; age: 30; }\n@2 { name: \"Bob\"; age: 25; }";
+        let program = parse_dbvl(input).unwrap();
+        
+        let json = dbvl_to_json(&program, false).unwrap();
+        assert!(json.contains("records"));
+        assert!(json.contains("Alice"));
+        assert!(json.contains("Bob"));
+        
+        let pretty_json = dbvl_to_json(&program, true).unwrap();
+        assert!(pretty_json.contains("  \"records\""));
+        assert!(pretty_json.len() > json.len());
+    }
 }
