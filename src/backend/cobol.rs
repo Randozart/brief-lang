@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ast::{Attribute, Expr, OutputType, Program, Statement, TopLevel, Transaction, Type, Contract, WatchdogSpec};
+use crate::ast::{Attribute, Expr, OutputType, Program, Statement, TopLevel, Transaction, Type, Contract, WatchdogSpec, StrictMode};
 
 pub struct CobolBackend {
     spec: Option<crate::target_spec::TargetSpec>,
@@ -669,6 +669,7 @@ mod tests {
             reactor_speed: None,
             attrs: vec![],
             ffi: None,
+            strict_mode: StrictMode::Off,
         }
     }
 

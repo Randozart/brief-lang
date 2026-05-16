@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Import, ImportItem, Program, TopLevel};
+use crate::ast::{Import, ImportItem, Program, StrictMode, TopLevel};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -76,6 +76,7 @@ impl ImportResolver {
             reactor_speed: program.reactor_speed,
             attrs: Vec::new(),
             ffi: None,
+            strict_mode: StrictMode::Off,
         })
     }
 
@@ -92,6 +93,7 @@ impl ImportResolver {
                 reactor_speed: None,
                 attrs: Vec::new(),
                 ffi: None,
+                strict_mode: StrictMode::Off,
             });
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
@@ -104,6 +106,7 @@ impl ImportResolver {
                     reactor_speed: None,
                     attrs: Vec::new(),
                     ffi: None,
+                    strict_mode: StrictMode::Off,
                 });
             }
             if last_component.ends_with(".css") || last_component.ends_with(".svg") {
@@ -138,6 +141,7 @@ self.loaded_modules.insert(
                         reactor_speed: None,
                         attrs: Vec::new(),
                         ffi: None,
+                        strict_mode: StrictMode::Off,
                     },
                 );
                 return Ok(Program {
@@ -146,6 +150,7 @@ self.loaded_modules.insert(
                     reactor_speed: None,
                     attrs: Vec::new(),
                     ffi: None,
+                    strict_mode: StrictMode::Off,
                 });
             }
         }
@@ -201,6 +206,7 @@ self.loaded_modules.insert(
                         reactor_speed: None,
                         attrs: Vec::new(),
                         ffi: None,
+                        strict_mode: StrictMode::Off,
                     },
                 );
                 return Ok(Program {
@@ -212,6 +218,7 @@ self.loaded_modules.insert(
                     reactor_speed: None,
                     attrs: Vec::new(),
                     ffi: None,
+                    strict_mode: StrictMode::Off,
                 });
             }
         }
@@ -342,6 +349,7 @@ self.loaded_modules.insert(
             reactor_speed: None,
             attrs: Vec::new(),
             ffi: None,
+            strict_mode: StrictMode::Off,
         })
     }
 }

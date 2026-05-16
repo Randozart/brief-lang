@@ -340,6 +340,7 @@ impl Desugarer {
             comments: program.comments.clone(),
             reactor_speed: program.reactor_speed,
             ffi: program.ffi.clone(),
+            strict_mode: StrictMode::Off,
         }
     }
 

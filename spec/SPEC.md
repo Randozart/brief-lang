@@ -1,9 +1,10 @@
 # Brief Language Specification
 
-**Version:** v0.12.0  
-**Date:** 2026-05-06  
+**Version:** v0.13.0  
+**Date:** 2026-05-14  
+**Status:** Development (stable core, experimental backends, **new: Strict Brief variants**)  
 **Status:** Development (stable core, experimental backends)  
-**Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl)
+**Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
 
@@ -27,6 +28,9 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 * **Data Brief** (`.dbv`): Concrete configuration data with schema validation. Replaces hardware.toml.
 * **Data Brief Schema** (`.dbvs`): Schema definitions for Data Brief, including aliases and validation rules.
 * **Data Brief Lines** (`.dbvl`): Line-based mutable database for large datasets with verification.
+* **Strict Brief** (`.sbv`): Enforces full pre/postcondition verification. Both conditions are mandatory and must be non-trivial. Same compilation targets as `.bv`.
+* **Strict Rendered Brief** (`.srbv`): Combines Strict Brief enforcement with verified view-state isomorphism. Every view binding maps to a state variable with a non-trivial contract. Same targets as `.rbv`.
+* **Strict Embedded Brief** (`.sebv`): Strict Brief for hardware targets. Same targets as `.ebv` with additional strictness.
 
 ### 1.3 Versioning
 
@@ -1270,9 +1274,27 @@ enum IOError {
 };
 ```
 
-### 5.4 FFI Attributes
+### 5.4 Compiler Directives
 
-Compiler directives for FFI:
+Compiler directives control backend behavior and FFI configuration. Two syntax forms are supported:
+
+#### 5.4.1 `#pragma` Syntax (Recommended)
+
+Item-level (single target):
+```brief
+#pragma.c           // Target: C backend (replaces #[c])
+#pragma.rust        // Target: Rust backend
+#pragma.c optimize(3)  // Target + value
+```
+
+File-level (multiple directives):
+```brief
+#!pragma ffi.c, bind("./bindings.toml"), import("./lib.a"), map("uint", "uint32_t")
+```
+
+#### 5.4.2 `#[...]` Syntax (Deprecated)
+
+The bracket-based syntax still works but emits a deprecation warning:
 
 ```brief
 #![ffi.c, bind("./bindings.toml"), import("./lib.a"), map("uint", "uint32_t")]
@@ -1280,11 +1302,11 @@ Compiler directives for FFI:
 frgn sig custom_func(x: Int) -> Result<Int, Error> from "custom.toml";
 ```
 
-**Attributes:**
-- `ffi.c` - C FFI
-- `ffi.rust` - Rust FFI
-- `ffi.python` - Python FFI
-- `ffi.wasm` - WASM FFI
+**Directives:**
+- `ffi.c` / `#pragma.ffi.c` - C FFI
+- `ffi.rust` / `#pragma.ffi.rust` - Rust FFI
+- `ffi.python` / `#pragma.ffi.python` - Python FFI
+- `ffi.wasm` / `#pragma.ffi.wasm` - WASM FFI
 - `bind("path.toml")` - Binding configuration
 - `import("lib.a")` - Link library
 - `map("brief_type", "foreign_type")` - Type mapping
@@ -1651,22 +1673,35 @@ let size = hardware.memory.regions[0].size;
 ### 9.1 Compilation Pipeline
 
 ```
-Source (.bv/.rbv/.ebv)
+Source (.bv/.rbv/.ebv/.sbv/.srbv/.sebv)
     ↓
 Lexer (tokenization)
     ↓
-Parser (AST construction)
+Parser (AST construction + strict mode enforcement)
     ↓
 Type Checker (type inference, trait resolution)
     ↓
-Proof Engine (symbolic execution, contract verification)
+Proof Engine (symbolic execution, contract verification + strict escalation)
+    ↓
+[.srbv only] View-State Isomorphism Verification
     ↓
 Backend (code generation)
     ↓
 Target (Rust/C/WASM/Verilog/VHDL/COBOL)
 ```
 
-### 9.2 CLI Commands
+### 9.2 Strict Brief Verification
+
+**Strict Brief** (`.sbv`, `.sebv`, `.srbv`) extends the standard Brief compiler pipeline with:
+
+1. **Mandatory Contracts**: Both `[precondition]` and `[postcondition]` are required. Omitting one or using `[true]` is a hard error.
+2. **Warning Escalation**: All contract warnings (P009, P010) become hard errors in strict mode.
+3. **View-State Isomorphism** (`.srbv` only): Every `b-text`, `b-show`, `b-trigger`, or other view binding is verified against the program's state declarations and contracts. References to undefined state or transactions with trivial contracts cause errors.
+4. **Capability Requirements** (`.sebv`/`.srbv`): Strict embedded files require `hardware_triggers` capability; strict rendered files require `reactive_ui` capability.
+
+Use `--strict` flag to apply strict mode to any file: `brief check --strict file.bv`
+
+### 9.3 CLI Commands
 
 ```bash
 # Check (type-check only, no codegen)

@@ -780,6 +780,18 @@ pub struct Comment {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrictMode {
+    Off,
+    Strict,
+}
+
+impl StrictMode {
+    pub fn is_strict(self) -> bool {
+        matches!(self, StrictMode::Strict)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Program {
     pub items: Vec<TopLevel>,
@@ -787,6 +799,7 @@ pub struct Program {
     pub reactor_speed: Option<u32>, // NEW: file-level @Hz default
     pub attrs: Vec<Attribute>,  // NEW: file-level #![...] attributes
     pub ffi: Option<FfiState>,  // NEW: FFI state from #![ffi.*, ...]
+    pub strict_mode: StrictMode,
 }
 
 /// FFI State captured from file-level attribute

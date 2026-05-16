@@ -20,6 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
+use crate::ast::{self, Contract, Expr, TopLevel};
 use std::collections::{HashMap, HashSet};
 
 const KNOWN_DIRECTIVES: &[&str] = &[
@@ -798,6 +799,145 @@ fn find_closing_quote(s: &str, quote_char: char) -> Option<usize> {
         }
     }
     None
+}
+
+/// Verify .srbv (Strict Rendered Brief) view-state isomorphism
+/// For every signal/transaction referenced in the view bindings,
+/// verify they have non-trivial contracts (not [true] on both sides).
+/// Returns list of verification errors.
+pub fn verify_srbv(
+    bindings: &[Binding],
+    program: &ast::Program,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    // Build lookup maps from the program
+    let mut state_vars: HashSet<String> = HashSet::new();
+    let mut txn_contracts: HashMap<String, &Contract> = HashMap::new();
+
+    for item in &program.items {
+        match item {
+            TopLevel::StateDecl(state) => {
+                state_vars.insert(state.name.clone());
+            }
+            TopLevel::Transaction(txn) => {
+                txn_contracts.insert(txn.name.clone(), &txn.contract);
+            }
+            TopLevel::Definition(defn) => {
+                txn_contracts.insert(defn.name.clone(), &defn.contract);
+            }
+            _ => {}
+        }
+    }
+
+    for binding in bindings {
+        match &binding.directive {
+            Directive::Text { signal } => {
+                if !state_vars.contains(signal) && !txn_contracts.contains_key(signal) {
+                    errors.push(format!(
+                        "error[SRBV001]: view references undefined signal '{}' in b-text",
+                        signal
+                    ));
+                }
+                if let Some(contract) = txn_contracts.get(signal) {
+                    if matches!(&contract.pre_condition, Expr::Bool(true))
+                        && matches!(&contract.post_condition, Expr::Bool(true))
+                    {
+                        errors.push(format!(
+                            "error[SRBV002]: view references '{}' which has trivial [true][true] contract",
+                            signal
+                        ));
+                    }
+                }
+            }
+            Directive::Show { expr } | Directive::Hide { expr } => {
+                // Check that referenced variables in the expression exist
+                let var_name = expr.trim();
+                if !state_vars.contains(var_name) && !txn_contracts.contains_key(var_name) {
+                    // Could be a compound expression - just warn
+                    errors.push(format!(
+                        "error[SRBV003]: view expression '{}' references undefined variable",
+                        expr
+                    ));
+                }
+            }
+            Directive::Trigger { txn, .. } => {
+                if !txn_contracts.contains_key(txn) {
+                    errors.push(format!(
+                        "error[SRBV004]: view references undefined transaction '{}' in trigger",
+                        txn
+                    ));
+                } else if let Some(contract) = txn_contracts.get(txn) {
+                    if matches!(&contract.pre_condition, Expr::Bool(true))
+                        && matches!(&contract.post_condition, Expr::Bool(true))
+                    {
+                        errors.push(format!(
+                            "error[SRBV005]: triggered transaction '{}' has trivial [true][true] contract",
+                            txn
+                        ));
+                    }
+                }
+            }
+            Directive::Class { pairs } => {
+                for (_, expr) in pairs {
+                    if !state_vars.contains(expr.as_str()) && !txn_contracts.contains_key(expr.as_str()) {
+                        errors.push(format!(
+                            "error[SRBV006]: view class expression references undefined '{}'",
+                            expr
+                        ));
+                    }
+                }
+            }
+            Directive::Attr { value, .. } => {
+                if !state_vars.contains(value.as_str()) && !txn_contracts.contains_key(value.as_str()) {
+                    errors.push(format!(
+                        "error[SRBV007]: view attribute references undefined '{}'",
+                        value
+                    ));
+                }
+            }
+            Directive::Style { value, .. } => {
+                if !state_vars.contains(value.as_str()) && !txn_contracts.contains_key(value.as_str()) {
+                    errors.push(format!(
+                        "error[SRBV008]: view style references undefined '{}'",
+                        value
+                    ));
+                }
+            }
+            Directive::Each { iterable, .. } => {
+                if !state_vars.contains(iterable.as_str()) && !txn_contracts.contains_key(iterable.as_str()) {
+                    errors.push(format!(
+                        "error[SRBV009]: view b-each references undefined '{}'",
+                        iterable
+                    ));
+                }
+            }
+        }
+    }
+
+    // Verify state-DOM correspondence: every state mutation should have a view binding
+    // For now, check that at least some bindings exist for rendered state
+    if !state_vars.is_empty() && bindings.is_empty() {
+        errors.push(
+            "error[SRBV010]: state variables declared but no view bindings found — view may not reflect state".to_string()
+        );
+    }
+
+    // Check that user-triggered transactions have non-trivial preconditions
+    for binding in bindings {
+        if let Directive::Trigger { txn, .. } = &binding.directive {
+            if let Some(contract) = txn_contracts.get(txn) {
+                if matches!(&contract.pre_condition, Expr::Bool(true)) {
+                    errors.push(format!(
+                        "error[SRBV011]: user-triggered transaction '{}' has precondition [true]; should specify when it can fire",
+                        txn
+                    ));
+                }
+            }
+        }
+    }
+
+    errors
 }
 
 fn strip_surrounding_quotes(s: &str) -> String {

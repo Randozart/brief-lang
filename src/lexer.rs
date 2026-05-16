@@ -269,6 +269,10 @@ pub enum Token {
     HashBracket,
     #[token("#![")]
     HashBangBracket,
+    #[token("#pragma")]
+    Pragma,
+    #[token("#!pragma")]
+    PragmaBang,
     #[token(";")]
     Semicolon,
     #[token(":")]

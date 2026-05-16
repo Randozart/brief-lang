@@ -34,10 +34,11 @@ pub fn arb_program(max_depth: usize) -> impl Strategy<Value = Program> {
             num_items..=num_items + 3,
         ).prop_map(|items| Program {
             items,
-            comments: Vec::new(),
+            comments: vec![],
             reactor_speed: None,
-            attrs: Vec::new(),
+            attrs: vec![],
             ffi: None,
+            strict_mode: StrictMode::Off,
         })
     })
 }

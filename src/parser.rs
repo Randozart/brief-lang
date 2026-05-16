@@ -42,6 +42,7 @@ pub struct Parser<'a> {
     current_line: usize,
     /// Track if we consumed a >> that should serve as > for parent generic level
     shr_consumed_as_gt: bool,
+    strict_mode: StrictMode,
 }
 
 impl<'a> Parser<'a> {
@@ -58,7 +59,13 @@ impl<'a> Parser<'a> {
             comments: Vec::new(),
             current_line: 1,
             shr_consumed_as_gt: false,
+            strict_mode: StrictMode::Off,
         }
+    }
+
+    pub fn with_strict_mode(mut self, strict: bool) -> Self {
+        self.strict_mode = if strict { StrictMode::Strict } else { StrictMode::Off };
+        self
     }
 
     fn advance(&mut self) {
@@ -257,8 +264,10 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Parse file-level attributes #![...]
-        if matches!(self.current_token(), Some(Ok(Token::HashBangBracket))) {
+        // Parse file-level attributes #![...] or #!pragma ... ]
+        if matches!(self.current_token(), Some(Ok(Token::HashBangBracket)))
+            || matches!(self.current_token(), Some(Ok(Token::PragmaBang)))
+        {
             file_attrs = self.parse_attributes()?;
         }
 
@@ -274,6 +283,7 @@ impl<'a> Parser<'a> {
             reactor_speed,
             attrs: file_attrs,
             ffi: ffi_state,
+            strict_mode: self.strict_mode,
         })
     }
 
@@ -341,7 +351,9 @@ impl<'a> Parser<'a> {
         }
 
         // Parse item-level attributes if present
-        let attrs = if matches!(self.current_token(), Some(Ok(Token::HashBracket))) {
+        let attrs = if matches!(self.current_token(), Some(Ok(Token::HashBracket)))
+            || matches!(self.current_token(), Some(Ok(Token::Pragma)))
+        {
             self.parse_attributes()?
         } else {
             Vec::new()
@@ -1784,82 +1796,188 @@ let span = self.current_span();
         Ok(result)
     }
 
-    /// Parse #[...] or #![...] attribute syntax
-    /// Returns a vector of attributes parsed from the #[...] or #![...] block
-    fn parse_attributes(&mut self) -> Result<Vec<crate::ast::Attribute>, SyntaxError> {
-        let mut attrs = Vec::new();
-        
-        // Expect #[ or #![
-        if matches!(self.current_token(), Some(Ok(Token::HashBracket))) {
-            self.advance(); // consume #[
-        } else if matches!(self.current_token(), Some(Ok(Token::HashBangBracket))) {
-            self.advance(); // consume #![
+    /// Parse a single #pragma directive: #pragma.c, #pragma bind(...), etc.
+    fn parse_pragma_item(&mut self, target_from_dot: Option<String>) -> Result<crate::ast::Attribute, SyntaxError> {
+        let mut key: String;
+        let mut target: Option<String> = target_from_dot;
+
+        // If we already have a target from #pragma.c, the attribute key is the target name
+        if let Some(ref tgt) = target {
+            key = tgt.clone();
         } else {
-            return self.spanned_err("Expected #[ or #![ for attribute".to_string());
-        }
-        
-        // Parse comma-separated items until ]
-        while !matches!(self.current_token(), Some(Ok(Token::RBracket))) {
-            // Parse item: either "key" or "key(value)" or "ffi.something"
-            let key = if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+            // Otherwise, parse an identifier as the key
+            key = if let Some(Ok(Token::Identifier(name))) = self.current_token() {
                 let name = name.clone();
                 self.advance();
-                // Handle ffi.c, ffi.rust, etc. by checking for . after ffi
-                if name == "ffi" && matches!(self.current_token(), Some(Ok(Token::Dot))) {
-                    self.advance(); // consume Dot
-                    if let Some(Ok(Token::Identifier(lang))) = self.current_token() {
-                        let full_key = format!("ffi.{}", lang);
-                        self.advance();
-                        full_key
-                    } else {
-                        return self.spanned_err("Expected language after ffi.".to_string());
-                    }
-                } else {
-                    name
-                }
+                name
             } else {
-                return self.spanned_err("Expected identifier in attribute".to_string());
+                return self.spanned_err("Expected identifier after #pragma".to_string());
             };
-            
-            // Check if it's key(value) or just key
-            let value = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
-                self.advance(); // consume (
-                let val = if let Some(Ok(Token::String(s))) = self.current_token() {
-                    let s = s.clone();
+
+            // Handle ffi.c, ffi.rust dot syntax
+            if key == "ffi" && matches!(self.current_token(), Some(Ok(Token::Dot))) {
+                self.advance(); // consume Dot
+                if let Some(Ok(Token::Identifier(lang))) = self.current_token() {
+                    let full_key = format!("ffi.{}", lang);
                     self.advance();
-                    s
-                } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
-                    let s = n.to_string();
-                    self.advance();
-                    s
-                } else if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                    target = Some(full_key.clone());
+                    key = full_key;
+                } else {
+                    return self.spanned_err("Expected language after ffi.".to_string());
+                }
+            }
+        }
+
+        // Check for key(value)
+        let value = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+            self.advance(); // consume (
+            let val = if let Some(Ok(Token::String(s))) = self.current_token() {
+                let s = s.clone();
+                self.advance();
+                s
+            } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                let s = n.to_string();
+                self.advance();
+                s
+            } else if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                let name = name.clone();
+                self.advance();
+                name
+            } else {
+                return self.spanned_err("Expected value in pragma key(value)".to_string());
+            };
+            self.expect(Token::RParen)?;
+            Some(val)
+        } else {
+            None
+        };
+
+        Ok(crate::ast::Attribute { target, key, value })
+    }
+
+    /// Parse #[...], #![...], #pragma, or #!pragma attribute syntax
+    /// For #[...] / #![...]: returns parsed items from inside brackets
+    /// For #pragma.c: returns a single attribute with target specifier
+    /// For #!pragma ... ]: returns parsed items from inside brackets
+    fn parse_attributes(&mut self) -> Result<Vec<crate::ast::Attribute>, SyntaxError> {
+        let mut attrs = Vec::new();
+        let mut is_pragma = false;
+        let mut is_file_level = false;
+        
+        // Detect which syntax is being used
+        match self.current_token() {
+            Some(Ok(Token::HashBracket)) => {
+                // Deprecated #[...] syntax
+                eprintln!("warning: #[...] syntax is deprecated, use #pragma instead");
+                self.advance(); // consume #[
+            }
+            Some(Ok(Token::HashBangBracket)) => {
+                // Deprecated #![...] syntax
+                eprintln!("warning: #![...] syntax is deprecated, use #!pragma instead");
+                self.advance(); // consume #![
+                is_file_level = true;
+            }
+            Some(Ok(Token::Pragma)) => {
+                self.advance(); // consume #pragma
+                is_pragma = true;
+                // Check for #pragma.c dot syntax
+                if matches!(self.current_token(), Some(Ok(Token::Dot))) {
+                    self.advance(); // consume .
+                    if let Some(Ok(Token::Identifier(target_name))) = self.current_token() {
+                        let name = target_name.clone();
+                        self.advance();
+                        let attr = crate::ast::Attribute {
+                            target: Some(name.clone()),
+                            key: name,
+                            value: None,
+                        };
+                        attrs.push(attr);
+                        return Ok(attrs);
+                    } else {
+                        return self.spanned_err("Expected target name after #pragma.".to_string());
+                    }
+                }
+                // Parse pragma key
+                let attr = self.parse_pragma_item(None)?;
+                attrs.push(attr);
+                return Ok(attrs);
+            }
+            Some(Ok(Token::PragmaBang)) => {
+                self.advance(); // consume #!pragma
+                is_pragma = true;
+                is_file_level = true;
+            }
+            _ => {
+                return self.spanned_err("Expected #[, #![, #pragma, or #!pragma for attribute".to_string());
+            }
+        }
+        
+        // Parse comma-separated items
+        // For #[...] / #![...]: items are inside brackets, terminated by ]
+        // For #pragma.c: single item, no brackets (already handled above)
+        // For #!pragma: items comma-separated, no brackets needed
+        while !matches!(self.current_token(), Some(Ok(Token::RBracket))) {
+            let attr = if is_pragma {
+                self.parse_pragma_item(None)?
+            } else {
+                // #[...]: parse old-style item
+                let key = if let Some(Ok(Token::Identifier(name))) = self.current_token() {
                     let name = name.clone();
                     self.advance();
-                    name
+                    if name == "ffi" && matches!(self.current_token(), Some(Ok(Token::Dot))) {
+                        self.advance(); // consume Dot
+                        if let Some(Ok(Token::Identifier(lang))) = self.current_token() {
+                            let full_key = format!("ffi.{}", lang);
+                            self.advance();
+                            full_key
+                        } else {
+                            return self.spanned_err("Expected language after ffi.".to_string());
+                        }
+                    } else {
+                        name
+                    }
                 } else {
-                    return self.spanned_err("Expected value in attribute key(value)".to_string());
+                    return self.spanned_err("Expected identifier in attribute".to_string());
                 };
-                self.expect(Token::RParen)?;
-                Some(val)
-            } else {
-                None
+
+                let value = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+                    self.advance(); // consume (
+                    let val = if let Some(Ok(Token::String(s))) = self.current_token() {
+                        let s = s.clone();
+                        self.advance();
+                        s
+                    } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                        let s = n.to_string();
+                        self.advance();
+                        s
+                    } else if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                        let name = name.clone();
+                        self.advance();
+                        name
+                    } else {
+                        return self.spanned_err("Expected value in attribute key(value)".to_string());
+                    };
+                    self.expect(Token::RParen)?;
+                    Some(val)
+                } else {
+                    None
+                };
+
+                let target = if attrs.is_empty() && value.is_none() {
+                    match key.as_str() {
+                        "c" | "sv" | "rust" | "wasm" | "kernel" => Some(key.clone()),
+                        _ if key.starts_with("ffi.") => Some(key.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
+                crate::ast::Attribute { target, key, value }
             };
-            
-            // Check if first item is a target specifier
-            let target = if attrs.is_empty() && value.is_none() {
-                // First item with no value - could be a target
-                // Known targets: c, sv, rust, wasm, kernel, ffi.c, ffi.rust, etc.
-                match key.as_str() {
-                    "c" | "sv" | "rust" | "wasm" | "kernel" => Some(key.clone()),
-                    _ if key.starts_with("ffi.") => Some(key.clone()),
-                    _ => None,
-                }
-            } else {
-                None
-            };
-            
-            attrs.push(crate::ast::Attribute { target, key, value });
-            
+
+            attrs.push(attr);
+
             // Expect comma or ]
             if matches!(self.current_token(), Some(Ok(Token::Comma))) {
                 self.advance();
@@ -1867,8 +1985,14 @@ let span = self.current_span();
                 break;
             }
         }
-        
-        self.expect(Token::RBracket)?;
+
+        // For #[...] and #![...] syntax, expect closing bracket
+        // For #pragma variants, consume optional closing bracket if present
+        if !is_pragma {
+            self.expect(Token::RBracket)?;
+        } else if matches!(self.current_token(), Some(Ok(Token::RBracket))) {
+            self.advance(); // consume optional ]
+        }
         Ok(attrs)
     }
 
@@ -2398,6 +2522,7 @@ let span = self.current_span();
                 pre_condition = Expr::Not(Box::new(Expr::Identifier(identifier.clone())));
                 post_condition = Expr::Identifier(identifier);
                 self.expect(Token::RBracket)?;
+                count = 2; // ~/ provides both pre and post
                 break;
             }
 
@@ -2405,7 +2530,7 @@ let span = self.current_span();
                 pre_condition = self.parse_expression()?;
             } else if count == 1 {
                 post_condition = self.parse_expression()?;
-} else if count == 2 {
+            } else if count == 2 {
                 // Watchdog specification - third bracket
                 //
                 // Syntax: [watchdog]       -> required (default)
@@ -2435,6 +2560,25 @@ let span = self.current_span();
 
             count += 1;
             self.expect(Token::RBracket)?;
+        }
+
+        // In strict mode, both pre and post conditions are required and must be non-trivial
+        if self.strict_mode.is_strict() {
+            if count < 2 {
+                return self.spanned_err(
+                    "Strict mode requires both [precondition] and [postcondition]".to_string()
+                );
+            }
+            if matches!(&pre_condition, Expr::Bool(true)) {
+                return self.spanned_err(
+                    "Strict mode: precondition [true] is not allowed - specify actual state requirements".to_string()
+                );
+            }
+            if matches!(&post_condition, Expr::Bool(true)) {
+                return self.spanned_err(
+                    "Strict mode: postcondition [true] is not allowed - specify actual state guarantees".to_string()
+                );
+            }
         }
 
         let span = self.current_span();

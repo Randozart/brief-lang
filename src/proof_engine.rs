@@ -765,6 +765,7 @@ pub struct ProofEngine {
     errors: Vec<ProofError>,
     state_dag: HashMap<String, HashSet<String>>,
     transactions: Vec<Transaction>,
+    strict: bool,
 }
 
 impl ProofEngine {
@@ -773,6 +774,20 @@ impl ProofEngine {
             errors: Vec::new(),
             state_dag: HashMap::new(),
             transactions: Vec::new(),
+            strict: false,
+        }
+    }
+
+    pub fn with_strict_mode(mut self, strict: bool) -> Self {
+        self.strict = strict;
+        self
+    }
+
+    fn make_err(&self, code: &str, title: &str) -> ProofError {
+        if self.strict {
+            ProofError::new(code, title)
+        } else {
+            ProofError::new_warning(code, title)
         }
     }
 
@@ -976,7 +991,7 @@ impl ProofEngine {
         }
 
         if has_success_path && has_error_path && !success_terminates && !error_terminates {
-            let mut err = ProofError::new_warning("F103", "FFI result may not be properly terminated");
+            let mut err = self.make_err("F103", "FFI result may not be properly terminated");
             err.explanation = format!(
                 "FFI call '{}' has both branches but neither terminates (escape/term)",
                 frgn_name
@@ -1182,8 +1197,8 @@ impl ProofEngine {
                             .push("e.g., '[count == @count + 1]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     } else if pre_is_trivial {
-                        // Only precondition trivial - warning (post is non-trivial)
-                        let mut err = ProofError::new_warning("P009", "trivial precondition");
+                        // Only precondition trivial
+                        let mut err = self.make_err("P009", "trivial precondition");
                         err.explanation = format!(
                             "transaction '{}' has precondition '[true]' which is always satisfied",
                             txn.name
@@ -1200,8 +1215,8 @@ impl ProofEngine {
                             .push("e.g., '[count > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     } else if post_is_trivial {
-                        // Only postcondition trivial - warning (pre is non-trivial)
-                        let mut err = ProofError::new_warning("P010", "trivial postcondition");
+                        // Only postcondition trivial
+                        let mut err = self.make_err("P010", "trivial postcondition");
                         err.explanation = format!(
                             "transaction '{}' has postcondition '[true]' which is always satisfied",
                             txn.name
@@ -1224,7 +1239,7 @@ impl ProofEngine {
                     let post_is_trivial = matches!(&defn.contract.post_condition, Expr::Bool(true));
 
                     if pre_is_trivial && post_is_trivial {
-                        let mut err = ProofError::new("P009", "trivial precondition");
+                        let mut err = self.make_err("P009", "trivial precondition");
                         err.explanation = format!(
                             "definition '{}' has precondition '[true]' which is always satisfied",
                             defn.name
@@ -1241,7 +1256,7 @@ impl ProofEngine {
                             .push("e.g., '[x > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
 
-                        let mut err = ProofError::new("P010", "trivial postcondition");
+                        let mut err = self.make_err("P010", "trivial postcondition");
                         err.explanation = format!(
                             "definition '{}' has postcondition '[true]' which is always satisfied",
                             defn.name
@@ -1258,7 +1273,7 @@ impl ProofEngine {
                             .push("e.g., '[result > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     } else if pre_is_trivial {
-                        let mut err = ProofError::new_warning("P009", "trivial precondition");
+                        let mut err = self.make_err("P009", "trivial precondition");
                         err.explanation = format!(
                             "definition '{}' has precondition '[true]' which is always satisfied",
                             defn.name
@@ -1275,7 +1290,7 @@ impl ProofEngine {
                             .push("e.g., '[x > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
                     } else if post_is_trivial {
-                        let mut err = ProofError::new_warning("P010", "trivial postcondition");
+                        let mut err = self.make_err("P010", "trivial postcondition");
                         err.explanation = format!(
                             "definition '{}' has postcondition '[true]' which is always satisfied",
                             defn.name

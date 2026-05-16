@@ -353,6 +353,7 @@ fn print_usage(program: &str) {
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -a, --annotate       Generate path annotations");
+    eprintln!("  --strict             Enforce full pre/postcondition verification (like .sbv/.sebv/.srbv)");
     eprintln!("  --skip-proof         Skip proof verification");
     eprintln!("  --no-stdlib          Disable standard library bindings");
     eprintln!("  --stdlib-path <path> Use custom standard library path");
@@ -362,6 +363,15 @@ fn print_usage(program: &str) {
     eprintln!("  -v, --verbose        Verbose output");
     eprintln!("  --quiet, --whisper   Minimal output (for CI/automated use)");
     eprintln!("  -h, --help           Show this help");
+    eprintln!();
+    eprintln!("File Extensions:");
+    eprintln!("  .bv, .br            Core Brief (specification)");
+    eprintln!("  .rbv                Rendered Brief (Brief + View)");
+    eprintln!("  .ebv                Embedded Brief (hardware targets)");
+    eprintln!("  .sbv                Strict Brief (requires full contracts)");
+    eprintln!("  .sebv               Strict Embedded Brief");
+    eprintln!("  .srbv               Strict Rendered Brief");
+    eprintln!("  .dbv, .dbvs, .dbvl  Data Brief (configuration)");
 }
 
 const STDLIB_BINDINGS: &[(&str, &str)] = &[
@@ -544,6 +554,11 @@ fn run_map_or_wrap(
     Ok(())
 }
 
+fn is_strict_extension(file_path: &PathBuf) -> bool {
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    matches!(ext, "sbv" | "sebv" | "srbv")
+}
+
 fn run_check(
     file_path: &PathBuf,
     verbose: bool,
@@ -551,6 +566,7 @@ fn run_check(
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
     codicil_mode: bool,
+    strict: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
@@ -566,7 +582,7 @@ fn run_check(
         println!("[Lexer] Tokenizing...");
     }
 
-    let mut parser = parser::Parser::new(&processed_source);
+    let mut parser = parser::Parser::new(&processed_source).with_strict_mode(strict);
     let program = match parser.parse() {
         Ok(prog) => prog,
         Err(e) => {
@@ -615,7 +631,7 @@ fn run_check(
     if verbose {
         println!("[ProofEngine] Running proof verification...");
     }
-    let mut pe = proof_engine::ProofEngine::new();
+    let mut pe = proof_engine::ProofEngine::new().with_strict_mode(strict);
     let proof_errors = pe.verify_program(&program);
     let has_errors = proof_errors.iter().any(|e| !e.is_warning);
     if has_errors {
@@ -659,14 +675,18 @@ fn run_build(
     out_dir: Option<&Path>,
     emit_memory_spec: bool,
     memory_spec_format: &str,
+    strict: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Detect source type from extension
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     
     match ext {
-        "bv" => {
-            // .bv files: Transpile to Rust and compile to native executable
-            println!("Building .bv file: transpiling to Rust...");
+        "bv" | "sbv" => {
+            // .bv / .sbv files: Transpile to Rust and compile to native executable
+            println!("Building {} file: transpiling to Rust...", if ext == "sbv" { "Strict Brief" } else { ".bv" });
+            if ext == "sbv" {
+                println!("  Strict mode: full pre/postcondition verification enforced");
+            }
             run_rust(file_path, out_dir, no_stdlib, stdlib_path, None, emit_memory_spec, memory_spec_format)?;
             
             // Try to compile the generated Rust
@@ -701,24 +721,27 @@ fn run_build(
                 Err("Failed to generate Rust output".into())
             }
         }
-        "rbv" => {
-            // .rbv files: WASM + JS + Frontend (RBV mode)
-            println!("Building .rbv file: generating WASM + JS + frontend...");
+        "rbv" | "srbv" => {
+            // .rbv / .srbv files: WASM + JS + Frontend (RBV mode)
+            println!("Building {} file: generating WASM + JS + frontend...", if ext == "srbv" { "Strict Rendered Brief" } else { ".rbv" });
+            if ext == "srbv" {
+                println!("  Strict mode: full contracts + verified view-state isomorphism");
+            }
             run_rbv(file_path, out_dir, true, no_stdlib, stdlib_path)?;
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             Ok(out.join(format!("{}-build", stem)))
         }
-        "ebv" => {
-            // .ebv files: Require explicit target
-            eprintln!("Error: .ebv files require explicit target");
-            eprintln!("  Use: brief compile <file.ebv> --target <spec.toml>");
+        "ebv" | "sebv" => {
+            // .ebv / .sebv files: Require explicit target
+            eprintln!("Error: {} files require explicit target", if ext == "sebv" { ".sebv (Strict Embedded)" } else { ".ebv" });
+            eprintln!("  Use: brief compile <file.{}> --target <spec.toml>", ext);
             eprintln!("  Example targets: verilog_fpga.toml, vhdl_fpga.toml");
-            eprintln!("  Or: brief <c|rust|verilog|vhdl> <file.ebv> --hw <hardware.dbv>");
-            Err(".ebv files require explicit target specification".into())
+            eprintln!("  Or: brief <c|rust|verilog|vhdl> <file.{}> --hw <hardware.dbv>", ext);
+            Err(format!(".{} files require explicit target specification", ext).into())
         }
         _ => {
-            Err(format!("Unknown file extension: {}. Use .bv, .rbv, or .ebv", ext).into())
+            Err(format!("Unknown file extension: {}. Use .bv, .sbv, .rbv, .srbv, .ebv, or .sebv", ext).into())
         }
     }
 }
@@ -969,6 +992,7 @@ fn run_watch(
             Ok(_) => {
                 println!("File changed, rebuilding...");
                 let codicil_mode = detect_codicil_project(&file_path);
+                let strict = is_strict_extension(&file_path);
                 if let Err(e) = run_check(
                     &file_path,
                     verbose,
@@ -976,6 +1000,7 @@ fn run_watch(
                     no_stdlib,
                     stdlib_path.clone(),
                     codicil_mode,
+                    strict,
                 ) {
                     eprintln!("Rebuild failed: {}", e);
                 }
@@ -1236,7 +1261,8 @@ fn run_compile_unified(args: &[String]) {
         } else if arg == "--out" && i + 1 < args.len() {
             out_dir = Some(PathBuf::from(&args[i + 1]));
             i += 2;
-        } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") {
+        } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv")
+            || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv") {
             file_path = Some(PathBuf::from(arg));
             i += 1;
         } else {
@@ -1254,18 +1280,18 @@ fn run_compile_unified(args: &[String]) {
     };
 
     // Detect source type from extension
-    let source_type = if file_path.extension().map(|e| e == "rbv").unwrap_or(false) {
+    let source_type = if matches!(file_path.extension().and_then(|e| e.to_str()), Some("rbv" | "srbv")) {
         "rendered"
-    } else if file_path.extension().map(|e| e == "ebv").unwrap_or(false) {
+    } else if matches!(file_path.extension().and_then(|e| e.to_str()), Some("ebv" | "sebv")) {
         "embedded"
     } else {
         "foundational"
     };
 
     // Infer default target if not specified (Phase 3.3)
-    // .bv -> hosted_c.toml (default C)
-    // .rbv -> react_web.toml (React web)
-    // .ebv -> verilog_fpga.toml (FPGA/embedded)
+    // .bv/.sbv -> hosted_c.toml (default C)
+    // .rbv/.srbv -> react_web.toml (React web)
+    // .ebv/.sebv -> verilog_fpga.toml (FPGA/embedded)
     let target_spec = if let Some(t) = target {
         let loader = target_spec::TargetSpecLoader::new();
         match loader.load(std::path::Path::new(t)) {
@@ -1303,21 +1329,32 @@ fn run_compile_unified(args: &[String]) {
         }
     };
 
-    // Validate capabilities (Phase 3.2: strict for .ebv, warn for .rbv)
+    // Validate capabilities
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let is_strict = ext == "sebv" || ext == "srbv" || ext == "sbv";
+    
     if let Some(ref spec) = target_spec {
         let target_name = spec.target.as_ref().map(|t| &t.name).unwrap_or(&"default".to_string()).clone();
         
-        // .ebv files ALWAYS require hardware_triggers capability
+        // .ebv/.sebv files ALWAYS require hardware_triggers capability
         if source_type == "embedded" && !spec.has_capability("hardware_triggers") {
-            eprintln!("Error B4001: Target '{}' lacks required 'hardware_triggers' capability", target_name);
-            eprintln!("  .ebv files require target with hardware_triggers support");
+            let prefix = if is_strict { "Error B4001" } else { "Error B4001" };
+            eprintln!("{}: Target '{}' lacks required 'hardware_triggers' capability", prefix, target_name);
+            eprintln!("  .ebv/.sebv files require target with hardware_triggers support");
             eprintln!("  Hint: Use a target spec with capabilities = [\"logic\", \"hardware_triggers\"]");
             std::process::exit(1);
         }
         
         // .rbv files warn if no reactive_ui capability (view gets stripped)
+        // .srbv files REQUIRE reactive_ui capability
         if source_type == "rendered" && !spec.has_capability("reactive_ui") {
-            eprintln!("Warning B4005: Target '{}' lacks 'reactive_ui'; view block will be stripped", target_name);
+            if is_strict {
+                eprintln!("Error B4006: Target '{}' lacks required 'reactive_ui' capability", target_name);
+                eprintln!("  .srbv files require target with reactive_ui support for verified view-state isomorphism");
+                std::process::exit(1);
+            } else {
+                eprintln!("Warning B4005: Target '{}' lacks 'reactive_ui'; view block will be stripped", target_name);
+            }
         }
     };
 
@@ -2128,7 +2165,8 @@ fn run_rbv(
 
     println!("  Brief source: {} chars", rbv_file.brief_source.len());
 
-    let mut parser = parser::Parser::new(&rbv_file.brief_source);
+    let strict = is_strict_extension(file_path);
+    let mut parser = parser::Parser::new(&rbv_file.brief_source).with_strict_mode(strict);
     let mut program = parser
         .parse()
         .map_err(|e| format!("Brief parse error: {}", e))?;
@@ -2229,7 +2267,7 @@ fn run_rbv(
         }
     }
 
-    let mut pe = proof_engine::ProofEngine::new();
+    let mut pe = proof_engine::ProofEngine::new().with_strict_mode(strict);
     println!("  Proof engine running...");
     let proof_errors = pe.verify_program(&program);
     println!("  Proof engine done");
@@ -2262,6 +2300,19 @@ fn run_rbv(
     println!("  View compiled: {} bindings", bindings.len());
     for diag in view_diagnostics {
         eprintln!("  {}", diag);
+    }
+
+    // .srbv verification: check view-state isomorphism
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext == "srbv" {
+        let srbv_errors = view_compiler::verify_srbv(&bindings, &program);
+        if !srbv_errors.is_empty() {
+            for err in &srbv_errors {
+                eprintln!("{}", err);
+            }
+            return Err("SRBV verification failed: view-state isomorphism broken".into());
+        }
+        println!("  SRBV verification passed: all view bindings map to verified contracts");
     }
 
     let output_path = if let Some(p) = out_dir {
@@ -2631,6 +2682,8 @@ fn main() {
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
 
+    let strict_flag = args.contains(&"--strict".to_string());
+
     match command.as_str() {
         "check" | "ck" => {
             let annotate =
@@ -2639,11 +2692,15 @@ fn main() {
             let file_path = args
                 .iter()
                 .skip(2)
-                .find(|a| a.ends_with(".bv"))
+                .find(|a| {
+                    a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv")
+                        || a.ends_with(".sebv") || a.ends_with(".rbv") || a.ends_with(".srbv")
+                })
                 .map(PathBuf::from);
 
             if let Some(path) = file_path {
                 let codicil_mode = detect_codicil_project(&path);
+                let strict = strict_flag || is_strict_extension(&path);
                 if let Err(_e) = run_check(
                     &path,
                     verbose,
@@ -2651,12 +2708,13 @@ fn main() {
                     no_stdlib,
                     stdlib_path,
                     codicil_mode,
+                    strict,
                 ) {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv file specified");
-                eprintln!("Usage: {} check <file.bv>", args[0]);
+                eprintln!("Error: No .bv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
+                eprintln!("Usage: {} check <file>", args[0]);
                 std::process::exit(1);
             }
         }
@@ -2675,7 +2733,8 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv")
+                    || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -2685,7 +2744,8 @@ fn main() {
 
             if let Some(path) = file_path {
                 let out = out_dir.as_deref();
-                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format) {
+                let strict = strict_flag || is_strict_extension(&path);
+                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format, strict) {
                     Ok(output) => {
                         println!("Build complete: {}", output.display());
                     }
@@ -2695,11 +2755,11 @@ fn main() {
                     }
                 }
             } else {
-                eprintln!("Error: No .bv, .rbv, or .ebv file specified");
+                eprintln!("Error: No .bv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
                 eprintln!("Usage: {} build <file> [--out <dir>]", args[0]);
-                eprintln!("  .bv files → transpile to Rust + compile");
-                eprintln!("  .rbv files → WASM + JS + frontend");
-                eprintln!("  .ebv files → requires explicit target (see: brief compile --help)");
+                eprintln!("  .bv/.sbv files → transpile to Rust + compile");
+                eprintln!("  .rbv/.srbv files → WASM + JS + frontend");
+                eprintln!("  .ebv/.sebv files → requires explicit target (see: brief compile --help)");
                 std::process::exit(1);
             }
         }
@@ -2714,7 +2774,7 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".ebv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -2728,8 +2788,8 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv or .ebv file specified");
-                eprintln!("Usage: {} rust <file.bv|file.ebv> [--out <dir>]", args[0]);
+                eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
+                eprintln!("Usage: {} rust <file.bv|file.sbv|file.ebv|file.sebv> [--out <dir>]", args[0]);
                 std::process::exit(1);
             }
         }
@@ -2748,7 +2808,7 @@ fn main() {
                 } else if arg == "--target" && i + 1 < args.len() {
                     target = Some(args[i + 1].as_str());
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".ebv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -2768,8 +2828,8 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv or .ebv file specified");
-                eprintln!("Usage: {} c <file.bv|file.ebv> [--out <dir>]", args[0]);
+                eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
+                eprintln!("Usage: {} c <file.bv|file.sbv|file.ebv|file.sebv> [--out <dir>]", args[0]);
                 std::process::exit(1);
             }
         }
@@ -2784,7 +2844,7 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".ebv") || arg.ends_with(".br") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".br") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -2798,8 +2858,8 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv, .ebv, or .br file specified");
-                eprintln!("Usage: {} cobol <file.bv|file.ebv|file.br> [--out <dir>]", args[0]);
+                eprintln!("Error: No .bv, .sbv, .ebv, .sebv, or .br file specified");
+                eprintln!("Usage: {} cobol <file.bv|file.sbv|file.ebv|file.sebv|file.br> [--out <dir>]", args[0]);
                 std::process::exit(1);
             }
         }
@@ -2814,7 +2874,7 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".ebv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -2828,8 +2888,8 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv or .ebv file specified");
-                eprintln!("Usage: {} arm <file.bv|file.ebv> [--out <dir>]", args[0]);
+                eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
+                eprintln!("Usage: {} arm <file.bv|file.sbv|file.ebv|file.sebv> [--out <dir>]", args[0]);
                 std::process::exit(1);
             }
         }
@@ -2841,7 +2901,7 @@ fn main() {
             let file_path = args
                 .iter()
                 .skip(2)
-                .find(|a| a.ends_with(".bv"))
+                .find(|a| a.ends_with(".bv") || a.ends_with(".sbv"))
                 .map(PathBuf::from);
 
             if let Some(path) = file_path {
@@ -2850,8 +2910,8 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv file specified");
-                eprintln!("Usage: {} watch <file.bv>", args[0]);
+                eprintln!("Error: No .bv or .sbv file specified");
+                eprintln!("Usage: {} watch <file.bv|file.sbv>", args[0]);
                 std::process::exit(1);
             }
         }
@@ -2940,10 +3000,10 @@ fn main() {
                 } else if arg == "--tcl-only" {
                     tcl_only = true;
                     i += 1;
-                } else if arg.ends_with(".ebv") {
+                } else if arg.ends_with(".ebv") || arg.ends_with(".sebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
-                } else if arg.ends_with(".bv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") {
                     if hw_config.is_some() {
                         eprintln!("Warning: --hw flag is ignored for .bv files. Use .ebv for hardware mapping.");
                     }
@@ -2956,7 +3016,7 @@ fn main() {
 
             if let Some(path) = file_path {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if ext == "ebv" {
+                if ext == "ebv" || ext == "sebv" {
                     if let Some(hw) = hw_config {
                         if let Err(e) = run_verilog(
                             &path,
@@ -2972,14 +3032,14 @@ fn main() {
                             std::process::exit(1);
                         }
                     } else {
-                        eprintln!("Error: .ebv files require --hw <hardware.toml|config.dbv>");
+                        eprintln!("Error: .ebv/.sebv files require --hw <hardware.toml|config.dbv>");
                         eprintln!(
-                            "Usage: {} verilog <file.ebv> --hw <hardware.toml|config.dbv> [--out <dir>] [--tcl] [--tcl-only]",
+                            "Usage: {} verilog <file.ebv|file.sebv> --hw <hardware.toml|config.dbv> [--out <dir>] [--tcl] [--tcl-only]",
                             args[0]
                         );
                         std::process::exit(1);
                     }
-                } else if ext == "bv" {
+                } else if ext == "bv" || ext == "sbv" {
                     let hw_path = hw_config.unwrap_or_else(|| PathBuf::from("/dev/null"));
                     if let Err(e) = run_verilog(
                         &path,
@@ -2996,9 +3056,9 @@ fn main() {
                     }
                 }
             } else {
-                eprintln!("Error: Missing .bv or .ebv file");
+                eprintln!("Error: Missing .bv, .sbv, .ebv, or .sebv file");
                 eprintln!(
-                    "Usage: {} verilog <file.bv|file.ebv> [--hw <hardware.toml|config.dbv>] [--out <dir>] [--tcl] [--tcl-only]",
+                    "Usage: {} verilog <file.bv|file.sbv|file.ebv|file.sebv> [--hw <hardware.toml|config.dbv>] [--out <dir>] [--tcl] [--tcl-only]",
                     args[0]
                 );
                 std::process::exit(1);
@@ -3023,7 +3083,7 @@ fn main() {
                 } else if arg == "--no-cache" {
                     no_cache = true;
                     i += 1;
-                } else if arg.ends_with(".rbv") {
+                } else if arg.ends_with(".rbv") || arg.ends_with(".srbv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -3065,9 +3125,9 @@ fn main() {
                     }
                 }
             } else {
-                eprintln!("Error: No .rbv file specified");
+                eprintln!("Error: No .rbv or .srbv file specified");
                 eprintln!(
-                    "Usage: {} rbv <file.rbv> [--out <dir>] [--no-build]",
+                    "Usage: {} rbv <file.rbv|file.srbv> [--out <dir>] [--no-build]",
                     args[0]
                 );
                 std::process::exit(1);
@@ -3103,7 +3163,7 @@ fn main() {
                 } else if arg == "--no-cache" {
                     no_cache = true;
                     i += 1;
-                } else if arg.ends_with(".rbv") {
+                } else if arg.ends_with(".rbv") || arg.ends_with(".srbv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -3157,9 +3217,9 @@ fn main() {
                     }
                 }
             } else {
-                eprintln!("Error: No .rbv file specified");
+                eprintln!("Error: No .rbv or .srbv file specified");
                 eprintln!(
-                    "Usage: {} run <file.rbv> [--port <port>] [--no-open]",
+                    "Usage: {} run <file.rbv|file.srbv> [--port <port>] [--no-open]",
                     args[0]
                 );
                 std::process::exit(1);
@@ -3180,7 +3240,7 @@ fn main() {
                 } else if arg == "--no-build" {
                     build_wasm = false;
                     i += 1;
-                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".rbv") || arg.ends_with(".srbv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -3199,10 +3259,10 @@ fn main() {
                     }
                 }
             } else {
-                eprintln!("Error: No .bv or .rbv file specified");
+                eprintln!("Error: No .bv, .sbv, .rbv, or .srbv file specified");
                 eprintln!("Usage: {} wasm <file> [--out <dir>] [--no-build]", args[0]);
-                eprintln!("  .bv files → pure WASM binary");
-                eprintln!("  .rbv files → WASM + JS + frontend");
+                eprintln!("  .bv/.sbv files → pure WASM binary");
+                eprintln!("  .rbv/.srbv files → WASM + JS + frontend");
                 std::process::exit(1);
             }
         }
@@ -3654,13 +3714,14 @@ fn main() {
         }
 
         _ => {
-            if command.ends_with(".bv") {
+            if command.ends_with(".bv") || command.ends_with(".sbv") {
                 let path = PathBuf::from(command);
                 let codicil_mode = detect_codicil_project(&path);
-                if let Err(_e) = run_check(&path, false, false, false, None, codicil_mode) {
+                let strict = is_strict_extension(&path);
+                if let Err(_e) = run_check(&path, false, false, false, None, codicil_mode, strict) {
                     std::process::exit(1);
                 }
-            } else if command.ends_with(".rbv") {
+            } else if command.ends_with(".rbv") || command.ends_with(".srbv") {
                 if let Err(_e) = run_rbv(&PathBuf::from(command), None, true, false, None) {
                     std::process::exit(1);
                 }
