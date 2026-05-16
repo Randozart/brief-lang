@@ -1204,6 +1204,11 @@ fn run_rust(
         return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
     }
 
+    // Validate hashtags against Rust backend
+    if !backend::validate_hashtags_in_program(&program, "rust", false) {
+        return Err("Hashtag validation errors (Rust backend)".into());
+    }
+
     let mut rust_backend = backend::rust::RustBackend::new();
     if let Some(spec) = target_spec {
         rust_backend = rust_backend.with_spec(spec);
@@ -1542,6 +1547,11 @@ fn run_c(
     let type_errors = tc.check_program(&mut program.clone());
     if !type_errors.is_empty() {
         return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
+    }
+
+    // Validate hashtags against C backend
+    if !backend::validate_hashtags_in_program(&program, "c", false) {
+        return Err("Hashtag validation errors (C backend)".into());
     }
 
     // Load linkage config (optional - look alongside source file)
