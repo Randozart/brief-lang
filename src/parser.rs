@@ -182,6 +182,112 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_hashtag_modifiers(&mut self) -> Result<Vec<Hashtag>, SyntaxError> {
+        let mut mods = Vec::new();
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::Hash)) => {
+                    self.advance();
+                    let name = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                        let n = n.clone();
+                        self.advance();
+                        n
+                    } else {
+                        return Ok(mods);
+                    };
+                    let value = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.advance();
+                        let val = if let Some(Ok(Token::String(s))) = self.current_token() {
+                            let s = s.clone();
+                            self.advance();
+                            s
+                        } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                            let s = n.to_string();
+                            self.advance();
+                            s
+                        } else if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                            let n = n.clone();
+                            self.advance();
+                            n
+                        } else {
+                            String::new()
+                        };
+                        if let Some(Ok(Token::RParen)) = self.current_token() {
+                            self.advance();
+                        }
+                        Some(val)
+                    } else {
+                        None
+                    };
+                    mods.push(Hashtag { name, value, mandatory: false, fallback: Vec::new(), scoped: None });
+                }
+                Some(Ok(Token::HashBang)) => {
+                    self.advance();
+                    let name = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                        let n = n.clone();
+                        self.advance();
+                        n
+                    } else {
+                        return Ok(mods);
+                    };
+                    let mut fallback = Vec::new();
+                    while let Some(Ok(Token::Pipe)) = self.current_token() {
+                        self.advance();
+                        if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                            let n = n.clone();
+                            self.advance();
+                            fallback.push(n);
+                        } else {
+                            break;
+                        }
+                    }
+                    let value = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.advance();
+                        let val = if let Some(Ok(Token::String(s))) = self.current_token() {
+                            let s = s.clone();
+                            self.advance();
+                            s
+                        } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                            let s = n.to_string();
+                            self.advance();
+                            s
+                        } else if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                            let n = n.clone();
+                            self.advance();
+                            n
+                        } else {
+                            String::new()
+                        };
+                        if let Some(Ok(Token::RParen)) = self.current_token() {
+                            self.advance();
+                        }
+                        Some(val)
+                    } else {
+                        None
+                    };
+                    mods.push(Hashtag { name, value, mandatory: true, fallback, scoped: None });
+                }
+                Some(Ok(Token::HashBracket)) => {
+                    self.advance();
+                    let scope = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                        let n = n.clone();
+                        self.advance();
+                        n
+                    } else {
+                        return Ok(mods);
+                    };
+                    self.expect(Token::RBracket)?;
+                    let inner = self.parse_hashtag_modifiers()?;
+                    for mut h in inner {
+                        h.scoped = Some(scope.clone());
+                        mods.push(h);
+                    }
+                }
+                _ => return Ok(mods),
+            }
+        }
+    }
+
     fn expect_type_identifier(&mut self) -> Result<String, crate::errors::SyntaxError> {
         let span = self.current_span().unwrap_or_else(Span::dummy);
         match self.current_token() {
@@ -953,6 +1059,8 @@ impl<'a> Parser<'a> {
             transactions,
             view_html: None,
             span,
+            modifiers: Vec::new(),
+            variants: Vec::new(),
         })
     }
 
@@ -1602,6 +1710,48 @@ impl<'a> Parser<'a> {
         self.peek.as_ref().map(|(t, _)| t)
     }
 
+    fn parse_alka_block(&mut self) -> Result<Statement, SyntaxError> {
+        self.advance();
+        let dangerous = if let Some(Ok(Token::Not)) = self.current_token() {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        let lbrace_pos = if let Some((_, span)) = &self.current {
+            if let Some(Ok(Token::LBrace)) = self.current_token() {
+                span.start
+            } else {
+                return self.spanned_err("Expected { after alka".to_string());
+            }
+        } else {
+            return self.spanned_err("Unexpected EOF".to_string());
+        };
+        self.advance();
+        let mut brace_depth = 1;
+        let mut end_pos = lbrace_pos;
+        while let Some((_, span)) = &self.current {
+            if let Some(Ok(Token::LBrace)) = self.current_token() {
+                brace_depth += 1;
+            } else if let Some(Ok(Token::RBrace)) = self.current_token() {
+                brace_depth -= 1;
+                if brace_depth == 0 {
+                    end_pos = span.start;
+                    self.advance();
+                    break;
+                }
+            }
+            self.advance();
+        }
+        if brace_depth != 0 {
+            return self.spanned_err("Unterminated alka block".to_string());
+        }
+        let content = self.source[lbrace_pos + 1..end_pos].trim().to_string();
+        self.expect(Token::Semicolon)?;
+        let span = self.current_span();
+        Ok(Statement::Alka(AlkaBlock { dangerous, content, span }))
+    }
+
     fn parse_state_decl(&mut self) -> Result<StateDecl, SyntaxError> {
         self.expect(Token::Let)?;
         let name = self.expect_identifier()?;
@@ -2206,7 +2356,9 @@ let span = self.current_span();
             span,
             is_lambda,
             dependencies,
-            attrs: Vec::new(),  // Initialize attrs
+            attrs: Vec::new(),
+            modifiers: Vec::new(),
+            variant_bodies: Vec::new(),
         })
     }
 
@@ -2330,6 +2482,8 @@ let span = self.current_span();
             contract,
             body,
             is_lambda,
+            modifiers: Vec::new(),
+            variant_bodies: Vec::new(),
         })
     }
 
@@ -2490,6 +2644,11 @@ let span = self.current_span();
             return Ok(outputs);
         }
 
+        // Stop at hashtag tokens so caller can parse modifiers
+        if matches!(self.current_token(), Some(Ok(Token::Hash | Token::HashBang))) {
+            return Ok(outputs);
+        }
+
         outputs.push(Some(self.parse_expression()?));
 
         while let Some(Ok(Token::Comma)) = self.current_token() {
@@ -2640,13 +2799,17 @@ let span = self.current_span();
                         ty,
                         expr: Some(Expr::TupleDestructure(names, Box::new(expr))),
                         address: None,
+                        address_expr: None,
                         bit_range: None,
                         is_override: false,
+                        modifiers: Vec::new(),
                     })
                 } else {
                     let name = self.expect_identifier()?;
 
+                let mut modifiers = self.parse_hashtag_modifiers()?;
                 let mut address: Option<u64> = None;
+                let mut address_expr: Option<Box<Expr>> = None;
                 let mut bit_range: Option<BitRange> = None;
                 let mut is_override = false;
 
@@ -2654,8 +2817,10 @@ let span = self.current_span();
                 loop {
                     if let Some(Ok(Token::At)) = self.current_token() {
                         self.advance();
-                        if let Expr::Integer(n) = self.parse_expression()? {
-                            address = Some(n as u64);
+                        let addr_expr = self.parse_expression()?;
+                        match &addr_expr {
+                            Expr::Integer(n) => { address = Some(*n as u64); }
+                            _ => { address_expr = Some(Box::new(addr_expr)); }
                         }
                     } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                         self.advance();
@@ -2674,8 +2839,10 @@ let span = self.current_span();
                     loop {
                         if let Some(Ok(Token::At)) = self.current_token() {
                             self.advance();
-                            if let Expr::Integer(n) = self.parse_expression()? {
-                                address = Some(n as u64);
+                            let addr_expr = self.parse_expression()?;
+                            match &addr_expr {
+                                Expr::Integer(n) => { address = Some(*n as u64); }
+                                _ => { address_expr = Some(Box::new(addr_expr)); }
                             }
                             if let Some(Ok(Token::Slash)) = self.current_token() {
                                 self.advance();
@@ -2693,6 +2860,11 @@ let span = self.current_span();
                 } else {
                     None
                 };
+
+                // Modifiers after type before =
+                let mods_after = self.parse_hashtag_modifiers()?;
+                modifiers.extend(mods_after);
+
                 let expr = if let Some(Ok(Token::Eq)) = self.current_token() {
                     self.advance();
                     Some(self.parse_expression()?)
@@ -2705,16 +2877,19 @@ let span = self.current_span();
                     ty,
                     expr,
                     address,
+                    address_expr,
                     bit_range,
                     is_override,
+                    modifiers,
                 })
                 }
             }
             Some(Ok(Token::Term)) => {
                 self.advance();
                 let outputs = self.parse_term_outputs()?;
+                let modifiers = self.parse_hashtag_modifiers()?;
                 self.expect(Token::Semicolon)?;
-                Ok(Statement::Term(outputs))
+                Ok(Statement::Term { values: outputs, modifiers })
             }
             Some(Ok(Token::Escape)) => {
                 self.advance();
@@ -3069,6 +3244,12 @@ let span = self.current_span();
                 )
             }
             _ => {
+                // Check for alka block before parsing as expression
+                if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                    if name == "alka" || name == "ALKA" {
+                        return self.parse_alka_block();
+                    }
+                }
                 // Expression statement or Assignment/Unification
                 let expr = self.parse_expression()?;
 
@@ -3106,12 +3287,11 @@ let span = self.current_span();
                         timeout = Some((expr, unit));
                     }
 
-                    self.expect(Token::Semicolon)?;
-
                     match expr {
                         Expr::Call(name, args) => {
                             if args.len() == 1 {
                                 if let Expr::Identifier(pattern) = &args[0] {
+                                    self.expect(Token::Semicolon)?;
                                     Ok(Statement::Unification {
                                         name,
                                         pattern: pattern.clone(),
@@ -3128,11 +3308,16 @@ let span = self.current_span();
                                 )
                             }
                         }
-                        _ => Ok(Statement::Assignment {
-                            lhs: expr,
-                            expr: right,
-                            timeout,
-                        }),
+                        _ => {
+                            let modifiers = self.parse_hashtag_modifiers()?;
+                            self.expect(Token::Semicolon)?;
+                            Ok(Statement::Assignment {
+                                lhs: expr,
+                                expr: right,
+                                timeout,
+                                modifiers,
+                            })
+                        }
                     }
                 } else {
                     self.expect(Token::Semicolon)?;
@@ -4848,6 +5033,135 @@ mod parser_tests {
             assert_eq!(trg.name, "button");
         } else {
             panic!("Expected Trigger item");
+        }
+    }
+
+    #[test]
+    fn test_parse_alka_block_safe() {
+        let s = r#"txn Foo [true][true] { alka { FENCE GPU_MAIN.METAPAGE == 1; }; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse alka block: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Alka(block) => {
+                    assert!(!block.dangerous, "Safe alka");
+                    assert!(block.content.contains("FENCE GPU_MAIN"));
+                }
+                _ => panic!("Expected Alka statement"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_alka_block_dangerous() {
+        let s = r#"txn Foo [true][true] { alka! { PULSE DOORBELL @ 0x90; }; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse alka! block: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Alka(block) => {
+                    assert!(block.dangerous, "Dangerous alka");
+                    assert!(block.content.contains("PULSE DOORBELL"));
+                }
+                _ => panic!("Expected Alka statement"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_alka_multi_line() {
+        let s = "txn Foo [true][true] { alka {\n  FENCE GPU_MAIN.METAPAGE == 1;\n  SIGNAL EXPERT_READY;\n}; term; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse multi-line alka: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_hashtag_on_let() {
+        let s = r#"txn Foo [true][true] { let x: Int #volatile; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse hashtag on let: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_hashtag_on_assignment() {
+        let s = r#"txn Foo [true][true] { &x = 1 #!sfence; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse mandatory hashtag on assignment: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_hashtag_on_term() {
+        let s = r#"txn Foo [true][true] { &x = 1; term #retry; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse hashtag on term: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_fallback_chain() {
+        let s = r#"txn Foo [true][true] { &x = 1 #!sfence|lfence|mfence; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse fallback chain: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Assignment { modifiers, .. } => {
+                    assert_eq!(modifiers.len(), 1);
+                    assert!(modifiers[0].mandatory);
+                    assert_eq!(modifiers[0].fallback.len(), 2);
+                    assert_eq!(modifiers[0].fallback[0], "lfence");
+                    assert_eq!(modifiers[0].fallback[1], "mfence");
+                }
+                _ => panic!("Expected Assignment"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_scoped_hashtag() {
+        let s = r#"txn Foo [true][true] { let x: Int #[cpp]#volatile; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse scoped hashtag: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_dynamic_address() {
+        let s = r#"txn Foo [true][true] { let x: Int @ some_ptr #volatile = 0; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse dynamic @ address: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Let { address_expr, address, .. } => {
+                    assert!(address_expr.is_some(), "Should have dynamic address");
+                    assert!(address.is_none(), "Should NOT have static address");
+                }
+                _ => panic!("Expected Let statement"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_hashtag_with_value() {
+        let s = r#"txn Foo [true][true] { let buf: Byte[4096] #!aligned(4096); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse hashtag with value: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Let { modifiers, .. } => {
+                    assert_eq!(modifiers.len(), 1);
+                    assert_eq!(modifiers[0].name, "aligned");
+                    assert_eq!(modifiers[0].value.as_deref(), Some("4096"));
+                }
+                _ => panic!("Expected Let"),
+            }
         }
     }
 }

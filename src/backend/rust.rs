@@ -357,7 +357,7 @@ impl RustBackend {
                     ));
                 }
             }
-            Statement::Term(values) => {
+            Statement::Term { values, .. } => {
                 if values.is_empty() {
                     output.push_str("        return;\n");
                 } else if values.len() == 1 {

@@ -277,6 +277,8 @@ impl Desugarer {
                         transactions: rs.transactions.clone(),
                         view_html: Some(rs.view_html.clone()),
                         span: rs.span,
+                        modifiers: Vec::new(),
+                        variants: Vec::new(),
                     }));
                     items.push(TopLevel::RenderBlock(RenderBlock {
                         struct_name: rs.name.clone(),
@@ -359,7 +361,7 @@ impl Desugarer {
 
     fn has_term_with_expression(&self, body: &[Statement]) -> bool {
         for stmt in body {
-            if let Statement::Term(outputs) = stmt {
+            if let Statement::Term { values: outputs, .. } = stmt {
                 if let Some(Some(_)) = outputs.first() {
                     return true;
                 }
@@ -389,7 +391,7 @@ impl Desugarer {
 
         let mut new_body_items = Vec::new();
         for stmt in &txn.body {
-            if let Statement::Term(outputs) = stmt {
+            if let Statement::Term { values: outputs, .. } = stmt {
                 if let Some(Some(expr)) = outputs.first() {
                     let fn_sigs = self.extract_function_call(expr);
                     sigs.extend(fn_sigs);
@@ -399,8 +401,9 @@ impl Desugarer {
                         lhs: Expr::OwnedRef("done".to_string()),
                         expr: Expr::Bool(true),
                         timeout: None,
+                        modifiers: vec![],
                     });
-                    new_body_items.push(Statement::Term(vec![]));
+                    new_body_items.push(Statement::Term { values: vec![], modifiers: vec![] });
                     continue;
                 }
             }
@@ -432,6 +435,8 @@ impl Desugarer {
             span: None,
             is_lambda: txn.is_lambda,
             dependencies,
+            modifiers: Vec::new(),
+            variant_bodies: Vec::new(),
         };
 
         (new_txn, sigs, state)
@@ -474,9 +479,9 @@ impl Desugarer {
             .body
             .iter()
             .map(|stmt| {
-                if let Statement::Term(outputs) = stmt {
+                if let Statement::Term { values: outputs, .. } = stmt {
                     if outputs.is_empty() && postcond_is_bool {
-                        return Statement::Term(vec![Some(Expr::Bool(true))]);
+                        return Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![] }
                     }
                 }
                 stmt.clone()
@@ -496,9 +501,9 @@ impl Desugarer {
             .body
             .iter()
             .map(|stmt| {
-                if let Statement::Term(outputs) = stmt {
+                if let Statement::Term { values: outputs, .. } = stmt {
                     if outputs.is_empty() && postcond_is_bool {
-                        return Statement::Term(vec![Some(Expr::Bool(true))]);
+                        return Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![] }
                     }
                 }
                 stmt.clone()
@@ -593,14 +598,16 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term(vec![])],
+            body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
             is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         let mut desugarer = Desugarer::new();
         let result = desugarer.expand_implicit_terms_defn(&defn);
 
-        if let Statement::Term(outputs) = &result.body[0] {
+        if let Statement::Term { values: outputs, .. } = &result.body[0] {
             assert_eq!(outputs.len(), 1, "Should have 1 output after desugaring");
             if let Some(Expr::Bool(true)) = &outputs[0] {
                 println!("✓ Implicit term true correctly added");
@@ -620,18 +627,20 @@ mod tests {
             name: "test".to_string(),
             parameters: vec![],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            body: vec![Statement::Term(vec![])],
+            body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
             reactor_speed: None,
             span: None,
             is_lambda: false,
             dependencies: vec![],
             attrs: Vec::new(),
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         let mut desugarer = Desugarer::new();
         let result = desugarer.expand_implicit_terms_txn(&txn);
 
-        if let Statement::Term(outputs) = &result.body[0] {
+        if let Statement::Term { values: outputs, .. } = &result.body[0] {
             assert_eq!(outputs.len(), 1, "Should have 1 output after desugaring");
             if let Some(Expr::Bool(true)) = &outputs[0] {
                 println!("✓ Implicit term true correctly added in txn");
@@ -658,8 +667,10 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term(vec![Some(Expr::Integer(1))])],
+            body: vec![Statement::Term { values: vec![Some(Expr::Integer(1))], modifiers: vec![] }],
             is_lambda: true,
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         let mut desugarer = Desugarer::new();

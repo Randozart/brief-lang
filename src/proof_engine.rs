@@ -502,6 +502,7 @@ impl SymbolicExecutor {
                     lhs,
                     expr,
                     timeout: _,
+                    modifiers: _,
                 } => {
                     let value = SymbolicValue::from_expr(expr, &current_state.vars);
                     if let Expr::Identifier(name) | Expr::OwnedRef(name) = lhs {
@@ -541,7 +542,7 @@ impl SymbolicExecutor {
                     }
                     return;
                 }
-                Statement::Term(outputs) => {
+                Statement::Term { values: outputs, .. } => {
                     terminated = true;
                     path_kind = PathKind::Term(outputs.clone());
                 }
@@ -550,6 +551,7 @@ impl SymbolicExecutor {
                     path_kind = PathKind::Escape;
                 }
                 Statement::Expression(_) | Statement::Unification { .. } | Statement::LocalTrigger { .. } => {}
+                Statement::Alka(_) => {}
             }
         }
 
@@ -1051,7 +1053,7 @@ impl ProofEngine {
     fn check_branch_terminates(&self, statements: &[Statement], terminates: &mut bool) {
         for stmt in statements {
             match stmt {
-                Statement::Term(_) => {
+                Statement::Term { .. } => {
                     *terminates = true;
                     return;
                 }
@@ -2056,9 +2058,8 @@ impl ProofEngine {
                 lhs,
                 expr,
                 timeout: _,
+                modifiers: _,
             } => {
-                self.collect_read_vars_from_expr(expr, vars);
-                self.collect_read_vars_from_expr(lhs, vars);
             }
             Statement::Let { name, expr, .. } => {
                 if let Some(e) = expr {
@@ -2078,7 +2079,7 @@ impl ProofEngine {
                     self.collect_read_vars(stmt, vars);
                 }
             }
-            Statement::Term(outputs) => {
+            Statement::Term { values: outputs, .. } => {
                 for out in outputs {
                     if let Some(expr) = out {
                         self.collect_read_vars_from_expr(expr, vars);
@@ -2111,7 +2112,7 @@ impl ProofEngine {
             Statement::Let { .. } => {}
             Statement::InlineAsm { .. } => {}
             Statement::Expression(_) => {}
-            Statement::Term(_) => {}
+            Statement::Term { .. } => {}
             Statement::Escape(_) => {}
             Statement::Guarded { statements, .. } => {
                 for stmt in statements {
@@ -2120,6 +2121,7 @@ impl ProofEngine {
             }
             Statement::Unification { .. } => {}
             Statement::LocalTrigger { .. } => {}
+            Statement::Alka(_) => {}
         }
     }
 
@@ -2165,7 +2167,7 @@ impl ProofEngine {
     fn has_term_statement(&self, statements: &[Statement]) -> bool {
         for stmt in statements {
             match stmt {
-                Statement::Term(outputs) => {
+                Statement::Term { values: outputs, .. } => {
                     return true;
                 }
                 Statement::Guarded { statements, .. } => {
@@ -2304,7 +2306,7 @@ impl ProofEngine {
     fn collect_term_values(&self, statements: &[Statement], results: &mut Vec<Vec<Option<Expr>>>) {
         for stmt in statements {
             match stmt {
-                Statement::Term(outputs) => {
+                Statement::Term { values: outputs, .. } => {
                     results.push(outputs.clone());
                 }
                 Statement::Guarded {

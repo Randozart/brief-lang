@@ -59,7 +59,7 @@ impl Annotator {
                     self.collect_calls_from_expr(condition, calls);
                     self.collect_calls_from_body(statements, calls);
                 }
-                Statement::Term(outputs) => {
+                Statement::Term { values: outputs, .. } => {
                     for out in outputs {
                         if let Some(expr) = out {
                             self.collect_calls_from_expr(expr, calls);
@@ -299,7 +299,7 @@ impl Annotator {
         let spaces = " ".repeat(indent);
         match stmt {
             Statement::Expression(expr) => format!("{}{};\n", spaces, self.format_expr(expr)),
-            Statement::Assignment { lhs, expr, timeout } => {
+            Statement::Assignment { lhs, expr, timeout, .. } => {
                 let timeout_str = if let Some((expr, unit)) = timeout {
                     let unit_str = match unit {
                         TimeUnit::Cycles => "cycles",
@@ -330,7 +330,7 @@ impl Annotator {
                 output.push_str(&format!("{}}}\n", spaces));
                 output
             }
-            Statement::Term(outputs) => {
+            Statement::Term { values: outputs, .. } => {
                 let outputs_str: Vec<String> = outputs
                     .iter()
                     .map(|o| o.as_ref().map(|e| self.format_expr(e)).unwrap_or_default())

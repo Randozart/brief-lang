@@ -307,3 +307,49 @@ Implement the solution:
 ## Contact
 
 This file is used by AI coding assistants (Claude Code, OpenCode) when working in the Brief compiler project. All changes should maintain the Contract-First Philosophy.
+
+---
+
+## v0.14 Implementation Log
+
+### 2026-05-16 — Engineering Log
+
+#### What was built
+- **`Hashtag` struct** + `parse_hashtag_modifiers()` parser (handles `#tag`, `#!tag`, `#!A|B|C`, `#[target]#tag`)
+- **`AlkaBlock`** AST struct + `parse_alka_block()` parser (handles `alka { ... };` and `alka! { ... };`)
+- **Dynamic `@` address** — parser stores non-literal `@ expr` in `address_expr: Option<Box<Expr>>`
+- **AST fields** — `modifiers` on Let/Assignment/Term/Transaction/Definition, `variant_bodies` on Transaction/Definition, `variants` on StructDefinition, `address_expr` on Let
+- **10 new tests** covering alka, hashtags (scoped, mandatory, fallback chain, with value), dynamic `@`, and term/assignment modifiers
+
+#### Bugs fixed during implementation
+1. **Semicolon before hashtags on assignments** — `self.expect(Semicolon)` was called BEFORE `parse_hashtag_modifiers()` in the assignment parsing path, meaning `&x = 1 #!sfence;` would fail. Fixed by moving semicolon check into each match arm.
+2. **Term hashtags not parsed** — `parse_term_outputs()` would try to parse `#retry` as an expression. Fixed by adding early-return for `Hash`/`HashBang` tokens.
+3. **`Statement::Term` construction used `.. }` pattern** in expression context (struct update syntax without base), which is a Rust compiler error. Changed all construction sites to `modifiers: vec![]`.
+4. **`Statement::Assignment { .. }` missing explicit modifiers** in construction sites (~15 locations across backends, fuzzer, proof engine, annotator).
+
+#### Not implemented (deferred from v0.14 draft)
+| Feature | Reason |
+|---------|--------|
+| Multi-body dispatch `[pre]{body}[pre2]{body2}` | Syntax conflicts with current `[pre][post]{body}` contract model — needs spec clarification |
+| `#on_exit { ... };` block pragma | Requires new `parse_hashtag_block_pragma()` method + proof engine integration for LIFO cleanup |
+| `+/-` struct variants | `StructVariant` struct exists but no parser support for differential member syntax |
+| Backend registry for hashtag validation | Backends need to declare supported tags and reject unsupported `#!` tags |
+| Backend codegen for dynamic `@` | C/Rust backends still emit `&var = ADDR` literal, not pointer-deref from `address_expr` |
+| Backend codegen for `alka {}` | Currently parsed but all backends treat `Alka` as no-op via catch-all match arms |
+
+#### Key design decisions
+- **`alka` is NOT a Token** — It's matched as `Identifier("alka")` in the parser, avoiding a lexer change for what's essentially a contextual keyword
+- **Brace-matching for `alka`** uses the same span-based approach as `parse_render_block()`: record `{` position, track depth through token stream, extract `source[lbrace+1..end_rbrace]`
+- **Hashtags live AFTER expressions**, before `;` — this means the expression parser never sees `#` tokens, avoiding ambiguity
+- **`#!A|B|C` fallback** — `|` is a pipe token (`Token::Pipe`), stored as `fallback: Vec<String>` in `Hashtag`
+
+#### Caught myself being lazy
+1. **First pass of `Statement::Term` construction** — used `.. }` everywhere thinking it was like a pattern. It IS a pattern in `if let`/`match`, but a struct-update-expression in constructors. Rust caught this, rightfully.
+2. **Added AlkaBlock but didn't wire match arms** — thought most would already have `_ =>` catch-alls. Only 5 were exhaustive. `cargo check` caught them all.
+3. **Tests for scoped hashtags** — wrote `#[cpp]volatile` instead of `#[cpp]#volatile` initially. The spec says `"#[" identifier "]" hashtag`, meaning the `#` prefix is required after the bracket. Fixed test.
+4. **Almost skipped semicolon reordering** — considered leaving assignment hashtags as a "parser limitation". But the `#` tokens are consumed by expression parser in the wrong order. Had to fix it properly.
+
+#### What I'd do differently
+- Multi-body dispatch should have been designed WITH the contract parsing, not bolted on. The current `[pre][post]{body}` is incompatible with per-body `[pre]{body}[post]{body2}`. A proper design would be: `[post]` is always on the LAST body, or adopt the Rust-like `match` syntax.
+- I should have written tests FIRST before implementing the fix for semicolon ordering. Would have caught the design flaw earlier.
+- The amount of `modifiers: vec![]` boilerplate across 15+ construction sites suggests this should have been a default. Consider using `#[derive(Default)]` patterns or builder methods for Statement.

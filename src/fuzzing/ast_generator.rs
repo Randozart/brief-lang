@@ -118,6 +118,8 @@ pub fn arb_transaction(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             is_lambda: false,
             dependencies: Vec::new(),
             attrs: Vec::new(),
+            modifiers: vec![],
+            variant_bodies: vec![],
         })
     })
 }
@@ -154,8 +156,10 @@ pub fn arb_definition(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             output_type: None,
             output_names: vec![None],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            body: vec![Statement::Term(vec![Some(body)])],
+            body: vec![Statement::Term { values: vec![Some(body)], modifiers: vec![] }],
             is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
         })
     })
 }
@@ -191,6 +195,8 @@ pub fn arb_struct_def(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             transactions: Vec::new(),
             view_html: None,
             span: None,
+            modifiers: vec![],
+            variants: vec![],
         })
     })
 }
@@ -248,6 +254,7 @@ fn arb_assignment(max_depth: usize) -> impl Strategy<Value = Statement> {
             lhs,
             expr,
             timeout: None,
+            modifiers: vec![],
         }
     })
 }
@@ -265,8 +272,10 @@ fn arb_let_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
             ty: Some(ty),
             expr,
             address: None,
+            address_expr: None,
             bit_range: None,
             is_override: false,
+            modifiers: vec![],
         }
     })
 }
@@ -289,8 +298,8 @@ fn arb_guarded_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
 fn arb_term_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
     let max_depth = max_depth.min(MAX_DEPTH);
     prop_oneof![
-        Just(Statement::Term(vec![])),
-        arb_expr(max_depth).prop_map(|e| Statement::Term(vec![Some(e)])),
+        Just(Statement::Term { values: vec![], modifiers: vec![] }),
+        arb_expr(max_depth).prop_map(|e| Statement::Term { values: vec![Some(e)], modifiers: vec![] }),
     ]
 }
 
@@ -566,7 +575,7 @@ mod tests {
                 Statement::Assignment { .. }
                     | Statement::Let { .. }
                     | Statement::Guarded { .. }
-                    | Statement::Term(_)
+                    | Statement::Term { .. }
                     | Statement::Escape(_)
                     | Statement::Expression(_)
             );

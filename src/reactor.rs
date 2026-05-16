@@ -256,7 +256,7 @@ impl Reactor {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::Term(outputs) => {
+            Statement::Term { values: outputs, .. } => {
                 if let Some(first) = outputs.first() {
                     if let Some(expr) = first {
                         let value = interp.eval_expr(expr)?;
@@ -301,6 +301,7 @@ impl Reactor {
                 // TODO: Full async yield/await semantics with rollback support
                 Ok(StmtResult::Continue)
             }
+            Statement::Alka(_) => Ok(StmtResult::Continue),
         }
     }
 }

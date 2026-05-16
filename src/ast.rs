@@ -471,6 +471,7 @@ pub enum Statement {
         lhs: Expr,
         expr: Expr,
         timeout: Option<(Expr, TimeUnit)>,
+        modifiers: Vec<Hashtag>,
     },
 
     // Unification: identifier(pattern) = expr;
@@ -483,11 +484,14 @@ pub enum Statement {
     // Guarded statement: [expr] statement or [expr] { statements }
     Guarded {
         condition: Expr,
-        statements: Vec<Statement>, // Changed from single statement to vec
+        statements: Vec<Statement>,
     },
 
-    // Term statement: term expr?, expr?, ... (multi-output with trailing commas for void)
-    Term(Vec<Option<Expr>>),
+    // Term statement: term expr?, expr?, ...
+    Term {
+        values: Vec<Option<Expr>>,
+        modifiers: Vec<Hashtag>,
+    },
 
     // Escape statement: escape expr?;
     Escape(Option<Expr>),
@@ -501,8 +505,10 @@ pub enum Statement {
         ty: Option<Type>,
         expr: Option<Expr>,
         address: Option<u64>,
+        address_expr: Option<Box<Expr>>,
         bit_range: Option<BitRange>,
         is_override: bool,
+        modifiers: Vec<Hashtag>,
     },
 
     // Inline assembly: asm "instruction" { "clobber1", "clobber2" };
@@ -520,6 +526,16 @@ pub enum Statement {
         expr: Option<Expr>,
         span: Option<Span>,
     },
+
+    // Alka escape hatch: alka { ... }; or alka! { ... };
+    Alka(AlkaBlock),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlkaBlock {
+    pub dangerous: bool,
+    pub content: String,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -611,7 +627,9 @@ pub struct Definition {
     pub output_names: Vec<Option<String>>,
     pub contract: Contract,
     pub body: Vec<Statement>,
-    pub is_lambda: bool, // Lambda-style: no body, postcondition must be provable
+    pub is_lambda: bool,
+    pub modifiers: Vec<Hashtag>,
+    pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -624,9 +642,11 @@ pub struct Transaction {
     pub body: Vec<Statement>,
     pub reactor_speed: Option<u32>,
     pub span: Option<Span>,
-    pub is_lambda: bool, // Lambda-style: no body, postcondition must be provable
-    pub dependencies: Vec<String>, // Variables read in preconditions
-    pub attrs: Vec<Attribute>,  // NEW: #[...] attributes
+    pub is_lambda: bool,
+    pub dependencies: Vec<String>,
+    pub attrs: Vec<Attribute>,
+    pub modifiers: Vec<Hashtag>,
+    pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -714,6 +734,14 @@ pub enum TopLevel {
 }
 
 #[derive(Debug, Clone)]
+pub struct StructVariant {
+    pub contract: Option<Contract>,
+    pub fields: Vec<StructField>,
+    pub additions: Vec<StructField>,
+    pub removals: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct StructDefinition {
     pub name: String,
     pub type_params: Vec<String>,
@@ -721,6 +749,8 @@ pub struct StructDefinition {
     pub transactions: Vec<Transaction>,
     pub view_html: Option<String>,
     pub span: Option<Span>,
+    pub modifiers: Vec<Hashtag>,
+    pub variants: Vec<StructVariant>,
 }
 
 #[derive(Debug, Clone)]
@@ -754,6 +784,8 @@ impl StructDefinition {
             transactions: Vec::new(),
             view_html: None,
             span: None,
+            modifiers: Vec::new(),
+            variants: Vec::new(),
         }
     }
 }
@@ -778,6 +810,25 @@ pub struct RenderBlock {
 pub struct Comment {
     pub line: usize,
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hashtag {
+    pub name: String,
+    pub value: Option<String>,
+    pub mandatory: bool,
+    pub fallback: Vec<String>,
+    pub scoped: Option<String>,
+}
+
+impl Hashtag {
+    pub fn new(name: String) -> Self {
+        Hashtag { name, value: None, mandatory: false, fallback: Vec::new(), scoped: None }
+    }
+
+    pub fn mandatory(name: String) -> Self {
+        Hashtag { name, value: None, mandatory: true, fallback: Vec::new(), scoped: None }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

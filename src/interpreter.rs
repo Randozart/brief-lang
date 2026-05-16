@@ -276,7 +276,7 @@ impl Interpreter {
         let mut result = Value::Void;
         for stmt in &defn.body {
             match stmt {
-                Statement::Term(outputs) => {
+                Statement::Term { values: outputs, .. } => {
                     if let Some(Some(expr)) = outputs.first() {
                         result = self.eval_expr(expr)?;
                     }
@@ -379,6 +379,7 @@ impl Interpreter {
                 lhs,
                 expr,
                 timeout: _,
+                modifiers: _,
             } => {
                 let value = self.eval_expr(expr)?;
                 match lhs {
@@ -422,7 +423,7 @@ impl Interpreter {
             Statement::Expression(expr) => {
                 self.eval_expr(expr)?;
             }
-            Statement::Term(outputs) => {
+            Statement::Term { values: outputs, .. } => {
                 if let Some(first) = outputs.first() {
                     if let Some(expr) = first {
                         let value = self.eval_expr(expr)?;
@@ -455,6 +456,7 @@ impl Interpreter {
                 }
                 // TODO: Full async yield/await semantics with rollback support
             }
+            Statement::Alka(_) => {}
         }
         Ok(())
     }

@@ -736,7 +736,7 @@ output.push_str("static void init_wrapper(void) {\n");
                     output.push_str("    );\n");
                 }
             }
-            Statement::Term(_) => {
+            Statement::Term { .. } => {
                 output.push_str("    /* transaction complete */\n");
             }
             Statement::Expression(expr) => {

@@ -424,7 +424,7 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
                     new_paths.push(false_state);
                 }
 
-                Statement::Term(_) | Statement::Escape(_) => {
+                Statement::Term { .. } | Statement::Escape(_) => {
                     // Termination: path ends here
                     new_paths.push(state);
                 }
@@ -450,6 +450,7 @@ fn execute_statement(stmt: &Statement, state: &mut SymbolicState) {
             lhs,
             expr,
             timeout: _,
+            modifiers: _,
         } => {
             if let Expr::Identifier(name) | Expr::OwnedRef(name) = lhs {
                 state.assign(name, expr);

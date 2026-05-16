@@ -102,7 +102,7 @@ fn check_all_paths(
                 }
             }
 
-            Statement::Term(outputs) => {
+            Statement::Term { values: outputs, .. } => {
                 found_term = true;
                 // Check if this term produces true
                 if let Some(Some(expr)) = outputs.first() {
@@ -207,8 +207,10 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term(vec![Some(Expr::Bool(true))])],
+            body: vec![Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![] }],
             is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -238,8 +240,10 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term(vec![Some(Expr::Bool(false))])],
+            body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![] }],
             is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -274,10 +278,13 @@ mod tests {
                     lhs: Expr::Identifier("result".to_string()),
                     expr: Expr::Bool(true),
                     timeout: None,
+                    modifiers: vec![],
                 },
-                Statement::Term(vec![Some(Expr::Identifier("result".to_string()))]),
+                Statement::Term { values: vec![Some(Expr::Identifier("result".to_string()))], modifiers: vec![] },
             ],
             is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -307,10 +314,12 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term(vec![Some(Expr::String(
+            body: vec![Statement::Term { values: vec![Some(Expr::String(
                 "not bool".to_string(),
-            ))])],
+            ))], modifiers: vec![] }],
             is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -340,8 +349,10 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term(vec![Some(Expr::Bool(false))])],
+            body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![] }],
             is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         // Should be OK because this is not a TrueAssertion

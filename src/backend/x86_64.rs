@@ -435,7 +435,7 @@ impl X86_64Backend {
                     self.generate_guarded_with_branch(output, condition, statements);
                 }
             }
-            Statement::Term(_) => {
+            Statement::Term { .. } => {
                 output.push_str("    ; term\n");
             }
             _ => {}

@@ -1255,6 +1255,7 @@ impl WasmGenerator {
                 lhs,
                 expr,
                 timeout: _,
+                modifiers: _,
             } => {
                 let expr_code = self.expr_to_js_value(expr);
                 match lhs {
@@ -1304,7 +1305,7 @@ impl WasmGenerator {
                     _ => {}
                 }
             }
-            Statement::Term(_) => {
+            Statement::Term { .. } => {
                 output.push_str("        // term - transaction settled\n");
             }
             Statement::Let {
@@ -1314,6 +1315,8 @@ impl WasmGenerator {
                 address: _,
                 bit_range: _,
                 is_override: _,
+                address_expr: _,
+                modifiers: _,
             } => {
                 if let Some(e) = expr {
                     let expr_code = self.expr_to_js_value(e);
@@ -1383,6 +1386,7 @@ impl WasmGenerator {
                 ));
                 // TODO: Emit async yield/await code for local triggers
             }
+            Statement::Alka(_) => {}
         }
     }
 

@@ -744,7 +744,7 @@ impl VerilogGenerator {
     fn emit_function_body(&mut self, fn_name: &str, body: &[Statement]) {
         for stmt in body {
             match stmt {
-                Statement::Term(outputs) => {
+                Statement::Term { values: outputs, .. } => {
                     if let Some(Some(expr)) = outputs.first() {
                         self.output
                             .push_str(&format!("        return {};\n", self.expr_to_verilog(expr)));
@@ -1151,7 +1151,7 @@ impl VerilogGenerator {
     ) {
         for stmt in body {
             match stmt {
-                Statement::Assignment { lhs, expr, timeout } => {
+                Statement::Assignment { lhs, expr, timeout, .. } => {
                     if self.extract_assignment_target(lhs).as_deref() == Some(var_name) {
                         if let Some((t_expr, _unit)) = timeout {
                             self.output

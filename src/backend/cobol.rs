@@ -434,7 +434,7 @@ impl CobolBackend {
                     target_name, value_str
                 ));
             }
-            Statement::Term(_) => {
+            Statement::Term { .. } => {
                 output.push_str("    EXIT PARAGRAPH.\n");
             }
             Statement::Escape(expr) => {
@@ -654,6 +654,7 @@ mod tests {
                         Box::new(Expr::Identifier("amount".to_string())),
                     ),
                     timeout: None,
+                    modifiers: vec![],
                 },
             ],
             reactor_speed: None,
@@ -661,6 +662,8 @@ mod tests {
             is_lambda: false,
             dependencies: vec![],
             attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
         };
 
         Program {

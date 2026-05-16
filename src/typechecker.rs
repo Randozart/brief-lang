@@ -826,7 +826,7 @@ impl TypeChecker {
         expected_outputs: &[Type],
     ) {
         match stmt {
-            Statement::Term(outputs) => {
+            Statement::Term { values: outputs, .. } => {
                 let actual_count = outputs.len();
                 let expected_count = expected_outputs.len();
 
@@ -1085,7 +1085,7 @@ impl TypeChecker {
 
     fn check_statement(&mut self, stmt: &Statement, is_async: Option<&bool>) {
         match stmt {
-            Statement::Assignment { lhs, expr, timeout } => {
+            Statement::Assignment { lhs, expr, timeout, .. } => {
                 self.check_expr_for_ffi_errors(lhs);
                 self.check_expr_for_ffi_errors(expr);
                 let lhs_ty = self.infer_expression(lhs);
