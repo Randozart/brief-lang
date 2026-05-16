@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7ef1f6a2765fcce3b09ad6c6c7d6f95f8be970cea23de4e2baaed62f60ff48cc # shrinks to stmt = Alka(AlkaBlock { dangerous: false, content: "FENCE ALL;", span: None })

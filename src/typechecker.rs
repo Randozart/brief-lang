@@ -1176,6 +1176,12 @@ impl TypeChecker {
                 // Declare the trigger variable in the local transaction scope
                 self.declare_variable(name, ty.clone());
             }
+            Statement::OnExit { body, .. } => {
+                for stmt in body {
+                    self.check_statement(stmt, is_async);
+                }
+            }
+            Statement::Alka(_) => {} // opaque passthrough, no validation
             _ => {}
         }
     }

@@ -240,6 +240,10 @@ pub fn arb_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
         arb_escape_statement(),
         // Expression: expr;
         arb_expr_statement(max_depth),
+        // Alka block: alka { ... };
+        arb_alka_statement(),
+        // OnExit block pragma: #on_exit { ... };
+        arb_on_exit_statement(max_depth),
     ].boxed()
 }
 
@@ -301,6 +305,32 @@ fn arb_term_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
         Just(Statement::Term { values: vec![], modifiers: vec![] }),
         arb_expr(max_depth).prop_map(|e| Statement::Term { values: vec![Some(e)], modifiers: vec![] }),
     ]
+}
+
+/// Generate a random alka block
+fn arb_alka_statement() -> impl Strategy<Value = Statement> {
+    prop_oneof![
+        Just(Statement::Alka(AlkaBlock {
+            dangerous: false,
+            content: "FENCE ALL;".to_string(),
+            span: None,
+        })),
+        Just(Statement::Alka(AlkaBlock {
+            dangerous: true,
+            content: "PULSE DOORBELL @ 0x90;".to_string(),
+            span: None,
+        })),
+    ]
+}
+
+/// Generate a random #on_exit block pragma
+fn arb_on_exit_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
+    let max_depth = max_depth.min(MAX_DEPTH);
+    let sub_depth = max_depth.saturating_sub(1);
+    proptest::collection::vec(arb_statement(sub_depth), 1..3)
+        .prop_map(|body| {
+            Statement::OnExit { body, span: None }
+        })
 }
 
 /// Generate a random escape statement
@@ -578,6 +608,8 @@ mod tests {
                     | Statement::Term { .. }
                     | Statement::Escape(_)
                     | Statement::Expression(_)
+                    | Statement::Alka(_)
+                    | Statement::OnExit { .. }
             );
             prop_assert!(is_valid, "Generated invalid statement type: {:?}", stmt);
         }
