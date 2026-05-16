@@ -353,3 +353,50 @@ This file is used by AI coding assistants (Claude Code, OpenCode) when working i
 - Multi-body dispatch should have been designed WITH the contract parsing, not bolted on. The current `[pre][post]{body}` is incompatible with per-body `[pre]{body}[post]{body2}`. A proper design would be: `[post]` is always on the LAST body, or adopt the Rust-like `match` syntax.
 - I should have written tests FIRST before implementing the fix for semicolon ordering. Would have caught the design flaw earlier.
 - The amount of `modifiers: vec![]` boilerplate across 15+ construction sites suggests this should have been a default. Consider using `#[derive(Default)]` patterns or builder methods for Statement.
+
+### 2026-05-16 Session 2 — Multi-body dispatch + recovery from misplaced code
+
+#### Built
+- **Multi-body dispatch** for transactions and definitions. Added `parse_variant_bodies()` method that reads `[pre]{body}` and bare `{body}` (catch-all) pairs after the main body. Wired into both `parse_transaction()` and `parse_definition()`.
+- **3 new tests** for multi-body (transaction, definition, single-body backward compat).
+- **204 total tests** (up from 201).
+
+#### Deferred (still pending)
+| Feature | Reason |
+|---------|--------|
+| `#on_exit { ... };` block pragma | Needs new parser method for hashtag block pragmas |
+| `+/-` struct variants | `StructVariant` exists but no parser |
+| Backend registry, alka codegen, dynamic @ emits | All no-ops via catch-all match arms |
+
+#### Bugs and recoveries during session
+1. **`[post ready]` in test input is invalid** — the spec example uses `[post ready]` as shorthand, but the contract parser reads sequential bracketed expressions. `ready` alone works (`[post == ready]` or `[ready]`). The spec `[post condition]` is aspirational sugar, not current grammar.
+2. **Misplaced test code** — I accidentally placed `#[test] fn test_multi_body...` inside the `impl Parser` block after `parse_statement`. This caused 94 cascading errors. The correct location is inside the `mod parser_tests { }` block at the end of the file. Three rounds of cleanup needed (removing duplicate, fixing extra closing braces, restoring `None` return in `parse_map_pair`).
+3. **`return` not a keyword in Brief** — used `return x * 2;` in a test which failed because `return` is an identifier token. Replaced with `&result = x * 2;` (standard Brief assignment).
+4. **Editor edit was too greedy** — my `String.replace("oldText", "newText")` pattern matched a larger region than intended, copying test functions into the wrong location while also removing them from the right one. Should have verified the edit region before applying.
+
+#### What I'd do differently this session
+- Verify test syntax against actual tokenizer BEFORE writing tests (the `[post ready]` and `return` issues are obvious in hindsight)
+- When removing code, use a smaller match window and verify with `git diff` before building
+- Place `#[test]` functions ONLY inside the `#[cfg(test)] mod parser_tests` block from the start
+
+### 2026-05-16 Session 3 — #on_exit block pragma + +/- struct variants
+
+#### Built
+- **`#on_exit { ... };` block pragma** — Added `Statement::OnExit` variant to AST. Parser reads `#identifier{body};` as a block pragma statement (new match arm in `parse_statement()`). Stores cleanup body statements.
+- **`+/-` struct variants** — Added `parse_struct_variants()` and `parse_struct_variant_fields()` methods. After the main `struct { fields }`, parser checks for `[discriminant]{ +addition; -removal; field; }` variant bodies. Fields prefixed with `+` go into `StructVariant::additions`, fields with `-` go into `removals`.
+- **4 new tests** — 2 for `#on_exit` (basic and bare form), 2 for struct variants (`+` add and `-` remove).
+- **208 total tests** (up from 204).
+
+#### Bugs and recoveries
+1. **Misplaced test code (round 2)** — despite cleaning up in session 2, remnant `#[test]` functions were still inside `impl Parser` at ~line 449. These closed `impl Parser` prematurely at line 481, causing ALL subsequent methods to be outside the impl block. Fixed by removing the full remaining test block.
+2. **`type` not a keyword** — test used `type GPU { ... }` but Brief uses `struct` keyword. Fixed test input.
+3. **`spanned_err` return type** — in `parse_struct_variant_fields`, the `_ =>` error arm calls `spanned_err` which returns `Err(SyntaxError)`. The function's `Result<..., SyntaxError>` return type means `return self.spanned_err(...)` works directly (no `.unwrap_err()` needed) since the `?` operator coerces the error variant.
+
+#### Commits
+- `da90458` — v0.14 hashtag modifiers, alka hatch, dynamic @
+- _(this commit)_ — #on_exit block pragma, +/- struct variants
+
+#### Still deferred
+- Backend registry for hashtag support checking
+- Backend codegen for dynamic `@`, alka, #on_exit
+- Multi-body struct type dispatch (only `+/-` field syntax is parsed, no type-check semantics)

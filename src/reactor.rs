@@ -301,7 +301,7 @@ impl Reactor {
                 // TODO: Full async yield/await semantics with rollback support
                 Ok(StmtResult::Continue)
             }
-            Statement::Alka(_) => Ok(StmtResult::Continue),
+            Statement::Alka(_) | Statement::OnExit { .. } => Ok(StmtResult::Continue),
         }
     }
 }

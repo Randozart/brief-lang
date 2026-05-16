@@ -1048,6 +1048,10 @@ impl<'a> Parser<'a> {
         }
 
         let span = self.current_span();
+
+        // Struct variants: [discriminant] { +field, -field, field }
+        let variants = self.parse_struct_variants()?;
+
         // Semicolon after struct is optional
         if let Some(Ok(Token::Semicolon)) = self.current_token() {
             self.advance();
@@ -1060,8 +1064,94 @@ impl<'a> Parser<'a> {
             view_html: None,
             span,
             modifiers: Vec::new(),
-            variants: Vec::new(),
+            variants,
         })
+    }
+
+    fn parse_struct_variants(&mut self) -> Result<Vec<StructVariant>, SyntaxError> {
+        let mut variants = Vec::new();
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::LBracket)) => {
+                    self.advance();
+                    let discriminant = self.parse_expression()?;
+                    self.expect(Token::RBracket)?;
+                    let contract = Some(Contract {
+                        pre_condition: discriminant,
+                        post_condition: Expr::Bool(true),
+                        watchdog: None,
+                        span: None,
+                    });
+                    self.expect(Token::LBrace)?;
+                    let (fields, additions, removals) = self.parse_struct_variant_fields()?;
+                    self.expect(Token::RBrace)?;
+                    variants.push(StructVariant { contract, fields, additions, removals });
+                }
+                _ => return Ok(variants),
+            }
+        }
+    }
+
+    fn parse_struct_variant_fields(&mut self) -> Result<(Vec<StructField>, Vec<StructField>, Vec<String>), SyntaxError> {
+        let mut fields = Vec::new();
+        let mut additions = Vec::new();
+        let mut removals = Vec::new();
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::RBrace)) => break,
+                Some(Ok(Token::Plus)) => {
+                    self.advance();
+                    let name = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let ty = self.parse_type()?;
+                    let default = if let Some(Ok(Token::Eq)) = self.current_token() {
+                        self.advance();
+                        Some(self.parse_expression()?)
+                    } else {
+                        None
+                    };
+                    if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                    } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                    additions.push(StructField { name, ty, default });
+                }
+                Some(Ok(Token::Minus)) => {
+                    self.advance();
+                    let name = self.expect_identifier()?;
+                    if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                    } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                    removals.push(name);
+                }
+                Some(Ok(Token::Identifier(_))) => {
+                    let name = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let ty = self.parse_type()?;
+                    let default = if let Some(Ok(Token::Eq)) = self.current_token() {
+                        self.advance();
+                        Some(self.parse_expression()?)
+                    } else {
+                        None
+                    };
+                    if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                    } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                    fields.push(StructField { name, ty, default });
+                }
+                _ => {
+                    return self.spanned_err(
+                        "Expected field declaration, +addition, or -removal in struct variant".to_string()
+                    );
+                }
+            }
+        }
+        Ok((fields, additions, removals))
     }
 
     fn parse_rstruct(&mut self) -> Result<RStructDefinition, SyntaxError> {
@@ -1710,6 +1800,30 @@ impl<'a> Parser<'a> {
         self.peek.as_ref().map(|(t, _)| t)
     }
 
+    fn parse_variant_bodies(&mut self) -> Result<Vec<(Option<Contract>, Vec<Statement>)>, SyntaxError> {
+        let mut variants = Vec::new();
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::LBracket)) => {
+                    self.advance();
+                    let pre = self.parse_expression()?;
+                    self.expect(Token::RBracket)?;
+                    self.expect(Token::LBrace)?;
+                    let body = self.parse_body()?;
+                    self.expect(Token::RBrace)?;
+                    variants.push((Some(Contract { pre_condition: pre, post_condition: Expr::Bool(true), watchdog: None, span: None }), body));
+                }
+                Some(Ok(Token::LBrace)) => {
+                    self.advance();
+                    let body = self.parse_body()?;
+                    self.expect(Token::RBrace)?;
+                    variants.push((None, body));
+                }
+                _ => return Ok(variants),
+            }
+        }
+    }
+
     fn parse_alka_block(&mut self) -> Result<Statement, SyntaxError> {
         self.advance();
         let dangerous = if let Some(Ok(Token::Not)) = self.current_token() {
@@ -1750,6 +1864,18 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon)?;
         let span = self.current_span();
         Ok(Statement::Alka(AlkaBlock { dangerous, content, span }))
+    }
+
+    fn parse_block_pragma(&mut self) -> Result<Statement, SyntaxError> {
+        // #identifier { body };
+        self.advance();
+        let name = self.expect_identifier()?;
+        self.expect(Token::LBrace)?;
+        let body = self.parse_body()?;
+        self.expect(Token::RBrace)?;
+        self.expect(Token::Semicolon)?;
+        let span = self.current_span();
+        Ok(Statement::OnExit { body, span })
     }
 
     fn parse_state_decl(&mut self) -> Result<StateDecl, SyntaxError> {
@@ -2306,6 +2432,13 @@ let span = self.current_span();
 
         let is_lambda = body.is_empty();
 
+        // Multi-body dispatch: parse additional [pre]{body} variants
+        let variant_bodies = if is_lambda {
+            Vec::new()
+        } else {
+            self.parse_variant_bodies()?
+        };
+
         let span = self.current_span();
 
         // NEW: Check for @Hz speed declaration after closing brace (for rct blocks)
@@ -2358,7 +2491,7 @@ let span = self.current_span();
             dependencies,
             attrs: Vec::new(),
             modifiers: Vec::new(),
-            variant_bodies: Vec::new(),
+            variant_bodies,
         })
     }
 
@@ -2457,20 +2590,27 @@ let span = self.current_span();
 
         // Lambda-style: allow ; termination (no body)
         let body = if let Some(Ok(Token::Semicolon)) = self.current_token() {
-            // Lambda-style definition: no body
             Vec::new()
         } else {
             self.expect(Token::LBrace)?;
             let body = self.parse_body()?;
             self.expect(Token::RBrace)?;
-            // Semicolon after function body is optional
-            if let Some(Ok(Token::Semicolon)) = self.current_token() {
-                self.advance();
-            }
             body
         };
 
         let is_lambda = body.is_empty();
+
+        // Multi-body dispatch: parse additional [pre]{body} variants
+        let variant_bodies = if is_lambda {
+            Vec::new()
+        } else {
+            self.parse_variant_bodies()?
+        };
+
+        // Semicolon after body or last variant body
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
 
         Ok(Definition {
             name,
@@ -2483,7 +2623,7 @@ let span = self.current_span();
             body,
             is_lambda,
             modifiers: Vec::new(),
-            variant_bodies: Vec::new(),
+            variant_bodies,
         })
     }
 
@@ -3242,6 +3382,10 @@ let span = self.current_span();
                      You must use 'trg!' or 'trigger!' to explicitly acknowledge this boundary. \
                      (Top-level trigger declarations use 'trg' without '!')".to_string(),
                 )
+            }
+            Some(Ok(Token::Hash)) => {
+                // Block pragma: #on_exit { ... };
+                return self.parse_block_pragma();
             }
             _ => {
                 // Check for alka block before parsing as expression
@@ -5161,6 +5305,153 @@ mod parser_tests {
                     assert_eq!(modifiers[0].value.as_deref(), Some("4096"));
                 }
                 _ => panic!("Expected Let"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_multi_body_transaction() {
+        let s = r#"txn Foo [x > 0][ready] {
+                &x = 1;
+            }
+            [x == 0] {
+                &x = 2;
+            }
+            {
+                term;
+            };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse multi-body transaction: {:?}", result.err());
+        if let Ok(program) = result {
+            if let TopLevel::Transaction(txn) = &program.items[0] {
+                assert_eq!(txn.variant_bodies.len(), 2, "Should have 2 variant bodies");
+                assert!(txn.variant_bodies[1].0.is_none(), "Catch-all variant should have no precondition");
+                assert!(!txn.variant_bodies[1].1.is_empty(), "Catch-all body should have statements");
+            } else {
+                panic!("Expected Transaction");
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_multi_body_definition() {
+        let s = r#"defn process [x > 0][result > 0] -> Int {
+                &result = x * 2;
+            }
+            [x == 0] {
+                &result = 1;
+            }
+            {
+                &result = 0;
+            };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse multi-body definition: {:?}", result.err());
+        if let Ok(program) = result {
+            if let TopLevel::Definition(defn) = &program.items[0] {
+                assert_eq!(defn.variant_bodies.len(), 2, "Should have 2 variant bodies");
+            } else {
+                panic!("Expected Definition");
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_single_body_still_works() {
+        let s = r#"txn Foo [true][true] { &x = 1; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Single body should still parse: {:?}", result.err());
+        if let Ok(program) = result {
+            if let TopLevel::Transaction(txn) = &program.items[0] {
+                assert!(txn.variant_bodies.is_empty(), "Single body should have no variants");
+                assert!(!txn.body.is_empty(), "Should have body content");
+            } else {
+                panic!("Expected Transaction");
+            }
+        }
+    }
+
+    #[test]
+    fn test_on_exit_block_pragma() {
+        let s = r#"txn Foo [true][true] {
+            &CLAIMED = true;
+            #on_exit {
+                &CLAIMED = false;
+            };
+            dma_work();
+        };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse #on_exit block: {:?}", result.err());
+        if let Ok(program) = result {
+            if let TopLevel::Transaction(txn) = &program.items[0] {
+                let has_on_exit = txn.body.iter().any(|s| matches!(s, Statement::OnExit { .. }));
+                assert!(has_on_exit, "Should contain OnExit statement");
+            } else {
+                panic!("Expected Transaction");
+            }
+        }
+    }
+
+    #[test]
+    fn test_on_exit_no_precondition() {
+        let s = r#"txn Foo [true][true] {
+            #on_exit { &x = 0; };
+            term;
+        };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse on_exit without pre: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_struct_variant_with_add() {
+        let s = r#"struct GPU {
+            vendor: UInt16;
+            bar0: Ptr;
+        }
+        [has_ce] {
+            has_ce: Bool = true;
+            + ce_engine: UInt16;
+        };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse struct variant with +: {:?}", result.err());
+        if let Ok(program) = result {
+            if let TopLevel::Struct(sdef) = &program.items[0] {
+                assert_eq!(sdef.variants.len(), 1, "Should have 1 variant");
+                let v = &sdef.variants[0];
+                assert_eq!(v.additions.len(), 1, "Should have 1 addition");
+                assert_eq!(v.additions[0].name, "ce_engine");
+                assert!(v.removals.is_empty(), "Should have no removals");
+            } else {
+                panic!("Expected Struct");
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_variant_with_remove() {
+        let s = r#"struct GPU {
+            vendor: UInt16;
+            bar0: Ptr;
+        }
+        [no_bar0] {
+            - bar0;
+        };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse struct variant with -: {:?}", result.err());
+        if let Ok(program) = result {
+            if let TopLevel::Struct(sdef) = &program.items[0] {
+                assert_eq!(sdef.variants.len(), 1, "Should have 1 variant");
+                assert!(sdef.variants[0].additions.is_empty(), "Should have no additions");
+                assert_eq!(sdef.variants[0].removals.len(), 1, "Should have 1 removal");
+                assert_eq!(sdef.variants[0].removals[0], "bar0");
+            } else {
+                panic!("Expected Struct");
             }
         }
     }

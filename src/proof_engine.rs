@@ -551,7 +551,7 @@ impl SymbolicExecutor {
                     path_kind = PathKind::Escape;
                 }
                 Statement::Expression(_) | Statement::Unification { .. } | Statement::LocalTrigger { .. } => {}
-                Statement::Alka(_) => {}
+                Statement::Alka(_) | Statement::OnExit { .. } => {}
             }
         }
 
@@ -2121,7 +2121,7 @@ impl ProofEngine {
             }
             Statement::Unification { .. } => {}
             Statement::LocalTrigger { .. } => {}
-            Statement::Alka(_) => {}
+            Statement::Alka(_) | Statement::OnExit { .. } => {}
         }
     }
 

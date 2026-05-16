@@ -1386,7 +1386,7 @@ impl WasmGenerator {
                 ));
                 // TODO: Emit async yield/await code for local triggers
             }
-            Statement::Alka(_) => {}
+            Statement::Alka(_) | Statement::OnExit { .. } => {}
         }
     }
 

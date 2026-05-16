@@ -529,6 +529,12 @@ pub enum Statement {
 
     // Alka escape hatch: alka { ... }; or alka! { ... };
     Alka(AlkaBlock),
+
+    // Block pragma: #on_exit { ... };
+    OnExit {
+        body: Vec<Statement>,
+        span: Option<Span>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

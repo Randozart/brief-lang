@@ -456,7 +456,7 @@ impl Interpreter {
                 }
                 // TODO: Full async yield/await semantics with rollback support
             }
-            Statement::Alka(_) => {}
+            Statement::Alka(_) | Statement::OnExit { .. } => {}
         }
         Ok(())
     }
