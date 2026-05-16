@@ -7,6 +7,7 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 ### Commands
 - **Build**: `cargo build`
 - **Test**: `cargo test --lib`
+- **Test backend registry**: `cargo test --lib -- backend::tests`
 - **Compile RBV**: `./target/release/brief-compiler rbv <file.rbv>`
 
 ### File Types
