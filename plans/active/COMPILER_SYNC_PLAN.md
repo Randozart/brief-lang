@@ -621,6 +621,17 @@ lib/compiler/
 **Files changed:**
 - `lib/compiler/ast.bv` — added `SliceCoordinate` enum (SliceIndex, SliceRange, SliceNamed); extended `ExprSlice` with stride and mask fields (3→5); added `ExprMultiSlice(Expr, List<SliceCoordinate>, Option<Expr>)`
 
+#### Phase 2.11: List SIMD Length Checking — COMPLETED
+
+**Files changed:**
+- `lib/compiler/proof_engine.bv` — added `SimdOp` struct; `extract_list_name()` extracts variable names from expressions; `collect_simd_ops()` finds binary ops in body; `collect_simd_ops_in_expr()` recursively identifies ops; `check_list_simd_lengths()` entry point walks all txns/defns
+
+#### Phase 2.12: Backend Hashtag Registry — 
+
+**Files changed:**
+- `lib/compiler/backends/mod.bv` — NEW file. `supported_hashtags(backend)` returns list per backend; `validate_hashtags(tags, backend)` checks each tag; `validate_hashtags_in_program(program, backend, strict)` walks entire AST
+- `lib/compiler/main.bv` — call hashtag validation in compilation pipeline
+
 #### Future: Strict Mode Big-O / Complexity Extension (Planned)
 
 See §2.8b above. Documented 2026-05-25. Implementation deferred until both compilers have strict mode ported.

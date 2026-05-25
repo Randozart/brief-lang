@@ -836,3 +836,85 @@ defn sym_to_string(sym: SymbolicValue) -> String {
     };
     term "?";
 }
+
+// ===== LIST SIMD LENGTH CHECKING =====
+
+struct SimdOp {
+    left: String,
+    right: String,
+    context: String
+}
+
+defn extract_list_name(expr: Expr) -> Option<String> {
+    uni expr(ExprVar(name)) = { term Some(name); };
+    uni expr(ExprFieldAccess(obj, field)) = {
+        let inner = extract_list_name(*obj);
+        uni inner(Some(n)) = { term Some(n + "." + field); };
+        term None;
+    };
+    uni expr(ExprListIndex(inner, _)) = {
+        term extract_list_name(*inner);
+    };
+    term None;
+}
+
+defn collect_simd_ops(body: List<Statement>) -> List<SimdOp> {
+    let ops: List<SimdOp> = [];
+    let i: Int = 0;
+    [i < len(body)] {
+        uni body[i](StmtExpr(expr)) = {
+            let result = collect_simd_ops_in_expr(*expr, "expr");
+            &ops = ops.append_all(result);
+        };
+        uni body[i](StmtAssign(lhs, rhs, _)) = {
+            let result = collect_simd_ops_in_expr(*rhs, "assign");
+            &ops = ops.append_all(result);
+        };
+        uni body[i](StmtLet(_, _, Some(init), _, _)) = {
+            let result = collect_simd_ops_in_expr(*init, "let");
+            &ops = ops.append_all(result);
+        };
+        &i = i + 1;
+    };
+    term ops;
+}
+
+defn collect_simd_ops_in_expr(expr: Expr, ctx: String) -> List<SimdOp> {
+    uni expr(ExprBinOp(op, left, right)) = {
+        let left_name = extract_list_name(*left);
+        let right_name = extract_list_name(*right);
+        [left_name.is_some() && right_name.is_some()] {
+            let simd = SimdOp { left: left_name.unwrap(), right: right_name.unwrap(), context: ctx };
+            term [simd];
+        };
+        term [];
+    };
+    term [];
+}
+
+defn check_list_simd_lengths(program: Program) -> List<String> {
+    let errors: List<String> = [];
+    let i: Int = 0;
+    [i < len(program.items)] {
+        uni program.items[i](TopTxn(txn)) = {
+            let ops = collect_simd_ops(txn.body);
+            let j: Int = 0;
+            [j < len(ops)] {
+                let msg = "SIMD op: " + ops[j].left + " " + ops[j].right + " in " + ops[j].context;
+                &errors = errors.append(msg);
+                &j = j + 1;
+            };
+        };
+        uni program.items[i](TopDefn(defn)) = {
+            let ops = collect_simd_ops(defn.body);
+            let j: Int = 0;
+            [j < len(ops)] {
+                let msg = "SIMD op: " + ops[j].left + " " + ops[j].right + " in " + ops[j].context;
+                &errors = errors.append(msg);
+                &j = j + 1;
+            };
+        };
+        &i = i + 1;
+    };
+    term errors;
+}
