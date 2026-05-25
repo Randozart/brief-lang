@@ -323,6 +323,8 @@ This is the termination analog of Brief's contract philosophy: make the provable
 - `cargo test --lib` passes all ARM64 backend tests
 - Regression: existing Brief `backend_aarch64.bv` still compiles and passes its tests
 
+**Phase 3 status**: NOT STARTED. Documented 2026-05-25. Ready to resume.
+
 ---
 
 ## Phase 4: Create Missing Backends (Rust → Brief)
