@@ -585,6 +585,13 @@ lib/compiler/
 - All pattern matches across typechecker, proof_engine, aarch64 backend updated (5th field)
 - `src/backend/c.rs:577,667` — fixed pre-existing `sig.unwrap()` bug (`sig.success_output` on `Option`)
 
+#### Phase 2.6: Tuple Destructuring — COMPLETED
+
+**Files changed:**
+- `lib/compiler/ast.bv` — added `ExprTupleDestructure(List<String>, Expr)` to Expr enum
+- `lib/compiler/parser.bv` — parse `let (a, b) = expr;` syntax with optional type annotation; comma-joins names, produces `StmtLet(joined, var_type, Some(ExprTupleDestructure(names, expr)), ...)`
+- `lib/compiler/typechecker.bv` — `infer_expr` handles `ExprTuple` (infers element types, produces `TypeTuple`) and `ExprTupleDestructure` (delegates to source type); `check_statement` destructure branch detects `ExprTupleDestructure` in init, infers RHS type, matches arity, declares each variable
+
 #### Future: Strict Mode Big-O / Complexity Extension (Planned)
 
 See §2.8b above. Documented 2026-05-25. Implementation deferred until both compilers have strict mode ported.

@@ -30,6 +30,7 @@ enum Expr {
     // Containers
     ExprList(List<Expr>),
     ExprTuple(List<Expr>),
+    ExprTupleDestructure(List<String>, Expr),  // (a, b) = source_tuple
     
     // Type operations
     ExprCast(Expr, Type),  // expr, target_type

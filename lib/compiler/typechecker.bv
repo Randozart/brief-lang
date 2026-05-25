@@ -370,6 +370,26 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
         term Err("Undefined function: " + name);
     };
     
+    uni expr(ExprTuple(elements)) = {
+        let types: List<Type> = [];
+        let i: Int = 0;
+        [i < len(elements)] {
+            let result = infer_expr(elements[i], ctx);
+            uni result(Ok(InferResult { ty, subst })) = {
+                &types = append(types, ty);
+                &i = i + 1;
+            };
+            uni result(Err(e)) = { term Err(e); };
+        };
+        term Ok(InferResult { ty: TypeTuple(types), subst: empty_subst() });
+    };
+    
+    uni expr(ExprTupleDestructure(_, source_expr)) = {
+        let result = infer_expr(*source_expr, ctx);
+        uni result(Ok(res)) = { term Ok(res); };
+        uni result(Err(e)) = { term Err(e); };
+    };
+    
     term Err("Cannot infer type for expression");
 }
 
@@ -519,6 +539,27 @@ defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeCon
     uni stmt(StmtLet(name, var_type, init, _modifiers, _)) = {
         let ctx = ctx;
         let ty: Type = TypeVoid;
+        
+        // Check for tuple destructuring via ExprTupleDestructure in init
+        [is_some(init)] {
+            let init_expr = unwrap(init);
+            uni init_expr(ExprTupleDestructure(names, source_expr)) = {
+                let result = infer_expr(*source_expr, ctx);
+                uni result(Ok((init_ty, _))) = {
+                    uni init_ty(TypeTuple(types)) = {
+                        [types.len() == names.len()] {
+                            let i: Int = 0;
+                            [i < types.len()] {
+                                &ctx = declare_variable(ctx, names[i], types[i]);
+                                &i = i + 1;
+                            };
+                            term (TypeVoid, ctx);
+                        };
+                    };
+                };
+                uni result(Err(e)) = { term Err(e); };
+            };
+        };
         
         [is_some(init)] {
             let result = infer_expr(unwrap(init), ctx);

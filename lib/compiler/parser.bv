@@ -1372,6 +1372,73 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
         term Err(e);
     };
     
+    // Check for tuple destructuring: let (a, b) = expr;
+    uni current_token(state)(DelimLParen) = {
+        &state = advance(state);
+        let names: List<String> = [];
+        
+        let tok = current_token(state);
+        uni tok(TokenIdentifier(name)) = {
+            &names = append(names, name);
+            &state = advance(state);
+        };
+        [!is_identifier(tok)] {
+            term Err("Expected identifier after ( in tuple destructuring");
+        };
+        
+        [current_token(state) == OpComma] {
+            &state = advance(state);
+            let tok2 = current_token(state);
+            uni tok2(TokenIdentifier(name2)) = {
+                &names = append(names, name2);
+                &state = advance(state);
+            };
+            [!is_identifier(tok2)] {
+                term Err("Expected identifier after comma in tuple destructuring");
+            };
+        };
+        
+        let result = expect_token(state, DelimRParen);
+        uni result(Ok(new_state)) = { &state = new_state; };
+        uni result(Err(e)) = { term Err(e); };
+        
+        let var_type: Option<Type> = None;
+        [current_token(state) == OpColon] {
+            &state = advance(state);
+            let result = parse_type(state);
+            uni result(Ok(pair)) = {
+                let (ty, new_state) = pair;
+                &var_type = Some(ty);
+                &state = new_state;
+            };
+            uni result(Err(e)) = { term Err(e); };
+        };
+        
+        let result = expect_token(state, OpEq);
+        uni result(Ok(new_state)) = { &state = new_state; };
+        uni result(Err(e)) = { term Err(e); };
+        
+        let result = parse_expression(state);
+        uni result(Ok(pair)) = {
+            let (expr, new_state) = pair;
+            &state = new_state;
+        };
+        uni result(Err(e)) = { term Err(e); };
+        
+        let result = expect_token(state, OpSemicolon);
+        uni result(Ok(new_state)) = {
+            let sb = new_builder();
+            let i: Int = 0;
+            [i < names.len()] {
+                [i > 0] { sb = append_str(sb, ","); };
+                sb = append_str(sb, names[i]);
+                &i = i + 1;
+            };
+            let joined = sb.to_string();
+            term Ok((StmtLet(joined, var_type, Some(ExprTupleDestructure(names, expr)), [], None), new_state));
+        };
+        uni result(Err(e)) = { term Err(e); };
+    };
     let tok = current_token(state);
     uni tok(TokenIdentifier(name)) = {
         &state = advance(state);
