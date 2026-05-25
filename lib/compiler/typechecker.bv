@@ -145,8 +145,8 @@ defn apply_subst(ty: Type, subst: Substitution) -> Type {
         };
         term ty;
     };
-    uni ty(TypeVector(inner, size)) = {
-        term TypeVector(inner, size);
+    uni ty(TypeVector(inner, dims)) = {
+        term TypeVector(inner, dims);
     };
     uni ty(TypeOption(inner)) = {
         term TypeOption(inner);

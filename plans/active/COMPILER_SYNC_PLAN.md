@@ -610,6 +610,12 @@ lib/compiler/
 - `lib/compiler/parser.bv` — added `strict_mode: Bool` to `ParserState`; `set_strict_mode()` helper; `parse_contract` rejects `[true]` pre/post in strict mode; all `ParserState` constructors propagate `strict_mode`
 - `lib/compiler/main.bv` — `is_strict_extension()` detects `.sbv`/`.sebv`/`.srbv`; `compile_file` enables strict mode via `set_strict_mode()`
 
+#### Phase 2.9: Multidimensional Vectors with Named Dimensions — COMPLETED
+
+**Files changed:**
+- `lib/compiler/ast.bv` — added `Dimension { name: Option<String>, size: Int }` struct; changed `TypeVector(Type, Int)` → `TypeVector(Type, List<Dimension>)`
+- `lib/compiler/typechecker.bv` — updated all 2 `TypeVector` pattern matches for new list-of-dimensions field
+
 #### Future: Strict Mode Big-O / Complexity Extension (Planned)
 
 See §2.8b above. Documented 2026-05-25. Implementation deferred until both compilers have strict mode ported.

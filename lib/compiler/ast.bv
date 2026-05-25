@@ -146,6 +146,11 @@ struct Signature {
 
 // ===== TYPE DEFINITIONS =====
 
+struct Dimension {
+    name: Option<String>,
+    size: Int
+}
+
 enum Type {
     TypeInt,
     TypeUInt,
@@ -155,7 +160,7 @@ enum Type {
     TypeChar,
     TypeData,
     TypeVoid,
-    TypeVector(Type, Int),
+    TypeVector(Type, List<Dimension>),
     TypeOption(Type),
     TypeResult(Type, Type),
     TypeList(Type),
