@@ -136,7 +136,8 @@ struct Transaction {
     params: List<Param>,
     contract: Contract,
     body: List<Statement>,
-    modifiers: List<Hashtag>
+    modifiers: List<Hashtag>,
+    dependencies: List<String>
 }
 
 struct Param {

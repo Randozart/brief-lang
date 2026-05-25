@@ -437,7 +437,8 @@ defn parse_transaction(state: ParserState) -> Result<(Transaction, ParserState),
         params: params,
         contract: contract,
         body: body,
-        modifiers: modifiers
+        modifiers: modifiers,
+        dependencies: []
     };
     
     term Ok((txn_obj, state));
