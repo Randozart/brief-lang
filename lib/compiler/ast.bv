@@ -287,6 +287,59 @@ struct ForeignBinding {
     target: String
 }
 
+enum ForeignTarget {
+    FgNative,
+    FgWasm,
+    FgC,
+    FgPython,
+    FgJs,
+    FgSwift,
+    FgGo
+}
+
+enum FfiKind {
+    FfiFrgn,
+    FfiFrgnBang,
+    FfiSyscall,
+    FfiSyscallBang
+}
+
+enum ResultType {
+    ResVoid,
+    ResResult,
+    ResOption
+}
+
+struct MemoryLayout {
+    offset: Int,
+    size: Int,
+    alignment: Int
+}
+
+struct ForeignSignature {
+    name: String,
+    location: String,
+    wasm_impl: Option<String>,
+    wasm_setup: Option<String>,
+    inputs: List<(String, Type)>,
+    success_output: List<(String, Type)>,
+    result_type: ResultType,
+    error_type_name: String,
+    error_fields: List<(String, Type)>,
+    input_layout: Option<MemoryLayout>,
+    output_layout: Option<MemoryLayout>,
+    precondition: Option<String>,
+    postcondition: Option<String>,
+    buffer_mode: Option<String>,
+    ffi_kind: Option<FfiKind>
+}
+
+struct FfiState {
+    bindings: List<ForeignSignature>,
+    wasm_glue: Option<String>,
+    profiles: Option<String>
+}
+
 // ===== PROGRAM =====
 
 enum StrictMode {
@@ -305,7 +358,7 @@ enum TopLevel {
     TopConst(Constant),
     TopState(StateDecl),
     TopRender(String, ViewBody),  // name, body
-    TopForeign(ForeignBinding)
+    TopForeign(ForeignSignature)
 }
 
 struct Program {

@@ -631,6 +631,37 @@ lib/compiler/
 **Files changed:**
 - `lib/compiler/backends/mod.bv` — NEW (145 lines). `supported_hashtags(backend)` returns list per backend (10 backends); `validate_hashtag(tag, backend)` checks support, fallback chains, scoped tags; `validate_hashtags_in_stmts()` walks statements; `validate_hashtags_in_program()` walks entire AST with strict mode error escalation
 
-#### Future: Strict Mode Big-O / Complexity Extension (Planned)
+#### Phase 2.13: CLI Dependency Management — COMPLETED
+
+**Files changed:**
+- `lib/compiler/ast.bv` — added `dependencies: List<String>` to Transaction struct
+- `lib/compiler/parser.bv` — Transaction creation includes empty `dependencies: []`
+
+#### Phase 2.14: FFI Infrastructure — COMPLETED
+
+**Files changed:**
+- `lib/compiler/ast.bv` — replaced simple `ForeignBinding` (4 fields) with full `ForeignSignature` (15 fields); added `ForeignTarget` enum (7 targets), `FfiKind` enum (4 kinds), `ResultType` enum, `MemoryLayout` struct, `FfiState` struct; updated `TopForeign` to use `ForeignSignature`
+- `lib/compiler/parser.bv` — updated Transaction creation to include `dependencies: []`
+
+---
+
+## Phase 2 Summary (2026-05-25)
+
+All 14 v0.14 feature sync phases completed in a single session. The Brief self-hosted compiler (`lib/compiler/`) now has:
+
+1. ✅ Hashtag modifiers (`#!`, `#[`, `#(`, `#?`)
+2. ✅ `#on_exit` block pragma
+3. ✅ `+/-` struct field modifiers (parsed, passthrough)
+4. ✅ Alka Hatch (`alka { }` / `alka! { }`)
+5. ✅ Dynamic `@` address binding
+6. ✅ Tuple destructuring (`let (a, b) = expr;`)
+7. ✅ LocalTrigger (`trg! name: Type = expr;`)
+8. ✅ Strict mode (`.sbv`/`.sebv`/`.srbv` detection, `[true]` rejection)
+9. ✅ Multidimensional vectors with named dimensions
+10. ✅ Vector slicing with stride/mask/multidimensional
+11. ✅ List SIMD length checking
+12. ✅ Backend hashtag registry
+13. ✅ CLI dependency management
+14. ✅ FFI infrastructure (ForeignSignature, ForeignTarget, FfiKind)
 
 See §2.8b above. Documented 2026-05-25. Implementation deferred until both compilers have strict mode ported.
