@@ -11,7 +11,7 @@ pub mod cobol;
 
 use crate::ast::Hashtag;
 
-/// Returns the list of hashtags supported by a given backend name.
+/// Intent: Return the list of hashtags supported by a given backend name.
 /// Backend names match the subcommand (e.g. "c", "rust", "wasm", "verilog", "vhdl", "x86_64", "aarch64", "cobol").
 pub fn supported_hashtags(backend: &str) -> Vec<&'static str> {
     match backend {
@@ -36,7 +36,7 @@ pub fn supported_hashtags(backend: &str) -> Vec<&'static str> {
     }
 }
 
-/// Result of validating a single hashtag against a backend.
+/// Intent: Result of validating a single hashtag against a backend.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HashtagValidation {
     Supported,
@@ -44,7 +44,7 @@ pub enum HashtagValidation {
     UnsupportedMandatory(String),
 }
 
-/// Validate a list of hashtags against a given backend.
+/// Intent: Validate a list of hashtags against a given backend.
 /// Returns a list of validation results — callers should emit
 /// warnings for `UnsupportedAdvisory` and errors for `UnsupportedMandatory`.
 pub fn validate_hashtags(hashtags: &[Hashtag], backend: &str) -> Vec<HashtagValidation> {
@@ -81,6 +81,7 @@ pub fn validate_hashtags(hashtags: &[Hashtag], backend: &str) -> Vec<HashtagVali
 
 use crate::ast::{Program, TopLevel, Transaction, Definition, Statement, StructDefinition};
 
+/// Intent: Collect all hashtags from a list of statements recursively.
 fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Hashtag> {
     let mut tags = Vec::new();
     for stmt in body {
@@ -96,7 +97,7 @@ fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Hashtag> {
     tags
 }
 
-/// Validate all hashtags in a program against the target backend.
+/// Intent: Validate all hashtags in a program against the target backend.
 /// Returns true if there are NO unsupported mandatory tag errors.
 /// Prints warnings/eprintfs for unsupported tags.
 pub fn validate_hashtags_in_program(program: &Program, backend: &str, strict: bool) -> bool {
@@ -153,6 +154,7 @@ mod tests {
     use super::*;
     use crate::ast::Hashtag;
 
+    /// Intent: Verify the C backend supports the volatile hashtag.
     #[test]
     fn test_c_backend_supports_volatile() {
         let tag = Hashtag { name: "volatile".into(), value: None, mandatory: false, fallback: vec![], scoped: None };
@@ -160,6 +162,7 @@ mod tests {
         assert_eq!(results[0], HashtagValidation::Supported);
     }
 
+    /// Intent: Verify the C backend rejects an unknown advisory hashtag.
     #[test]
     fn test_c_backend_rejects_unknown_advisory() {
         let tag = Hashtag { name: "thermal_sense".into(), value: None, mandatory: false, fallback: vec![], scoped: None };
@@ -167,6 +170,7 @@ mod tests {
         assert_eq!(results[0], HashtagValidation::UnsupportedAdvisory("thermal_sense".to_string()));
     }
 
+    /// Intent: Verify the C backend rejects an unknown mandatory hashtag.
     #[test]
     fn test_c_backend_rejects_unknown_mandatory() {
         let tag = Hashtag { name: "thermal_sense".into(), value: None, mandatory: true, fallback: vec![], scoped: None };
@@ -174,6 +178,7 @@ mod tests {
         assert_eq!(results[0], HashtagValidation::UnsupportedMandatory("thermal_sense".to_string()));
     }
 
+    /// Intent: Verify fallback chain tries alternative hashtags.
     #[test]
     fn test_fallback_chain_tries_alternatives() {
         let tag = Hashtag {
@@ -187,6 +192,7 @@ mod tests {
         assert_eq!(results[0], HashtagValidation::Supported);
     }
 
+    /// Intent: Verify fallback chain returns error when all alternatives unknown.
     #[test]
     fn test_fallback_chain_all_unknown() {
         let tag = Hashtag {
@@ -200,6 +206,7 @@ mod tests {
         assert_eq!(results[0], HashtagValidation::UnsupportedMandatory("unknown_op".to_string()));
     }
 
+    /// Intent: Verify scoped tag is skipped when backend does not match.
     #[test]
     fn test_scoped_tag_skipped_for_wrong_backend() {
         let tag = Hashtag {
@@ -213,6 +220,7 @@ mod tests {
         assert_eq!(results.len(), 0, "Scoped tag should be skipped for wrong backend");
     }
 
+    /// Intent: Verify scoped tag is validated when backend matches.
     #[test]
     fn test_scoped_tag_validated_for_correct_backend() {
         let tag = Hashtag {

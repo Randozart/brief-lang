@@ -24,7 +24,7 @@
 use crate::ast::{Expr, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 
-// AArch64 instruction set
+/// Intent: AArch64 instruction set enum with all supported opcodes and addressing modes.
 #[derive(Debug, Clone)]
 pub enum A64Instr {
     // Data processing (immediate)
@@ -70,6 +70,7 @@ pub enum A64Instr {
 }
 
 impl A64Instr {
+    /// Intent: Convert an AArch64 instruction to its assembly string representation.
     pub fn to_asm(&self) -> String {
         match self {
             A64Instr::AddImm(rd, rn, imm) => format!("    add {}, {}, #{}", rd, rn, imm),
@@ -99,7 +100,7 @@ impl A64Instr {
     }
 }
 
-// AArch64 backend with PRAXIS optimizations
+/// Intent: AArch64 backend with PRAXIS optimizations for branchless code generation, predictive fetching, transaction fusion, memory overlay, and parallel scheduling.
 pub struct AArch64Backend {
     spec: Option<crate::target_spec::TargetSpec>,
     signal_counter: usize,
@@ -108,6 +109,7 @@ pub struct AArch64Backend {
     optimizations: OptimizationFlags,
 }
 
+/// Intent: Flags to enable or disable specific PRAXIS optimization passes.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OptimizationFlags {
     pub branchless: bool,
@@ -118,6 +120,7 @@ pub struct OptimizationFlags {
 }
 
 impl AArch64Backend {
+    /// Intent: Create a new AArch64Backend with default PRAXIS optimizations enabled.
     pub fn new() -> Self {
         Self {
             spec: None,
@@ -134,18 +137,20 @@ impl AArch64Backend {
         }
     }
     
+    /// Intent: Attach a target specification to the backend via builder pattern.
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
         self.spec = Some(spec);
         self
     }
     
+    /// Intent: Override the default optimization flags via builder pattern.
     pub fn with_optimizations(mut self, opts: OptimizationFlags) -> Self {
         self.optimizations = opts;
         self
     }
     
+    /// Intent: Generate a complete AArch64 assembly output for the given Brief program.
     pub fn generate(&mut self, program: &Program) -> String {
-        self.collect_signals(program);
         
         let mut output = String::new();
         
@@ -202,6 +207,7 @@ impl AArch64Backend {
         output
     }
     
+    /// Intent: Scan the program and build a signal-to-offset map for state declarations.
     fn collect_signals(&mut self, program: &Program) {
         for item in &program.items {
             if let TopLevel::StateDecl(state) = item {
@@ -211,6 +217,7 @@ impl AArch64Backend {
         }
     }
     
+    /// Intent: Extract all transactions from the program AST into a name-to-transaction vector.
     fn collect_transactions(program: &Program) -> Vec<(String, &crate::ast::Transaction)> {
         let mut txns = Vec::new();
         for item in &program.items {
@@ -221,6 +228,7 @@ impl AArch64Backend {
         txns
     }
     
+    /// Intent: Emit the .data section with aligned zero-initialized storage for each state variable.
     fn generate_data_section(&mut self, output: &mut String, program: &Program) {
         output.push_str(".data\n");
         
@@ -235,6 +243,7 @@ impl AArch64Backend {
         }
     }
     
+    /// Intent: Return the AArch64 memory size in bytes for a given Brief type.
     fn type_size(ty: &Type) -> usize {
         match ty {
             Type::Int | Type::UInt => 8,
@@ -245,6 +254,7 @@ impl AArch64Backend {
         }
     }
     
+    /// Intent: Emit the _start entry point that sets up the frame pointer and calls the reactor.
     fn generate_entry_point(&self, output: &mut String) {
         output.push_str("_start:\n");
         output.push_str("    // Entry point\n");
@@ -257,6 +267,7 @@ impl AArch64Backend {
     }
     
     // PRAXIS: Sequential reactor (baseline)
+    /// Intent: Emit a sequential reactor loop that checks and fires each transaction in order.
     fn generate_sequential_reactor(&self, output: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         output.push_str("reactor_entry:\n");
         output.push_str("    // Reactor loop - sequential\n");
@@ -277,6 +288,7 @@ impl AArch64Backend {
     }
     
     // PRAXIS: Parallel reactor with transaction fusion
+    /// Intent: Emit a parallel reactor loop with memory barriers and optional branchless guard checks.
     fn generate_parallel_reactor(&self, output: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         output.push_str("reactor_entry:\n");
         output.push_str("    // Reactor loop - parallel with transaction fusion\n");
@@ -304,6 +316,7 @@ impl AArch64Backend {
     }
     
     // PRAXIS: Branchless guard check
+    /// Intent: Emit a branchless guard check that calls the guard function then conditionally fires the transaction.
     fn generate_branchless_guard_check(&self, output: &mut String, name: &str, txn: &crate::ast::Transaction) {
         output.push_str(&format!("    // Branchless guard check for {}\n", name));
         output.push_str(&format!("    bl {}_guard\n", name));
@@ -313,6 +326,7 @@ impl AArch64Backend {
         output.push_str(".skip:\n\n");
     }
     
+    /// Intent: Emit a transaction function body with frame setup/teardown and statement generation.
     fn generate_transaction(&self, output: &mut String, name: &str, txn: &crate::ast::Transaction) {
         output.push_str(&format!("{}:\n", name));
         output.push_str(&format!("    // Transaction: {}\n", name));
@@ -329,6 +343,7 @@ impl AArch64Backend {
     }
     
     // PRAXIS: Transaction with predictive fetch
+    /// Intent: Emit a guard function with predictive prefetch instructions for early data loading.
     fn generate_transaction_with_prefetch(&self, output: &mut String, name: &str, txn: &crate::ast::Transaction) {
         output.push_str(&format!("{}_guard:\n", name));
         output.push_str(&format!("    // Guard check with predictive fetch for {}\n", name));
@@ -349,6 +364,7 @@ impl AArch64Backend {
         output.push_str("    ret\n\n");
     }
     
+    /// Intent: Collect memory offset addresses accessed by a transaction for prefetch hints.
     fn collect_data_addresses(&self, txn: &crate::ast::Transaction) -> Vec<i64> {
         let mut addrs = Vec::new();
         for stmt in &txn.body {

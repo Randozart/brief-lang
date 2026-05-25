@@ -1394,6 +1394,20 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
         };
     };
     
+    let address_expr: Option<Expr> = None;
+    [current_token(state) == OpAt] {
+        &state = advance(state);
+        let result = parse_expression(state);
+        uni result(Ok(pair)) = {
+            let (addr_expr, new_state) = pair;
+            &address_expr = Some(addr_expr);
+            &state = new_state;
+        };
+        uni result(Err(e)) = {
+            term Err(e);
+        };
+    };
+    
     let init_value: Option<Expr> = None;
     [current_token(state) == OpEq] {
         &state = advance(state);
@@ -1410,7 +1424,7 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
     
     let result = expect_token(state, OpSemicolon);
     uni result(Ok(new_state)) = {
-        term Ok((StmtLet(name, var_type, init_value, []), new_state));
+        term Ok((StmtLet(name, var_type, init_value, [], None), new_state));
     };
     uni result(Err(e)) = {
         term Err(e);

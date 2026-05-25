@@ -26,19 +26,27 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, PartialEq)]
+/// Intent: CodeTarget type.
+/// Intent: CodeTarget type.
 pub enum CodeTarget {
     Wasm,   // Browser WASM (default)
     Arm,     // ARM ELF (bare-metal)
     Fpga,   // SystemVerilog (FPGA)
 }
 
+/// Intent: Default implementation block.
+/// Intent: Default implementation.
 impl Default for CodeTarget {
+    /// Intent: default function.
+    /// Intent: return the default value.
     fn default() -> Self {
         CodeTarget::Wasm
     }
 }
 
 #[derive(Clone)]
+/// Intent: SignalType type.
+/// Intent: SignalType type.
 enum SignalType {
     Int,
     Float,
@@ -49,6 +57,8 @@ enum SignalType {
     Vector(usize),
 }
 
+/// Intent: WebstackGenerator type.
+/// Intent: WebstackGenerator type.
 pub struct WebstackGenerator {
     spec: Option<crate::target_spec::TargetSpec>,
     signal_counter: usize,
@@ -68,7 +78,11 @@ pub struct WebstackGenerator {
     pending_cleanup: RefCell<Vec<Statement>>,
 }
 
+/// Intent: WebstackGenerator implementation block.
+/// Intent: WebstackGenerator implementation.
 impl WebstackGenerator {
+    /// Intent: new function.
+    /// Intent: create a new instance.
     pub fn new() -> Self {
         WebstackGenerator {
             spec: None,
@@ -90,20 +104,28 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: with_spec function.
+    /// Intent: with spec.
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
         self.spec = Some(spec);
         self
     }
 
+    /// Intent: with_target function.
+    /// Intent: with target.
     pub fn with_target(mut self, target: CodeTarget) -> Self {
         self.target = target;
         self
     }
 
+    /// Intent: set_reactor_speed function.
+    /// Intent: set reactor speed.
     pub fn set_reactor_speed(&mut self, speed: u32) {
         self.reactor_speed = speed;
     }
 
+    /// Intent: generate function.
+    /// Intent: generate output code.
     pub fn generate(
         &mut self,
         program: &Program,
@@ -144,6 +166,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: generate_arm_rust_code function.
+    /// Intent: generate arm rust code.
     fn generate_arm_rust_code(&self, program: &Program) -> String {
         let mut output = String::new();
 
@@ -248,6 +272,8 @@ impl WebstackGenerator {
         output
     }
 
+    /// Intent: get_rust_type_for_arm function.
+    /// Intent: get rust type for arm.
     fn get_rust_type_for_arm(ty: &Type, bit_range: &Option<BitRange>) -> String {
         // Handle Vector types first - generate array
         if let Type::Vector(inner, dims) = ty {
@@ -287,6 +313,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: rust_type_from_bit_range function.
+    /// Intent: rust type from bit range.
     fn rust_type_from_bit_range(bit_range: &BitRange) -> String {
         match bit_range {
             BitRange::Single(1) => "bool".to_string(),
@@ -312,10 +340,14 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: mmio_const_name function.
+    /// Intent: mmio const name.
     fn mmio_const_name(var_name: &str) -> String {
         format!("{}_BASE", var_name.to_uppercase().replace('-', "_"))
     }
 
+    /// Intent: collect_signals_and_transactions function.
+    /// Intent: collect signals and transactions.
     fn collect_signals_and_transactions(&mut self, program: &Program) {
         for item in &program.items {
             match item {
@@ -408,6 +440,7 @@ impl WebstackGenerator {
     }
 
     /// Generate Rust code for an FFI call - calls JS function from WASM
+    /// Intent: gen ffi call.
     fn gen_ffi_call(&self, fn_name: &str, args: &[Expr]) -> String {
         let mut code = String::from("{\n");
         code.push_str(&format!(
@@ -462,12 +495,16 @@ impl WebstackGenerator {
         code
     }
 
+    /// Intent: extract_dependencies function.
+    /// Intent: extract dependencies.
     fn extract_dependencies(&self, expr: &Expr) -> Vec<String> {
         let mut deps = Vec::new();
         self.extract_identifiers(expr, &mut deps);
         deps
     }
 
+    /// Intent: extract_identifiers function.
+    /// Intent: extract identifiers.
     fn extract_identifiers(&self, expr: &Expr, deps: &mut Vec<String>) {
         match expr {
             Expr::Identifier(name) => {
@@ -518,6 +555,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: generate_rust_code function.
+    /// Intent: generate rust code.
     fn generate_rust_code(&mut self, program: &Program, bindings: &[Binding]) -> String {
         let mut output = String::new();
 
@@ -1152,6 +1191,8 @@ impl WebstackGenerator {
         output
     }
 
+    /// Intent: generate_transaction function.
+    /// Intent: generate transaction.
     fn generate_transaction(&mut self, output: &mut String, txn: &crate::ast::Transaction) {
         // Clear local variables for this transaction
         self.local_vars.clear();
@@ -1237,6 +1278,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: is_vector_expr function.
+    /// Intent: is vector expr.
     fn is_vector_expr(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Identifier(name) | Expr::OwnedRef(name) => {
@@ -1252,6 +1295,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: statement_to_rust function.
+    /// Intent: statement to rust.
     fn statement_to_rust(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
             Statement::Assignment {
@@ -1408,6 +1453,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: is_list_signal function.
+    /// Intent: is list signal.
     fn is_list_signal(&self, expr: &Expr) -> bool {
         match expr {
             Expr::ListLiteral(_) => true,
@@ -1422,6 +1469,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: expr_to_js_value function.
+    /// Intent: expr to js value.
     fn expr_to_js_value(&self, expr: &Expr) -> String {
         match expr {
             Expr::Integer(n) => format!("JsValue::from({})", n),
@@ -1665,6 +1714,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: expr_to_js_value_for_condition function.
+    /// Intent: expr to js value for condition.
     fn expr_to_js_value_for_condition(&self, expr: &Expr) -> String {
         match expr {
             Expr::Bool(true) => "true".to_string(),
@@ -1751,6 +1802,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: is_string_expr function.
+    /// Intent: is string expr.
     fn is_string_expr(&self, expr: &Expr) -> bool {
         match expr {
             Expr::String(_) => true,
@@ -1765,6 +1818,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: js_value_to_f64 function.
+    /// Intent: js value to f64.
     fn js_value_to_f64(&self, expr: &Expr) -> String {
         match expr {
             Expr::ListLen(list_expr) => self.expr_to_js_value(expr),
@@ -1778,6 +1833,8 @@ impl WebstackGenerator {
         }
     }
 
+    /// Intent: generate_js_glue function.
+    /// Intent: generate js glue.
     fn generate_js_glue(&self, program_name: &str, bindings: &[Binding]) -> String {
         let mut output = String::new();
 
@@ -1998,6 +2055,8 @@ impl WebstackGenerator {
         output
     }
 
+    /// Intent: escape_selector function.
+    /// Intent: escape selector.
     fn escape_selector(&self, id: &str) -> String {
         if id.starts_with("rbv-") || id.starts_with('#') {
             format!("#{}", id.trim_start_matches('#'))
@@ -2007,13 +2066,19 @@ impl WebstackGenerator {
     }
 }
 
+/// Intent: Default implementation block.
+/// Intent: Default implementation.
 impl Default for WebstackGenerator {
+    /// Intent: default function.
+    /// Intent: return the default value.
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[derive(Debug)]
+/// Intent: WebstackOutput type.
+/// Intent: WebstackOutput type.
 pub struct WebstackOutput {
     pub rust_code: String,
     pub js_glue: String,

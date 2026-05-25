@@ -64,7 +64,7 @@ enum Statement {
     StmtAssign(Expr, Expr, List<Hashtag>),  // lhs, rhs, modifiers
     
     // Let binding
-    StmtLet(String, Option<Type>, Option<Expr>, List<Hashtag>),  // name, type, init, modifiers
+    StmtLet(String, Option<Type>, Option<Expr>, List<Hashtag>, Option<Expr>),  // name, type, init, modifiers, address_expr
     
     // Expression statement
     StmtExpr(Expr),

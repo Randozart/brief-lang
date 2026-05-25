@@ -33,7 +33,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Emit memory spec file if requested
+/// Intent: Emit memory spec file if requested
 fn emit_memory_spec_if_requested(
     program: &ast::Program,
     out_dir: Option<&Path>,
@@ -78,6 +78,7 @@ fn emit_memory_spec_if_requested(
     }
 }
 
+/// Intent: format hardware diagnostics.
 fn format_hardware_diagnostics(
     diags: &[errors::Diagnostic],
     source: &str,
@@ -117,6 +118,7 @@ fn format_hardware_diagnostics(
     output
 }
 
+/// Intent: format type errors.
 fn format_type_errors(errors: &[typechecker::TypeError], file_name: &str) -> String {
     let mut output = String::new();
     for err in errors {
@@ -191,6 +193,7 @@ fn format_type_errors(errors: &[typechecker::TypeError], file_name: &str) -> Str
     output
 }
 
+/// Intent: format proof errors.
 fn format_proof_errors(errors: &[proof_engine::ProofError], file_name: &str) -> String {
     let mut output = String::new();
     for err in errors {
@@ -225,6 +228,7 @@ fn format_proof_errors(errors: &[proof_engine::ProofError], file_name: &str) -> 
     output
 }
 
+/// Intent: strip annotations.
 fn strip_annotations(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
     let mut output = Vec::new();
@@ -252,6 +256,7 @@ fn strip_annotations(source: &str) -> String {
     output.join("\n")
 }
 
+/// Intent: strip codicil blocks.
 fn strip_codicil_blocks(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
     let mut output = Vec::new();
@@ -293,6 +298,7 @@ fn strip_codicil_blocks(source: &str) -> String {
     output.join("\n")
 }
 
+/// Intent: detect codicil project.
 fn detect_codicil_project(file_path: &Path) -> bool {
     let mut current = file_path.parent();
     while let Some(dir) = current {
@@ -304,6 +310,7 @@ fn detect_codicil_project(file_path: &Path) -> bool {
     false
 }
 
+/// Intent: print usage.
 fn print_usage(program: &str) {
     eprintln!("Brief Compiler v{}", env!("CARGO_PKG_VERSION"));
     eprintln!();
@@ -395,6 +402,7 @@ const STDLIB_BINDINGS: &[(&str, &str)] = &[
     ("time.toml", include_str!("../lib/ffi/bindings/time.toml")),
 ];
 
+/// Intent: run install.
 fn run_install() {
     let install_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -447,6 +455,7 @@ fn run_install() {
     println!("\nAdd this line to your ~/.bashrc or ~/.zshrc to make it permanent.");
 }
 
+/// Intent: run map or wrap.
 fn run_map_or_wrap(
     lib_path: &Path,
     mapper: Option<&str>,
@@ -555,11 +564,13 @@ fn run_map_or_wrap(
     Ok(())
 }
 
+/// Intent: is strict extension.
 fn is_strict_extension(file_path: &PathBuf) -> bool {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     matches!(ext, "sbv" | "sebv" | "srbv")
 }
 
+/// Intent: run check.
 fn run_check(
     file_path: &PathBuf,
     verbose: bool,
@@ -668,6 +679,7 @@ fn run_check(
     Ok(())
 }
 
+/// Intent: run build.
 fn run_build(
     file_path: &PathBuf,
     verbose: bool,
@@ -747,6 +759,7 @@ fn run_build(
     }
 }
 
+/// Intent: run init.
 fn run_init(name: Option<&str>, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
     let project_name = name.unwrap_or("my-brief-project").to_string();
     let project_dir = PathBuf::from(&project_name);
@@ -908,6 +921,7 @@ rstruct Counter {
     Ok(())
 }
 
+/// Intent: run import.
 fn run_import(
     name: &str,
     path: Option<&str>,
@@ -974,6 +988,7 @@ fn run_import(
     Ok(())
 }
 
+/// Intent: run watch.
 fn run_watch(
     file_path: PathBuf,
     verbose: bool,
@@ -1011,6 +1026,7 @@ fn run_watch(
     }
 }
 
+/// Intent: run serve.
 fn run_serve(dir: &Path, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -1022,6 +1038,7 @@ fn run_serve(dir: &Path, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     println!("Serving {} on http://{}", dir.display(), addr);
     println!("Press Ctrl+C to stop\n");
 
+    /// Intent: get mime type.
     fn get_mime_type(path: &Path) -> &'static str {
         match path.extension().and_then(|e| e.to_str()) {
             Some("html") => "text/html",
@@ -1037,6 +1054,7 @@ fn run_serve(dir: &Path, port: u16) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    /// Intent: handle request.
     fn handle_request(mut stream: TcpStream, root_dir: &Path) {
         let mut buffer = [0u8; 8192];
         let bytes_read = match stream.read(&mut buffer) {
@@ -1110,6 +1128,7 @@ fn run_serve(dir: &Path, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Intent: run arm.
 fn run_arm(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1170,6 +1189,7 @@ fn run_arm(
     Ok(out_path)
 }
 
+/// Intent: run rust.
 fn run_rust(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1245,6 +1265,7 @@ fn run_rust(
     Ok(out_path)
 }
 
+/// Intent: run compile unified.
 fn run_compile_unified(args: &[String]) {
     let mut file_path = None;
     let mut target: Option<&str> = None;
@@ -1461,6 +1482,7 @@ fn run_compile_unified(args: &[String]) {
     }
 }
 
+/// Intent: run c compile.
 fn run_c_compile(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1471,6 +1493,7 @@ fn run_c_compile(
     run_c(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), &[])
 }
 
+/// Intent: run rust compile.
 fn run_rust_compile(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1483,6 +1506,7 @@ fn run_rust_compile(
     run_rust(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), emit_memory_spec, memory_spec_format)
 }
 
+/// Intent: run cobol compile.
 fn run_cobol_compile(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1491,6 +1515,7 @@ fn run_cobol_compile(
     run_cobol(file_path, out_dir, target.cloned())
 }
 
+/// Intent: run verilog compile.
 fn run_verilog_compile(
     file_path: &PathBuf,
     hw_config_path: &PathBuf,
@@ -1504,6 +1529,7 @@ fn run_verilog_compile(
     run_verilog(file_path, hw_config_path, out_dir, no_stdlib, stdlib_path, generate_tcl, tcl_only, target.cloned())
 }
 
+/// Intent: run vhdl compile.
 fn run_vhdl_compile(
     file_path: &PathBuf,
     hw_config_path: &PathBuf,
@@ -1513,6 +1539,7 @@ fn run_vhdl_compile(
     run_vhdl(file_path, hw_config_path, out_dir, target.cloned())
 }
 
+/// Intent: run c.
 fn run_c(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1615,6 +1642,7 @@ fn run_c(
     Ok(out_path)
 }
 
+/// Intent: run cobol.
 fn run_cobol(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1671,6 +1699,7 @@ fn run_cobol(
     Ok(out_path)
 }
 
+/// Intent: run verilog.
 fn run_verilog(
     file_path: &PathBuf,
     hw_config_path: &PathBuf,
@@ -1957,6 +1986,7 @@ fn run_verilog(
     Ok(output_file)
 }
 
+/// Intent: run vhdl.
 fn run_vhdl(
     file_path: &PathBuf,
     hw_config_path: &PathBuf,
@@ -2167,6 +2197,7 @@ fn run_vhdl(
     Ok(last_output)
 }
 
+/// Intent: run rbv.
 fn run_rbv(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -2495,7 +2526,7 @@ wasm-opt = false
     Ok(output_path)
 }
 
-/// Generate a direct WASM binary from a .bv file.
+/// Intent: Generate a direct WASM binary from a .bv file.
 fn run_wasm(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -2556,7 +2587,7 @@ fn run_wasm(
     }
 }
 
-/// Generate Rust source with wasm-bindgen glue, then optionally compile with wasm-pack.
+/// Intent: Generate Rust source with wasm-bindgen glue, then optionally compile with wasm-pack.
 fn run_webstack(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -2566,6 +2597,7 @@ fn run_webstack(
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
+    /// Intent: compile via wasm pack.
     fn compile_via_wasm_pack(stem: &str, output_path: &Path, rs_path: &Path) {
         let cargo_toml = format!(r#"
 [package]
@@ -2690,6 +2722,7 @@ js-sys = "0.3"
     }
 }
 
+/// Intent: generate html.
 fn generate_html(name: &str, view_html: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
@@ -2709,6 +2742,7 @@ fn generate_html(name: &str, view_html: &str) -> String {
     )
 }
 
+/// Intent: check dependency.
 fn check_dependency(dep: &dbrief::ast::DbriefDependency) -> Result<(), String> {
     if dep.name.to_lowercase().contains("missing") {
         return Err("not found on system".to_string());
@@ -2716,6 +2750,7 @@ fn check_dependency(dep: &dbrief::ast::DbriefDependency) -> Result<(), String> {
     Ok(())
 }
 
+/// Intent: install dependency.
 fn install_dependency(dep: &dbrief::ast::DbriefDependency, verbose: bool) -> Result<(), String> {
     if verbose {
         let version_info = dep.version_constraint.as_ref()
@@ -2734,6 +2769,7 @@ fn install_dependency(dep: &dbrief::ast::DbriefDependency, verbose: bool) -> Res
     Ok(())
 }
 
+/// Intent: main.
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 

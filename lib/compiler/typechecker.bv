@@ -516,7 +516,7 @@ defn check_block(stmts: List<Statement>, ctx: TypeContext) -> Result<(Type, Type
 }
 
 defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeContext), String> {
-    uni stmt(StmtLet(name, var_type, init, _modifiers)) = {
+    uni stmt(StmtLet(name, var_type, init, _modifiers, _)) = {
         let ctx = ctx;
         let ty: Type = TypeVoid;
         

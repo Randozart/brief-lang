@@ -293,7 +293,7 @@ defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
     
     let i: Int = 0;
     [i < stmts.len()] {
-        uni stmts[i](StmtLet(name, _, _, _)) = {
+        uni stmts[i](StmtLet(name, _, _, _, _)) = {
             vars = vars.append(name);
         };
         uni stmts[i](StmtAssign(lhs, _, _)) = {
@@ -1194,7 +1194,7 @@ defn generate_statement_list(stmts: List<Statement>, alloc: RegisterAllocator) -
 }
 
 defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64Instr>, RegisterAllocator) {
-    uni stmt(StmtLet(name, _, Some(init), _modifiers)) = {
+    uni stmt(StmtLet(name, _, Some(init), _modifiers, _)) = {
         // let name = init;
         let (expr_instrs, new_alloc) = generate_expr(*init, alloc);
         let (reg, final_alloc) = alloc_reg(new_alloc, None);

@@ -297,7 +297,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
 }
 
 defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> SymbolicState {
-    uni stmt(StmtLet(name, _, Some(init), _)) = {
+    uni stmt(StmtLet(name, _, Some(init), _, _)) = {
         let value = eval_symbolic(*init, state);
         term state_assign(state, name, value);
     };
@@ -478,7 +478,7 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
     
     let i: Int = 0;
     [i < stmts.len()] {
-        uni stmts[i](StmtLet(name, _, _, _)) = {
+        uni stmts[i](StmtLet(name, _, _, _, _)) = {
             writes = writes.append(name);
         };
         uni stmts[i](StmtAssign(lhs, _, _)) = {
@@ -699,7 +699,7 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
     
     let i: Int = 0;
     [i < stmts.len()] {
-        uni stmts[i](StmtLet(_, _, Some(init), _)) = {
+        uni stmts[i](StmtLet(_, _, Some(init), _, _)) = {
             reads = reads.append_all(collect_reads_expr(*init));
         };
         uni stmts[i](StmtAssign(lhs, rhs, _)) = {

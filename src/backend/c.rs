@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use crate::ast::{Expr, LinkRef, Program, Statement, TopLevel, Type, ForeignBinding, ForeignSignature, FfiState};
-use crate::ffi::error::{ErrorConventions, generate_bounds_check, generate_null_check};  // NEW
+use crate::ffi::error::{ErrorConventions, generate_bounds_check, generate_null_check};
 use crate::linkage::LinkageConfig;
 
+/// Intent: Backend that compiles Brief programs to C with optional inline assembly.
 pub struct CBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     linkage: Option<LinkageConfig>,
@@ -30,6 +31,7 @@ pub struct CBackend {
 }
 
 impl CBackend {
+    /// Intent: Create a new C backend with default configuration.
     pub fn new() -> Self {
         Self {
             spec: None,
@@ -45,29 +47,28 @@ impl CBackend {
         }
     }
 
+    /// Intent: Enable or disable test mode for the C backend.
     pub fn with_test_mode(mut self, test_mode: bool) -> Self {
         self.test_mode = test_mode;
         self
     }
 
+    /// Intent: Attach a linkage configuration for hardware register resolution.
     pub fn with_linkage(mut self, linkage: LinkageConfig) -> Self {
         self.linkage = Some(linkage);
         self
     }
 
+    /// Intent: Attach a target specification for code generation.
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
         self.spec = Some(spec);
         self
     }
 
+    /// Intent: Generate C source and optional Makefile from a Brief program.
     pub fn generate(&mut self, program: &Program, stem: &str) -> (String, Option<String>) {
-        // Collect hardware register names first
         self.collect_hw_registers(program);
-
-        // Collect FFI bindings and state
         self.collect_ffi_bindings(program);
-
-        // Collect constants for #define
         self.collect_constants(program);
 
         let mut output = String::new();
@@ -80,7 +81,6 @@ impl CBackend {
             .unwrap_or("hosted");
         output.push_str(&format!("/* Target: {} */\n\n", target_label));
 
-        // Include headers based on spec
         if let Some(spec) = &self.spec {
             if let Some(cg) = &spec.codegen {
                 if let Some(header) = &cg.templates.header {
@@ -89,7 +89,6 @@ impl CBackend {
                 }
             }
         } else {
-            // Default: hosted headers
             output.push_str("#include <stdint.h>\n");
             output.push_str("#include <stdbool.h>\n");
             output.push_str("#include <stddef.h>\n");
@@ -97,13 +96,9 @@ impl CBackend {
             output.push_str("\n");
         }
 
-        // Generate MMIO definitions from @ link references
         self.generate_linkage_defines(&mut output);
-
-        // Generate FFI function declarations
         self.generate_ffi_declarations(&mut output);
 
-        // Generate module parameters for kernel module targets
         if let Some(spec) = &self.spec {
             if let Some(cg) = &spec.codegen {
                 if cg.entry_point.style == "module_init" {
@@ -118,7 +113,6 @@ impl CBackend {
 
         let state_decls = self.collect_state_declarations(program);
 
-        // Only generate struct for non-hardware state
         if !state_decls.is_empty() {
             output.push_str("typedef struct {\n");
             for (name, ty) in &state_decls {
@@ -127,7 +121,6 @@ impl CBackend {
             }
             output.push_str("} State;\n\n");
 
-            // State allocation based on spec or defaults
             let state_alloc = self.spec.as_ref()
                 .and_then(|s| s.codegen.as_ref())
                 .map(|s| s.state_allocation.clone())
@@ -142,7 +135,6 @@ impl CBackend {
                     output.push_str("static State *state = NULL;\n\n");
                 }
                 _ => {
-                    // Default to dynamic allocation for unknown variants
                     output.push_str("static State *state = NULL;\n\n");
                 }
             }
@@ -155,7 +147,7 @@ impl CBackend {
             output.push_str("}\n\n");
         }
 
-self.clear_local_vars();
+        self.clear_local_vars();
 
         for (_, txn) in self.collect_transactions(program) {
             self.clear_local_vars();
@@ -180,7 +172,7 @@ self.clear_local_vars();
             output.push_str("}\n\n");
         }
 
-output.push_str("static void init_wrapper(void) {\n");
+        output.push_str("static void init_wrapper(void) {\n");
         let state_decls = self.collect_state_declarations(program);
         if !state_decls.is_empty() {
             let state_alloc = self.spec.as_ref()
@@ -198,7 +190,6 @@ output.push_str("static void init_wrapper(void) {\n");
                     output.push_str("    state_init();\n");
                 }
                 _ => {
-                    // Default to dynamic allocation
                     output.push_str("    state = (State *)malloc(sizeof(State));\n");
                     output.push_str("    state_init();\n");
                 }
@@ -206,7 +197,6 @@ output.push_str("static void init_wrapper(void) {\n");
         }
         output.push_str("}\n\n");
 
-        // Generate appropriate entry point based on spec
         let entry_style = self.spec.as_ref()
             .and_then(|s| s.codegen.as_ref())
             .map(|s| s.entry_point.style.as_str())
@@ -214,11 +204,10 @@ output.push_str("static void init_wrapper(void) {\n");
 
         match entry_style {
             "module_init" => {
-                // Kernel module: generate module_init/module_exit
                 output.push_str("\n// Kernel module entry points\n");
-                
+
                 let entry_txn = self.find_entry_point(program);
-                
+
                 output.push_str("static int __init brief_init(void) {\n");
                 if let Some(entry_name) = entry_txn {
                     output.push_str(&format!("    {}();\n", Self::sanitize_name(&entry_name)));
@@ -226,7 +215,7 @@ output.push_str("static void init_wrapper(void) {\n");
                 output.push_str("    return 0;\n");
                 output.push_str("}\n");
                 output.push_str("module_init(brief_init);\n\n");
-                
+
                 let exit_txn = self.find_exit_point(program);
                 output.push_str("static void __exit brief_exit(void) {\n");
                 if let Some(exit_name) = exit_txn {
@@ -234,12 +223,11 @@ output.push_str("static void init_wrapper(void) {\n");
                 }
                 output.push_str("}\n");
                 output.push_str("module_exit(brief_exit);\n\n");
-                
+
                 output.push_str("MODULE_DESCRIPTION(\"Generated by Brief\");\n");
                 output.push_str("MODULE_LICENSE(\"GPL\");\n");
             }
             "bare_metal" | "arm_el1_start" => {
-                // Bare-metal: generate _start entry point + main
                 output.push_str("/* Bare-metal entry point */\n");
                 output.push_str("#define STACK_TOP 0x0F800000\n\n");
                 output.push_str("void _start(void) __attribute__((section(\".text.start\")));\n");
@@ -254,7 +242,6 @@ output.push_str("static void init_wrapper(void) {\n");
                 output.push_str("    while(1) { __asm__ volatile(\"wfi\"); }\n");
                 output.push_str("}\n\n");
 
-                // Generate main()
                 output.push_str("int main(void) {\n");
                 let state_decls = self.collect_state_declarations(program);
                 if !state_decls.is_empty() {
@@ -264,7 +251,6 @@ output.push_str("static void init_wrapper(void) {\n");
                 output.push_str("}\n");
             }
             _ => {
-                // Default/main: generate main()
                 output.push_str("int main(void) {\n");
                 let state_decls = self.collect_state_declarations(program);
                 if !state_decls.is_empty() {
@@ -275,7 +261,6 @@ output.push_str("static void init_wrapper(void) {\n");
             }
         }
 
-        // Generate Makefile for kernel modules
         let makefile = if entry_style == "module_init" {
             Some(self.generate_makefile(stem))
         } else {
@@ -285,8 +270,8 @@ output.push_str("static void init_wrapper(void) {\n");
         (output, makefile)
     }
 
+    /// Intent: Find the entry point transaction (named "init" or first with true precondition).
     fn find_entry_point(&self, program: &Program) -> Option<String> {
-        // First, look for a transaction named "init"
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
                 if txn.name == "init" {
@@ -294,11 +279,9 @@ output.push_str("static void init_wrapper(void) {\n");
                 }
             }
         }
-        
-        // Next, look for a transaction with precondition = true
+
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
-                // Check if precondition is true (simplified check)
                 if let Expr::Bool(true) = txn.contract.pre_condition {
                     return Some(txn.name.clone());
                 }
@@ -307,8 +290,8 @@ output.push_str("static void init_wrapper(void) {\n");
         None
     }
 
+    /// Intent: Find the exit point transaction (named "exit" or last non-reactive transaction).
     fn find_exit_point(&self, program: &Program) -> Option<String> {
-        // Look for transaction named "exit" or last non-rct transaction
         let mut last_txn = None;
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
@@ -323,11 +306,11 @@ output.push_str("static void init_wrapper(void) {\n");
         last_txn
     }
 
+    /// Intent: Generate a Makefile for kernel module compilation.
     fn generate_makefile(&self, stem: &str) -> String {
         let mut makefile = String::new();
         makefile.push_str("# Auto-generated Makefile for kernel module\n");
         makefile.push_str(&format!("obj-m += {}.o\n", stem));
-        // Note: -objs line not needed for single source file (causes circular dependency)
         makefile.push_str("\n");
         makefile.push_str("all:\n");
         makefile.push_str("\tmake -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules\n\n");
@@ -336,6 +319,7 @@ output.push_str("static void init_wrapper(void) {\n");
         makefile
     }
 
+    /// Intent: Collect hardware register names from trigger items in the program.
     fn collect_hw_registers(&mut self, program: &Program) {
         self.hw_register_names.clear();
         for item in &program.items {
@@ -347,6 +331,7 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Collect FFI binding declarations from the program.
     fn collect_ffi_bindings(&mut self, program: &Program) {
         self.ffi_bindings.clear();
         self.ffi_state = program.ffi.clone();
@@ -358,6 +343,7 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Collect constant definitions from the program for #define generation.
     fn collect_constants(&mut self, program: &Program) {
         self.constants.clear();
         for item in &program.items {
@@ -368,34 +354,40 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Check if a variable name refers to a defined constant.
     fn is_constant(&self, name: &str) -> bool {
         self.constants.iter().any(|(n, _)| n == name)
     }
 
+    /// Intent: Get the C expression value of a constant by name.
     fn get_constant_value(&self, name: &str) -> Option<String> {
         self.constants.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
     }
 
+    /// Intent: Check if a variable name is a locally declared variable.
     fn is_local_var(&self, name: &str) -> bool {
         self.local_vars.iter().any(|n| n == name)
     }
 
+    /// Intent: Register a variable as locally declared.
     fn add_local_var(&mut self, name: &str) {
         self.local_vars.push(name.to_string());
     }
 
+    /// Intent: Clear all registered local variables (per-transaction state).
     fn clear_local_vars(&mut self) {
         self.local_vars.clear();
     }
 
+    /// Intent: Check if a variable name references a hardware register.
     fn is_hw_register(&self, name: &str) -> bool {
         self.hw_register_names.iter().any(|n| n == name)
     }
 
+    /// Intent: Generate #define macros for linked hardware register addresses.
     fn generate_linkage_defines(&self, output: &mut String) {
         let Some(linkage) = &self.linkage else { return; };
 
-        // Generate #define for each linked hardware register
         for name in &self.hw_register_names {
             if let Some(c_addr) = linkage.resolve_c(name) {
                 let upper_name = name.to_uppercase();
@@ -407,6 +399,7 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Generate FFI extern declarations and optional stub implementations.
     fn generate_ffi_declarations(&self, output: &mut String) {
         if self.ffi_bindings.is_empty() {
             return;
@@ -414,7 +407,6 @@ output.push_str("static void init_wrapper(void) {\n");
 
         output.push_str("/* FFI Function Declarations */\n");
 
-        // Generate #defines for constants
         if !self.constants.is_empty() {
             output.push_str("\n/* Constant Definitions */\n");
             for (name, value) in &self.constants {
@@ -429,12 +421,10 @@ output.push_str("static void init_wrapper(void) {\n");
                 .unwrap_or("main");
             let is_linux_kernel = entry_style == "module_init";
 
-            // In kernel mode (linux), skip printk - it's provided by kernel headers
             if is_linux_kernel && name == "printk" {
                 continue;
             }
 
-            // In test mode with stubs, skip extern declarations (stubs are static)
             if is_linux_kernel && self.test_mode {
                 continue;
             }
@@ -442,8 +432,7 @@ output.push_str("static void init_wrapper(void) {\n");
             let return_type = if sig.success_output.is_empty() {
                 "void".to_string()
             } else {
-                // Use first output field's type
-                let (_, ty) = &sig.success_output[0];
+            let (_, ty) = &sig.success_output[0];
                 Self::get_c_type(ty)
             };
 
@@ -462,7 +451,6 @@ output.push_str("static void init_wrapper(void) {\n");
 
         output.push_str("\n");
 
-        // Generate stub implementations for test mode
         let entry_style = self.spec.as_ref()
             .and_then(|s| s.codegen.as_ref())
             .map(|s| s.entry_point.style.as_str())
@@ -476,12 +464,12 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Generate a stub implementation for an FFI function in test mode.
     fn generate_ffi_stub(&self, name: &str, sig: &ForeignSignature, output: &mut String) {
         let entry_style = self.spec.as_ref()
             .and_then(|s| s.codegen.as_ref())
             .map(|s| s.entry_point.style.as_str())
             .unwrap_or("main");
-        // In kernel mode (linux), printk is provided by kernel headers - don't stub it
         if entry_style == "module_init" && name == "printk" {
             return;
         }
@@ -506,7 +494,6 @@ output.push_str("static void init_wrapper(void) {\n");
         output.push_str(&format!("static {} {}({}) {{\n", return_type, name, params_str));
         output.push_str(&format!("    printk(\"[VITRIOL-STUB] {} called\\\\n\");\n", name));
 
-        // Return appropriate stub value based on return type
         match return_type.as_str() {
             "void" => {}
             "uint32_t" => output.push_str("    return 1;  // stub: success handle\n"),
@@ -518,8 +505,8 @@ output.push_str("static void init_wrapper(void) {\n");
         output.push_str("}\n\n");
     }
 
+    /// Intent: Generate an FFI call with error handling for a statement expression.
     fn generate_ffi_call(&self, name: &str, args: &[Expr], output: &mut String) {
-        // Find the signature for this FFI function
         let sig = self.ffi_bindings.iter()
             .find(|(n, _)| n == name)
             .map(|(_, s)| s);
@@ -529,23 +516,19 @@ output.push_str("static void init_wrapper(void) {\n");
             return;
         };
 
-        // Check if it's fire-and-forget (frgn!)
         let is_fire_and_forget = matches!(
             signature.ffi_kind,
             Some(crate::ast::FfiKind::FrgnBang)
         );
 
-        // Generate arguments
         let args_str: Vec<String> = args.iter()
             .map(|a| self.expr_to_c(a))
             .collect();
         let args_csv = args_str.join(", ");
 
         if is_fire_and_forget {
-            // Fire-and-forget: just call the function
             output.push_str(&format!("    {}({});\n", Self::sanitize_name(name), args_csv));
         } else {
-            // Standard FFI with Result - generate error handling
             let result_var = format!("_result_{}", Self::sanitize_name(name));
             let return_type = if signature.success_output.is_empty() {
                 "void".to_string()
@@ -555,29 +538,25 @@ output.push_str("static void init_wrapper(void) {\n");
             };
 
             if return_type != "void" {
-                // Generate result variable and error check
                 output.push_str(&format!("    /* FFI call to {} with error handling */\n", name));
                 output.push_str(&format!("    {} {} = {}({});\n", return_type, result_var, Self::sanitize_name(name), args_csv));
-                
-                // Generate bounds check
+
                 let bounds_check = generate_bounds_check(&self.error_conventions, &result_var, &format!("ffi_error_{}", name));
                 output.push_str(&bounds_check);
-                
-                // Generate error label for this FFI call
+
                 output.push_str(&format!("    goto ffi_ok_{};\n", name));
                 output.push_str(&format!("ffi_error_{}:\n", name));
                 output.push_str(&format!("    /* FFI error occurred for {} */\n", name));
                 output.push_str(&format!("ffi_ok_{}:\n", name));
             } else {
-                // Void return - just call
                 output.push_str(&format!("    /* FFI call to {} */\n", name));
                 output.push_str(&format!("    {}({});\n", Self::sanitize_name(name), args_csv));
             }
         }
     }
 
+    /// Intent: Generate an FFI call whose result is assigned to a state variable.
     fn generate_ffi_assignment(&self, name: &str, args: &[Expr], target: &str, output: &mut String) {
-        // Find the signature for this FFI function
         let sig = self.ffi_bindings.iter()
             .find(|(n, _)| n == name)
             .map(|(_, s)| s);
@@ -587,7 +566,6 @@ output.push_str("static void init_wrapper(void) {\n");
             return;
         };
 
-        // Generate arguments
         let args_str: Vec<String> = args.iter()
             .map(|a| self.expr_to_c(a))
             .collect();
@@ -603,28 +581,24 @@ output.push_str("static void init_wrapper(void) {\n");
         let result_var = format!("_result_{}", Self::sanitize_name(name));
 
         if return_type != "void" {
-            // Generate FFI call with result stored to target
             output.push_str(&format!("    /* FFI call to {} with error handling */\n", name));
             output.push_str(&format!("    {} {} = {}({});\n", return_type, result_var, Self::sanitize_name(name), args_csv));
-            
-            // Generate bounds check
+
             let bounds_check = generate_bounds_check(&self.error_conventions, &result_var, &format!("ffi_error_{}", name));
             output.push_str(&bounds_check);
-            
-            // Store result to target
+
             output.push_str(&format!("    state->{} = {};\n", Self::sanitize_name(target), result_var));
             output.push_str(&format!("    goto ffi_ok_{};\n", name));
             output.push_str(&format!("ffi_error_{}:\n", name));
             output.push_str(&format!("    /* FFI error occurred for {} */\n", name));
-            // For error case, store default/error value
             output.push_str(&format!("    state->{} = 0;\n", Self::sanitize_name(target)));
             output.push_str(&format!("ffi_ok_{}:\n", name));
         } else {
-            // Void return - just call
             output.push_str(&format!("    {}({});\n", Self::sanitize_name(name), args_csv));
         }
     }
 
+    /// Intent: Collect state variable declarations from the program.
     fn collect_state_declarations(&self, program: &Program) -> Vec<(String, Type)> {
         let mut decls = Vec::new();
         for item in &program.items {
@@ -635,6 +609,7 @@ output.push_str("static void init_wrapper(void) {\n");
         decls
     }
 
+    /// Intent: Collect all transaction definitions from the program.
     fn collect_transactions(&self, program: &Program) -> Vec<(String, crate::ast::Transaction)> {
         let mut txns = Vec::new();
         for item in &program.items {
@@ -645,6 +620,7 @@ output.push_str("static void init_wrapper(void) {\n");
         txns
     }
 
+    /// Intent: Convert a Brief statement to C code.
     fn statement_to_c(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
@@ -653,20 +629,16 @@ output.push_str("static void init_wrapper(void) {\n");
                     _ => return,
                 };
 
-                // Check if expr is an FFI call
                 if let Expr::Call(func_name, args) = expr {
                     let is_ffi = self.ffi_bindings.iter().any(|(n, _)| n == func_name);
                     if is_ffi {
-                        // Generate FFI call with result handling
                         self.generate_ffi_assignment(&func_name, args, &name, output);
                         return;
                     }
                 }
 
                 let expr_code = self.expr_to_c(expr);
-                // Check if lhs is a hardware register (shouldn't happen for assignments, but handle anyway)
                 if self.is_hw_register(&name) {
-                    // Direct write to hardware register
                     let upper = name.to_uppercase();
                     output.push_str(&format!("    {} = {};\n", upper, expr_code));
                 } else {
@@ -674,7 +646,6 @@ output.push_str("static void init_wrapper(void) {\n");
                 }
             }
             Statement::Let { name, expr, address_expr, .. } => {
-                // Dynamic @ address: emit pointer variable
                 if let Some(addr_expr) = address_expr {
                     let addr_code = self.expr_to_c(&addr_expr);
                     let ty = "uint32_t*";
@@ -683,11 +654,9 @@ output.push_str("static void init_wrapper(void) {\n");
                     return;
                 }
                 if let Some(e) = expr {
-                    // Check if expr is an FFI call
                     if let Expr::Call(func_name, args) = e {
                         let is_ffi = self.ffi_bindings.iter().any(|(n, _)| n == func_name);
                         if is_ffi {
-                            // Generate FFI call with result
                             let sig = self.ffi_bindings.iter()
                                 .find(|(n, _)| n == func_name)
                                 .map(|(_, s)| s);
@@ -703,8 +672,8 @@ output.push_str("static void init_wrapper(void) {\n");
                                         .map(|a| self.expr_to_c(a))
                                         .collect();
                                     let args_csv = args_str.join(", ");
-                                    output.push_str(&format!("    {} {} = {}({});\n", 
-                                        return_type, Self::sanitize_name(name), 
+                                    output.push_str(&format!("    {} {} = {}({});\n",
+                                        return_type, Self::sanitize_name(name),
                                         Self::sanitize_name(func_name), args_csv));
                                     self.add_local_var(name);
                                     return;
@@ -719,7 +688,6 @@ output.push_str("static void init_wrapper(void) {\n");
                 }
             }
             Statement::Guarded { condition, statements } => {
-                // Generate: if (condition) { statements }
                 let cond_str = self.expr_to_c(condition);
                 output.push_str(&format!("    if ({}) {{\n", cond_str));
                 for stmt in statements {
@@ -735,7 +703,6 @@ output.push_str("static void init_wrapper(void) {\n");
                     output.push_str(&format!("        \"{} \\n\"\n", asm_string));
                     output.push_str("    );\n");
                 } else {
-                    // Clobbers go in the third section: : : : "reg1", "reg2"
                     let clobber_list = clobbers.iter()
                         .map(|c| format!("\"{}\"", c.as_str()))
                         .collect::<Vec<_>>()
@@ -747,7 +714,6 @@ output.push_str("static void init_wrapper(void) {\n");
                 }
             }
             Statement::Term { .. } => {
-                // Emit pending #on_exit cleanup before transaction completes
                 let cleanup = std::mem::take(&mut self.pending_cleanup);
                 for stmt in &cleanup {
                     self.statement_to_c(output, stmt);
@@ -755,9 +721,7 @@ output.push_str("static void init_wrapper(void) {\n");
                 output.push_str("    /* transaction complete */\n");
             }
             Statement::Expression(expr) => {
-                // Check if this is an FFI call
                 if let Expr::Call(name, args) = expr {
-                    // Check if it's an FFI function
                     let is_ffi = self.ffi_bindings.iter().any(|(n, _)| n == name);
                     if is_ffi {
                         self.generate_ffi_call(name, args, output);
@@ -771,7 +735,6 @@ output.push_str("static void init_wrapper(void) {\n");
                 }
             }
             Statement::LocalTrigger { name, ty, expr, .. } => {
-                // Local trigger: async wait point inside transaction
                 let _ty_c = match ty {
                     Type::Int | Type::UInt => "int64_t",
                     Type::Float => "double",
@@ -785,7 +748,6 @@ output.push_str("static void init_wrapper(void) {\n");
                 } else {
                     output.push_str(&format!("    /* trg! {}: await external event */\n", name));
                 }
-                // TODO: Full async yield/await semantics with rollback support
             }
             Statement::Alka(block) => {
                 if block.dangerous {
@@ -804,6 +766,7 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Convert a Brief expression to its C representation.
     fn expr_to_c(&self, expr: &Expr) -> String {
         match expr {
             Expr::Integer(n) => n.to_string(),
@@ -811,15 +774,12 @@ output.push_str("static void init_wrapper(void) {\n");
             Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
             Expr::String(s) => format!("\"{}\"", s),
             Expr::Identifier(n) => {
-                // Check if this is a constant first
                 if self.is_constant(n) {
                     return self.get_constant_value(n).unwrap_or_else(|| n.clone());
                 }
-                // Check if this is a local variable
                 if self.is_local_var(n) {
                     return Self::sanitize_name(n);
                 }
-                // Check if this is a hardware register
                 if self.is_hw_register(n) {
                     n.to_uppercase()
                 } else {
@@ -866,6 +826,7 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Map a Brief type to its C type string.
     fn get_c_type(ty: &Type) -> String {
         match ty {
             Type::Int => "int32_t".to_string(),
@@ -884,6 +845,7 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Get the default initialization value for a Brief type.
     fn get_default_value(ty: &Type) -> String {
         match ty {
             Type::Int => "0".to_string(),
@@ -896,12 +858,14 @@ output.push_str("static void init_wrapper(void) {\n");
         }
     }
 
+    /// Intent: Sanitize a Brief identifier for use as a C name (replace hyphens with underscores).
     fn sanitize_name(name: &str) -> String {
         name.replace('-', "_")
     }
 }
 
 impl Default for CBackend {
+    /// Intent: Create a default C backend instance.
     fn default() -> Self {
         Self::new()
     }

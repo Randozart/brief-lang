@@ -107,8 +107,17 @@ defn generate_rust_block(stmts: List<Statement>) -> String {
 }
 
 defn generate_rust_statement(stmt: Statement) -> String {
-    uni stmt(StmtLet(name, var_type, init, _modifiers)) = {
+    uni stmt(StmtLet(name, var_type, init, _modifiers, address_expr)) = {
         let output = new_builder();
+        [address_expr.is_some()] {
+            let addr_code = expr_to_rust(address_expr.unwrap());
+            output = output.append_str("let ");
+            output = output.append_str(name);
+            output = output.append_str(": *const u32 = ");
+            output = output.append_str(addr_code);
+            output = output.append_str(" as *const u32;\n");
+            term output.to_string();
+        };
         output = output.append_str("let ");
         output = output.append_str(name);
         [var_type.is_some()] {

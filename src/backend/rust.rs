@@ -16,6 +16,7 @@ use crate::ast::{BitRange, Expr, Program, Statement, TopLevel, Type};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+/// Intent: Backend that compiles Brief programs to native Rust source code.
 pub struct RustBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     signal_counter: usize,
@@ -25,6 +26,7 @@ pub struct RustBackend {
 }
 
 impl RustBackend {
+    /// Intent: Create a new Rust backend with default configuration.
     pub fn new() -> Self {
         Self {
             spec: None,
@@ -35,11 +37,13 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Attach a target specification for Rust code generation.
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
         self.spec = Some(spec);
         self
     }
 
+    /// Intent: Generate Rust source code from a Brief program.
     pub fn generate(&mut self, program: &Program) -> String {
         self.collect_signals(program);
 
@@ -84,7 +88,6 @@ impl RustBackend {
         output.push_str("    }\n");
         output.push_str("}\n\n");
 
-        // Output struct definitions
         for item in &program.items {
             if let TopLevel::Struct(struct_def) = item {
                 output.push_str("#[derive(Debug, Clone)]\n");
@@ -102,7 +105,6 @@ impl RustBackend {
             }
         }
 
-        // Output enum definitions
         for item in &program.items {
             if let TopLevel::Enum(enum_def) = item {
                 output.push_str("#[derive(Debug, Clone)]\n");
@@ -128,7 +130,6 @@ impl RustBackend {
             }
         }
 
-        // Output constant definitions
         for item in &program.items {
             if let TopLevel::Constant(const_def) = item {
                 let rust_type = Self::get_rust_type(&const_def.ty);
@@ -137,7 +138,6 @@ impl RustBackend {
             }
         }
 
-        // Output struct definitions
         for item in &program.items {
             if let TopLevel::Struct(struct_def) = item {
                 output.push_str("#[derive(Debug, Clone)]\n");
@@ -155,7 +155,6 @@ impl RustBackend {
             }
         }
 
-        // Output enum definitions
         for item in &program.items {
             if let TopLevel::Enum(enum_def) = item {
                 output.push_str("#[derive(Debug, Clone)]\n");
@@ -181,7 +180,6 @@ impl RustBackend {
             }
         }
 
-        // Output constant definitions
         for item in &program.items {
             if let TopLevel::Constant(const_def) = item {
                 let rust_type = Self::get_rust_type(&const_def.ty);
@@ -201,7 +199,7 @@ impl RustBackend {
             } else {
                 format!("&mut self, {}", params.join(", "))
             };
-            
+
             let return_type = "bool";
             output.push_str(&format!(
                 "    pub fn {}({}) -> {} {{\n",
@@ -226,7 +224,6 @@ impl RustBackend {
 
         output.push_str("}\n\n");
 
-        // Output standalone definitions (not inside State)
         for item in &program.items {
             if let TopLevel::Definition(defn) = item {
                 let params: Vec<String> = defn.parameters.iter()
@@ -269,6 +266,7 @@ impl RustBackend {
         output
     }
 
+    /// Intent: Collect signal declarations from the program and assign indices.
     fn collect_signals(&mut self, program: &Program) {
         for item in &program.items {
             if let TopLevel::StateDecl(decl) = item {
@@ -278,6 +276,7 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Collect state variable declarations from the program.
     fn collect_state_declarations(&self, program: &Program) -> Vec<(String, Type)> {
         let mut decls = Vec::new();
         for item in &program.items {
@@ -288,10 +287,12 @@ impl RustBackend {
         decls
     }
 
+    /// Intent: Return an empty list of transaction names (placeholder).
     fn txn_names(&self) -> Vec<String> {
         vec![]
     }
 
+    /// Intent: Collect all transaction definitions from the program.
     fn collect_transactions(&self, program: &Program) -> Vec<(String, crate::ast::Transaction)> {
         let mut txns = Vec::new();
         for item in &program.items {
@@ -302,6 +303,7 @@ impl RustBackend {
         txns
     }
 
+    /// Intent: Convert a Brief statement to Rust code for the generated State impl.
     fn statement_to_rust(&self, output: &mut String, stmt: &Statement) {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
@@ -364,7 +366,6 @@ impl RustBackend {
                 }
             }
             Statement::Term { values, .. } => {
-                // Emit pending #on_exit cleanup before transaction completes
                 let cleanup = std::mem::take(&mut *self.pending_cleanup.borrow_mut());
                 for stmt in &cleanup {
                     self.statement_to_rust(output, stmt);
@@ -441,6 +442,7 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Convert a Brief expression to Rust code with self access for state.
     fn expr_to_rust(&self, expr: &Expr) -> String {
         match expr {
             Expr::Integer(n) => n.to_string(),
@@ -595,6 +597,7 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Convert a Brief expression to Rust code without self prefix for state.
     fn expr_to_rust_no_self(&self, expr: &Expr) -> String {
         match expr {
             Expr::Identifier(n) => n.clone(),
@@ -640,6 +643,7 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Check if an expression is a list or vector type.
     fn is_list_expr(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Identifier(_) => true,
@@ -651,6 +655,7 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Convert a slice coordinate to Rust range/index syntax.
     fn expr_to_rust_slice_coord(&self, coord: &crate::ast::SliceCoordinate) -> String {
         match coord {
             crate::ast::SliceCoordinate::Index(e) => self.expr_to_rust(e),
@@ -668,6 +673,7 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Map a Brief type to its native Rust type string.
     fn get_rust_type(ty: &Type) -> String {
         match ty {
             Type::Int => "i64".to_string(),
@@ -728,7 +734,6 @@ impl RustBackend {
                 format!("({})", inner.join(", "))
             }
             Type::Union(_types) => {
-                // Union types are handled via enums in Brief
                 "i64".to_string()
             }
             Type::Custom(name) => name.clone(),
@@ -748,6 +753,7 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Get the default initialization value for a Brief type in Rust.
     fn get_default_value(ty: &Type) -> String {
         match ty {
             Type::Int => "0".to_string(),
@@ -776,8 +782,8 @@ impl RustBackend {
         }
     }
 
+    /// Intent: Sanitize a Brief identifier for use as a Rust name (replace hyphens with underscores).
     fn sanitize_name(name: &str) -> String {
         name.replace('-', "_")
     }
 }
-

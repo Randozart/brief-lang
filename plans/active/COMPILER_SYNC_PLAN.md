@@ -575,6 +575,16 @@ lib/compiler/
 - `lib/compiler/backends/rust.bv` — emits `// alka {} = ...` or `// alka! {} = ...` comment
 - `lib/compiler/backends/backend_aarch64.bv` — no-op in `collect_vars_from_stmts`; emits comment instruction in `generate_statement`
 
+#### Phase 2.5: Dynamic `@` Address Binding — COMPLETED
+
+**Files changed:**
+- `lib/compiler/ast.bv` — added `address_expr: Option<Expr>` (5th field) to `StmtLet`
+- `lib/compiler/parser.bv` — parse `@ expr` after type in let bindings, store as `address_expr`
+- `lib/compiler/backends/c.bv` — emits `uint32_t* name = (uint32_t*)(addr_code);` when address_expr is present
+- `lib/compiler/backends/rust.bv` — emits `let name: *const u32 = addr_code as *const u32;` when address_expr is present
+- All pattern matches across typechecker, proof_engine, aarch64 backend updated (5th field)
+- `src/backend/c.rs:577,667` — fixed pre-existing `sig.unwrap()` bug (`sig.success_output` on `Option`)
+
 #### Future: Strict Mode Big-O / Complexity Extension (Planned)
 
 See §2.8b above. Documented 2026-05-25. Implementation deferred until both compilers have strict mode ported.
