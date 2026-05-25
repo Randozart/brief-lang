@@ -10,7 +10,8 @@ import std.collections;
 struct ParserState {
     tokens: List<Token>,
     position: Int,
-    current_token: Token
+    current_token: Token,
+    strict_mode: Bool
 }
 
 // ===== PARSER CONSTRUCTION =====
@@ -20,7 +21,8 @@ defn new_parser(tokens: List<Token>) -> ParserState {
     term ParserState {
         tokens: tokens,
         position: 0,
-        current_token: current
+        current_token: current,
+        strict_mode: false
     };
 }
 
@@ -45,13 +47,15 @@ defn advance(state: ParserState) -> ParserState {
         term ParserState {
             tokens: state.tokens,
             position: new_pos,
-            current_token: new_current
+            current_token: new_current,
+            strict_mode: state.strict_mode
         };
     };
     term ParserState {
         tokens: state.tokens,
         position: new_pos,
-        current_token: TokenEof
+        current_token: TokenEof,
+        strict_mode: state.strict_mode
     };
 }
 
@@ -86,7 +90,18 @@ defn parse_program(state: ParserState) -> Result<Program, String> {
         };
     };
     
-    term Ok(Program { items: items });
+    term Ok(Program { items: items, strict_mode: StrictOff });
+}
+
+// ===== STRICT MODE =====
+
+defn set_strict_mode(state: ParserState, strict: Bool) -> ParserState {
+    term ParserState {
+        tokens: state.tokens,
+        position: state.position,
+        current_token: state.current_token,
+        strict_mode: strict
+    };
 }
 
 defn token_to_string(tok: Token) -> String {
@@ -586,6 +601,16 @@ defn parse_contract(state: ParserState) -> Result<(Contract, ParserState), Strin
     };
     uni result(Err(e)) = {
         term Err(e);
+    };
+    
+    // Strict mode check: reject [true] contracts
+    [state.strict_mode] {
+        uni pre(ExprBool(b)) = {
+            [b] { term Err("Strict mode: precondition [true] is not allowed - specify actual state requirements"); };
+        };
+        uni post(ExprBool(b)) = {
+            [b] { term Err("Strict mode: postcondition [true] is not allowed - specify actual state guarantees"); };
+        };
     };
     
     let watchdog: Option<Watchdog> = None;

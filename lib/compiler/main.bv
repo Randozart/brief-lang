@@ -25,6 +25,22 @@ struct CompilerState {
 
 // ===== MAIN ENTRY POINT =====
 
+// ===== UTILITY =====
+
+defn is_strict_extension(path: String) -> Bool {
+    let len = path.len();
+    [len >= 4] {
+        [path[len - 4] == '.' && path[len - 3] == 's' && path[len - 2] == 'b' && path[len - 1] == 'v'] { term true; };
+    };
+    [len >= 5] {
+        [path[len - 5] == '.' && path[len - 4] == 's' && path[len - 3] == 'e' && path[len - 2] == 'b' && path[len - 1] == 'v'] { term true; };
+        [path[len - 5] == '.' && path[len - 4] == 's' && path[len - 3] == 'r' && path[len - 2] == 'b' && path[len - 1] == 'v'] { term true; };
+    };
+    term false;
+}
+
+// ===== COMPILE =====
+
 defn compile_file(path: String, backend: String, verbose: Bool) -> Result<String, String> [path.len() > 0][result.is_ok() || result.is_err()] {
     let source_result = __read_file(path);
     uni source_result(Ok(source)) = {
@@ -49,6 +65,9 @@ defn compile_file(path: String, backend: String, verbose: Bool) -> Result<String
             };
 
             let parser = new_parser(tokens);
+            // Detect strict mode from file extension
+            let strict = is_strict_extension(state.file_path);
+            let parser = set_strict_mode(parser, strict);
             let parse_result = parse_program_from_state(parser);
             uni parse_result(Ok(program)) = {
                 [state.verbose] {

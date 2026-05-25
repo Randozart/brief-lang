@@ -275,6 +275,11 @@ struct ForeignBinding {
 
 // ===== PROGRAM =====
 
+enum StrictMode {
+    StrictOff,
+    StrictOn
+}
+
 enum TopLevel {
     TopDefn(Definition),
     TopTxn(Transaction),
@@ -290,7 +295,8 @@ enum TopLevel {
 }
 
 struct Program {
-    items: List<TopLevel>
+    items: List<TopLevel>,
+    strict_mode: StrictMode
 }
 
 // ===== UTILITY FUNCTIONS =====
