@@ -277,6 +277,23 @@ defn is_acyclic(body: List<Statement>) -> Bool {
 }
 ```
 
+### 2.8d Termination Strategy (Documented 2026-05-25)
+
+Brief does not solve the halting problem — it structurally discourages it:
+
+1. **No unbounded loop primitives** — `while`, `loop`, `for` do not exist in Brief. The `txn` construct is the only unit of iteration.
+2. **Structural recursion** — `defn` with recursive calls on substructural data (e.g., `items[1..]`). The proof engine verifies termination by checking that each recursive call operates on a smaller value. This is the *default and preferred* approach.
+3. **Watchdog clauses** (`?[N]`) — For cases where the dataset size is genuinely unknown at compile time (network IO, device polling), the contract watchdog bounds execution at runtime: `[true][result > 0] ?[50]`. If the watchdog fires, execution terminates with a contract violation.
+4. **Escape hatch** (`alka!`) — For genuinely unbounded operations (rare), `alka! { raw_instructions }` is the explicit opt-out. The `!` is a psychological speedbump making the programmer consciously acknowledge the unprovable operation.
+
+| Case | Mechanism | Verification |
+|------|-----------|-------------|
+| Fixed-size dataset | Structural recursion | Proof engine (compile-time) |
+| Unknown-size dataset | Watchdog `?[N]` | Runtime bound |
+| Genuinely unbounded | `alka!` escape hatch | None (explicit) |
+
+This is the termination analog of Brief's contract philosophy: make the provable case the default, make the uncertain case explicit and bounded, and eliminate the need for general halting-problem reasoning.
+
 ---
 
 ## Phase 3: Backport AArch64 (Brief → Rust)
