@@ -240,6 +240,43 @@ Sync these features from the Rust compiler into the Brief self-hosted compiler's
 - `lib/compiler/parser.bv` — parse full FFI signature syntax
 - `lib/compiler/typechecker.bv` — validate FFI declarations
 
+### 2.8c Acyclic-Graph Optimization (Insight, Documented 2026-05-25)
+
+**Key insight:** Brief's proof engine can *prove* a transaction is acyclic via symbolic execution (`execute_statement_symbolic`). If no path contains a loop (`StmtWhile`/`StmtLoop`) or unbounded recursion, the transaction is provably acyclic — a category most languages cannot statically guarantee.
+
+**What acyclic proof unlocks for backends:**
+
+| Optimization | Acyclic Benefit | Comparable in C/Rust |
+|---|---|---|
+| Instruction scheduling | Full DAG — reorder for pipeline stalls without aliasing fear | Blocked by pointer aliasing |
+| Branch elimination | Compile-time-resolvable guards → straight-line code | Can't prove branches are dead |
+| WCET guarantee | Exact cycle count per path | Worst-case path assumption |
+| Software pipelining | Optimal modulo scheduling without loop-carried deps | Blocked by unknown trip counts |
+| Register allocation | Linear scan (provably optimal for basic blocks) | Graph coloring (NP-complete) |
+| Memory disambiguation | No alias analysis needed — all accesses known | Must assume aliasing |
+| Hardware synthesis | Inherently pipelineable — maps directly to stage logic | Loops require state machines |
+
+**Where this applies:**
+- **Phase 3 (AArch64 backend):** When a transaction is provably acyclic, emit straight-line AArch64 with aggressive instruction reordering. The backend's optimization pass (task 3.4) should gate parallel scheduling on acyclic proof.
+- **Big-O enforcement (§2.8b):** Acyclic transactions get precise Big-O = O(1). Cyclic transactions get their loop bounds analyzed for asymptotic complexity.
+- **Future hardware backends:** Acyclic Brief → VHDL/Verilog without handshake states — pure combinational logic.
+
+**Implementation sketch:**
+```
+defn is_acyclic(body: List<Statement>) -> Bool {
+    let i: Int = 0;
+    [i < len(body)] {
+        uni body[i](StmtWhile(_, _))  { term false; };
+        uni body[i](StmtLoop(_))     { term false; };
+        uni body[i](StmtFor(_, _, _)){ term false; };
+        uni body[i](StmtOnExit(b))   { term is_acyclic(b); };
+        uni body[i](StmtGuarded(_, b)) { term is_acyclic(b); };
+        &i = i + 1;
+    };
+    term true;
+}
+```
+
 ---
 
 ## Phase 3: Backport AArch64 (Brief → Rust)
