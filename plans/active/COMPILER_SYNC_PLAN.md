@@ -616,6 +616,11 @@ lib/compiler/
 - `lib/compiler/ast.bv` — added `Dimension { name: Option<String>, size: Int }` struct; changed `TypeVector(Type, Int)` → `TypeVector(Type, List<Dimension>)`
 - `lib/compiler/typechecker.bv` — updated all 2 `TypeVector` pattern matches for new list-of-dimensions field
 
+#### Phase 2.10: Vector Slicing with Stride/Mask/Multidimensional — COMPLETED
+
+**Files changed:**
+- `lib/compiler/ast.bv` — added `SliceCoordinate` enum (SliceIndex, SliceRange, SliceNamed); extended `ExprSlice` with stride and mask fields (3→5); added `ExprMultiSlice(Expr, List<SliceCoordinate>, Option<Expr>)`
+
 #### Future: Strict Mode Big-O / Complexity Extension (Planned)
 
 See §2.8b above. Documented 2026-05-25. Implementation deferred until both compilers have strict mode ported.

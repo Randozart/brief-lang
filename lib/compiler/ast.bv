@@ -3,6 +3,13 @@
 
 // ===== EXPRESSIONS =====
 
+// Slice coordinate for multidimensional slicing
+enum SliceCoordinate {
+    SliceIndex(Expr),                    // single index: 5
+    SliceRange(Option<Expr>, Option<Expr>),  // range: start..end
+    SliceNamed(String, SliceCoordinate)  // named: time:0..10
+}
+
 enum Expr {
     // Literals
     ExprInt(Int),
@@ -25,7 +32,8 @@ enum Expr {
     ExprCall(String, List<Expr>),  // name, args
     ExprFieldAccess(Expr, String),  // object, field
     ExprIndex(Expr, Expr),  // array, index
-    ExprSlice(Expr, Option<Expr>, Option<Expr>),  // arr, start, end
+    ExprSlice(Expr, Option<Expr>, Option<Expr>, Option<Expr>, Option<Expr>),  // arr, start, end, stride, mask
+    ExprMultiSlice(Expr, List<SliceCoordinate>, Option<Expr>),  // arr, coords, mask
     
     // Containers
     ExprList(List<Expr>),
