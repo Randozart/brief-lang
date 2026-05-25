@@ -626,11 +626,10 @@ lib/compiler/
 **Files changed:**
 - `lib/compiler/proof_engine.bv` — added `SimdOp` struct; `extract_list_name()` extracts variable names from expressions; `collect_simd_ops()` finds binary ops in body; `collect_simd_ops_in_expr()` recursively identifies ops; `check_list_simd_lengths()` entry point walks all txns/defns
 
-#### Phase 2.12: Backend Hashtag Registry — 
+#### Phase 2.12: Backend Hashtag Registry — COMPLETED
 
 **Files changed:**
-- `lib/compiler/backends/mod.bv` — NEW file. `supported_hashtags(backend)` returns list per backend; `validate_hashtags(tags, backend)` checks each tag; `validate_hashtags_in_program(program, backend, strict)` walks entire AST
-- `lib/compiler/main.bv` — call hashtag validation in compilation pipeline
+- `lib/compiler/backends/mod.bv` — NEW (145 lines). `supported_hashtags(backend)` returns list per backend (10 backends); `validate_hashtag(tag, backend)` checks support, fallback chains, scoped tags; `validate_hashtags_in_stmts()` walks statements; `validate_hashtags_in_program()` walks entire AST with strict mode error escalation
 
 #### Future: Strict Mode Big-O / Complexity Extension (Planned)
 

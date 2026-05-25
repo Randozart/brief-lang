@@ -1,0 +1,197 @@
+// Backend Hashtag Registry
+// Each backend exports which hashtags it supports.
+// Hashtags are used for backend-specific codegen hints (#volatile, #clock, etc.)
+
+defn supported_hashtags(backend: String) -> List<String> {
+    [backend == "c"] {
+        term ["volatile", "packed", "aligned", "section", "used", "inline", "no_mangle", "export_name", "link_section"];
+    };
+    [backend == "rust"] {
+        term ["volatile", "packed", "repr", "inline", "no_mangle", "export_name", "link_section", "cfg"];
+    };
+    [backend == "wasm"] {
+        term ["volatile", "export", "import", "memory", "table"];
+    };
+    [backend == "verilog"] {
+        term ["clock", "register", "wire", "input", "output", "inout", "keep", "async_reset", "sync_reset"];
+    };
+    [backend == "vhdl"] {
+        term ["clock", "register", "signal", "port", "buffer", "keep", "async_reset", "sync_reset"];
+    };
+    [backend == "aarch64"] {
+        term ["volatile", "register", "caller_saved", "callee_saved", "spill"];
+    };
+    [backend == "x86_64"] {
+        term ["volatile", "register", "caller_saved", "callee_saved", "spill"];
+    };
+    [backend == "cobol"] {
+        term ["volatile", "packed", "sync", "occurs", "usage", "display"];
+    };
+    [backend == "tcl"] {
+        term ["volatile"];
+    };
+    [backend == "webstack"] {
+        term ["volatile", "export", "wasm_bindgen"];
+    };
+    term [];
+}
+
+defn validate_hashtag(tag: Hashtag, backend: String) -> Result<String, String> {
+    let supported = supported_hashtags(backend);
+    let name = tag.name;
+    
+    // Check if tag is directly supported
+    let i: Int = 0;
+    [i < len(supported)] {
+        [supported[i] == name] {
+            term Ok("supported");
+        };
+        &i = i + 1;
+    };
+    
+    // Check fallback chain (syntax: #!primary|fallback1|fallback2)
+    [len(tag.fallback) > 0] {
+        let j: Int = 0;
+        [j < len(tag.fallback)] {
+            let k: Int = 0;
+            [k < len(supported)] {
+                [supported[k] == tag.fallback[j]] {
+                    term Ok("supported (via fallback: " + tag.fallback[j] + ")");
+                };
+                &k = k + 1;
+            };
+            &j = j + 1;
+        };
+    };
+    
+    // Check scoped tag (syntax: #[backend]tag)
+    [tag.scoped.is_some()] {
+        let scope = tag.scoped.unwrap();
+        [scope == backend] {
+            term Ok("supported (scoped to " + scope + ")");
+        };
+        term Ok("skipped (scoped for " + scope + ")");
+    };
+    
+    // Unknown tag
+    [tag.mandatory] {
+        term Err("Unsupported mandatory hashtag " + name + " for backend " + backend);
+    };
+    term Ok("unknown (advisory)");
+}
+
+defn validate_hashtags_in_stmts(stmts: List<Statement>, backend: String) -> Result<List<String>, String> {
+    let results: List<String> = [];
+    let i: Int = 0;
+    [i < len(stmts)] {
+        uni stmts[i](StmtLet(_, _, _, modifiers, _)) = {
+            let j: Int = 0;
+            [j < len(modifiers)] {
+                let result = validate_hashtag(modifiers[j], backend);
+                uni result(Ok(msg)) = {
+                    &results = results.append("modifier " + modifiers[j].name + ": " + msg);
+                };
+                uni result(Err(e)) = {
+                    term Err(e);
+                };
+                &j = j + 1;
+            };
+        };
+        uni stmts[i](StmtAssign(_, _, modifiers)) = {
+            let j: Int = 0;
+            [j < len(modifiers)] {
+                let result = validate_hashtag(modifiers[j], backend);
+                uni result(Ok(msg)) = {
+                    &results = results.append("modifier " + modifiers[j].name + ": " + msg);
+                };
+                uni result(Err(e)) = {
+                    term Err(e);
+                };
+                &j = j + 1;
+            };
+        };
+        uni stmts[i](StmtTerm(_, modifiers)) = {
+            let j: Int = 0;
+            [j < len(modifiers)] {
+                let result = validate_hashtag(modifiers[j], backend);
+                uni result(Ok(msg)) = {
+                    &results = results.append("modifier " + modifiers[j].name + ": " + msg);
+                };
+                uni result(Err(e)) = {
+                    term Err(e);
+                };
+                &j = j + 1;
+            };
+        };
+        &i = i + 1;
+    };
+    term Ok(results);
+}
+
+defn validate_hashtags_in_program(program: Program, backend: String, strict: Bool) -> Result<List<String>, String> {
+    let all_results: List<String> = [];
+    let i: Int = 0;
+    [i < len(program.items)] {
+        uni program.items[i](TopTxn(txn)) = {
+            let result = validate_hashtags_in_stmts(txn.body, backend);
+            uni result(Ok(msgs)) = {
+                &all_results = all_results.append_all(msgs);
+            };
+            uni result(Err(e)) = {
+                [strict] { term Err(e); };
+            };
+            [txn.modifiers.len() > 0] {
+                let j: Int = 0;
+                [j < len(txn.modifiers)] {
+                    let result = validate_hashtag(txn.modifiers[j], backend);
+                    uni result(Ok(msg)) = {
+                        &all_results = all_results.append("txn " + txn.name + ": " + msg);
+                    };
+                    uni result(Err(e)) = {
+                        [strict] { term Err(e); };
+                    };
+                    &j = j + 1;
+                };
+            };
+        };
+        uni program.items[i](TopDefn(defn)) = {
+            let result = validate_hashtags_in_stmts(defn.body, backend);
+            uni result(Ok(msgs)) = {
+                &all_results = all_results.append_all(msgs);
+            };
+            uni result(Err(e)) = {
+                [strict] { term Err(e); };
+            };
+            [defn.modifiers.len() > 0] {
+                let j: Int = 0;
+                [j < len(defn.modifiers)] {
+                    let result = validate_hashtag(defn.modifiers[j], backend);
+                    uni result(Ok(msg)) = {
+                        &all_results = all_results.append("defn " + defn.name + ": " + msg);
+                    };
+                    uni result(Err(e)) = {
+                        [strict] { term Err(e); };
+                    };
+                    &j = j + 1;
+                };
+            };
+        };
+        uni program.items[i](TopStruct(struct_def)) = {
+            [struct_def.modifiers.len() > 0] {
+                let j: Int = 0;
+                [j < len(struct_def.modifiers)] {
+                    let result = validate_hashtag(struct_def.modifiers[j], backend);
+                    uni result(Ok(msg)) = {
+                        &all_results = all_results.append("struct " + struct_def.name + ": " + msg);
+                    };
+                    uni result(Err(e)) = {
+                        [strict] { term Err(e); };
+                    };
+                    &j = j + 1;
+                };
+            };
+        };
+        &i = i + 1;
+    };
+    term Ok(all_results);
+}
