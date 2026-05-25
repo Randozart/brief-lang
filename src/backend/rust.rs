@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::ast::{BitRange, Expr, Program, Statement, TopLevel, Type};
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 pub struct RustBackend {
@@ -20,6 +21,7 @@ pub struct RustBackend {
     signal_counter: usize,
     txn_counter: usize,
     signal_map: HashMap<String, usize>,
+    pending_cleanup: RefCell<Vec<Statement>>,
 }
 
 impl RustBackend {
@@ -29,6 +31,7 @@ impl RustBackend {
             signal_counter: 0,
             txn_counter: 0,
             signal_map: HashMap::new(),
+            pending_cleanup: RefCell::new(Vec::new()),
         }
     }
 
@@ -313,8 +316,11 @@ impl RustBackend {
                 let expr_code = self.expr_to_rust(expr);
                 output.push_str(&format!("        {} = {};\n", name, expr_code));
             }
-            Statement::Let { name, ty, expr, .. } => {
-                if let Some(e) = expr {
+            Statement::Let { name, ty, expr, address_expr, .. } => {
+                if let Some(addr_expr) = address_expr {
+                    let addr_code = self.expr_to_rust(addr_expr);
+                    output.push_str(&format!("        let {}: *const u32 = {} as *const u32;\n", name, addr_code));
+                } else if let Some(e) = expr {
                     let expr_code = self.expr_to_rust(e);
                     if let Some(t) = ty {
                         let rust_ty = Self::get_rust_type(t);
@@ -358,6 +364,11 @@ impl RustBackend {
                 }
             }
             Statement::Term { values, .. } => {
+                // Emit pending #on_exit cleanup before transaction completes
+                let cleanup = std::mem::take(&mut *self.pending_cleanup.borrow_mut());
+                for stmt in &cleanup {
+                    self.statement_to_rust(output, stmt);
+                }
                 if values.is_empty() {
                     output.push_str("        return;\n");
                 } else if values.len() == 1 {
@@ -412,6 +423,17 @@ impl RustBackend {
                 } else {
                     output.push_str(&format!("        // trg! {}: await external event\n", name));
                 }
+            }
+            Statement::Alka(block) => {
+                if block.dangerous {
+                    output.push_str(&format!("        // alka! {{}} = {}\n", block.content));
+                } else {
+                    output.push_str(&format!("        // alka {{}} = {}\n", block.content));
+                }
+            }
+            Statement::OnExit { body, .. } => {
+                self.pending_cleanup.borrow_mut().extend(body.iter().cloned());
+                output.push_str("        // #on_exit cleanup registered\n");
             }
             _ => {
                 output.push_str("        // statement type not implemented\n");

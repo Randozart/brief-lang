@@ -1,0 +1,22 @@
+[intent]
+enabled = true
+severity = "error"
+exempt_patterns = ["fn get_.*", "fn set_.*", "fn new\\(", "fn main\\(", "fn test_.*"]
+
+[complexity]
+big_o_threshold = "O(n²)"
+cyclomatic_max = 15
+cognitive_max = 15
+max_function_lines = 100
+max_nesting_depth = 6
+max_params = 6
+
+[state_graph]
+enabled = false
+path = ".praetor/state-graph.json"
+
+[datalog]
+auth_functions = ["authenticate", "authorize", "login"]
+private_data_labels = ["private", "secret", "password", "token"]
+entry_points = ["main", "run", "start", "handle"]
+log_functions = ["log", "log_access", "audit"]

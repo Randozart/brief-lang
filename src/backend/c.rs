@@ -26,6 +26,7 @@ pub struct CBackend {
     constants: Vec<(String, String)>,
     local_vars: Vec<String>,
     test_mode: bool,
+    pending_cleanup: Vec<Statement>,
 }
 
 impl CBackend {
@@ -40,6 +41,7 @@ impl CBackend {
             constants: Vec::new(),
             local_vars: Vec::new(),
             test_mode: false,
+            pending_cleanup: Vec::new(),
         }
     }
 
@@ -671,7 +673,15 @@ output.push_str("static void init_wrapper(void) {\n");
                     output.push_str(&format!("    state->{} = {};\n", Self::sanitize_name(&name), expr_code));
                 }
             }
-            Statement::Let { name, expr, .. } => {
+            Statement::Let { name, expr, address_expr, .. } => {
+                // Dynamic @ address: emit pointer variable
+                if let Some(addr_expr) = address_expr {
+                    let addr_code = self.expr_to_c(&addr_expr);
+                    let ty = "uint32_t*";
+                    output.push_str(&format!("    {} {} = ({})({});\n", ty, Self::sanitize_name(name), ty, addr_code));
+                    self.add_local_var(name);
+                    return;
+                }
                 if let Some(e) = expr {
                     // Check if expr is an FFI call
                     if let Expr::Call(func_name, args) = e {
@@ -737,6 +747,11 @@ output.push_str("static void init_wrapper(void) {\n");
                 }
             }
             Statement::Term { .. } => {
+                // Emit pending #on_exit cleanup before transaction completes
+                let cleanup = std::mem::take(&mut self.pending_cleanup);
+                for stmt in &cleanup {
+                    self.statement_to_c(output, stmt);
+                }
                 output.push_str("    /* transaction complete */\n");
             }
             Statement::Expression(expr) => {
@@ -771,6 +786,17 @@ output.push_str("static void init_wrapper(void) {\n");
                     output.push_str(&format!("    /* trg! {}: await external event */\n", name));
                 }
                 // TODO: Full async yield/await semantics with rollback support
+            }
+            Statement::Alka(block) => {
+                if block.dangerous {
+                    output.push_str(&format!("    /* alka! {} */\n", block.content));
+                } else {
+                    output.push_str(&format!("    /* alka: {} */\n", block.content));
+                }
+            }
+            Statement::OnExit { body, .. } => {
+                self.pending_cleanup.extend(body.iter().cloned());
+                output.push_str("    /* #on_exit cleanup registered */\n");
             }
             _ => {
                 output.push_str("    /* statement not implemented */\n");

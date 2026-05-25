@@ -130,6 +130,13 @@ enum Token {
     DelimLBracket,   // [
     DelimRBracket,   // ]
     
+    // Hashtag modifiers
+    Hash,            // # (block pragma prefix)
+    HashBang,        // #!
+    HashBracket,     // #[
+    HashParen,       // #(
+    HashQuestion,    // #?
+    
     // Special
     TokenIdentifier(String),
     TokenComment(String),

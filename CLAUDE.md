@@ -394,9 +394,27 @@ This file is used by AI coding assistants (Claude Code, OpenCode) when working i
 
 #### Commits
 - `da90458` — v0.14 hashtag modifiers, alka hatch, dynamic @
-- _(this commit)_ — #on_exit block pragma, +/- struct variants
+- `b24e7dc` — #on_exit block pragma, +/- struct variants
+- `e2fc2c2` — typecheck #on_exit bodies, add Alka/OnExit to fuzzer
+- `984afb6` — backend hashtag registry with validation pipeline
 
 #### Still deferred
-- Backend registry for hashtag support checking
+- ~~Backend registry for hashtag support checking~~ **DONE**
 - Backend codegen for dynamic `@`, alka, #on_exit
 - Multi-body struct type dispatch (only `+/-` field syntax is parsed, no type-check semantics)
+
+### 2026-05-16 Session 4 — Backend hashtag registry
+
+#### Built
+- **`supported_hashtags(backend)`** — returns supported tags per backend (C, Rust, WASM, Verilog, VHDL, Cobol, x86_64, aarch64)
+- **`validate_hashtags(tags, backend)`** — checks each tag against backend support, handles mandatory/fallback/scoped
+- **`validate_hashtags_in_program(program, backend, strict)`** — walks entire AST, collects hashtags from all statements/transactions/definitions/structs, validates them
+- **Wired into C and Rust pipelines** — called after typechecking, before codegen
+- **7 unit tests** — supported tag, unknown advisory warning, unknown mandatory error, fallback chain success, fallback chain failure, scoped skip, scoped validate
+
+#### Key findings
+- `supported_hashtags()` is a simple string list, but the tags themselves are not standardized. `volatile` is used by C/Rust/Cobol but not by Verilog (`clock`, `register`). If a Brief file has `#!volatile` targeting Verilog, the error message tells the user exactly that.
+- Fallback chain `#!A|B|C` only works if at least one alternative is supported. The validation correctly skips the primary `name` when checking fallbacks.
+- Scoped tags `#[verilog]clock` are only validated when `scope == backend`. This means a C target never sees the Verilog-specific `clock` tag.
+- `StateDecl` (top-level let) doesn't have a `modifiers` field — hashtags on top-level lets are not yet supported. This is fine because top-level state declarations don't need backend-specific modifiers in practice.
+- The validation is only wired into `run_c` and `run_rust` in main.rs. Other backends (Cobol, Verilog, VHDL, WASM) would need the same call added in their `run_*` functions.

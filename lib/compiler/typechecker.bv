@@ -516,7 +516,7 @@ defn check_block(stmts: List<Statement>, ctx: TypeContext) -> Result<(Type, Type
 }
 
 defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeContext), String> {
-    uni stmt(StmtLet(name, var_type, init)) = {
+    uni stmt(StmtLet(name, var_type, init, _modifiers)) = {
         let ctx = ctx;
         let ty: Type = TypeVoid;
         
@@ -555,7 +555,7 @@ defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeCon
         term (TypeVoid, ctx);
     };
     
-    uni stmt(StmtAssign(lhs, rhs)) = {
+    uni stmt(StmtAssign(lhs, rhs, _modifiers)) = {
         let result = infer_expr(lhs, ctx);
         uni result(Ok((lhs_ty, _))) = {
             let result = infer_expr(rhs, ctx);
@@ -588,7 +588,7 @@ defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeCon
         };
     };
     
-    uni stmt(StmtTerm(values)) = {
+    uni stmt(StmtTerm(values, _modifiers)) = {
         [len(values) == 0] {
             term (TypeVoid, ctx);
         };
@@ -644,6 +644,21 @@ defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeCon
         uni result(Ok(_)) = {
             term (TypeVoid, ctx);
         };
+    };
+    
+    uni stmt(StmtOnExit(body)) = {
+        let result = check_block(body, ctx);
+        uni result(Ok((_, _))) = {
+            term (TypeVoid, ctx);
+        };
+        uni result(Err(e)) = {
+            term Err(e);
+        };
+    };
+    
+    uni stmt(StmtAlka(_)) = {
+        // Opaque passthrough, no validation
+        term (TypeVoid, ctx);
     };
     
     term (TypeVoid, ctx);

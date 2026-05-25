@@ -4,6 +4,7 @@ pub mod rust;
 pub mod verilog;
 pub mod vhdl;
 pub mod wasm;
+pub mod webstack;
 pub mod x86_64;
 pub mod tcl_generator;
 pub mod cobol;
@@ -20,7 +21,7 @@ pub fn supported_hashtags(backend: &str) -> Vec<&'static str> {
         "rust" => {
             vec!["volatile", "sync", "aligned", "repr", "packed"]
         }
-        "wasm" => {
+        "wasm" | "webstack" => {
             vec!["volatile", "aligned"]
         }
         "verilog" | "vhdl" => {

@@ -22,6 +22,7 @@
 
 use crate::ast::{BitRange, Contract, Expr, ForeignTarget, Program, Statement, TopLevel, Transaction, Type};
 use crate::view_compiler::{Binding, Directive};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -48,7 +49,7 @@ enum SignalType {
     Vector(usize),
 }
 
-pub struct WasmGenerator {
+pub struct WebstackGenerator {
     spec: Option<crate::target_spec::TargetSpec>,
     signal_counter: usize,
     txn_counter: usize,
@@ -64,11 +65,12 @@ pub struct WasmGenerator {
     ffi_wasm_setups: HashSet<String>,     // global WASM JS setup/imports
     local_vars: HashMap<String, ()>,      // track local let-bound variables
     target: CodeTarget,
+    pending_cleanup: RefCell<Vec<Statement>>,
 }
 
-impl WasmGenerator {
+impl WebstackGenerator {
     pub fn new() -> Self {
-        WasmGenerator {
+        WebstackGenerator {
             spec: None,
             signal_counter: 0,
             txn_counter: 0,
@@ -84,6 +86,7 @@ impl WasmGenerator {
             ffi_wasm_setups: HashSet::new(),
             local_vars: HashMap::new(),
             target: CodeTarget::default(),
+            pending_cleanup: RefCell::new(Vec::new()),
         }
     }
 
@@ -106,14 +109,14 @@ impl WasmGenerator {
         program: &Program,
         bindings: &[Binding],
         program_name: &str,
-    ) -> WasmOutput {
+    ) -> WebstackOutput {
         self.collect_signals_and_transactions(program);
 
         match self.target {
             CodeTarget::Wasm => {
                 let rust_code = self.generate_rust_code(program, bindings);
                 let js_glue = self.generate_js_glue(program_name, bindings);
-                WasmOutput {
+                WebstackOutput {
                     rust_code,
                     js_glue,
                     signal_count: self.signal_counter,
@@ -122,7 +125,7 @@ impl WasmGenerator {
             }
             CodeTarget::Arm => {
                 let rust_code = self.generate_arm_rust_code(program);
-                WasmOutput {
+                WebstackOutput {
                     rust_code,
                     js_glue: String::new(),
                     signal_count: self.signal_counter,
@@ -131,7 +134,7 @@ impl WasmGenerator {
             }
             CodeTarget::Fpga => {
                 let rust_code = self.generate_rust_code(program, bindings);
-                WasmOutput {
+                WebstackOutput {
                     rust_code,
                     js_glue: String::new(),
                     signal_count: self.signal_counter,
@@ -1306,19 +1309,24 @@ impl WasmGenerator {
                 }
             }
             Statement::Term { .. } => {
+                let cleanup = std::mem::take(&mut *self.pending_cleanup.borrow_mut());
+                for stmt in &cleanup {
+                    self.statement_to_rust(output, stmt);
+                }
                 output.push_str("        // term - transaction settled\n");
             }
             Statement::Let {
                 name,
                 ty: _,
                 expr,
-                address: _,
-                bit_range: _,
-                is_override: _,
-                address_expr: _,
-                modifiers: _,
+                address_expr,
+                ..
             } => {
-                if let Some(e) = expr {
+                if let Some(addr_expr) = address_expr {
+                    let addr_code = self.expr_to_js_value(addr_expr);
+                    output.push_str(&format!("        let {}: *const u32 = {} as *const u32;\n", name, addr_code));
+                    self.local_vars.insert(name.clone(), ());
+                } else if let Some(e) = expr {
                     let expr_code = self.expr_to_js_value(e);
                     output.push_str(&format!("        let {} = {};\n", name, expr_code));
                     self.local_vars.insert(name.clone(), ());
@@ -1386,7 +1394,17 @@ impl WasmGenerator {
                 ));
                 // TODO: Emit async yield/await code for local triggers
             }
-            Statement::Alka(_) | Statement::OnExit { .. } => {}
+            Statement::Alka(block) => {
+                if block.dangerous {
+                    output.push_str(&format!("        // alka! {{}} = {}\n", block.content));
+                } else {
+                    output.push_str(&format!("        // alka {{}} = {}\n", block.content));
+                }
+            }
+            Statement::OnExit { body, .. } => {
+                self.pending_cleanup.borrow_mut().extend(body.iter().cloned());
+                output.push_str("        // #on_exit cleanup registered\n");
+            }
         }
     }
 
@@ -1989,14 +2007,14 @@ impl WasmGenerator {
     }
 }
 
-impl Default for WasmGenerator {
+impl Default for WebstackGenerator {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[derive(Debug)]
-pub struct WasmOutput {
+pub struct WebstackOutput {
     pub rust_code: String,
     pub js_glue: String,
     pub signal_count: usize,

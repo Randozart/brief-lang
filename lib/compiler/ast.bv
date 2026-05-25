@@ -42,23 +42,44 @@ enum Expr {
     ExprExists(String, Expr)   // var, body
 }
 
+// ===== HASHTAG MODIFIERS =====
+
+struct Hashtag {
+    name: String,
+    value: Option<String>,
+    mandatory: Bool,
+    fallback: List<String>,
+    scoped: Option<String>
+}
+
 // ===== STATEMENTS =====
+
+struct AlkaBlock {
+    dangerous: Bool,
+    content: String
+}
 
 enum Statement {
     // Assignment
-    StmtAssign(Expr, Expr),  // lhs, rhs
+    StmtAssign(Expr, Expr, List<Hashtag>),  // lhs, rhs, modifiers
     
     // Let binding
-    StmtLet(String, Option<Type>, Option<Expr>),  // name, type, init
+    StmtLet(String, Option<Type>, Option<Expr>, List<Hashtag>),  // name, type, init, modifiers
     
     // Expression statement
     StmtExpr(Expr),
     
     // Term statement
-    StmtTerm(List<Option<Expr>>),  // return values
+    StmtTerm(List<Option<Expr>>, List<Hashtag>),  // return values, modifiers
     
     // Escape statement
     StmtEscape(Option<Expr>),  // escape value
+    
+    // Alka escape hatch: alka { ... }; or alka! { ... };
+    StmtAlka(AlkaBlock),
+    
+    // Block pragma: #on_exit { ... };
+    StmtOnExit(List<Statement>),  // cleanup body
     
     // Guarded statement
     StmtGuarded(Expr, List<Statement>),  // condition, body
@@ -91,7 +112,8 @@ struct Definition {
     params: List<Param>,
     output_type: Option<Type>,
     contract: Contract,
-    body: List<Statement>
+    body: List<Statement>,
+    modifiers: List<Hashtag>
 }
 
 struct Transaction {
@@ -101,7 +123,8 @@ struct Transaction {
     type_params: List<String>,
     params: List<Param>,
     contract: Contract,
-    body: List<Statement>
+    body: List<Statement>,
+    modifiers: List<Hashtag>
 }
 
 struct Param {
@@ -151,10 +174,19 @@ struct BitRange {
 
 // ===== STRUCTS AND ENUMS =====
 
+struct StructVariant {
+    contract: Contract,
+    fields: List<StructField>,
+    additions: List<StructField>,
+    removals: List<String>
+}
+
 struct StructDefinition {
     name: String,
     fields: List<StructField>,
-    methods: List<Transaction>
+    methods: List<Transaction>,
+    modifiers: List<Hashtag>,
+    variants: List<StructVariant>
 }
 
 struct StructField {

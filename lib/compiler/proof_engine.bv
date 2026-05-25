@@ -297,17 +297,33 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
 }
 
 defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> SymbolicState {
-    uni stmt(StmtLet(name, _, Some(init))) = {
+    uni stmt(StmtLet(name, _, Some(init), _)) = {
         let value = eval_symbolic(*init, state);
         term state_assign(state, name, value);
     };
     
-    uni stmt(StmtAssign(lhs, rhs)) = {
+    uni stmt(StmtAssign(lhs, rhs, _)) = {
         // Extract variable name from lhs
         uni *lhs(ExprVar(name)) = {
             let value = eval_symbolic(*rhs, state);
             term state_assign(state, name, value);
         };
+        term state;
+    };
+    
+    uni stmt(StmtOnExit(body)) = {
+        // Execute cleanup body inline for symbolic analysis
+        let i: Int = 0;
+        let st = state;
+        [i < body.len()] {
+            &st = execute_statement_symbolic(body[i], st);
+            &i = i + 1;
+        };
+        term st;
+    };
+    
+    uni stmt(StmtAlka(_)) = {
+        // Opaque passthrough, no symbolic effect
         term state;
     };
     
@@ -462,10 +478,10 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
     
     let i: Int = 0;
     [i < stmts.len()] {
-        uni stmts[i](StmtLet(name, _, _)) = {
+        uni stmts[i](StmtLet(name, _, _, _)) = {
             writes = writes.append(name);
         };
-        uni stmts[i](StmtAssign(lhs, _)) = {
+        uni stmts[i](StmtAssign(lhs, _, _)) = {
             uni *lhs(ExprVar(name)) = {
                 writes = writes.append(name);
             };
@@ -493,6 +509,10 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
         };
         uni stmts[i](StmtFor(name, _, body)) = {
             writes = writes.append(name);
+            let nested = collect_writes(body);
+            writes = writes.append_all(nested);
+        };
+        uni stmts[i](StmtOnExit(body)) = {
             let nested = collect_writes(body);
             writes = writes.append_all(nested);
         };
@@ -679,14 +699,14 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
     
     let i: Int = 0;
     [i < stmts.len()] {
-        uni stmts[i](StmtLet(_, _, Some(init))) = {
+        uni stmts[i](StmtLet(_, _, Some(init), _)) = {
             reads = reads.append_all(collect_reads_expr(*init));
         };
-        uni stmts[i](StmtAssign(lhs, rhs)) = {
+        uni stmts[i](StmtAssign(lhs, rhs, _)) = {
             reads = reads.append_all(collect_reads_expr(*lhs));
             reads = reads.append_all(collect_reads_expr(*rhs));
         };
-        uni stmts[i](StmtTerm(values)) = {
+        uni stmts[i](StmtTerm(values, _)) = {
             let j: Int = 0;
             [j < values.len()] {
                 [values[j].is_some()] {
@@ -708,6 +728,9 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
         };
         uni stmts[i](StmtFor(_, iter, body)) = {
             reads = reads.append_all(collect_reads_expr(*iter));
+            reads = reads.append_all(collect_reads(body));
+        };
+        uni stmts[i](StmtOnExit(body)) = {
             reads = reads.append_all(collect_reads(body));
         };
         uni stmts[i](StmtIf(cond, then_body, else_body)) = {

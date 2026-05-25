@@ -318,7 +318,8 @@ fn print_usage(program: &str) {
     eprintln!("  serve [dir]      Serve static files (default: .)");
     eprintln!("  rbv <file>       Compile RBV to browser-ready files");
     eprintln!("  run <file>       Compile, build WASM, serve, and open browser");
-    eprintln!("  wasm <file>      Generate WASM only (.bv) or WASM+JS+UI (.rbv)");
+    eprintln!("  wasm <file>      Direct WASM binary (.bv/.sbv) or WASM+JS+UI (.rbv/.srbv)");
+    eprintln!("  webstack <file>  Rust + wasm-bindgen glue, compile via wasm-pack");
     eprintln!("  rust <file>      Compile to Native Rust (std)");
     eprintln!("  c <file>         Compile to C with __asm__");
     eprintln!("  arm <file>       Compile to ARM bare-metal Rust");
@@ -1147,7 +1148,7 @@ fn run_arm(
         eprintln!("  Warning: Proof errors (continuing anyway)");
     }
 
-    let mut wasm_gen = backend::wasm::WasmGenerator::new().with_target(backend::wasm::CodeTarget::Arm);
+    let mut wasm_gen = backend::webstack::WebstackGenerator::new().with_target(backend::webstack::CodeTarget::Arm);
     let output = wasm_gen.generate(&program, &[], "kernel");
 
     let stem = file_path
@@ -2144,20 +2145,26 @@ fn run_vhdl(
     if let Some(spec) = target_spec {
         vhdl_gen = vhdl_gen.with_spec(spec);
     }
-    let vhdl_code = vhdl_gen.generate(&program);
+    let vhdl_files = vhdl_gen.generate(&program);
 
-    // Write output
+    // Write output — each file is a separate .vhd
     let out_path = out_dir
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
     if !out_path.exists() {
         fs::create_dir_all(&out_path)?;
     }
-    let output_file = out_path.join(format!("{}.vhd", stem));
-    fs::write(&output_file, vhdl_code)?;
+    let mut last_output = out_path.join(format!("{}.vhd", stem));
+    for (filename, source) in &vhdl_files {
+        let output_file = out_path.join(filename);
+        fs::write(&output_file, source)?;
+        println!("  Generated: {}", output_file.display());
+        if filename == &format!("{}.vhd", stem) || filename == "top.vhd" {
+            last_output = output_file;
+        }
+    }
 
-    println!("  Generated: {}", output_file.display());
-    Ok(output_file)
+    Ok(last_output)
 }
 
 fn run_rbv(
@@ -2342,7 +2349,7 @@ fn run_rbv(
         .and_then(|s| s.to_str())
         .unwrap_or("output");
 
-    let mut wasm_gen = backend::wasm::WasmGenerator::new();
+    let mut wasm_gen = backend::webstack::WebstackGenerator::new();
     if let Some(speed) = program.reactor_speed {
         wasm_gen.set_reactor_speed(speed);
     }
@@ -2488,6 +2495,7 @@ wasm-opt = false
     Ok(output_path)
 }
 
+/// Generate a direct WASM binary from a .bv file.
 fn run_wasm(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -2496,26 +2504,25 @@ fn run_wasm(
     stdlib_path: Option<PathBuf>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    
+
     match ext {
-        "bv" => {
-            // .bv files: Generate pure WASM only (no JS/frontend)
-            println!("Generating pure WASM from .bv file...");
-            
+        "bv" | "sbv" => {
+            println!("Generating direct WASM binary from .{} file...", ext);
+
             let source = fs::read_to_string(file_path)?;
             let clean_source = strip_annotations(&source);
-            
+
             let mut parser = parser::Parser::new(&clean_source);
             let mut program = parser.parse()
                 .map_err(|e| format!("Brief parse error: {}", e))?;
-            
+
             let mut import_resolver = import_resolver::ImportResolver::new();
             program = import_resolver.resolve_imports(&program, file_path)
                 .map_err(|e| format!("Import error: {}", e))?;
-            
+
             let mut desug = desugarer::Desugarer::new();
             program = desug.desugar(&program);
-            
+
             let mut tc = typechecker::TypeChecker::new()
                 .with_stdlib_config(no_stdlib, stdlib_path)
                 .with_target(typechecker::CompilationTarget::Wasm);
@@ -2523,30 +2530,44 @@ fn run_wasm(
             if !type_errors.is_empty() {
                 return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
             }
-            
+
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-            
-            // Generate WASM target code (not the binary itself)
-            let mut wasm_gen = backend::wasm::WasmGenerator::new()
-                .with_target(backend::wasm::CodeTarget::Wasm);
-            
-            let output = wasm_gen.generate(&program, &[], stem);
-            
+
+            let module = backend::wasm::generate_wasm(&program);
+
             let output_path = out_dir.map(|p| p.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."));
             fs::create_dir_all(&output_path)?;
-            
-            // Write the Rust source for WASM
-            let rs_path = output_path.join(format!("{}.rs", stem));
-            fs::write(&rs_path, &output.rust_code)?;
-            println!("  Generated Rust: {}", rs_path.display());
-            
-            if build_wasm {
-                // Compile Rust to WASM using wasm32 target and wasm-bindgen
-                println!("  Attempting to compile to WASM...");
-                
-                // First create a minimal Cargo project
-                let cargo_toml = format!(r#"
+
+            let wasm_path = output_path.join(format!("{}.wasm", stem));
+            fs::write(&wasm_path, &module.bytes)?;
+            println!("  WASM binary: {} ({} bytes, {} functions, {} exports)",
+                wasm_path.display(), module.bytes.len(), module.function_count, module.export_count);
+
+            Ok(output_path)
+        }
+        "rbv" | "srbv" => {
+            println!("Generating WASM + JS + frontend from .{} file...", ext);
+            run_rbv(file_path, out_dir, build_wasm, no_stdlib, stdlib_path)
+        }
+        _ => {
+            Err(format!("Unsupported file type: {}. Use .bv, .sbv, .rbv, or .srbv files", ext).into())
+        }
+    }
+}
+
+/// Generate Rust source with wasm-bindgen glue, then optionally compile with wasm-pack.
+fn run_webstack(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+    build_wasm: bool,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    fn compile_via_wasm_pack(stem: &str, output_path: &Path, rs_path: &Path) {
+        let cargo_toml = format!(r#"
 [package]
 name = "{}"
 version = "0.1.0"
@@ -2559,67 +2580,112 @@ crate-type = ["cdylib"]
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 "#,
-                    stem
-                );
-                let cargo_path = output_path.join("Cargo.toml");
-                fs::write(&cargo_path, cargo_toml)?;
-                
-                // Try wasm-pack first (preferred method)
-                let wasm_pack_result = std::process::Command::new("wasm-pack")
-                    .args(&["build", "--target", "web", "--out-dir", "pkg"])
-                    .current_dir(&output_path)
+            stem
+        );
+        let cargo_path = output_path.join("Cargo.toml");
+        let _ = fs::write(&cargo_path, cargo_toml);
+
+        let wasm_pack_result = std::process::Command::new("wasm-pack")
+            .args(&["build", "--target", "web", "--out-dir", "pkg"])
+            .current_dir(output_path)
+            .output();
+
+        match wasm_pack_result {
+            Ok(result) if result.status.success() => {
+                let wasm_file = output_path.join("pkg").join(format!("{}_bg.wasm", stem));
+                if wasm_file.exists() {
+                    println!("  WASM compiled: {}", wasm_file.display());
+                }
+                println!("  Use: {}", output_path.join("pkg").display());
+            }
+            Ok(_) => {
+                eprintln!("  wasm-pack not available or failed, trying rustc...");
+                let compile_result = std::process::Command::new("rustc")
+                    .args(&[
+                        "--target", "wasm32-unknown-unknown",
+                        "--crate-type", "cdylib",
+                        "-O",
+                        "-o", &output_path.join(format!("{}.wasm", stem)).to_string_lossy(),
+                        &rs_path.to_string_lossy()
+                    ])
                     .output();
-                
-                match wasm_pack_result {
-                    Ok(result) if result.status.success() => {
-                        let wasm_file = output_path.join("pkg").join(format!("{}_bg.wasm", stem));
-                        if wasm_file.exists() {
-                            println!("  WASM compiled: {}", wasm_file.display());
-                        }
-                        println!("  Use: {}", output_path.join("pkg").display());
+
+                match compile_result {
+                    Ok(cresult) if cresult.status.success() => {
+                        println!("  WASM compiled: {}", output_path.join(format!("{}.wasm", stem)).display());
                     }
-                    Ok(result) => {
-                        // Fall back to direct rustc
-                        eprintln!("  wasm-pack not available or failed, trying rustc...");
-                        let compile_result = std::process::Command::new("rustc")
-                            .args(&[
-                                "--target", "wasm32-unknown-unknown",
-                                "--crate-type", "cdylib",
-                                "-O",
-                                "-o", &output_path.join(format!("{}.wasm", stem)).to_string_lossy(),
-                                &rs_path.to_string_lossy()
-                            ])
-                            .output();
-                        
-                        match compile_result {
-                            Ok(cresult) if cresult.status.success() => {
-                                println!("  WASM compiled: {}", output_path.join(format!("{}.wasm", stem)).display());
-                            }
-                            Ok(cresult) => {
-                                eprintln!("  Note: rustc wasm32 target not installed");
-                                eprintln!("  Install with: rustup target add wasm32-unknown-unknown");
-                            }
-                            Err(e) => {
-                                eprintln!("  Note: rustc not found - outputting Rust source only");
-                            }
-                        }
+                    Ok(_) => {
+                        eprintln!("  Note: rustc wasm32 target not installed");
+                        eprintln!("  Install with: rustup target add wasm32-unknown-unknown");
                     }
-                    Err(e) => {
-                        eprintln!("  Note: wasm-pack not found - outputting Rust source only");
-                        eprintln!("  Install wasm-pack from https://rustwasm.github.io/wasm-pack/");
+                    Err(_) => {
+                        eprintln!("  Note: rustc not found - outputting Rust source only");
                     }
                 }
             }
-            
+            Err(_) => {
+                eprintln!("  Note: wasm-pack not found - outputting Rust source only");
+                eprintln!("  Install wasm-pack from https://rustwasm.github.io/wasm-pack/");
+            }
+        }
+    }
+
+    match ext {
+        "bv" | "sbv" => {
+            println!("Generating Rust/WASM-bindgen from .{} file...", ext);
+
+            let source = fs::read_to_string(file_path)?;
+            let clean_source = strip_annotations(&source);
+
+            let mut parser = parser::Parser::new(&clean_source);
+            let mut program = parser.parse()
+                .map_err(|e| format!("Brief parse error: {}", e))?;
+
+            let mut import_resolver = import_resolver::ImportResolver::new();
+            program = import_resolver.resolve_imports(&program, file_path)
+                .map_err(|e| format!("Import error: {}", e))?;
+
+            let mut desug = desugarer::Desugarer::new();
+            program = desug.desugar(&program);
+
+            let mut tc = typechecker::TypeChecker::new()
+                .with_stdlib_config(no_stdlib, stdlib_path)
+                .with_target(typechecker::CompilationTarget::Wasm);
+            let type_errors = tc.check_program(&mut program);
+            if !type_errors.is_empty() {
+                return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
+            }
+
+            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+
+            let mut webstack_gen = backend::webstack::WebstackGenerator::new()
+                .with_target(backend::webstack::CodeTarget::Wasm);
+            let output = webstack_gen.generate(&program, &[], stem);
+
+            let output_path = out_dir.map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+            fs::create_dir_all(&output_path)?;
+
+            let rs_path = output_path.join(format!("{}.rs", stem));
+            fs::write(&rs_path, &output.rust_code)?;
+            println!("  Generated Rust: {}", rs_path.display());
+
+            let js_path = output_path.join(format!("{}.js", stem));
+            fs::write(&js_path, &output.js_glue)?;
+            println!("  Generated JS: {}", js_path.display());
+
+            if build_wasm {
+                compile_via_wasm_pack(stem, &output_path, &rs_path);
+            }
+
             Ok(output_path)
         }
-        "rbv" => {
-            // .rbv files: Full WASM + JS + Frontend (delegate to run_rbv)
-            println!("Generating WASM + JS + frontend from .rbv file...");
+        "rbv" | "srbv" => {
+            println!("Full webstack (Rust + JS + HTML) from .{} file...", ext);
             run_rbv(file_path, out_dir, build_wasm, no_stdlib, stdlib_path)
         }
         _ => {
-            Err(format!("Unsupported file type: {}. Use .bv or .rbv files", ext).into())
+            Err(format!("Unsupported file type: {}. Use .bv, .sbv, .rbv, or .srbv files", ext).into())
         }
     }
 }
@@ -3270,9 +3336,49 @@ fn main() {
                 }
             } else {
                 eprintln!("Error: No .bv, .sbv, .rbv, or .srbv file specified");
-                eprintln!("Usage: {} wasm <file> [--out <dir>] [--no-build]", args[0]);
-                eprintln!("  .bv/.sbv files → pure WASM binary");
-                eprintln!("  .rbv/.srbv files → WASM + JS + frontend");
+                eprintln!("Usage: {} wasm <file> [--out <dir>]", args[0]);
+                eprintln!("  .bv/.sbv files → direct WASM binary");
+                eprintln!("  .rbv/.srbv files → WASM + JS + frontend (same as webstack)");
+                std::process::exit(1);
+            }
+        }
+
+        "webstack" => {
+            let mut file_path = None;
+            let mut out_dir = None;
+            let mut build_wasm = true;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--no-build" {
+                    build_wasm = false;
+                    i += 1;
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".rbv") || arg.ends_with(".srbv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                match run_webstack(&path, out_dir.as_deref(), build_wasm, no_stdlib, stdlib_path.clone()) {
+                    Ok(output) => {
+                        println!("Webstack generated: {}", output.display());
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No .bv, .sbv, .rbv, or .srbv file specified");
+                eprintln!("Usage: {} webstack <file> [--out <dir>] [--no-build]", args[0]);
+                eprintln!("  Generates Rust source + wasm-bindgen glue, compiles via wasm-pack");
                 std::process::exit(1);
             }
         }

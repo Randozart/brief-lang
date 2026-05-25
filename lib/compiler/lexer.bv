@@ -347,6 +347,37 @@ defn next_token(state: LexerState) -> Result<(Token, LexerState), String> {
     [c == '^'] { &state = advance(state); term Ok((OpCaret, state)); };
     [c == '~'] { &state = advance(state); term Ok((OpTilde, state)); };
     [c == '?'] { &state = advance(state); term Ok((OpQuestion, state)); };
+    [c == '#'] {
+        [is_some(peek_char(state, 1))] {
+            let next = unwrap(peek_char(state, 1));
+            [next == '!'] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((HashBang, state));
+            };
+            [next == '['] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((HashBracket, state));
+            };
+            [next == '('] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((HashParen, state));
+            };
+            [next == '?'] {
+                &state = advance(state);
+                &state = advance(state);
+                term Ok((HashQuestion, state));
+            };
+            [is_alpha(next) || next == '_'] {
+                &state = advance(state);
+                term Ok((Hash, state));
+            };
+        };
+        &state = advance(state);
+        term Ok((TokenComment("#"), state));
+    };
     [c == '@'] { &state = advance(state); term Ok((OpAt, state)); };
     [c == '.'] { &state = advance(state); term Ok((OpDot, state)); };
     [c == ':'] { &state = advance(state); term Ok((OpColon, state)); };

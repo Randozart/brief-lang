@@ -95,7 +95,7 @@ defn generate_c_block(stmts: List<Statement>) -> String {
 }
 
 defn generate_c_statement(stmt: Statement) -> String {
-    uni stmt(StmtLet(name, var_type, init)) = {
+    uni stmt(StmtLet(name, var_type, init, _modifiers)) = {
         let output = new_builder();
         output = output.append_str(type_to_c(var_type.unwrap()));
         output = output.append_str(" ");
@@ -108,7 +108,7 @@ defn generate_c_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    uni stmt(StmtAssign(lhs, rhs)) = {
+    uni stmt(StmtAssign(lhs, rhs, _modifiers)) = {
         let output = new_builder();
         output = output.append_str(expr_to_c(*lhs));
         output = output.append_str(" = ");
@@ -117,7 +117,7 @@ defn generate_c_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    uni stmt(StmtTerm(values)) = {
+    uni stmt(StmtTerm(values, _modifiers)) = {
         let output = new_builder();
         output = output.append_str("return");
         [values.len() > 0] {
@@ -135,6 +135,24 @@ defn generate_c_statement(stmt: Statement) -> String {
         output = output.append_str(") {\n");
         output = output.append_str(generate_c_block(body));
         output = output.append_str("}\n");
+        term output.to_string();
+    };
+    
+    uni stmt(StmtOnExit(body)) = {
+        let output = new_builder();
+        output = output.append_str("/* #on_exit cleanup */\n");
+        output = output.append_str(generate_c_block(body));
+        term output.to_string();
+    };
+    
+    uni stmt(StmtAlka(block)) = {
+        let output = new_builder();
+        output = output.append_str("/* ");
+        let prefix = "alka: ";
+        [block.dangerous] { &prefix = "alka! "; };
+        output = output.append_str(prefix);
+        output = output.append_str(block.content);
+        output = output.append_str(" */\n");
         term output.to_string();
     };
     

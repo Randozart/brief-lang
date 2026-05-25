@@ -293,10 +293,10 @@ defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
     
     let i: Int = 0;
     [i < stmts.len()] {
-        uni stmts[i](StmtLet(name, _, _)) = {
+        uni stmts[i](StmtLet(name, _, _, _)) = {
             vars = vars.append(name);
         };
-        uni stmts[i](StmtAssign(lhs, _)) = {
+        uni stmts[i](StmtAssign(lhs, _, _)) = {
             uni *lhs(ExprVar(name)) = {
                 vars = vars.append(name);
             };
@@ -321,6 +321,13 @@ defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
             let else_vars = collect_vars_from_stmts(else_b);
             vars = vars.append_all(then_vars);
             vars = vars.append_all(else_vars);
+        };
+        uni stmts[i](StmtOnExit(body)) = {
+            let nested = collect_vars_from_stmts(body);
+            vars = vars.append_all(nested);
+        };
+        uni stmts[i](StmtAlka(_)) = {
+            // No variables from alka blocks
         };
         &i = i + 1;
     };
@@ -1187,7 +1194,7 @@ defn generate_statement_list(stmts: List<Statement>, alloc: RegisterAllocator) -
 }
 
 defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64Instr>, RegisterAllocator) {
-    uni stmt(StmtLet(name, _, Some(init))) = {
+    uni stmt(StmtLet(name, _, Some(init), _modifiers)) = {
         // let name = init;
         let (expr_instrs, new_alloc) = generate_expr(*init, alloc);
         let (reg, final_alloc) = alloc_reg(new_alloc, None);
@@ -1200,7 +1207,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         term (instrs, final_alloc);
     };
     
-    uni stmt(StmtAssign(lhs, rhs)) = {
+    uni stmt(StmtAssign(lhs, rhs, _modifiers)) = {
         // lhs = rhs;
         let (expr_instrs, new_alloc) = generate_expr(*rhs, alloc);
         
@@ -1211,7 +1218,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         term (instrs, new_alloc);
     };
     
-    uni stmt(StmtTerm(values)) = {
+    uni stmt(StmtTerm(values, _modifiers)) = {
         // term [values];
         let instrs: List<A64Instr> = [];
         let current_alloc = alloc;
@@ -1249,6 +1256,28 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         instrs = instrs.append(emit_label(false_label));
         
         term (instrs, body_alloc);
+    };
+    
+    uni stmt(StmtOnExit(body)) = {
+        // Execute #on_exit cleanup inline
+        let instrs: List<A64Instr> = [emit_comment("#on_exit cleanup")];
+        let current_alloc = alloc;
+        let i: Int = 0;
+        [i < body.len()] {
+            let (body_instrs, new_alloc) = generate_statement(body[i], current_alloc);
+            &instrs = instrs.append_all(body_instrs);
+            &current_alloc = new_alloc;
+            &i = i + 1;
+        };
+        term (instrs, current_alloc);
+    };
+    
+    uni stmt(StmtAlka(block)) = {
+        let instrs: List<A64Instr> = [];
+        let label = "alka";
+        [block.dangerous] { &label = "alka!"; };
+        let instrs = [emit_comment(label + ": " + block.content)];
+        term (instrs, alloc);
     };
     
     // Default - no code
