@@ -158,6 +158,10 @@ defn read_identifier(state: LexerState) -> (Token, LexerState) {
     [text == "as"] { term (KeywordAs, state); };
     [text == "true"] { term (KeywordTrue, state); };
     [text == "false"] { term (KeywordFalse, state); };
+    [text == "trg"] { term (KeywordTrg, state); };
+    [text == "trigger"] { term (KeywordTrg, state); };
+    [text == "TRG"] { term (KeywordTrg, state); };
+    [text == "TRIGGER"] { term (KeywordTrg, state); };
     
     // Not a keyword - it's an identifier
     term (TokenIdentifier(text), state);

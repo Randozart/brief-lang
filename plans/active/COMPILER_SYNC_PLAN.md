@@ -592,6 +592,17 @@ lib/compiler/
 - `lib/compiler/parser.bv` — parse `let (a, b) = expr;` syntax with optional type annotation; comma-joins names, produces `StmtLet(joined, var_type, Some(ExprTupleDestructure(names, expr)), ...)`
 - `lib/compiler/typechecker.bv` — `infer_expr` handles `ExprTuple` (infers element types, produces `TypeTuple`) and `ExprTupleDestructure` (delegates to source type); `check_statement` destructure branch detects `ExprTupleDestructure` in init, infers RHS type, matches arity, declares each variable
 
+#### Phase 2.7: LocalTrigger (`trg!`) — COMPLETED
+
+**Files changed:**
+- `lib/compiler/token.bv` — added `KeywordTrgBang` token variant
+- `lib/compiler/lexer.bv` — lex `trg`/`trigger`/`TRG`/`TRIGGER` as `KeywordTrg`
+- `lib/compiler/ast.bv` — added `StmtLocalTrigger(String, Type, Option<Expr>)` to Statement enum
+- `lib/compiler/parser.bv` — parse `trg! name: Type [= expr];`; when `KeywordTrg` is followed by `OpNot`, parse as `StmtLocalTrigger` (otherwise error suggesting `!`)
+- `lib/compiler/typechecker.bv` — infer expression type if present, unify with declared type, declare variable in scope
+- `lib/compiler/proof_engine.bv` — no-op in `execute_statement_symbolic`
+- `lib/compiler/backends/{c,rust,backend_aarch64}.bv` — emit as comment
+
 #### Future: Strict Mode Big-O / Complexity Extension (Planned)
 
 See §2.8b above. Documented 2026-05-25. Implementation deferred until both compilers have strict mode ported.

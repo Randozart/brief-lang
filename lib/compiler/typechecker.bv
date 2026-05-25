@@ -702,6 +702,21 @@ defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeCon
         term (TypeVoid, ctx);
     };
     
+    uni stmt(StmtLocalTrigger(name, ty, trigger_expr)) = {
+        [is_some(trigger_expr)] {
+            let result = infer_expr(unwrap(trigger_expr), ctx);
+            uni result(Ok((expr_ty, _))) = {
+                let subst = empty_subst();
+                let result = unify(expr_ty, ty, subst);
+                uni result(Err(e)) = { term Err(e); };
+                uni result(Ok(_)) = {};
+            };
+            uni result(Err(e)) = { term Err(e); };
+        };
+        &ctx = declare_variable(ctx, name, ty);
+        term (TypeVoid, ctx);
+    };
+    
     term (TypeVoid, ctx);
 }
 

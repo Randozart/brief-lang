@@ -165,6 +165,24 @@ defn generate_c_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
+    uni stmt(StmtLocalTrigger(name, _, trigger_expr)) = {
+        let output = new_builder();
+        [is_some(trigger_expr)] {
+            let expr_code = expr_to_c(unwrap(trigger_expr));
+            output = output.append_str("/* trg! ");
+            output = output.append_str(name);
+            output = output.append_str(": await ");
+            output = output.append_str(expr_code);
+            output = output.append_str(" */\n");
+        };
+        [!is_some(trigger_expr)] {
+            output = output.append_str("/* trg! ");
+            output = output.append_str(name);
+            output = output.append_str(": await external event */\n");
+        };
+        term output.to_string();
+    };
+    
     term String::new()
 }
 

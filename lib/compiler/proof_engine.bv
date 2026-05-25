@@ -327,6 +327,11 @@ defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> Symbol
         term state;
     };
     
+    uni stmt(StmtLocalTrigger(_, _, _)) = {
+        // Local trigger: no symbolic effect
+        term state;
+    };
+    
     term state;
 }
 

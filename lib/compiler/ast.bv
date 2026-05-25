@@ -73,6 +73,9 @@ enum Statement {
     // Term statement
     StmtTerm(List<Option<Expr>>, List<Hashtag>),  // return values, modifiers
     
+    // Local trigger: trg! name: Type = expr;
+    StmtLocalTrigger(String, Type, Option<Expr>),  // name, type, expr
+    
     // Escape statement
     StmtEscape(Option<Expr>),  // escape value
     

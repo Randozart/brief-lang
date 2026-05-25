@@ -1127,6 +1127,52 @@ defn parse_statement(state: ParserState) -> Result<(Statement, ParserState), Str
         };
     };
     
+    uni tok(KeywordTrg) = {
+        &state = advance(state);
+        // Check for trg! (local trigger) vs trg (top-level)
+        [current_token(state) == OpNot] {
+            &state = advance(state);
+            // Parse trg! name: Type = expr;
+            let tok_name = current_token(state);
+            uni tok_name(TokenIdentifier(name)) = {
+                &state = advance(state);
+            };
+            [!is_identifier(tok_name)] {
+                term Err("Expected local trigger name after trg!");
+            };
+            
+            let result = expect_token(state, OpColon);
+            uni result(Ok(new_state)) = { &state = new_state; };
+            uni result(Err(e)) = { term Err(e); };
+            
+            let result = parse_type(state);
+            uni result(Ok(pair)) = {
+                let (ty, new_state) = pair;
+                &state = new_state;
+            };
+            uni result(Err(e)) = { term Err(e); };
+            
+            let trigger_expr: Option<Expr> = None;
+            [current_token(state) == OpEq] {
+                &state = advance(state);
+                let result = parse_expression(state);
+                uni result(Ok(pair)) = {
+                    let (expr_val, new_state) = pair;
+                    &trigger_expr = Some(expr_val);
+                    &state = new_state;
+                };
+                uni result(Err(e)) = { term Err(e); };
+            };
+            
+            let result = expect_token(state, OpSemicolon);
+            uni result(Ok(new_state)) = {
+                term Ok((StmtLocalTrigger(name, ty, trigger_expr), new_state));
+            };
+            uni result(Err(e)) = { term Err(e); };
+        };
+        term Err("trg at statement level requires 'trg!' (with bang)");
+    };
+    
     [is_identifier(tok) || tok == OpAt] {
         // Check for alka escape hatch before parsing as expression
         uni tok(TokenIdentifier(name)) = {

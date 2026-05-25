@@ -326,6 +326,9 @@ defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
             let nested = collect_vars_from_stmts(body);
             vars = vars.append_all(nested);
         };
+        uni stmts[i](StmtLocalTrigger(_, _, _)) = {
+            // No variables from local triggers
+        };
         uni stmts[i](StmtAlka(_)) = {
             // No variables from alka blocks
         };
@@ -1277,6 +1280,11 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         let label = "alka";
         [block.dangerous] { &label = "alka!"; };
         let instrs = [emit_comment(label + ": " + block.content)];
+        term (instrs, alloc);
+    };
+    
+    uni stmt(StmtLocalTrigger(name, _, trigger_expr)) = {
+        let instrs: List<A64Instr> = [emit_comment("trg! " + name)];
         term (instrs, alloc);
     };
     

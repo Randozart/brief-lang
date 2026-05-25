@@ -55,6 +55,7 @@ enum Token {
     
     // Hardware
     KeywordTrg,
+    KeywordTrgBang,  // trg!
     KeywordLink,
     KeywordBank,
     
