@@ -161,13 +161,15 @@ defn print_usage() -> String [true][result.len() > 0] {
     sb = sb.append_str("  --wasm       Generate direct WASM binary\n");
     sb = sb.append_str("  --webstack   Generate Rust + wasm-bindgen code\n");
     sb = sb.append_str("  --verbose    Show detailed compilation info\n");
+    sb = sb.append_str("  --strict     Enable strict mode (reject [true] contracts, verify all constraints)\n");
     term sb.to_string();
 }
 
-defn parse_args(args: List<String>) -> (String, String, Bool) {
+defn parse_args(args: List<String>) -> (String, String, Bool, Bool) {
     let file_path: String = "";
     let backend: String = "rust";
     let verbose: Bool = false;
+    let strict: Bool = false;
 
     let i: Int = 0;
     [i < args.len()] {
@@ -180,7 +182,10 @@ defn parse_args(args: List<String>) -> (String, String, Bool) {
         [args[i] == "--verbose"] {
             &verbose = true;
         };
-        [args[i] != "--wasm" && args[i] != "--webstack" && args[i] != "--verbose"] {
+        [args[i] == "--strict"] {
+            &strict = true;
+        };
+        [args[i] != "--wasm" && args[i] != "--webstack" && args[i] != "--verbose" && args[i] != "--strict"] {
             [file_path == ""] {
                 &file_path = args[i];
             };
@@ -188,18 +193,21 @@ defn parse_args(args: List<String>) -> (String, String, Bool) {
         &i = i + 1;
     };
 
-    term (file_path, backend, verbose);
+    term (file_path, backend, verbose, strict);
 }
 
 // ===== MAIN TRANSACTION =====
 
 txn compile_main [true][term] {
     let args: List<String> = [];
-    let (file_path, backend, verbose) = parse_args(args);
+    let (file_path, backend, verbose, strict_flag) = parse_args(args);
 
     [file_path == ""] {
         term;
     };
+
+    // Combine CLI strict flag with extension-based detection
+    let strict = strict_flag || is_strict_extension(file_path);
 
     let result = compile_file(file_path, backend, verbose);
     uni result(Ok(output)) = {

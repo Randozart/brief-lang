@@ -22,14 +22,37 @@
 
 use crate::ast::{Program, TopLevel};
 use crate::errors::{Diagnostic, ErrorMode, Severity, Span};
+use crate::import_resolver;
 use crate::parser;
 use crate::proof_engine;
 use crate::typechecker;
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
+
+/// Auto-launch configuration for LSP server
+pub struct AutoLaunchConfig {
+    pub verbose: bool,
+}
+
+impl Default for AutoLaunchConfig {
+    fn default() -> Self {
+        AutoLaunchConfig { verbose: false }
+    }
+}
+
+/// Symbol table entry for LSP
+struct SymbolEntry {
+    name: String,
+    kind: u32,
+    uri: String,
+    line: usize,
+    column: usize,
+    name_len: usize,
+}
 
 fn strip_codicil_blocks(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
@@ -101,6 +124,23 @@ impl LspServer {
         })
     }
 
+    pub fn new_with_config(config: AutoLaunchConfig) -> Result<Self, Box<dyn std::error::Error>> {
+        let (connection, _) = Connection::stdio();
+
+        if config.verbose {
+            eprintln!("Brief Language Server started");
+            eprintln!("  Features: hover, definition, completion, documentSymbol, workspaceSymbol");
+        }
+
+        Ok(LspServer {
+            connection,
+            documents: Arc::new(Mutex::new(DocumentStore {
+                docs: HashMap::new(),
+            })),
+            codicil_mode: false,
+        })
+    }
+
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let server_capabilities = serde_json::json!({
             "textDocumentSync": {
@@ -109,9 +149,11 @@ impl LspServer {
             },
             "hoverProvider": true,
             "definitionProvider": true,
+            "documentSymbolProvider": true,
+            "workspaceSymbolProvider": true,
             "completionProvider": {
                 "resolveProvider": false,
-                "triggerCharacters": ["."]
+                "triggerCharacters": [".", "#"]
             }
         });
 
@@ -176,6 +218,12 @@ impl LspServer {
                 if let Ok(params) = serde_json::from_value(req.params) {
                     self.handle_completion(req.id, params);
                 }
+            }
+            "textDocument/documentSymbol" => {
+                self.handle_document_symbol(req.id, req.params);
+            }
+            "workspace/symbol" => {
+                self.handle_workspace_symbol(req.id, req.params);
             }
             _ => {
                 warn!("Unknown request method: {}", req.method);
@@ -622,6 +670,96 @@ impl LspServer {
     }
 
     fn handle_response(&self, _resp: Response) {}
+
+    /// Build a symbol table from a program for a given URI
+    fn build_symbol_table(&self, program: &Program, uri: &str) -> Vec<SymbolEntry> {
+        program.items.iter().filter_map(|item| {
+            let name = item_name(item);
+            let span = item_span(item)?;
+            let kind: u32 = match item {
+                TopLevel::Transaction(_) => 6,    // Method
+                TopLevel::StateDecl(_) => 13,      // Variable
+                TopLevel::Trigger(_) => 25,        // Event
+                TopLevel::Struct(_) => 23,         // Struct
+                TopLevel::Enum(_) => 10,           // Module
+                TopLevel::ForeignBinding { .. } => 24, // Operator
+                TopLevel::Definition(_) => 12,     // Function
+                TopLevel::Constant(_) => 14,       // Constant
+                TopLevel::Signature(_) => 12,      // Function
+                _ => return None,
+            };
+            let name_len = name.len();
+            Some(SymbolEntry {
+                name,
+                kind,
+                uri: uri.to_string(),
+                line: span.line,
+                column: span.column,
+                name_len,
+            })
+        }).collect()
+    }
+
+    /// Handle textDocument/documentSymbol request
+    fn handle_document_symbol(&self, id: lsp_server::RequestId, params: Value) {
+        let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+        let docs = self.documents.lock().unwrap();
+        let result: Vec<Value> = if let Some(doc) = docs.docs.get(&uri) {
+            if let Some(program) = &doc.program {
+                let symbols = self.build_symbol_table(program, &uri);
+                symbols.iter().map(|s| {
+                    serde_json::json!({
+                        "name": s.name,
+                        "kind": s.kind,
+                        "location": {
+                            "uri": s.uri,
+                            "range": {
+                                "start": { "line": s.line - 1, "character": s.column - 1 },
+                                "end": { "line": s.line - 1, "character": s.column + s.name_len - 1 }
+                            }
+                        }
+                    })
+                }).collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+        let resp = Response::new_ok(id, result);
+        let _ = self.connection.sender.send(Message::Response(resp));
+    }
+
+    /// Handle workspace/symbol request
+    fn handle_workspace_symbol(&self, id: lsp_server::RequestId, params: Value) {
+        let query = params["query"].as_str().unwrap_or("").to_lowercase();
+        let docs = self.documents.lock().unwrap();
+        let mut result: Vec<Value> = Vec::new();
+
+        for (uri, doc) in &docs.docs {
+            if let Some(program) = &doc.program {
+                let symbols = self.build_symbol_table(program, uri);
+                for sym in symbols {
+                    if query.is_empty() || sym.name.to_lowercase().contains(&query) {
+                        result.push(serde_json::json!({
+                            "name": sym.name,
+                            "kind": sym.kind,
+                            "location": {
+                                "uri": sym.uri,
+                                "range": {
+                                    "start": { "line": sym.line - 1, "character": sym.column - 1 },
+                                    "end": { "line": sym.line - 1, "character": sym.column + sym.name_len - 1 }
+                                }
+                            }
+                        }));
+                    }
+                }
+            }
+        }
+
+        let resp = Response::new_ok(id, result);
+        let _ = self.connection.sender.send(Message::Response(resp));
+    }
 }
 
 fn item_span(item: &TopLevel) -> Option<Span> {

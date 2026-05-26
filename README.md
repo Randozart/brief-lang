@@ -80,10 +80,10 @@ txn main() [true][true] {
 ./target/debug/brief-compiler c counter.bv
 
 # Compile to AArch64 binary
-./target/debug/brief-compiler compile counter.bv --target aarch64.toml
+./target/debug/brief-compiler compile counter.bv --target aarch64.dbvs
 
 # Compile to x86-64 binary
-./target/debug/brief-compiler compile counter.bv --target x86_64.toml
+./target/debug/brief-compiler compile counter.bv --target x86_64.dbvs
 ```
 
 ## Language Variants
@@ -434,5 +434,5 @@ Apache 2.0 with explicit runtime exception
 
 ---
 
-*Last updated: 2026-05-06*  
+*Last updated: 2026-05-27*  
 *Version: Brief v0.12.0*

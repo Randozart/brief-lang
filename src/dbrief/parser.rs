@@ -795,6 +795,46 @@ fn parse_address(&mut self) -> Result<DbriefAddress, String> {
                 self.consume(']')?;
                 Ok(DbriefType::Option(inner))
             }
+            "fn" => {
+                self.consume('(')?;
+                let mut param_types = Vec::new();
+                if self.peek() != Some(')') {
+                    loop {
+                        param_types.push(self.parse_type()?);
+                        self.skip_whitespace();
+                        if self.peek() == Some(',') {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.consume(')')?;
+                self.skip_whitespace();
+                // consume ->
+                if self.starts_with("->") {
+                    self.pos += 2;
+                } else {
+                    return Err("Expected '->' in function type".to_string());
+                }
+                let return_type = Box::new(self.parse_type()?);
+                Ok(DbriefType::Fn(param_types, return_type))
+            }
+            "trigger" => {
+                self.consume('(')?;
+                let inner = Box::new(self.parse_type()?);
+                self.consume(')')?;
+                Ok(DbriefType::Trigger(inner))
+            }
+            "result" => {
+                self.consume('[')?;
+                let success = Box::new(self.parse_type()?);
+                self.skip_whitespace();
+                self.consume(',')?;
+                let error = Box::new(self.parse_type()?);
+                self.consume(']')?;
+                Ok(DbriefType::Result(success, error))
+            }
             _ => Ok(DbriefType::Named(tok)),
         }
     }

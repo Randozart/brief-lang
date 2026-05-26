@@ -18,7 +18,7 @@ frgn __shm_open(name: String, flags: Int, mode: Int) -> Result<Int, ShmError>;
 frgn __shm_unlink(name: String) -> Result<Void, ShmError>;
 frgn __ftruncate_shm(fd: Int, length: Int) -> Result<Void, ShmError>;
 frgn __shm_list() -> Result<List<String>, ShmError>;
-frgn __shm_exists(name: String) -> Bool;
+frgn __shm_exists(name: String) -> Result<Bool, ShmError>;
 frgn __shm_size(name: String) -> Result<Int, ShmError>;
 
 // ===== NATIVE WRAPPERS =====
@@ -27,12 +27,12 @@ frgn __shm_size(name: String) -> Result<Int, ShmError>;
 let O_CREAT_RDWR: Int = 0x0202;
 
 // Default permission mode (0644)
-let SHM_MODE_DEFAULT: Int = 0o644;
+let SHM_MODE_DEFAULT: Int = 420;  // 0o644 in decimal
 
 defn shm_create(name: String, size: Int) -> Result<Int, ShmError> {
     let fd = __shm_open(name, O_CREAT_RDWR, SHM_MODE_DEFAULT);
     [fd.is_ok()] {
-        let _ = __ftruncate_shm(fd.value, size);
+        __ftruncate_shm(fd.value, size);
         term Ok(fd.value);
     };
     term fd;
@@ -48,7 +48,11 @@ defn shm_close(name: String) -> Result<Void, ShmError> {
 }
 
 defn shm_exists(name: String) -> Bool {
-    term __shm_exists(name);
+    let result = __shm_exists(name);
+    [result.is_ok()] {
+        term result.value;
+    };
+    term false;
 }
 
 defn shm_list() -> Result<List<String>, ShmError> {
@@ -150,10 +154,17 @@ defn metro_write_max_capacity(addr: Int, capacity: Int) -> Result<Void, MmapErro
 
 // Initialize a Metropolitan channel header (set all fields to defaults)
 defn metro_init_header(addr: Int, capacity: Int) -> Result<Void, MmapError> {
-    metro_write_status(addr, METRO_STATUS_IDLE)?;
-    metro_write_payload_size(addr, 0)?;
-    metro_write_max_capacity(addr, capacity)?;
-    term __mmap_write_u32(addr, METRO_OFFSET_CAS_LOCK, 0);
+    let s = metro_write_status(addr, METRO_STATUS_IDLE);
+    [s.is_ok()] {
+        let p = metro_write_payload_size(addr, 0);
+        [p.is_ok()] {
+            let c = metro_write_max_capacity(addr, capacity);
+            [c.is_ok()] {
+                term __mmap_write_u32(addr, METRO_OFFSET_CAS_LOCK, 0);
+            };
+        };
+    };
+    term s;
 }
 
 // Wait for the channel to be idle (spin-wait with timeout)

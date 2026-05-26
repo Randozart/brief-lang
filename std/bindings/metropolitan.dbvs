@@ -1,0 +1,196 @@
+// Metropolitan FFI Bindings
+// Low-level shared memory and atomic primitives for the Metropolitan protocol
+// These bindings bridge Brief's shm.bv to the Rust MetropolitanHub runtime
+
+// Error types are defined in lib/std/shm.bv (ShmError, MmapError, AtomicError)
+// and returned from the Rust implementations as Value::Enum variants.
+
+register 0x10 as "__shm_open" {
+    type: Data;
+    location: "metro::shm::open";
+    target: native;
+    description: "Open or create a POSIX shared memory object, returns fd";
+    check: [true];
+}
+
+register 0x11 as "__shm_unlink" {
+    type: Data;
+    location: "metro::shm::unlink";
+    target: native;
+    description: "Unlink a POSIX shared memory object";
+    check: [true];
+}
+
+register 0x12 as "__ftruncate_shm" {
+    type: Data;
+    location: "metro::shm::ftruncate";
+    target: native;
+    description: "Set the size of a shared memory object";
+    check: [true];
+}
+
+register 0x13 as "__shm_list" {
+    type: Data;
+    location: "metro::shm::list";
+    target: native;
+    description: "List all shared memory objects";
+    check: [true];
+}
+
+register 0x14 as "__shm_exists" {
+    type: Data;
+    location: "metro::shm::exists";
+    target: native;
+    description: "Check if a shared memory object exists";
+    check: [true];
+}
+
+register 0x15 as "__shm_size" {
+    type: Data;
+    location: "metro::shm::size";
+    target: native;
+    description: "Get the size of a shared memory object";
+    check: [true];
+}
+
+// ===== MMAP Operations =====
+
+register 0x20 as "__mmap_anonymous" {
+    type: Data;
+    location: "metro::mmap::anonymous";
+    target: native;
+    description: "Allocate anonymous shared memory, returns address";
+    check: [true];
+}
+
+register 0x21 as "__munmap" {
+    type: Data;
+    location: "metro::mmap::unmap";
+    target: native;
+    description: "Unmap a memory-mapped region";
+    check: [true];
+}
+
+register 0x22 as "__msync" {
+    type: Data;
+    location: "metro::mmap::sync";
+    target: native;
+    description: "Synchronize a memory-mapped region with backing store";
+    check: [true];
+}
+
+register 0x23 as "__mmap_write" {
+    type: Data;
+    location: "metro::mmap::write";
+    target: native;
+    description: "Write byte values to a memory-mapped region at offset";
+    check: [true];
+}
+
+register 0x24 as "__mmap_read" {
+    type: Data;
+    location: "metro::mmap::read";
+    target: native;
+    description: "Read byte values from a memory-mapped region at offset";
+    check: [true];
+}
+
+register 0x25 as "__mmap_read_u32" {
+    type: Data;
+    location: "metro::mmap::read_u32";
+    target: native;
+    description: "Read a u32 from a memory-mapped region at offset";
+    check: [true];
+}
+
+register 0x26 as "__mmap_write_u32" {
+    type: Data;
+    location: "metro::mmap::write_u32";
+    target: native;
+    description: "Write a u32 to a memory-mapped region at offset";
+    check: [true];
+}
+
+// ===== Atomic Operations =====
+
+register 0x30 as "__atomic_load_u32" {
+    type: Data;
+    location: "metro::atomic::load_u32";
+    target: native;
+    description: "Atomically load a u32 from memory address + offset";
+    check: [true];
+}
+
+register 0x31 as "__atomic_store_u32" {
+    type: Data;
+    location: "metro::atomic::store_u32";
+    target: native;
+    description: "Atomically store a u32 to memory address + offset";
+    check: [true];
+}
+
+register 0x32 as "__atomic_cas_u32" {
+    type: Data;
+    location: "metro::atomic::cas_u32";
+    target: native;
+    description: "Atomic compare-and-swap: if *addr == expected, set *addr = new and return old";
+    check: [true];
+}
+
+register 0x33 as "__atomic_fence" {
+    type: Data;
+    location: "metro::atomic::fence";
+    target: native;
+    description: "Insert a memory barrier (sequentially consistent)";
+    check: [true];
+}
+
+register 0x34 as "__atomic_xchg_u32" {
+    type: Data;
+    location: "metro::atomic::xchg_u32";
+    target: native;
+    description: "Atomically exchange a u32 at memory address + offset, returns old value";
+    check: [true];
+}
+
+register 0x35 as "__atomic_add_u32" {
+    type: Data;
+    location: "metro::atomic::add_u32";
+    target: native;
+    description: "Atomically add a u32 at memory address + offset, returns previous value";
+    check: [true];
+}
+
+// ===== Metropolitan Channel Operations =====
+
+register 0x40 as "__metro_create_channel" {
+    type: Data;
+    location: "metro::channel::create";
+    target: native;
+    description: "Create a Metropolitan channel with request/response sizes, returns channel handle";
+    check: [true];
+}
+
+register 0x41 as "__metro_destroy_channel" {
+    type: Data;
+    location: "metro::channel::destroy";
+    target: native;
+    description: "Destroy a Metropolitan channel by handle";
+    check: [true];
+}
+
+register 0x42 as "__metro_get_channel_layout" {
+    type: Data;
+    location: "metro::channel::get_layout";
+    target: native;
+    description: "Get (request_addr, response_addr, sync_addr) for a channel";
+    check: [true];
+}
+
+register 0x43 as "__metro_generate_c_header" {
+    type: Data;
+    location: "metro::channel::gen_c_header";
+    target: native;
+    description: "Generate a C header file for the foreign side of a channel";
+    check: [true];
+}

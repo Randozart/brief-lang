@@ -564,6 +564,88 @@ fn run_map_or_wrap(
     Ok(())
 }
 
+/// Intent: run bind - generate ready-to-use FFI bindings from a foreign library.
+fn run_bind(
+    lib_path: &Path,
+    mapper: Option<&str>,
+    output_dir: Option<&Path>,
+    force: bool,
+    gen_stubs: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use brief_compiler::ffi::metropolitan::MetropolitanHub;
+    use brief_compiler::wrapper::{
+        analyze_library,
+        generator::{
+            generate_bindings_dbvs, generate_bridge_bv, generate_foreign_stub,
+            write_bind_files,
+        },
+    };
+
+    let lib_name = lib_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+
+    let mapper_name = mapper.unwrap_or_else(|| {
+        if lib_path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            "rust"
+        } else if lib_path.extension().and_then(|e| e.to_str()) == Some("h") {
+            "c"
+        } else if lib_path.extension().and_then(|e| e.to_str()) == Some("wasm") {
+            "wasm"
+        } else {
+            "rust"
+        }
+    });
+
+    println!("  Library: {}", lib_name);
+    println!("  Mapper: {}", mapper_name);
+
+    let analysis_result = match analyze_library(lib_path, Some(mapper_name)) {
+        Ok(result) => {
+            println!("  Analyzed {} functions", result.functions.len());
+            Some(result)
+        }
+        Err(e) => {
+            eprintln!("  Analysis warning: {}", e);
+            None
+        }
+    };
+
+    let out_dir = output_dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("lib/ffi/generated").join(lib_name));
+
+    if !out_dir.exists() {
+        fs::create_dir_all(&out_dir)?;
+    }
+
+    if let Some(result) = analysis_result {
+        // Generate DBVS bindings + bridge.bv + foreign stubs
+        write_bind_files(&result, &out_dir, force)?;
+
+        if gen_stubs {
+            let hub = MetropolitanHub::new();
+            let _ = hub.create_channel(lib_name, mapper_name, 4096, 4096);
+            let stub = generate_foreign_stub(&hub, lib_name, mapper_name)?;
+            let stub_path = out_dir.join(format!("{}_stub.{}", lib_name, 
+                match mapper_name { "c" => "h", "python" => "py", "js" => "js", _ => "h" }
+            ));
+            fs::write(&stub_path, &stub)?;
+            println!("  Foreign stub: {}", stub_path.display());
+        }
+
+        println!("\n  Generated files:");
+        println!("    {}/bindings.dbvs", out_dir.display());
+        println!("    {}/bridge.bv", out_dir.display());
+        println!("  Import with: import \"{}\";", out_dir.join("bridge").to_string_lossy());
+    } else {
+        eprintln!("  Could not analyze library. Create bindings manually.");
+    }
+
+    Ok(())
+}
+
 /// Intent: is strict extension.
 fn is_strict_extension(file_path: &PathBuf) -> bool {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -606,7 +688,8 @@ fn run_check(
     if verbose {
         println!("[Resolver] Resolving imports...");
     }
-    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut import_resolver = import_resolver::ImportResolver::new()
+        .with_strict_mode(strict);
     let mut program = match import_resolver.resolve_imports(&program, file_path) {
         Ok(resolved) => resolved,
         Err(e) => {
@@ -700,8 +783,8 @@ fn run_build(
             if ext == "sbv" {
                 println!("  Strict mode: full pre/postcondition verification enforced");
             }
-            run_rust(file_path, out_dir, no_stdlib, stdlib_path, None, emit_memory_spec, memory_spec_format)?;
-            
+            run_rust(file_path, out_dir, no_stdlib, stdlib_path, None, emit_memory_spec, memory_spec_format, strict)?;
+
             // Try to compile the generated Rust
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let rs_path = out_dir.map(|d| d.join(format!("{}.rs", stem)))
@@ -1198,18 +1281,23 @@ fn run_rust(
     target_spec: Option<TargetSpec>,
     emit_memory_spec: bool,
     memory_spec_format: &str,
+    strict: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to Native Rust: {}", file_path.display());
+    if strict {
+        println!("  Strict mode: full pre/postcondition verification enforced");
+    }
 
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
 
-    let mut parser = parser::Parser::new(&clean_source);
+    let mut parser = parser::Parser::new(&clean_source).with_strict_mode(strict);
     let mut program = parser
         .parse()
         .map_err(|e| format!("Brief parse error: {}", e))?;
 
-    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut import_resolver = import_resolver::ImportResolver::new()
+        .with_strict_mode(strict);
     let mut program = import_resolver
         .resolve_imports(&program, file_path)
         .map_err(|e| format!("Import error: {}", e))?;
@@ -1266,7 +1354,7 @@ fn run_rust(
 }
 
 /// Intent: run compile unified.
-fn run_compile_unified(args: &[String]) {
+fn run_compile_unified(args: &[String], strict_flag: bool) {
     let mut file_path = None;
     let mut target: Option<&str> = None;
     let mut out_dir = None;
@@ -1358,7 +1446,7 @@ fn run_compile_unified(args: &[String]) {
 
     // Validate capabilities
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let is_strict = ext == "sebv" || ext == "srbv" || ext == "sbv";
+    let is_strict = strict_flag || ext == "sebv" || ext == "srbv" || ext == "sbv";
     
     if let Some(ref spec) = target_spec {
         let target_name = spec.target.as_ref().map(|t| &t.name).unwrap_or(&"default".to_string()).clone();
@@ -1400,19 +1488,19 @@ fn run_compile_unified(args: &[String]) {
 
     let result: Option<PathBuf> = match backend.as_str() {
         "c" => {
-            match run_c_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref()) {
+            match run_c_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref(), is_strict) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
         },
         "rust" => {
-            match run_rust_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref(), emit_memory_spec, memory_spec_format) {
+            match run_rust_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref(), emit_memory_spec, memory_spec_format, is_strict) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
         },
         "cobol" => {
-            match run_cobol_compile(&file_path, out_dir.as_deref(), target_spec.as_ref()) {
+            match run_cobol_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1489,8 +1577,9 @@ fn run_c_compile(
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
     target: Option<&TargetSpec>,
+    strict: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_c(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), &[])
+    run_c(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), &[], strict)
 }
 
 /// Intent: run rust compile.
@@ -1502,8 +1591,9 @@ fn run_rust_compile(
     target: Option<&TargetSpec>,
     emit_memory_spec: bool,
     memory_spec_format: &str,
+    strict: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_rust(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), emit_memory_spec, memory_spec_format)
+    run_rust(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), emit_memory_spec, memory_spec_format, strict)
 }
 
 /// Intent: run cobol compile.
@@ -1511,6 +1601,7 @@ fn run_cobol_compile(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
     target: Option<&TargetSpec>,
+    _strict: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     run_cobol(file_path, out_dir, target.cloned())
 }
@@ -1547,8 +1638,12 @@ fn run_c(
     stdlib_path: Option<PathBuf>,
     target_spec: Option<TargetSpec>,
     args: &[String],
+    strict: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to C: {}", file_path.display());
+    if strict {
+        println!("  Strict mode: full pre/postcondition verification enforced");
+    }
     if let Some(ref spec) = target_spec {
         println!("  Target: {}", spec.target.as_ref().map(|t| t.name.as_str()).unwrap_or("unknown"));
     }
@@ -1556,12 +1651,13 @@ fn run_c(
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
 
-    let mut parser = parser::Parser::new(&clean_source);
+    let mut parser = parser::Parser::new(&clean_source).with_strict_mode(strict);
     let mut program = parser
         .parse()
         .map_err(|e| format!("Brief parse error: {}", e))?;
 
-    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut import_resolver = import_resolver::ImportResolver::new()
+        .with_strict_mode(strict);
     let mut program = import_resolver
         .resolve_imports(&program, file_path)
         .map_err(|e| format!("Import error: {}", e))?;
@@ -2832,7 +2928,7 @@ fn main() {
         }
 
         "compile" => {
-            run_compile_unified(&args);
+            run_compile_unified(&args, strict_flag);
         }
 
         "build" | "b" => {
@@ -2895,7 +2991,8 @@ fn main() {
             }
 
             if let Some(path) = file_path {
-                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), None, emit_memory_spec, memory_spec_format) {
+                let strict = strict_flag || is_strict_extension(&path);
+                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), None, emit_memory_spec, memory_spec_format, strict) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -2935,7 +3032,8 @@ fn main() {
                 } else {
                     None
                 };
-                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), spec, &args) {
+                let strict = strict_flag || is_strict_extension(&path);
+                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), spec, &args, strict) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -3857,6 +3955,68 @@ fn main() {
             } else {
                 eprintln!("Error: No .dbvs or .dbv file specified");
                 eprintln!("Usage: {} deps [check|install|list] <file.dbvs|file.dbv> [-v]", args[0]);
+                std::process::exit(1);
+            }
+        }
+
+        "metrod" => {
+            if args.len() >= 3 && args[2] == "connect" {
+                if let Err(e) = brief_compiler::ffi::metro_cli::run_metro_cli(&args) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Usage: {} metrod connect <service_name> [--send <data>] [--gen-stub] [--out <dir>]", args[0]);
+                eprintln!("  Connects to a Metropolitan shared memory service");
+                eprintln!("  Default mode: interactive REPL");
+                std::process::exit(1);
+            }
+        }
+
+        "bind" => {
+            let mut lib_path = None;
+            let mut output_dir = None;
+            let mut mapper = None;
+            let mut force = false;
+            let mut gen_stubs = false;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--mapper" && i + 1 < args.len() {
+                    mapper = Some(args[i + 1].clone());
+                    i += 2;
+                } else if arg == "--out" && i + 1 < args.len() {
+                    output_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--force" {
+                    force = true;
+                    i += 1;
+                } else if arg == "--gen-stubs" {
+                    gen_stubs = true;
+                    i += 1;
+                } else if !arg.starts_with('-') {
+                    lib_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = lib_path {
+                match run_bind(&path, mapper.as_deref(), output_dir.as_deref(), force, gen_stubs) {
+                    Ok(_) => {
+                        println!("  Binding complete");
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                eprintln!("Error: No library path specified");
+                eprintln!("Usage: {} bind <library_path> [--mapper <name>] [--out <dir>] [--force] [--gen-stubs]", args[0]);
+                eprintln!("  Analyzes a foreign library and generates ready-to-use Brief FFI bindings");
                 std::process::exit(1);
             }
         }

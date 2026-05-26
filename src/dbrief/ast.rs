@@ -75,6 +75,8 @@ pub enum DbriefType {
     Vector(Box<DbriefType>, Option<usize>),
     Option(Box<DbriefType>),
     Result(Box<DbriefType>, Box<DbriefType>),
+    Fn(Vec<DbriefType>, Box<DbriefType>),
+    Trigger(Box<DbriefType>),
     Named(String),
     Struct(Vec<(String, DbriefType)>),
     Enum(Vec<String>),

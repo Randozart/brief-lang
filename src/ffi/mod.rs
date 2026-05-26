@@ -33,6 +33,7 @@ pub mod error;   // NEW: Error handling
 pub mod loader;
 pub mod mapper;
 pub mod mappers;
+pub mod metro_cli;      // Metro CLI - brief metrod connect
 pub mod metropolitan;  // Metropolitan FFI - Shared Memory Negotiation
 pub mod native_mapper;
 pub mod orchestrator;

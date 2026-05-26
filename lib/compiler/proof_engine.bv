@@ -399,7 +399,7 @@ defn verify_contract(txn: Transaction) -> ProofResult {
     };
 }
 
-defn verify_precondition(precondition: Expr, state: SymbolicState) -> Bool {
+defn verify_precondition(precondition: Expr, state: SymbolicState, strict_mode: Bool) -> Bool {
     let pre_sym = eval_symbolic(precondition, state);
     let pre_simp = simplify(pre_sym);
     
@@ -409,10 +409,13 @@ defn verify_precondition(precondition: Expr, state: SymbolicState) -> Bool {
     uni pre_simp(SymBool(false)) = {
         term false;
     };
-    term true;  // Unknown preconditions assumed satisfiable
+    [strict_mode] {
+        term false;  // Strict: unknown constraints fail verification
+    };
+    term true;  // Unknown preconditions assumed satisfiable (non-strict mode)
 }
 
-defn verify_postcondition(postcondition: Expr, state: SymbolicState) -> Bool {
+defn verify_postcondition(postcondition: Expr, state: SymbolicState, strict_mode: Bool) -> Bool {
     let post_sym = eval_symbolic(postcondition, state);
     let post_simp = simplify(post_sym);
     
@@ -422,7 +425,10 @@ defn verify_postcondition(postcondition: Expr, state: SymbolicState) -> Bool {
     uni post_simp(SymBool(false)) = {
         term false;
     };
-    term true;  // Unknown postconditions need manual verification
+    [strict_mode] {
+        term false;  // Strict: unknown constraints fail verification
+    };
+    term true;  // Unknown postconditions need manual verification (non-strict mode)
 }
 
 // ===== MUTUAL EXCLUSION CHECKING =====

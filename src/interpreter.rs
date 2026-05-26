@@ -207,7 +207,17 @@ impl Interpreter {
                 self.ffi_bindings.insert(name.clone(), signature.clone());
 
                 let location = if !signature.location.is_empty() {
-                    signature.location.clone()
+                    // Check if this is a profile-based location that needs registry fallback
+                    let loc = signature.location.clone();
+                    if loc.starts_with("<profile:") {
+                        // Try the DBVS registry's name→location map first
+                        match crate::ffi::registry::FFI_REGISTRY.get_location_by_name(&name) {
+                            Some(actual_loc) => actual_loc.to_string(),
+                            None => loc,
+                        }
+                    } else {
+                        loc
+                    }
                 } else {
                     Self::lookup_location_from_toml(&name, toml_path)
                         .unwrap_or_else(|_| signature.location.clone())

@@ -25,20 +25,24 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub struct ImportResolver {
-    search_paths: Vec<PathBuf>,
     loaded_modules: HashMap<String, Program>,
+    search_paths: Vec<PathBuf>,
+    strict_mode: StrictMode,
 }
 
 impl ImportResolver {
     pub fn new() -> Self {
         ImportResolver {
-            search_paths: vec![
-                PathBuf::from("lib"),
-                PathBuf::from("imports"),
-                PathBuf::from("."),
-            ],
             loaded_modules: HashMap::new(),
+            search_paths: vec![PathBuf::from("lib"), PathBuf::from("imports"), PathBuf::from(".")],
+            strict_mode: StrictMode::Off,
         }
+    }
+
+    /// Set strict mode for all resolved imports (propagated to all Program objects)
+    pub fn with_strict_mode(mut self, strict: bool) -> Self {
+        self.strict_mode = if strict { StrictMode::Strict } else { StrictMode::Off };
+        self
     }
 
     pub fn add_search_path(&mut self, path: PathBuf) {
@@ -76,7 +80,7 @@ impl ImportResolver {
             reactor_speed: program.reactor_speed,
             attrs: Vec::new(),
             ffi: None,
-            strict_mode: StrictMode::Off,
+            strict_mode: self.strict_mode,
         })
     }
 
@@ -93,7 +97,7 @@ impl ImportResolver {
                 reactor_speed: None,
                 attrs: Vec::new(),
                 ffi: None,
-                strict_mode: StrictMode::Off,
+                strict_mode: self.strict_mode,
             });
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
@@ -106,7 +110,7 @@ impl ImportResolver {
                     reactor_speed: None,
                     attrs: Vec::new(),
                     ffi: None,
-                    strict_mode: StrictMode::Off,
+                    strict_mode: self.strict_mode,
                 });
             }
             if last_component.ends_with(".css") || last_component.ends_with(".svg") {
@@ -141,7 +145,7 @@ self.loaded_modules.insert(
                         reactor_speed: None,
                         attrs: Vec::new(),
                         ffi: None,
-                        strict_mode: StrictMode::Off,
+                        strict_mode: self.strict_mode,
                     },
                 );
                 return Ok(Program {
@@ -150,7 +154,7 @@ self.loaded_modules.insert(
                     reactor_speed: None,
                     attrs: Vec::new(),
                     ffi: None,
-                    strict_mode: StrictMode::Off,
+                    strict_mode: self.strict_mode,
                 });
             }
         }
@@ -206,7 +210,7 @@ self.loaded_modules.insert(
                         reactor_speed: None,
                         attrs: Vec::new(),
                         ffi: None,
-                        strict_mode: StrictMode::Off,
+                        strict_mode: self.strict_mode,
                     },
                 );
                 return Ok(Program {
@@ -218,7 +222,7 @@ self.loaded_modules.insert(
                     reactor_speed: None,
                     attrs: Vec::new(),
                     ffi: None,
-                    strict_mode: StrictMode::Off,
+                    strict_mode: self.strict_mode,
                 });
             }
         }
@@ -349,7 +353,7 @@ self.loaded_modules.insert(
             reactor_speed: None,
             attrs: Vec::new(),
             ffi: None,
-            strict_mode: StrictMode::Off,
+            strict_mode: self.strict_mode,
         })
     }
 }

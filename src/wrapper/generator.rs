@@ -27,7 +27,7 @@ use super::js_analyzer::js_func_to_frgn_sig;
 use super::python_analyzer::py_func_to_frgn_sig;
 use super::rust_analyzer::rust_func_to_frgn_sig;
 use super::wasm_analyzer::wasm_func_to_frgn_sig;
-use super::{AnalysisResult, AnalyzedFunction};
+use super::{c_type_to_brief, AnalysisResult, AnalyzedFunction};
 use std::fs;
 use std::path::Path;
 
@@ -214,6 +214,192 @@ pub fn preview_generated(result: &AnalysisResult) -> String {
     output.push_str("\n=== bindings.toml (preview) ===\n\n");
     output.push_str(&generate_bindings_toml(result));
 
+    output
+}
+
+/// Generate DBVS bindings from analysis results (replaces TOML)
+pub fn generate_bindings_dbvs(result: &AnalysisResult) -> String {
+    let mut output = String::new();
+
+    output.push_str(&format!(
+        "// Auto-generated DBVS bindings for {}\n// Mapper: {}\n\n",
+        result.library_name, result.mapper,
+    ));
+
+    for func in &result.functions {
+        let params_str: Vec<String> = func
+            .parameters
+            .iter()
+            .map(|(_, t)| c_type_to_brief(t))
+            .collect();
+        let return_brief = c_type_to_brief(&func.return_type);
+
+        output.push_str(&format!(
+            "register 0x{:02X} as \"{}\" {{\n",
+            result.functions.iter().position(|f| f.name == func.name).unwrap_or(0),
+            func.name
+        ));
+        output.push_str(&format!(
+            "    type: Fn({}) -> {};\n",
+            params_str.join(", "),
+            return_brief
+        ));
+        output.push_str(&format!("    location: \"{}::{}\";\n", result.library_name, func.name));
+        output.push_str(&format!("    target: {};\n", detect_target(&result.mapper)));
+        if let Some(desc) = func.comments.first() {
+            output.push_str(&format!("    description: \"{}\";\n", desc));
+        }
+        output.push_str("    check: [true];\n");
+        output.push_str("}\n\n");
+    }
+
+    output
+}
+
+/// Generate bridge.bv with a pre-initialized wrapper function using alka! polling
+pub fn generate_bridge_bv(result: &AnalysisResult) -> String {
+    let mut output = String::new();
+
+    output.push_str(&format!(
+        "// Auto-generated bridge for {}\n// Mapper: {}\n// Import this file to call {} functions from Brief\n\n",
+        result.library_name, result.mapper, result.library_name
+    ));
+    output.push_str("import \"std/metro_bridge\";\n\n");
+
+    // Generate frgn declarations
+    for func in &result.functions {
+        let params: Vec<String> = func
+            .parameters
+            .iter()
+            .map(|(n, t)| format!("{}: {}", n, c_type_to_brief(t)))
+            .collect();
+        let return_brief = if func.return_type == "Void" || func.return_type == "void" {
+            "Void".to_string()
+        } else {
+            c_type_to_brief(&func.return_type)
+        };
+        output.push_str(&format!(
+            "frgn __raw_{}({}) -> Result<{}, String>;\n\n",
+            func.name,
+            params.join(", "),
+            return_brief
+        ));
+    }
+
+    // Generate pre-initialized wrapper defn
+    for func in &result.functions {
+        let params: Vec<String> = func
+            .parameters
+            .iter()
+            .map(|(n, t)| format!("{}: {}", n, c_type_to_brief(t)))
+            .collect();
+        let return_brief = if func.return_type == "Void" || func.return_type == "void" {
+            "Void".to_string()
+        } else {
+            c_type_to_brief(&func.return_type)
+        };
+        let params_names: Vec<String> = func
+            .parameters
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
+        let args_list = if params_names.is_empty() {
+            "[]".to_string()
+        } else {
+            format!("List({})", params_names.join(", "))
+        };
+
+        output.push_str(&format!(
+            "// Pre-initialized wrapper for {}\n\
+             // Usage: let result = call_{}({});\n\
+             defn call_{}(\n\
+             \tchannel_id: String,\n\
+             \t{}\n\
+             ) -> Result<{}, String> [\n\
+             \ttrue\n\
+             ][\n\
+             \tresult.is_ok() || result.is_err()\n\
+             ] {{\n\
+             \tlet request: List<Int> = {};\n\
+             \tterm metropolitan_rpc(channel_id, request, 5000);\n\
+             }};\n\n",
+            func.name,
+            func.name,
+            params_names.join(", "),
+            func.name,
+            params.join(", "),
+            return_brief,
+            args_list
+        ));
+    }
+
+    output
+}
+
+/// Generate foreign stub for C/Python/JS using MetropolitanHub
+pub fn generate_foreign_stub(
+    hub: &crate::ffi::metropolitan::MetropolitanHub,
+    channel_id: &str,
+    lang: &str,
+) -> Result<String, String> {
+    match lang {
+        "c" => hub.generate_c_header(channel_id),
+        "rust" => hub.generate_rust_module(channel_id),
+        "python" => hub.generate_python_module(channel_id),
+        "js" | "javascript" => {
+            // JS stub generation
+            Ok(format!(
+                "// Metropolitan FFI stub for {channel_id}\n\
+                 const {{ MetroClient }} = require('./metro.js');\n\
+                 const client = new MetroClient('{channel_id}');\n\
+                 module.exports = {{ client }};\n",
+                channel_id = channel_id
+            ))
+        }
+        _ => Err(format!("Unsupported stub language: {}", lang)),
+    }
+}
+
+/// Write bind files to output directory
+pub fn write_bind_files(
+    result: &AnalysisResult,
+    output_dir: &Path,
+    force: bool,
+) -> Result<(), String> {
+    if !output_dir.exists() {
+        fs::create_dir_all(output_dir)
+            .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    }
+
+    let dbvs_path = output_dir.join("bindings.dbvs");
+    let bridge_path = output_dir.join("bridge.bv");
+
+    if dbvs_path.exists() && !force {
+        return Err(format!("bindings.dbvs already exists (use --force to overwrite)"));
+    }
+    if bridge_path.exists() && !force {
+        return Err(format!("bridge.bv already exists (use --force to overwrite)"));
+    }
+
+    let dbvs_content = generate_bindings_dbvs(result);
+    let bridge_content = generate_bridge_bv(result);
+
+    fs::write(&dbvs_path, dbvs_content)
+        .map_err(|e| format!("Failed to write bindings.dbvs: {}", e))?;
+
+    fs::write(&bridge_path, bridge_content)
+        .map_err(|e| format!("Failed to write bridge.bv: {}", e))?;
+
+    Ok(())
+}
+
+/// Preview bind files without writing
+pub fn preview_bind(result: &AnalysisResult) -> String {
+    let mut output = String::new();
+    output.push_str("=== bindings.dbvs (preview) ===\n\n");
+    output.push_str(&generate_bindings_dbvs(result));
+    output.push_str("\n=== bridge.bv (preview) ===\n\n");
+    output.push_str(&generate_bridge_bv(result));
     output
 }
 

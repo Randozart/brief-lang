@@ -395,7 +395,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
 
 // ===== TYPE CHECKING =====
 
-defn check_program(program: Program) -> Result<TypedProgram, String> {
+defn check_program(program: Program, strict_mode: Bool) -> Result<TypedProgram, String> {
     let ctx = new_context();
     
     let i: Int = 0;
@@ -416,7 +416,7 @@ defn check_program(program: Program) -> Result<TypedProgram, String> {
     let i: Int = 0;
     [i < len(program.items)] {
         uni program.items[i] = TopDefn(d) = {
-            let result = check_definition(d, ctx);
+            let result = check_definition(d, ctx, strict_mode);
             uni result(Err(e)) = {
                 term Err(e);
             };
@@ -424,7 +424,7 @@ defn check_program(program: Program) -> Result<TypedProgram, String> {
             };
         };
         uni program.items[i] = TopTxn(t) = {
-            let result = check_transaction(t, ctx);
+            let result = check_transaction(t, ctx, strict_mode);
             uni result(Err(e)) = {
                 term Err(e);
             };
@@ -437,7 +437,7 @@ defn check_program(program: Program) -> Result<TypedProgram, String> {
     term Ok(program);
 }
 
-defn check_definition(d: Definition, ctx: TypeContext) -> Result<(), String> {
+defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Result<(), String> {
     let ctx = enter_scope(ctx);
     
     let i: Int = 0;
@@ -471,7 +471,7 @@ defn check_definition(d: Definition, ctx: TypeContext) -> Result<(), String> {
     };
 }
 
-defn check_transaction(t: Transaction, ctx: TypeContext) -> Result<(), String> {
+defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> Result<(), String> {
     let ctx = enter_scope(ctx);
     
     let i: Int = 0;
@@ -504,6 +504,20 @@ defn check_transaction(t: Transaction, ctx: TypeContext) -> Result<(), String> {
     };
     uni result(Err(e)) = {
         term Err(e);
+    };
+    
+    // Strict mode: reject [true] contracts
+    [strict_mode] {
+        uni t.contract.precondition(ExprBool(pre_val)) = {
+            [pre_val] {
+                term Err("Strict mode: precondition [true] is not allowed");
+            };
+        };
+        uni t.contract.postcondition(ExprBool(post_val)) = {
+            [post_val] {
+                term Err("Strict mode: postcondition [true] is not allowed");
+            };
+        };
     };
     
     let result = check_block(t.body, ctx);

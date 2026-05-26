@@ -90,6 +90,9 @@ defn parse_program(state: ParserState) -> Result<Program, String> {
         };
     };
     
+    [state.strict_mode] {
+        term Ok(Program { items: items, strict_mode: StrictOn });
+    };
     term Ok(Program { items: items, strict_mode: StrictOff });
 }
 
