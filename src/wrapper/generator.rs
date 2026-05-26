@@ -343,19 +343,14 @@ pub fn generate_foreign_stub(
     lang: &str,
 ) -> Result<String, String> {
     match lang {
-        "c" => hub.generate_c_header(channel_id),
+        // metropipe 32-byte protocol is the default
+        "c" => hub.generate_metropipe_c_header(channel_id),
+        "python" => hub.generate_metropipe_python_module(channel_id),
+        "js" | "javascript" => hub.generate_metropipe_js_module(channel_id),
         "rust" => hub.generate_rust_module(channel_id),
-        "python" => hub.generate_python_module(channel_id),
-        "js" | "javascript" => {
-            // JS stub generation
-            Ok(format!(
-                "// Metropolitan FFI stub for {channel_id}\n\
-                 const {{ MetroClient }} = require('./metro.js');\n\
-                 const client = new MetroClient('{channel_id}');\n\
-                 module.exports = {{ client }};\n",
-                channel_id = channel_id
-            ))
-        }
+        // Legacy 3-region protocol (fallback)
+        "legacy-c" => hub.generate_c_header(channel_id),
+        "legacy-python" => hub.generate_python_module(channel_id),
         _ => Err(format!("Unsupported stub language: {}", lang)),
     }
 }

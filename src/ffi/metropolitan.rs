@@ -738,6 +738,224 @@ def reset_request():
             output = addrs.get("output_size").unwrap_or(&0),
         ))
     }
+
+    // ===== metropipe-compatible code generation (32-byte header, single-region protocol) =====
+
+    /// Generate a metropipe C header (32-byte header matching metropipe/clients/c/metropipe.h)
+    pub fn generate_metropipe_c_header(&self, channel_id: &str) -> Result<String, String> {
+        let channel = self.get_channel(channel_id)
+            .ok_or_else(|| format!("Channel {} not found", channel_id))?;
+
+        let addrs = channel.get_addresses();
+        let max_size = addrs.get("input_size").copied().unwrap_or(4096)
+            .max(addrs.get("output_size").copied().unwrap_or(4096));
+
+        Ok(format!(r#"
+/* metropipe C header for channel: {channel_id} */
+/* 32-byte header — metropipe/clients/c/metropipe.h compatible */
+/* Auto-generated — DO NOT EDIT */
+
+#include <stdint.h>
+#include <stdatomic.h>
+#include <stddef.h>
+
+#define METRO_STATUS_IDLE         0
+#define METRO_STATUS_CONSUMER_REQ 1
+#define METRO_STATUS_PROVIDER_ACK 2
+#define METRO_STATUS_PROVIDER_RES 3
+#define METRO_STATUS_ERROR        4
+
+#define METRO_HEADER_SIZE     32
+#define METRO_OFFSET_STATUS   0
+#define METRO_OFFSET_CAS_LOCK 4
+#define METRO_OFFSET_SIZE     8
+#define METRO_OFFSET_CAPACITY 12
+#define METRO_OFFSET_ERROR    16
+#define METRO_OFFSET_PAYLOAD  32
+
+#define METRO_CAPACITY {max_size}
+
+typedef struct {{
+    volatile uint32_t *header;
+    volatile uint8_t  *payload;
+    size_t capacity;
+    int fd;
+}} MetroChannel;
+
+int metro_channel_open(MetroChannel *ch, const char *shm_path);
+void metro_channel_close(MetroChannel *ch);
+int metro_wait_idle(MetroChannel *ch, int timeout_ms);
+int metro_channel_send(MetroChannel *ch, const uint8_t *data, size_t len);
+int metro_channel_recv(MetroChannel *ch, uint8_t *out, size_t max_len, int timeout_ms);
+int metro_channel_request(MetroChannel *ch, const uint8_t *req, size_t req_len,
+                          uint8_t *resp, size_t resp_max, int timeout_ms);
+
+static inline uint32_t metro_read_status(MetroChannel *ch) {{
+    return atomic_load_explicit((_Atomic uint32_t*)&ch->header[0], memory_order_seq_cst);
+}}
+static inline void metro_write_status(MetroChannel *ch, uint32_t value) {{
+    atomic_store_explicit((_Atomic uint32_t*)&ch->header[0], value, memory_order_seq_cst);
+}}
+static inline uint32_t metro_read_size(MetroChannel *ch) {{
+    return atomic_load_explicit((_Atomic uint32_t*)&ch->header[2], memory_order_seq_cst);
+}}
+static inline void metro_write_size(MetroChannel *ch, uint32_t size) {{
+    atomic_store_explicit((_Atomic uint32_t*)&ch->header[2], size, memory_order_seq_cst);
+}}
+"#, channel_id = channel_id, max_size = max_size))
+    }
+
+    /// Generate a metropipe Python module (32-byte header, single-region)
+    pub fn generate_metropipe_python_module(&self, channel_id: &str) -> Result<String, String> {
+        let channel = self.get_channel(channel_id)
+            .ok_or_else(|| format!("Channel {} not found", channel_id))?;
+
+        let addrs = channel.get_addresses();
+        let max_size = addrs.get("input_size").copied().unwrap_or(4096)
+            .max(addrs.get("output_size").copied().unwrap_or(4096));
+
+        Ok(format!(r#"""
+metropipe Python stub for {channel_id}
+32-byte header — metropipe/clients/python/metropipe.py compatible
+
+Usage:
+    from {channel_id}_stub import MetroChannel
+    ch = MetroChannel("/dev/shm/metro_{channel_id}")
+    result = ch.request(bytes, timeout_ms=5000)
+"""
+
+import mmap, struct, time, os
+
+
+class MetroError(Exception):
+    pass
+
+
+class MetroTimeoutError(MetroError):
+    pass
+
+
+class MetroChannel:
+    STATUS_IDLE = 0
+    STATUS_CONSUMER_REQ = 1
+    STATUS_PROVIDER_ACK = 2
+    STATUS_PROVIDER_RES = 3
+    STATUS_ERROR = 4
+
+    HEADER_SIZE = 32
+    OFFSET_STATUS = 0
+    OFFSET_CAS_LOCK = 4
+    OFFSET_PAYLOAD_SIZE = 8
+    OFFSET_MAX_CAPACITY = 12
+    OFFSET_ERROR_CODE = 16
+    OFFSET_PAYLOAD = 32
+
+    CAPACITY = {max_size}
+
+    def __init__(self, shm_path):
+        self.shm_path = shm_path
+        self._mmap = None
+        if os.path.exists(shm_path):
+            fd = open(shm_path, "r+b")
+            self._mmap = mmap.mmap(fd.fileno(), 0)
+
+    def close(self):
+        if self._mmap:
+            self._mmap.close()
+
+    def _read_status(self):
+        return struct.unpack_from("<I", self._mmap, self.OFFSET_STATUS)[0]
+
+    def _write_status(self, value):
+        struct.pack_into("<I", self._mmap, self.OFFSET_STATUS, value)
+
+    def request(self, payload, timeout_ms=5000):
+        self._write_status(self.STATUS_CONSUMER_REQ)
+        size = len(payload)
+        self._mmap[self.OFFSET_PAYLOAD:self.OFFSET_PAYLOAD + size] = payload
+        struct.pack_into("<I", self._mmap, self.OFFSET_PAYLOAD_SIZE, size)
+        start = time.monotonic()
+        while True:
+            status = self._read_status()
+            if status == self.STATUS_PROVIDER_RES:
+                resp_size = struct.unpack_from("<I", self._mmap, self.OFFSET_PAYLOAD_SIZE)[0]
+                result = bytes(self._mmap[self.OFFSET_PAYLOAD:self.OFFSET_PAYLOAD + resp_size])
+                self._write_status(self.STATUS_IDLE)
+                return result
+            if status == self.STATUS_ERROR:
+                raise MetroError("Provider error")
+            if (time.monotonic() - start) * 1000 > timeout_ms:
+                raise MetroTimeoutError("Timeout")
+            time.sleep(0.001)
+"#, channel_id = channel_id, max_size = max_size))
+    }
+
+    /// Generate a metropipe JavaScript module (32-byte header, SharedArrayBuffer)
+    pub fn generate_metropipe_js_module(&self, channel_id: &str) -> Result<String, String> {
+        let channel = self.get_channel(channel_id)
+            .ok_or_else(|| format!("Channel {} not found", channel_id))?;
+
+        let addrs = channel.get_addresses();
+        let max_size = addrs.get("input_size").copied().unwrap_or(4096)
+            .max(addrs.get("output_size").copied().unwrap_or(4096));
+
+        Ok(format!(r#"
+// metropipe JS stub for {channel_id}
+// 32-byte header — metropipe/clients/javascript/metropipe.js compatible
+
+const STATUS_IDLE = 0;
+const STATUS_CONSUMER_REQ = 1;
+const STATUS_PROVIDER_RES = 3;
+const STATUS_ERROR = 4;
+
+const OFFSET_STATUS = 0;
+const OFFSET_PAYLOAD_SIZE = 8;
+const OFFSET_PAYLOAD = 32;
+const CAPACITY = {max_size};
+
+class MetroChannel {{
+    constructor(shmPath) {{
+        this.shmPath = shmPath;
+        this.header = null;
+        this.payload = null;
+    }}
+
+    async request(payload, timeoutMs = 5000) {{
+        const fs = require('fs');
+        const size = fs.statSync(this.shmPath).size;
+        this.buffer = new SharedArrayBuffer(size);
+        this.header = new Int32Array(this.buffer, 0, 8);
+        this.payload = new Uint8Array(this.buffer, OFFSET_PAYLOAD);
+        new Uint8Array(this.buffer).set(fs.readFileSync(this.shmPath));
+
+        const start = Date.now();
+        while (Atomics.load(this.header, 0) !== STATUS_IDLE) {{
+            if (Date.now() - start > timeoutMs) throw new Error('timeout');
+            await new Promise(r => setTimeout(r, 1));
+        }}
+        this.payload.set(payload);
+        this.header[2] = payload.length;
+        Atomics.store(this.header, 0, STATUS_CONSUMER_REQ);
+
+        const respStart = Date.now();
+        while (true) {{
+            const status = Atomics.load(this.header, 0);
+            if (status === STATUS_PROVIDER_RES) {{
+                const respSize = this.header[2];
+                const result = this.payload.slice(0, respSize);
+                Atomics.store(this.header, 0, STATUS_IDLE);
+                return result;
+            }}
+            if (status === STATUS_ERROR) throw new Error('provider error');
+            if (Date.now() - respStart > timeoutMs) throw new Error('timeout');
+            await new Promise(r => setTimeout(r, 1));
+        }}
+    }}
+}}
+
+module.exports = {{ MetroChannel }};
+"#, channel_id = channel_id, max_size = max_size))
+    }
 }
 
 impl Default for MetropolitanHub {
