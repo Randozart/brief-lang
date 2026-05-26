@@ -4046,15 +4046,15 @@ fn main() {
             }
         }
 
-        "metrod" => {
+        "metropipe" => {
             if args.len() >= 3 && args[2] == "connect" {
                 if let Err(e) = brief_compiler::ffi::metro_cli::run_metro_cli(&args) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Usage: {} metrod connect <service_name> [--send <data>] [--gen-stub] [--out <dir>]", args[0]);
-                eprintln!("  Connects to a Metropolitan shared memory service");
+                eprintln!("Usage: {} metropipe connect <service_name> [--send <data>] [--gen-stub] [--out <dir>]", args[0]);
+                eprintln!("  Connects to a metropipe shared memory service");
                 eprintln!("  Default mode: interactive REPL");
                 std::process::exit(1);
             }
