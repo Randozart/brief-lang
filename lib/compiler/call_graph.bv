@@ -1,0 +1,252 @@
+// Call Graph Analysis for Brief self-hosted compiler.
+// Mirrors src/analysis/call_graph.rs functionality in Brief.
+//
+// Builds a transaction-to-transaction call graph from a Program AST
+// and detects cycles. Backends query has_cycle() to choose codegen strategy:
+//   - acyclic: static dispatch, no recursion guards
+//   - cyclic:  dynamic dispatch, bounded execution
+
+struct CallGraph {
+    graph: Map<String, List<String>>,
+    txn_names: List<String>,
+    cycles: List<List<String>>
+}
+
+struct CallGraphResult {
+    has_cycle: Bool,
+    cycles: List<List<String>>,
+    node_count: Int,
+    edge_count: Int
+}
+
+defn new_call_graph() -> CallGraph [
+    true
+][
+    result.graph == empty_map() && result.txn_names == [] && result.cycles == []
+] {
+    term CallGraph {
+        graph: empty_map(),
+        txn_names: [],
+        cycles: []
+    };
+}
+
+// Build call graph from a Program AST
+// Returns a CallGraph and an AnalysisResult
+defn analyze_call_graph(program: Program) -> CallGraphResult [
+    true
+][
+    result.node_count >= 0 && result.edge_count >= 0
+] {
+    let cg = new_call_graph();
+    
+    // First pass: collect all transaction names
+    let i: Int = 0;
+    [i < len(program.items)] {
+        uni program.items[i](TopTxn(t)) = {
+            &cg.txn_names = append(cg.txn_names, t.name);
+            &cg.graph = map_insert(cg.graph, t.name, []);
+        };
+        &i = i + 1;
+    };
+    
+    // Second pass: extract called transactions
+    let j: Int = 0;
+    [j < len(program.items)] {
+        uni program.items[j](TopTxn(t)) = {
+            let callees = extract_calls_from_body(t.body);
+            let existing = map_get(cg.graph, t.name);
+            uni existing(Some(list)) = {
+                &cg.graph = map_insert(cg.graph, t.name, list ++ callees);
+            };
+        };
+        &j = j + 1;
+    };
+    
+    // Detect cycles
+    let has_cycle_result: Bool = has_cycles(cg.graph, cg.txn_names);
+    let found_cycles: List<List<String>> = [];
+    [has_cycle_result] {
+        &found_cycles = find_cycles(cg.graph, cg.txn_names);
+    };
+    
+    let edge_count: Int = count_edges(cg.graph, cg.txn_names);
+    
+    term CallGraphResult {
+        has_cycle: has_cycle_result,
+        cycles: found_cycles,
+        node_count: len(cg.txn_names),
+        edge_count: edge_count
+    };
+}
+
+// Extract all transaction/function call names from a list of statements
+defn extract_calls_from_body(body: List<Statement>) -> List<String> [
+    true
+][
+    true
+] {
+    let called: List<String> = [];
+    let i: Int = 0;
+    [i < len(body)] {
+        uni body[i](AssignStmt(_, expr, _, _)) = {
+            &called = called ++ collect_call_names(expr);
+        };
+        uni body[i](LetStmt(_, Some(expr), _)) = {
+            &called = called ++ collect_call_names(expr);
+        };
+        uni body[i](ExprStmt(expr)) = {
+            &called = called ++ collect_call_names(expr);
+        };
+        uni body[i](GuardStmt(_, stmts)) = {
+            &called = called ++ extract_calls_from_body(stmts);
+        };
+        &i = i + 1;
+    };
+    term called;
+}
+
+// Recursively collect call names from an expression tree
+defn collect_call_names(expr: Expr) -> List<String> [
+    true
+][
+    true
+] {
+    uni expr(CallExpr(name, args)) = {
+        let names: List<String> = [name];
+        let i: Int = 0;
+        [i < len(args)] {
+            &names = names ++ collect_call_names(args[i]);
+            &i = i + 1;
+        };
+        term names;
+    };
+    uni expr(BinOp(left, _, right)) = {
+        term collect_call_names(left) ++ collect_call_names(right);
+    };
+    uni expr(UnaryOp(_, inner)) = {
+        term collect_call_names(inner);
+    };
+    uni expr(FieldAccess(inner, _)) = {
+        term collect_call_names(inner);
+    };
+    uni expr(ListExpr(elems)) = {
+        let names: List<String> = [];
+        let i: Int = 0;
+        [i < len(elems)] {
+            &names = names ++ collect_call_names(elems[i]);
+            &i = i + 1;
+        };
+        term names;
+    };
+    term [];
+}
+
+// Count total edges in the graph
+defn count_edges(graph: Map<String, List<String>>, names: List<String>) -> Int [
+    true
+][
+    result >= 0
+] {
+    let total: Int = 0;
+    let i: Int = 0;
+    [i < len(names)] {
+        uni map_get(graph, names[i])(Some(edges)) = {
+            &total = total + len(edges);
+        };
+        &i = i + 1;
+    };
+    term total;
+}
+
+// Check if the graph has any cycles
+defn has_cycles(graph: Map<String, List<String>>, names: List<String>) -> Bool [
+    true
+][
+    true
+] {
+    let i: Int = 0;
+    [i < len(names)] {
+        let visited: List<String> = [];
+        let path: List<String> = [];
+        [detect_cycle(names[i], graph, visited, path)] {
+            term true;
+        };
+        &i = i + 1;
+    };
+    term false;
+}
+
+// Find all cycles in the graph
+defn find_cycles(graph: Map<String, List<String>>, names: List<String>) -> List<List<String>> [
+    true
+][
+    true
+] {
+    let found: List<List<String>> = [];
+    let i: Int = 0;
+    [i < len(names)] {
+        let visited: List<String> = [];
+        let path: List<String> = [];
+        [detect_cycle(names[i], graph, visited, path)] {
+            &found = append(found, path);
+        };
+        &i = i + 1;
+    };
+    term found;
+}
+
+// DFS-based cycle detection
+// Returns true if a cycle is reachable from `node`
+defn detect_cycle(
+    node: String,
+    graph: Map<String, List<String>>,
+    visited: List<String>,
+    path: List<String>
+) -> Bool [
+    true
+][
+    true
+] {
+    // Check if node is already in current path
+    let in_path: Bool = false;
+    let pi: Int = 0;
+    [pi < len(path)] {
+        [path[pi] == node] {
+            &in_path = true;
+        };
+        &pi = pi + 1;
+    };
+    [in_path] {
+        term true;
+    };
+    
+    // Check if node was already visited
+    let in_visited: Bool = false;
+    let vi: Int = 0;
+    [vi < len(visited)] {
+        [visited[vi] == node] {
+            &in_visited = true;
+        };
+        &vi = vi + 1;
+    };
+    [in_visited] {
+        term false;
+    };
+    
+    // Mark as visited and explore edges
+    let new_visited = append(visited, node);
+    let new_path = append(path, node);
+    
+    uni map_get(graph, node)(Some(edges)) = {
+        let ei: Int = 0;
+        [ei < len(edges)] {
+            [detect_cycle(edges[ei], graph, new_visited, new_path)] {
+                term true;
+            };
+            &ei = ei + 1;
+        };
+    };
+    
+    term false;
+}

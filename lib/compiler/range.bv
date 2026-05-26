@@ -1,0 +1,269 @@
+// Parameter Range Analysis for Brief self-hosted compiler.
+// Mirrors src/analysis/range.rs functionality in Brief.
+//
+// Infers the possible value ranges of transaction parameters by analyzing
+// preconditions. Backends use this for:
+//   - Loop unrolling bounds
+//   - Memory allocation sizes
+//   - Removing runtime bounds checks
+
+struct ParamRange {
+    min: Option<Int>,
+    max: Option<Int>,
+    min_inclusive: Bool,
+    max_inclusive: Bool
+}
+
+struct RangeResult {
+    txn_name: String,
+    param_name: String,
+    min: Option<Int>,
+    max: Option<Int>
+}
+
+// Create a default (unbounded) parameter range
+defn new_param_range() -> ParamRange [
+    true
+][
+    result.min == None && result.max == None
+] {
+    term ParamRange {
+        min: None,
+        max: None,
+        min_inclusive: false,
+        max_inclusive: false
+    };
+}
+
+// Analyze a Program to infer parameter ranges from preconditions
+defn analyze_parameter_ranges(program: Program) -> Map<String, Map<String, ParamRange>> [
+    true
+][
+    true
+] {
+    let ranges: Map<String, Map<String, ParamRange>> = empty_map();
+    
+    let i: Int = 0;
+    [i < len(program.items)] {
+        uni program.items[i](TopTxn(t)) = {
+            let param_ranges: Map<String, ParamRange> = empty_map();
+            
+            // Initialize all params as unbounded
+            let pi: Int = 0;
+            [pi < len(t.parameters)] {
+                let (name, _) = t.parameters[pi];
+                &param_ranges = map_insert(param_ranges, name, new_param_range());
+                &pi = pi + 1;
+            };
+            
+            // Extract bounds from precondition
+            &param_ranges = extract_bounds_from_expr(t.contract.pre_condition, param_ranges);
+            
+            &ranges = map_insert(ranges, t.name, param_ranges);
+        };
+        &i = i + 1;
+    };
+    
+    term ranges;
+}
+
+// Extract bounds from precondition expressions
+defn extract_bounds_from_expr(
+    expr: Expr,
+    ranges: Map<String, ParamRange>
+) -> Map<String, ParamRange> [
+    true
+][
+    true
+] {
+    uni expr(AndExpr(left, right)) = {
+        let r1 = extract_bounds_from_expr(left, ranges);
+        term extract_bounds_from_expr(right, r1);
+    };
+    uni expr(GtExpr(l, r)) = {
+        term apply_comparison(l, r, ranges, true, false);
+    };
+    uni expr(GeExpr(l, r)) = {
+        term apply_comparison(l, r, ranges, true, true);
+    };
+    uni expr(LtExpr(l, r)) = {
+        term apply_comparison(l, r, ranges, false, false);
+    };
+    uni expr(LeExpr(l, r)) = {
+        term apply_comparison(l, r, ranges, false, true);
+    };
+    term ranges;
+}
+
+// Apply a comparison constraint to set a parameter bound
+// op_is_gt: true for >/>= (greater-than family), false for </<= (less-than family)
+// inclusive: true for >=/<= (includes equality)
+defn apply_comparison(
+    left: Expr,
+    right: Expr,
+    ranges: Map<String, ParamRange>,
+    op_is_gt: Bool,
+    inclusive: Bool
+) -> Map<String, ParamRange> [
+    true
+][
+    true
+] {
+    // Case 1: var <op> lit  (e.g. x > 0)
+    uni(left)(IdentExpr(var_name)) = {
+        uni(right)(IntLit(val)) = {
+            [op_is_gt] {
+                // var > lit => LOWER bound
+                term set_lower_bound(ranges, var_name, val, inclusive);
+            };
+            // var < lit => UPPER bound
+            term set_upper_bound(ranges, var_name, val, inclusive);
+        };
+        term ranges;
+    };
+    
+    // Case 2: lit <op> var  (e.g. 0 < x)
+    uni(left)(IntLit(val)) = {
+        uni(right)(IdentExpr(var_name)) = {
+            [op_is_gt] {
+                // lit > var => var < lit => UPPER bound
+                term set_upper_bound(ranges, var_name, val, inclusive);
+            };
+            // lit < var => var > lit => LOWER bound
+            term set_lower_bound(ranges, var_name, val, inclusive);
+        };
+        term ranges;
+    };
+    
+    term ranges;
+}
+
+// Set a lower bound on a parameter
+defn set_lower_bound(
+    ranges: Map<String, ParamRange>,
+    name: String,
+    val: Int,
+    inclusive: Bool
+) -> Map<String, ParamRange> [
+    true
+][
+    true
+] {
+    uni map_get(ranges, name)(Some(range)) = {
+        let actual_val = [inclusive] { val } else { val + 1 };
+        
+        uni range.min(None) = {
+            let new_range = ParamRange {
+                min: Some(actual_val),
+                max: range.max,
+                min_inclusive: true,
+                max_inclusive: range.max_inclusive
+            };
+            term map_insert(ranges, name, new_range);
+        };
+        uni range.min(Some(existing)) = {
+            [actual_val > existing] {
+                let new_range = ParamRange {
+                    min: Some(actual_val),
+                    max: range.max,
+                    min_inclusive: true,
+                    max_inclusive: range.max_inclusive
+                };
+                term map_insert(ranges, name, new_range);
+            };
+            term ranges; // Keep stricter bound
+        };
+        term ranges;
+    };
+    term ranges;
+}
+
+// Set an upper bound on a parameter
+defn set_upper_bound(
+    ranges: Map<String, ParamRange>,
+    name: String,
+    val: Int,
+    inclusive: Bool
+) -> Map<String, ParamRange> [
+    true
+][
+    true
+] {
+    uni map_get(ranges, name)(Some(range)) = {
+        let actual_val = [inclusive] { val } else { val - 1 };
+        
+        uni range.max(None) = {
+            let new_range = ParamRange {
+                min: range.min,
+                max: Some(actual_val),
+                min_inclusive: range.min_inclusive,
+                max_inclusive: true
+            };
+            term map_insert(ranges, name, new_range);
+        };
+        uni range.max(Some(existing)) = {
+            [actual_val < existing] {
+                let new_range = ParamRange {
+                    min: range.min,
+                    max: Some(actual_val),
+                    min_inclusive: range.min_inclusive,
+                    max_inclusive: true
+                };
+                term map_insert(ranges, name, new_range);
+            };
+            term ranges; // Keep stricter bound
+        };
+        term ranges;
+    };
+    term ranges;
+}
+
+// Check if a parameter has a known lower bound
+defn has_lower_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
+    true
+][
+    true
+] {
+    uni map_get(ranges, name)(Some(range)) = {
+        uni range.min(None) = { term false; };
+        term true;
+    };
+    term false;
+}
+
+// Check if a parameter has a known upper bound
+defn has_upper_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
+    true
+][
+    true
+] {
+    uni map_get(ranges, name)(Some(range)) = {
+        uni range.max(None) = { term false; };
+        term true;
+    };
+    term false;
+}
+
+// Get the minimum value of a parameter (if bounded)
+defn min_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
+    true
+][
+    true
+] {
+    uni map_get(ranges, name)(Some(range)) = {
+        term range.min;
+    };
+    term None;
+}
+
+// Get the maximum value of a parameter (if bounded)
+defn max_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
+    true
+][
+    true
+] {
+    uni map_get(ranges, name)(Some(range)) = {
+        term range.max;
+    };
+    term None;
+}
