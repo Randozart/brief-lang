@@ -23,6 +23,7 @@
 
 use crate::ast::{Expr, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
+use std::fmt::Write;
 
 /// Intent: AArch64 instruction set enum with all supported opcodes and addressing modes.
 #[derive(Debug, Clone)]
@@ -108,6 +109,7 @@ pub struct AArch64Backend {
     signal_map: HashMap<String, usize>,
     optimizations: OptimizationFlags,
     has_cycles: bool,
+    pending_cleanup: Vec<Statement>,
 }
 
 /// Intent: Flags to enable or disable specific PRAXIS optimization passes.
@@ -136,6 +138,7 @@ impl AArch64Backend {
                 parallel_scheduling: true,
             },
             has_cycles: false,
+            pending_cleanup: Vec::new(),
         }
     }
     
@@ -236,6 +239,19 @@ impl AArch64Backend {
         txns
     }
     
+    /// Intent: Generate AArch64 assembly for the State struct layout with zero-initialized storage.
+    fn generate_state_struct(&self, output: &mut String, program: &Program) {
+        writeln!(output, "// State structure").ok();
+        for item in &program.items {
+            if let TopLevel::StateDecl(s) = item {
+                let size = Self::type_size(&s.ty);
+                writeln!(output, "    .globl {}", s.name).ok();
+                writeln!(output, "{}:", s.name).ok();
+                writeln!(output, "    .zero {}", size).ok();
+            }
+        }
+    }
+
     /// Intent: Emit the .data section with aligned zero-initialized storage for each state variable.
     fn generate_data_section(&mut self, output: &mut String, program: &Program) {
         output.push_str(".data\n");
@@ -335,7 +351,7 @@ impl AArch64Backend {
     }
     
     /// Intent: Emit a transaction function body with frame setup/teardown and statement generation.
-    fn generate_transaction(&self, output: &mut String, name: &str, txn: &crate::ast::Transaction) {
+    fn generate_transaction(&mut self, output: &mut String, name: &str, txn: &crate::ast::Transaction) {
         output.push_str(&format!("{}:\n", name));
         output.push_str(&format!("    // Transaction: {}\n", name));
         output.push_str("    stp x29, x30, [sp, #-16]!\n");
@@ -415,7 +431,7 @@ impl AArch64Backend {
         }
     }
     
-    fn generate_statement(&self, output: &mut String, stmt: &Statement) {
+    fn generate_statement(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
                 self.generate_expr(output, expr);
@@ -433,14 +449,56 @@ impl AArch64Backend {
                 }
             }
             Statement::Term { .. } => {
-                output.push_str("    // term\n");
+                let cleanup = std::mem::take(&mut self.pending_cleanup);
+                for stmt in &cleanup {
+                    self.generate_statement(output, stmt);
+                }
+                writeln!(output, "    // term — transaction complete").ok();
+            }
+            Statement::Let { name, expr, address_expr, .. } => {
+                if let Some(addr) = address_expr {
+                    self.generate_expr(output, addr);
+                    writeln!(output, "    // let {} = ptr (addr computed above)", name).ok();
+                } else if let Some(e) = expr {
+                    self.generate_expr(output, e);
+                    writeln!(output, "    // let {} = expr (value in x0)", name).ok();
+                }
+            }
+            Statement::Expression(e) => {
+                self.generate_expr(output, e);
+            }
+            Statement::LocalTrigger { name, expr, .. } => {
+                if let Some(e) = expr {
+                    self.generate_expr(output, e);
+                    writeln!(output, "    // trg! {}: await expr (in x0)", name).ok();
+                } else {
+                    writeln!(output, "    // trg! {}: await external signal", name).ok();
+                }
+            }
+            Statement::OnExit { body, .. } => {
+                self.pending_cleanup.extend(body.iter().cloned());
+                writeln!(output, "    // #on_exit cleanup registered").ok();
+            }
+            Statement::Escape(Some(v)) => {
+                self.generate_expr(output, v);
+                writeln!(output, "    // escape (value in x0)").ok();
+            }
+            Statement::Escape(None) => {
+                writeln!(output, "    // escape (unit)").ok();
+            }
+            Statement::Alka(block) => {
+                writeln!(output, "    // alka! {{}}").ok();
+                writeln!(output, "    // {}", block.content).ok();
+            }
+            Statement::InlineAsm { asm_string, .. } => {
+                writeln!(output, "    // inline asm: \"{}\"", asm_string).ok();
             }
             _ => {}
         }
     }
     
     // PRAXIS: Branchless guarded statement
-    fn generate_guarded_branchless(&self, output: &mut String, condition: &Expr, body: &[Statement]) {
+    fn generate_guarded_branchless(&mut self, output: &mut String, condition: &Expr, body: &[Statement]) {
         output.push_str("    // Branchless guard\n");
         
         // Evaluate condition
@@ -453,7 +511,7 @@ impl AArch64Backend {
         }
     }
     
-    fn generate_guarded_with_branch(&self, output: &mut String, condition: &Expr, body: &[Statement]) {
+    fn generate_guarded_with_branch(&mut self, output: &mut String, condition: &Expr, body: &[Statement]) {
         let label = format!(".guard_end_{}", self.signal_counter);
         
         self.generate_expr_branchless(output, condition);
@@ -470,6 +528,18 @@ impl AArch64Backend {
         match expr {
             Expr::Integer(n) => {
                 output.push_str(&format!("    movz x0, #{}\n", n));
+            }
+            Expr::Bool(true) => {
+                output.push_str("    movz x0, #1\n");
+            }
+            Expr::Bool(false) => {
+                output.push_str("    movz x0, #0\n");
+            }
+            Expr::Float(f) => {
+                write!(output, "    // Float: {} (load from literal pool)\n", f).unwrap();
+            }
+            Expr::String(s) => {
+                write!(output, "    // String: \"{}\" (load from data section)\n", s).unwrap();
             }
             Expr::Identifier(name) => {
                 if let Some(offset) = self.signal_map.get(name) {
@@ -499,6 +569,140 @@ impl AArch64Backend {
                 output.push_str("    mov x1, x0\n");
                 self.generate_expr(output, right);
                 output.push_str("    sdiv x0, x1, x0\n");
+            }
+            Expr::Mod(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    udiv x2, x1, x0\n");
+                output.push_str("    msub x0, x2, x0, x1\n");
+            }
+            Expr::Eq(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp x0, x1\n");
+                output.push_str("    cset x0, eq\n");
+            }
+            Expr::Ne(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp x0, x1\n");
+                output.push_str("    cset x0, ne\n");
+            }
+            Expr::Lt(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp x0, x1\n");
+                output.push_str("    cset x0, lt\n");
+            }
+            Expr::Le(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp x0, x1\n");
+                output.push_str("    cset x0, le\n");
+            }
+            Expr::Gt(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp x0, x1\n");
+                output.push_str("    cset x0, gt\n");
+            }
+            Expr::Ge(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp x0, x1\n");
+                output.push_str("    cset x0, ge\n");
+            }
+            Expr::And(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    and x0, x1, x0\n");
+            }
+            Expr::Or(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    orr x0, x1, x0\n");
+            }
+            Expr::Not(inner) => {
+                self.generate_expr(output, inner);
+                output.push_str("    cmp x0, #0\n");
+                output.push_str("    cset x0, eq\n");
+            }
+            Expr::Neg(inner) => {
+                self.generate_expr(output, inner);
+                output.push_str("    neg x0, x0\n");
+            }
+            Expr::BitAnd(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    and x0, x1, x0\n");
+            }
+            Expr::BitOr(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    orr x0, x1, x0\n");
+            }
+            Expr::BitXor(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    eor x0, x1, x0\n");
+            }
+            Expr::BitNot(inner) => {
+                self.generate_expr(output, inner);
+                output.push_str("    mvn x0, x0\n");
+            }
+            Expr::Shl(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    lsl x0, x1, x0\n");
+            }
+            Expr::Shr(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr(output, right);
+                output.push_str("    lsr x0, x1, x0\n");
+            }
+            Expr::Call(name, args) => {
+                write!(output, "    // call {}(", name).unwrap();
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    self.generate_expr(output, arg);
+                }
+                output.push_str(")\n");
+            }
+            Expr::ListLiteral(elems) => {
+                output.push_str("    /* [");
+                for (i, elem) in elems.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    self.generate_expr(output, elem);
+                }
+                output.push_str("] */\n");
+            }
+            Expr::ListIndex(list, idx) => {
+                self.generate_expr(output, list);
+                output.push_str("[");
+                self.generate_expr(output, idx);
+                output.push_str("]\n");
+            }
+            Expr::ListLen(list) => {
+                self.generate_expr(output, list);
+                output.push_str(".length\n");
+            }
+            Expr::FieldAccess(obj, field) => {
+                self.generate_expr(output, obj);
+                write!(output, ".{}\n", field).unwrap();
             }
             _ => {
                 output.push_str("    // Unimplemented expr\n");
@@ -562,6 +766,80 @@ impl AArch64Backend {
                 self.generate_expr_branchless(output, right);
                 output.push_str("    orr x0, x1, x0\n");
             }
+            Expr::Add(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    add x0, x1, x0\n");
+            }
+            Expr::Sub(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    sub x0, x1, x0\n");
+            }
+            Expr::Mul(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    mul x0, x1, x0\n");
+            }
+            Expr::Div(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    sdiv x0, x1, x0\n");
+            }
+            Expr::Mod(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    udiv x2, x1, x0\n");
+                output.push_str("    msub x0, x2, x0, x1\n");
+            }
+            Expr::Not(inner) => {
+                self.generate_expr_branchless(output, inner);
+                output.push_str("    cmp x0, #0\n");
+                output.push_str("    cset x0, eq\n");
+            }
+            Expr::Neg(inner) => {
+                self.generate_expr_branchless(output, inner);
+                output.push_str("    neg x0, x0\n");
+            }
+            Expr::BitAnd(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    and x0, x1, x0\n");
+            }
+            Expr::BitOr(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    orr x0, x1, x0\n");
+            }
+            Expr::BitXor(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    eor x0, x1, x0\n");
+            }
+            Expr::BitNot(inner) => {
+                self.generate_expr_branchless(output, inner);
+                output.push_str("    mvn x0, x0\n");
+            }
+            Expr::Shl(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    lsl x0, x1, x0\n");
+            }
+            Expr::Shr(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov x1, x0\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    lsr x0, x1, x0\n");
+            }
             Expr::Identifier(name) => {
                 if let Some(offset) = self.signal_map.get(name) {
                     output.push_str(&format!("    ldr x0, [x29, #{}]\n", offset * 8));
@@ -570,16 +848,101 @@ impl AArch64Backend {
             Expr::Integer(n) => {
                 output.push_str(&format!("    movz x0, #{}\n", n));
             }
-            Expr::Bool(b) => {
-                if *b {
-                    output.push_str("    movz x0, #1\n");
-                } else {
-                    output.push_str("    movz x0, #0\n");
+            Expr::Bool(true) => {
+                output.push_str("    movz x0, #1\n");
+            }
+            Expr::Bool(false) => {
+                output.push_str("    movz x0, #0\n");
+            }
+            Expr::Float(f) => {
+                write!(output, "    movz x0, #{} // Float placeholder\n", f).unwrap();
+            }
+            Expr::String(s) => {
+                write!(output, "    // String literal: \"{}\"\n", s).unwrap();
+            }
+            Expr::Call(name, args) => {
+                write!(output, "    // call {}(", name).unwrap();
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    self.generate_expr_branchless(output, arg);
                 }
+                output.push_str(")\n");
+            }
+            Expr::ListLiteral(elems) => {
+                output.push_str("    /* [");
+                for (i, elem) in elems.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    self.generate_expr_branchless(output, elem);
+                }
+                output.push_str("] */\n");
+            }
+            Expr::ListIndex(list, idx) => {
+                self.generate_expr_branchless(output, list);
+                output.push_str("[");
+                self.generate_expr_branchless(output, idx);
+                output.push_str("]\n");
+            }
+            Expr::ListLen(list) => {
+                self.generate_expr_branchless(output, list);
+                output.push_str(".length\n");
+            }
+            Expr::FieldAccess(obj, field) => {
+                self.generate_expr_branchless(output, obj);
+                write!(output, ".{}\n", field).unwrap();
             }
             _ => {
                 output.push_str("    mov x0, #0\n");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+
+    #[test]
+    fn test_aarch64_generates_assembly() {
+        let mut backend = AArch64Backend::new();
+        let program = Program {
+            items: vec![],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains(".data"));
+        assert!(output.contains(".text"));
+    }
+
+    #[test]
+    fn test_aarch64_generates_entry_point() {
+        let mut backend = AArch64Backend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "counter".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: Vec::new(),
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("_start"));
+        assert!(output.contains("counter"));
     }
 }
