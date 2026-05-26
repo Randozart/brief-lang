@@ -1,5 +1,6 @@
 pub mod aarch64;
 pub mod c;
+pub mod llvm;
 pub mod rust;
 pub mod verilog;
 pub mod vhdl;
@@ -34,7 +35,7 @@ pub fn analyze_program(program: &Program) -> (CallGraph, ParameterRanges) {
 /// Backend names match the subcommand (e.g. "c", "rust", "wasm", "verilog", "vhdl", "x86_64", "aarch64", "cobol").
 pub fn supported_hashtags(backend: &str) -> Vec<&'static str> {
     match backend {
-        "c" | "x86_64" | "aarch64" => {
+        "c" | "x86_64" | "aarch64" | "llvm" => {
             vec!["volatile", "sfence", "lfence", "mfence", "aligned", "packed"]
         }
         "rust" => {

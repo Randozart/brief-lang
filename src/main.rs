@@ -1499,6 +1499,12 @@ fn run_compile_unified(args: &[String], strict_flag: bool) {
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
         },
+        "llvm" => {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict) {
+                Ok(p) => Some(p),
+                Err(e) => { eprintln!("Error: {}", e); None }
+            }
+        },
         "cobol" => {
             match run_cobol_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict) {
                 Ok(p) => Some(p),
@@ -1597,6 +1603,52 @@ fn run_rust_compile(
 }
 
 /// Intent: run cobol compile.
+fn run_llvm_compile(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+    target: Option<&TargetSpec>,
+    _strict: bool,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    println!("Compiling to LLVM IR: {}", file_path.display());
+
+    let source = fs::read_to_string(file_path)?;
+    let clean_source = strip_annotations(&source);
+
+    let mut parser = parser::Parser::new(&clean_source).with_strict_mode(_strict);
+    let mut program = parser
+        .parse()
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let mut import_resolver = import_resolver::ImportResolver::new()
+        .with_strict_mode(_strict);
+    let mut program = import_resolver
+        .resolve_imports(&program, file_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    let mut desug = desugarer::Desugarer::new();
+    let program = desug.desugar(&program);
+
+    let mut tc = typechecker::TypeChecker::new()
+        .with_target(typechecker::CompilationTarget::Interpreter);
+    let type_errors = tc.check_program(&mut program.clone());
+    if !type_errors.is_empty() {
+        return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
+    }
+
+    let mut llvm_backend = crate::backend::llvm::LlvmBackend::new();
+    if let Some(spec) = target.cloned() {
+        llvm_backend = llvm_backend.with_spec(spec);
+    }
+    let output = llvm_backend.generate(&program);
+
+    let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    let output_file = out_dir.unwrap_or_else(|| std::path::Path::new(".")).join(format!("{}.ll", stem));
+    fs::write(&output_file, &output)?;
+    println!("  Output: {}", output_file.display());
+
+    Ok(output_file)
+}
+
 fn run_cobol_compile(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -2999,6 +3051,41 @@ fn main() {
             } else {
                 eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
                 eprintln!("Usage: {} rust <file.bv|file.sbv|file.ebv|file.sebv> [--out <dir>]", args[0]);
+                std::process::exit(1);
+            }
+        }
+
+        "llvm" => {
+            let mut file_path = None;
+            let mut out_dir = None;
+            let mut target = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--target" && i + 1 < args.len() {
+                    target = Some(args[i + 1].as_str());
+                    i += 2;
+                } else if !arg.starts_with('-') {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = file_path {
+                let strict = strict_flag || is_strict_extension(&path);
+                if let Err(e) = run_llvm_compile(&path, out_dir.as_deref(), None, strict) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
+                eprintln!("Usage: {} llvm <file.bv> [--out <dir>]", args[0]);
                 std::process::exit(1);
             }
         }
