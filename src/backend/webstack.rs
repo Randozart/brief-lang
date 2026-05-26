@@ -24,6 +24,7 @@ use crate::ast::{BitRange, Contract, Expr, ForeignTarget, Program, Statement, To
 use crate::view_compiler::{Binding, Directive};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 
 #[derive(Clone, Copy, PartialEq)]
 /// Intent: CodeTarget type.
@@ -1688,7 +1689,97 @@ impl WebstackGenerator {
                     sets
                 )
             }
+            Expr::Float(f) => format!("JsValue::from({})", f),
+            Expr::Char(c) => format!("JsValue::from(\"{}\")", c.escape_default()),
+            Expr::Mod(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!(
+                    "JsValue::from({}.as_f64().unwrap_or(0.0) as i64 % {}.as_f64().unwrap_or(0.0) as i64)",
+                    a_val, b_val
+                )
+            }
+            Expr::And(a, b) => {
+                let a_val = self.expr_to_js_value_for_condition(a);
+                let b_val = self.expr_to_js_value_for_condition(b);
+                format!("JsValue::from({} && {})", a_val, b_val)
+            }
+            Expr::BitAnd(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 & {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+            }
+            Expr::BitOr(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 | {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+            }
+            Expr::BitXor(a, b) => {
+                let a_val = self.expr_to_js_value(a);
+                let b_val = self.expr_to_js_value(b);
+                format!("JsValue::from({}.as_f64().unwrap_or(0.0) as i32 ^ {}.as_f64().unwrap_or(0.0) as i32)", a_val, b_val)
+            }
+            Expr::BitNot(a) => {
+                let a_val = self.expr_to_js_value(a);
+                format!("JsValue::from(!{}.as_f64().unwrap_or(0.0) as i32)", a_val)
+            }
+            Expr::MultiSlice { value, coordinates, mask } => {
+                let val = self.expr_to_js_value(value);
+                let coords: Vec<String> = coordinates.iter().map(|c| self.expr_to_js_slice_coord(c)).collect();
+                let mask_str = mask.as_ref().map(|m| self.expr_to_js_value(m)).unwrap_or_default();
+                format!("// multi_slice: {}[{} ; {}]", val, coords.join(", "), mask_str)
+            }
+            Expr::PatternMatch { value, variant, fields } => {
+                let val = self.expr_to_js_value(value);
+                let flds = fields.join(", ");
+                format!("// pattern_match: {} {}({})", val, variant, flds)
+            }
+            Expr::ForAll { var, expr } => {
+                let e = self.expr_to_js_value(expr);
+                format!("// forall {} in {}", var, e)
+            }
+            Expr::Exists { var, expr } => {
+                let e = self.expr_to_js_value(expr);
+                format!("// exists {} in {}", var, e)
+            }
+            Expr::Block(stmts, last) => {
+                format!("// block_expr: {} stmts, last = {}", stmts.len(), self.expr_to_js_value(last))
+            }
+            Expr::TupleDestructure(names, expr) => {
+                let e = self.expr_to_js_value(expr);
+                let ns = names.join(", ");
+                format!("// tuple_destructure: ({}) = {}", ns, e)
+            }
+            Expr::Tuple(elements) => {
+                let items: Vec<String> = elements.iter().map(|e| self.expr_to_js_value(e)).collect();
+                if items.is_empty() {
+                    "JsValue::undefined()".to_string()
+                } else {
+                    let mut arr = String::from("{ let __arr = js_sys::Array::new(); ");
+                    for item in &items {
+                        arr.push_str(&format!("__arr.push(&{}); ", item));
+                    }
+                    arr.push_str("__arr.into() }");
+                    arr
+                }
+            }
             _ => "JsValue::TRUE".to_string(),
+        }
+    }
+
+    /// Intent: expr_to_js_slice_coord function.
+    fn expr_to_js_slice_coord(&self, coord: &crate::ast::SliceCoordinate) -> String {
+        match coord {
+            crate::ast::SliceCoordinate::Index(e) => self.expr_to_js_value(e),
+            crate::ast::SliceCoordinate::Range { start, end } => {
+                let s = start.as_ref().map(|e| self.expr_to_js_value(e)).unwrap_or_default();
+                let e = end.as_ref().map(|e| self.expr_to_js_value(e)).unwrap_or_default();
+                format!("{}..{}", s, e)
+            }
+            crate::ast::SliceCoordinate::Named { name, coord } => {
+                let inner = self.expr_to_js_slice_coord(coord);
+                format!("{}:{}", name, inner)
+            }
         }
     }
 
@@ -2055,4 +2146,27 @@ pub struct WebstackOutput {
     pub js_glue: String,
     pub signal_count: usize,
     pub txn_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+
+    /// Intent: verify that generate produces output for an empty program.
+    #[test]
+    fn test_webstack_generates_output() {
+        let mut backend = WebstackGenerator::new();
+        let program = Program {
+            items: vec![],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let bindings: Vec<Binding> = vec![];
+        let output = backend.generate(&program, &bindings, "test");
+        assert!(!output.rust_code.is_empty());
+    }
 }
