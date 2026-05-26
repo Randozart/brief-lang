@@ -256,6 +256,89 @@ pub fn generate_bindings_dbvs(result: &AnalysisResult) -> String {
     output
 }
 
+/// Generate a Metropolitan IDL .dbv service definition
+pub fn generate_service_dbv(result: &AnalysisResult) -> String {
+    let mut output = String::new();
+    let lib = &result.library_name;
+
+    output.push_str(&format!(
+        "// Auto-generated metropipe service definition for {}\n// Mapper: {}\n\n",
+        lib, result.mapper,
+    ));
+    output.push_str(&format!("SERVICE {} {{\n", lib));
+
+    for func in &result.functions {
+        for (pname, ptype) in &func.parameters {
+            let t = c_type_to_brief(ptype);
+            output.push_str(&format!("    INPUT {}: {};\n", pname, t));
+        }
+        let rt = c_type_to_brief(&func.return_type);
+        output.push_str(&format!("    OUTPUT {}_result: {};\n", func.name, rt));
+    }
+
+    output.push_str("}\n");
+    output
+}
+
+/// Generate a memory-spec.json for schema-aware clients
+pub fn generate_memory_spec(result: &AnalysisResult) -> String {
+    use serde_json::map::Map;
+
+    let lib = &result.library_name;
+    let mut spec = Map::new();
+    let mut channel = Map::new();
+    channel.insert("address".to_string(), serde_json::Value::String(format!("/dev/shm/metro_{}", lib)));
+    channel.insert("payload_offset".to_string(), serde_json::Value::Number(serde_json::Number::from(32)));
+    channel.insert("capacity".to_string(), serde_json::Value::Number(serde_json::Number::from(4096)));
+
+    let mut input_fields: Vec<Map<String, serde_json::Value>> = Vec::new();
+    let mut output_fields: Vec<Map<String, serde_json::Value>> = Vec::new();
+    let mut input_offset = 0u64;
+
+    for func in &result.functions {
+        for (pname, ptype) in &func.parameters {
+            let mut field = Map::new();
+            field.insert("name".to_string(), serde_json::Value::String(pname.clone()));
+            field.insert("type".to_string(), serde_json::Value::String(ptype.clone()));
+            field.insert("offset".to_string(), serde_json::Value::Number(serde_json::Number::from(input_offset)));
+            let size = type_size(ptype);
+            field.insert("size".to_string(), serde_json::Value::Number(serde_json::Number::from(size)));
+            input_fields.push(field);
+            input_offset += size;
+        }
+        let mut field = Map::new();
+        field.insert("name".to_string(), serde_json::Value::String(format!("{}_result", func.name)));
+        field.insert("type".to_string(), serde_json::Value::String(func.return_type.clone()));
+        field.insert("offset".to_string(), serde_json::Value::Number(serde_json::Number::from(input_offset)));
+        let size = type_size(&func.return_type);
+        field.insert("size".to_string(), serde_json::Value::Number(serde_json::Number::from(size)));
+        output_fields.push(field);
+        input_offset += size;
+    }
+
+    channel.insert("input_fields".to_string(), serde_json::Value::Array(
+        input_fields.into_iter().map(|m| serde_json::Value::Object(m)).collect()
+    ));
+    channel.insert("output_fields".to_string(), serde_json::Value::Array(
+        output_fields.into_iter().map(|m| serde_json::Value::Object(m)).collect()
+    ));
+
+    spec.insert("channel".to_string(), serde_json::Value::Object(channel));
+    serde_json::to_string_pretty(&spec).unwrap_or_default()
+}
+
+fn type_size(ty: &str) -> u64 {
+    match ty {
+        "Bool" | "bool" | "uint8_t" => 1,
+        "Int16" | "int16_t" | "UInt16" | "uint16_t" => 2,
+        "Int" | "int" | "int32_t" | "UInt" | "uint32_t" | "Float" | "float" => 4,
+        "Int64" | "int64_t" | "UInt64" | "uint64_t" | "Double" | "double" | "Float64" => 8,
+        "String" | "string" | "Data" => 256,
+        "Void" | "void" => 0,
+        _ => 8,
+    }
+}
+
 /// Generate bridge.bv with a pre-initialized wrapper function using alka! polling
 pub fn generate_bridge_bv(result: &AnalysisResult) -> String {
     let mut output = String::new();
