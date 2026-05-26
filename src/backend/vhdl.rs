@@ -15,6 +15,7 @@
 use crate::ast::*;
 use crate::linkage::LinkageConfig;
 use std::collections::HashMap;
+use std::fmt::Write;
 
 /// VHDL code generator: converts a Brief Program into multi-file VHDL output.
 pub struct VhdlGenerator {
@@ -25,6 +26,7 @@ pub struct VhdlGenerator {
     linkage: Option<LinkageConfig>,
     signal_counter: usize,
     process_counter: usize,
+    pending_cleanup: Vec<Statement>,
 }
 
 /// Read a pragma attribute from the attrs list, filtered by vhdl target.
@@ -46,6 +48,7 @@ impl VhdlGenerator {
             linkage: None,
             signal_counter: 0,
             process_counter: 0,
+            pending_cleanup: Vec::new(),
         }
     }
 
@@ -705,7 +708,7 @@ impl VhdlGenerator {
     }
 
     /// Emit a standalone reactive transaction with PSL assertion comments.
-    fn emit_reactive_txn(&self, txn: &Transaction) -> String {
+    fn emit_reactive_txn(&mut self, txn: &Transaction) -> String {
         let mut o = String::new();
         o.push_str("library IEEE;\n");
         o.push_str("use IEEE.std_logic_1164.all;\n");
@@ -726,9 +729,7 @@ impl VhdlGenerator {
         o.push_str("begin\n");
         o.push_str("    if rst = '1' then\n");
         for item in &txn.body {
-            if let Statement::Assignment { lhs, expr, .. } = item {
-                o.push_str(&format!("        {} <= {};\n", self.expr_to_string(lhs), self.expr_to_string(expr)));
-            }
+            self.statement_to_vhdl(&mut o, item, "        ");
         }
         o.push_str("    elsif rising_edge(clk) then\n");
         let pre = self.expr_to_string(&txn.contract.pre_condition);
@@ -736,9 +737,7 @@ impl VhdlGenerator {
             o.push_str(&format!("        if {} then\n", pre));
         }
         for item in &txn.body {
-            if let Statement::Assignment { lhs, expr, .. } = item {
-                o.push_str(&format!("            {} <= {};\n", self.expr_to_string(lhs), self.expr_to_string(expr)));
-            }
+            self.statement_to_vhdl(&mut o, item, "            ");
         }
         if pre != "true" && pre != "1" && pre != "'1'" {
             o.push_str("        end if;\n");
@@ -758,9 +757,7 @@ impl VhdlGenerator {
         output.push_str("        if rst = '1' then\n");
 
         for item in &txn.body {
-            if let Statement::Assignment { lhs, expr, .. } = item {
-                output.push_str(&format!("            {} <= {};\n", self.expr_to_string(lhs), self.expr_to_string(expr)));
-            }
+            self.statement_to_vhdl(output, item, "            ");
         }
 
         output.push_str("        elsif rising_edge(clk) then\n");
@@ -772,9 +769,7 @@ impl VhdlGenerator {
             }
 
             for item in &txn.body {
-                if let Statement::Assignment { lhs, expr, .. } = item {
-                    output.push_str(&format!("                {} <= {};\n", self.expr_to_string(lhs), self.expr_to_string(expr)));
-                }
+                self.statement_to_vhdl(output, item, "                ");
             }
 
             if pre != "true" && pre != "1" && pre != "'1'" {
@@ -788,14 +783,106 @@ impl VhdlGenerator {
             }
         } else {
             for item in &txn.body {
-                if let Statement::Assignment { lhs, expr, .. } = item {
-                    output.push_str(&format!("            {} <= {};\n", self.expr_to_string(lhs), self.expr_to_string(expr)));
-                }
+                self.statement_to_vhdl(output, item, "            ");
             }
         }
 
         output.push_str("        end if;\n");
         output.push_str(&format!("    end process {};\n\n", proc_name));
+    }
+
+    /// Convert a Brief statement to VHDL code with the given indentation level.
+    fn statement_to_vhdl(&mut self, output: &mut String, stmt: &Statement, indent: &str) {
+        match stmt {
+            Statement::Assignment { lhs, expr, .. } => {
+                let _ = write!(output, "{}{} <= {};\n", indent,
+                    self.expr_to_string(lhs),
+                    self.expr_to_string(expr));
+            }
+            Statement::Let { name, expr, address_expr, address, .. } => {
+                if let Some(addr_expr) = address_expr {
+                    let addr_code = self.expr_to_string(addr_expr);
+                    let _ = write!(output, "{}-- let {} at address {}\n", indent, name, addr_code);
+                } else if let Some(addr) = address {
+                    let _ = write!(output, "{}-- let {} at address 0x{:X}\n", indent, name, addr);
+                } else if let Some(e) = expr {
+                    let expr_code = self.expr_to_string(e);
+                    let _ = write!(output, "{}-- let {} = {}\n", indent, name, expr_code);
+                } else {
+                    let _ = write!(output, "{}-- let {}\n", indent, name);
+                }
+            }
+            Statement::Term { values, .. } => {
+                let cleanup = std::mem::take(&mut self.pending_cleanup);
+                for stmt in &cleanup {
+                    self.statement_to_vhdl(output, stmt, indent);
+                }
+                if values.is_empty() {
+                    let _ = write!(output, "{}-- term\n", indent);
+                } else if values.len() == 1 {
+                    if let Some(v) = &values[0] {
+                        let expr_code = self.expr_to_string(v);
+                        let _ = write!(output, "{}-- term with {}\n", indent, expr_code);
+                    } else {
+                        let _ = write!(output, "{}-- term\n", indent);
+                    }
+                } else {
+                    let vals: Vec<String> = values.iter().map(|v| {
+                        match v {
+                            Some(e) => self.expr_to_string(e),
+                            None => "open".to_string(),
+                        }
+                    }).collect();
+                    let _ = write!(output, "{}-- term with ({})\n", indent, vals.join(", "));
+                }
+            }
+            Statement::Expression(expr) => {
+                let expr_code = self.expr_to_string(expr);
+                let _ = write!(output, "{}-- side effect: {}\n", indent, expr_code);
+            }
+            Statement::LocalTrigger { name, .. } => {
+                let _ = write!(output, "{}-- trg!\n", indent);
+            }
+            Statement::OnExit { body, .. } => {
+                self.pending_cleanup.extend(body.iter().cloned());
+                let _ = write!(output, "{}-- on_exit cleanup registered\n", indent);
+            }
+            Statement::Escape(value) => {
+                if let Some(v) = value {
+                    let expr_code = self.expr_to_string(v);
+                    let _ = write!(output, "{}-- escape with {}\n", indent, expr_code);
+                } else {
+                    let _ = write!(output, "{}-- escape\n", indent);
+                }
+            }
+            Statement::Alka(block) => {
+                if block.dangerous {
+                    let _ = write!(output, "{}-- alka! {{}} = {}\n", indent, block.content);
+                } else {
+                    let _ = write!(output, "{}-- alka {{}} = {}\n", indent, block.content);
+                }
+            }
+            Statement::InlineAsm { asm_string, clobbers, .. } => {
+                if clobbers.is_empty() {
+                    let _ = write!(output, "{}-- asm: {}\n", indent, asm_string);
+                } else {
+                    let clobber_list = clobbers.join(", ");
+                    let _ = write!(output, "{}-- asm: {} (clobbers: {})\n", indent, asm_string, clobber_list);
+                }
+            }
+            Statement::Unification { name, pattern, expr } => {
+                let expr_code = self.expr_to_string(expr);
+                let _ = write!(output, "{}-- uni {}({}) = {}\n", indent, name, pattern, expr_code);
+            }
+            Statement::Guarded { condition, statements } => {
+                let cond_code = self.expr_to_string(condition);
+                let _ = write!(output, "{}if {} then\n", indent, cond_code);
+                for s in statements {
+                    self.statement_to_vhdl(output, s, &format!("{}    ", indent));
+                }
+                let _ = write!(output, "{}end if;\n", indent);
+            }
+        }
     }
 
     /// Emit a testbench with clock/reset stimulus and assertion checking from contracts.
@@ -1038,5 +1125,35 @@ impl VhdlGenerator {
             }
             _ => "'0'".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+
+    #[test]
+    fn test_vhdl_generates_entity() {
+        let hw_config = HardwareConfig {
+            project: ProjectConfig { name: "test".to_string(), version: "1.0".to_string() },
+            target: TargetConfig { fpga: "test".to_string(), clock_hz: 100_000_000, platform: None, synthesis: None },
+            interface: InterfaceConfig { name: "none".to_string(), address_width: None, data_width: None, controller: None, situs: None },
+            io: None,
+            memory: HashMap::new(),
+        };
+        let mut backend = VhdlGenerator::new("test_entity", hw_config);
+        let program = Program {
+            items: vec![],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let files = backend.generate(&program);
+        let output = files.iter().map(|(_, s)| s.as_str()).collect::<Vec<&str>>().join("\n");
+        assert!(output.contains("entity"), "output should contain entity declaration");
+        assert!(output.contains("architecture"), "output should contain architecture body");
     }
 }

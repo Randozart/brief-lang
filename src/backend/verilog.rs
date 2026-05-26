@@ -39,6 +39,7 @@ pub struct VerilogGenerator {
     linkage: Option<LinkageConfig>,
     _indent_level: usize,
     output: String,
+    pending_cleanup: Vec<Statement>,
 }
 
 impl VerilogGenerator {
@@ -52,6 +53,7 @@ impl VerilogGenerator {
             linkage: None,
             _indent_level: 0,
             output: String::new(),
+            pending_cleanup: Vec::new(),
         }
     }
 
@@ -1524,6 +1526,71 @@ impl VerilogGenerator {
         }
     }
 
+    fn statement_to_verilog(&mut self, stmt: &Statement) -> String {
+        let mut out = String::new();
+        match stmt {
+            Statement::Term { .. } => {
+                let cleanup = std::mem::take(&mut self.pending_cleanup);
+                for s in &cleanup {
+                    out.push_str(&self.statement_to_verilog(s));
+                }
+                out.push_str("        /* transaction complete */\n");
+            }
+            Statement::Let { name, expr, address, address_expr, .. } => {
+                if let Some(addr) = address {
+                    if let Some(addr_expr) = address_expr {
+                        out.push_str(&format!(
+                            "        // let {} @ 0x{:x} = {};\n",
+                            name, addr, self.expr_to_verilog(addr_expr)
+                        ));
+                    } else {
+                        out.push_str(&format!("        // let {} @ 0x{:x}\n", name, addr));
+                    }
+                }
+                if let Some(e) = expr {
+                    out.push_str(&format!("        // let {} = {};\n", name, self.expr_to_verilog(e)));
+                } else {
+                    out.push_str(&format!("        // let {};\n", name));
+                }
+            }
+            Statement::Expression(expr) => {
+                out.push_str(&format!("        /* {} */\n", self.expr_to_verilog(expr)));
+            }
+            Statement::LocalTrigger { name, expr, .. } => {
+                if let Some(e) = expr {
+                    out.push_str(&format!("        // trg! {}: await {}\n", name, self.expr_to_verilog(e)));
+                } else {
+                    out.push_str(&format!("        // trg! {}: await external event\n", name));
+                }
+            }
+            Statement::OnExit { body, .. } => {
+                self.pending_cleanup.extend(body.iter().cloned());
+                out.push_str("        /* #on_exit cleanup registered */\n");
+            }
+            Statement::Escape(opt_expr) => {
+                if let Some(e) = opt_expr {
+                    out.push_str(&format!("        // escape {}\n", self.expr_to_verilog(e)));
+                } else {
+                    out.push_str("        // escape\n");
+                }
+            }
+            Statement::Alka(block) => {
+                if block.dangerous {
+                    out.push_str(&format!("        // alka! {}\n", block.content));
+                } else {
+                    out.push_str(&format!("        // alka: {}\n", block.content));
+                }
+            }
+            Statement::InlineAsm { asm_string, .. } => {
+                out.push_str(&format!("        /* asm: {} */\n", asm_string));
+            }
+            _ => {
+                out.push_str("        /* statement not implemented */\n");
+            }
+        }
+        out
+    }
+
     fn expr_to_verilog(&self, expr: &Expr) -> String {
         match expr {
             Expr::Integer(n) => n.to_string(),
@@ -1667,6 +1734,36 @@ impl VerilogGenerator {
                     self.expr_to_verilog(index)
                 )
             }
+            Expr::Float(f) => format!("{}", f),
+            Expr::String(s) => format!("\"{}\"", s),
+            Expr::Mod(l, r) => format!(
+                "({} % {})",
+                self.expr_to_verilog(l),
+                self.expr_to_verilog(r)
+            ),
+            Expr::Or(l, r) => format!(
+                "({} || {})",
+                self.expr_to_verilog(l),
+                self.expr_to_verilog(r)
+            ),
+            Expr::ListLiteral(items) => {
+                let items_str = items
+                    .iter()
+                    .map(|i| self.expr_to_verilog(i))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{ {}}} ", items_str)
+            }
+            Expr::ListLen(list) => {
+                format!("$size({})", self.expr_to_verilog(list))
+            }
+            Expr::FieldAccess(obj, field) => {
+                format!(
+                    "{}_{}",
+                    self.expr_to_verilog(obj),
+                    field
+                )
+            }
             _ => format!("/* Unsupported Expr: {:?} */", expr),
         }
     }
@@ -1801,5 +1898,46 @@ impl VerilogGenerator {
         tb.push_str("endmodule\n");
 
         tb
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_verilog_generates_module() {
+        let hw_config = HardwareConfig {
+            project: ProjectConfig {
+                name: "test".to_string(),
+                version: "1.0".to_string(),
+            },
+            target: TargetConfig {
+                fpga: "test".to_string(),
+                clock_hz: 100_000_000,
+                platform: None,
+                synthesis: None,
+            },
+            interface: InterfaceConfig {
+                name: "none".to_string(),
+                address_width: None,
+                data_width: None,
+                controller: None,
+                situs: None,
+            },
+            memory: HashMap::new(),
+            io: None,
+        };
+        let mut backend = VerilogGenerator::new("test_module", hw_config);
+        let program = Program {
+            items: vec![],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("module"));
     }
 }

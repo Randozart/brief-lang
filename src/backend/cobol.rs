@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ast::{Attribute, Expr, OutputType, Program, Statement, TopLevel, Transaction, Type, Contract, WatchdogSpec, StrictMode};
+use std::fmt::Write;
+
+use crate::ast::{Attribute, Expr, OutputType, Program, Statement, TopLevel, Transaction, Type, Contract, WatchdogSpec, StrictMode, AlkaBlock};
 
 pub struct CobolBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     program_id: String,
     use_abend: bool,
     recursion_limit: u32,
+    pending_cleanup: Vec<Statement>,
 }
 
 impl CobolBackend {
@@ -28,6 +31,7 @@ impl CobolBackend {
             program_id: String::new(),
             use_abend: false,
             recursion_limit: 1000,
+            pending_cleanup: Vec::new(),
         }
     }
 
@@ -342,7 +346,7 @@ impl CobolBackend {
         }
     }
 
-    fn generate_transactions(&self, program: &Program, output: &mut String) {
+    fn generate_transactions(&mut self, program: &Program, output: &mut String) {
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
                 self.generate_transaction(txn, output);
@@ -350,7 +354,7 @@ impl CobolBackend {
         }
     }
 
-    fn generate_transaction(&self, txn: &crate::ast::Transaction, output: &mut String) {
+    fn generate_transaction(&mut self, txn: &crate::ast::Transaction, output: &mut String) {
         let name = Self::sanitize_name(&txn.name).to_uppercase();
 
         let pre_contract = &txn.contract.pre_condition;
@@ -395,13 +399,13 @@ impl CobolBackend {
         }
     }
 
-    fn generate_body(&self, body: &[Statement], output: &mut String) {
+    fn generate_body(&mut self, body: &[Statement], output: &mut String) {
         for stmt in body {
             self.generate_statement(stmt, output);
         }
     }
 
-    fn generate_statement(&self, stmt: &Statement, output: &mut String) {
+    fn generate_statement(&mut self, stmt: &Statement, output: &mut String) {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
                 let lhs_name = match lhs {
@@ -435,9 +439,17 @@ impl CobolBackend {
                 ));
             }
             Statement::Term { .. } => {
-                output.push_str("    EXIT PARAGRAPH.\n");
+                let cleanup = std::mem::take(&mut self.pending_cleanup);
+                for stmt in &cleanup {
+                    self.generate_statement(stmt, output);
+                }
+                output.push_str("    STOP RUN.\n");
             }
             Statement::Escape(expr) => {
+                let cleanup = std::mem::take(&mut self.pending_cleanup);
+                for stmt in &cleanup {
+                    self.generate_statement(stmt, output);
+                }
                 if let Some(e) = expr {
                     let expr_str = self.translate_expr(e);
                     output.push_str(&format!("    MOVE {} TO RETURN-CODE.\n", expr_str));
@@ -455,6 +467,35 @@ impl CobolBackend {
             Statement::Expression(e) => {
                 let expr_str = self.translate_expr(e);
                 output.push_str(&format!("    {}.\n", expr_str));
+            }
+            Statement::Let { name, expr, address_expr, .. } => {
+                let safe_name = Self::sanitize_name(name).to_uppercase();
+                if let Some(addr) = address_expr {
+                    let addr_str = self.translate_expr(addr);
+                    output.push_str(&format!("    * let {} at address {}\n", safe_name, addr_str));
+                } else if let Some(e) = expr {
+                    let val_str = self.translate_expr(e);
+                    output.push_str(&format!("    MOVE {} TO WS-{}.\n", val_str, safe_name));
+                }
+            }
+            Statement::LocalTrigger { name, expr, .. } => {
+                if let Some(e) = expr {
+                    let val_str = self.translate_expr(e);
+                    output.push_str(&format!("    *> trg! {} = {}\n", name, val_str));
+                } else {
+                    output.push_str(&format!("    *> trg! {}: await external\n", name));
+                }
+            }
+            Statement::OnExit { body, .. } => {
+                self.pending_cleanup.extend(body.iter().cloned());
+                output.push_str("    *> #on_exit cleanup registered\n");
+            }
+            Statement::Alka(block) => {
+                output.push_str(&format!("    *> alka!\n"));
+                output.push_str(&format!("    *> {}\n", block.content));
+            }
+            Statement::InlineAsm { asm_string, .. } => {
+                output.push_str(&format!("    *> asm: {}\n", asm_string));
             }
             _ => {}
         }
@@ -540,6 +581,7 @@ impl CobolBackend {
             Expr::Sub(a, b) => format!("({} - {})", self.translate_expr(a), self.translate_expr(b)),
             Expr::Mul(a, b) => format!("({} * {})", self.translate_expr(a), self.translate_expr(b)),
             Expr::Div(a, b) => format!("({} / {})", self.translate_expr(a), self.translate_expr(b)),
+            Expr::Mod(a, b) => format!("(FUNCTION MOD({}, {}))", self.translate_expr(a), self.translate_expr(b)),
             Expr::Eq(a, b) => format!("({} = {})", self.translate_expr(a), self.translate_expr(b)),
             Expr::Ne(a, b) => format!("(NOT ({} = {}))", self.translate_expr(a), self.translate_expr(b)),
             Expr::Lt(a, b) => format!("({} < {})", self.translate_expr(a), self.translate_expr(b)),
@@ -550,6 +592,12 @@ impl CobolBackend {
             Expr::Or(a, b) => format!("({} OR {})", self.translate_expr(a), self.translate_expr(b)),
             Expr::Not(a) => format!("NOT {}", self.translate_expr(a)),
             Expr::Neg(a) => format!("-{}", self.translate_expr(a)),
+            Expr::BitNot(a) => format!("(FUNCTION BOOLEAN(-1, 0) - {})", self.translate_expr(a)),
+            Expr::BitAnd(a, b) => format!("(FUNCTION BOOLEAN({}, {}))", self.translate_expr(a), self.translate_expr(b)),
+            Expr::BitOr(a, b) => format!("(FUNCTION INTEGER({}) + FUNCTION INTEGER({}) - FUNCTION BOOLEAN({}, {}))", self.translate_expr(a), self.translate_expr(b), self.translate_expr(a), self.translate_expr(b)),
+            Expr::BitXor(a, b) => format!("(FUNCTION INTEGER({}) + FUNCTION INTEGER({}) - 2 * FUNCTION BOOLEAN({}, {}))", self.translate_expr(a), self.translate_expr(b), self.translate_expr(a), self.translate_expr(b)),
+            Expr::Shl(a, b) => format!("({} * FUNCTION 2 ** ({}))", self.translate_expr(a), self.translate_expr(b)),
+            Expr::Shr(a, b) => format!("({} / FUNCTION 2 ** ({}))", self.translate_expr(a), self.translate_expr(b)),
             Expr::Call(name, args) => {
                 if name == "old" {
                     if let Some(arg) = args.first() {
@@ -559,6 +607,25 @@ impl CobolBackend {
                     }
                 }
                 format!("{}({})", Self::sanitize_name(name), args.iter().map(|a| self.translate_expr(a)).collect::<Vec<_>>().join(", "))
+            }
+            Expr::ListLiteral(items) => {
+                if items.is_empty() {
+                    "0".to_string()
+                } else {
+                    items.iter().map(|i| self.translate_expr(i)).collect::<Vec<_>>().join(", ")
+                }
+            }
+            Expr::ListIndex(list, index) => {
+                let list_str = self.translate_expr(list);
+                let index_str = self.translate_expr(index);
+                format!("{} ({})", list_str, index_str)
+            }
+            Expr::ListLen(list) => {
+                format!("FUNCTION LENGTH({})", self.translate_expr(list))
+            }
+            Expr::FieldAccess(obj, field) => {
+                let obj_str = self.translate_expr(obj);
+                format!("{}-{}", obj_str, Self::sanitize_name(field).to_uppercase())
             }
             _ => "0".to_string(),
         }
@@ -706,5 +773,22 @@ mod tests {
 
         assert!(output.contains("WS-OLD-BALANCE"));
         assert!(output.contains("POST-CONDITION"));
+    }
+
+    #[test]
+    fn test_cobol_generates_program() {
+        let mut backend = CobolBackend::new();
+        let program = Program {
+            items: vec![],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let output = backend.generate(&program, "test_program");
+        assert!(output.contains("PROGRAM-ID"));
+        assert!(output.contains("DATA DIVISION"));
+        assert!(output.contains("PROCEDURE DIVISION"));
     }
 }
