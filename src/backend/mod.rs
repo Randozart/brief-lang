@@ -9,7 +9,26 @@ pub mod x86_64;
 pub mod tcl_generator;
 pub mod cobol;
 
-use crate::ast::Hashtag;
+use crate::analysis::call_graph::CallGraph;
+use crate::analysis::range::ParameterRanges;
+use crate::ast::{Hashtag, Program};
+
+/// Run shared program analysis for backend code generation.
+///
+/// Returns a CallGraph (acyclic detection) and ParameterRanges (bounds inference).
+/// Backends use these to:
+/// - Acyclic: static dispatch, no recursion guards, inlining
+/// - Cyclic: dynamic dispatch, recursion depth limits, bounded execution
+/// - Bounded params: loop unrolling, fixed-size allocations
+pub fn analyze_program(program: &Program) -> (CallGraph, ParameterRanges) {
+    let mut cg = CallGraph::new();
+    cg.build_from_program(program);
+
+    let mut pr = ParameterRanges::new();
+    pr.analyze(program);
+
+    (cg, pr)
+}
 
 /// Intent: Return the list of hashtags supported by a given backend name.
 /// Backend names match the subcommand (e.g. "c", "rust", "wasm", "verilog", "vhdl", "x86_64", "aarch64", "cobol").
@@ -79,7 +98,7 @@ pub fn validate_hashtags(hashtags: &[Hashtag], backend: &str) -> Vec<HashtagVali
     results
 }
 
-use crate::ast::{Program, TopLevel, Transaction, Definition, Statement, StructDefinition};
+use crate::ast::{TopLevel, Transaction, Definition, Statement, StructDefinition};
 
 /// Intent: Collect all hashtags from a list of statements recursively.
 fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Hashtag> {

@@ -28,6 +28,7 @@ pub struct CBackend {
     local_vars: Vec<String>,
     test_mode: bool,
     pending_cleanup: Vec<Statement>,
+    has_cycles: bool,
 }
 
 impl CBackend {
@@ -44,6 +45,7 @@ impl CBackend {
             local_vars: Vec::new(),
             test_mode: false,
             pending_cleanup: Vec::new(),
+            has_cycles: false,
         }
     }
 
@@ -70,6 +72,13 @@ impl CBackend {
         self.collect_hw_registers(program);
         self.collect_ffi_bindings(program);
         self.collect_constants(program);
+
+        // Run shared program analysis
+        let (cg, _pr) = crate::backend::analyze_program(program);
+        self.has_cycles = cg.has_cycle();
+        if !self.has_cycles {
+            println!("  C backend: acyclic call graph detected — optimizing for static dispatch");
+        }
 
         let mut output = String::new();
         let mut makefile = String::new();

@@ -4,4 +4,5 @@ pub mod cross_reference;
 pub mod dataflow;
 pub mod entry_point;
 pub mod protocol;
+pub mod range;
 pub mod struct_generator;

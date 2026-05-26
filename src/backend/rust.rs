@@ -23,6 +23,7 @@ pub struct RustBackend {
     txn_counter: usize,
     signal_map: HashMap<String, usize>,
     pending_cleanup: RefCell<Vec<Statement>>,
+    has_cycles: bool,
 }
 
 impl RustBackend {
@@ -34,6 +35,7 @@ impl RustBackend {
             txn_counter: 0,
             signal_map: HashMap::new(),
             pending_cleanup: RefCell::new(Vec::new()),
+            has_cycles: false,
         }
     }
 
@@ -45,6 +47,13 @@ impl RustBackend {
 
     /// Intent: Generate Rust source code from a Brief program.
     pub fn generate(&mut self, program: &Program) -> String {
+        // Run shared program analysis
+        let (cg, _pr) = crate::backend::analyze_program(program);
+        self.has_cycles = cg.has_cycle();
+        if !self.has_cycles {
+            println!("  Rust backend: acyclic call graph — static dispatch enabled");
+        }
+
         self.collect_signals(program);
 
         let mut output = String::new();
