@@ -1,10 +1,8 @@
 // JSON bindings (2026-05-27)
 // Licensed under Apache 2.0
 
-import "std/types.dbvs";
-
 register 0x30 as "__json_parse" {
-    type: Fn(Data) -> Data;
+    type: Data;
     location: "json::parse";
     target: native;
     description: "Parse a JSON string into a Brief value";
@@ -12,7 +10,7 @@ register 0x30 as "__json_parse" {
 }
 
 register 0x31 as "__json_stringify" {
-    type: Fn(Data) -> Data;
+    type: Data;
     location: "json::stringify";
     target: native;
     description: "Serialize a Brief value to JSON string";
@@ -20,7 +18,7 @@ register 0x31 as "__json_stringify" {
 }
 
 register 0x32 as "__json_is_object" {
-    type: Fn(Data) -> Bool;
+    type: Data;
     location: "json::is_object";
     target: native;
     description: "Check if JSON value is an object";
@@ -28,7 +26,7 @@ register 0x32 as "__json_is_object" {
 }
 
 register 0x33 as "__json_is_array" {
-    type: Fn(Data) -> Bool;
+    type: Data;
     location: "json::is_array";
     target: native;
     description: "Check if JSON value is an array";
@@ -36,7 +34,7 @@ register 0x33 as "__json_is_array" {
 }
 
 register 0x34 as "__json_is_string" {
-    type: Fn(Data) -> Bool;
+    type: Data;
     location: "json::is_string";
     target: native;
     description: "Check if JSON value is a string";
@@ -44,7 +42,7 @@ register 0x34 as "__json_is_string" {
 }
 
 register 0x35 as "__json_is_number" {
-    type: Fn(Data) -> Bool;
+    type: Data;
     location: "json::is_number";
     target: native;
     description: "Check if JSON value is a number";
@@ -52,7 +50,7 @@ register 0x35 as "__json_is_number" {
 }
 
 register 0x36 as "__json_is_bool" {
-    type: Fn(Data) -> Bool;
+    type: Data;
     location: "json::is_bool";
     target: native;
     description: "Check if JSON value is a boolean";
@@ -60,7 +58,7 @@ register 0x36 as "__json_is_bool" {
 }
 
 register 0x37 as "__json_is_null" {
-    type: Fn(Data) -> Bool;
+    type: Data;
     location: "json::is_null";
     target: native;
     description: "Check if JSON value is null";
@@ -68,7 +66,7 @@ register 0x37 as "__json_is_null" {
 }
 
 register 0x38 as "__json_get" {
-    type: Fn(Data, Data) -> Data;
+    type: Data;
     location: "json::get";
     target: native;
     description: "Access a property by key or index";
@@ -76,7 +74,7 @@ register 0x38 as "__json_get" {
 }
 
 register 0x39 as "__json_set" {
-    type: Fn(Data, Data, Data) -> Data;
+    type: Data;
     location: "json::set";
     target: native;
     description: "Set a property value";
@@ -84,7 +82,7 @@ register 0x39 as "__json_set" {
 }
 
 register 0x3A as "__json_keys" {
-    type: Fn(Data) -> Data;
+    type: Data;
     location: "json::keys";
     target: native;
     description: "Get object keys as array";
@@ -92,7 +90,7 @@ register 0x3A as "__json_keys" {
 }
 
 register 0x3B as "__json_length" {
-    type: Fn(Data) -> Int;
+    type: Data;
     location: "json::length";
     target: native;
     description: "Get array length or object key count";

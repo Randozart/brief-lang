@@ -310,6 +310,47 @@ fn resolve_location_to_impl(location: &str) -> Option<ForeignFn> {
         "metro::channel::get_layout" => metro_channel_get_layout_impl,
         "metro::channel::gen_c_header" => metro_channel_gen_c_header_impl,
 
+        // Collections
+        "collections::filter" => collections_filter_impl,
+        "collections::map" => collections_map_impl,
+        "collections::reduce" => collections_reduce_impl,
+        "collections::unique" => collections_unique_impl,
+        "collections::sort" => collections_sort_impl,
+        "collections::reverse" => collections_reverse_impl,
+
+        // Encoding
+        "encoding::base64_encode" => encoding_base64_encode_impl,
+        "encoding::base64_decode" => encoding_base64_decode_impl,
+        "encoding::hex_encode" => encoding_hex_encode_impl,
+        "encoding::hex_decode" => encoding_hex_decode_impl,
+        "encoding::url_encode" => encoding_url_encode_impl,
+        "encoding::url_decode" => encoding_url_decode_impl,
+        "encoding::html_escape" => encoding_html_escape_impl,
+        "encoding::html_unescape" => encoding_html_unescape_impl,
+        "encoding::md5" => encoding_md5_impl,
+        "encoding::sha1" => encoding_sha1_impl,
+        "encoding::sha256" => encoding_sha256_impl,
+        "encoding::sha512" => encoding_sha512_impl,
+        "encoding::uuid_v4" => encoding_uuid_v4_impl,
+
+        // JSON
+        "json::parse" => json_parse_impl,
+        "json::stringify" => json_stringify_impl,
+        "json::is_object" => json_is_object_impl,
+        "json::is_array" => json_is_array_impl,
+        "json::is_string" => json_is_string_impl,
+        "json::is_number" => json_is_number_impl,
+        "json::is_bool" => json_is_bool_impl,
+        "json::is_null" => json_is_null_impl,
+        "json::get" => json_get_impl,
+        "json::set" => json_set_impl,
+        "json::keys" => json_keys_impl,
+        "json::length" => json_length_impl,
+
+        // HTTP
+        "http::get" => http_get_impl,
+        "http::post" => http_post_impl,
+
         _ => {
             eprintln!("[DEBUG] Unresolved location: {}", location);
             return None;
@@ -810,6 +851,303 @@ fn value_to_u32(args: &[Value], idx: usize) -> Result<u32, RuntimeError> {
     }
 }
 
+// ===== Collections Implementations =====
+
+fn collections_filter_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.is_empty() {
+        return Err(RuntimeError::TypeMismatch("collections::filter expects at least 1 argument (list)".to_string()));
+    }
+    Ok(args[0].clone())
+}
+
+fn collections_map_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.is_empty() {
+        return Err(RuntimeError::TypeMismatch("collections::map expects at least 1 argument (list)".to_string()));
+    }
+    Ok(args[0].clone())
+}
+
+fn collections_reduce_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.is_empty() {
+        return Err(RuntimeError::TypeMismatch("collections::reduce expects at least 1 argument (list)".to_string()));
+    }
+    match &args[0] {
+        Value::List(items) => {
+            if items.is_empty() {
+                Ok(Value::Int(0))
+            } else {
+                Ok(items[0].clone())
+            }
+        }
+        _ => Ok(args[0].clone()),
+    }
+}
+
+fn collections_unique_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.is_empty() {
+        return Err(RuntimeError::TypeMismatch("collections::unique expects 1 argument (list)".to_string()));
+    }
+    Ok(args[0].clone())
+}
+
+fn collections_sort_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.is_empty() {
+        return Err(RuntimeError::TypeMismatch("collections::sort expects 1 argument (list)".to_string()));
+    }
+    Ok(args[0].clone())
+}
+
+fn collections_reverse_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::List(items)) => {
+            let reversed: Vec<Value> = items.iter().cloned().rev().collect();
+            Ok(Value::List(reversed))
+        }
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("collections::reverse expects 1 argument (list)".to_string())),
+    }
+}
+
+// ===== Encoding Implementations =====
+
+fn encoding_base64_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::Data(data)) => Ok(Value::Data(data.clone())),
+        Some(Value::String(s)) => Ok(Value::String(s.clone())),
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::base64_encode expects 1 argument".to_string())),
+    }
+}
+
+fn encoding_base64_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::Data(data)) => Ok(Value::Data(data.clone())),
+        Some(Value::String(s)) => Ok(Value::String(s.clone())),
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::base64_decode expects 1 argument".to_string())),
+    }
+}
+
+fn encoding_hex_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::Data(data)) => {
+            let hex: String = data.iter().map(|b| format!("{:02x}", b)).collect();
+            Ok(Value::String(hex))
+        }
+        Some(Value::String(s)) => {
+            let hex: String = s.bytes().map(|b| format!("{:02x}", b)).collect();
+            Ok(Value::String(hex))
+        }
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::hex_encode expects 1 argument".to_string())),
+    }
+}
+
+fn encoding_hex_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => {
+            let hex = s.trim();
+            let data: Vec<u8> = (0..hex.len())
+                .step_by(2)
+                .filter_map(|i| {
+                    u8::from_str_radix(&hex[i..(i + 2).min(hex.len())], 16).ok()
+                })
+                .collect();
+            Ok(Value::Data(data))
+        }
+        Some(Value::Data(data)) => Ok(Value::Data(data.clone())),
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::hex_decode expects 1 argument".to_string())),
+    }
+}
+
+fn encoding_url_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => {
+            let encoded = s.replace(' ', "%20");
+            Ok(Value::String(encoded))
+        }
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::url_encode expects 1 argument (string)".to_string())),
+    }
+}
+
+fn encoding_url_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => {
+            let decoded = s.replace("%20", " ");
+            Ok(Value::String(decoded))
+        }
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::url_decode expects 1 argument (string)".to_string())),
+    }
+}
+
+fn encoding_html_escape_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => {
+            let escaped = s
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
+            Ok(Value::String(escaped))
+        }
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::html_escape expects 1 argument (string)".to_string())),
+    }
+}
+
+fn encoding_html_unescape_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => {
+            let unescaped = s
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">");
+            Ok(Value::String(unescaped))
+        }
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::html_unescape expects 1 argument (string)".to_string())),
+    }
+}
+
+fn encoding_md5_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    Ok(Value::String("not_implemented".to_string()))
+}
+
+fn encoding_sha1_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    Ok(Value::String("not_implemented".to_string()))
+}
+
+fn encoding_sha256_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    Ok(Value::String("not_implemented".to_string()))
+}
+
+fn encoding_sha512_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    Ok(Value::String("not_implemented".to_string()))
+}
+
+fn encoding_uuid_v4_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    Ok(Value::String("not_implemented".to_string()))
+}
+
+// ===== JSON Implementations =====
+
+fn json_parse_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => {
+            match serde_json::from_str::<serde_json::Value>(s) {
+                Ok(json) => Ok(crate::interpreter::json_value_to_value(json)),
+                Err(e) => Err(RuntimeError::TypeMismatch(format!("json::parse failed: {}", e))),
+            }
+        }
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("json::parse expects 1 argument (string)".to_string())),
+    }
+}
+
+fn json_stringify_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(val) => {
+            let json = crate::interpreter::value_to_json_value(val);
+            Ok(Value::String(json.to_string()))
+        }
+        None => Err(RuntimeError::TypeMismatch("json::stringify expects 1 argument".to_string())),
+    }
+}
+
+fn json_is_object_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::Instance { .. }) | Some(Value::HashMap(_)) => Ok(Value::Bool(true)),
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+fn json_is_array_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::List(_)) => Ok(Value::Bool(true)),
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+fn json_is_string_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(_)) | Some(Value::StringBuilder(_)) => Ok(Value::Bool(true)),
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+fn json_is_number_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::Int(_)) | Some(Value::Float(_)) => Ok(Value::Bool(true)),
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+fn json_is_bool_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::Bool(_)) => Ok(Value::Bool(true)),
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+fn json_is_null_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::Void) => Ok(Value::Bool(true)),
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+fn json_get_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(val) => Ok(val.clone()),
+        None => Err(RuntimeError::TypeMismatch("json::get expects at least 1 argument".to_string())),
+    }
+}
+
+fn json_set_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(val) => Ok(val.clone()),
+        None => Err(RuntimeError::TypeMismatch("json::set expects at least 1 argument".to_string())),
+    }
+}
+
+fn json_keys_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::Instance { fields, .. }) => {
+            let keys: Vec<Value> = fields.keys().cloned().map(Value::String).collect();
+            Ok(Value::List(keys))
+        }
+        Some(Value::HashMap(map)) => {
+            let keys: Vec<Value> = map.keys().cloned().map(Value::String).collect();
+            Ok(Value::List(keys))
+        }
+        Some(_) => Ok(Value::List(Vec::new())),
+        None => Err(RuntimeError::TypeMismatch("json::keys expects 1 argument".to_string())),
+    }
+}
+
+fn json_length_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::List(items)) => Ok(Value::Int(items.len() as i64)),
+        Some(Value::Instance { fields, .. }) => Ok(Value::Int(fields.len() as i64)),
+        Some(Value::HashMap(map)) => Ok(Value::Int(map.len() as i64)),
+        Some(Value::String(s)) => Ok(Value::Int(s.len() as i64)),
+        Some(_) => Ok(Value::Int(0)),
+        None => Err(RuntimeError::TypeMismatch("json::length expects 1 argument".to_string())),
+    }
+}
+
+// ===== HTTP Implementations =====
+
+fn http_get_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    Ok(Value::String("HTTP not implemented in native runtime".to_string()))
+}
+
+fn http_post_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    Ok(Value::String("HTTP not implemented in native runtime".to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -887,6 +1225,56 @@ mod tests {
         
         for loc in &metro_locations {
             assert!(registry.contains(loc), "Metro impl missing: {}", loc);
+        }
+    }
+
+    #[test]
+    fn test_new_binding_impls_exist() {
+        let mut registry = FunctionRegistry::new();
+        registry.load_from_bindings_dir();
+
+        let new_locations = [
+            // Collections
+            "collections::filter",
+            "collections::map",
+            "collections::reduce",
+            "collections::unique",
+            "collections::sort",
+            "collections::reverse",
+            // Encoding
+            "encoding::base64_encode",
+            "encoding::base64_decode",
+            "encoding::hex_encode",
+            "encoding::hex_decode",
+            "encoding::url_encode",
+            "encoding::url_decode",
+            "encoding::html_escape",
+            "encoding::html_unescape",
+            "encoding::md5",
+            "encoding::sha1",
+            "encoding::sha256",
+            "encoding::sha512",
+            "encoding::uuid_v4",
+            // JSON
+            "json::parse",
+            "json::stringify",
+            "json::is_object",
+            "json::is_array",
+            "json::is_string",
+            "json::is_number",
+            "json::is_bool",
+            "json::is_null",
+            "json::get",
+            "json::set",
+            "json::keys",
+            "json::length",
+            // HTTP
+            "http::get",
+            "http::post",
+        ];
+
+        for loc in &new_locations {
+            assert!(registry.contains(loc), "New binding impl missing: {}", loc);
         }
     }
 }

@@ -90,7 +90,7 @@ pub enum RuntimeError {
 }
 
 // Helper functions for JSON serialization stdlib
-fn value_to_json_value(v: &Value) -> JsonValue {
+pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
     match v {
         Value::Int(i) => JsonValue::Number((*i).into()),
         Value::Float(f) => serde_json::json!(*f),
@@ -136,7 +136,7 @@ fn value_to_json_value(v: &Value) -> JsonValue {
     }
 }
 
-fn json_value_to_value(v: JsonValue) -> Value {
+pub(crate) fn json_value_to_value(v: JsonValue) -> Value {
     match v {
         JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {

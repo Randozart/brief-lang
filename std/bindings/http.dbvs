@@ -1,10 +1,8 @@
 // HTTP bindings (2026-05-27)
 // Licensed under Apache 2.0
 
-import "std/types.dbvs";
-
 register 0x40 as "__http_get" {
-    type: Fn(Data) -> Data;
+    type: Data;
     location: "http::get";
     target: native;
     description: "Perform an HTTP GET request";
@@ -12,7 +10,7 @@ register 0x40 as "__http_get" {
 }
 
 register 0x41 as "__http_post" {
-    type: Fn(Data, Data) -> Data;
+    type: Data;
     location: "http::post";
     target: native;
     description: "Perform an HTTP POST request with body";

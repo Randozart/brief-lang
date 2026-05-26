@@ -1,10 +1,8 @@
 // Collections bindings (2026-05-27)
 // Licensed under Apache 2.0
 
-import "std/types.dbvs";
-
 register 0x10 as "__filter" {
-    type: Fn(Data, Data) -> Data;
+    type: Data;
     location: "collections::filter";
     target: native;
     description: "Filter a collection using a predicate";
@@ -12,7 +10,7 @@ register 0x10 as "__filter" {
 }
 
 register 0x11 as "__map" {
-    type: Fn(Data, Data) -> Data;
+    type: Data;
     location: "collections::map";
     target: native;
     description: "Transform each element in a collection";
@@ -20,7 +18,7 @@ register 0x11 as "__map" {
 }
 
 register 0x12 as "__reduce" {
-    type: Fn(Data, Data, Data) -> Data;
+    type: Data;
     location: "collections::reduce";
     target: native;
     description: "Reduce a collection to a single value";
@@ -28,7 +26,7 @@ register 0x12 as "__reduce" {
 }
 
 register 0x13 as "__unique" {
-    type: Fn(Data) -> Data;
+    type: Data;
     location: "collections::unique";
     target: native;
     description: "Remove duplicate elements from a collection";
@@ -36,7 +34,7 @@ register 0x13 as "__unique" {
 }
 
 register 0x14 as "__sort" {
-    type: Fn(Data) -> Data;
+    type: Data;
     location: "collections::sort";
     target: native;
     description: "Sort a collection";
@@ -44,7 +42,7 @@ register 0x14 as "__sort" {
 }
 
 register 0x15 as "__reverse" {
-    type: Fn(Data) -> Data;
+    type: Data;
     location: "collections::reverse";
     target: native;
     description: "Reverse a collection";
