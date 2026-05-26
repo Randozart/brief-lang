@@ -20,6 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
+use crate::analysis::call_graph::CallGraph;
 use crate::ast::*;
 use crate::errors::{Diagnostic, Severity, Span};
 use crate::sig_casting;
@@ -1718,142 +1719,35 @@ impl ProofEngine {
     }
 
     fn check_circular_dependencies(&mut self, program: &Program) {
-        let mut call_graph: HashMap<String, Vec<String>> = HashMap::new();
-        let mut all_txn_names: HashSet<String> = HashSet::new();
-        let mut txn_spans: HashMap<String, Option<Span>> = HashMap::new();
+        let mut call_graph = CallGraph::new();
+        call_graph.build_from_program(program);
 
-        for item in &program.items {
-            if let TopLevel::Transaction(txn) = item {
-                all_txn_names.insert(txn.name.clone());
-                txn_spans.insert(txn.name.clone(), txn.span);
-                let called_txns = self.extract_called_transactions(&txn.body);
-                call_graph.entry(txn.name.clone()).or_insert_with(Vec::new).extend(called_txns);
-            }
+        if !call_graph.has_cycle() {
+            return;
         }
 
-        for txn_name in &all_txn_names {
-            let mut visited: HashSet<String> = HashSet::new();
-            let mut path: Vec<String> = Vec::new();
-            if self.detect_cycle(txn_name, &call_graph, &mut visited, &mut path) {
+        // Collect cycles and report them as proof errors
+        let cycles = call_graph.find_all_cycles().to_vec();
+        for cycle in &cycles {
+            if let Some(txn_name) = cycle.first() {
                 let mut err = ProofError::new("P012", "circular transaction dependency");
                 err.explanation = format!(
                     "transactions form a circular dependency: {}",
-                    path.join(" -> ")
+                    cycle.join(" -> ")
                 );
                 err.proof_chain.push("1. transaction call cycle detected".to_string());
-                for (i, name) in path.iter().enumerate() {
+                for (i, name) in cycle.iter().enumerate() {
                     err.proof_chain.push(format!("{}. {}", i + 2, name));
                 }
-                err.proof_chain.push(format!("{}. (cycle closes back to {})", path.len() + 2, txn_name));
+                err.proof_chain.push(format!("{}. (cycle closes back to {})", cycle.len() + 2, txn_name));
                 err.hints.push("break the cycle by removing or reordering calls".to_string());
-                if let Some(span) = txn_spans.get(txn_name).and_then(|s| *s) {
-                    err.span = Some(span);
-                }
                 self.errors.push(err);
                 break;
             }
         }
     }
 
-    fn extract_called_transactions(&self, body: &[Statement]) -> Vec<String> {
-        let mut called = Vec::new();
-        for stmt in body {
-            match stmt {
-                Statement::Assignment { expr, .. } => {
-                    self.collect_call_names(expr, &mut called);
-                }
-                Statement::Let { expr, .. } => {
-                    if let Some(e) = expr {
-                        self.collect_call_names(e, &mut called);
-                    }
-                }
-                Statement::Expression(e) => {
-                    self.collect_call_names(e, &mut called);
-                }
-                Statement::Guarded { statements, .. } => {
-                    called.extend(self.extract_called_transactions(statements));
-                }
-                _ => {}
-            }
-        }
-        called
-    }
 
-    fn collect_call_names(&self, expr: &Expr, called: &mut Vec<String>) {
-        match expr {
-            Expr::Call(name, args) => {
-                called.push(name.clone());
-                for arg in args {
-                    self.collect_call_names(arg, called);
-                }
-            }
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
-                self.collect_call_names(l, called);
-                self.collect_call_names(r, called);
-            }
-            Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) => {
-                self.collect_call_names(l, called);
-                self.collect_call_names(r, called);
-            }
-            Expr::And(l, r) | Expr::Or(l, r) => {
-                self.collect_call_names(l, called);
-                self.collect_call_names(r, called);
-            }
-            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
-                self.collect_call_names(e, called);
-            }
-            Expr::FieldAccess(e, _) => {
-                self.collect_call_names(e, called);
-            }
-            Expr::ListLiteral(elems) => {
-                for elem in elems {
-                    self.collect_call_names(elem, called);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn detect_cycle(
-        &self,
-        node: &str,
-        graph: &HashMap<String, Vec<String>>,
-        visited: &mut HashSet<String>,
-        path: &mut Vec<String>,
-    ) -> bool {
-        let node_str = node.to_string();
-        if path.iter().any(|n| *n == node_str) {
-            if let Some(pos) = path.iter().position(|n| *n == node_str) {
-                let cycle_start = pos;
-                path.push(node_str.clone());
-                for i in cycle_start..path.len() {
-                    if path[i] == node_str && i > cycle_start {
-                        return true;
-                    }
-                }
-                path.pop();
-            }
-            return true;
-        }
-
-        if visited.contains(node) {
-            return false;
-        }
-
-        visited.insert(node.to_string());
-        path.push(node.to_string());
-
-        if let Some(edges) = graph.get(node) {
-            for next in edges {
-                if self.detect_cycle(next, graph, visited, path) {
-                    return true;
-                }
-            }
-        }
-
-        path.pop();
-        false
-    }
 
     fn type_name(&self, ty: &Type) -> String {
         match ty {
