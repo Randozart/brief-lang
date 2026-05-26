@@ -23,6 +23,7 @@
 
 use crate::ast::{Expr, Program, Statement, TopLevel};
 use std::collections::HashMap;
+use std::fmt::Write;
 
 // x86-64 instruction set
 #[derive(Debug, Clone)]
@@ -132,6 +133,7 @@ pub struct X86_64Backend {
     txn_counter: usize,
     signal_map: HashMap<String, usize>,
     optimizations: OptimizationFlags,
+    pending_cleanup: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -157,6 +159,7 @@ impl X86_64Backend {
                 memory_overlay: true,
                 parallel_scheduling: true,
             },
+            pending_cleanup: Vec::new(),
         }
     }
     
@@ -340,7 +343,7 @@ impl X86_64Backend {
         output.push_str(".skip:\n\n");
     }
     
-    fn generate_transaction(&self, output: &mut String, name: &str, txn: &crate::ast::Transaction) {
+    fn generate_transaction(&mut self, output: &mut String, name: &str, txn: &crate::ast::Transaction) {
         output.push_str(&format!("{}:\n", name));
         output.push_str(&format!("    ; Transaction: {}\n", name));
         output.push_str("    push rbp\n");
@@ -418,7 +421,7 @@ impl X86_64Backend {
         }
     }
     
-    fn generate_statement(&self, output: &mut String, stmt: &Statement) {
+    fn generate_statement(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
                 self.generate_expr(output, expr);
@@ -436,14 +439,57 @@ impl X86_64Backend {
                 }
             }
             Statement::Term { .. } => {
-                output.push_str("    ; term\n");
+                let cleanup = std::mem::take(&mut self.pending_cleanup);
+                for stmt in &cleanup {
+                    self.generate_statement(output, stmt);
+                }
+                writeln!(output, "    ; term — transaction complete").ok();
+            }
+            Statement::Let { name, expr, address_expr, .. } => {
+                if let Some(addr) = address_expr {
+                    self.generate_expr(output, addr);
+                    writeln!(output, "    ; let {}: ptr = address_expr", name).ok();
+                } else if let Some(e) = expr {
+                    self.generate_expr(output, e);
+                    writeln!(output, "    ; let {} = (expr in rax)", name).ok();
+                }
+            }
+            Statement::Expression(e) => {
+                self.generate_expr(output, e);
+            }
+            Statement::OnExit { body, .. } => {
+                self.pending_cleanup.extend(body.iter().cloned());
+                writeln!(output, "    ; #on_exit cleanup registered").ok();
+            }
+            Statement::LocalTrigger { name, expr, .. } => {
+                if let Some(e) = expr {
+                    self.generate_expr(output, e);
+                    writeln!(output, "    ; trg! {}: await expr (in rax)", name).ok();
+                } else {
+                    writeln!(output, "    ; trg! {}: await external signal", name).ok();
+                }
+            }
+            Statement::Escape(value) => {
+                if let Some(v) = value {
+                    self.generate_expr(output, v);
+                    writeln!(output, "    ; escape (value in rax)").ok();
+                } else {
+                    writeln!(output, "    ; escape (unit)").ok();
+                }
+            }
+            Statement::Alka(block) => {
+                writeln!(output, "    ; alka! {{}}").ok();
+                writeln!(output, "    ; {}", block.content).ok();
+            }
+            Statement::InlineAsm { asm_string, .. } => {
+                writeln!(output, "    {}", asm_string).ok();
             }
             _ => {}
         }
     }
     
     // PRAXIS: Branchless guarded statement
-    fn generate_guarded_branchless(&self, output: &mut String, condition: &Expr, body: &[Statement]) {
+    fn generate_guarded_branchless(&mut self, output: &mut String, condition: &Expr, body: &[Statement]) {
         output.push_str("    ; Branchless guard\n");
         
         // Evaluate condition
@@ -456,7 +502,7 @@ impl X86_64Backend {
         }
     }
     
-    fn generate_guarded_with_branch(&self, output: &mut String, condition: &Expr, body: &[Statement]) {
+    fn generate_guarded_with_branch(&mut self, output: &mut String, condition: &Expr, body: &[Statement]) {
         let label = format!(".guard_end_{}", self.signal_counter);
         
         self.generate_expr_branchless(output, condition);
@@ -474,6 +520,18 @@ impl X86_64Backend {
         match expr {
             Expr::Integer(n) => {
                 output.push_str(&format!("    mov rax, {}\n", n));
+            }
+            Expr::Bool(true) => {
+                output.push_str("    mov rax, 1\n");
+            }
+            Expr::Bool(false) => {
+                output.push_str("    xor rax, rax\n");
+            }
+            Expr::Float(f) => {
+                write!(output, "    ; Float: {} (load from literal pool)\n", f).unwrap();
+            }
+            Expr::String(s) => {
+                write!(output, "    ; String: \"{}\" (load from data section)\n", s).unwrap();
             }
             Expr::Identifier(name) => {
                 if let Some(offset) = self.signal_map.get(name) {
@@ -506,6 +564,153 @@ impl X86_64Backend {
                 output.push_str("    mov rdx, 0\n");
                 output.push_str("    mov rax, rbx\n");
                 output.push_str("    idiv rax\n");
+            }
+            Expr::Mod(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    mov rdx, 0\n");
+                output.push_str("    mov rax, rbx\n");
+                output.push_str("    idiv rax\n");
+                output.push_str("    mov rax, rdx\n");
+            }
+            Expr::Eq(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp rax, rbx\n");
+                output.push_str("    sete al\n");
+                output.push_str("    movzx rax, al\n");
+            }
+            Expr::Ne(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp rax, rbx\n");
+                output.push_str("    setne al\n");
+                output.push_str("    movzx rax, al\n");
+            }
+            Expr::Lt(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp rbx, rax\n");
+                output.push_str("    setl al\n");
+                output.push_str("    movzx rax, al\n");
+            }
+            Expr::Gt(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp rbx, rax\n");
+                output.push_str("    setg al\n");
+                output.push_str("    movzx rax, al\n");
+            }
+            Expr::Le(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp rbx, rax\n");
+                output.push_str("    setle al\n");
+                output.push_str("    movzx rax, al\n");
+            }
+            Expr::Ge(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    cmp rbx, rax\n");
+                output.push_str("    setge al\n");
+                output.push_str("    movzx rax, al\n");
+            }
+            Expr::And(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    and rax, rbx\n");
+            }
+            Expr::Or(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    or rax, rbx\n");
+            }
+            Expr::Not(inner) => {
+                self.generate_expr(output, inner);
+                output.push_str("    cmp rax, 0\n");
+                output.push_str("    sete al\n");
+                output.push_str("    movzx rax, al\n");
+            }
+            Expr::Neg(inner) => {
+                self.generate_expr(output, inner);
+                output.push_str("    neg rax\n");
+            }
+            Expr::BitAnd(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    and rax, rbx\n");
+            }
+            Expr::BitOr(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    or rax, rbx\n");
+            }
+            Expr::BitXor(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    xor rax, rbx\n");
+            }
+            Expr::BitNot(inner) => {
+                self.generate_expr(output, inner);
+                output.push_str("    not rax\n");
+            }
+            Expr::Shl(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    mov rcx, rax\n");
+                output.push_str("    mov rax, rbx\n");
+                output.push_str("    shl rax, cl\n");
+            }
+            Expr::Shr(left, right) => {
+                self.generate_expr(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr(output, right);
+                output.push_str("    mov rcx, rax\n");
+                output.push_str("    mov rax, rbx\n");
+                output.push_str("    shr rax, cl\n");
+            }
+            Expr::Call(name, args) => {
+                write!(output, "    ; call {}(", name).unwrap();
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    self.generate_expr(output, arg);
+                }
+                output.push_str(")\n");
+            }
+            Expr::ListLiteral(elems) => {
+                output.push_str("    /* [");
+                for (i, elem) in elems.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    self.generate_expr(output, elem);
+                }
+                output.push_str("] */\n");
+            }
+            Expr::ListIndex(list, idx) => {
+                self.generate_expr(output, list);
+                output.push_str("[");
+                self.generate_expr(output, idx);
+                output.push_str("]\n");
+            }
+            Expr::ListLen(list) => {
+                self.generate_expr(output, list);
+                output.push_str(".length\n");
+            }
+            Expr::FieldAccess(obj, field) => {
+                self.generate_expr(output, obj);
+                write!(output, ".{}\n", field).unwrap();
             }
             _ => {
                 output.push_str("    ; Unimplemented expr\n");
@@ -575,6 +780,90 @@ impl X86_64Backend {
                 self.generate_expr_branchless(output, right);
                 output.push_str("    or rax, rbx\n");
             }
+            Expr::Add(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    add rax, rbx\n");
+            }
+            Expr::Sub(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    sub rbx, rax\n");
+                output.push_str("    mov rax, rbx\n");
+            }
+            Expr::Mul(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    imul rax, rbx\n");
+            }
+            Expr::Div(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    mov rdx, 0\n");
+                output.push_str("    mov rax, rbx\n");
+                output.push_str("    idiv rax\n");
+            }
+            Expr::Mod(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    mov rdx, 0\n");
+                output.push_str("    mov rax, rbx\n");
+                output.push_str("    idiv rax\n");
+                output.push_str("    mov rax, rdx\n");
+            }
+            Expr::Not(inner) => {
+                self.generate_expr_branchless(output, inner);
+                output.push_str("    cmp rax, 0\n");
+                output.push_str("    sete al\n");
+                output.push_str("    movzx rax, al\n");
+            }
+            Expr::Neg(inner) => {
+                self.generate_expr_branchless(output, inner);
+                output.push_str("    neg rax\n");
+            }
+            Expr::BitAnd(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    and rax, rbx\n");
+            }
+            Expr::BitOr(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    or rax, rbx\n");
+            }
+            Expr::BitXor(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    xor rax, rbx\n");
+            }
+            Expr::BitNot(inner) => {
+                self.generate_expr_branchless(output, inner);
+                output.push_str("    not rax\n");
+            }
+            Expr::Shl(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    mov rcx, rax\n");
+                output.push_str("    mov rax, rbx\n");
+                output.push_str("    shl rax, cl\n");
+            }
+            Expr::Shr(left, right) => {
+                self.generate_expr_branchless(output, left);
+                output.push_str("    mov rbx, rax\n");
+                self.generate_expr_branchless(output, right);
+                output.push_str("    mov rcx, rax\n");
+                output.push_str("    mov rax, rbx\n");
+                output.push_str("    shr rax, cl\n");
+            }
             Expr::Identifier(name) => {
                 if let Some(offset) = self.signal_map.get(name) {
                     output.push_str(&format!("    mov rax, [rbp+{}]\n", offset * 8));
@@ -590,9 +879,95 @@ impl X86_64Backend {
                     output.push_str("    xor rax, rax\n");
                 }
             }
+            Expr::Float(f) => {
+                write!(output, "    mov rax, #{} ; Float placeholder\n", f).unwrap();
+            }
+            Expr::String(s) => {
+                write!(output, "    ; String literal: \"{}\"\n", s).unwrap();
+            }
+            Expr::Call(name, args) => {
+                write!(output, "    ; call {}(", name).unwrap();
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    self.generate_expr_branchless(output, arg);
+                }
+                output.push_str(")\n");
+            }
+            Expr::ListLiteral(elems) => {
+                output.push_str("    /* [");
+                for (i, elem) in elems.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    self.generate_expr_branchless(output, elem);
+                }
+                output.push_str("] */\n");
+            }
+            Expr::ListIndex(list, idx) => {
+                self.generate_expr_branchless(output, list);
+                output.push_str("[");
+                self.generate_expr_branchless(output, idx);
+                output.push_str("]\n");
+            }
+            Expr::ListLen(list) => {
+                self.generate_expr_branchless(output, list);
+                output.push_str(".length\n");
+            }
+            Expr::FieldAccess(obj, field) => {
+                self.generate_expr_branchless(output, obj);
+                write!(output, ".{}\n", field).unwrap();
+            }
             _ => {
                 output.push_str("    xor rax, rax\n");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+
+    #[test]
+    fn test_x86_64_generates_assembly() {
+        let mut backend = X86_64Backend::new();
+        let program = Program {
+            items: vec![],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains(".data"));
+        assert!(output.contains(".text"));
+    }
+
+    #[test]
+    fn test_x86_64_generates_state_decl() {
+        let mut backend = X86_64Backend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "counter".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: Vec::new(),
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("_start"));
+        assert!(output.contains("counter"));
     }
 }
