@@ -101,6 +101,7 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             "js" => ForeignTarget::Js,
             "swift" => ForeignTarget::Swift,
             "go" => ForeignTarget::Go,
+            "metropolitan" => ForeignTarget::Metropolitan,
             _ => {
                 return Err(FfiError::TomlParseError(format!(
                     "Unknown target: {}",

@@ -29,9 +29,14 @@ use super::native_mapper::NativeMapper;
 use super::protocol::Mapper;
 use super::sentinel::Sentinel;
 use super::types::{FfiValue, MemoryLayout};
-use crate::ast::ForeignBinding;
+use crate::ast::{ForeignBinding, ForeignTarget};
 use crate::interpreter::{ForeignFn, RuntimeError, Value};
 use std::sync::Arc;
+
+/// Check if a binding uses the Metropolitan target
+fn is_metropolitan_target(binding: &ForeignBinding) -> bool {
+    binding.target == ForeignTarget::Metropolitan
+}
 
 pub struct Orchestrator {
     mapper: NativeMapper,
@@ -66,6 +71,32 @@ impl Orchestrator {
         args: Vec<Value>,
         foreign_fn: ForeignFn,
     ) -> Result<Value, RuntimeError> {
+        // Metropolitan dispatch: create/retrieve channel and marshal via shared memory
+        if is_metropolitan_target(binding) {
+            let channel_result = self.metro_hub.create_channel(
+                &binding.name,
+                "c",
+                4096,
+                4096,
+            );
+            match channel_result {
+                Ok(channel) => {
+                    eprintln!(
+                        "[INFO] Metropolitan dispatch: {} (channel: {:?})",
+                        binding.name,
+                        channel.id,
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[WARN] Metropolitan channel creation failed for {}: {}; falling back to native",
+                        binding.name,
+                        e,
+                    );
+                }
+            }
+        }
+
         // 1. Convert interpreter values to FFI values
         let ffi_args: Vec<FfiValue> = args
             .iter()

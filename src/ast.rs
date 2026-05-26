@@ -156,13 +156,14 @@ pub enum ResultType {
 /// Foreign Function Target Platform
 #[derive(Debug, Clone, PartialEq)]
 pub enum ForeignTarget {
-    Native, // Rust FFI (v6.2)
-    Wasm,   // WebAssembly
-    C,      // C library
-    Python, // Python extension
-    Js,     // JavaScript
-    Swift,  // Swift
-    Go,     // Go
+    Native,       // Rust FFI (v6.2)
+    Wasm,         // WebAssembly
+    C,            // C library
+    Python,       // Python extension
+    Js,           // JavaScript
+    Swift,        // Swift
+    Go,           // Go
+    Metropolitan, // Metropolitan FFI (shared memory IPC)
 }
 
 impl std::fmt::Display for ForeignTarget {
@@ -175,6 +176,7 @@ impl std::fmt::Display for ForeignTarget {
             ForeignTarget::Js => write!(f, "js"),
             ForeignTarget::Swift => write!(f, "swift"),
             ForeignTarget::Go => write!(f, "go"),
+            ForeignTarget::Metropolitan => write!(f, "metropolitan"),
         }
     }
 }

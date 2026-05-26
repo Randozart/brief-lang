@@ -1,0 +1,108 @@
+// Encoding bindings (2026-05-27)
+// Licensed under Apache 2.0
+
+import "std/types.dbvs";
+
+register 0x20 as "__base64_encode" {
+    type: Fn(Data) -> Data;
+    location: "encoding::base64_encode";
+    target: native;
+    description: "Encode data to Base64";
+    check: [true];
+}
+
+register 0x21 as "__base64_decode" {
+    type: Fn(Data) -> Data;
+    location: "encoding::base64_decode";
+    target: native;
+    description: "Decode Base64 data";
+    check: [true];
+}
+
+register 0x22 as "__hex_encode" {
+    type: Fn(Data) -> Data;
+    location: "encoding::hex_encode";
+    target: native;
+    description: "Encode data to hex string";
+    check: [true];
+}
+
+register 0x23 as "__hex_decode" {
+    type: Fn(Data) -> Data;
+    location: "encoding::hex_decode";
+    target: native;
+    description: "Decode hex string";
+    check: [true];
+}
+
+register 0x24 as "__url_encode" {
+    type: Fn(Data) -> Data;
+    location: "encoding::url_encode";
+    target: native;
+    description: "URL-encode a string";
+    check: [true];
+}
+
+register 0x25 as "__url_decode" {
+    type: Fn(Data) -> Data;
+    location: "encoding::url_decode";
+    target: native;
+    description: "URL-decode a string";
+    check: [true];
+}
+
+register 0x26 as "__html_escape" {
+    type: Fn(Data) -> Data;
+    location: "encoding::html_escape";
+    target: native;
+    description: "HTML-escape special characters";
+    check: [true];
+}
+
+register 0x27 as "__html_unescape" {
+    type: Fn(Data) -> Data;
+    location: "encoding::html_unescape";
+    target: native;
+    description: "HTML-unescape entities";
+    check: [true];
+}
+
+register 0x28 as "__md5" {
+    type: Fn(Data) -> Data;
+    location: "encoding::md5";
+    target: native;
+    description: "Compute MD5 hash";
+    check: [true];
+}
+
+register 0x29 as "__sha1" {
+    type: Fn(Data) -> Data;
+    location: "encoding::sha1";
+    target: native;
+    description: "Compute SHA-1 hash";
+    check: [true];
+}
+
+register 0x2A as "__sha256" {
+    type: Fn(Data) -> Data;
+    location: "encoding::sha256";
+    target: native;
+    description: "Compute SHA-256 hash";
+    check: [true];
+}
+
+register 0x2B as "__sha512" {
+    type: Fn(Data) -> Data;
+    location: "encoding::sha512";
+    target: native;
+    description: "Compute SHA-512 hash";
+    check: [true];
+}
+
+register 0x2C as "__uuid_v4" {
+    type: Fn() -> Data;
+    location: "encoding::uuid_v4";
+    target: native;
+    description: "Generate a random UUID v4";
+    check: [true];
+}
