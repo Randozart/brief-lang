@@ -6,7 +6,7 @@
 
 ## Brief Doesn't Break
 
-**Status:** v0.12.0 - Self-Hosting Capable
+**Status:** v0.14.0 - Multi-Backend, FFI-Connected, LLVM-Ready
 
 Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. Due to this, it transpiles well to many imperative languages by inferring what instructions must happen for each new state to become true, and writing that in the target code. Due to its declarative nature, this means it handles both software transpilation (C, Rust, Assembly, COBOL), hardware transpilation (SystemVerilog, VHDL), embedded transpilation, web transpilation (by combining WASM, HTML, CSS and SVG, and gluing these together with a thing layer of JS. Also TypeScript and TSX).
 
@@ -73,28 +73,47 @@ txn main() [true][true] {
 # Type-check only (fast)
 ./target/debug/brief-compiler check counter.bv
 
+# Check in strict mode (.sbv files or --strict flag)
+./target/debug/brief-compiler check counter.sbv
+./target/debug/brief-compiler check --strict counter.bv
+
 # Compile to Rust
 ./target/debug/brief-compiler rust counter.bv
 
 # Compile to C
 ./target/debug/brief-compiler c counter.bv
 
-# Compile to AArch64 binary
+# Compile to LLVM IR
+./target/debug/brief-compiler llvm counter.bv
+
+# Compile to AArch64 assembly
 ./target/debug/brief-compiler compile counter.bv --target aarch64.dbvs
 
-# Compile to x86-64 binary
+# Compile to x86-64 assembly
 ./target/debug/brief-compiler compile counter.bv --target x86_64.dbvs
+
+# Generate FFI bindings for a foreign library
+./target/debug/brief-compiler bind mylib.h
+
+# Connect to a Metropolitan shared memory service
+./target/debug/brief-compiler metrod connect WeatherApi
+
+# Start the LSP server
+./target/debug/brief-compiler lsp
 ```
 
 ## Language Variants
 
 | Type | File Extension | Description | Targets |
 |------|----------------|-------------|---------|
-| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Brief** | `.bv` | Pure declarative logic | Rust, C, AArch64, x86-64, WASM |
+| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Brief** | `.bv` | Pure declarative logic | Rust, C, AArch64, x86-64, WASM, LLVM |
+| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Strict Brief** | `.sbv` | Brief with full contract verification | Same + strict mode |
+| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Strict Embedded Brief** | `.sebv` | Embedded Brief with strict contracts | FPGA, ARM bare-metal |
+| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Strict Rendered Brief** | `.srbv` | Rendered Brief with strict contracts | Browser (WASM + JS) |
 | <img src="assets/r-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Rendered Brief** | `.rbv` | Brief + Web UI (HTML/CSS/SVG) | Browser (WASM + JS) |
 | <img src="assets/e-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Embedded Brief** | `.ebv` | Brief + Hardware triggers | FPGA (VHDL/SystemVerilog), ARM bare-metal |
 | <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief** | `.dbv` | Configuration data | All targets |
-| <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief Schema** | `.dbvs` | Schema definitions | All targets |
+| <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief Schema** | `.dbvs` | Schema/FFI bindings | All targets |
 | <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief Lines** | `.dbvl` | Line-based databases | All targets |
 
 ## Key Features
@@ -156,27 +175,56 @@ The compiler proves:
 ## Compiler Architecture
 
 ```
-Source (.bv/.rbv/.ebv)
+Source (.bv/.sbv/.rbv/.ebv)
     ↓
-Lexer (token.bv, lexer.bv) → List<Token>
+Lexer (lexer.bv) → List<Token>
     ↓
 Parser (parser.bv, ast.bv) → AST
+    ↓
+Import Resolver (import_resolver.rs) → Resolved AST
+    ↓
+Desugarer (desugarer.rs) → Desugared AST
     ↓
 Type Checker (typechecker.bv) → Typed AST
     ↓
 Proof Engine (proof_engine.bv) → Verified AST
     ↓
+Shared Analysis
+├── CallGraph (call_graph.bv) — Cycle detection, acyclic optimization
+├── Range Analysis (range.bv) — Parameter bounds inference
+├── Dataflow (analysis/dataflow.rs) — Read/write dependencies
+└── Protocol (analysis/protocol.rs) — Control register prerequisites
+    ↓
+FFI Layer (Metropolitan)
+├── DBVS Bindings (std/bindings/*.dbvs) — Interface definitions
+├── Registry (ffi/registry.rs) — 60+ Rust implementation functions
+├── Orchestrator (ffi/orchestrator.rs) — Native + Metropolitan dispatch
+├── Sentinel (ffi/sentinel.rs) — Pre/post-condition validation
+├── NativeMapper (ffi/native_mapper.rs) — Byte serialization
+└── Metropolitan Hub (ffi/metropolitan.rs) — Shared memory IPC + codegen
+    ↓
 Backends
-├── AArch64 (aarch64.bv) - ARM64 binary 
-├── x86-64 (x86_64.bv) - AMD64 binary 
-├── Rust (rust.bv) - Rust source 
-├── C (c.bv) - C source 
-├── WASM (wasm.bv) - WebAssembly 
-├── VHDL (vhdl.bv) - FPGA 
-└── SystemVerilog (verilog.bv) - FPGA/ASIC 
+├── AArch64 (aarch64.rs) — ARM64 assembly
+├── x86-64 (x86_64.rs) — AMD64 assembly
+├── Rust (rust.rs) — Rust source
+├── C (c.rs) — C source
+├── LLVM (llvm.rs) — LLVM IR
+├── WASM (wasm.rs) — WebAssembly text format
+├── Webstack (webstack.rs) — Rust + wasm-bindgen + JS
+├── COBOL (cobol.rs) — COBOL source
+├── VHDL (vhdl.rs) — FPGA
+├── SystemVerilog (verilog.rs) — FPGA/ASIC
+└── TCL Generator (tcl_generator.rs) — Vivado build scripts
+    ↓
+LSP Server (lsp.rs)
+├── Hover — Type information
+├── Definition — Go-to-definition
+├── Completions — Context-aware keyword/field/hashtag suggestions
+├── Document Symbols — Outline view
+├── Workspace Symbols — Cross-file symbol search
+├── Strict Mode Detection — .sbv/.sebv/.srbv extension handling
+└── Diagnostics — Typechecker + proof engine errors
 ```
-
-**All phases implemented in pure Brief** (no FFI for core compiler).
 
 ## Standard Library
 
@@ -315,17 +363,28 @@ See [examples/](examples/) for more.
 # Run all library tests
 cargo test --lib
 
-# Run specific test
+# Run specific test module
 cargo test --lib lexer::tests
+cargo test --lib analysis::call_graph::tests
+cargo test --lib backend::llvm::tests
 
 # Check a Brief file
 ./target/debug/brief-compiler check examples/counter.rbv
+
+# Check in strict mode
+./target/debug/brief-compiler check --strict counter.sbv
 ```
 
-**Test Files:**
+**Test Suite (269 tests):**
 - `tests/tier1/` - Core data type tests
 - `tests/tier2/` - String processing tests
-- `tests/backends/` - Backend tests (planned)
+- `tests/backends/` - Backend generation tests
+- `tests/ffi_*.rs` - FFI parser, typechecker, stdlib, proof engine tests
+- `tests/fuzz_frontend.rs` - AST roundtrip fuzzing
+- `tests/fuzz_backend.rs` - Backend codegen fuzzing
+- `tests/fuzz_fault_injection.rs` - Error recovery fuzzing
+- `src/analysis/*/tests/` - CallGraph, Range analysis, etc.
+- `src/ffi/metropolitan.rs/tests` - Shared memory IPC tests
 
 **See:** [docs/reports/TESTING_SUMMARY.md](docs/reports/TESTING_SUMMARY.md) for complete results.
 
@@ -337,14 +396,26 @@ The Brief compiler can now:
 - Parse itself
 - Type-check itself
 - Verify its own contracts
-- Generate code for itself (AArch64, x86-64, Rust, C)
+- Generate code for itself (all 11 backends)
+- Run shared analysis (CallGraph, range inference) in both Rust and Brief
 
 **Implementation:**
 - 9 architectural tiers (100% complete)
-- 4 production backends
+- 11 production backends
 - 300+ standard library functions
-- ~10,000 lines of compiler code
+- ~46,000 lines of Rust bootstrap compiler
+- ~8,500 lines of Brief self-hosted compiler
 - ~7,500 lines of documentation
+- 269 passing tests
+
+**Key v0.14.0 additions:**
+- Metropolitan FFI: shared memory IPC with C/Python/JS/Rust interop
+- Strict Brief: full pre/postcondition verification with `--strict` flag
+- LSP server: hover, definition, completions, document/workspace symbols
+- `brief bind` + `brief metrod connect`: one-command FFI binding generation
+- LLVM IR backend with acyclic optimization
+- Backend syncs: all 11 backends have full statement/expression coverage
+- Phase 0 shared analysis: CallGraph + ParameterRanges across all backends
 
 **See:** [docs/milestones/SELF_HOSTING_COMPLETE.md](docs/milestones/SELF_HOSTING_COMPLETE.md) for the full story.
 
@@ -353,8 +424,80 @@ The Brief compiler can now:
 ```
 brief-compiler/
 ├── src/                          # Rust bootstrap compiler
+│   ├── main.rs                   # CLI: check, build, compile, bind, metrod, lsp
+│   ├── lib.rs                    # Crate root
+│   ├── ast.rs                    # AST definitions
+│   ├── parser.rs                 # Rust parser
+│   ├── import_resolver.rs        # Module import resolution
+│   ├── desugarer.rs              # AST desugaring
+│   ├── typechecker.rs            # Type checker
+│   ├── proof_engine.rs           # Proof engine + CallGraph integration
+│   ├── lsp.rs                    # LSP server (hover, definition, completions, symbols)
+│   ├── reactor.rs                # Reactive runtime
+│   ├── signal_graph.rs           # Signal dependency tracking
+│   │
+│   ├── analysis/                 # Shared program analysis
+│   │   ├── call_graph.rs         # Transaction call graph + cycle detection
+│   │   ├── range.rs              # Parameter bounds inference
+│   │   ├── dataflow.rs           # Read/write dependency analysis
+│   │   ├── protocol.rs           # Control register prerequisites
+│   │   ├── address_space.rs      # Memory address classification
+│   │   ├── cross_reference.rs    # Address validation
+│   │   ├── entry_point.rs        # Triggerable transaction discovery
+│   │   └── struct_generator.rs   # State struct generation
+│   │
+│   ├── backend/                  # Code generation backends
+│   │   ├── aarch64.rs            # ARM64 assembly (577 lines)
+│   │   ├── x86_64.rs             # AMD64 assembly (598 lines)
+│   │   ├── rust.rs               # Rust source (789 lines)
+│   │   ├── c.rs                  # C source (872 lines)
+│   │   ├── llvm.rs               # LLVM IR (500 lines) — NEW
+│   │   ├── wasm.rs               # WebAssembly text format (600 lines)
+│   │   ├── webstack.rs           # Rust + wasm-bindgen + JS (2087 lines)
+│   │   ├── cobol.rs              # COBOL source (710 lines)
+│   │   ├── verilog.rs            # SystemVerilog (1805 lines)
+│   │   ├── vhdl.rs               # VHDL (1042 lines)
+│   │   ├── tcl_generator.rs      # Xilinx Vivado Tcl (369 lines)
+│   │   └── mod.rs                # Backend registry + analysis helper
+│   │
+│   ├── ffi/                      # Foreign Function Interface
+│   │   ├── metropolitan.rs       # Shared memory IPC (876 lines)
+│   │   ├── orchestrator.rs       # Native + Metropolitan dispatch
+│   │   ├── registry.rs           # 60+ Rust impl functions (892 lines)
+│   │   ├── sentinel.rs           # Pre/post-condition validation
+│   │   ├── native_mapper.rs      # Byte serialization
+│   │   ├── loader.rs             # DBVS binding file loader
+│   │   ├── resolver.rs           # Binding path resolution
+│   │   ├── metro_cli.rs          # `brief metrod connect` CLI (661 lines)
+│   │   ├── types.rs              # FfiValue, MemoryLayout, FfiType
+│   │   ├── error.rs              # Error conventions
+│   │   ├── protocol.rs           # Mapper trait
+│   │   ├── mapper.rs             # Mapper registry
+│   │   ├── mappers.rs            # Built-in mappers
+│   │   ├── script.rs             # Script function resolution
+│   │   ├── validator.rs          # Binding validation
+│   │   └── mod.rs                # FFI crate root
+│   │
+│   ├── dbrief/                   # Data Brief (DBVS) subsystem
+│   │   ├── ast.rs                # DBVS AST + Fn/Trigger/Result types
+│   │   ├── parser.rs             # DBVS parser
+│   │   └── ...                   # DBVS compiler
+│   │
+│   ├── wrapper/                  # Library wrapper/bindings generator
+│   │   ├── generator.rs          # DBVS + bridge.bv + foreign stub gen
+│   │   ├── c_analyzer.rs         # C header parser
+│   │   ├── rust_analyzer.rs      # Rust source analyzer
+│   │   ├── python_analyzer.rs    # Python function analyzer
+│   │   ├── js_analyzer.rs        # JavaScript function analyzer
+│   │   ├── wasm_analyzer.rs      # WASM module analyzer
+│   │   └── mod.rs                # Wrapper dispatch
+│   │
+│   ├── backend/                  # (see above)
+│   ├── ffi/                      # (see above)
+│   └── ...                       # Other modules
+│
 ├── lib/
-│   ├── std/                      # Standard Library
+│   ├── std/                      # Standard Library (15+ modules)
 │   │   ├── char.bv               # Character operations
 │   │   ├── string.bv             # String manipulation
 │   │   ├── math.bv               # Math functions
@@ -362,20 +505,39 @@ brief-compiler/
 │   │   ├── io.bv                 # File I/O
 │   │   ├── process.bv            # Process spawning
 │   │   ├── iterator.bv           # Iterator adapters
+│   │   ├── metro_bridge.bv       # Metropolitan FFI frgn declarations
 │   │   └── ...                   # 15+ modules total
 │   │
-│   └── compiler/                 # Compiler Infrastructure
+│   └── compiler/                 # Brief Self-Hosted Compiler
 │       ├── token.bv              # Token definitions
 │       ├── lexer.bv              # Lexer
-│       ├── parser.bv             # Parser
+│       ├── parser.bv             # Parser (strict mode aware)
 │       ├── ast.bv                # AST
-│       ├── typechecker.bv        # Type checker
-│       ├── proof_engine.bv       # Proof engine
-│       └── backends/             # Code backends
+│       ├── typechecker.bv        # Type checker (strict [true] rejection)
+│       ├── proof_engine.bv       # Proof engine (strict escalation)
+│       ├── call_graph.bv         # CallGraph analysis (mirrors Rust)
+│       ├── range.bv              # Range analysis (mirrors Rust)
+│       ├── main.bv               # CLI entry point (--strict flag)
+│       └── backends/             # Brief code backends
 │           ├── aarch64.bv        # ARM64 binary
 │           ├── x86_64.bv         # AMD64 binary
 │           ├── rust.bv           # Rust source
 │           └── c.bv              # C source
+│
+├── std/bindings/                 # DBVS binding definitions
+│   ├── metropolitan.dbvs         # 23 Metropolitan primitives
+│   ├── io.dbvs                   # I/O bindings
+│   ├── math.dbvs                 # Math bindings
+│   ├── string.dbvs               # String bindings
+│   ├── time.dbvs                 # Time bindings
+│   ├── system_triggers.dbvs      # System trigger bindings
+│   ├── collections.dbvs          # Collections bindings (NEW)
+│   ├── encoding.dbvs             # Encoding bindings (NEW)
+│   ├── json.dbvs                 # JSON bindings (NEW)
+│   └── http.dbvs                 # HTTP bindings (NEW)
+│
+├── plans/active/                 # Active plans
+│   └── ROADMAP.md                # Comprehensive roadmap (supersedes all others)
 │
 ├── learn-brief/                  # Tutorial
 │   ├── 00-welcome.md
@@ -386,40 +548,38 @@ brief-compiler/
 │
 ├── examples/                     # Example programs
 ├── spec/                         # Language specification
-├── tests/                        # Test files
+├── tests/                        # Test files (269 tests)
 └── docs/                         # Documentation
-    ├── milestones/                # Milestone reports
-    │   ├── SELF_HOSTING_COMPLETE.md
-    │   ├── SELF_HOSTING_PLAN.md
-    │   └── TIER*_COMPLETE.md
-    ├── reports/                   # Status reports
-    │   ├── TESTING_SUMMARY.md
-    │   └── ...
-    ├── OPTIMIZATIONS.md
-    └── ...
+    ├── milestones/               # Milestone reports
+    └── reports/                  # Status reports
 ```
 
 ## Roadmap
 
-### ✅ Complete (v0.12.0)
-- [x] Complete compiler frontend
-- [x] 4 production backends (AArch64, x86-64, Rust, C)
+### ✅ Complete (v0.14.0)
+- [x] 11 production backends (AArch64, x86-64, Rust, C, LLVM, WASM, Webstack, COBOL, Verilog, VHDL, TCL)
+- [x] Full statement/expression coverage across all backends (13/13 statement variants, 22-36 expression variants)
 - [x] 300+ standard library functions
-- [x] Complete documentation
-- [x] Self-hosting capable
+- [x] Self-hosting capable (both Rust bootstrap and Brief self-hosted)
+- [x] Metropolitan FFI: shared memory IPC with C/Python/JS/Rust clients
+- [x] DBVS binding schema with `Fn()`, `Trigger()`, `Result[]` type support
+- [x] `brief bind` — one-command FFI binding generation
+- [x] `brief metrod connect` — interactive shared memory CLI
+- [x] Strict Brief (.sbv/.sebv/.srbv) with full contract verification
+- [x] LSP server: hover, definition, completions, symbols, strict mode detection
+- [x] Shared analysis: CallGraph + ParameterRanges across all backends
+- [x] Acyclic optimization — static dispatch in backends when graph is cycle-free
+- [x] Sentinel pre/post-condition validation
+- [x] 269 passing tests
 
-### ⏳ In Progress
-- [ ] Fix binary build (2 minor hardware validation issues)
-- [ ] Integration tests for all backends
+### 📋 Planned
+- [ ] AArch64 FFI support + linkage config
+- [ ] Integration tests for all 11 backends
 - [ ] Bootstrap process (compile compiler with itself)
-
-### 📋 Planned (v0.12.0)
-- [ ] WASM backend
-- [ ] VHDL backend (FPGA)
-- [ ] SystemVerilog backend (FPGA/ASIC)
-- [ ] LSP improvements
-- [ ] Debugger integration
+- [ ] LSP ghost text (inlay hints with call graph, trigger dependencies, ranges)
+- [ ] LLVM backend inkwell bindings (programmatic IR generation)
 - [ ] Performance profiler
+- [ ] Debugger integration
 
 ## Contributing
 
@@ -434,5 +594,5 @@ Apache 2.0 with explicit runtime exception
 
 ---
 
-*Last updated: 2026-05-27*  
-*Version: Brief v0.12.0*
+*Last updated: 2026-05-28*  
+*Version: Brief v0.14.0*
