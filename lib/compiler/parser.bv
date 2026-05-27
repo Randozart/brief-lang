@@ -115,14 +115,14 @@ defn token_to_string(tok: Token) -> String {
     uni tok(OpSlash) = { term "/"; };
     uni tok(OpEq) = { term "="; };
     uni tok(OpEqEq) = { term "=="; };
-    uni tok(OpNotEq) = { term "!="; };
+    uni tok(OpNeq) = { term "!="; };
     uni tok(OpLt) = { term "<"; };
     uni tok(OpGt) = { term ">"; };
     uni tok(OpLtEq) = { term "<="; };
     uni tok(OpGtEq) = { term ">="; };
-    uni tok(OpAndAnd) = { term "&&"; };
-    uni tok(OpOrOr) = { term "||"; };
-    uni tok(OpNot) = { term "!"; };
+    uni tok(OpAnd) = { term "&&"; };
+    uni tok(OpOr) = { term "||"; };
+    uni tok(OpBang) = { term "!"; };
     uni tok(OpAt) = { term "@"; };
     uni tok(OpDot) = { term "."; };
     uni tok(OpColon) = { term ":"; };
@@ -330,6 +330,39 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
         uni result(Ok(pair)) = {
             let (imp, new_state) = pair;
             term Ok((TopImport(imp), new_state));
+        };
+        uni result(Err(e)) = {
+            term Err(e);
+        };
+    };
+    
+    uni tok(KeywordFrgn) = {
+        let result = parse_foreign_signature(state);
+        uni result(Ok(pair)) = {
+            let (f, new_state) = pair;
+            term Ok((TopForeign(f), new_state));
+        };
+        uni result(Err(e)) = {
+            term Err(e);
+        };
+    };
+    
+    uni tok(KeywordRstruct) = {
+        let result = parse_rstruct(state);
+        uni result(Ok(pair)) = {
+            let (r, new_state) = pair;
+            term Ok((TopRStruct(r), new_state));
+        };
+        uni result(Err(e)) = {
+            term Err(e);
+        };
+    };
+    
+    uni tok(KeywordRender) = {
+        let result = parse_render(state);
+        uni result(Ok(pair)) = {
+            let (name, body) = pair;
+            term Ok((TopRender(name, body), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
@@ -607,7 +640,18 @@ defn parse_contract(state: ParserState) -> Result<(Contract, ParserState), Strin
         term Err(e);
     };
     
-    // Strict mode check: reject [true] contracts
+    // Both [true] is always an error — defeats contract-first programming
+    uni pre(ExprBool(pre_b)) = {
+        [pre_b] {
+            uni post(ExprBool(post_b)) = {
+                [post_b] {
+                    term Err("both precondition and postcondition are [true] — at least one side must specify meaningful constraints");
+                };
+            };
+        };
+    };
+    
+    // Strict mode: reject [true] contracts
     [state.strict_mode] {
         uni pre(ExprBool(b)) = {
             [b] { term Err("Strict mode: precondition [true] is not allowed - specify actual state requirements"); };

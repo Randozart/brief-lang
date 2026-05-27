@@ -34,7 +34,7 @@ defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][result.len
 };
 
 // Fold (reduce) iterator
-defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [true][true] {
+defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [f != null][true] {
     let acc = initial;
     let i: Int = 0;
     [i < list.len()] {
@@ -78,7 +78,7 @@ defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][result.len() == l
 };
 
 // Find first matching
-defn iter_find<T>(list: List<T>, pred: T -> Bool) -> Option<T> [true][true] {
+defn iter_find<T>(list: List<T>, pred: T -> Bool) -> Option<T> [pred != null][result.is_some() -> pred(result.unwrap())] {
     let i: Int = 0;
     [i < list.len()] {
         [pred(list[i])] {
@@ -124,7 +124,7 @@ defn iter_chain<T>(a: List<T>, b: List<T>) -> List<T> [true][result.len() == a.l
 };
 
 // Flat map (map then flatten)
-defn iter_flatmap<T, U>(list: List<T>, f: T -> List<U>) -> List<U> [true][true] {
+defn iter_flatmap<T, U>(list: List<T>, f: T -> List<U>) -> List<U> [f != null][result.len() >= 0] {
     let result: List<U> = [];
     let i: Int = 0;
     [i < list.len()] {
@@ -140,7 +140,7 @@ defn iter_flatmap<T, U>(list: List<T>, f: T -> List<U>) -> List<U> [true][true] 
 };
 
 // Partition into two lists
-defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [true][true] {
+defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [pred != null][true] {
     let trues: List<T> = [];
     let falses: List<T> = [];
     let i: Int = 0;

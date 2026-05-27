@@ -42,7 +42,6 @@ enum Token {
     KeywordEnum,
     KeywordType,
     KeywordData,
-    KeywordData,
     
     // Control
     KeywordImport,
@@ -192,6 +191,8 @@ defn keyword_to_string(tok: Token) -> String {
     uni tok(KeywordTrue) = "true";
     uni tok(KeywordFalse) = "false";
     uni tok(KeywordUnification) = "unification";
+    uni tok(KeywordRender) = "render";
+    uni tok(KeywordRstruct) = "rstruct";
     term "";
 };
 

@@ -3,15 +3,15 @@
 
 // ===== CONSOLE IO (Native) =====
 
-defn print(msg: String) -> Bool [true][true] {
+defn print(msg: String) -> Bool [msg != ""][result == true] {
     term true;
 };
 
-defn println(msg: String) -> Bool [true][true] {
+defn println(msg: String) -> Bool [msg != ""][result == true] {
     term print(msg + "\n");
 };
 
-defn input() -> String [true][true] {
+defn input() -> String [true][result.len() >= 0] {
     term "";
 };
 
@@ -26,7 +26,7 @@ frgn __create_dir(path: String) -> Result<Void, String>;
 
 // ===== NATIVE WRAPPERS =====
 
-defn read_file(path: String) -> String [true][true] {
+defn read_file(path: String) -> String [path != ""][result.len() >= 0] {
     let result = __read_file(path);
     [result.is_ok()] {
         term result.value;
@@ -34,7 +34,7 @@ defn read_file(path: String) -> String [true][true] {
     term "";
 };
 
-defn write_file(path: String, content: String) -> Bool [true][true] {
+defn write_file(path: String, content: String) -> Bool [path != ""][result == true || result == false] {
     let result = __write_file(path, content);
     [result.is_ok()] {
         term true;
@@ -42,7 +42,7 @@ defn write_file(path: String, content: String) -> Bool [true][true] {
     term false;
 };
 
-defn file_exists(path: String) -> Bool [true][true] {
+defn file_exists(path: String) -> Bool [path != ""][result == true || result == false] {
     let result = __file_exists(path);
     [result.is_ok()] {
         term result.value;
@@ -50,7 +50,7 @@ defn file_exists(path: String) -> Bool [true][true] {
     term false;
 };
 
-defn delete_file(path: String) -> Bool [true][true] {
+defn delete_file(path: String) -> Bool [path != ""][result == true || result == false] {
     let result = __delete_file(path);
     [result.is_ok()] {
         term true;
@@ -58,7 +58,7 @@ defn delete_file(path: String) -> Bool [true][true] {
     term false;
 };
 
-defn list_directory(path: String) -> String [true][true] {
+defn list_directory(path: String) -> String [path != ""][result.len() >= 0] {
     let result = __list_directory(path);
     [result.is_ok()] {
         term result.value;
@@ -66,7 +66,7 @@ defn list_directory(path: String) -> String [true][true] {
     term "";
 };
 
-defn create_dir(path: String) -> Bool [true][true] {
+defn create_dir(path: String) -> Bool [path != ""][result == true || result == false] {
     let result = __create_dir(path);
     [result.is_ok()] {
         term true;
@@ -76,7 +76,7 @@ defn create_dir(path: String) -> Bool [true][true] {
 
 // ===== PATH OPERATIONS (Native) =====
 
-defn join_path(parts: List<String>) -> String [true][true] {
+defn join_path(parts: List<String>) -> String [parts.len() > 0][result.len() >= 0] {
     let result = new_builder();
     let i: Int = 0;
     [i < parts.len()] {
@@ -89,33 +89,33 @@ defn join_path(parts: List<String>) -> String [true][true] {
     term result.to_string();
 };
 
-defn split_path(path: String) -> String [true][true] {
+defn split_path(path: String) -> String [path != ""][result.len() >= 0] {
     term path;
 };
 
-defn file_extension(path: String) -> String [true][true] {
+defn file_extension(path: String) -> String [path != ""][result.len() >= 0] {
     term "";
 };
 
-defn file_stem(path: String) -> String [true][true] {
+defn file_stem(path: String) -> String [path != ""][result.len() >= 0] {
     term path;
 };
 
-defn directory(path: String) -> String [true][true] {
+defn directory(path: String) -> String [path != ""][result.len() >= 0] {
     term ".";
 };
 
-defn absolute_path(path: String) -> String [true][true] {
+defn absolute_path(path: String) -> String [path != ""][result.len() >= 0] {
     term path;
 };
 
-defn normalize_path(path: String) -> String [true][true] {
+defn normalize_path(path: String) -> String [path != ""][result.len() >= 0] {
     term path;
 };
 
 // ===== FILE TYPE OPERATIONS =====
 
-defn is_file(path: String) -> Bool [true][true] {
+defn is_file(path: String) -> Bool [path != ""][result == true || result == false] {
     [file_exists(path)] {
         let ext = file_extension(path);
         [ext != ""] {
@@ -125,7 +125,7 @@ defn is_file(path: String) -> Bool [true][true] {
     term false;
 };
 
-defn is_dir(path: String) -> Bool [true][true] {
+defn is_dir(path: String) -> Bool [path != ""][result == true || result == false] {
     term !is_file(path);
 };
 

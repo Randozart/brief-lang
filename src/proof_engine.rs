@@ -1506,8 +1506,8 @@ impl ProofEngine {
                     let pre_is_trivial = matches!(&txn.contract.pre_condition, Expr::Bool(true));
                     let post_is_trivial = matches!(&txn.contract.post_condition, Expr::Bool(true));
 
-                    if pre_is_trivial && post_is_trivial {
-                        // BOTH trivial - hard error
+                    if pre_is_trivial && post_is_trivial && txn.contract.span.is_some() {
+                        // BOTH trivial and explicitly written - hard error
                         let mut err = ProofError::new("P009", "trivial precondition");
                         err.explanation = format!(
                             "transaction '{}' has precondition '[true]' which is always satisfied",
@@ -1583,8 +1583,8 @@ impl ProofEngine {
                     let pre_is_trivial = matches!(&defn.contract.pre_condition, Expr::Bool(true));
                     let post_is_trivial = matches!(&defn.contract.post_condition, Expr::Bool(true));
 
-                    if pre_is_trivial && post_is_trivial {
-                        let mut err = self.make_err("P009", "trivial precondition");
+                    if pre_is_trivial && post_is_trivial && defn.contract.span.is_some() {
+                        let mut err = ProofError::new("P009", "trivial precondition");
                         err.explanation = format!(
                             "definition '{}' has precondition '[true]' which is always satisfied",
                             defn.name
@@ -1601,7 +1601,7 @@ impl ProofEngine {
                             .push("e.g., '[x > 0]' instead of '[true]'".to_string());
                         self.errors.push(err);
 
-                        let mut err = self.make_err("P010", "trivial postcondition");
+                        let mut err = ProofError::new("P010", "trivial postcondition");
                         err.explanation = format!(
                             "definition '{}' has postcondition '[true]' which is always satisfied",
                             defn.name
@@ -2779,12 +2779,12 @@ mod tests {
         let code = r#"
             let data: String = "";
 
-            txn write_a [true] {
+            txn write_a [true][data != @data] {
                 &data = "A";
                 term;
             };
 
-            txn write_b [true] {
+            txn write_b [true][data != @data] {
                 &data = "B";
                 term;
             };
@@ -2857,7 +2857,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trivial_contracts_both_true() {
+    fn test_trivial_contracts_both_true_rejected_at_parse_time() {
         let code = r#"
             let count: Int = 0;
 
@@ -2868,17 +2868,10 @@ mod tests {
         "#;
 
         let mut parser = crate::parser::Parser::new(code);
-        let program = parser.parse().expect("Failed to parse");
-
-        let mut pe = ProofEngine::new();
-        let errors = pe.verify_program(&program);
-
-        let has_trivial_pre = errors.iter().any(|e| e.code == "P009");
-        let has_trivial_post = errors.iter().any(|e| e.code == "P010");
+        let result = parser.parse();
         assert!(
-            has_trivial_pre && has_trivial_post,
-            "Expected both P009 and P010 errors, got: {:?}",
-            errors
+            result.is_err(),
+            "[true][true] should be rejected at parse time, but parse succeeded"
         );
     }
 
@@ -2909,7 +2902,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trivial_contracts_in_definition() {
+    fn test_trivial_contracts_in_definition_rejected_at_parse_time() {
         let code = r#"
             defn double(x: Int) -> Int [true][true] {
                 term x * 2;
@@ -2917,17 +2910,10 @@ mod tests {
         "#;
 
         let mut parser = crate::parser::Parser::new(code);
-        let program = parser.parse().expect("Failed to parse");
-
-        let mut pe = ProofEngine::new();
-        let errors = pe.verify_program(&program);
-
-        let has_trivial_pre = errors.iter().any(|e| e.code == "P009");
-        let has_trivial_post = errors.iter().any(|e| e.code == "P010");
+        let result = parser.parse();
         assert!(
-            has_trivial_pre && has_trivial_post,
-            "Expected both P009 and P010 errors for definition, got: {:?}",
-            errors
+            result.is_err(),
+            "[true][true] in definition should be rejected at parse time, but parse succeeded"
         );
     }
 

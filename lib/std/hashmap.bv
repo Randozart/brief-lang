@@ -34,7 +34,7 @@ defn insert<K, V>(map: HashMap<K, V>, key: K, value: V)
 };
 
 defn get<K, V>(map: HashMap<K, V>, key: K) 
-    [true][true] 
+    [true][result.is_some() == map.contains_key(key)] 
     -> Option<V> 
 {
     let i: Int = 0;
@@ -174,7 +174,7 @@ defn clear<K, V>(map: HashMap<K, V>)
 // ===== ENTRY API =====
 
 defn entry<K, V>(map: HashMap<K, V>, key: K) 
-    [true][true] 
+    [true][result.is_some() == map.contains_key(key)] 
     -> Option<V> 
 {
     term map.get(key);

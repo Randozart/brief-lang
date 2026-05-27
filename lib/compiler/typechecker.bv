@@ -506,6 +506,17 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
         term Err(e);
     };
     
+    // Both [true] is always an error — defeats contract-first programming
+    uni t.contract.precondition(ExprBool(pre_val)) = {
+        [pre_val] {
+            uni t.contract.postcondition(ExprBool(post_val)) = {
+                [post_val] {
+                    term Err("both precondition and postcondition are [true] — at least one side must specify meaningful constraints");
+                };
+            };
+        };
+    };
+    
     // Strict mode: reject [true] contracts
     [strict_mode] {
         uni t.contract.precondition(ExprBool(pre_val)) = {

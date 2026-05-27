@@ -16,15 +16,15 @@
 // Required Functions (Identity by default)
 // ============================================================
 
-defn map_input(value: Value) -> Value [true][true] {
+defn map_input(value: Value) -> Value [true][result == value] {
     term value;
 };
 
-defn map_output(value: Value) -> Value [true][true] {
+defn map_output(value: Value) -> Value [true][result == value] {
     term value;
 };
 
-defn map_error(err: Error) -> Error [true][true] {
+defn map_error(err: Error) -> Error [true][result == err] {
     term err;
 };
 

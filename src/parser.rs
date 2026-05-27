@@ -2861,6 +2861,13 @@ let span = self.current_span();
             self.expect(Token::RBracket)?;
         }
 
+        // [true][n >= 0] is always an error — defeats contract-first programming
+        if matches!(&pre_condition, Expr::Bool(true)) && matches!(&post_condition, Expr::Bool(true)) {
+            return self.spanned_err(
+                "both precondition and postcondition are [true] — at least one side must specify meaningful constraints".to_string()
+            );
+        }
+
         // In strict mode, both pre and post conditions are required and must be non-trivial
         if self.strict_mode.is_strict() {
             if count < 2 {
@@ -4985,7 +4992,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_inline_asm() {
-        let s = r#"txn Foo [true][true] { asm "mov x0, #0" { "x0" }; };"#;
+        let s = r#"txn Foo [true][n >= 0] { asm "mov x0, #0" { "x0" }; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse inline asm");
@@ -5009,7 +5016,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_inline_asm_no_clobbers() {
-        let s = r#"txn Bar [true][true] { asm "wfi"; };"#;
+        let s = r#"txn Bar [true][n >= 0] { asm "wfi"; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse inline asm without clobbers");
@@ -5112,7 +5119,7 @@ mod parser_tests {
     #[test]
     fn test_parse_local_trigger_bang() {
         // Test trg! inside transaction
-        let s = r#"txn Foo [true][true] { trg! resp: Int = fetch(); term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { trg! resp: Int = fetch(); term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse trg! inside transaction: {:?}", result.err());
@@ -5134,19 +5141,19 @@ mod parser_tests {
     #[test]
     fn test_parse_local_trigger_bang_aliases() {
         // Test trigger! alias
-        let s = r#"txn Foo [true][true] { trigger! resp: Bool = check(); term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { trigger! resp: Bool = check(); term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse trigger! inside transaction: {:?}", result.err());
 
         // Test TRG! uppercase
-        let s = r#"txn Foo [true][true] { TRG! resp: UInt = read(); term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { TRG! resp: UInt = read(); term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse TRG! inside transaction: {:?}", result.err());
 
         // Test TRIGGER! uppercase
-        let s = r#"txn Foo [true][true] { TRIGGER! resp: String = get(); term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { TRIGGER! resp: String = get(); term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse TRIGGER! inside transaction: {:?}", result.err());
@@ -5155,7 +5162,7 @@ mod parser_tests {
     #[test]
     fn test_parse_local_trigger_without_bang_errors() {
         // Test that plain trg inside transaction gives helpful error
-        let s = r#"txn Foo [true][true] { trg resp: Int = fetch(); term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { trg resp: Int = fetch(); term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_err(), "Should error on plain trg inside transaction");
@@ -5182,7 +5189,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_alka_block_safe() {
-        let s = r#"txn Foo [true][true] { alka { FENCE GPU_MAIN.METAPAGE == 1; }; term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { alka { FENCE GPU_MAIN.METAPAGE == 1; }; term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse alka block: {:?}", result.err());
@@ -5199,7 +5206,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_alka_block_dangerous() {
-        let s = r#"txn Foo [true][true] { alka! { PULSE DOORBELL @ 0x90; }; term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { alka! { PULSE DOORBELL @ 0x90; }; term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse alka! block: {:?}", result.err());
@@ -5216,7 +5223,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_alka_multi_line() {
-        let s = "txn Foo [true][true] { alka {\n  FENCE GPU_MAIN.METAPAGE == 1;\n  SIGNAL EXPERT_READY;\n}; term; };";
+        let s = "txn Foo [true][n >= 0] { alka {\n  FENCE GPU_MAIN.METAPAGE == 1;\n  SIGNAL EXPERT_READY;\n}; term; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse multi-line alka: {:?}", result.err());
@@ -5224,7 +5231,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_hashtag_on_let() {
-        let s = r#"txn Foo [true][true] { let x: Int #volatile; term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { let x: Int #volatile; term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse hashtag on let: {:?}", result.err());
@@ -5232,7 +5239,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_hashtag_on_assignment() {
-        let s = r#"txn Foo [true][true] { &x = 1 #!sfence; term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { &x = 1 #!sfence; term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse mandatory hashtag on assignment: {:?}", result.err());
@@ -5240,7 +5247,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_hashtag_on_term() {
-        let s = r#"txn Foo [true][true] { &x = 1; term #retry; };"#;
+        let s = r#"txn Foo [true][n >= 0] { &x = 1; term #retry; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse hashtag on term: {:?}", result.err());
@@ -5248,7 +5255,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_fallback_chain() {
-        let s = r#"txn Foo [true][true] { &x = 1 #!sfence|lfence|mfence; term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { &x = 1 #!sfence|lfence|mfence; term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse fallback chain: {:?}", result.err());
@@ -5268,7 +5275,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_scoped_hashtag() {
-        let s = r#"txn Foo [true][true] { let x: Int #[cpp]#volatile; term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { let x: Int #[cpp]#volatile; term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse scoped hashtag: {:?}", result.err());
@@ -5276,7 +5283,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_dynamic_address() {
-        let s = r#"txn Foo [true][true] { let x: Int @ some_ptr #volatile = 0; term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { let x: Int @ some_ptr #volatile = 0; term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse dynamic @ address: {:?}", result.err());
@@ -5293,7 +5300,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_hashtag_with_value() {
-        let s = r#"txn Foo [true][true] { let buf: Byte[4096] #!aligned(4096); term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { let buf: Byte[4096] #!aligned(4096); term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse hashtag with value: {:?}", result.err());
@@ -5359,7 +5366,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_single_body_still_works() {
-        let s = r#"txn Foo [true][true] { &x = 1; term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { &x = 1; term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Single body should still parse: {:?}", result.err());
@@ -5375,7 +5382,7 @@ mod parser_tests {
 
     #[test]
     fn test_on_exit_block_pragma() {
-        let s = r#"txn Foo [true][true] {
+        let s = r#"txn Foo [true][n >= 0] {
             &CLAIMED = true;
             #on_exit {
                 &CLAIMED = false;
@@ -5397,7 +5404,7 @@ mod parser_tests {
 
     #[test]
     fn test_on_exit_no_precondition() {
-        let s = r#"txn Foo [true][true] {
+        let s = r#"txn Foo [true][n >= 0] {
             #on_exit { &x = 0; };
             term;
         };"#;

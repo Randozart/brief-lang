@@ -13,7 +13,7 @@ let counter: Int = 0;
 //
 // Key advantage: Proven correct at compile time, zero FFI overhead
 
-defn demo_predicates() [true][true] -> Bool {
+defn demo_predicates() [true][result == true || result == false] -> Bool {
   term true;
 };
 

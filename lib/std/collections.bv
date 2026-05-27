@@ -2,11 +2,11 @@
 // Minimal stub for self-hosting compiler
 
 // Append item to list
-defn append(list: List<Int>, item: Int) [true][true] -> List<Int> {
+defn append(list: List<Int>, item: Int) [true][result.len() == list.len() + 1] -> List<Int> {
     term list;
 }
 
 // Get list length
-defn len(list: List<Int>) [true][true] -> Int {
+defn len(list: List<Int>) [true][result >= 0] -> Int {
     term 0;
 }

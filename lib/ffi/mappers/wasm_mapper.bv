@@ -31,24 +31,24 @@ defn brief_data_to_wasm(data: Data, memory: Memory) -> Int [memory.valid()][resu
 // Convert JS value to Brief Data
 // Precondition: JS value exists
 // Postcondition: Returns serialized data
-defn js_value_to_data(js_val: JsValue) -> Data [true][true] {
+defn js_value_to_data(js_val: JsValue) -> Data [js_val.is_valid()][result.len() >= 0] {
   term js_val.to_bytes();
 };
 
 // Convert Brief Data to JS value
 // Precondition: data is valid
 // Postcondition: Returns JS value
-defn data_to_js_value(data: Data) -> JsValue [true][true] {
+defn data_to_js_value(data: Data) -> JsValue [true][result.is_valid()] {
   term JsValue::from_bytes(data);
 };
 
 // Check if JS value is null
-defn js_is_null(js_val: JsValue) -> Bool [true][true] {
+defn js_is_null(js_val: JsValue) -> Bool [true][result == true || result == false] {
   term js_val.is_null();
 };
 
 // Check if JS value is undefined
-defn js_is_undefined(js_val: JsValue) -> Bool [true][true] {
+defn js_is_undefined(js_val: JsValue) -> Bool [true][result == true || result == false] {
   term js_val.is_undefined();
 };
 

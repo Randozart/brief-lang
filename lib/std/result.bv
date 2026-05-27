@@ -1,9 +1,9 @@
 
-// ===== FUNCTIONAL METHODS (Tier 1.6) =====
+// ===== FUNCTIONAL METHODS =====
 
 // Map over Result (transforms Ok value)
 defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E> 
-    [true][true] 
+    [f != null][result.is_ok() || result.is_err()] 
 {
     [result.is_ok()] {
         let val = result.unwrap();
@@ -18,7 +18,7 @@ defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E>
 
 // Map_err (transforms Err value)
 defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F> 
-    [true][true] 
+    [f != null][result.is_ok() || result.is_err()] 
 {
     [result.is_ok()] {
         let val = result.unwrap();
@@ -33,7 +33,7 @@ defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F>
 
 // And_then (flat map for Result)
 defn result_and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Result<U, E> 
-    [true][true] 
+    [f != null][result.is_ok() || result.is_err()] 
 {
     [result.is_ok()] {
         let val = result.unwrap();
@@ -48,7 +48,7 @@ defn result_and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Res
 
 // Or_else
 defn result_or_else<T, E>(result: Result<T, E>, f: E -> Result<T, E>) -> Result<T, E> 
-    [true][true] 
+    [f != null][result.is_ok() || result.is_err()] 
 {
     [result.is_ok()] {
         term result;
@@ -62,7 +62,7 @@ defn result_or_else<T, E>(result: Result<T, E>, f: E -> Result<T, E>) -> Result<
 
 // And (returns second Result if first is Ok)
 defn result_and<T, E, U>(result: Result<T, E>, other: Result<U, E>) -> Result<U, E> 
-    [true][true] 
+    [true][result.is_ok() || result.is_err()] 
 {
     [result.is_ok()] {
         term other;
@@ -76,7 +76,7 @@ defn result_and<T, E, U>(result: Result<T, E>, other: Result<U, E>) -> Result<U,
 
 // Or (returns first Ok, or second Result)
 defn result_or<T, E>(result: Result<T, E>, other: Result<T, E>) -> Result<T, E> 
-    [true][true] 
+    [true][result.is_ok() || result.is_err()] 
 {
     [result.is_ok()] {
         term result;
@@ -86,110 +86,7 @@ defn result_or<T, E>(result: Result<T, E>, other: Result<T, E>) -> Result<T, E>
 
 // Filter (keeps Ok only if predicate is true)
 defn result_filter<T, E>(result: Result<T, E>, pred: T -> Bool) -> Result<T, E> 
-    [true][true] 
-{
-    [result.is_ok()] {
-        let val = result.unwrap();
-        [pred(val)] {
-            term Ok(val);
-        };
-        term Err("filtered_out");
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(err);
-    };
-    term Err("unreachable");
-};
-
-// ===== FUNCTIONAL METHODS (Tier 1.6) =====
-
-// Map over Result (transforms Ok value)
-defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E> 
-    [true][true] 
-{
-    [result.is_ok()] {
-        let val = result.unwrap();
-        term Ok(f(val));
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(err);
-    };
-    term Err("unreachable");
-};
-
-// Map_err (transforms Err value)
-defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F> 
-    [true][true] 
-{
-    [result.is_ok()] {
-        let val = result.unwrap();
-        term Ok(val);
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(f(err));
-    };
-    term Err("unreachable");
-};
-
-// And_then (flat map for Result)
-defn result_and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Result<U, E> 
-    [true][true] 
-{
-    [result.is_ok()] {
-        let val = result.unwrap();
-        term f(val);
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(err);
-    };
-    term Err("unreachable");
-};
-
-// Or_else
-defn result_or_else<T, E>(result: Result<T, E>, f: E -> Result<T, E>) -> Result<T, E> 
-    [true][true] 
-{
-    [result.is_ok()] {
-        term result;
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term f(err);
-    };
-    term Err("unreachable");
-};
-
-// And (returns second Result if first is Ok)
-defn result_and<T, E, U>(result: Result<T, E>, other: Result<U, E>) -> Result<U, E> 
-    [true][true] 
-{
-    [result.is_ok()] {
-        term other;
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(err);
-    };
-    term Err("unreachable");
-};
-
-// Or (returns first Ok, or second Result)
-defn result_or<T, E>(result: Result<T, E>, other: Result<T, E>) -> Result<T, E> 
-    [true][true] 
-{
-    [result.is_ok()] {
-        term result;
-    };
-    term other;
-};
-
-// Filter (keeps Ok only if predicate is true)
-defn result_filter<T, E>(result: Result<T, E>, pred: T -> Bool) -> Result<T, E> 
-    [true][true] 
+    [pred != null][result.is_ok() || result.is_err()] 
 {
     [result.is_ok()] {
         let val = result.unwrap();

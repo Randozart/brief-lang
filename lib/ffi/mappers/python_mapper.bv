@@ -22,15 +22,15 @@
 // Required Functions
 // ============================================================
 
-defn map_input(value: Value) -> Value [true][true] {
+defn map_input(value: Value) -> Value [true][result == value] {
     term value;
 };
 
-defn map_output(value: Value) -> Value [true][true] {
+defn map_output(value: Value) -> Value [true][result == value] {
     term value;
 };
 
-defn map_error(err: Error) -> Error [true][true] {
+defn map_error(err: Error) -> Error [true][result == err] {
     term err;
 };
 
@@ -57,22 +57,22 @@ defn map_error(err: Error) -> Error [true][true] {
 // ============================================================
 
 // Convert Python int to Brief Int
-defn py_int_to_brief(py_int: PyInt) -> Int [true][true] {
+defn py_int_to_brief(py_int: PyInt) -> Int [true][result == py_int.value] {
     term py_int.value;
 };
 
 // Convert Brief Int to Python int
-defn brief_int_to_py(n: Int) -> PyInt [true][true] {
+defn brief_int_to_py(n: Int) -> PyInt [true][result.value == n] {
     term PyInt::from_int(n);
 };
 
 // Convert Python float to Brief Float
-defn py_float_to_brief(py_float: PyFloat) -> Float [true][true] {
+defn py_float_to_brief(py_float: PyFloat) -> Float [true][result == py_float.value] {
     term py_float.value;
 };
 
 // Convert Brief Float to Python float
-defn brief_float_to_py(f: Float) -> PyFloat [true][true] {
+defn brief_float_to_py(f: Float) -> PyFloat [true][result.value == f] {
     term PyFloat::from_float(f);
 };
 

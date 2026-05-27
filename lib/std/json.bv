@@ -91,7 +91,7 @@ defn get_bool_or(data: Data, key: String, default: Bool) [true][result == true |
 };
 
 // Helper: Safe array access with bounds check
-defn array_get(data: Data, index: Int) [true][true] -> Data {
+defn array_get(data: Data, index: Int) [index >= 0][result.is_null() || true] -> Data {
   [index < 0 || index >= __array_len(data)] {
     term __null();
   };

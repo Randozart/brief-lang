@@ -89,16 +89,16 @@ defn extract_calls_from_body(body: List<Statement>) -> List<String> [
     let called: List<String> = [];
     let i: Int = 0;
     [i < len(body)] {
-        uni body[i](AssignStmt(_, expr, _, _)) = {
+        uni body[i](StmtAssign(expr, _, _)) = {
             &called = called ++ collect_call_names(expr);
         };
-        uni body[i](LetStmt(_, Some(expr), _)) = {
+        uni body[i](StmtLet(_, _, Some(expr), _, _)) = {
             &called = called ++ collect_call_names(expr);
         };
-        uni body[i](ExprStmt(expr)) = {
+        uni body[i](StmtExpr(expr)) = {
             &called = called ++ collect_call_names(expr);
         };
-        uni body[i](GuardStmt(_, stmts)) = {
+        uni body[i](StmtGuarded(_, stmts)) = {
             &called = called ++ extract_calls_from_body(stmts);
         };
         &i = i + 1;
@@ -112,7 +112,7 @@ defn collect_call_names(expr: Expr) -> List<String> [
 ][
     true
 ] {
-    uni expr(CallExpr(name, args)) = {
+    uni expr(ExprCall(name, args)) = {
         let names: List<String> = [name];
         let i: Int = 0;
         [i < len(args)] {
@@ -121,16 +121,16 @@ defn collect_call_names(expr: Expr) -> List<String> [
         };
         term names;
     };
-    uni expr(BinOp(left, _, right)) = {
+    uni expr(ExprBinOp(left, _, right)) = {
         term collect_call_names(left) ++ collect_call_names(right);
     };
-    uni expr(UnaryOp(_, inner)) = {
+    uni expr(ExprUnaryOp(_, inner)) = {
         term collect_call_names(inner);
     };
-    uni expr(FieldAccess(inner, _)) = {
+    uni expr(ExprFieldAccess(inner, _)) = {
         term collect_call_names(inner);
     };
-    uni expr(ListExpr(elems)) = {
+    uni expr(ExprList(elems)) = {
         let names: List<String> = [];
         let i: Int = 0;
         [i < len(elems)] {
