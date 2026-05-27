@@ -917,6 +917,32 @@ impl AArch64Backend {
     }
 }
 
+/// Intent: Peephole optimization pass that eliminates redundant AArch64 instructions.
+pub fn peephole_optimize(instrs: Vec<A64Instr>) -> Vec<A64Instr> {
+    let mut result = Vec::with_capacity(instrs.len());
+    for instr in instrs {
+        match &instr {
+            A64Instr::MovImm(rd, _) if rd == "xzr" || rd == "wzr" => continue,
+            A64Instr::Nop => continue,
+            _ => {}
+        }
+
+        // Consecutive identical ops on same register (excluding xzr/wzr)
+        if let Some(prev) = result.last() {
+            match (prev, &instr) {
+                (A64Instr::AddReg(rd1, rn1, rm1), A64Instr::AddReg(rd2, rn2, rm2))
+                    if rd1 == rd2 && rn1 == rn2 && rm1 == rm2 => continue,
+                (A64Instr::SubReg(rd1, rn1, rm1), A64Instr::SubReg(rd2, rn2, rm2))
+                    if rd1 == rd2 && rn1 == rn2 && rm1 == rm2 => continue,
+                _ => {}
+            }
+        }
+
+        result.push(instr);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

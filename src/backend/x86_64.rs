@@ -953,6 +953,34 @@ impl X86_64Backend {
     }
 }
 
+/// Intent: Peephole optimization pass that eliminates redundant x86-64 instructions.
+pub fn peephole_optimize(instrs: Vec<X64Instr>) -> Vec<X64Instr> {
+    let mut result = Vec::with_capacity(instrs.len());
+    for instr in instrs {
+        match &instr {
+            X64Instr::Mov(rd, rs) if rd == rs => continue,
+            X64Instr::AddImm(rd, 0) if !rd.starts_with("rsp") && !rd.starts_with("rbp") => continue,
+            X64Instr::SubImm(rd, 0) if !rd.starts_with("rsp") && !rd.starts_with("rbp") => continue,
+            X64Instr::Nop => continue,
+            _ => {}
+        }
+
+        // Consecutive identical ops on same register
+        if let Some(prev) = result.last() {
+            match (prev, &instr) {
+                (X64Instr::Add(rd1, rs1), X64Instr::Add(rd2, rs2))
+                    if rd1 == rd2 && rs1 == rs2 => continue,
+                (X64Instr::Sub(rd1, rs1), X64Instr::Sub(rd2, rs2))
+                    if rd1 == rd2 && rs1 == rs2 => continue,
+                _ => {}
+            }
+        }
+
+        result.push(instr);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -14,7 +14,164 @@
 
 use crate::ast::{BitRange, Expr, Program, Statement, TopLevel, Type};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// Intent: Perform lifetime analysis to identify mutually exclusive state variables
+/// that can be overlaid in memory (shared same offset via union).
+struct MemoryOverlay {
+    groups: Vec<Vec<String>>,
+}
+
+impl MemoryOverlay {
+    fn new() -> Self {
+        Self { groups: Vec::new() }
+    }
+
+    fn analyze(program: &Program) -> Self {
+        let txns: Vec<&crate::ast::Transaction> = program
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let TopLevel::Transaction(txn) = item {
+                    Some(txn)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut all_assigned: Vec<String> = Vec::new();
+        for txn in &txns {
+            collect_assignments_rs(&txn.body, &mut all_assigned);
+        }
+        all_assigned.sort();
+        all_assigned.dedup();
+
+        let mut overlay_groups: Vec<Vec<String>> = Vec::new();
+        let mut used = HashSet::new();
+
+        for v in &all_assigned {
+            if used.contains(v) {
+                continue;
+            }
+            let mut group = vec![v.clone()];
+            used.insert(v.clone());
+            for w in &all_assigned {
+                if v == w || used.contains(w) {
+                    continue;
+                }
+                let simultaneous = txns.iter().any(|txn| {
+                    let reads_v = reads_variable_rs(&txn.body, v);
+                    let reads_w = reads_variable_rs(&txn.body, w);
+                    let writes_v = writes_variable_rs(&txn.body, v);
+                    let writes_w = writes_variable_rs(&txn.body, w);
+                    (reads_v || writes_v) && (reads_w || writes_w)
+                });
+                if !simultaneous {
+                    group.push(w.clone());
+                    used.insert(w.clone());
+                }
+            }
+            if group.len() > 1 {
+                overlay_groups.push(group);
+            }
+        }
+
+        Self {
+            groups: overlay_groups,
+        }
+    }
+
+    fn has_overlays(&self) -> bool {
+        !self.groups.is_empty()
+    }
+}
+
+fn collect_assignments_rs(body: &[Statement], out: &mut Vec<String>) {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs, .. } => {
+                if let Expr::Identifier(name) = lhs {
+                    out.push(name.clone());
+                }
+            }
+            Statement::Guarded { statements, .. } => collect_assignments_rs(statements, out),
+            _ => {}
+        }
+    }
+}
+
+fn reads_variable_rs(body: &[Statement], var: &str) -> bool {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { expr, .. } => {
+                let mut ids = HashSet::new();
+                RustBackend::collect_expr_ids(expr, &mut ids);
+                if ids.contains(var) {
+                    return true;
+                }
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                let mut ids = HashSet::new();
+                RustBackend::collect_expr_ids(condition, &mut ids);
+                if ids.contains(var) || reads_variable_rs(statements, var) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn writes_variable_rs(body: &[Statement], var: &str) -> bool {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs, .. } => {
+                if let Expr::Identifier(name) = lhs {
+                    if name == var {
+                        return true;
+                    }
+                }
+            }
+            Statement::Guarded { statements, .. } => {
+                if writes_variable_rs(statements, var) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Intent: Tracks guard dependencies for pre-computation caching.
+struct GuardTracker {
+    var_to_guards: HashMap<String, HashSet<String>>,
+    guard_to_vars: HashMap<String, Vec<String>>,
+    state_vars: Vec<String>,
+}
+
+impl GuardTracker {
+    fn new() -> Self {
+        Self {
+            var_to_guards: HashMap::new(),
+            guard_to_vars: HashMap::new(),
+            state_vars: Vec::new(),
+        }
+    }
+
+    fn register_guard(&mut self, guard_name: &str, dependencies: Vec<String>) {
+        for dep in &dependencies {
+            self.var_to_guards
+                .entry(dep.clone())
+                .or_default()
+                .insert(guard_name.to_string());
+        }
+        self.guard_to_vars
+            .insert(guard_name.to_string(), dependencies);
+    }
+}
 
 /// Intent: Backend that compiles Brief programs to native Rust source code.
 pub struct RustBackend {
@@ -24,6 +181,8 @@ pub struct RustBackend {
     signal_map: HashMap<String, usize>,
     pending_cleanup: RefCell<Vec<Statement>>,
     has_cycles: bool,
+    guard_tracker: GuardTracker,
+    enable_guard_cache: bool,
 }
 
 impl RustBackend {
@@ -36,6 +195,8 @@ impl RustBackend {
             signal_map: HashMap::new(),
             pending_cleanup: RefCell::new(Vec::new()),
             has_cycles: false,
+            guard_tracker: GuardTracker::new(),
+            enable_guard_cache: true,
         }
     }
 
@@ -58,6 +219,21 @@ impl RustBackend {
 
         let mut output = String::new();
 
+        // Build guard tracker
+        let state_decls = self.collect_state_declarations(program);
+        self.guard_tracker.state_vars = state_decls.iter().map(|(n, _)| n.clone()).collect();
+        for (_, txn) in self.collect_transactions(program) {
+            let mut deps = Vec::new();
+            let mut ids = HashSet::new();
+            Self::collect_expr_ids(&txn.contract.pre_condition, &mut ids);
+            for id in &ids {
+                if self.guard_tracker.state_vars.contains(id) {
+                    deps.push(id.clone());
+                }
+            }
+            self.guard_tracker.register_guard(&txn.name, deps);
+        }
+
         output.push_str("// Native Rust application - generated by Brief\n");
         let target_label = self.spec.as_ref()
             .and_then(|s| s.codegen.as_ref())
@@ -76,13 +252,27 @@ impl RustBackend {
             output.push_str("use std::fmt;\n\n");
         }
 
-        let state_decls = self.collect_state_declarations(program);
+        let memory_overlay = MemoryOverlay::analyze(program);
 
         output.push_str("#[derive(Debug, Clone)]\n");
         output.push_str("pub struct State {\n");
+        if memory_overlay.has_overlays() {
+            output.push_str("    // Memory overlay groups (mutually exclusive variables):\n");
+            for group in &memory_overlay.groups {
+                output.push_str(&format!(
+                    "    //   overlaid: {}\n",
+                    group.join(", ")
+                ));
+            }
+        }
         for (name, ty) in &state_decls {
             let rust_type = Self::get_rust_type(ty);
             output.push_str(&format!("    pub {}: {},\n", name, rust_type));
+        }
+        if self.enable_guard_cache {
+            for (guard_name, _) in &self.guard_tracker.guard_to_vars {
+                output.push_str(&format!("    pub {}_dirty: bool,\n", Self::sanitize_name(guard_name)));
+            }
         }
         output.push_str("}\n\n");
 
@@ -92,6 +282,11 @@ impl RustBackend {
         for (name, ty) in &state_decls {
             let default_val = Self::get_default_value(ty);
             output.push_str(&format!("            {}: {},\n", name, default_val));
+        }
+        if self.enable_guard_cache {
+            for (guard_name, _) in &self.guard_tracker.guard_to_vars {
+                output.push_str(&format!("            {}_dirty: true,\n", Self::sanitize_name(guard_name)));
+            }
         }
         output.push_str("        }\n");
         output.push_str("    }\n");
@@ -210,10 +405,24 @@ impl RustBackend {
             };
 
             let return_type = "bool";
+            let sanitized = Self::sanitize_name(&txn_name);
             output.push_str(&format!(
                 "    pub fn {}({}) -> {} {{\n",
-                Self::sanitize_name(&txn_name), param_str, return_type
+                sanitized, param_str, return_type
             ));
+
+            // Guard pre-computation: check dirty flag
+            if self.enable_guard_cache && self.guard_tracker.guard_to_vars.contains_key(&txn_name) {
+                output.push_str(&format!(
+                    "        if !self.{}_dirty {{\n            return true;\n        }}\n",
+                    sanitized
+                ));
+                output.push_str(&format!(
+                    "        self.{}_dirty = false;\n",
+                    sanitized
+                ));
+            }
+
             output.push_str(&format!(
                 "        // pre: {:?}\n",
                 txn.contract.pre_condition
@@ -317,7 +526,11 @@ impl RustBackend {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
                 let name = match lhs {
-                    Expr::Identifier(n) => n.clone(),
+                    Expr::Identifier(n) => {
+                        let n = n.clone();
+                        self.mark_guard_dirty(output, &n);
+                        n
+                    }
                     Expr::OwnedRef(n) => format!("self.{}", n),
                     Expr::FieldAccess(obj, field) => {
                         format!("{}.{}", self.expr_to_rust_no_self(obj), field)
@@ -786,6 +999,45 @@ impl RustBackend {
             }
             Type::Custom(_) => "Default::default()".to_string(),
             _ => "0".to_string(),
+        }
+    }
+
+    /// Intent: Collect identifier names from an expression.
+    fn collect_expr_ids(expr: &Expr, ids: &mut HashSet<String>) {
+        match expr {
+            Expr::Identifier(n) | Expr::OwnedRef(n) | Expr::PriorState(n) => {
+                ids.insert(n.clone());
+            }
+            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+            | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b)
+            | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b) | Expr::Or(a, b)
+            | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+            | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Mod(a, b) => {
+                Self::collect_expr_ids(a, ids);
+                Self::collect_expr_ids(b, ids);
+            }
+            Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) => Self::collect_expr_ids(a, ids),
+            Expr::Call(_, args) => {
+                for arg in args {
+                    Self::collect_expr_ids(arg, ids);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Intent: Mark dirty flags for guards that depend on the given state variable.
+    fn mark_guard_dirty(&self, output: &mut String, var_name: &str) {
+        if !self.enable_guard_cache {
+            return;
+        }
+        if let Some(guards) = self.guard_tracker.var_to_guards.get(var_name) {
+            for guard_name in guards {
+                output.push_str(&format!(
+                    "        self.{}_dirty = true;\n",
+                    Self::sanitize_name(guard_name)
+                ));
+            }
         }
     }
 

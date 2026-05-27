@@ -724,12 +724,15 @@ impl VhdlGenerator {
 
         o.push_str(&format!("-- Reactive transaction: {}\n", txn.name));
         o.push_str(&format!("-- Guards: {}\n", self.expr_to_string(&txn.contract.pre_condition)));
+        let pre_str = self.expr_to_string(&txn.contract.pre_condition);
+        let post_str = self.expr_to_string(&txn.contract.post_condition);
+        if pre_str != "true" && pre_str != "1" && pre_str != "'1'" {
+            o.push_str(&format!("-- psl assert never ({}) report \"Pre-condition violated for {}\";\n",
+                pre_str, txn.name));
+        }
         if !matches!(&txn.contract.post_condition, Expr::Bool(true)) {
-            o.push_str(&format!("-- psl default clock is rising_edge(clk);\n"));
-            o.push_str(&format!("-- psl assert always ({} -> next({})) report \"Contract: {}\";\n",
-                self.expr_to_string(&txn.contract.pre_condition),
-                self.expr_to_string(&txn.contract.post_condition),
-                txn.name));
+            o.push_str(&format!("-- psl assert always ({} -> next({})) report \"Post-condition violated for {}\";\n",
+                pre_str, post_str, txn.name));
         }
 
         let proc_name = format!("proc_{}", txn.name);
@@ -784,10 +787,15 @@ impl VhdlGenerator {
                 output.push_str("            end if;\n");
             }
 
+            if pre != "true" && pre != "1" && pre != "'1'" {
+                output.push_str(&format!("            -- psl assert never ({}) report \"Pre-condition violated for {}\";\n",
+                    pre, txn.name));
+            }
             if !matches!(&txn.contract.post_condition, Expr::Bool(true)) {
-                output.push_str(&format!("            -- psl assert always ({} -> next({}))\n",
-                    self.expr_to_string(&txn.contract.pre_condition),
-                    self.expr_to_string(&txn.contract.post_condition)));
+                output.push_str(&format!("            -- psl assert always ({} -> next({})) report \"Post-condition violated for {}\";\n",
+                    pre,
+                    self.expr_to_string(&txn.contract.post_condition),
+                    txn.name));
             }
         } else {
             for item in &txn.body {
@@ -1001,12 +1009,40 @@ impl VhdlGenerator {
             Type::Custom(n) if n == "HashMap" || n.starts_with("HashMap<") => {
                 format!("std_logic_vector(31 downto 0) -- HashMap (BRAM-backed)")
             }
+            Type::Custom(n) if n == "Addr" => {
+                "std_logic_vector(31 downto 0)".to_string()
+            }
             Type::Constrained(base, r) => {
-                let base_vh = self.brief_type_to_vhdl(base);
+                let is_signed = matches!(**base, Type::Int);
                 match r {
-                    BitRange::Single(n) => format!("subtype constrained is {} range {} downto 0", base_vh, n),
-                    BitRange::Range(start, end) => format!("subtype constrained is {} range {} downto {}", base_vh, end, start),
-                    BitRange::Any(n) => format!("std_logic_vector({} downto 0)", n - 1),
+                    BitRange::Single(n) => {
+                        if *n <= 1 {
+                            "std_logic".to_string()
+                        } else if is_signed {
+                            format!("signed({} downto 0)", n - 1)
+                        } else {
+                            format!("std_logic_vector({} downto 0)", n - 1)
+                        }
+                    }
+                    BitRange::Range(start, end) => {
+                        let width = end - start + 1;
+                        if width <= 1 {
+                            "std_logic".to_string()
+                        } else if is_signed {
+                            format!("signed({} downto 0)", width - 1)
+                        } else {
+                            format!("std_logic_vector({} downto 0)", width - 1)
+                        }
+                    }
+                    BitRange::Any(n) => {
+                        if *n <= 1 {
+                            "std_logic".to_string()
+                        } else if is_signed {
+                            format!("signed({} downto 0)", n - 1)
+                        } else {
+                            format!("std_logic_vector({} downto 0)", n - 1)
+                        }
+                    }
                 }
             }
             Type::Enum(name) => {

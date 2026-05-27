@@ -12,8 +12,7 @@ pub mod cobol;
 
 use crate::analysis::call_graph::CallGraph;
 use crate::analysis::range::ParameterRanges;
-use crate::ast::{Expr, Hashtag, Program, Statement, TopLevel};
-use std::collections::HashMap;
+use crate::ast::{Expr, Hashtag, Program, Statement, TopLevel, Transaction, Definition, StructDefinition};
 
 /// Run shared program analysis for backend code generation.
 ///
@@ -99,8 +98,6 @@ pub fn validate_hashtags(hashtags: &[Hashtag], backend: &str) -> Vec<HashtagVali
 
     results
 }
-
-use crate::ast::{TopLevel, Transaction, Definition, Statement, StructDefinition};
 
 /// Intent: Collect all hashtags from a list of statements recursively.
 fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Hashtag> {

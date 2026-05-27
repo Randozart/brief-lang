@@ -15,6 +15,182 @@
 use crate::ast::{Expr, LinkRef, Program, Statement, TopLevel, Type, ForeignBinding, ForeignSignature, FfiState};
 use crate::ffi::error::{ErrorConventions, generate_bounds_check, generate_null_check};
 use crate::linkage::LinkageConfig;
+use std::collections::{HashMap, HashSet};
+
+/// Intent: Perform lifetime analysis to identify mutually exclusive state variables
+/// that can be overlaid in memory.
+struct MemoryOverlay {
+    /// Map from overlay group id → list of variable names
+    groups: Vec<Vec<String>>,
+}
+
+impl MemoryOverlay {
+    fn new() -> Self {
+        Self { groups: Vec::new() }
+    }
+
+    /// Intent: Build overlay groups from a program's transactions.
+    /// Variables are mutually exclusive if they are assigned in mutually exclusive
+    /// guarded blocks.
+    fn analyze(program: &Program) -> Self {
+        let txns: Vec<&crate::ast::Transaction> = program
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let TopLevel::Transaction(txn) = item {
+                    Some(txn)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Collect all state variables that appear in assignments
+        let mut all_assigned: Vec<String> = Vec::new();
+        for txn in &txns {
+            collect_assignments(&txn.body, &mut all_assigned);
+        }
+        all_assigned.sort();
+        all_assigned.dedup();
+
+        // For each pair of variables, check if they are ever simultaneously live
+        let mut overlay_groups: Vec<Vec<String>> = Vec::new();
+        let mut used = HashSet::new();
+
+        for v in &all_assigned {
+            if used.contains(v) {
+                continue;
+            }
+            let mut group = vec![v.clone()];
+            used.insert(v.clone());
+            for w in &all_assigned {
+                if v == w || used.contains(w) {
+                    continue;
+                }
+                // Check if v and w are ever live simultaneously
+                let simultaneous = txns.iter().any(|txn| {
+                    let reads_v = reads_variable(&txn.body, v);
+                    let reads_w = reads_variable(&txn.body, w);
+                    let writes_v = writes_variable(&txn.body, v);
+                    let writes_w = writes_variable(&txn.body, w);
+                    (reads_v || writes_v) && (reads_w || writes_w)
+                });
+                if !simultaneous {
+                    group.push(w.clone());
+                    used.insert(w.clone());
+                }
+            }
+            if group.len() > 1 {
+                overlay_groups.push(group);
+            }
+        }
+
+        Self {
+            groups: overlay_groups,
+        }
+    }
+
+    fn has_overlays(&self) -> bool {
+        !self.groups.is_empty()
+    }
+}
+
+fn collect_assignments(body: &[Statement], out: &mut Vec<String>) {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs, .. } => {
+                if let Expr::Identifier(name) = lhs {
+                    out.push(name.clone());
+                }
+            }
+            Statement::Guarded { statements, .. } => collect_assignments(statements, out),
+            _ => {}
+        }
+    }
+}
+
+fn reads_variable(body: &[Statement], var: &str) -> bool {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { expr, .. } => {
+                let mut ids = HashSet::new();
+                CBackend::collect_expr_ids(expr, &mut ids);
+                if ids.contains(var) {
+                    return true;
+                }
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                let mut ids = HashSet::new();
+                CBackend::collect_expr_ids(condition, &mut ids);
+                if ids.contains(var) || reads_variable(statements, var) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn writes_variable(body: &[Statement], var: &str) -> bool {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs, .. } => {
+                if let Expr::Identifier(name) = lhs {
+                    if name == var {
+                        return true;
+                    }
+                }
+            }
+            Statement::Guarded { statements, .. } => {
+                if writes_variable(statements, var) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Intent: Tracks guard dependencies for pre-computation caching.
+struct GuardTracker {
+    /// Map from state variable name → set of guard (transaction) names that depend on it
+    var_to_guards: HashMap<String, HashSet<String>>,
+    /// Map from guard name → list of state variables it depends on
+    guard_to_vars: HashMap<String, Vec<String>>,
+    /// Names of all state variables
+    state_vars: Vec<String>,
+}
+
+impl GuardTracker {
+    fn new() -> Self {
+        Self {
+            var_to_guards: HashMap::new(),
+            guard_to_vars: HashMap::new(),
+            state_vars: Vec::new(),
+        }
+    }
+
+    fn register_guard(&mut self, guard_name: &str, dependencies: Vec<String>) {
+        for dep in &dependencies {
+            self.var_to_guards
+                .entry(dep.clone())
+                .or_default()
+                .insert(guard_name.to_string());
+        }
+        self.guard_to_vars
+            .insert(guard_name.to_string(), dependencies);
+    }
+
+    fn guard_dependencies(&self, guard_name: &str) -> Option<&Vec<String>> {
+        self.guard_to_vars.get(guard_name)
+    }
+
+    fn all_state_vars(&self) -> &[String] {
+        &self.state_vars
+    }
+}
 
 /// Intent: Backend that compiles Brief programs to C with optional inline assembly.
 pub struct CBackend {
@@ -29,6 +205,8 @@ pub struct CBackend {
     test_mode: bool,
     pending_cleanup: Vec<Statement>,
     has_cycles: bool,
+    guard_tracker: GuardTracker,
+    enable_guard_cache: bool,
 }
 
 impl CBackend {
@@ -46,6 +224,8 @@ impl CBackend {
             test_mode: false,
             pending_cleanup: Vec::new(),
             has_cycles: false,
+            guard_tracker: GuardTracker::new(),
+            enable_guard_cache: true,
         }
     }
 
@@ -121,8 +301,38 @@ impl CBackend {
         }
 
         let state_decls = self.collect_state_declarations(program);
+        let memory_overlay = MemoryOverlay::analyze(program);
 
         if !state_decls.is_empty() {
+            // Build a set of overlaid variables
+            let overlaid_vars: HashSet<String> = memory_overlay
+                .groups
+                .iter()
+                .flat_map(|g| g.iter())
+                .cloned()
+                .collect();
+
+            // Emit overlay unions when variables are never simultaneously live
+            if memory_overlay.has_overlays() {
+                for group in &memory_overlay.groups {
+                    output.push_str("/* Memory overlay for mutually exclusive variables */\n");
+                    output.push_str("union {\n");
+                    for var_name in group {
+                        let ty = state_decls
+                            .iter()
+                            .find(|(n, _)| n == var_name)
+                            .map(|(_, t)| Self::get_c_type(t))
+                            .unwrap_or_else(|| "int32_t".to_string());
+                        output.push_str(&format!(
+                            "    {} {};\n",
+                            ty,
+                            Self::sanitize_name(var_name)
+                        ));
+                    }
+                    output.push_str("};\n\n");
+                }
+            }
+
             output.push_str("typedef struct {\n");
             for (name, ty) in &state_decls {
                 let c_type = Self::get_c_type(ty);
@@ -158,14 +368,55 @@ impl CBackend {
 
         self.clear_local_vars();
 
+        // Build guard tracker for pre-computation caching
+        self.guard_tracker.state_vars = state_decls.iter().map(|(n, _)| n.clone()).collect();
+        for (_, txn) in self.collect_transactions(program) {
+            let mut deps = Vec::new();
+            let mut ids = HashSet::new();
+            Self::collect_expr_ids(&txn.contract.pre_condition, &mut ids);
+            for id in &ids {
+                if self.guard_tracker.state_vars.contains(id) {
+                    deps.push(id.clone());
+                }
+            }
+            self.guard_tracker
+                .register_guard(&txn.name, deps);
+        }
+
+        // Emit guard dirty flags
+        if self.enable_guard_cache && !self.guard_tracker.guard_to_vars.is_empty() {
+            output.push_str("/* Guard dirty flags for pre-computation caching */\n");
+            for (guard_name, _) in &self.guard_tracker.guard_to_vars {
+                output.push_str(&format!(
+                    "static bool {}_dirty = true;\n",
+                    Self::sanitize_name(guard_name)
+                ));
+            }
+            output.push_str("\n");
+        }
+
         for (_, txn) in self.collect_transactions(program) {
             self.clear_local_vars();
             output.push_str(&format!(
                 "bool {}(void) {{",
                 Self::sanitize_name(&txn.name)
             ));
+
+            // Guard pre-computation: check dirty flag
+            if self.enable_guard_cache {
+                let sanitized = Self::sanitize_name(&txn.name);
+                output.push_str(&format!(
+                    "\n    if (!{}_dirty) {{\n        return true;\n    }}",
+                    sanitized
+                ));
+                output.push_str(&format!(
+                    "\n    {}_dirty = false;\n",
+                    sanitized
+                ));
+            }
+
             output.push_str(&format!(
-                "    /* pre: {:?} */\n",
+                "\n    /* pre: {:?} */\n",
                 txn.contract.pre_condition
             ));
 
@@ -597,10 +848,12 @@ impl CBackend {
             output.push_str(&bounds_check);
 
             output.push_str(&format!("    state->{} = {};\n", Self::sanitize_name(target), result_var));
+            self.mark_guard_dirty(output, target);
             output.push_str(&format!("    goto ffi_ok_{};\n", name));
             output.push_str(&format!("ffi_error_{}:\n", name));
             output.push_str(&format!("    /* FFI error occurred for {} */\n", name));
             output.push_str(&format!("    state->{} = 0;\n", Self::sanitize_name(target)));
+            self.mark_guard_dirty(output, target);
             output.push_str(&format!("ffi_ok_{}:\n", name));
         } else {
             output.push_str(&format!("    {}({});\n", Self::sanitize_name(name), args_csv));
@@ -629,6 +882,45 @@ impl CBackend {
         txns
     }
 
+    /// Intent: Collect identifier names from an expression.
+    fn collect_expr_ids(expr: &Expr, ids: &mut HashSet<String>) {
+        match expr {
+            Expr::Identifier(n) | Expr::OwnedRef(n) | Expr::PriorState(n) => {
+                ids.insert(n.clone());
+            }
+            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+            | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b)
+            | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b) | Expr::Or(a, b)
+            | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+            | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Mod(a, b) => {
+                Self::collect_expr_ids(a, ids);
+                Self::collect_expr_ids(b, ids);
+            }
+            Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) => Self::collect_expr_ids(a, ids),
+            Expr::Call(_, args) => {
+                for arg in args {
+                    Self::collect_expr_ids(arg, ids);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Intent: Mark dirty flags for guards that depend on the given state variable.
+    fn mark_guard_dirty(&self, output: &mut String, var_name: &str) {
+        if !self.enable_guard_cache {
+            return;
+        }
+        if let Some(guards) = self.guard_tracker.var_to_guards.get(var_name) {
+            for guard_name in guards {
+                output.push_str(&format!(
+                    "    {}_dirty = true;\n",
+                    Self::sanitize_name(guard_name)
+                ));
+            }
+        }
+    }
+
     /// Intent: Convert a Brief statement to C code.
     fn statement_to_c(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
@@ -652,6 +944,7 @@ impl CBackend {
                     output.push_str(&format!("    {} = {};\n", upper, expr_code));
                 } else {
                     output.push_str(&format!("    state->{} = {};\n", Self::sanitize_name(&name), expr_code));
+                    self.mark_guard_dirty(output, &name);
                 }
             }
             Statement::Let { name, expr, address_expr, .. } => {
