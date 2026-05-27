@@ -661,6 +661,7 @@ fn run_check(
     stdlib_path: Option<PathBuf>,
     codicil_mode: bool,
     strict: bool,
+    optimize: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
@@ -751,13 +752,13 @@ fn run_check(
     }
     // Intent: Run shared program analysis (call graph + parameter ranges) to detect
     //   acyclic subgraphs eligible for optimized scheduling and bounded parameter loops.
-    let (mut call_graph, param_ranges) = backend::analyze_program(&program);
-    let has_cycles = call_graph.has_cycle();
-    let cycles = call_graph.find_all_cycles();
-    let range_count: usize = param_ranges.ranges.values().map(|m| m.len()).sum();
+    let analysis = backend::analyze_program(&program, optimize);
+    let has_cycles = analysis.call_graph.has_cycle();
+    let cycles = analysis.call_graph.find_all_cycles();
+    let range_count: usize = analysis.param_ranges.ranges.values().map(|m| m.len()).sum();
     if verbose {
         println!("[Analysis] Call graph: {} transactions, {} edges, {} cycle(s)",
-            call_graph.node_count(), call_graph.edge_count(), cycles.len());
+            analysis.call_graph.node_count(), analysis.call_graph.edge_count(), cycles.len());
         println!("[Analysis] Parameter ranges for {} transaction parameters", range_count);
         if has_cycles {
             println!("[Analysis]  Warning: cyclic dependencies detected - some transactions cannot use optimized scheduling");
@@ -1118,6 +1119,7 @@ fn run_watch(
                     stdlib_path.clone(),
                     codicil_mode,
                     strict,
+                    optimize_flag,
                 ) {
                     eprintln!("Rebuild failed: {}", e);
                 }
@@ -1268,7 +1270,7 @@ fn run_arm(
         eprintln!("  Warning: Proof errors (continuing anyway)");
     }
 
-    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+    let _analysis = backend::analyze_program(&program, false);
 
     let mut wasm_gen = backend::webstack::WebstackGenerator::new().with_target(backend::webstack::CodeTarget::Arm);
     let output = wasm_gen.generate(&program, &[], "kernel");
@@ -1342,7 +1344,7 @@ fn run_rust(
     if verbose {
         println!("  [Analysis] Call graph + parameter ranges...");
     }
-    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+    let _analysis = backend::analyze_program(&program, false);
 
     let mut rust_backend = backend::rust::RustBackend::new();
     if let Some(spec) = target_spec {
@@ -1662,7 +1664,7 @@ fn run_llvm_compile(
     }
 
     // Run shared program analysis
-    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+    let _analysis = backend::analyze_program(&program, false);
 
     let mut llvm_backend = crate::backend::llvm::LlvmBackend::new();
     if let Some(spec) = target.cloned() {
@@ -1760,7 +1762,7 @@ fn run_c(
     }
 
     // Run shared program analysis
-    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+    let _analysis = backend::analyze_program(&program, false);
 
     // Load linkage config (optional - look alongside source file)
     let linkage_path = file_path
@@ -1855,7 +1857,7 @@ fn run_cobol(
     }
 
     // Run shared program analysis
-    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+    let _analysis = backend::analyze_program(&program, false);
 
     let stem = file_path
         .file_stem()
@@ -2124,7 +2126,7 @@ fn run_verilog(
     }
 
     // Run shared program analysis
-    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+    let _analysis = backend::analyze_program(&program, false);
 
     // Verilog generation
     let stem = file_path
@@ -2353,7 +2355,7 @@ fn run_vhdl(
     }
 
     // Run shared program analysis
-    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+    let _analysis = backend::analyze_program(&program, false);
 
     // VHDL generation
     let stem = file_path
@@ -2569,7 +2571,7 @@ fn run_rbv(
         .and_then(|s| s.to_str())
         .unwrap_or("output");
 
-    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+    let _analysis = backend::analyze_program(&program, false);
 
     let mut wasm_gen = backend::webstack::WebstackGenerator::new();
     if let Some(speed) = program.reactor_speed {
@@ -2879,7 +2881,7 @@ js-sys = "0.3"
                 return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
             }
 
-            let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+            let _analysis = backend::analyze_program(&program, false);
 
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
 
@@ -2988,6 +2990,7 @@ fn main() {
         .map(PathBuf::from);
 
     let strict_flag = args.contains(&"--strict".to_string());
+    let optimize_flag = args.contains(&"--optimize".to_string()) || args.contains(&"-O".to_string());
 
     match command.as_str() {
         "check" | "ck" => {
@@ -3014,6 +3017,7 @@ fn main() {
                     stdlib_path,
                     codicil_mode,
                     strict,
+                    optimize_flag,
                 ) {
                     std::process::exit(1);
                 }
@@ -4162,7 +4166,7 @@ fn main() {
                 let path = PathBuf::from(command);
                 let codicil_mode = detect_codicil_project(&path);
                 let strict = is_strict_extension(&path);
-                if let Err(_e) = run_check(&path, false, false, false, None, codicil_mode, strict) {
+                if let Err(_e) = run_check(&path, false, false, false, None, codicil_mode, strict, optimize_flag) {
                     std::process::exit(1);
                 }
             } else if command.ends_with(".rbv") || command.ends_with(".srbv") {

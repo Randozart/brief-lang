@@ -157,7 +157,9 @@ impl AArch64Backend {
     /// Intent: Generate a complete AArch64 assembly output for the given Brief program.
     pub fn generate(&mut self, program: &Program) -> String {
         // Run shared program analysis
-        let (cg, _pr) = crate::backend::analyze_program(program);
+        let _analysis = crate::backend::analyze_program(program, false);
+        let cg = &_analysis.call_graph;
+        let _pr = &_analysis.param_ranges;
         self.has_cycles = cg.has_cycle();
         if !self.has_cycles {
             println!("  AArch64 backend: acyclic call graph — PRAXIS optimizations enabled");

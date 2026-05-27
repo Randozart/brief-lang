@@ -153,33 +153,31 @@ Functions accessing private/secret/password data must call authenticate/authoriz
 
 ## 6. Implementation Order
 
-| Priority | Task | Depends On | Effort |
-|----------|------|-----------|--------|
-| P0 | Wire `analyze_program()` in `main.rs` | None | 1 session |
-| P0 | Thread CallGraph + ParameterRanges into backends | P0 above | 1-2 sessions |
-| P0 | Fix `range.bv` AST constructors | None | 1 session |
-| P0 | Fix `backend_aarch64.bv` NOT() call | None | Minutes |
-| P0 | Fix `rust.bv`/`c.bv` Rust syntax | None | Minutes |
-| P1 | Wire `detect_fusable_pairs()` in -O path | P0 above | 1 session |
-| P1 | Wire `DataflowAnalyzer` (fix static lifetime first) | P0 above | 1 session |
-| P1 | Implement `parse_render/rstruct/foreign_signature` | None | 1-2 sessions |
-| P1 | Fix `main.bv` backend stubs | None | 1 session |
-| P1 | Praetor intent comments on touched files | Every task | Ongoing |
-| P2 | Implement peephole optimizer | P1 above | 1-2 sessions |
-| P2 | Extract memory overlay + guard caching to shared | P0 above | 1-2 sessions |
-| P2 | Rewrite `wasm.bv`, `vhdl.bv`, `verilog.bv` | P0 above | 2-3 sessions |
-| P3 | Rust parser: missing AST nodes (ListLen, ForAll, etc.) | None | 2-3 sessions |
-| P3 | Brief parser: missing expr types (Tuple, FieldAccess, etc.) | None | 2-3 sessions |
-| P3 | Language design: if/else, loops, match | CLAUDE.md discussion | Varies |
+| Priority | Task | Depends On | Effort | Status |
+|----------|------|-----------|--------|--------|
+| P0 | Wire `analyze_program()` in `main.rs` | None | 1 session | ✅ DONE |
+| P0 | Thread CallGraph + ParameterRanges into backends | P0 above | 1-2 sessions | ✅ DONE |
+| P0 | Fix `range.bv` AST constructors | None | 1 session | ✅ DONE |
+| P0 | Fix `backend_aarch64.bv` NOT() call | None | Minutes | ✅ DONE |
+| P0 | Fix `rust.bv`/`c.bv` Rust syntax | None | Minutes | ✅ DONE |
+| P0 | Implement `parse_render/rstruct/foreign_signature` | None | 1-2 sessions | ✅ DONE |
+| P0 | Create `AnalysisResults` struct + `--optimize` flag | P0 above | 1 session | ✅ DONE |
+| P0 | Fix `DataflowAnalyzer` static lifetime | P0 above | 1 session | ✅ DONE |
+| P1 | Wire `detect_fusable_pairs()` in -O path | P0 above | 1 session | PENDING |
+| P1 | Fix `main.bv` backend stubs | None | 1 session | PENDING |
+| P1 | Praetor intent comments on touched files | Every task | Ongoing | PENDING |
+| P2 | Implement peephole optimizer | P1 above | 1-2 sessions | PENDING |
+| P2 | Extract memory overlay + guard caching to shared | P0 above | 1-2 sessions | PENDING |
+| P2 | Rewrite `wasm.bv`, `vhdl.bv`, `verilog.bv` | P0 above | 2-3 sessions | PENDING |
+| P3 | Rust parser: missing AST nodes (ListLen, ForAll, etc.) | None | 2-3 sessions | PENDING |
+| P3 | Brief parser: missing expr types (Tuple, FieldAccess, etc.) | None | 2-3 sessions | PENDING |
+| P3 | Language design: if/else, loops, match | CLAUDE.md discussion | Varies | PENDING |
 
 ---
 
-## 7. Commit Strategy
+## 7. Commit Log
 
-Each session produces one commit with:
-1. The work done (which section from this plan)
-2. Praetor fixes for all touched files
-3. Updated test count (all must pass)
-4. Updated plan status
+- `15742b2` (2026-05-27): Fix Brief bugs (NOT(), range.bv, String::new()), implement stub parsers, wire analyze_program into all backends
+- `current` (2026-05-27): Create AnalysisResults struct, fix DataflowAnalyzer lifetime, add --optimize CLI flag, wire fusable_pairs + dataflow in -O mode
 
-Commit message format: `Phase 2.X: <summary>`
+---

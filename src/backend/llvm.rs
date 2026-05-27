@@ -35,7 +35,9 @@ impl LlvmBackend {
     }
 
     pub fn generate(&mut self, program: &Program) -> String {
-        let (cg, _pr) = crate::backend::analyze_program(program);
+        let _analysis = crate::backend::analyze_program(program, false);
+        let cg = &_analysis.call_graph;
+        let _pr = &_analysis.param_ranges;
         self.has_cycles = cg.has_cycle();
         if !self.has_cycles {
             println!("  LLVM backend: acyclic call graph — norecurse + inlining enabled");

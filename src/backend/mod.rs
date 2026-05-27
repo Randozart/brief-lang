@@ -12,23 +12,50 @@ pub mod cobol;
 
 use crate::analysis::call_graph::CallGraph;
 use crate::analysis::range::ParameterRanges;
+use crate::analysis::dataflow::DataflowError;
 use crate::ast::{Expr, Hashtag, Program, Statement, TopLevel, Transaction, Definition, StructDefinition};
 
-/// Run shared program analysis for backend code generation.
-///
-/// Returns a CallGraph (acyclic detection) and ParameterRanges (bounds inference).
-/// Backends use these to:
-/// - Acyclic: static dispatch, no recursion guards, inlining
-/// - Cyclic: dynamic dispatch, recursion depth limits, bounded execution
-/// - Bounded params: loop unrolling, fixed-size allocations
-pub fn analyze_program(program: &Program) -> (CallGraph, ParameterRanges) {
+/// Intent: Container for all shared analysis results that backends can consume.
+/// Backends check `optimize_mode` to decide whether to use optimized paths
+/// (pre-scheduled DAG emission) or fall back to full idiomatic codegen.
+pub struct AnalysisResults {
+    pub call_graph: CallGraph,
+    pub param_ranges: ParameterRanges,
+    pub fusable_pairs: Vec<(String, String)>,
+    pub dataflow_errors: Vec<DataflowError>,
+    pub optimize_mode: bool,
+}
+
+/// Intent: Run shared program analysis for backend code generation.
+/// Returns an AnalysisResults with CallGraph, ParameterRanges, fusable pairs,
+/// and dataflow errors. When optimize is true, runs extra analysis passes.
+pub fn analyze_program(program: &Program, optimize: bool) -> AnalysisResults {
     let mut cg = CallGraph::new();
     cg.build_from_program(program);
 
     let mut pr = ParameterRanges::new();
     pr.analyze(program);
 
-    (cg, pr)
+    let fusable_pairs = if optimize {
+        detect_fusable_pairs(program)
+    } else {
+        Vec::new()
+    };
+
+    let dataflow_errors = if optimize {
+        let analyzer = crate::analysis::dataflow::DataflowAnalyzer::new(program);
+        analyzer.analyze()
+    } else {
+        Vec::new()
+    };
+
+    AnalysisResults {
+        call_graph: cg,
+        param_ranges: pr,
+        fusable_pairs,
+        dataflow_errors,
+        optimize_mode: optimize,
+    }
 }
 
 /// Intent: Return the list of hashtags supported by a given backend name.
