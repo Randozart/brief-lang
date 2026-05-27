@@ -2973,6 +2973,63 @@ let span = self.current_span();
         Ok(statements)
     }
 
+    /// Extract the base identifier from a potentially nested access expression.
+    /// For `program.items[i]` → returns "program".
+    fn get_base_identifier(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Identifier(n) => n.clone(),
+            Expr::ListIndex(inner, _) | Expr::FieldAccess(inner, _) => self.get_base_identifier(inner),
+            _ => String::new(),
+        }
+    }
+
+    /// Supports block style: { stmts } or expression.
+    fn parse_unification_rhs(&mut self) -> Result<Expr, SyntaxError> {
+        if let Some(Ok(Token::LBrace)) = self.current_token() {
+            self.advance();
+            let mut stmts = Vec::new();
+            loop {
+                if let Some(Ok(Token::RBrace)) = self.current_token() {
+                    self.advance();
+                    break;
+                }
+                stmts.push(self.parse_statement()?);
+            }
+            Ok(Expr::Block(stmts, Box::new(Expr::Bool(true))))
+        } else {
+            self.parse_expression()
+        }
+    }
+
+    /// Parse the target of a unification statement: an identifier with optional [index]
+    /// or .field access, but stopping before (Pattern) which belongs to unification.
+    fn parse_uni_target(&mut self) -> Result<Expr, SyntaxError> {
+        let ident = self.expect_identifier()?;
+        let mut expr = Expr::Identifier(ident);
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::Dot)) => {
+                    self.advance();
+                    let field = self.expect_identifier()?;
+                    if let Some(Ok(Token::LParen)) = self.current_token() {
+                        return Ok(Expr::FieldAccess(Box::new(expr), field));
+                    }
+                    expr = Expr::FieldAccess(Box::new(expr), field);
+                }
+                Some(Ok(Token::LBracket)) => {
+                    self.advance();
+                    let index = self.parse_expression()?;
+                    self.expect(Token::RBracket)?;
+                    expr = Expr::ListIndex(Box::new(expr), Box::new(index));
+                }
+                // Stop at LParen — it belongs to the unification pattern
+                Some(Ok(Token::LParen)) => break,
+                _ => break,
+            }
+        }
+        Ok(expr)
+    }
+
     fn parse_statement(&mut self) -> Result<Statement, SyntaxError> {
         match self.current_token() {
             Some(Ok(Token::Let)) => {
@@ -3114,28 +3171,20 @@ let span = self.current_span();
                 Ok(Statement::Escape(expr))
             }
             Some(Ok(Token::Unification)) => {
-                // Two syntaxes supported:
-                // 1. uni pattern = expr; (current Brief style)
-                // 2. uni variable(Pattern) = result; (Brief compiler library style)
+                // Three syntaxes supported:
+                // 1. uni variable(Pattern) = result; (library pattern match)
+                // 2. uni expr[Index](Pattern) = result; (indexed pattern match)
+                // 3. uni pattern = expr; (simple pattern)
                 self.advance();
                 
-                // Get the first token - could be variable name or pattern
-                let first = match self.current_token() {
-                    Some(Ok(Token::Identifier(name))) => name.clone(),
-                    Some(Ok(Token::TypeData)) => "Data".to_string(),
-                    Some(Ok(Token::Ok)) => "Ok".to_string(),
-                    Some(Ok(Token::Err)) => "Err".to_string(),
-                    Some(Ok(Token::Some)) => "Some".to_string(),
-                    Some(Ok(Token::None)) => "None".to_string(),
-                    _ => return self.spanned_err("Expected pattern after uni".to_string()),
-                };
-                self.advance();
+                // Read target: an identifier, possibly with [index] access, but NOT with
+                // postfix (Pattern) — those belong to the unification pattern, not a call.
+                let target = self.parse_uni_target()?;
                 
-                // Check what follows: ( for library style or = for current style
+                // If followed by (, this is library-style pattern matching
                 if let Some(Ok(Token::LParen)) = self.current_token() {
-                    // Library style: uni variable(Pattern) = result;
-                    // First token was the variable name, now parse the pattern
-                    let var_name = first;
+                    // Extract the base variable name from nested access expressions
+                    let var_name = self.get_base_identifier(&target);
                     self.advance(); // consume (
                     
                     // Parse pattern - could be Variant or Variant(data) or just _
@@ -3146,20 +3195,7 @@ let span = self.current_span();
                             let pattern = "_".to_string();
                             self.expect(Token::RParen)?;
                             self.expect(Token::Eq)?;
-                            let expr = if let Some(Ok(Token::LBrace)) = self.current_token() {
-                                self.advance();
-                                let mut stmts = Vec::new();
-                                loop {
-                                    if let Some(Ok(Token::RBrace)) = self.current_token() {
-                                        self.advance();
-                                        break;
-                                    }
-                                    stmts.push(self.parse_statement()?);
-                                }
-                                Expr::Block(stmts, Box::new(Expr::Bool(true)))
-                            } else {
-                                self.parse_expression()?
-                            };
+                            let expr = self.parse_unification_rhs()?;
                             self.expect(Token::Semicolon)?;
                             return Ok(Statement::Unification {
                                 name: var_name,
@@ -3177,49 +3213,38 @@ let span = self.current_span();
                         Some(Ok(Token::TypeString)) => "String".to_string(),
                         Some(Ok(Token::TypeBool)) => "Bool".to_string(),
                         Some(Ok(Token::TypeChar)) => "Char".to_string(),
-                        Some(Ok(Token::Let)) => "KeywordLet".to_string(),
-                        Some(Ok(Token::Const)) => "KeywordConst".to_string(),
-                        Some(Ok(Token::Txn)) => "KeywordTxn".to_string(),
-                        Some(Ok(Token::Rct)) => "KeywordRct".to_string(),
-                        Some(Ok(Token::Async)) => "KeywordAsync".to_string(),
-                        Some(Ok(Token::Term)) => "KeywordTerm".to_string(),
-                        Some(Ok(Token::Escape)) => "KeywordEscape".to_string(),
-                        Some(Ok(Token::Defn)) => "KeywordDefn".to_string(),
-                        Some(Ok(Token::Sig)) => "KeywordSig".to_string(),
-                        Some(Ok(Token::Frgn)) => "KeywordFrgn".to_string(),
-                        Some(Ok(Token::Struct)) => "KeywordStruct".to_string(),
-                        Some(Ok(Token::Enum)) => "KeywordEnum".to_string(),
-                        Some(Ok(Token::Import)) => "KeywordImport".to_string(),
-                        Some(Ok(Token::From)) => "KeywordFrom".to_string(),
-                        Some(Ok(Token::As)) => "KeywordAs".to_string(),
-                        Some(Ok(Token::BoolTrue)) => "KeywordTrue".to_string(),
-                        Some(Ok(Token::BoolFalse)) => "KeywordFalse".to_string(),
                         Some(Ok(Token::TypeFloat)) => "Float".to_string(),
                         Some(Ok(Token::TypeVoid)) => "Void".to_string(),
                         Some(Ok(Token::TypeUInt)) => "UInt".to_string(),
+                        Some(Ok(Token::BoolTrue)) => "KeywordTrue".to_string(),
+                        Some(Ok(Token::BoolFalse)) => "KeywordFalse".to_string(),
+                        Some(Ok(Token::Let)) => "KeywordLet".to_string(),
+                        Some(Ok(Token::Txn)) => "KeywordTxn".to_string(),
+                        Some(Ok(Token::Defn)) => "KeywordDefn".to_string(),
+                        Some(Ok(Token::Sig)) => "KeywordSig".to_string(),
+                        Some(Ok(Token::Enum)) => "KeywordEnum".to_string(),
+                        Some(Ok(Token::Struct)) => "KeywordStruct".to_string(),
+                        Some(Ok(Token::Frgn)) => "KeywordFrgn".to_string(),
+                        Some(Ok(Token::Import)) => "KeywordImport".to_string(),
+                        Some(Ok(Token::Term)) => "KeywordTerm".to_string(),
+                        Some(Ok(Token::Rct)) => "KeywordRct".to_string(),
+                        Some(Ok(Token::Async)) => "KeywordAsync".to_string(),
+                        Some(Ok(Token::Escape)) => "KeywordEscape".to_string(),
+                        Some(Ok(Token::Unification)) => "KeywordUnification".to_string(),
+                        Some(Ok(Token::Render)) => "KeywordRender".to_string(),
                         Some(Ok(Token::Rstruct)) => "KeywordRstruct".to_string(),
                         Some(Ok(Token::Registry)) => "KeywordRegistry".to_string(),
                         Some(Ok(Token::Trg)) => "KeywordTrg".to_string(),
                         Some(Ok(Token::TrgBang)) => "KeywordTrgBang".to_string(),
-                        Some(Ok(Token::Syscall)) => "KeywordSyscall".to_string(),
-                        Some(Ok(Token::Resource)) => "KeywordResource".to_string(),
-                        Some(Ok(Token::Rsrc)) => "KeywordRsrc".to_string(),
                         Some(Ok(Token::Link)) => "KeywordLink".to_string(),
                         Some(Ok(Token::Asm)) => "KeywordAsm".to_string(),
-                        Some(Ok(Token::Stage)) => "KeywordStage".to_string(),
-                        Some(Ok(Token::On)) => "KeywordOn".to_string(),
-                        Some(Ok(Token::Forall)) => "KeywordForall".to_string(),
-                        Some(Ok(Token::Exists)) => "KeywordExists".to_string(),
-                        Some(Ok(Token::Within)) => "KeywordWithin".to_string(),
                         Some(Ok(Token::Bank)) => "KeywordBank".to_string(),
                         Some(Ok(Token::Match)) => "KeywordMatch".to_string(),
-                        Some(Ok(Token::Unification)) => "KeywordUnification".to_string(),
-                        Some(Ok(Token::Render)) => "KeywordRender".to_string(),
                         _ => return self.spanned_err(format!("Expected pattern variant, found {:?}", self.current_token()).to_string()),
                     };
                     self.advance();
                     
-                    // Check for pattern data: Variant(field1, field2, ...) or Variant(_) or just Variant
+                    // Check for pattern data: Variant(field1, ...) or just Variant
                     let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
                         self.advance();
                         let mut fields = Vec::new();
@@ -3241,28 +3266,13 @@ let span = self.current_span();
                         }
                         self.expect(Token::RParen)?;
                         format!("{}({})", pattern_name, fields.join(","))
-                    } else {
+} else {
                         pattern_name.clone()
                     };
                     
                     self.expect(Token::RParen)?;
                     self.expect(Token::Eq)?;
-                    // Check for block-style result: { stmts... }
-                    let expr = if let Some(Ok(Token::LBrace)) = self.current_token() {
-                        self.advance();
-                        let mut stmts = Vec::new();
-                        loop {
-                            if let Some(Ok(Token::RBrace)) = self.current_token() {
-                                self.advance();
-                                break;
-                            }
-                            stmts.push(self.parse_statement()?);
-                        }
-                        // Block needs a final expression - use a placeholder for now
-                        Expr::Block(stmts, Box::new(Expr::Bool(true)))
-                    } else {
-                        self.parse_expression()?
-                    };
+                    let expr = self.parse_unification_rhs()?;
                     self.expect(Token::Semicolon)?;
                     Ok(Statement::Unification {
                         name: var_name,
@@ -3270,16 +3280,11 @@ let span = self.current_span();
                         expr,
                     })
                 } else {
-                    // Current Brief style: uni pattern = expr;
-                    let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
-                        self.advance();
-                        let field = self.expect_identifier()?;
-                        self.expect(Token::RParen)?;
-                        format!("{}:{}", first, field)
-                    } else {
-                        first
+                    // Simple pattern: uni pattern = expr;
+                    let pattern = match &target {
+                        Expr::Identifier(n) => n.clone(),
+                        _ => return self.spanned_err("Expected pattern name after uni".to_string()),
                     };
-                    
                     self.expect(Token::Eq)?;
                     let expr = self.parse_expression()?;
                     self.expect(Token::Semicolon)?;
