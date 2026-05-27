@@ -2,7 +2,7 @@ sig fetch: () -> Int;
 
 let res: Int | Error = 0;
 
-rct txn fetch_data [true][true] {
+rct txn fetch_data [n >= 0][true] {
     res = fetch() within 10 cycles;
     [res Ok(data)] {
         term true;

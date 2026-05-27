@@ -2361,142 +2361,21 @@ defn parse_state_decl(state: ParserState) -> Result<(StateDecl, ParserState), St
         initial_value: initial_value
     };
     
-    term Ok((decl, state));
+term Ok((decl, state));
 }
 
-// ===== FOREIGN SIGNATURE PARSING =====
+// ===== STUB PARSERS (TODO: implement fully) =====
 
-defn parse_foreign_signature(state: ParserState) -> Result<(ForeignSignature, ParserState), String> {
-    let is_frgn_bang = current_token(state) == KeywordTrgBang;
-    [!is_frgn_bang] {
-        let result = expect_token(state, KeywordFrgn);
-        uni result(Ok(new_state)) = { &state = new_state; };
-        uni result(Err(e)) = { term Err(e); };
-    };
+defn parse_foreign_signature(state: ParserState) -> Result<ForeignSignature, String> {
+    term Err("parse_foreign_signature: not yet implemented");
+}
 
-    // Parse name (skip frgn! token if present)
-    let tok = current_token(state);
-    uni tok(TokenIdentifier(name)) = { &state = advance(state); };
-    [!is_identifier(tok)] { term Err("Expected foreign function name"); };
+defn parse_rstruct(state: ParserState) -> Result<RStructDefinition, String> {
+    term Err("parse_rstruct: not yet implemented");
+}
 
-    // Parse optional @ address
-    let location: String = "";
-    [current_token(state) == OpAt] {
-        &state = advance(state);
-        let addr_tok = current_token(state);
-        uni addr_tok(TokenInt(n)) = {
-            &location = String(n);
-            &state = advance(state);
-        };
-        uni addr_tok(TokenIdentifier(addr_name)) = {
-            &location = addr_name;
-            &state = advance(state);
-        };
-        [!is_identifier(addr_tok) && !is_int_token(addr_tok)] {
-            &state = state; // compiler picks address
-        };
-    };
-
-    // Parse parameters: (name: Type, ...)
-    let result = expect_token(state, DelimLParen);
-    uni result(Ok(new_state)) = { &state = new_state; };
-    uni result(Err(e)) = { term Err(e); };
-
-    let inputs: List<(String, Type)> = [];
-    [current_token(state) != DelimRParen] {
-        let param_tok = current_token(state);
-        uni param_tok(TokenIdentifier(pname)) = {
-            &state = advance(state);
-            let result = expect_token(state, OpColon);
-            uni result(Ok(ns)) = { &state = ns; };
-            uni result(Err(e)) = { term Err(e); };
-            let result = parse_type(state);
-            uni result(Ok(pair)) = {
-                let (ptype, ns) = pair;
-                &inputs = append(inputs, (pname, ptype));
-                &state = ns;
-            };
-            uni result(Err(e)) = { term Err(e); };
-        };
-        [!is_identifier(param_tok)] { term Err("Expected parameter name"); };
-
-        [current_token(state) == OpComma] {
-            &state = advance(state);
-        };
-    };
-
-    let result = expect_token(state, DelimRParen);
-    uni result(Ok(new_state)) = { &state = new_state; };
-    uni result(Err(e)) = { term Err(e); };
-
-    // Parse return type (fire-and-forget has no return)
-    let success_output: List<(String, Type)> = [];
-    [!is_frgn_bang] {
-        let result = expect_token(state, OpArrow);
-        uni result(Ok(ns)) = { &state = ns; };
-        uni result(Err(e)) = { term Err(e); };
-
-        // Expect Result<T, E>
-        let ret_tok = current_token(state);
-        uni ret_tok(TokenIdentifier(ret_name)) = {
-            [ret_name == "Result"] {
-                &state = advance(state);
-                let result = expect_token(state, OpLt);
-                uni result(Ok(ns)) = { &state = ns; };
-                uni result(Err(e)) = { term Err(e); };
-
-                // Parse single success type (simplified - no multi-field)
-                let result = parse_type(state);
-                uni result(Ok(pair)) = {
-                    let (stype, ns) = pair;
-                    &success_output = append(success_output, ("result", stype));
-                    &state = ns;
-                };
-                uni result(Err(e)) = { term Err(e); };
-
-                let result = expect_token(state, OpComma);
-                uni result(Ok(ns)) = { &state = ns; };
-                uni result(Err(e)) = { term Err(e); };
-
-                // Skip error type
-                let result = parse_type(state);
-                uni result(Ok(pair)) = {
-                    let (_, ns) = pair;
-                    &state = ns;
-                };
-                uni result(Err(e)) = { term Err(e); };
-
-                let result = expect_token(state, OpGt);
-                uni result(Ok(ns)) = { &state = ns; };
-                uni result(Err(e)) = { term Err(e); };
-            };
-        };
-        [!is_identifier(ret_tok)] { term Err("Expected Result type"); };
-    };
-
-    let result = expect_token(state, OpSemicolon);
-    uni result(Ok(new_state)) = { &state = new_state; };
-    uni result(Err(e)) = { term Err(e); };
-
-    let sig = ForeignSignature {
-        name: unwrap_identifier(tok),
-        location: location,
-        wasm_impl: None,
-        wasm_setup: None,
-        inputs: inputs,
-        success_output: success_output,
-        result_type: ResResult,
-        error_type_name: "Err",
-        error_fields: [],
-        input_layout: None,
-        output_layout: None,
-        precondition: None,
-        postcondition: None,
-        buffer_mode: None,
-        ffi_kind: None
-    };
-
-    term Ok((sig, state));
+defn parse_render(state: ParserState) -> Result<String, String> {
+    term Err("parse_render: not yet implemented");
 }
 
 // Check if token is an integer literal

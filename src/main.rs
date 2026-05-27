@@ -752,7 +752,7 @@ if verbose {
     }
     // Intent: Run shared program analysis (call graph + parameter ranges) to detect
     //   acyclic subgraphs eligible for optimized scheduling and bounded parameter loops.
-    let mut analysis = backend::analyze_program(&program, optimize);
+    let analysis = backend::analyze_program(&program, optimize);
 
     // Peephole optimization in --optimize mode
     let program = if optimize {
@@ -778,19 +778,27 @@ if verbose {
                 println!("[Optimizer]  Eliminated {} redundant statements", removed_count);
             }
         }
-        // Re-run analysis on optimized program to get fresh call graph
-        analysis = backend::analyze_program(&transformed, optimize);
         transformed
     } else {
         program
     };
 
+    // Re-run analysis if optimized to get fresh call graph
+    let analysis = if optimize {
+        backend::analyze_program(&program, optimize)
+    } else {
+        analysis
+    };
+
     let has_cycles = analysis.call_graph.has_cycle();
-    let cycles = analysis.call_graph.find_all_cycles();
+    let mut cg = analysis.call_graph.clone();
+    let cycles: Vec<Vec<String>> = cg.find_all_cycles().to_vec();
+    let node_count = cg.node_count();
+    let edge_count = cg.edge_count();
     let range_count: usize = analysis.param_ranges.ranges.values().map(|m| m.len()).sum();
     if verbose {
         println!("[Analysis] Call graph: {} transactions, {} edges, {} cycle(s)",
-            analysis.call_graph.node_count(), analysis.call_graph.edge_count(), cycles.len());
+            cg.node_count(), cg.edge_count(), cycles.len());
         println!("[Analysis] Parameter ranges for {} transaction parameters", range_count);
         if has_cycles {
             println!("[Analysis]  Warning: cyclic dependencies detected - some transactions cannot use optimized scheduling");
@@ -823,6 +831,7 @@ fn run_build(
     emit_memory_spec: bool,
     memory_spec_format: &str,
     strict: bool,
+    optimize: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Detect source type from extension
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -834,7 +843,7 @@ fn run_build(
             if ext == "sbv" {
                 println!("  Strict mode: full pre/postcondition verification enforced");
             }
-            run_rust(file_path, out_dir, no_stdlib, stdlib_path, None, emit_memory_spec, memory_spec_format, strict)?;
+            run_rust(file_path, out_dir, no_stdlib, stdlib_path, None, emit_memory_spec, memory_spec_format, strict, verbose, optimize)?;
 
             // Try to compile the generated Rust
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
@@ -1128,6 +1137,7 @@ fn run_watch(
     verbose: bool,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
+    optimize: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -1151,7 +1161,7 @@ fn run_watch(
                     stdlib_path.clone(),
                     codicil_mode,
                     strict,
-                    optimize_flag,
+                    optimize,
                 ) {
                     eprintln!("Rebuild failed: {}", e);
                 }
@@ -1336,6 +1346,8 @@ fn run_rust(
     emit_memory_spec: bool,
     memory_spec_format: &str,
     strict: bool,
+    verbose: bool,
+    optimize: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to Native Rust: {}", file_path.display());
     if strict {
@@ -1376,7 +1388,7 @@ fn run_rust(
     if verbose {
         println!("  [Analysis] Call graph + parameter ranges...");
     }
-    let _analysis = backend::analyze_program(&program, false);
+    let _analysis = backend::analyze_program(&program, optimize);
 
     let mut rust_backend = backend::rust::RustBackend::new();
     if let Some(spec) = target_spec {
@@ -1414,7 +1426,7 @@ fn run_rust(
 }
 
 /// Intent: run compile unified.
-fn run_compile_unified(args: &[String], strict_flag: bool) {
+fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) {
     let mut file_path = None;
     let mut target: Option<&str> = None;
     let mut out_dir = None;
@@ -1554,7 +1566,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool) {
             }
         },
         "rust" => {
-            match run_rust_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref(), emit_memory_spec, memory_spec_format, is_strict) {
+            match run_rust_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref(), emit_memory_spec, memory_spec_format, is_strict, verbose, false) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1658,8 +1670,10 @@ fn run_rust_compile(
     emit_memory_spec: bool,
     memory_spec_format: &str,
     strict: bool,
+    verbose: bool,
+    optimize: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_rust(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), emit_memory_spec, memory_spec_format, strict)
+    run_rust(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), emit_memory_spec, memory_spec_format, strict, verbose, optimize)
 }
 
 /// Intent: run cobol compile.
@@ -3061,7 +3075,7 @@ fn main() {
         }
 
         "compile" => {
-            run_compile_unified(&args, strict_flag);
+            run_compile_unified(&args, strict_flag, optimize_flag);
         }
 
         "build" | "b" => {
@@ -3086,7 +3100,7 @@ fn main() {
             if let Some(path) = file_path {
                 let out = out_dir.as_deref();
                 let strict = strict_flag || is_strict_extension(&path);
-                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format, strict) {
+                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format, strict, optimize_flag) {
                     Ok(output) => {
                         println!("Build complete: {}", output.display());
                     }
@@ -3125,7 +3139,7 @@ fn main() {
 
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
-                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), None, emit_memory_spec, memory_spec_format, strict) {
+                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), None, emit_memory_spec, memory_spec_format, strict, verbose, optimize_flag) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
@@ -3283,7 +3297,7 @@ fn main() {
                 .map(PathBuf::from);
 
             if let Some(path) = file_path {
-                if let Err(e) = run_watch(path, verbose, no_stdlib, stdlib_path.clone()) {
+                if let Err(e) = run_watch(path, verbose, no_stdlib, stdlib_path.clone(), optimize_flag) {
                     eprintln!("Watch error: {}", e);
                     std::process::exit(1);
                 }

@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 /// Backends query `has_cycle()` to decide codegen strategy:
 /// - Acyclic: can use static dispatch, no recursion guards
 /// - Cyclic: must use dynamic dispatch, recursion guards, or bounded execution
+#[derive(Clone)]
 pub struct CallGraph {
     graph: HashMap<String, Vec<String>>,
     txn_names: HashSet<String>,
