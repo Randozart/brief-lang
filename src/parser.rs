@@ -3614,6 +3614,15 @@ let span = self.current_span();
             }
             // If @ is not followed by /, don't consume it - let the caller handle it
         }
+
+        // Check for contract bound: Type[expr] (e.g. Int[product > 0])
+        if let Some(Ok(Token::LBracket)) = self.current_token() {
+            self.advance();
+            let contract_expr = self.parse_expression()?;
+            self.expect(Token::RBracket)?;
+            ty = Type::ContractBound(Box::new(ty), Box::new(contract_expr));
+        }
+
         if let Some(Ok(Token::Lt)) = self.current_token() {
             self.advance();
             
@@ -4112,6 +4121,18 @@ let span = self.current_span();
                 let val = *val;
                 self.advance();
                 Ok(Expr::Integer(val))
+            }
+            Some(Ok(Token::Forall)) => {
+                self.advance();
+                let var = self.expect_identifier()?;
+                let expr = self.parse_expression()?;
+                Ok(Expr::ForAll { var, expr: Box::new(expr) })
+            }
+            Some(Ok(Token::Exists)) => {
+                self.advance();
+                let var = self.expect_identifier()?;
+                let expr = self.parse_expression()?;
+                Ok(Expr::Exists { var, expr: Box::new(expr) })
             }
             Some(Ok(Token::Float(val))) => {
                 let val = *val;
