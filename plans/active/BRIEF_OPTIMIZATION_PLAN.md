@@ -169,7 +169,7 @@ Functions accessing private/secret/password data must call authenticate/authoriz
 | P2 | Implement peephole optimizer | P1 above | 1-2 sessions | ✅ DONE |
 | P2 | Extract memory overlay + guard caching to shared | P0 above | 1-2 sessions | ✅ DONE |
 | P2 | Rewrite `wasm.bv`, `vhdl.bv`, `verilog.bv` | P0 above | 2-3 sessions | PENDING |
-| P3 | Rust parser: missing AST nodes (ListLen, ForAll, etc.) | None | 2-3 sessions | PENDING |
+| P3 | Rust parser: missing AST nodes (ListLen, ForAll, Exists, Block, ContractBound, TypeVar, Sig, Enum) | None | 2-3 sessions | ✅ DONE |
 | P3 | Brief parser: missing expr types (Tuple, FieldAccess, etc.) | None | 2-3 sessions | PENDING |
 | P3 | Language design: if/else, loops, match | CLAUDE.md discussion | Varies | PENDING |
 
