@@ -4093,7 +4093,13 @@ let span = self.current_span();
                 }
             } else if let Some(Ok(Token::Dot)) = self.current_token() {
                 self.advance();
-                let member_name = self.expect_identifier()?;
+                let member_name = if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                    let s = n.to_string();
+                    self.advance();
+                    s
+                } else {
+                    self.expect_identifier()?
+                };
                 if let Some(Ok(Token::LParen)) = self.current_token() {
                     self.advance();
                     let mut args = Vec::new();
@@ -4158,7 +4164,13 @@ let span = self.current_span();
                 }
             } else if let Some(Ok(Token::Dot)) = self.current_token() {
                 self.advance();
-                let member_name = self.expect_identifier()?;
+                let member_name = if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                    let s = n.to_string();
+                    self.advance();
+                    s
+                } else {
+                    self.expect_identifier()?
+                };
                 if let Some(Ok(Token::LParen)) = self.current_token() {
                     self.advance();
                     let mut args = Vec::new();

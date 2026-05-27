@@ -99,8 +99,9 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     uni expr(ExprVar(name)) = {
         [state.vars.contains_key(name)] {
             term state.vars.get(name).unwrap();
-        };
-        term SymVar(name);
+};
+        term SymFloat(l + r);
+    };
     };
     
     // Prior state (@var)
@@ -112,12 +113,12 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     uni expr(ExprBinOp(op, left, right)) = {
         let left_sym = eval_symbolic(left, state);
         let right_sym = eval_symbolic(right, state);
-        term SymBinaryOp(op, Box(left_sym), Box(right_sym));
+        term SymBinaryOp(op, left_sym, right_sym);
     };
     
     // Unary operations
     uni expr(ExprUnaryOp(op, operand)) = {
-        let operand_sym = eval_symbolic(*operand, state);
+        let operand_sym = eval_symbolic(operand, state);
         term SymUnaryOp(op, Box(operand_sym));
     };
     
@@ -129,19 +130,24 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
 
 defn simplify(sym: SymbolicValue) -> SymbolicValue {
     uni sym(SymBinaryOp(op, left, right)) = {
-        let left_simp = simplify(*left);
-        let right_simp = simplify(*right);
+        let left_simp = simplify(left);
+        let right_simp = simplify(right);
         
         // Constant folding
-        uni (left_simp, right_simp) = (SymInt(l), SymInt(r)) = {
+        uni left_simp(SymInt(l)) = {
+            uni right_simp(SymInt(r)) = {
             [op == "+"] { term SymInt(l + r); };
             [op == "-"] { term SymInt(l - r); };
             [op == "*"] { term SymInt(l * r); };
             [op == "/"] { [r != 0] { term SymInt(l / r); }; };
             [op == "%"] { [r != 0] { term SymInt(l % r); }; };
+            [true] { term SymUnknown; };
+        };
+        [true] { term SymUnknown; };
         };
         
-        uni (left_simp, right_simp) = (SymFloat(l), SymFloat(r)) = {
+        uni left_simp(SymFloat(l)) = {
+            uni right_simp(SymFloat(r)) = {
             [op == "+"] { term SymFloat(l + r); };
             [op == "-"] { term SymFloat(l - r); };
             [op == "*"] { term SymFloat(l * r); };
@@ -175,11 +181,11 @@ defn simplify(sym: SymbolicValue) -> SymbolicValue {
             term SymInt(0);
         };
         
-        term SymBinaryOp(op, Box(left_simp), Box(right_simp));
+        term SymBinaryOp(op, left_simp), right_simp));
     };
     
     uni sym(SymUnaryOp(op, operand)) = {
-        let operand_simp = simplify(*operand);
+        let operand_simp = simplify(operand);
         
         uni (op, operand_simp) = ("-", SymInt(n)) = {
             term SymInt(-n);
@@ -407,8 +413,8 @@ defn verify_contract(txn: Transaction) -> ProofResult {
                 // Try structural comparison: evaluate left and right sides separately
                 // and check if they match after resolving @var to initial values
                 uni txn.contract.postcondition(ExprBinOp("==", left, right)) = {
-                    let left_sym = simplify(eval_symbolic(*left, path.final_state));
-                    let right_sym = simplify(eval_symbolic(*right, path.final_state));
+                    let left_sym = simplify(eval_symbolic(left, path.final_state));
+                    let right_sym = simplify(eval_symbolic(right, path.final_state));
                     
                     // Structural comparison with @-resolution: replace @var with initial value
                     let left_str = sym_to_debug_string(left_sym);
@@ -460,12 +466,12 @@ defn extract_var_names(expr: Expr) -> List<String> {
         term ["@" + name];
     };
     uni expr(ExprBinOp(_, left, right)) = {
-        let l_vars = extract_var_names(*left);
-        let r_vars = extract_var_names(*right);
+        let l_vars = extract_var_names(left);
+        let r_vars = extract_var_names(right);
         term l_vars.append_all(r_vars);
     };
     uni expr(ExprUnaryOp(_, operand)) = {
-        term extract_var_names(*operand);
+        term extract_var_names(operand);
     };
     term [];
 }
@@ -485,12 +491,12 @@ defn sym_to_debug_string(sym: SymbolicValue) -> String {
         term name;
     };
     uni sym(SymBinaryOp(op, left, right)) = {
-        let l_str = sym_to_debug_string(*left);
-        let r_str = sym_to_debug_string(*right);
+        let l_str = sym_to_debug_string(left);
+        let r_str = sym_to_debug_string(right);
         term l_str + " " + op + " " + r_str;
     };
     uni sym(SymUnaryOp(op, operand)) = {
-        let o_str = sym_to_debug_string(*operand);
+        let o_str = sym_to_debug_string(operand);
         term op + " " + o_str;
     };
     term "?";
@@ -766,13 +772,13 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
     };
     
     uni expr(ExprBinOp(_, left, right)) = {
-        let left_reads = collect_reads_expr(*left);
-        let right_reads = collect_reads_expr(*right);
+        let left_reads = collect_reads_expr(left);
+        let right_reads = collect_reads_expr(right);
         term left_reads.append_all(right_reads);
     };
     
     uni expr(ExprUnaryOp(_, operand)) = {
-        term collect_reads_expr(*operand);
+        term collect_reads_expr(operand);
     };
     
     uni expr(ExprFieldAccess(obj, _)) = {
@@ -864,7 +870,7 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
             reads = reads.append_all(collect_reads(else_body));
         };
         uni stmts[i](StmtExpr(expr)) = {
-            reads = reads.append_all(collect_reads_expr(*expr));
+            reads = reads.append_all(collect_reads_expr(expr));
         };
         &i = i + 1;
     };
@@ -935,11 +941,11 @@ defn sym_to_string(sym: SymbolicValue) -> String {
     uni sym(SymBinaryOp(op, left, right)) = {
         let sb = new_builder();
         sb = sb.append_char('(');
-        sb = sb.append_str(sym_to_string(*left));
+        sb = sb.append_str(sym_to_string(left));
         sb = sb.append_str(" ");
         sb = sb.append_str(op);
         sb = sb.append_str(" ");
-        sb = sb.append_str(sym_to_string(*right));
+        sb = sb.append_str(sym_to_string(right));
         sb = sb.append_char(')');
         term sb.to_string();
     };
@@ -947,7 +953,7 @@ defn sym_to_string(sym: SymbolicValue) -> String {
         let sb = new_builder();
         sb = sb.append_char('(');
         sb = sb.append_str(op);
-        sb = sb.append_str(sym_to_string(*operand));
+        sb = sb.append_str(sym_to_string(operand));
         sb = sb.append_char(')');
         term sb.to_string();
     };
@@ -983,7 +989,7 @@ defn collect_simd_ops(body: List<Statement>) -> List<SimdOp> {
     let i: Int = 0;
     [i < len(body)] {
         uni body[i](StmtExpr(expr)) = {
-            let result = collect_simd_ops_in_expr(*expr, "expr");
+            let result = collect_simd_ops_in_expr(expr, "expr");
             &ops = ops.append_all(result);
         };
         uni body[i](StmtAssign(lhs, rhs, _)) = {
@@ -1001,8 +1007,8 @@ defn collect_simd_ops(body: List<Statement>) -> List<SimdOp> {
 
 defn collect_simd_ops_in_expr(expr: Expr, ctx: String) -> List<SimdOp> {
     uni expr(ExprBinOp(op, left, right)) = {
-        let left_name = extract_list_name(*left);
-        let right_name = extract_list_name(*right);
+        let left_name = extract_list_name(left);
+        let right_name = extract_list_name(right);
         [left_name.is_some() && right_name.is_some()] {
             let simd = SimdOp { left: left_name.unwrap(), right: right_name.unwrap(), context: ctx };
             term [simd];

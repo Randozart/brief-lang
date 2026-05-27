@@ -73,7 +73,7 @@ defn extract_bounds_from_expr(
     expr: Expr,
     ranges: Map<String, ParamRange>
 ) -> Map<String, ParamRange> [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {
@@ -106,7 +106,7 @@ defn apply_comparison(
     op_is_gt: Bool,
     inclusive: Bool
 ) -> Map<String, ParamRange> [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {
@@ -146,7 +146,7 @@ defn set_lower_bound(
     val: Int,
     inclusive: Bool
 ) -> Map<String, ParamRange> [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {
@@ -186,7 +186,7 @@ defn set_upper_bound(
     val: Int,
     inclusive: Bool
 ) -> Map<String, ParamRange> [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {
@@ -221,7 +221,7 @@ defn set_upper_bound(
 
 // Check if a parameter has a known lower bound
 defn has_lower_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {
@@ -234,7 +234,7 @@ defn has_lower_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
 
 // Check if a parameter has a known upper bound
 defn has_upper_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {
@@ -247,7 +247,7 @@ defn has_upper_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
 
 // Get the minimum value of a parameter (if bounded)
 defn min_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {
@@ -259,7 +259,7 @@ defn min_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
 
 // Get the maximum value of a parameter (if bounded)
 defn max_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {

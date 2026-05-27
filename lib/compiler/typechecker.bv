@@ -232,7 +232,7 @@ defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool {
         term occurs_check(name, inner, subst);
     };
     uni ty(TypeResult(ok, err)) = {
-        occurs_check(name, ok, subst) || occurs_check(name, err, subst)
+        occurs_check(name, ok, subst) || occurs_check(name, err, subst);
     };
     term false;
 }
@@ -375,8 +375,10 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
         let i: Int = 0;
         [i < len(elements)] {
             let result = infer_expr(elements[i], ctx);
-            uni result(Ok(InferResult { ty, subst })) = {
-                &types = append(types, ty);
+            uni result(Ok(ir)) = {
+            let res_ty = ir.ty;
+            let res_subst = ir.subst;
+                &types = append(types, res_ty);
                 &i = i + 1;
             };
             uni result(Err(e)) = { term Err(e); };
@@ -385,7 +387,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
     };
     
     uni expr(ExprTupleDestructure(_, source_expr)) = {
-        let result = infer_expr(*source_expr, ctx);
+        let result = infer_expr(source_expr, ctx);
         uni result(Ok(res)) = { term Ok(res); };
         uni result(Err(e)) = { term Err(e); };
     };
@@ -569,7 +571,7 @@ defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeCon
         [is_some(init)] {
             let init_expr = unwrap(init);
             uni init_expr(ExprTupleDestructure(names, source_expr)) = {
-                let result = infer_expr(*source_expr, ctx);
+let result = infer_expr(source_expr, ctx);
                 uni result(Ok((init_ty, _))) = {
                     uni init_ty(TypeTuple(types)) = {
                         [types.len() == names.len()] {

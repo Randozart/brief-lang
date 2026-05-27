@@ -90,17 +90,17 @@ defn extract_calls_from_body(body: List<Statement>) -> List<String> [
     let called: List<String> = [];
     let i: Int = 0;
     [i < len(body)] {
-        uni body[i](StmtAssign(expr, _, _)) = {
-            &called = called ++ collect_call_names(expr);
+        uni body[i](StmtAssign(assign_expr, _, _)) = {
+            &called = called + collect_call_names(assign_expr);
         };
-        uni body[i](StmtLet(_, _, Some(expr), _, _)) = {
-            &called = called ++ collect_call_names(expr);
+        uni body[i](StmtLet(_, _, opt_expr, _, _)) = {
+            [!opt_expr == None] { &called = called + collect_call_names(opt_expr); };
         };
-        uni body[i](StmtExpr(expr)) = {
-            &called = called ++ collect_call_names(expr);
+        uni body[i](StmtExpr(stmt_expr)) = {
+            &called = called + collect_call_names(stmt_expr);
         };
         uni body[i](StmtGuarded(_, stmts)) = {
-            &called = called ++ extract_calls_from_body(stmts);
+            &called = called + extract_calls_from_body(stmts);
         };
         &i = i + 1;
     };
@@ -117,13 +117,13 @@ defn collect_call_names(expr: Expr) -> List<String> [
         let names: List<String> = [name];
         let i: Int = 0;
         [i < len(args)] {
-            &names = names ++ collect_call_names(args[i]);
+            &names = names + collect_call_names(args[i]);
             &i = i + 1;
         };
         term names;
     };
     uni expr(ExprBinOp(left, _, right)) = {
-        term collect_call_names(left) ++ collect_call_names(right);
+        term collect_call_names(left) + collect_call_names(right);
     };
     uni expr(ExprUnaryOp(_, inner)) = {
         term collect_call_names(inner);
@@ -135,7 +135,7 @@ defn collect_call_names(expr: Expr) -> List<String> [
         let names: List<String> = [];
         let i: Int = 0;
         [i < len(elems)] {
-            &names = names ++ collect_call_names(elems[i]);
+            &names = names + collect_call_names(elems[i]);
             &i = i + 1;
         };
         term names;

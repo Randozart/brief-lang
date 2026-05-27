@@ -49,7 +49,7 @@ defn compile_file(path: String, backend: String, verbose: Bool) -> Result<String
             source: source,
             file_path: path,
             verbose: verbose,
-            backend: backend,
+            backend: backend
         };
 
         let token_result = tokenize(state.source);
@@ -171,7 +171,8 @@ output = output.append_str(String(len(cg.cylist)));
 
     let i: Int = 0;
     [i < state.program.items.len()] {
-        uni state.program.items[i](TopTxn(txn)) = {
+        let item = state.program.items[i];
+        uni item(TopTxn(txn)) = {
             output = output.append_str("// Transaction: ");
             output = output.append_str(txn.name);
             output = output.append_str("\n");
