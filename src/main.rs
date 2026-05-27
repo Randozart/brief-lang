@@ -743,8 +743,8 @@ fn run_check(
             format_proof_errors(&proof_errors, file_path.to_str().unwrap_or("main.bv"))
         );
     }
-    if verbose {
-        println!("[ProofEngine] All proofs verified");
+if verbose {
+        println!("[Analysis] All proofs verified");
     }
 
     if verbose {
@@ -752,7 +752,39 @@ fn run_check(
     }
     // Intent: Run shared program analysis (call graph + parameter ranges) to detect
     //   acyclic subgraphs eligible for optimized scheduling and bounded parameter loops.
-    let analysis = backend::analyze_program(&program, optimize);
+    let mut analysis = backend::analyze_program(&program, optimize);
+
+    // Peephole optimization in --optimize mode
+    let program = if optimize {
+        if verbose {
+            println!("[Optimizer] Running peephole optimization...");
+        }
+        let transformed = backend::run_peephole(&program, &analysis);
+        let removed_count = program.items.iter().map(|i| match i {
+            ast::TopLevel::Transaction(t) => t.body.len(),
+            _ => 0
+        }).sum::<usize>() - transformed.items.iter().map(|i| match i {
+            ast::TopLevel::Transaction(t) => t.body.len(),
+            _ => 0
+        }).sum::<usize>();
+        if verbose {
+            if analysis.fusable_pairs.len() > 0 {
+                println!("[Optimizer]  {} fusable transaction pairs", analysis.fusable_pairs.len());
+            }
+            if analysis.dataflow_errors.len() > 0 {
+                println!("[Optimizer]  {} dataflow diagnostics", analysis.dataflow_errors.len());
+            }
+            if removed_count > 0 {
+                println!("[Optimizer]  Eliminated {} redundant statements", removed_count);
+            }
+        }
+        // Re-run analysis on optimized program to get fresh call graph
+        analysis = backend::analyze_program(&transformed, optimize);
+        transformed
+    } else {
+        program
+    };
+
     let has_cycles = analysis.call_graph.has_cycle();
     let cycles = analysis.call_graph.find_all_cycles();
     let range_count: usize = analysis.param_ranges.ranges.values().map(|m| m.len()).sum();

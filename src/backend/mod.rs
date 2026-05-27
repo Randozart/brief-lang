@@ -28,7 +28,8 @@ pub struct AnalysisResults {
 
 /// Intent: Run shared program analysis for backend code generation.
 /// Returns an AnalysisResults with CallGraph, ParameterRanges, fusable pairs,
-/// and dataflow errors. When optimize is true, runs extra analysis passes.
+/// and dataflow errors. When optimize is true, runs extra analysis passes
+/// and applies peephole optimization.
 pub fn analyze_program(program: &Program, optimize: bool) -> AnalysisResults {
     let mut cg = CallGraph::new();
     cg.build_from_program(program);
@@ -56,6 +57,16 @@ pub fn analyze_program(program: &Program, optimize: bool) -> AnalysisResults {
         dataflow_errors,
         optimize_mode: optimize,
     }
+}
+
+/// Intent: Apply peephole optimization after analysis. Returns a new Program
+/// with redundant assignments, dead expressions, and foldable constants removed.
+/// Only called when optimize mode is active.
+pub fn run_peephole(program: &Program, analysis: &AnalysisResults) -> Program {
+    if !analysis.optimize_mode {
+        return program.clone();
+    }
+    peephole_optimize_program(program)
 }
 
 /// Intent: Return the list of hashtags supported by a given backend name.
@@ -313,6 +324,247 @@ pub fn detect_fusable_pairs(program: &Program) -> Vec<(String, String)> {
         }
     }
     pairs
+}
+
+/// Intent: Shared peephole optimizer that works at the AST level.
+/// Handles redundant assignments, constant folding, dead statement
+/// elimination, and guard simplification. Called in optimized mode.
+pub fn peephole_optimize_program(program: &Program) -> Program {
+    let mut items = program.items.clone();
+    for item in &mut items {
+        match item {
+            TopLevel::Transaction(txn) => {
+                txn.body = peephole_optimize_body(&txn.body);
+            }
+            TopLevel::Definition(defn) => {
+                defn.body = peephole_optimize_body(&defn.body);
+            }
+            _ => {}
+        }
+    }
+    Program {
+        items,
+        ..program.clone()
+    }
+}
+
+fn peephole_optimize_body(body: &[Statement]) -> Vec<Statement> {
+    let mut result = Vec::with_capacity(body.len());
+    let mut i = 0;
+    while i < body.len() {
+        match &body[i] {
+            Statement::Let { name, expr, .. } => {
+                if let Some(Expr::Identifier(n)) = expr {
+                    if n == name {
+                        i += 1;
+                        continue;
+                    }
+                }
+                if let Some(stmt) = peephole_optimize_stmt(&body[i]) {
+                    result.push(stmt);
+                }
+            }
+            Statement::Assignment { lhs, expr, .. } => {
+                if let Expr::Identifier(name) = lhs {
+                    if let Expr::Identifier(n) = expr {
+                        if n == name {
+                            i += 1;
+                            continue;
+                        }
+                    }
+                }
+                if let Some(stmt) = peephole_optimize_stmt(&body[i]) {
+                    result.push(stmt);
+                }
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                if let Some(stmts) = peephole_simplify_guard(condition, statements) {
+                    result.extend(stmts);
+                }
+            }
+            _ => {
+                if let Some(stmt) = peephole_optimize_stmt(&body[i]) {
+                    result.push(stmt);
+                }
+            }
+        }
+        i += 1;
+    }
+    result
+}
+
+fn peephole_optimize_stmt(stmt: &Statement) -> Option<Statement> {
+    match stmt {
+        Statement::Guarded { condition, statements } => {
+            let opt_body: Vec<Statement> = statements.iter().filter_map(peephole_optimize_stmt).collect();
+            Some(Statement::Guarded {
+                condition: peephole_optimize_expr(condition),
+                statements: opt_body,
+            })
+        }
+        Statement::Assignment { lhs, expr, timeout, modifiers } => {
+            Some(Statement::Assignment {
+                lhs: lhs.clone(),
+                expr: peephole_optimize_expr(expr),
+                timeout: timeout.clone(),
+                modifiers: modifiers.clone(),
+            })
+        }
+        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers } => {
+            Some(Statement::Let {
+                name: name.clone(),
+                ty: ty.clone(),
+                expr: expr.as_ref().map(|e| peephole_optimize_expr(e)),
+                address: *address,
+                address_expr: address_expr.as_ref().map(|e| Box::new(peephole_optimize_expr(e))),
+                bit_range: bit_range.clone(),
+                is_override: *is_override,
+                modifiers: modifiers.clone(),
+            })
+        }
+        Statement::Expression(expr) => {
+            match peephole_optimize_expr(expr) {
+                Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) => None,
+                opt => Some(Statement::Expression(opt)),
+            }
+        }
+        other => Some(other.clone()),
+    }
+}
+
+fn peephole_optimize_expr(expr: &Expr) -> Expr {
+    match expr {
+        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b) => {
+            let a = peephole_optimize_expr(a);
+            let b = peephole_optimize_expr(b);
+            peephole_fold_binop(expr, &a, &b)
+        }
+        Expr::And(a, b) | Expr::Or(a, b) => {
+            let a = peephole_optimize_expr(a);
+            let b = peephole_optimize_expr(b);
+            peephole_fold_boolop(expr, &a, &b)
+        }
+        Expr::Not(a) => {
+            let a = peephole_optimize_expr(a);
+            match &a {
+                Expr::Bool(v) => Expr::Bool(!v),
+                _ => Expr::Not(Box::new(a)),
+            }
+        }
+        Expr::Neg(a) => {
+            let a = peephole_optimize_expr(a);
+            match &a {
+                Expr::Integer(n) => Expr::Integer(-n),
+                Expr::Float(f) => Expr::Float(-f),
+                _ => Expr::Neg(Box::new(a)),
+            }
+        }
+        Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) => {
+            let a = peephole_optimize_expr(a);
+            let b = peephole_optimize_expr(b);
+            peephole_fold_cmp(expr, &a, &b)
+        }
+        _ => expr.clone(),
+    }
+}
+
+fn peephole_fold_binop(expr: &Expr, a: &Expr, b: &Expr) -> Expr {
+    match (a, b) {
+        (Expr::Integer(la), Expr::Integer(rb)) => {
+            match expr {
+                Expr::Add(_, _) => Expr::Integer(la + rb),
+                Expr::Sub(_, _) => Expr::Integer(la - rb),
+                Expr::Mul(_, _) => Expr::Integer(la * rb),
+                Expr::Div(_, _) => if *rb != 0 { Expr::Integer(la / rb) } else { expr.clone() },
+                Expr::Mod(_, _) => if *rb != 0 { Expr::Integer(la % rb) } else { expr.clone() },
+                _ => expr.clone(),
+            }
+        }
+        (Expr::Float(la), Expr::Float(rb)) => {
+            match expr {
+                Expr::Add(_, _) => Expr::Float(la + rb),
+                Expr::Sub(_, _) => Expr::Float(la - rb),
+                Expr::Mul(_, _) => Expr::Float(la * rb),
+                Expr::Div(_, _) => if *rb != 0.0 { Expr::Float(la / rb) } else { expr.clone() },
+                _ => expr.clone(),
+            }
+        }
+        (_, Expr::Integer(1)) if matches!(expr, Expr::Mul(_, _)) => a.clone(),
+        (_, Expr::Integer(0)) if matches!(expr, Expr::Add(_, _) | Expr::Sub(_, _)) => a.clone(),
+        (Expr::Integer(0), _) if matches!(expr, Expr::Add(_, _)) => b.clone(),
+        (Expr::Integer(1), _) if matches!(expr, Expr::Mul(_, _)) => b.clone(),
+        _ => {
+            match expr {
+                Expr::Add(_, _) => Expr::Add(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Sub(_, _) => Expr::Sub(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Mul(_, _) => Expr::Mul(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Div(_, _) => Expr::Div(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Mod(_, _) => Expr::Mod(Box::new(a.clone()), Box::new(b.clone())),
+                _ => expr.clone(),
+            }
+        }
+    }
+}
+
+fn peephole_fold_boolop(expr: &Expr, a: &Expr, b: &Expr) -> Expr {
+    match (a, b) {
+        (Expr::Bool(true), _) if matches!(expr, Expr::Or(_, _)) => Expr::Bool(true),
+        (_, Expr::Bool(true)) if matches!(expr, Expr::Or(_, _)) => Expr::Bool(true),
+        (Expr::Bool(false), _) if matches!(expr, Expr::And(_, _)) => Expr::Bool(false),
+        (_, Expr::Bool(false)) if matches!(expr, Expr::And(_, _)) => Expr::Bool(false),
+        (Expr::Bool(false), _) if matches!(expr, Expr::Or(_, _)) => b.clone(),
+        (_, Expr::Bool(false)) if matches!(expr, Expr::Or(_, _)) => a.clone(),
+        (Expr::Bool(true), _) if matches!(expr, Expr::And(_, _)) => b.clone(),
+        (_, Expr::Bool(true)) if matches!(expr, Expr::And(_, _)) => a.clone(),
+        _ => {
+            match expr {
+                Expr::And(_, _) => Expr::And(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Or(_, _) => Expr::Or(Box::new(a.clone()), Box::new(b.clone())),
+                _ => expr.clone(),
+            }
+        }
+    }
+}
+
+fn peephole_fold_cmp(expr: &Expr, a: &Expr, b: &Expr) -> Expr {
+    match (a, b) {
+        (Expr::Integer(la), Expr::Integer(rb)) => {
+            match expr {
+                Expr::Eq(_, _) => Expr::Bool(la == rb),
+                Expr::Ne(_, _) => Expr::Bool(la != rb),
+                Expr::Lt(_, _) => Expr::Bool(la < rb),
+                Expr::Le(_, _) => Expr::Bool(la <= rb),
+                Expr::Gt(_, _) => Expr::Bool(la > rb),
+                Expr::Ge(_, _) => Expr::Bool(la >= rb),
+                _ => expr.clone(),
+            }
+        }
+        _ => {
+            match expr {
+                Expr::Eq(_, _) => Expr::Eq(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Ne(_, _) => Expr::Ne(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Lt(_, _) => Expr::Lt(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Le(_, _) => Expr::Le(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Gt(_, _) => Expr::Gt(Box::new(a.clone()), Box::new(b.clone())),
+                Expr::Ge(_, _) => Expr::Ge(Box::new(a.clone()), Box::new(b.clone())),
+                _ => expr.clone(),
+            }
+        }
+    }
+}
+
+fn peephole_simplify_guard(condition: &Expr, body: &[Statement]) -> Option<Vec<Statement>> {
+    match condition {
+        Expr::Bool(true) => Some(body.to_vec()),
+        Expr::Bool(false) => Some(Vec::new()),
+        _ => {
+            let opt_body: Vec<Statement> = body.iter().filter_map(peephole_optimize_stmt).collect();
+            Some(vec![Statement::Guarded {
+                condition: peephole_optimize_expr(condition),
+                statements: opt_body,
+            }])
+        }
+    }
 }
 
 #[cfg(test)]
