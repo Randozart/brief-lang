@@ -1,452 +1,333 @@
 // VHDL Backend for Brief Compiler
 // Generates synthesizable VHDL from Brief programs
-// 
-// VHDL is a hardware description language for FPGA/ASIC design.
-// This backend maps transactions to concurrent processes and signals.
+// Brief transactions map to concurrent processes and signals
 
 import call_graph;
-use std::vhdl;
+import std.string;
 
-// ============================================================================
-// VHDL Entity Architecture
-// ============================================================================
+// ===== VHDL TYPES =====
 
-// Generate VHDL entity declaration
-transaction build_entity(name: String, ports: Vec<Port>) -> Entity
-    [Entity {
-        name,
-        generic_params: vec![],
-        ports,
-    }]
+enum VhdlDataType {
+    StdLogic,
+    StdLogicVector(Int),
+    Real,
+    Array(Int, VhdlDataType)
+}
 
-// Generate VHDL architecture body
-transaction build_architecture(entity_name: String, body: Vec<ArchitectureItem>) -> Architecture
-    [Architecture {
-        entity_name,
-        name: "behavioral",
-        signals: vec![],
-        processes: body,
-    }]
+enum PortDirection {
+    In,
+    Out,
+    InOut
+}
 
-// Port declaration
-transaction build_port(name: String, direction: PortDirection, data_type: VhdlType) -> Port
-    [Port { name, direction, data_type }]
+// ===== VHDL STRUCTS =====
 
-// ============================================================================
-// Type Mapping (Brief to VHDL)
-// ============================================================================
+struct Entity {
+    name: String,
+    ports: List<Port>,
+    generics: List<GenericParam>
+}
 
-// Map Brief types to VHDL types
-transaction map_brief_type_to_vhdl(brief_type: Type) -> VhdlType
-    [brief_type = Type::Bool => VhdlType::StdLogic]
-    [brief_type = Type::Int => VhdlType::StdLogicVector(32)]
-    [brief_type = Type::U64 => VhdlType::StdLogicVector(64)]
-    [brief_type = Type::Float => VhdlType::Real]
-    [brief_type = Type::Ptr => VhdlType::StdLogicVector(32)]
-    [brief_type = Type::Array(size, elem_type) => 
-        VhdlType::Array(*size, map_brief_type_to_vhdl(*elem_type))]
-
-// Clock and reset signals
-transaction build_clock_signal() -> Signal
-    [Signal {
-        name: "clk",
-        data_type: VhdlType::StdLogic,
-    }]
-
-transaction build_reset_signal() -> Signal
-    [Signal {
-        name: "rst",
-        data_type: VhdlType::StdLogic,
-    }]
-
-// ============================================================================
-// Transaction to Process Conversion
-// ============================================================================
-
-// Convert reactive transaction to VHDL process
-// Each rct txn becomes a clocked process
-transaction compile_rct_process(txn: Transaction, ctx: &VhdlContext) -> Process
-    [guard_signal = compile_guard(txn.guard, ctx)]
-    [body_signals = compile_transaction_body(txn.body, ctx)]
-    
-    [Process {
-        sensitivity_list: vec!["clk", "rst"],
-        statements: vec![
-            ProcessStatement::If(IfStatement {
-                condition: "rst = '1'",
-                then_branch: vec![SignalAssignment(txn.output, "0")],
-                else_branch: vec![
-                    ProcessStatement::If(IfStatement {
-                        condition: format!("{} = '1' and rising_edge(clk)", guard_signal),
-                        then_branch: body_signals,
-                        else_branch: vec![],
-                    })
-                ],
-            })
-        ],
-    }]
-
-// Convert pure transaction to combinational logic
-transaction compile_pure_process(txn: Transaction, ctx: &VhdlContext) -> Process
-    [input_signals = collect_inputs(txn.body, ctx)]
-    [output_expr = compile_expression(txn.output_expr, ctx)]
-    
-    [Process {
-        sensitivity_list: input_signals,
-        statements: vec![
-            SignalAssignment(txn.output, output_expr)
-        ],
-    }]
-
-// ============================================================================
-// Guard Compilation (Branchless)
-// ============================================================================
-
-// Compile guard expression to hardware signal
-// Guards become enable signals for registers
-transaction compile_guard(expr: Expr, ctx: &VhdlContext) -> String
-    [expr = Expr::BinOp(BinOp::And, left, right) =>
-        format!("({} and {})", compile_guard(*left, ctx), compile_guard(*right, ctx))]
-    
-    [expr = Expr::BinOp(BinOp::Or, left, right) =>
-        format!("({} or {})", compile_guard(*left, ctx), compile_guard(*right, ctx))]
-    
-    [expr = Expr::BinOp(BinOp::Eq, left, right) =>
-        format!("({} = {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
-    
-    [expr = Expr::BinOp(BinOp::Lt, left, right) =>
-        format!("{} < {}", compile_expr(*left, ctx), compile_expr(*right, ctx))]
-    
-    [expr = Expr::Var(name) => name.clone()]
-    
-    [expr = Expr::Const(Const::Bool(true)) => "'1'".to_string()]
-    [expr = Expr::Const(Const::Bool(false)) => "'0'".to_string()]
-    [expr = Expr::Const(Const::Int(n)) => format!("std_logic_vector(to_unsigned({}, 32))", n)]
-
-// ============================================================================
-// Expression Compilation
-// ============================================================================
-
-// Compile Brief expression to VHDL expression
-transaction compile_expr(expr: Expr, ctx: &VhdlContext) -> String
-    [expr = Expr::BinOp(BinOp::Add, left, right) =>
-        format!("({} + {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
-    
-    [expr = Expr::BinOp(BinOp::Sub, left, right) =>
-        format!("({} - {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
-    
-    [expr = Expr::BinOp(BinOp::Mul, left, right) =>
-        format!("({} * {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
-    
-    [expr = Expr::BinOp(BinOp::Div, left, right) =>
-        format!("({} / {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
-    
-    [expr = Expr::BinOp(BinOp::And, left, right) =>
-        format!("({} and {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
-    
-    [expr = Expr::BinOp(BinOp::Or, left, right) =>
-        format!("({} or {})", compile_expr(*left, ctx), compile_expr(*right, ctx))]
-    
-    [expr = Expr::Var(name) => name.clone()]
-    
-    [expr = Expr::Const(Const::Int(n)) => format!("{}", n)]
-    [expr = Expr::Const(Const::Bool(true)) => "true".to_string()]
-    [expr = Expr::Const(Const::Bool(false)) => "false".to_string()]
-
-// ============================================================================
-// Signal Declaration
-// ============================================================================
-
-// Generate signal declarations for all variables
-transaction declare_signals(program: &Program, ctx: &VhdlContext) -> Vec<Signal>
-    [map(program.variables, |var| Signal {
-        name: var.name.clone(),
-        data_type: map_brief_type_to_vhdl(var.type_),
-    })]
-
-// Internal signals for intermediate computations
-transaction declare_internal_signals(txns: Vec<Transaction>) -> Vec<Signal>
-    [flat_map(txns, |txn| {
-        collect_temporaries(txn.body)
-    })]
-
-// ============================================================================
-// Component Instantiation
-// ============================================================================
-
-// Instantiate hardware components (ALU, multiplier, etc.)
-transaction instantiate_component(name: String, component_type: String, port_map: PortMap) -> ComponentInstantiation
-    [ComponentInstantiation {
-        label: name,
-        component_name: component_type,
-        port_map,
-    }]
-
-// Standard ALU component
-transaction build_alu_instance(id: u32, inputs: Vec<String>, output: String) -> ComponentInstantiation
-    [instantiate_component(
-        format!("alu_{}", id),
-        "ALU",
-        PortMap {
-            "a": inputs[0].clone(),
-            "b": inputs[1].clone(),
-            "op": "000".to_string(),  // ADD
-            "result": output.clone(),
-        }
-    )]
-
-// Register file component
-transaction build_register_file(size: u32, ports: Vec<RegPort>) -> ComponentInstantiation
-    [instantiate_component(
-        "reg_file",
-        "RegisterFile",
-        build_regfile_port_map(size, ports)
-    )]
-
-// ============================================================================
-// Memory Inference
-// ============================================================================
-
-// Infer block RAM from array declarations
-transaction infer_block_ram(array: &Variable, ctx: &VhdlContext) -> Signal
-    [Signal {
-        name: array.name.clone(),
-        data_type: VhdlType::ArrayType(
-            array.size,
-            map_brief_type_to_vhdl(array.element_type)
-        ),
-        attribute: Some("ram_style = \"BLOCK\"".to_string()),
-    }]
-
-// Infer distributed RAM for small arrays
-transaction infer_distributed_ram(array: &Variable, ctx: &VhdlContext) -> Signal
-    [Signal {
-        name: array.name.clone(),
-        data_type: VhdlType::ArrayType(
-            array.size,
-            map_brief_type_to_vhdl(array.element_type)
-        ),
-        attribute: Some("ram_style = \"DISTRIBUTED\"".to_string()),
-    }]
-
-// ============================================================================
-// FSM Generation from Transactions
-// ============================================================================
-
-// Generate finite state machine from transaction dependencies
-transaction generate_fsm(txns: Vec<Transaction>) -> FSM
-    [states = identify_execution_states(txns)]
-    [transitions = build_state_transitions(txns, &states)]
-    
-    [FSM {
-        states,
-        transitions,
-        state_register: "state_reg",
-        next_state_logic: "state_next",
-        output_logic: build_moore_outputs(txns, &states),
-    }]
-
-// One-hot encoding for FSM states
-transaction encode_fsm_onehot(fsm: &FSM) -> Vec<Signal>
-    [map(fsm.states, |state| Signal {
-        name: format!("state_{}", state.name),
-        data_type: VhdlType::StdLogic,
-    })]
-
-// ============================================================================
-// Timing Constraints
-// ============================================================================
-
-// Generate timing constraints for synthesis
-transaction generate_timing_constraints(clock_period: f64) -> XdcConstraints
-    [XdcConstraints {
-        clock: format!("create_clock -period {} [get_ports clk]", clock_period),
-        input_delay: "set_input_delay -clock clk 0 [all_inputs]".to_string(),
-        output_delay: "set_output_delay -clock clk 0 [all_outputs]".to_string(),
-    }]
-
-// False path constraints for guard signals
-transaction generate_false_paths(guards: Vec<String>) -> Vec<String>
-    [map(guards, |guard| format!("set_false_path -from {}", guard))]
-
-// ============================================================================
-// Code Generation Context
-// ============================================================================
-
-struct VhdlContext {
-    // Entity name
+struct Architecture {
     entity_name: String,
-    
-    // Clock frequency (Hz)
-    clock_frequency: u64,
-    
-    // Target FPGA family
-    target_family: FpgaFamily,
-    
-    // Signal declarations
-    signals: HashMap<String, Signal>,
-    
-    // Component declarations
-    components: HashMap<String, Component>,
+    name: String,
+    signals: List<Signal>,
+    processes: List<Process>
 }
 
-enum FpgaFamily {
-    Xilinx7Series,
-    XilinxUltraScale,
-    IntelCyclone,
-    IntelStratix,
-    LatticeECP5,
+struct Port {
+    name: String,
+    direction: PortDirection,
+    data_type: VhdlDataType
 }
 
-// ============================================================================
-// Main Compilation Pipeline
-// ============================================================================
-
-transaction compile_to_vhdl(program: Program, config: VhdlConfig) -> VhdlDesign
-    [ctx = VhdlContext {
-        entity_name: program.name.clone(),
-        clock_frequency: config.clock_frequency,
-        target_family: config.target_family,
-        signals: HashMap::new(),
-        components: HashMap::new(),
-    }]
-    
-    // Build entity with ports
-    [ports = build_port_list(&program, &ctx)]
-    [entity = build_entity(program.name.clone(), ports)]
-    
-    // Declare all signals
-    [signals = declare_signals(&program, &ctx)]
-    
-    // Compile transactions to processes
-    [processes = map(program.transactions, |txn| {
-        if txn.reactive {
-            compile_rct_process(txn, &ctx)
-        } else {
-            compile_pure_process(txn, &ctx)
-        }
-    })]
-    
-    // Build architecture
-    [architecture = build_architecture(
-        program.name.clone(),
-        processes
-    )]
-    
-    [VhdlDesign { entity, architecture, signals }]
-
-// ============================================================================
-// VHDL Output Generation
-// ============================================================================
-
-transaction generate_vhdl_file(design: VhdlDesign) -> String
-    [header = generate_header()]
-    [library_clause = "library IEEE;\nuse IEEE.STD_LOGIC_1164.ALL;\nuse IEEE.NUMERIC_STD.ALL;"]
-    
-    [entity_text = format_entity(&design.entity)]
-    [architecture_text = format_architecture(&design.architecture, &design.signals)]
-    
-    [header ++ "\n" ++ library_clause ++ "\n\n" ++ entity_text ++ "\n" ++ architecture_text]
-
-transaction generate_header() -> String
-    ["-- Generated by Brief Compiler\n-- https://github.com/brief-lang/brief\n-- Auto-generated VHDL code"]
-
-// ============================================================================
-// Optimization Passes
-// ============================================================================
-
-// Resource sharing optimization
-transaction optimize_resource_sharing(processes: Vec<Process>) -> Vec<Process>
-    // Share ALUs and multipliers across operations
-    [identify_shared_operations(processes)]
-    [allocate_shared_resources(processes)]
-    [rewrite_processes_with_muxes(processes)]
-
-// Pipelining optimization
-transaction optimize_pipelining(processes: Vec<Process>) -> Vec<Process>
-    // Insert pipeline registers for long combinational paths
-    [identify_critical_paths(processes)]
-    [insert_pipeline_stages(processes)]
-
-// Guard merging optimization
-transaction optimize_guards(processes: Vec<Process>) -> Vec<Process>
-    // Merge common guard conditions
-    [identify_common_guards(processes)]
-    [factor_out_guard_logic(processes)]
-
-// ============================================================================
-// Configuration
-// ============================================================================
-
-struct VhdlConfig {
-    // Clock frequency in Hz
-    clock_frequency: u64,
-    
-    // Target FPGA family
-    target_family: FpgaFamily,
-    
-    // Optimization level
-    optimize: OptimizationLevel,
-    
-    // Generate testbench
-    generate_testbench: bool,
-    
-    // Reset polarity (active high/low)
-    reset_polarity: ResetPolarity,
+struct GenericParam {
+    name: String,
+    data_type: VhdlDataType,
+    default_value: String
 }
 
-enum ResetPolarity {
-    ActiveHigh,
-    ActiveLow,
+struct Signal {
+    name: String,
+    data_type: VhdlDataType,
+    default_value: Option<String>
 }
 
-// ============================================================================
-// Testbench Generation
-// ============================================================================
+struct Process {
+    sensitivity_list: List<String>,
+    statements: List<String>,
+    name: String
+}
 
-transaction generate_testbench(design: VhdlDesign, test_vectors: Vec<TestVector>) -> String
-    [tb_entity = build_testbench_entity(&design)]
-    [tb_architecture = build_testbench_architecture(&design, test_vectors)]
-    
-    [format_entity(&tb_entity) ++ "\n" ++ format_architecture(&tb_architecture, &vec![])]
+// ===== TYPE MAPPING =====
 
-// ============================================================================
-// Exports
-// ============================================================================
+defn brief_type_to_vhdl(brief_type: Type) -> VhdlDataType {
+    uni brief_type(TypeBool) = { term StdLogic; };
+    uni brief_type(TypeInt) = { term StdLogicVector(32); };
+    uni brief_type(TypeChar) = { term StdLogicVector(8); };
+    uni brief_type(TypeFloat) = { term Real; };
+    uni brief_type(TypeUInt) = { term StdLogicVector(32); };
+    uni brief_type(TypeVoid) = { term StdLogic; };
+    term StdLogicVector(32); // default
+}
 
-// Main entry point for VHDL backend
-export transaction compile_vhdl(program: Program, output: &mut String)
-    [config = VhdlConfig {
-        clock_frequency: 100_000_000,  // 100 MHz
-        target_family: FpgaFamily::Xilinx7Series,
-        optimize: OptimizationLevel::Speed,
-        generate_testbench: false,
-        reset_polarity: ResetPolarity::ActiveHigh,
-    }]
-    
-    [design = compile_to_vhdl(program, config)]
-    [optimized_design = optimize_vhdl_design(design, config.optimize)]
-    [output = generate_vhdl_file(optimized_design)]
-
-// Generate with testbench
-export transaction compile_vhdl_with_tb(program: Program, output: &mut String, tb_output: &mut String)
-    [config = VhdlConfig {
-        clock_frequency: 100_000_000,
-        target_family: FpgaFamily::Xilinx7Series,
-        optimize: OptimizationLevel::Speed,
-        generate_testbench: true,
-        reset_polarity: ResetPolarity::ActiveHigh,
-    }]
-    
-    [design = compile_to_vhdl(program, config)]
-    [output = generate_vhdl_file(design)]
-    [test_vectors = generate_test_vectors(&program)]
-    [tb_output = generate_testbench(design, test_vectors)]
-
-// Acyclicity annotation helper for generated VHDL output
-defn vhdl_acyclic_annotation(cg: CallGraphResult) -> String {
-    [!cg.has_cycle] {
-        term "-- Call graph: acyclic -- static dispatch in processes\n";
+defn vhdl_type_str(data_type: VhdlDataType) -> String {
+    uni data_type(StdLogic) = "std_logic";
+    uni data_type(StdLogicVector(width)) = {
+        term "std_logic_vector(" + String(width - 1) + " downto 0)";
     };
-    term "-- Call graph: cyclic -- sequential dispatch with depth limit\n";
+    uni data_type(Real) = "real";
+    uni data_type(Array(size, elem)) = {
+        term "array(0 to " + String(size - 1) + ") of " + vhdl_type_str(elem);
+    };
+    term "std_logic";
+}
+
+defn port_direction_str(dir: PortDirection) -> String {
+    uni dir(In) = "in";
+    uni dir(Out) = "out";
+    uni dir(InOut) = "inout";
+    term "in";
+}
+
+// ===== ENTITY GENERATION =====
+
+defn generate_entity(name: String, ports: List<Port>, generics: List<GenericParam>) -> String {
+    let sb = new_builder();
+    sb = sb.append_str("entity ");
+    sb = sb.append_str(name);
+    sb = sb.append_str(" is\n");
+
+    [generics.len() > 0] {
+        sb = sb.append_str("  generic (\n");
+        let i: Int = 0;
+        [i < generics.len()] {
+            sb = sb.append_str("    ");
+            sb = sb.append_str(generics[i].name);
+            sb = sb.append_str(": ");
+            sb = sb.append_str(vhdl_type_str(generics[i].data_type));
+            [generics[i].default_value != ""] {
+                sb = sb.append_str(" := ");
+                sb = sb.append_str(generics[i].default_value);
+            };
+            [i < generics.len() - 1] { sb = sb.append_str(";"); };
+            sb = sb.append_str("\n");
+            &i = i + 1;
+        };
+        sb = sb.append_str("  );\n");
+    };
+
+    sb = sb.append_str("  port (\n");
+    let i: Int = 0;
+    [i < ports.len()] {
+        sb = sb.append_str("    ");
+        sb = sb.append_str(ports[i].name);
+        sb = sb.append_str(": ");
+        sb = sb.append_str(port_direction_str(ports[i].direction));
+        sb = sb.append_str(" ");
+        sb = sb.append_str(vhdl_type_str(ports[i].data_type));
+        [i < ports.len() - 1] { sb = sb.append_str(";"); };
+        sb = sb.append_str("\n");
+        &i = i + 1;
+    };
+    sb = sb.append_str("  );\n");
+    sb = sb.append_str("end entity ");
+    sb = sb.append_str(name);
+    sb = sb.append_str(";\n");
+    term sb.to_string();
+}
+
+// ===== ARCHITECTURE GENERATION =====
+
+defn generate_architecture(entity_name: String, signals: List<Signal>, processes: List<Process>) -> String {
+    let sb = new_builder();
+    sb = sb.append_str("architecture behavioral of ");
+    sb = sb.append_str(entity_name);
+    sb = sb.append_str(" is\n");
+
+    // Signal declarations
+    [signals.len() > 0] {
+        let i: Int = 0;
+        [i < signals.len()] {
+            sb = sb.append_str("  signal ");
+            sb = sb.append_str(signals[i].name);
+            sb = sb.append_str(": ");
+            sb = sb.append_str(vhdl_type_str(signals[i].data_type));
+            [signals[i].default_value != None] {
+                uni signals[i].default_value(Some(dv)) = {
+                    sb = sb.append_str(" := ");
+                    sb = sb.append_str(dv);
+                };
+            };
+            sb = sb.append_str(";\n");
+            &i = i + 1;
+        };
+    };
+
+    sb = sb.append_str("begin\n");
+
+    // Process bodies
+    let i: Int = 0;
+    [i < processes.len()] {
+        sb = sb.append_str("  ");
+        sb = sb.append_str(processes[i].name);
+        sb = sb.append_str(": process (");
+        let j: Int = 0;
+        [j < processes[i].sensitivity_list.len()] {
+            sb = sb.append_str(processes[i].sensitivity_list[j]);
+            [j < processes[i].sensitivity_list.len() - 1] { sb = sb.append_str(", "); };
+            &j = j + 1;
+        };
+        sb = sb.append_str(") is\n");
+        sb = sb.append_str("  begin\n");
+
+        let j: Int = 0;
+        [j < processes[i].statements.len()] {
+            sb = sb.append_str("    ");
+            sb = sb.append_str(processes[i].statements[j]);
+            sb = sb.append_str("\n");
+            &j = j + 1;
+        };
+
+        sb = sb.append_str("  end process ");
+        sb = sb.append_str(processes[i].name);
+        sb = sb.append_str(";\n");
+        &i = i + 1;
+    };
+
+    sb = sb.append_str("end behavioral;\n");
+    term sb.to_string();
+}
+
+// ===== TRANSACTION TO VHDL =====
+
+defn transaction_to_vhdl(txn: Transaction, state_names: List<String>) -> Process {
+    // Create a VHDL process from a Brief transaction
+    let process_name = txn.name + "_proc";
+    let stmts: List<String> = [];
+
+    // Extract state variable reads/writes from body
+    let i: Int = 0;
+    [i < txn.body.len()] {
+        stmts = append(stmts, statement_to_vhdl(txn.body[i]));
+        &i = i + 1;
+    };
+
+    // Sensitivity: clock and reset
+    let sens_list: List<String> = ["clk", "rst"];
+
+    term Process {
+        sensitivity_list: sens_list,
+        statements: stmts,
+        name: process_name
+    };
+}
+
+defn statement_to_vhdl(stmt: Statement) -> String {
+    uni stmt(StmtAssign(name, expr)) = {
+        term name + " <= " + expr_to_vhdl(expr) + ";";
+    };
+    uni stmt(StmtGuarded(guard, body)) = {
+        let result = "if " + expr_to_vhdl(guard) + " then\n";
+        let i: Int = 0;
+        [i < body.len()] {
+            result = result + "      " + statement_to_vhdl(body[i]) + "\n";
+            &i = i + 1;
+        };
+        term result + "    end if;";
+    };
+    uni stmt(StmtExpression(expr)) = {
+        term expr_to_vhdl(expr) + ";";
+    };
+    uni stmt(StmtPass) = {
+        term "-- pass";
+    };
+    term "-- unknown statement";
+}
+
+defn expr_to_vhdl(expr: Expr) -> String {
+    uni expr(ExprInt(val)) = { term String(val); };
+    uni expr(ExprBool(v)) = { [v] { term "'1'"; }; term "'0'"; };
+    uni expr(ExprVar(name)) = { term name; };
+    uni expr(ExprBinOp("+", l, r)) = {
+        term expr_to_vhdl(l) + " + " + expr_to_vhdl(r);
+    };
+    uni expr(ExprBinOp("-", l, r)) = {
+        term expr_to_vhdl(l) + " - " + expr_to_vhdl(r);
+    };
+    uni expr(ExprBinOp("*", l, r)) = {
+        term expr_to_vhdl(l) + " * " + expr_to_vhdl(r);
+    };
+    uni expr(ExprBinOp("==", l, r)) = {
+        term expr_to_vhdl(l) + " = " + expr_to_vhdl(r);
+    };
+    uni expr(ExprBinOp("<", l, r)) = {
+        term expr_to_vhdl(l) + " < " + expr_to_vhdl(r);
+    };
+    uni expr(ExprBinOp(">", l, r)) = {
+        term expr_to_vhdl(l) + " > " + expr_to_vhdl(r);
+    };
+    uni expr(ExprBinOp("&&", l, r)) = {
+        term expr_to_vhdl(l) + " and " + expr_to_vhdl(r);
+    };
+    uni expr(ExprBinOp("||", l, r)) = {
+        term expr_to_vhdl(l) + " or " + expr_to_vhdl(r);
+    };
+    uni expr(ExprUnaryOp("!", e)) = {
+        term "not " + expr_to_vhdl(e);
+    };
+    term "0";
+}
+
+// ===== MAIN GENERATION ENTRY POINT =====
+
+defn generate_vhdl(program: Program, cg: CallGraphResult) -> (String, String) {
+    let entity_name: String;
+    let ports: List<Port> = [];
+    let signals: List<Signal> = [];
+    let processes: List<Process> = [];
+    let state_names: List<String> = [];
+
+    // Collect state declarations as entity ports
+    let i: Int = 0;
+    [i < program.items.len()] {
+        uni program.items[i](TopState(decl)) = {
+            state_names = append(state_names, decl.name);
+            ports = append(ports, Port {
+                name: decl.name,
+                direction: Out,
+                data_type: brief_type_to_vhdl(decl.state_type)
+            });
+            signals = append(signals, Signal {
+                name: decl.name,
+                data_type: brief_type_to_vhdl(decl.state_type),
+                default_value: None
+            });
+        };
+        &i = i + 1;
+    };
+
+    // Add clock and reset ports
+    ports = append(ports, Port { name: "clk", direction: In, data_type: StdLogic });
+    ports = append(ports, Port { name: "rst", direction: In, data_type: StdLogic });
+
+    // Convert each transaction to a process
+    let i: Int = 0;
+    [i < program.items.len()] {
+        uni program.items[i](TopTxn(txn)) = {
+            processes = append(processes, transaction_to_vhdl(txn, state_names));
+        };
+        &i = i + 1;
+    };
+
+    // Determine entity name from file or default
+    entity_name = "brief_top";
+
+    let entity_str = generate_entity(entity_name, ports, []);
+    let arch_str = generate_architecture(entity_name, signals, processes);
+    term (entity_str, arch_str);
+}
+
+defn generate_guard_cache_test(guard_expr: Expr) -> String {
+    term "-- guard cache check: " + expr_to_vhdl(guard_expr) + "\n";
 }

@@ -1,360 +1,486 @@
-// WebAssembly Backend for Brief Compiler
+// WASM Backend for Brief Compiler
 // Generates .wasm binary modules from Brief programs
-// 
-// WebAssembly is a stack-based virtual machine with linear memory.
-// This backend uses guard-based execution for branchless code generation.
+// Uses guard-based execution for branchless code generation
 
 import call_graph;
-use std::wasm;
+import std.string;
 
-// ============================================================================
-// WASM Module Structure
-// ============================================================================
+// ===== WASM TYPES =====
 
-// WebAssembly module builder
-// Generates complete .wasm binaries with all required sections
-transaction build_wasm_module(program: Program) -> WasmModule
-
-// Core WASM sections
-transaction build_type_section(types: Vec<FunctionType>) -> TypeSection
-transaction build_import_section(imports: Vec<Import>) -> ImportSection
-transaction build_function_section(signatures: Vec<TypeIndex>) -> FunctionSection
-transaction build_table_section(tables: Vec<Table>) -> TableSection
-transaction build_memory_section(memories: Vec<Memory>) -> MemorySection
-transaction build_global_section(globals: Vec<Global>) -> GlobalSection
-transaction build_export_section(exports: Vec<Export>) -> ExportSection
-transaction build_start_section(start_func: FunctionIndex) -> StartSection
-transaction build_element_section(elements: Vec<Element>) -> ElementSection
-transaction build_code_section(functions: Vec<FunctionBody>) -> CodeSection
-transaction build_data_section(data_segments: Vec<DataSegment>) -> DataSection
-
-// ============================================================================
-// WASM Type System
-// ============================================================================
-
-// Map Brief types to WASM types
-// Brief int -> i32, Brief float -> f64, Brief bool -> i32
-transaction map_brief_type_to_wasm(brief_type: Type) -> WasmType
-    [brief_type = Type::Int => WasmType::I32]
-    [brief_type = Type::Float => WasmType::F64]
-    [brief_type = Type::Bool => WasmType::I32]
-    [brief_type = Type::U64 => WasmType::I64]
-    [brief_type = Type::Ptr => WasmType::I32]
-
-// Function signature conversion
-transaction convert_signature(brief_sig: FunctionSignature) -> FunctionType
-    [result_type = map_brief_type_to_wasm(brief_sig.return_type)]
-    [param_types = map_all(brief_sig.params, map_brief_type_to_wasm)]
-    [FunctionType { params: param_types, result: result_type }]
-
-// ============================================================================
-// WASM Instruction Generation
-// ============================================================================
-
-// Convert Brief expressions to WASM instructions
-transaction expr_to_wasm(expr: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-
-// Arithmetic operations
-transaction compile_add(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [left_instrs = expr_to_wasm(left, ctx)]
-    [right_instrs = expr_to_wasm(right, ctx)]
-    [left_instrs ++ right_instrs ++ [WasmInstr::I32Add]]
-
-transaction compile_sub(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [left_instrs = expr_to_wasm(left, ctx)]
-    [right_instrs = expr_to_wasm(right, ctx)]
-    [left_instrs ++ right_instrs ++ [WasmInstr::I32Sub]]
-
-transaction compile_mul(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [left_instrs = expr_to_wasm(left, ctx)]
-    [right_instrs = expr_to_wasm(right, ctx)]
-    [left_instrs ++ right_instrs ++ [WasmInstr::I32Mul]]
-
-transaction compile_div(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [left_instrs = expr_to_wasm(left, ctx)]
-    [right_instrs = expr_to_wasm(right, ctx)]
-    [left_instrs ++ right_instrs ++ [WasmInstr::I32DivS]]
-
-// Comparison operations (return i32 bool)
-transaction compile_eq(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [left_instrs = expr_to_wasm(left, ctx)]
-    [right_instrs = expr_to_wasm(right, ctx)]
-    [left_instrs ++ right_instrs ++ [WasmInstr::I32Eq]]
-
-transaction compile_lt(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [left_instrs = expr_to_wasm(left, ctx)]
-    [right_instrs = expr_to_wasm(right, ctx)]
-    [left_instrs ++ right_instrs ++ [WasmInstr::I32LtS]]
-
-transaction compile_gt(left: Expr, right: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [left_instrs = expr_to_wasm(left, ctx)]
-    [right_instrs = expr_to_wasm(right, ctx)]
-    [left_instrs ++ right_instrs ++ [WasmInstr::I32GtS]]
-
-// ============================================================================
-// Guard-Based Execution (Branchless)
-// ============================================================================
-
-// Convert guard-based transactions to WASM
-// Uses select instruction instead of branches
-transaction compile_guarded_txn(guard: Expr, body: Vec<Statement>, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [guard_instrs = expr_to_wasm(guard, ctx)]
-    [body_instrs = compile_statements(body, ctx)]
-    
-    // Stack: [guard_value, ...body_results...]
-    // Use select to conditionally execute
-    [guard_instrs ++ body_instrs ++ [WasmInstr::Select]]
-
-// Compile reactive transactions (rct)
-// Fires while guard is true, reaches equilibrium
-transaction compile_rct_txn(name: String, guard: Expr, body: Vec<Statement>, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [guard_instrs = expr_to_wasm(guard, ctx)]
-    [body_instrs = compile_statements(body, ctx)]
-    
-    // Loop with guard check (using br_table for branchless exit)
-    [guard_instrs ++ 
-     [WasmInstr::Block(BlockType::Void), 
-      WasmInstr::Loop(BlockType::Void)] ++
-     body_instrs ++
-     expr_to_wasm(guard, ctx) ++
-     [WasmInstr::BrIf(0),  // Continue if guard true
-      WasmInstr::End, 
-      WasmInstr::End]]
-
-// ============================================================================
-// Memory Management
-// ============================================================================
-
-// Linear memory layout for WASM
-// Page 0: Stack (grows down from 64KB)
-// Page 1-N: Heap (grows up from 64KB)
-// Page M: Globals and constants
-
-transaction setup_wasm_memory(config: &MemoryConfig) -> Memory
-    [initial_pages = config.min_pages]
-    [max_pages = config.max_pages]
-    [Memory { min: initial_pages, max: max_pages }]
-
-// Stack allocation in WASM
-// Uses local variables for stack frame
-transaction allocate_stack_frame(locals: Vec<Local>) -> Vec<WasmInstr>
-    [map(locals, |local| WasmInstr::Local(local.index))]
-
-// Heap allocation via memory.grow
-transaction compile_heap_alloc(size: Expr, ctx: &CodeGenContext) -> Vec<WasmInstr>
-    [size_instrs = expr_to_wasm(size, ctx)]
-    [size_instrs ++ 
-     [WasmInstr::I32Const(65536),  // Page size
-      WasmInstr::I32DivU,
-      WasmInstr::MemoryGrow(0)]]
-
-// ============================================================================
-// FFI and Imports
-// ============================================================================
-
-// Import host functions (JavaScript, native)
-transaction build_import(module: String, name: String, sig: FunctionType) -> Import
-    [Import { module, name, kind: ImportKind::Function(sig) }]
-
-// Standard WASI imports
-transaction build_wasi_imports() -> Vec<Import>
-    [vec![
-        build_import("wasi_snapshot_preview1", "fd_write", fd_write_signature()),
-        build_import("wasi_snapshot_preview1", "proc_exit", proc_exit_signature()),
-    ]]
-
-// Metropolitan FFI imports for shared memory
-transaction build_metropolitan_imports() -> Vec<Import>
-    [vec![
-        build_import("metro", "negotiate", negotiate_signature()),
-        build_import("metro", "share", share_signature()),
-        build_import("metro", "sync", sync_signature()),
-    ]]
-
-// ============================================================================
-// Code Generation Context
-// ============================================================================
-
-struct CodeGenContext {
-    // Current function being compiled
-    current_function: Option<FunctionId>,
-    
-    // Local variable mapping (Brief var -> WASM local index)
-    locals: HashMap<VarId, LocalIndex>,
-    
-    // Next available local index
-    next_local: LocalIndex,
-    
-    // Label stack for control flow
-    label_stack: Vec<Label>,
-    
-    // Type information
-    types: HashMap<TypeId, FunctionType>,
+enum WasmType {
+    I32,
+    I64,
+    F32,
+    F64
 }
 
-transaction create_codegen_context() -> CodeGenContext
-    [CodeGenContext {
-        current_function: None,
-        locals: HashMap::new(),
-        next_local: 0,
-        label_stack: Vec::new(),
-        types: HashMap::new(),
-    }]
-
-// ============================================================================
-// Main Compilation Pipeline
-// ============================================================================
-
-transaction compile_to_wasm(program: Program, config: WasmConfig) -> WasmModule
-    [ctx = create_codegen_context()]
-    
-    // Build type section from function signatures
-    [types = collect_function_types(&program)]
-    [type_section = build_type_section(types)]
-    
-    // Build imports (WASI + user imports)
-    [imports = build_wasi_imports()]
-    [import_section = build_import_section(imports)]
-    
-    // Build function bodies
-    [functions = map(program.functions, |f| compile_function(f, &ctx))]
-    [code_section = build_code_section(functions)]
-    
-    // Build exports
-    [exports = collect_exports(&program)]
-    [export_section = build_export_section(exports)]
-    
-    // Assemble module
-    [WasmModule {
-        type_section,
-        import_section,
-        function_section: build_function_section(function_signatures),
-        table_section: build_table_section(vec![]),
-        memory_section: build_memory_section(vec![setup_wasm_memory(&config.memory)]),
-        global_section: build_global_section(vec![]),
-        export_section,
-        start_section: None,
-        element_section: build_element_section(vec![]),
-        code_section,
-        data_section: build_data_section(vec![]),
-    }]
-
-// ============================================================================
-// Optimization Passes
-// ============================================================================
-
-// Branchless optimization using select
-transaction optimize_branchless(code: Vec<WasmInstr>) -> Vec<WasmInstr>
-    // Replace if-then-else with select where possible
-    [pattern_match(code, |instrs| {
-        [If, condition, then_branch, Else, else_branch, End] =>
-            [condition, then_branch, else_branch, Select]
-    })]
-
-// Tail call optimization
-transaction optimize_tail_calls(code: Vec<WasmInstr>) -> Vec<WasmInstr>
-    // Replace call + return with return_call (WASM tail calls)
-    [pattern_match(code, |instrs| {
-        [Call(func_idx), Return] => [ReturnCall(func_idx)]
-    })]
-
-// Constant folding
-transaction optimize_constants(code: Vec<WasmInstr>) -> Vec<WasmInstr>
-    // Evaluate constant expressions at compile time
-    [fold_constants(code)]
-
-// ============================================================================
-// WASM Binary Encoding
-// ============================================================================
-
-// Encode WASM module to binary format
-transaction encode_wasm_module(module: WasmModule) -> Vec<u8>
-    [magic = [0x00, 0x61, 0x73, 0x6D]]  // \0asm
-    [version = [0x01, 0x00, 0x00, 0x00]]  // Version 1
-    
-    [type_bytes = encode_section(SectionId::Type, module.type_section)]
-    [import_bytes = encode_section(SectionId::Import, module.import_section)]
-    [function_bytes = encode_section(SectionId::Function, module.function_section)]
-    [table_bytes = encode_section(SectionId::Table, module.table_section)]
-    [memory_bytes = encode_section(SectionId::Memory, module.memory_section)]
-    [global_bytes = encode_section(SectionId::Global, module.global_section)]
-    [export_bytes = encode_section(SectionId::Export, module.export_section)]
-    [start_bytes = encode_section(SectionId::Start, module.start_section)]
-    [element_bytes = encode_section(SectionId::Element, module.element_section)]
-    [code_bytes = encode_section(SectionId::Code, module.code_section)]
-    [data_bytes = encode_section(SectionId::Data, module.data_section)]
-    
-    [magic ++ version ++ 
-     type_bytes ++ import_bytes ++ function_bytes ++
-     table_bytes ++ memory_bytes ++ global_bytes ++
-     export_bytes ++ start_bytes ++ element_bytes ++
-     code_bytes ++ data_bytes]
-
-// LEB128 encoding for WASM integers
-transaction encode_leb128(value: u32) -> Vec<u8>
-    [if value < 128 then [value as u8]
-     else [(value & 0x7F | 0x80) as u8] ++ encode_leb128(value >> 7)]
-
-// ============================================================================
-// Runtime Support
-// ============================================================================
-
-// WASM runtime configuration
-struct WasmConfig {
-    // Memory configuration
-    memory: MemoryConfig,
-    
-    // Optimization level
-    optimize: OptimizationLevel,
-    
-    // Debug info
-    debug: bool,
-    
-    // Target environment (browser, node, wasi)
-    target: WasmTarget,
+enum WasmValueType {
+    ValI32,
+    ValI64,
+    ValF32,
+    ValF64
 }
 
-struct MemoryConfig {
-    min_pages: u32,
-    max_pages: u32,
-    heap_start: u32,
-    stack_size: u32,
+// ===== WASM SECTION TYPES =====
+
+enum SectionType {
+    SecCustom,
+    SecType,
+    SecImport,
+    SecFunction,
+    SecTable,
+    SecMemory,
+    SecGlobal,
+    SecExport,
+    SecStart,
+    SecElement,
+    SecCode,
+    SecData
 }
 
-enum WasmTarget {
-    Browser,
-    Node,
-    WASI,
-    Bare,
+comptype Section(Int) // raw byte data
+
+// ===== WASM MODULE STRUCTURE =====
+
+struct WasmModule {
+    types: List<FunctionType>,
+    functions: List<FunctionBody>,
+    imports: List<Import>,
+    exports: List<Export>,
+    memories: List<Memory>,
+    globals: List<Global>,
+    data_segments: List<DataSegment>,
+    code: CodeSection
 }
 
-enum OptimizationLevel {
-    None,
-    Speed,
-    Size,
+struct FunctionType {
+    params: List<WasmValueType>,
+    results: List<WasmValueType>
 }
 
-// ============================================================================
-// Exports
-// ============================================================================
+struct FunctionBody {
+    locals: List<WasmValueType>,
+    code: List<u8>
+}
 
-// Main entry point for WASM backend
-export transaction compile_wasm(program: Program, output: &mut String)
-    [config = WasmConfig::default()]
-    [module = compile_to_wasm(program, config)]
-    [optimized_module = optimize_wasm_module(module, config.optimize)]
-    [binary = encode_wasm_module(optimized_module)]
-    [output = format!("// WASM binary: {} bytes\n", binary.len())]
+struct Import {
+    module: String,
+    name: String,
+    kind: ImportKind
+}
 
-// Generate WAT (WebAssembly Text Format) for debugging
-export transaction generate_wat(module: WasmModule) -> String
-    [wat = format_wat_text(module)]
-    [wat]
+enum ImportKind {
+    ImportFunc(TypeIndex),
+    ImportMem(Memory),
+    ImportGlobal(GlobalType)
+}
 
-// Acyclicity annotation helper for generated WASM output
-defn wasm_acyclic_annotation(cg: CallGraphResult) -> String {
-    [!cg.has_cycle] {
-        term ";; Call graph: acyclic -- static dispatch in WASM module\n";
+struct Memory {
+    min: u32,
+    max: Option<u32>
+}
+
+struct Global {
+    global_type: GlobalType,
+    init_expr: List<u8>
+}
+
+struct GlobalType {
+    value_type: WasmValueType,
+    mutable: Bool
+}
+
+struct Export {
+    name: String,
+    kind: ExportKind
+}
+
+enum ExportKind {
+    ExportFunc(u32),
+    ExportMem(u32),
+    ExportGlobal(u32)
+}
+
+struct DataSegment {
+    memory_index: u32,
+    offset_expr: List<u8>,
+    data: List<u8>
+}
+
+// ===== WASM INSTRUCTION ENCODING =====
+
+defn encode_i32_const(value: i32) -> List<u8> {
+    // LEB128 encoding for i32
+    let result: List<u8> = [];
+    let val: u32 = u32(value);
+    [val > 0x7F] {
+        result = append(result, u8(val & 0x7F | 0x80));
+        &val = val >> 7;
     };
-    term ";; Call graph: cyclic -- dynamic dispatch with bounded stack\n";
+    result = append(result, u8(val & 0x7F));
+    term result;
+}
+
+defn encode_opcode(opcode: u8) -> List<u8> {
+    term [opcode];
+}
+
+defn encode_end() -> List<u8> {
+    term [0x0B]; // end opcode
+}
+
+defn encode_block(result_type: WasmValueType) -> List<u8> {
+    // block with optional result type
+    let block_type: u8;
+    uni result_type(I32) = { &block_type = 0x7F; };
+    uni result_type(I64) = { &block_type = 0x7E; };
+    uni result_type(F32) = { &block_type = 0x7D; };
+    uni result_type(F64) = { &block_type = 0x7C; };
+    term [0x02, block_type]; // block opcode + block type
+}
+
+// ===== BRIEF TYPE TO WASM TYPE =====
+
+defn brief_type_to_wasm(brief_type: Type) -> WasmType {
+    uni brief_type(TypeInt) = { term I32; };
+    uni brief_type(TypeUInt) = { term I32; };
+    uni brief_type(TypeFloat) = { term F64; };
+    uni brief_type(TypeBool) = { term I32; };
+    uni brief_type(TypeChar) = { term I32; };
+    uni brief_type(TypeString) = { term I32; }; // pointer to string data
+    term I32; // default
+}
+
+defn value_type(wasm_type: WasmType) -> WasmValueType {
+    uni wasm_type(I32) = { term ValI32; };
+    uni wasm_type(I64) = { term ValI64; };
+    uni wasm_type(F32) = { term ValF32; };
+    uni wasm_type(F64) = { term ValF64; };
+}
+
+// ===== MODULE BUILDING =====
+
+defn build_wasm_module(program: Program, cg: CallGraphResult) -> List<u8> {
+    let bytes: List<u8> = [];
+
+    // Magic number + version
+    bytes = append_all(bytes, [0x00, 0x61, 0x73, 0x6D]); // \0asm
+    bytes = append_all(bytes, [0x01, 0x00, 0x00, 0x00]); // version 1
+
+    // Collect sections
+    let func_types: List<FunctionType> = [];
+    let func_bodies: List<FunctionBody> = [];
+    let imports: List<Import> = [];
+    let exports: List<Export> = [];
+
+    // Process each transaction
+    let i: Int = 0;
+    [i < program.items.len()] {
+        uni program.items[i](TopTxn(txn)) = {
+            // Create function type for this transaction
+            let params: List<WasmValueType> = [];
+            let results: List<WasmValueType> = [];
+
+            // Map parameters to WASM types
+            let j: Int = 0;
+            [j < txn.params.len()] {
+                let param_type = brief_type_to_wasm(txn.params[j].param_type);
+                params = append(params, value_type(param_type));
+                &j = j + 1;
+            };
+
+            // Add result type for term statements
+            let has_result: Bool = has_term_value(txn.body);
+            [has_result] {
+                results = append(results, ValI32);
+            };
+
+            func_types = append(func_types, FunctionType {
+                params: params,
+                results: results
+            });
+
+            // Generate function body
+            let body_bytes = generate_transaction_body(txn);
+            func_bodies = append(func_bodies, FunctionBody {
+                locals: [],
+                code: body_bytes
+            });
+
+            // Export each transaction
+            exports = append(exports, Export {
+                name: txn.name,
+                kind: ExportFunc(i)
+            });
+        };
+        &i = i + 1;
+    };
+
+    // Emit type section
+    bytes = append_all(bytes, encode_section(SecType, encode_type_section(func_types)));
+
+    // Emit function section
+    let func_indices: List<u32> = [];
+    let fi: Int = 0;
+    [fi < func_bodies.len()] {
+        func_indices = append(func_indices, u32(fi));
+        &fi = fi + 1;
+    };
+    bytes = append_all(bytes, encode_section(SecFunction, encode_function_section(func_indices)));
+
+    // Emit export section
+    bytes = append_all(bytes, encode_section(SecExport, encode_export_section(exports)));
+
+    // Emit code section
+    bytes = append_all(bytes, encode_section(SecCode, encode_code_section(func_bodies)));
+
+    // Emit memory section (default: 1 page)
+    bytes = append_all(bytes, encode_section(SecMemory, [0x00, 0x01, 0x00]));
+
+    term bytes;
+}
+
+// ===== SECTION ENCODING =====
+
+defn encode_section(section_id: u8, content: List<u8>) -> List<u8> {
+    let result: List<u8> = [section_id];
+    result = append_all(result, encode_leb128_u32(u32(content.len())));
+    term append_all(result, content);
+}
+
+defn encode_leb128_u32(value: u32) -> List<u8> {
+    let result: List<u8> = [];
+    let val = value;
+    [val > 0x7F] {
+        result = append(result, u8(val & 0x7F | 0x80));
+        &val = val >> 7;
+    };
+    result = append(result, u8(val & 0x7F));
+    term result;
+}
+
+defn encode_type_section(types: List<FunctionType>) -> List<u8> {
+    let result: List<u8> = encode_leb128_u32(u32(types.len()));
+    let i: Int = 0;
+    [i < types.len()] {
+        result = append_all(result, encode_function_type(types[i]));
+        &i = i + 1;
+    };
+    term result;
+}
+
+defn encode_function_type(ft: FunctionType) -> List<u8> {
+    let result: List<u8> = [0x60]; // functype
+    result = append_all(result, encode_leb128_u32(u32(ft.params.len())));
+    let i: Int = 0;
+    [i < ft.params.len()] {
+        result = append(result, encode_value_type(ft.params[i]));
+        &i = i + 1;
+    };
+    result = append_all(result, encode_leb128_u32(u32(ft.results.len())));
+    let i: Int = 0;
+    [i < ft.results.len()] {
+        result = append(result, encode_value_type(ft.results[i]));
+        &i = i + 1;
+    };
+    term result;
+}
+
+defn encode_value_type(vt: WasmValueType) -> u8 {
+    uni vt(ValI32) = 0x7F;
+    uni vt(ValI64) = 0x7E;
+    uni vt(ValF32) = 0x7D;
+    uni vt(ValF64) = 0x7C;
+    term 0x7F; // default i32
+}
+
+defn encode_function_section(indices: List<u32>) -> List<u8> {
+    term encode_leb128_u32(u32(indices.len()));
+}
+
+defn encode_export_section(exports: List<Export>) -> List<u8> {
+    let result: List<u8> = encode_leb128_u32(u32(exports.len()));
+    let i: Int = 0;
+    [i < exports.len()] {
+        result = append_all(result, encode_export(exports[i]));
+        &i = i + 1;
+    };
+    term result;
+}
+
+defn encode_export(exp: Export) -> List<u8> {
+    let result: List<u8> = [];
+    // Encode export name as UTF-8 length-prefixed string
+    result = append_all(result, encode_leb128_u32(u32(exp.name.len())));
+    let j: Int = 0;
+    [j < exp.name.len()] {
+        result = append(result, u8(exp.name[j]));
+        &j = j + 1;
+    };
+    uni exp.kind(ExportFunc(idx)) = {
+        result = append(result, 0x00); // func export
+        result = append_all(result, encode_leb128_u32(idx));
+    };
+    uni exp.kind(ExportMem(idx)) = {
+        result = append(result, 0x02); // mem export
+        result = append_all(result, encode_leb128_u32(idx));
+    };
+    uni exp.kind(ExportGlobal(idx)) = {
+        result = append(result, 0x03); // global export
+        result = append_all(result, encode_leb128_u32(idx));
+    };
+    term result;
+}
+
+defn encode_code_section(bodies: List<FunctionBody>) -> List<u8> {
+    let result: List<u8> = encode_leb128_u32(u32(bodies.len()));
+    let i: Int = 0;
+    [i < bodies.len()] {
+        result = append_all(result, encode_function_body(bodies[i]));
+        &i = i + 1;
+    };
+    term result;
+}
+
+defn encode_function_body(body: FunctionBody) -> List<u8> {
+    // Body size + locals + code
+    let body_content: List<u8> = [];
+
+    // Locals declaration: count and types
+    [body.locals.len() > 0] {
+        body_content = append_all(body_content, encode_leb128_u32(u32(body.locals.len())));
+        let i: Int = 0;
+        [i < body.locals.len()] {
+            body_content = append_all(body_content, [0x01]); // count = 1
+            body_content = append(body_content, encode_value_type(body.locals[i]));
+            &i = i + 1;
+        };
+    };
+    [!body.locals.len() > 0] {
+        body_content = append_all(body_content, [0x00]); // no locals
+    };
+
+    body_content = append_all(body_content, body.code);
+
+    // Encode body size prefix
+    let size = u32(body_content.len());
+    term append_all(encode_leb128_u32(size), body_content);
+}
+
+// ===== TRANSACTION BODY GENERATION =====
+
+defn generate_transaction_body(txn: Transaction) -> List<u8> {
+    let bytes: List<u8> = [];
+    // Generate code from transaction body
+    let i: Int = 0;
+    [i < txn.body.len()] {
+        bytes = append_all(bytes, generate_statement(txn.body[i]));
+        &i = i + 1;
+    };
+    bytes = append_all(bytes, [0x0B]); // end
+    term bytes;
+}
+
+defn generate_statement(stmt: Statement) -> List<u8> {
+    uni stmt(StmtAssign(name, expr)) = {
+        // Local set: store value to local variable
+        term append_all(generate_expression(expr), [0x21, u8(local_index(name))]); // local.set
+    };
+    uni stmt(StmtExpression(expr)) = {
+        term append_all(generate_expression(expr), [0x1A]); // drop
+    };
+    uni stmt(StmtPass) = {
+        term []; // no-op
+    };
+    uni stmt(StmtGuarded(guard, body)) = {
+        // Guarded block: if condition then body else skip
+        let condition_bytes = generate_expression(guard);
+        let body_bytes: List<u8> = [];
+        let i: Int = 0;
+        [i < body.len()] {
+            body_bytes = append_all(body_bytes, generate_statement(body[i]));
+            &i = i + 1;
+        };
+        term append_all(append_all(append_all(condition_bytes, [0x04, 0x40]), body_bytes), [0x0B]); // if block end
+    };
+    term [];
+}
+
+defn generate_expression(expr: Expr) -> List<u8> {
+    uni expr(ExprInt(val)) = {
+        // i32.const
+        term append_all([0x41], encode_i32_const(val));
+    };
+    uni expr(ExprBool(val)) = {
+        [val] { term [0x41, 0x01]; }; // i32.const 1
+        term [0x41, 0x00]; // i32.const 0
+    };
+    uni expr(ExprVar(name)) = {
+        // local.get
+        term [0x20, u8(local_index(name))];
+    };
+    uni expr(ExprBinOp("+", l, r)) = {
+        term append_all(append_all(generate_expression(l), generate_expression(r)), [0x6A]); // i32.add
+    };
+    uni expr(ExprBinOp("-", l, r)) = {
+        term append_all(append_all(generate_expression(l), generate_expression(r)), [0x6B]); // i32.sub
+    };
+    uni expr(ExprBinOp("*", l, r)) = {
+        term append_all(append_all(generate_expression(l), generate_expression(r)), [0x6C]); // i32.mul
+    };
+    uni expr(ExprBinOp("==", l, r)) = {
+        term append_all(append_all(generate_expression(l), generate_expression(r)), [0x46]); // i32.eq
+    };
+    uni expr(ExprBinOp("<", l, r)) = {
+        term append_all(append_all(generate_expression(l), generate_expression(r)), [0x48]); // i32.lt_s
+    };
+    uni expr(ExprBinOp(">", l, r)) = {
+        term append_all(append_all(generate_expression(l), generate_expression(r)), [0x4A]); // i32.gt_s
+    };
+    uni expr(ExprUnaryOp("!", e)) = {
+        term append_all(generate_expression(e), [0x45]); // i32.eqz
+    };
+    term []; // default no-op
+}
+
+defn local_index(name: String) -> Int {
+    // Simple locals: params first, then locals
+    // This is a simplified local index lookup
+    term 0;
+}
+
+defn has_term_value(body: List<Statement>) -> Bool {
+    let i: Int = 0;
+    [i < body.len()] {
+        uni body[i](StmtTerm(_)) = { term true; };
+        &i = i + 1;
+    };
+    term false;
+}
+
+// ===== UTILITY FUNCTIONS =====
+
+// Append all items from second list to first
+defn append_all(list1: List<u8>, list2: List<u8>) -> List<u8> {
+    let result = list1;
+    let i: Int = 0;
+    [i < list2.len()] {
+        result = append(result, list2[i]);
+        &i = i + 1;
+    };
+    term result;
+}
+
+// Generate a complete WASM module string representation for debugging
+defn wasm_module_to_string(module: WasmModule) -> String {
+    let sb = new_builder();
+    sb = sb.append_str("WasmModule(");
+    sb = sb.append_str("types=");
+    sb = sb.append_str(String(module.types.len()));
+    sb = sb.append_str(", functions=");
+    sb = sb.append_str(String(module.functions.len()));
+    sb = sb.append_str(", exports=");
+    sb = sb.append_str(String(module.exports.len()));
+    sb = sb.append_str(")");
+    term sb.to_string();
 }

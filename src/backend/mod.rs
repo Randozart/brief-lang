@@ -110,31 +110,37 @@ pub fn validate_hashtags(hashtags: &[Hashtag], backend: &str) -> Vec<HashtagVali
     let mut results = Vec::new();
 
     for tag in hashtags {
-        // Check scoped tags: only validate if scope matches the current backend
-        if let Some(ref scope) = tag.scoped {
-            if scope != backend {
-                continue; // not our concern
-            }
+        if is_scoped_elsewhere(tag, backend) {
+            continue;
         }
-
-        let is_supported = supported.iter().any(|s| *s == tag.name);
-
-        if is_supported {
-            results.push(HashtagValidation::Supported);
-        } else if tag.mandatory {
-            // Check fallback chain
-            let fallback_supported = tag.fallback.iter().any(|f| supported.contains(&f.as_str()));
-            if fallback_supported {
-                results.push(HashtagValidation::Supported);
-            } else {
-                results.push(HashtagValidation::UnsupportedMandatory(tag.name.clone()));
-            }
-        } else {
-            results.push(HashtagValidation::UnsupportedAdvisory(tag.name.clone()));
-        }
+        results.push(validate_single_hashtag(tag, &supported));
     }
 
     results
+}
+
+fn is_scoped_elsewhere(tag: &Hashtag, backend: &str) -> bool {
+    if let Some(ref scope) = tag.scoped {
+        return scope != backend;
+    }
+    false
+}
+
+fn validate_single_hashtag(tag: &Hashtag, supported: &[&'static str]) -> HashtagValidation {
+    if supported.contains(&tag.name.as_str()) {
+        return HashtagValidation::Supported;
+    }
+    if tag.mandatory && has_supported_fallback(tag, supported) {
+        return HashtagValidation::Supported;
+    }
+    if tag.mandatory {
+        return HashtagValidation::UnsupportedMandatory(tag.name.clone());
+    }
+    HashtagValidation::UnsupportedAdvisory(tag.name.clone())
+}
+
+fn has_supported_fallback(tag: &Hashtag, supported: &[&'static str]) -> bool {
+    tag.fallback.iter().any(|f| supported.contains(&f.as_str()))
 }
 
 /// Intent: Collect all hashtags from a list of statements recursively.
@@ -281,6 +287,7 @@ fn collect_read_identifiers(body: &[Statement]) -> std::collections::HashSet<Str
 
 /// Intent: Detect pairs of transactions where post(A) implies pre(B),
 /// meaning they could be fused into a single atomic transaction.
+/// Pre-computes analysis per transaction to avoid recomputing in the O(n²) loop.
 pub fn detect_fusable_pairs(program: &Program) -> Vec<(String, String)> {
     let txns: Vec<&crate::ast::Transaction> = program
         .items
@@ -294,32 +301,31 @@ pub fn detect_fusable_pairs(program: &Program) -> Vec<(String, String)> {
         })
         .collect();
 
+    // Pre-compute for each transaction: write list, read set, post set, pre set
+    let mut all_writes: Vec<Vec<String>> = Vec::new();
+    let mut all_reads: Vec<std::collections::HashSet<String>> = Vec::new();
+    let mut all_post_ids: Vec<std::collections::HashSet<String>> = Vec::new();
+    let mut all_pre_ids: Vec<std::collections::HashSet<String>> = Vec::new();
+
+    for txn in &txns {
+        all_writes.push(collect_assigned_identifiers(&txn.body));
+        all_reads.push(collect_read_identifiers(&txn.body));
+        let mut post_ids = std::collections::HashSet::new();
+        collect_expr_identifiers(&txn.contract.post_condition, &mut post_ids);
+        all_post_ids.push(post_ids);
+        let mut pre_ids = std::collections::HashSet::new();
+        collect_expr_identifiers(&txn.contract.pre_condition, &mut pre_ids);
+        all_pre_ids.push(pre_ids);
+    }
+
     let mut pairs = Vec::new();
-    for a in &txns {
-        let a_writes: Vec<String> = collect_assigned_identifiers(&a.body);
-        let a_post_ids = {
-            let mut ids = std::collections::HashSet::new();
-            collect_expr_identifiers(&a.contract.post_condition, &mut ids);
-            ids
-        };
-
-        for b in &txns {
-            if a.name == b.name {
-                continue;
-            }
-            let b_reads: std::collections::HashSet<String> = collect_read_identifiers(&b.body);
-            let b_pre_ids = {
-                let mut ids = std::collections::HashSet::new();
-                collect_expr_identifiers(&b.contract.pre_condition, &mut ids);
-                ids
-            };
-
-            // Check if post(A) writes overlap with pre(B) reads
-            let fusable = a_writes.iter().any(|w| b_pre_ids.contains(w))
-                || a_post_ids.iter().any(|id| b_reads.contains(id));
-
+    for i in 0..txns.len() {
+        for j in 0..txns.len() {
+            if i == j { continue; }
+            let fusable = all_writes[i].iter().any(|w| all_pre_ids[j].contains(w))
+                || all_post_ids[i].iter().any(|id| all_reads[j].contains(id));
             if fusable {
-                pairs.push((a.name.clone(), b.name.clone()));
+                pairs.push((txns[i].name.clone(), txns[j].name.clone()));
             }
         }
     }
