@@ -166,8 +166,8 @@ Functions accessing private/secret/password data must call authenticate/authoriz
 | P1 | Wire `detect_fusable_pairs()` in -O path | P0 above | 1 session | PENDING |
 | P1 | Fix `main.bv` backend stubs | None | 1 session | PENDING |
 | P1 | Praetor intent comments on touched files | Every task | Ongoing | PENDING |
-| P2 | Implement peephole optimizer | P1 above | 1-2 sessions | PENDING |
-| P2 | Extract memory overlay + guard caching to shared | P0 above | 1-2 sessions | PENDING |
+| P2 | Implement peephole optimizer | P1 above | 1-2 sessions | ✅ DONE |
+| P2 | Extract memory overlay + guard caching to shared | P0 above | 1-2 sessions | ✅ DONE |
 | P2 | Rewrite `wasm.bv`, `vhdl.bv`, `verilog.bv` | P0 above | 2-3 sessions | PENDING |
 | P3 | Rust parser: missing AST nodes (ListLen, ForAll, etc.) | None | 2-3 sessions | PENDING |
 | P3 | Brief parser: missing expr types (Tuple, FieldAccess, etc.) | None | 2-3 sessions | PENDING |
@@ -178,6 +178,7 @@ Functions accessing private/secret/password data must call authenticate/authoriz
 ## 7. Commit Log
 
 - `15742b2` (2026-05-27): Fix Brief bugs (NOT(), range.bv, String::new()), implement stub parsers, wire analyze_program into all backends
-- `current` (2026-05-27): Create AnalysisResults struct, fix DataflowAnalyzer lifetime, add --optimize CLI flag, wire fusable_pairs + dataflow in -O mode
+- `current` (2026-05-27): Implement shared peephole optimizer (constant folding, redundant elimination, guard simplification). Extract MemoryOverlay + GuardTracker to shared pipeline. Both wired into --optimize path.
+- `c2728c5` (2026-05-27): [same as above - amend for final extraction]
 
 ---
