@@ -504,7 +504,7 @@ defn emit_store_bitfield(base_reg: String, field: BitFieldLayout, value_reg: Str
     instrs = instrs.append(LDR(temp_reg, base_reg, field.byte_offset));
     
     // Clear the field bits in current value
-    let inverted_mask = NOT(field.mask);
+    let inverted_mask = !field.mask;
     let clear_mask_reg = "X17";
     instrs = instrs.append(MOVI(clear_mask_reg, inverted_mask));
     instrs = instrs.append(AND(temp_reg, temp_reg, clear_mask_reg));

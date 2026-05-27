@@ -746,6 +746,24 @@ fn run_check(
         println!("[ProofEngine] All proofs verified");
     }
 
+    if verbose {
+        println!("[Analysis] Running shared program analysis...");
+    }
+    // Intent: Run shared program analysis (call graph + parameter ranges) to detect
+    //   acyclic subgraphs eligible for optimized scheduling and bounded parameter loops.
+    let (mut call_graph, param_ranges) = backend::analyze_program(&program);
+    let has_cycles = call_graph.has_cycle();
+    let cycles = call_graph.find_all_cycles();
+    let range_count: usize = param_ranges.ranges.values().map(|m| m.len()).sum();
+    if verbose {
+        println!("[Analysis] Call graph: {} transactions, {} edges, {} cycle(s)",
+            call_graph.node_count(), call_graph.edge_count(), cycles.len());
+        println!("[Analysis] Parameter ranges for {} transaction parameters", range_count);
+        if has_cycles {
+            println!("[Analysis]  Warning: cyclic dependencies detected - some transactions cannot use optimized scheduling");
+        }
+    }
+
     if annotate {
         if verbose {
             println!("[Annotator] Computing call paths...");
@@ -1250,6 +1268,8 @@ fn run_arm(
         eprintln!("  Warning: Proof errors (continuing anyway)");
     }
 
+    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+
     let mut wasm_gen = backend::webstack::WebstackGenerator::new().with_target(backend::webstack::CodeTarget::Arm);
     let output = wasm_gen.generate(&program, &[], "kernel");
 
@@ -1317,6 +1337,12 @@ fn run_rust(
     if !backend::validate_hashtags_in_program(&program, "rust", false) {
         return Err("Hashtag validation errors (Rust backend)".into());
     }
+
+    // Run shared program analysis
+    if verbose {
+        println!("  [Analysis] Call graph + parameter ranges...");
+    }
+    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
 
     let mut rust_backend = backend::rust::RustBackend::new();
     if let Some(spec) = target_spec {
@@ -1635,6 +1661,9 @@ fn run_llvm_compile(
         return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
     }
 
+    // Run shared program analysis
+    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+
     let mut llvm_backend = crate::backend::llvm::LlvmBackend::new();
     if let Some(spec) = target.cloned() {
         llvm_backend = llvm_backend.with_spec(spec);
@@ -1730,6 +1759,9 @@ fn run_c(
         return Err("Hashtag validation errors (C backend)".into());
     }
 
+    // Run shared program analysis
+    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+
     // Load linkage config (optional - look alongside source file)
     let linkage_path = file_path
         .parent()
@@ -1821,6 +1853,9 @@ fn run_cobol(
     if !type_errors.is_empty() {
         return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
     }
+
+    // Run shared program analysis
+    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
 
     let stem = file_path
         .file_stem()
@@ -2088,6 +2123,9 @@ fn run_verilog(
         }
     }
 
+    // Run shared program analysis
+    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+
     // Verilog generation
     let stem = file_path
         .file_stem()
@@ -2314,6 +2352,9 @@ fn run_vhdl(
         }
     }
 
+    // Run shared program analysis
+    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
+
     // VHDL generation
     let stem = file_path
         .file_stem()
@@ -2527,6 +2568,8 @@ fn run_rbv(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
+
+    let (_call_graph, _param_ranges) = backend::analyze_program(&program);
 
     let mut wasm_gen = backend::webstack::WebstackGenerator::new();
     if let Some(speed) = program.reactor_speed {
@@ -2835,6 +2878,8 @@ js-sys = "0.3"
             if !type_errors.is_empty() {
                 return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
             }
+
+            let (_call_graph, _param_ranges) = backend::analyze_program(&program);
 
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
 

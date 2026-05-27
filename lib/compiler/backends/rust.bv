@@ -207,7 +207,7 @@ defn generate_rust_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    term String::new()
+    term "";
 }
 
 defn expr_to_rust(expr: Expr) -> String {

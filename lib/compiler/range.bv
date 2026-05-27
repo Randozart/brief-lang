@@ -76,20 +76,20 @@ defn extract_bounds_from_expr(
 ][
     true
 ] {
-    uni expr(AndExpr(left, right)) = {
+    uni expr(ExprBinOp("&&", left, right)) = {
         let r1 = extract_bounds_from_expr(left, ranges);
         term extract_bounds_from_expr(right, r1);
     };
-    uni expr(GtExpr(l, r)) = {
+    uni expr(ExprBinOp(">", l, r)) = {
         term apply_comparison(l, r, ranges, true, false);
     };
-    uni expr(GeExpr(l, r)) = {
+    uni expr(ExprBinOp(">=", l, r)) = {
         term apply_comparison(l, r, ranges, true, true);
     };
-    uni expr(LtExpr(l, r)) = {
+    uni expr(ExprBinOp("<", l, r)) = {
         term apply_comparison(l, r, ranges, false, false);
     };
-    uni expr(LeExpr(l, r)) = {
+    uni expr(ExprBinOp("<=", l, r)) = {
         term apply_comparison(l, r, ranges, false, true);
     };
     term ranges;
@@ -110,8 +110,8 @@ defn apply_comparison(
     true
 ] {
     // Case 1: var <op> lit  (e.g. x > 0)
-    uni(left)(IdentExpr(var_name)) = {
-        uni(right)(IntLit(val)) = {
+    uni(left)(ExprVar(var_name)) = {
+        uni(right)(ExprInt(val)) = {
             [op_is_gt] {
                 // var > lit => LOWER bound
                 term set_lower_bound(ranges, var_name, val, inclusive);
@@ -123,8 +123,8 @@ defn apply_comparison(
     };
     
     // Case 2: lit <op> var  (e.g. 0 < x)
-    uni(left)(IntLit(val)) = {
-        uni(right)(IdentExpr(var_name)) = {
+    uni(left)(ExprInt(val)) = {
+        uni(right)(ExprVar(var_name)) = {
             [op_is_gt] {
                 // lit > var => var < lit => UPPER bound
                 term set_upper_bound(ranges, var_name, val, inclusive);

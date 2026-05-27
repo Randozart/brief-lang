@@ -194,7 +194,7 @@ defn generate_c_statement(stmt: Statement) -> String {
         term output.to_string();
     };
     
-    term String::new()
+    term "";
 }
 
 defn expr_to_c(expr: Expr) -> String {

@@ -361,13 +361,15 @@ defn parse_top_level(state: ParserState) -> Result<(TopLevel, ParserState), Stri
     uni tok(KeywordRender) = {
         let result = parse_render(state);
         uni result(Ok(pair)) = {
-            let (name, body) = pair;
+            let (name, body, new_state) = pair;
             term Ok((TopRender(name, body), new_state));
         };
         uni result(Err(e)) = {
             term Err(e);
         };
     };
+
+    term Err("Unknown top-level declaration");
     
     term Err("Unexpected token: " + token_to_string(tok));
 }
@@ -2360,4 +2362,306 @@ defn parse_state_decl(state: ParserState) -> Result<(StateDecl, ParserState), St
     };
     
     term Ok((decl, state));
+}
+
+// ===== FOREIGN SIGNATURE PARSING =====
+
+defn parse_foreign_signature(state: ParserState) -> Result<(ForeignSignature, ParserState), String> {
+    let is_frgn_bang = current_token(state) == KeywordTrgBang;
+    [!is_frgn_bang] {
+        let result = expect_token(state, KeywordFrgn);
+        uni result(Ok(new_state)) = { &state = new_state; };
+        uni result(Err(e)) = { term Err(e); };
+    };
+
+    // Parse name (skip frgn! token if present)
+    let tok = current_token(state);
+    uni tok(TokenIdentifier(name)) = { &state = advance(state); };
+    [!is_identifier(tok)] { term Err("Expected foreign function name"); };
+
+    // Parse optional @ address
+    let location: String = "";
+    [current_token(state) == OpAt] {
+        &state = advance(state);
+        let addr_tok = current_token(state);
+        uni addr_tok(TokenInt(n)) = {
+            &location = String(n);
+            &state = advance(state);
+        };
+        uni addr_tok(TokenIdentifier(addr_name)) = {
+            &location = addr_name;
+            &state = advance(state);
+        };
+        [!is_identifier(addr_tok) && !is_int_token(addr_tok)] {
+            &state = state; // compiler picks address
+        };
+    };
+
+    // Parse parameters: (name: Type, ...)
+    let result = expect_token(state, DelimLParen);
+    uni result(Ok(new_state)) = { &state = new_state; };
+    uni result(Err(e)) = { term Err(e); };
+
+    let inputs: List<(String, Type)> = [];
+    [current_token(state) != DelimRParen] {
+        let param_tok = current_token(state);
+        uni param_tok(TokenIdentifier(pname)) = {
+            &state = advance(state);
+            let result = expect_token(state, OpColon);
+            uni result(Ok(ns)) = { &state = ns; };
+            uni result(Err(e)) = { term Err(e); };
+            let result = parse_type(state);
+            uni result(Ok(pair)) = {
+                let (ptype, ns) = pair;
+                &inputs = append(inputs, (pname, ptype));
+                &state = ns;
+            };
+            uni result(Err(e)) = { term Err(e); };
+        };
+        [!is_identifier(param_tok)] { term Err("Expected parameter name"); };
+
+        [current_token(state) == OpComma] {
+            &state = advance(state);
+        };
+    };
+
+    let result = expect_token(state, DelimRParen);
+    uni result(Ok(new_state)) = { &state = new_state; };
+    uni result(Err(e)) = { term Err(e); };
+
+    // Parse return type (fire-and-forget has no return)
+    let success_output: List<(String, Type)> = [];
+    [!is_frgn_bang] {
+        let result = expect_token(state, OpArrow);
+        uni result(Ok(ns)) = { &state = ns; };
+        uni result(Err(e)) = { term Err(e); };
+
+        // Expect Result<T, E>
+        let ret_tok = current_token(state);
+        uni ret_tok(TokenIdentifier(ret_name)) = {
+            [ret_name == "Result"] {
+                &state = advance(state);
+                let result = expect_token(state, OpLt);
+                uni result(Ok(ns)) = { &state = ns; };
+                uni result(Err(e)) = { term Err(e); };
+
+                // Parse single success type (simplified - no multi-field)
+                let result = parse_type(state);
+                uni result(Ok(pair)) = {
+                    let (stype, ns) = pair;
+                    &success_output = append(success_output, ("result", stype));
+                    &state = ns;
+                };
+                uni result(Err(e)) = { term Err(e); };
+
+                let result = expect_token(state, OpComma);
+                uni result(Ok(ns)) = { &state = ns; };
+                uni result(Err(e)) = { term Err(e); };
+
+                // Skip error type
+                let result = parse_type(state);
+                uni result(Ok(pair)) = {
+                    let (_, ns) = pair;
+                    &state = ns;
+                };
+                uni result(Err(e)) = { term Err(e); };
+
+                let result = expect_token(state, OpGt);
+                uni result(Ok(ns)) = { &state = ns; };
+                uni result(Err(e)) = { term Err(e); };
+            };
+        };
+        [!is_identifier(ret_tok)] { term Err("Expected Result type"); };
+    };
+
+    let result = expect_token(state, OpSemicolon);
+    uni result(Ok(new_state)) = { &state = new_state; };
+    uni result(Err(e)) = { term Err(e); };
+
+    let sig = ForeignSignature {
+        name: unwrap_identifier(tok),
+        location: location,
+        wasm_impl: None,
+        wasm_setup: None,
+        inputs: inputs,
+        success_output: success_output,
+        result_type: ResResult,
+        error_type_name: "Err",
+        error_fields: [],
+        input_layout: None,
+        output_layout: None,
+        precondition: None,
+        postcondition: None,
+        buffer_mode: None,
+        ffi_kind: None
+    };
+
+    term Ok((sig, state));
+}
+
+// Check if token is an integer literal
+defn is_int_token(tok: Token) -> Bool {
+    uni tok(TokenInt(_)) = true;
+    term false;
+}
+
+// ===== RSTRUCT PARSING =====
+
+defn parse_rstruct(state: ParserState) -> Result<(RStructDefinition, ParserState), String> {
+    let result = expect_token(state, KeywordRstruct);
+    uni result(Ok(new_state)) = { &state = new_state; };
+    uni result(Err(e)) = { term Err(e); };
+
+    let tok = current_token(state);
+    uni tok(TokenIdentifier(name)) = { &state = advance(state); };
+    [!is_identifier(tok)] { term Err("Expected rstruct name"); };
+
+    let result = expect_token(state, DelimLBrace);
+    uni result(Ok(new_state)) = { &state = new_state; };
+    uni result(Err(e)) = { term Err(e); };
+
+    let fields: List<StructField> = [];
+    let methods: List<Transaction> = [];
+
+    [current_token(state) != DelimRBrace] {
+        let tok = current_token(state);
+        let is_field_candidate = is_identifier(tok);
+        let is_keyword_start = tok == KeywordTxn || tok == KeywordRct || tok == KeywordAsync;
+
+        [is_keyword_start] {
+            // Transaction
+            let result = parse_transaction(state);
+            uni result(Ok(pair)) = {
+                let (txn, ns) = pair;
+                let expanded_name = name + "." + txn.name;
+                let expanded_txn = Transaction {
+                    name: expanded_name,
+                    params: txn.params,
+                    is_async: txn.is_async,
+                    is_reactive: txn.is_reactive,
+                    type_params: txn.type_params,
+                    contract: txn.contract,
+                    body: txn.body,
+                    modifiers: txn.modifiers,
+                    dependencies: txn.dependencies
+                };
+                &methods = append(methods, expanded_txn);
+                &state = ns;
+            };
+            uni result(Err(e)) = { term Err(e); };
+        };
+
+        [!is_keyword_start] {
+            // Try as field: name: Type
+            let ftok = current_token(state);
+            uni ftok(TokenIdentifier(fname)) = {
+                &state = advance(state);
+                [current_token(state) == OpColon] {
+                    &state = advance(state);
+                    let result = parse_type(state);
+                    uni result(Ok(pair)) = {
+                        let (ftype, ns) = pair;
+                        &state = ns;
+                        let default: Option<Expr> = None;
+                        [current_token(state) == OpEq] {
+                            &state = advance(state);
+                            let eresult = parse_expression(state);
+                            uni eresult(Ok(epair)) = {
+                                let (val, ns2) = epair;
+                                &default = Some(val);
+                                &state = ns2;
+                            };
+                            uni eresult(Err(_)) = { };
+                        };
+                        [current_token(state) == OpSemicolon] { &state = advance(state); };
+                        [current_token(state) == OpComma] { &state = advance(state); };
+                        let field = StructField { name: fname, field_type: ftype, default_value: default };
+                        &fields = append(fields, field);
+                    };
+                    uni result(Err(e)) = { term Err(e); };
+                };
+                [current_token(state) != OpColon] {
+                    // Not a field - try as transaction with implicit name
+                    // This is a simplified fallback
+                    term Err("Expected field (name: Type) or transaction in rstruct body");
+                };
+            };
+            [!is_identifier(ftok)] { term Err("Expected field or transaction in rstruct body"); };
+        };
+    };
+
+    let result = expect_token(state, DelimRBrace);
+    uni result(Ok(new_state)) = { &state = new_state; };
+    uni result(Err(e)) = { term Err(e); };
+
+    let rstruct = RStructDefinition {
+        name: unwrap_identifier(tok),
+        fields: fields,
+        methods: methods,
+        view: None
+    };
+
+    term Ok((rstruct, state));
+}
+
+// Check if string contains substring
+defn contains(s: String, substr: String) -> Bool {
+    // Simple implementation - check if substr appears in s
+    let i: Int = 0;
+    [i <= len(s) - len(substr)] {
+        let j: Int = 0;
+        let match: Bool = true;
+        [j < len(substr)] {
+            [s[i + j] != substr[j]] { &match = false; };
+            &j = j + 1;
+        };
+        [match] { term true; };
+        &i = i + 1;
+    };
+    term false;
+}
+
+// ===== RENDER PARSING =====
+
+defn parse_render(state: ParserState) -> Result<(String, ViewBody, ParserState), String> {
+    let result = expect_token(state, KeywordRender);
+    uni result(Ok(new_state)) = { &state = new_state; };
+    uni result(Err(e)) = { term Err(e); };
+
+    let tok = current_token(state);
+    uni tok(TokenIdentifier(name)) = { &state = advance(state); };
+    [!is_identifier(tok)] { term Err("Expected render target struct name"); };
+
+    let result = expect_token(state, DelimLBrace);
+    uni result(Ok(new_state)) = { &state = new_state; };
+    uni result(Err(e)) = { term Err(e); };
+
+    // Parse view body elements (simplified - raw HTML text capture)
+    let elements: List<ViewElement> = [];
+    let depth: Int = 1;
+    let raw_html: String = "";
+
+    [depth > 0 && current_token(state) != TokenEof] {
+        let tok = current_token(state);
+        uni tok(DelimRBrace) = {
+            &depth = depth - 1;
+            [depth > 0] { &raw_html = raw_html + "}"; };
+            &state = advance(state);
+        };
+        uni tok(TokenString(s)) = {
+            &raw_html = raw_html + s;
+            &state = advance(state);
+        };
+        // Skip any other tokens as raw content
+        &raw_html = raw_html + " ";
+        &state = advance(state);
+    };
+
+    // If we have raw HTML content, store it as a ViewText element
+    [raw_html != ""] {
+        &elements = append(elements, ViewText(raw_html));
+    };
+
+    let body = ViewBody { elements: elements };
+    term Ok((name, body, state));
 }
