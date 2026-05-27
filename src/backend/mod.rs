@@ -567,6 +567,175 @@ fn peephole_simplify_guard(condition: &Expr, body: &[Statement]) -> Option<Vec<S
     }
 }
 
+/// Intent: Memory overlay analysis — identifies mutually exclusive variables
+/// that can share the same memory location to reduce stack usage.
+/// Used by C and Rust backends.
+#[derive(Debug, Clone)]
+pub struct MemoryOverlay {
+    pub groups: Vec<Vec<String>>,
+}
+
+impl MemoryOverlay {
+    pub fn new() -> Self {
+        Self { groups: Vec::new() }
+    }
+
+    pub fn analyze(program: &Program) -> Self {
+        let txns: Vec<&Transaction> = program
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let TopLevel::Transaction(txn) = item {
+                    Some(txn)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut all_assigned: Vec<String> = Vec::new();
+        for txn in &txns {
+            collect_assignments(&txn.body, &mut all_assigned);
+        }
+        all_assigned.sort();
+        all_assigned.dedup();
+
+        let mut overlay_groups: Vec<Vec<String>> = Vec::new();
+        let mut used = std::collections::HashSet::new();
+
+        for v in &all_assigned {
+            if used.contains(v) {
+                continue;
+            }
+            let mut group = vec![v.clone()];
+            used.insert(v.clone());
+            for w in &all_assigned {
+                if v == w || used.contains(w) {
+                    continue;
+                }
+                let simultaneous = txns.iter().any(|txn| {
+                    let reads_v = reads_variable_general(&txn.body, v);
+                    let reads_w = reads_variable_general(&txn.body, w);
+                    let writes_v = writes_variable_general(&txn.body, v);
+                    let writes_w = writes_variable_general(&txn.body, w);
+                    (reads_v || writes_v) && (reads_w || writes_w)
+                });
+                if !simultaneous {
+                    group.push(w.clone());
+                    used.insert(w.clone());
+                }
+            }
+            if group.len() > 1 {
+                overlay_groups.push(group);
+            }
+        }
+
+        Self {
+            groups: overlay_groups,
+        }
+    }
+
+    pub fn has_overlays(&self) -> bool {
+        !self.groups.is_empty()
+    }
+}
+
+fn collect_assignments(body: &[Statement], out: &mut Vec<String>) {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs, .. } => {
+                if let Expr::Identifier(name) = lhs {
+                    out.push(name.clone());
+                }
+            }
+            Statement::Guarded { statements, .. } => collect_assignments(statements, out),
+            _ => {}
+        }
+    }
+}
+
+fn reads_variable_general(body: &[Statement], var: &str) -> bool {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { expr, .. } => {
+                let mut ids = std::collections::HashSet::new();
+                collect_expr_identifiers(expr, &mut ids);
+                if ids.contains(var) {
+                    return true;
+                }
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                let mut ids = std::collections::HashSet::new();
+                collect_expr_identifiers(condition, &mut ids);
+                if ids.contains(var) || reads_variable_general(statements, var) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn writes_variable_general(body: &[Statement], var: &str) -> bool {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs, .. } => {
+                if let Expr::Identifier(name) = lhs {
+                    if name == var {
+                        return true;
+                    }
+                }
+            }
+            Statement::Guarded { statements, .. } => {
+                if writes_variable_general(statements, var) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Intent: Tracks guard dependencies for pre-computation caching.
+/// Allows backends to pre-compute guard conditions that depend on state variables.
+#[derive(Debug, Clone)]
+pub struct GuardTracker {
+    pub var_to_guards: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    pub guard_to_vars: std::collections::HashMap<String, Vec<String>>,
+    pub state_vars: Vec<String>,
+}
+
+impl GuardTracker {
+    pub fn new() -> Self {
+        Self {
+            var_to_guards: std::collections::HashMap::new(),
+            guard_to_vars: std::collections::HashMap::new(),
+            state_vars: Vec::new(),
+        }
+    }
+
+    pub fn register_guard(&mut self, guard_name: &str, dependencies: Vec<String>) {
+        for dep in &dependencies {
+            self.var_to_guards
+                .entry(dep.clone())
+                .or_default()
+                .insert(guard_name.to_string());
+        }
+        self.guard_to_vars
+            .insert(guard_name.to_string(), dependencies);
+    }
+
+    pub fn guard_dependencies(&self, guard_name: &str) -> Option<&Vec<String>> {
+        self.guard_to_vars.get(guard_name)
+    }
+
+    pub fn all_state_vars(&self) -> &[String] {
+        &self.state_vars
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
