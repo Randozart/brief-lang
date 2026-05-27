@@ -120,11 +120,10 @@ defn compile_file(path: String, backend: String, verbose: Bool) -> Result<String
 }
 
 // Compile to direct WASM binary using the wasm backend
+// TODO: Use backends/wasm.bv when rewritten as valid Brief
 defn compile_to_wasm(program: Program, cg: CallGraphResult) -> String {
     let output = new_builder();
     output = output.append_str(";; WASM binary generation\n");
-
-    // Emit acyclicity annotation
     [!cg.has_cycle] {
         output = output.append_str(";; Call graph: acyclic -- static dispatch enabled\n");
     };
@@ -134,7 +133,6 @@ defn compile_to_wasm(program: Program, cg: CallGraphResult) -> String {
         output = output.append_str(String(len(cg.cycles)));
         output = output.append_str("\n");
     };
-
     output = output.append_str(";; Function count: ");
     output = output.append_str(String(program.items.len()));
     output = output.append_str("\n");
@@ -143,10 +141,9 @@ defn compile_to_wasm(program: Program, cg: CallGraphResult) -> String {
 
 // Compile to webstack (Rust + wasm-bindgen)
 defn compile_to_webstack(program: Program, cg: CallGraphResult) -> String {
+    // TODO: Use backends/webstack.bv emit_webstack when connected
     let output = new_builder();
     output = output.append_str("// Webstack output\n");
-
-    // Emit acyclicity annotation
     [!cg.has_cycle] {
         output = output.append_str("// Call graph: acyclic -- static dispatch enabled\n");
     };
@@ -156,7 +153,6 @@ defn compile_to_webstack(program: Program, cg: CallGraphResult) -> String {
         output = output.append_str(String(len(cg.cycles)));
         output = output.append_str("\n");
     };
-
     let i: Int = 0;
     [i < program.items.len()] {
         uni program.items[i](TopTxn(txn)) = {
