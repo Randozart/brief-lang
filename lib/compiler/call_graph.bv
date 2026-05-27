@@ -9,12 +9,12 @@
 struct CallGraph {
     graph: Map<String, List<String>>,
     txn_names: List<String>,
-    cycles: List<List<String>>
+    cylist: List<List<String>>
 }
 
 struct CallGraphResult {
     has_cycle: Bool,
-    cycles: List<List<String>>,
+    cylist: List<List<String>>,
     node_count: Int,
     edge_count: Int
 }
@@ -22,12 +22,12 @@ struct CallGraphResult {
 defn new_call_graph() -> CallGraph [
     true
 ][
-    result.graph == empty_map() && result.txn_names == [] && result.cycles == []
+    result.graph == empty_map() && result.txn_names == [] && result.cylist == []
 ] {
     term CallGraph {
         graph: empty_map(),
         txn_names: [],
-        cycles: []
+        cylist: []
     };
 }
 
@@ -65,16 +65,16 @@ defn analyze_call_graph(program: Program) -> CallGraphResult [
     
     // Detect cycles
     let has_cycle_result: Bool = has_cycles(cg.graph, cg.txn_names);
-    let found_cycles: List<List<String>> = [];
+    let found_cylist: List<List<String>> = [];
     [has_cycle_result] {
-        &found_cycles = find_cycles(cg.graph, cg.txn_names);
+        &found_cylist = find_cycles(cg.graph, cg.txn_names);
     };
     
     let edge_count: Int = count_edges(cg.graph, cg.txn_names);
     
     term CallGraphResult {
         has_cycle: has_cycle_result,
-        cycles: found_cycles,
+        cylist: found_cylist,
         node_count: len(cg.txn_names),
         edge_count: edge_count
     };

@@ -534,23 +534,31 @@ pub enum SyntaxError {
 
 impl fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let span_str = match self {
+            SyntaxError::UnexpectedToken { span, .. } => format!(" at {}", span),
+            SyntaxError::UnexpectedEOF { span, .. } => format!(" at {}", span),
+            SyntaxError::InvalidExpression { span, .. } => format!(" at {}", span),
+            SyntaxError::InvalidStatement { span, .. } => format!(" at {}", span),
+            SyntaxError::InvalidType { span, .. } => format!(" at {}", span),
+        };
+
         match self {
             SyntaxError::UnexpectedToken {
                 expected, found, ..
             } => {
-                write!(f, "expected {}, found '{}'", expected, found)
+                write!(f, "expected {}, found '{}'{}", expected, found, span_str)
             }
             SyntaxError::UnexpectedEOF { expected, .. } => {
-                write!(f, "expected {}, found end of file", expected)
+                write!(f, "expected {}, found end of file{}", expected, span_str)
             }
             SyntaxError::InvalidExpression { reason, .. } => {
-                write!(f, "invalid expression: {}", reason)
+                write!(f, "invalid expression: {}{}", reason, span_str)
             }
             SyntaxError::InvalidStatement { reason, .. } => {
-                write!(f, "invalid statement: {}", reason)
+                write!(f, "invalid statement: {}{}", reason, span_str)
             }
             SyntaxError::InvalidType { type_name, .. } => {
-                write!(f, "invalid type: '{}'", type_name)
+                write!(f, "invalid type: '{}'{}", type_name, span_str)
             }
         }
     }

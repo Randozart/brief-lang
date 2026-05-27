@@ -37,7 +37,7 @@ defn new_param_range() -> ParamRange [
 
 // Analyze a Program to infer parameter ranges from preconditions
 defn analyze_parameter_ranges(program: Program) -> Map<String, Map<String, ParamRange>> [
-    true
+    len(program.items) >= 0
 ][
     true
 ] {

@@ -130,13 +130,20 @@ defn compile_to_wasm(program: Program, cg: CallGraphResult) -> String {
     [cg.has_cycle] {
         output = output.append_str(";; Call graph: cyclic -- dynamic dispatch required\n");
         output = output.append_str(";; Cycles detected: ");
-        output = output.append_str(String(len(cg.cycles)));
+output = output.append_str(String(len(cg.cylist)));
         output = output.append_str("\n");
     };
+
     output = output.append_str(";; Function count: ");
     output = output.append_str(String(program.items.len()));
     output = output.append_str("\n");
     term output.to_string();
+}
+
+// Compile to Rust using the rust backend
+defn generate_rust(program: Program, cg: CallGraphResult) -> String {
+    import backends.rust as rust_codegen;
+    term rust_codegen.generate_rust(program, cg);
 }
 
 // Compile to webstack (Rust + wasm-bindgen)
@@ -150,12 +157,13 @@ defn compile_to_webstack(program: Program, cg: CallGraphResult) -> String {
     [cg.has_cycle] {
         output = output.append_str("// Call graph: cyclic -- dynamic dispatch required\n");
         output = output.append_str("// Cycles detected: ");
-        output = output.append_str(String(len(cg.cycles)));
+output = output.append_str(String(len(cg.cylist)));
         output = output.append_str("\n");
     };
+
     let i: Int = 0;
-    [i < program.items.len()] {
-        uni program.items[i](TopTxn(txn)) = {
+    [i < state.program.items.len()] {
+        uni state.program.items[i](TopTxn(txn)) = {
             output = output.append_str("// Transaction: ");
             output = output.append_str(txn.name);
             output = output.append_str("\n");
@@ -163,7 +171,8 @@ defn compile_to_webstack(program: Program, cg: CallGraphResult) -> String {
         &i = i + 1;
     };
     output = output.append_str("\n");
-    output = output.append_str("fn main() {\n");
+    output = output.append_str("#[tokio::main]\n");
+    output = output.append_str("async fn main() {\n");
     output = output.append_str("    println!(\"Hello from Brief Webstack!\");\n");
     output = output.append_str("}\n");
     term output.to_string();

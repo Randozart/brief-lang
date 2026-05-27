@@ -105,6 +105,71 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn token_display(token: &Token) -> String {
+        match token {
+            Token::Identifier(s) => format!("'{}'", s),
+            Token::Integer(n) => format!("integer {}", n),
+            Token::Float(f) => format!("float {}", f),
+            Token::String(s) => format!("\"{}\"", s),
+            Token::Char(c) => format!("'{}'", c),
+            Token::Eq => "'='".into(),
+            Token::EqEq => "'=='".into(),
+            Token::Ne => "'!='".into(),
+            Token::Lt => "'<'".into(),
+            Token::Gt => "'>'".into(),
+            Token::Le => "'<='".into(),
+            Token::Ge => "'>='".into(),
+            Token::LParen => "'('".into(),
+            Token::RParen => "')'".into(),
+            Token::LBrace => "'{'".into(),
+            Token::RBrace => "'}'".into(),
+            Token::LBracket => "'['".into(),
+            Token::RBracket => "']'".into(),
+            Token::Arrow => "'->'".into(),
+            Token::Colon => "':'".into(),
+            Token::Semicolon => "';'".into(),
+            Token::Comma => "','".into(),
+            Token::Dot => "'.'".into(),
+            Token::At => "'@'".into(),
+            Token::Hash => "'#'".into(),
+            Token::Tilde => "'~'".into(),
+            Token::Star => "'*'".into(),
+            Token::Plus => "'+'".into(),
+            Token::Minus => "'-'".into(),
+            Token::Slash => "'/'".into(),
+            Token::Underscore => "'_'".into(),
+            Token::Question => "'?'".into(),
+            Token::Not => "'!'".into(),
+            Token::Sig => "sig".into(),
+            Token::Defn => "defn".into(),
+            Token::Let => "let".into(),
+            Token::Txn => "txn".into(),
+            Token::Rct => "rct".into(),
+            Token::Async => "async".into(),
+            Token::Term => "term".into(),
+            Token::Frgn => "frgn".into(),
+            Token::Import => "import".into(),
+            Token::Struct => "struct".into(),
+            Token::Enum => "enum".into(),
+            Token::Render => "render".into(),
+            Token::BoolTrue => "true".into(),
+            Token::BoolFalse => "false".into(),
+            Token::Match => "match".into(),
+            Token::Ok => "Ok".into(),
+            Token::Err => "Err".into(),
+            Token::Some => "Some".into(),
+            Token::None => "None".into(),
+            Token::Forall => "forall".into(),
+            Token::Exists => "exists".into(),
+            Token::Bank => "bank".into(),
+            Token::Trg => "trg".into(),
+            Token::TrgBang => "trg!".into(),
+            Token::Link => "link".into(),
+            Token::Asm => "asm".into(),
+            _ => format!("{:?}", token),
+        }
+    }
+
     fn expect(&mut self, expected: Token) -> Result<(), crate::errors::SyntaxError> {
         let span = self.current_span().unwrap_or_else(Span::dummy);
         match self.current_token() {
@@ -113,8 +178,8 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             Some(Ok(tok)) => Err(crate::errors::SyntaxError::UnexpectedToken {
-                expected: format!("{:?}", expected),
-                found: format!("{:?}", tok),
+                expected: Self::token_display(&expected),
+                found: Self::token_display(tok),
                 span,
             }),
             Some(Err(_)) => Err(crate::errors::SyntaxError::InvalidStatement {
