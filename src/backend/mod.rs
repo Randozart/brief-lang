@@ -12,7 +12,8 @@ pub mod cobol;
 
 use crate::analysis::call_graph::CallGraph;
 use crate::analysis::range::ParameterRanges;
-use crate::ast::{Hashtag, Program};
+use crate::ast::{Expr, Hashtag, Program, Statement, TopLevel};
+use std::collections::HashMap;
 
 /// Run shared program analysis for backend code generation.
 ///
@@ -167,6 +168,127 @@ pub fn validate_hashtags_in_program(program: &Program, backend: &str, strict: bo
     }
 
     !has_errors
+}
+
+/// Intent: Collect all identifiers referenced by an expression.
+fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet<String>) {
+    match expr {
+        Expr::Identifier(n) | Expr::OwnedRef(n) | Expr::PriorState(n) => {
+            ids.insert(n.clone());
+        }
+        Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) => {}
+        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b)
+        | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b)
+        | Expr::Ge(a, b) | Expr::And(a, b) | Expr::Or(a, b) | Expr::BitAnd(a, b)
+        | Expr::BitOr(a, b) | Expr::BitXor(a, b) | Expr::Shl(a, b) | Expr::Shr(a, b) => {
+            collect_expr_identifiers(a, ids);
+            collect_expr_identifiers(b, ids);
+        }
+        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) => collect_expr_identifiers(a, ids),
+        Expr::Call(_, args) => {
+            for arg in args {
+                collect_expr_identifiers(arg, ids);
+            }
+        }
+        Expr::FieldAccess(obj, _) => collect_expr_identifiers(obj, ids),
+        Expr::ListLiteral(elems) => {
+            for elem in elems {
+                collect_expr_identifiers(elem, ids);
+            }
+        }
+        Expr::ListIndex(list, idx) => {
+            collect_expr_identifiers(list, ids);
+            collect_expr_identifiers(idx, ids);
+        }
+        Expr::ListLen(inner) => collect_expr_identifiers(inner, ids),
+        Expr::Tuple(elems) => {
+            for elem in elems {
+                collect_expr_identifiers(elem, ids);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Intent: Collect all identifiers assigned in a guarded statement body.
+fn collect_assigned_identifiers(body: &[Statement]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for stmt in body {
+        if let Statement::Assignment { lhs, .. } = stmt {
+            if let Expr::Identifier(name) = lhs {
+                ids.push(name.clone());
+            }
+        }
+    }
+    ids
+}
+
+/// Intent: Collect all identifiers read by an expression/statement.
+fn collect_read_identifiers(body: &[Statement]) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { expr, .. } => {
+                collect_expr_identifiers(expr, &mut ids);
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                collect_expr_identifiers(condition, &mut ids);
+                ids.extend(collect_read_identifiers(statements));
+            }
+            Statement::Expression(e) => {
+                collect_expr_identifiers(e, &mut ids);
+            }
+            _ => {}
+        }
+    }
+    ids
+}
+
+/// Intent: Detect pairs of transactions where post(A) implies pre(B),
+/// meaning they could be fused into a single atomic transaction.
+pub fn detect_fusable_pairs(program: &Program) -> Vec<(String, String)> {
+    let txns: Vec<&crate::ast::Transaction> = program
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let TopLevel::Transaction(txn) = item {
+                Some(txn)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut pairs = Vec::new();
+    for a in &txns {
+        let a_writes: Vec<String> = collect_assigned_identifiers(&a.body);
+        let a_post_ids = {
+            let mut ids = std::collections::HashSet::new();
+            collect_expr_identifiers(&a.contract.post_condition, &mut ids);
+            ids
+        };
+
+        for b in &txns {
+            if a.name == b.name {
+                continue;
+            }
+            let b_reads: std::collections::HashSet<String> = collect_read_identifiers(&b.body);
+            let b_pre_ids = {
+                let mut ids = std::collections::HashSet::new();
+                collect_expr_identifiers(&b.contract.pre_condition, &mut ids);
+                ids
+            };
+
+            // Check if post(A) writes overlap with pre(B) reads
+            let fusable = a_writes.iter().any(|w| b_pre_ids.contains(w))
+                || a_post_ids.iter().any(|id| b_reads.contains(id));
+
+            if fusable {
+                pairs.push((a.name.clone(), b.name.clone()));
+            }
+        }
+    }
+    pairs
 }
 
 #[cfg(test)]

@@ -501,17 +501,33 @@ impl AArch64Backend {
         }
     }
     
-    // PRAXIS: Branchless guarded statement
+    // PRAXIS: Branchless guarded statement using CSEL
     fn generate_guarded_branchless(&mut self, output: &mut String, condition: &Expr, body: &[Statement]) {
-        output.push_str("    // Branchless guard\n");
-        
-        // Evaluate condition
         self.generate_expr_branchless(output, condition);
-        
-        // Generate body with conditional execution
+        output.push_str("    cmp x0, #0\n");
+        output.push_str("    cset x8, ne\n");
+        output.push_str("    sub x8, x8, #1\n");
+
         for stmt in body {
-            output.push_str("    // Conditional execution\n");
-            self.generate_statement(output, stmt);
+            match stmt {
+                Statement::Assignment { lhs, expr, .. } => {
+                    if let Expr::Identifier(name) = lhs {
+                        if let Some(offset) = self.signal_map.get(name) {
+                            output.push_str(&format!("    ldr x9, [x29, #{}]\n", offset * 8));
+                            self.generate_expr(output, expr);
+                            output.push_str("    eor x10, x9, x0\n");
+                            output.push_str("    and x10, x10, x8\n");
+                            output.push_str("    eor x0, x9, x10\n");
+                            output.push_str(&format!("    str x0, [x29, #{}]\n", offset * 8));
+                            continue;
+                        }
+                    }
+                    self.generate_statement(output, stmt);
+                }
+                _ => {
+                    self.generate_statement(output, stmt);
+                }
+            }
         }
     }
     

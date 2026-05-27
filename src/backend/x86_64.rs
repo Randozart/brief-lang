@@ -501,17 +501,35 @@ impl X86_64Backend {
         }
     }
     
-    // PRAXIS: Branchless guarded statement
+    // PRAXIS: Branchless guarded statement using CMOV
     fn generate_guarded_branchless(&mut self, output: &mut String, condition: &Expr, body: &[Statement]) {
-        output.push_str("    ; Branchless guard\n");
-        
-        // Evaluate condition
         self.generate_expr_branchless(output, condition);
-        
-        // Generate body with conditional execution
+        output.push_str("    neg rax\n");
+        output.push_str("    sbb rax, rax\n");
+        output.push_str("    mov r8, rax\n");
+
         for stmt in body {
-            output.push_str("    ; Conditional execution\n");
-            self.generate_statement(output, stmt);
+            match stmt {
+                Statement::Assignment { lhs, expr, .. } => {
+                    if let Expr::Identifier(name) = lhs {
+                        if let Some(offset) = self.signal_map.get(name) {
+                            output.push_str(&format!("    mov r9, [rbp+{}]\n", offset * 8));
+                            self.generate_expr(output, expr);
+                            output.push_str("    mov rdx, rax\n");
+                            output.push_str("    xor rdx, r9\n");
+                            output.push_str("    and rdx, r8\n");
+                            output.push_str("    mov rax, r9\n");
+                            output.push_str("    xor rax, rdx\n");
+                            output.push_str(&format!("    mov [rbp+{}], rax\n", offset * 8));
+                            continue;
+                        }
+                    }
+                    self.generate_statement(output, stmt);
+                }
+                _ => {
+                    self.generate_statement(output, stmt);
+                }
+            }
         }
     }
     
