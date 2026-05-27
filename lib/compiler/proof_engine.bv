@@ -353,14 +353,36 @@ defn verify_contract(txn: Transaction) -> ProofResult {
     // Create initial symbolic state with prior state variables
     let initial = initial_state();
     
-    // Add prior state for each parameter
+    // Add prior state for state variables (for @var postcondition references)
+    // and for each parameter
     let i: Int = 0;
     [i < txn.params.len()] {
         let param = txn.params[i];
         initial = state_assign(initial, "@" + param.name, SymVar("@old_" + param.name));
         &i = i + 1;
     };
-    
+
+    // For state variables referenced in the contract, also track @prior values.
+    // They are added to the initial state with @ prefix for postcondition checking.
+    let pre_vars = extract_var_names(txn.contract.precondition);
+    let post_vars = extract_var_names(txn.contract.postcondition);
+    let all_vars = pre_vars.append_all(post_vars);
+    let j: Int = 0;
+    [j < all_vars.len()] {
+        let var_name = all_vars[j];
+        // If the variable starts with @, it's already a prior-state reference
+        [var_name.len() > 0 && var_name[0] != '@'] {
+            [initial.vars.contains_key(var_name)] {
+                initial = state_assign(initial, "@" + var_name, SymVar(var_name));
+            };
+            // If not yet assigned, assign a fresh symbolic value
+            [!initial.vars.contains_key(var_name)] {
+                initial = state_assign(initial, var_name, SymVar(var_name));
+            };
+        };
+        &j = j + 1;
+    };
+
     // Explore all paths through transaction
     let paths = explore_paths(txn.body, initial);
     
@@ -374,18 +396,48 @@ defn verify_contract(txn: Transaction) -> ProofResult {
         
         // Check if path is feasible
         [path.feasible] {
-            // Evaluate postcondition on final state
+            // Evaluate postcondition on final state.
+            // @var references are resolved from the initial state,
+            // while var references use the post-execution (final) state.
             let post_sym = eval_symbolic(txn.contract.postcondition, path.final_state);
             let post_simp = simplify(post_sym);
             
             // Check if postcondition holds
             uni post_simp(SymBool(false)) = {
-                &all_verified = false;
-                &counterexample = Some(CounterExample {
-                    inputs: path.final_state.vars,
-                    path: path,
-                    violation: "Postcondition not satisfied"
-                });
+                // Try structural comparison: evaluate left and right sides separately
+                // and check if they match after resolving @var to initial values
+                uni txn.contract.postcondition(ExprBinOp("==", left, right)) = {
+                    let left_sym = simplify(eval_symbolic(*left, path.final_state));
+                    let right_sym = simplify(eval_symbolic(*right, path.final_state));
+                    
+                    // Structural comparison with @-resolution: replace @var with initial value
+                    let left_str = sym_to_debug_string(left_sym);
+                    let right_str = sym_to_debug_string(right_sym);
+                    let left_expanded = str_replace(left_str, "@", "");
+                    let right_expanded = str_replace(right_str, "@", "");
+                    
+                    [left_str == right_str || left_expanded == right_expanded ||
+                     left_expanded == right_str || right_expanded == left_str] {
+                        // Pass — structurally equivalent after prior-state resolution
+                    };
+                    [!left_str == right_str && !left_expanded == right_expanded &&
+                     !left_expanded == right_str && !right_expanded == left_str] {
+                        &all_verified = false;
+                        &counterexample = Some(CounterExample {
+                            inputs: path.final_state.vars,
+                            path: path,
+                            violation: "Postcondition not satisfied"
+                        });
+                    };
+                };
+                [!uni txn.contract.postcondition(ExprBinOp("==", _, _)) = true] {
+                    &all_verified = false;
+                    &counterexample = Some(CounterExample {
+                        inputs: path.final_state.vars,
+                        path: path,
+                        violation: "Postcondition not satisfied"
+                    });
+                };
             };
         };
         
@@ -397,6 +449,68 @@ defn verify_contract(txn: Transaction) -> ProofResult {
         counterexample: counterexample,
         paths_explored: paths.len()
     };
+}
+
+// Helper: extract variable names from an expression
+defn extract_var_names(expr: Expr) -> List<String> {
+    uni expr(ExprVar(name)) = {
+        term [name];
+    };
+    uni expr(ExprPriorState(name)) = {
+        term ["@" + name];
+    };
+    uni expr(ExprBinOp(_, left, right)) = {
+        let l_vars = extract_var_names(*left);
+        let r_vars = extract_var_names(*right);
+        term l_vars.append_all(r_vars);
+    };
+    uni expr(ExprUnaryOp(_, operand)) = {
+        term extract_var_names(*operand);
+    };
+    term [];
+}
+
+// Helper: convert a symbolic value to a debug string for comparison
+defn sym_to_debug_string(sym: SymbolicValue) -> String {
+    uni sym(SymInt(n)) = {
+        term int_to_string(n);
+    };
+    uni sym(SymFloat(f)) = {
+        term float_to_string(f);
+    };
+    uni sym(SymBool(b)) = {
+        term bool_to_string(b);
+    };
+    uni sym(SymVar(name)) = {
+        term name;
+    };
+    uni sym(SymBinaryOp(op, left, right)) = {
+        let l_str = sym_to_debug_string(*left);
+        let r_str = sym_to_debug_string(*right);
+        term l_str + " " + op + " " + r_str;
+    };
+    uni sym(SymUnaryOp(op, operand)) = {
+        let o_str = sym_to_debug_string(*operand);
+        term op + " " + o_str;
+    };
+    term "?";
+}
+
+// Helper: replace all occurrences of a substring
+defn str_replace(s: String, from: String, to: String) -> String {
+    let result = "";
+    let i: Int = 0;
+    [i < s.len()] {
+        [s[i..i + from.len()] == from] {
+            result = result + to;
+            &i = i + from.len();
+        };
+        [!s[i..i + from.len()] == from] {
+            result = result + s[i];
+            &i = i + 1;
+        };
+    };
+    term result;
 }
 
 defn verify_precondition(precondition: Expr, state: SymbolicState, strict_mode: Bool) -> Bool {

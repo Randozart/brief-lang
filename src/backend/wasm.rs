@@ -1,3 +1,4 @@
+use crate::analysis::call_graph::CallGraph;
 use crate::ast::{Expr, Program, Statement, TopLevel, Type};
 use std::fmt::Write;
 
@@ -13,6 +14,7 @@ pub enum WasmTarget {
 /// Intent: Text-based WASM (WAT) backend that generates human-readable WebAssembly text format.
 pub struct WasmBackend {
     pending_cleanup: Vec<Statement>,
+    has_cycles: bool,
 }
 
 impl WasmBackend {
@@ -20,11 +22,18 @@ impl WasmBackend {
     pub fn new() -> Self {
         WasmBackend {
             pending_cleanup: Vec::new(),
+            has_cycles: false,
         }
     }
 
     /// Intent: Generate WAT text output for the given Brief program.
     pub fn generate(&mut self, program: &Program) -> String {
+        let (cg, _pr) = crate::backend::analyze_program(program);
+        self.has_cycles = cg.has_cycle();
+        if !self.has_cycles {
+            println!("  WASM backend: acyclic call graph — static dispatch enabled");
+        }
+
         let mut output = String::new();
         output.push_str("(module\n");
         for item in &program.items {
@@ -87,8 +96,9 @@ impl WasmBackend {
                 writeln!(output, "    ;; escape (unit)").ok();
             }
             Statement::Alka(block) => {
-                writeln!(output, "    ;; alka! {{}}").ok();
-                writeln!(output, "    ;; {}", block.content).ok();
+                for line in block.content.lines() {
+                    let _ = writeln!(output, "    {}", line);
+                }
             }
             Statement::InlineAsm { asm_string, .. } => {
                 writeln!(output, "    ;; inline asm: \"{}\"", asm_string).ok();
@@ -107,7 +117,10 @@ impl WasmBackend {
                     writeln!(output, "    local.set ${}", name).ok();
                 }
             }
-            _ => {}
+            Statement::Unification { name, pattern, expr } => {
+                self.generate_expr(output, expr);
+                writeln!(output, "    ;; unification: {} {} (value on stack)", name, pattern).ok();
+            }
         }
     }
 

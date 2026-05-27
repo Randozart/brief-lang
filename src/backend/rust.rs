@@ -435,10 +435,8 @@ impl RustBackend {
                 }
             }
             Statement::Alka(block) => {
-                if block.dangerous {
-                    output.push_str(&format!("        // alka! {{}} = {}\n", block.content));
-                } else {
-                    output.push_str(&format!("        // alka {{}} = {}\n", block.content));
+                for line in block.content.lines() {
+                    output.push_str(&format!("        {}\n", line));
                 }
             }
             Statement::OnExit { body, .. } => {

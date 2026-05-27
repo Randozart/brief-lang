@@ -73,6 +73,7 @@ pub struct WebstackGenerator {
     local_vars: HashMap<String, ()>,      // track local let-bound variables
     target: CodeTarget,
     pending_cleanup: RefCell<Vec<Statement>>,
+    has_cycles: bool,
 }
 
 /// Intent: WebstackGenerator implementation block.
@@ -96,6 +97,7 @@ impl WebstackGenerator {
             local_vars: HashMap::new(),
             target: CodeTarget::default(),
             pending_cleanup: RefCell::new(Vec::new()),
+            has_cycles: false,
         }
     }
 
@@ -1420,10 +1422,8 @@ impl WebstackGenerator {
                 // TODO: Emit async yield/await code for local triggers
             }
             Statement::Alka(block) => {
-                if block.dangerous {
-                    output.push_str(&format!("        // alka! {{}} = {}\n", block.content));
-                } else {
-                    output.push_str(&format!("        // alka {{}} = {}\n", block.content));
+                for line in block.content.lines() {
+                    output.push_str(&format!("        {}\n", line));
                 }
             }
             Statement::OnExit { body, .. } => {
@@ -2151,7 +2151,8 @@ pub struct WebstackOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
+    use crate::analysis::call_graph::CallGraph;
+use crate::ast::*;
 
     /// Intent: verify that generate produces output for an empty program.
     #[test]

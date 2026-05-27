@@ -21,8 +21,9 @@
 // - Memory overlay for non-overlapping lifetimes
 // - Parallel transaction scheduling
 
+use crate::analysis::call_graph::CallGraph;
 use crate::ast::{Expr, Program, Statement, TopLevel};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 // x86-64 instruction set
@@ -134,6 +135,7 @@ pub struct X86_64Backend {
     signal_map: HashMap<String, usize>,
     optimizations: OptimizationFlags,
     pending_cleanup: Vec<Statement>,
+    has_cycles: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -160,6 +162,7 @@ impl X86_64Backend {
                 parallel_scheduling: true,
             },
             pending_cleanup: Vec::new(),
+            has_cycles: false,
         }
     }
     
@@ -174,6 +177,12 @@ impl X86_64Backend {
     }
     
     pub fn generate(&mut self, program: &Program) -> String {
+        let (cg, _pr) = crate::backend::analyze_program(program);
+        self.has_cycles = cg.has_cycle();
+        if !self.has_cycles {
+            println!("  x86_64 backend: acyclic call graph — static dispatch enabled");
+        }
+
         self.collect_signals(program);
         
         let mut output = String::new();
@@ -478,13 +487,17 @@ impl X86_64Backend {
                 }
             }
             Statement::Alka(block) => {
-                writeln!(output, "    ; alka! {{}}").ok();
-                writeln!(output, "    ; {}", block.content).ok();
+                for line in block.content.lines() {
+                    let _ = writeln!(output, "    {}", line);
+                }
             }
             Statement::InlineAsm { asm_string, .. } => {
                 writeln!(output, "    {}", asm_string).ok();
             }
-            _ => {}
+            Statement::Unification { name, pattern, expr } => {
+                self.generate_expr(output, expr);
+                writeln!(output, "    ; unification: {} {} (expr in rax)", name, pattern).ok();
+            }
         }
     }
     

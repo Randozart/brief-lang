@@ -20,6 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
+use crate::analysis::call_graph::CallGraph;
 use crate::ast::*;
 use crate::linkage::LinkageConfig;
 use std::collections::{HashMap, HashSet};
@@ -40,6 +41,7 @@ pub struct VerilogGenerator {
     _indent_level: usize,
     output: String,
     pending_cleanup: Vec<Statement>,
+    has_cycles: bool,
 }
 
 impl VerilogGenerator {
@@ -54,6 +56,7 @@ impl VerilogGenerator {
             _indent_level: 0,
             output: String::new(),
             pending_cleanup: Vec::new(),
+            has_cycles: false,
         }
     }
 
@@ -68,6 +71,12 @@ impl VerilogGenerator {
     }
 
     pub fn generate(&mut self, program: &Program) -> String {
+        let (cg, _pr) = crate::backend::analyze_program(program);
+        self.has_cycles = cg.has_cycle();
+        if !self.has_cycles {
+            println!("  Verilog backend: acyclic call graph — static dispatch enabled");
+        }
+
         self.output.clear();
 
         if let Err(e) = self.validate_hardware(program) {
@@ -1575,17 +1584,29 @@ impl VerilogGenerator {
                 }
             }
             Statement::Alka(block) => {
-                if block.dangerous {
-                    out.push_str(&format!("        // alka! {}\n", block.content));
-                } else {
-                    out.push_str(&format!("        // alka: {}\n", block.content));
+                for line in block.content.lines() {
+                    out.push_str(&format!("        {}\n", line));
                 }
             }
             Statement::InlineAsm { asm_string, .. } => {
                 out.push_str(&format!("        /* asm: {} */\n", asm_string));
             }
-            _ => {
-                out.push_str("        /* statement not implemented */\n");
+            Statement::Unification { name, pattern, expr } => {
+                out.push_str(&format!("        // unification: {} {} <= {}\n", name, pattern, self.expr_to_verilog(expr)));
+            }
+            Statement::Assignment { lhs, expr, .. } => {
+                if let Expr::Identifier(name) = lhs {
+                    out.push_str(&format!("        {} <= {};\n", name, self.expr_to_verilog(expr)));
+                } else {
+                    out.push_str(&format!("        /* assign */ {} <= {};\n", self.expr_to_verilog(lhs), self.expr_to_verilog(expr)));
+                }
+            }
+            Statement::Guarded { condition, statements } => {
+                out.push_str(&format!("        if ({}) begin\n", self.expr_to_verilog(condition)));
+                for s in statements {
+                    out.push_str(&self.statement_to_verilog(s));
+                }
+                out.push_str("        end\n");
             }
         }
         out

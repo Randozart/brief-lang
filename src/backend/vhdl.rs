@@ -27,6 +27,7 @@ pub struct VhdlGenerator {
     signal_counter: usize,
     process_counter: usize,
     pending_cleanup: Vec<Statement>,
+    has_cycles: bool,
 }
 
 /// Read a pragma attribute from the attrs list, filtered by vhdl target.
@@ -49,6 +50,7 @@ impl VhdlGenerator {
             signal_counter: 0,
             process_counter: 0,
             pending_cleanup: Vec::new(),
+            has_cycles: false,
         }
     }
 
@@ -66,6 +68,12 @@ impl VhdlGenerator {
 
     /// Generate all VHDL files for the given program. Returns (filename, source) pairs.
     pub fn generate(&mut self, program: &Program) -> Vec<(String, String)> {
+        let (cg, _pr) = crate::backend::analyze_program(program);
+        self.has_cycles = cg.has_cycle();
+        if !self.has_cycles {
+            println!("  VHDL backend: acyclic call graph — static dispatch enabled");
+        }
+
         if let Err(e) = self.validate_hardware(program) {
             panic!("Hardware validation failed: {}", e);
         }
@@ -840,8 +848,14 @@ impl VhdlGenerator {
                 let expr_code = self.expr_to_string(expr);
                 let _ = write!(output, "{}-- side effect: {}\n", indent, expr_code);
             }
-            Statement::LocalTrigger { name, .. } => {
-                let _ = write!(output, "{}-- trg!\n", indent);
+            Statement::LocalTrigger { name, ty, expr, .. } => {
+                let _ty_str = self.brief_type_to_vhdl(ty);
+                if let Some(e) = expr {
+                    let expr_code = self.expr_to_string(e);
+                    let _ = write!(output, "{}-- trg! {}: {} = {}\n", indent, name, _ty_str, expr_code);
+                } else {
+                    let _ = write!(output, "{}-- trg! {}: await external {}\n", indent, name, _ty_str);
+                }
             }
             Statement::OnExit { body, .. } => {
                 self.pending_cleanup.extend(body.iter().cloned());
@@ -856,10 +870,8 @@ impl VhdlGenerator {
                 }
             }
             Statement::Alka(block) => {
-                if block.dangerous {
-                    let _ = write!(output, "{}-- alka! {{}} = {}\n", indent, block.content);
-                } else {
-                    let _ = write!(output, "{}-- alka {{}} = {}\n", indent, block.content);
+                for line in block.content.lines() {
+                    let _ = write!(output, "{}{}\n", indent, line);
                 }
             }
             Statement::InlineAsm { asm_string, clobbers, .. } => {
@@ -1131,7 +1143,8 @@ impl VhdlGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
+use crate::analysis::call_graph::CallGraph;
+use crate::ast::*;
 
     #[test]
     fn test_vhdl_generates_entity() {

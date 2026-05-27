@@ -487,13 +487,17 @@ impl AArch64Backend {
                 writeln!(output, "    // escape (unit)").ok();
             }
             Statement::Alka(block) => {
-                writeln!(output, "    // alka! {{}}").ok();
-                writeln!(output, "    // {}", block.content).ok();
+                for line in block.content.lines() {
+                    let _ = writeln!(output, "    {}", line);
+                }
             }
             Statement::InlineAsm { asm_string, .. } => {
-                writeln!(output, "    // inline asm: \"{}\"", asm_string).ok();
+                let _ = writeln!(output, "    {}", asm_string);
             }
-            _ => {}
+            Statement::Unification { name, pattern, expr } => {
+                self.generate_expr(output, expr);
+                writeln!(output, "    // unification: {} {} (value in x0)", name, pattern).ok();
+            }
         }
     }
     

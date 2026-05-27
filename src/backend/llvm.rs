@@ -204,13 +204,16 @@ impl LlvmBackend {
                 }
             }
             Statement::Alka(block) => {
-                writeln!(output, "{}; alka! {{}}", indent).ok();
+                for line in block.content.lines() {
+                    let _ = writeln!(output, "{}{}", indent, line);
+                }
             }
             Statement::InlineAsm { asm_string, .. } => {
                 writeln!(output, "{}{}", indent, asm_string).ok();
             }
-            _ => {
-                writeln!(output, "{}; unreachable or unsupported", indent).ok();
+            Statement::Unification { name, pattern, expr } => {
+                let val = self.generate_expr(output, expr, indent);
+                writeln!(output, "{}; unification: {} {} = {}", indent, name, pattern, val).ok();
             }
         }
     }

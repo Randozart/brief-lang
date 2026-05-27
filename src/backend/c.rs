@@ -759,18 +759,25 @@ impl CBackend {
                 }
             }
             Statement::Alka(block) => {
-                if block.dangerous {
-                    output.push_str(&format!("    /* alka! {} */\n", block.content));
-                } else {
-                    output.push_str(&format!("    /* alka: {} */\n", block.content));
+                for line in block.content.lines() {
+                    output.push_str(&format!("    {}\n", line));
                 }
             }
             Statement::OnExit { body, .. } => {
                 self.pending_cleanup.extend(body.iter().cloned());
                 output.push_str("    /* #on_exit cleanup registered */\n");
             }
-            _ => {
-                output.push_str("    /* statement not implemented */\n");
+            Statement::Escape(opt) => {
+                if let Some(v) = opt {
+                    let val = self.expr_to_c(v);
+                    output.push_str(&format!("    return {}; /* escape */\n", val));
+                } else {
+                    output.push_str("    return 0; /* escape */\n");
+                }
+            }
+            Statement::Unification { name, pattern, expr } => {
+                let val = self.expr_to_c(expr);
+                output.push_str(&format!("    /* unification: {} {} = {} */\n", name, pattern, val));
             }
         }
     }

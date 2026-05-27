@@ -14,6 +14,7 @@
 
 use std::fmt::Write;
 
+use crate::analysis::call_graph::CallGraph;
 use crate::ast::{Attribute, Expr, OutputType, Program, Statement, TopLevel, Transaction, Type, Contract, WatchdogSpec, StrictMode, AlkaBlock};
 
 pub struct CobolBackend {
@@ -22,6 +23,7 @@ pub struct CobolBackend {
     use_abend: bool,
     recursion_limit: u32,
     pending_cleanup: Vec<Statement>,
+    has_cycles: bool,
 }
 
 impl CobolBackend {
@@ -32,6 +34,7 @@ impl CobolBackend {
             use_abend: false,
             recursion_limit: 1000,
             pending_cleanup: Vec::new(),
+            has_cycles: false,
         }
     }
 
@@ -51,6 +54,12 @@ impl CobolBackend {
     }
 
     pub fn generate(&mut self, program: &Program, stem: &str) -> String {
+        let (cg, _pr) = crate::backend::analyze_program(program);
+        self.has_cycles = cg.has_cycle();
+        if !self.has_cycles {
+            println!("  COBOL backend: acyclic call graph — static dispatch enabled");
+        }
+
         let program_id = if self.program_id.is_empty() {
             Self::sanitize_name(stem).to_uppercase()
         } else {
@@ -491,13 +500,17 @@ impl CobolBackend {
                 output.push_str("    *> #on_exit cleanup registered\n");
             }
             Statement::Alka(block) => {
-                output.push_str(&format!("    *> alka!\n"));
-                output.push_str(&format!("    *> {}\n", block.content));
+                for line in block.content.lines() {
+                    output.push_str(&format!("    {}\n", line));
+                }
             }
             Statement::InlineAsm { asm_string, .. } => {
                 output.push_str(&format!("    *> asm: {}\n", asm_string));
             }
-            _ => {}
+            Statement::Unification { name, pattern, expr } => {
+                let expr_str = self.translate_expr(expr);
+                output.push_str(&format!("    *> unification: {} {} = {}\n", name, pattern, expr_str));
+            }
         }
     }
 

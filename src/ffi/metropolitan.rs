@@ -956,6 +956,379 @@ class MetroChannel {{
 module.exports = {{ MetroChannel }};
 "#, channel_id = channel_id, max_size = max_size))
     }
+
+    /// Generate a metropipe Rust module (32-byte header via mmap)
+    pub fn generate_metropipe_rust_module(&self, channel_id: &str) -> Result<String, String> {
+        let channel = self.get_channel(channel_id)
+            .ok_or_else(|| format!("Channel {} not found", channel_id))?;
+        let addrs = channel.get_addresses();
+        let max_size = addrs.get("input_size").copied().unwrap_or(4096)
+            .max(addrs.get("output_size").copied().unwrap_or(4096));
+
+        Ok(format!(r#"
+// metropipe Rust stub for {channel_id}
+// 32-byte header — metropipe protocol compatible
+
+use std::sync::atomic::{{AtomicU32, Ordering}};
+use std::fs::OpenOptions;
+use std::os::unix::io::AsRawFd;
+use std::time::Instant;
+
+const SHM_PATH: &str = "/dev/shm/metro_{channel_id}";
+const HEADER_SIZE: usize = 32;
+const PAYLOAD_OFFSET: usize = 32;
+const CAPACITY: usize = {max_size};
+
+const STATUS_IDLE: u32 = 0;
+const STATUS_CONSUMER_REQ: u32 = 1;
+const STATUS_PROVIDER_RES: u32 = 3;
+
+pub struct MetroChannel {{
+    pub fd: std::fs::File,
+    pub ptr: *mut u8,
+    pub len: usize,
+}}
+
+impl MetroChannel {{
+    pub fn open() -> Result<Self, String> {{
+        let fd = OpenOptions::new()
+            .read(true).write(true)
+            .open(SHM_PATH)
+            .map_err(|e| format!("Cannot open {{}}: {{}}", SHM_PATH, e))?;
+        let len = std::fs::metadata(SHM_PATH)
+            .map_err(|e| e.to_string())?.len() as usize;
+        let ptr = unsafe {{
+            libc::mmap(
+                std::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED, fd.as_raw_fd(), 0,
+            )
+        }};
+        if ptr == libc::MAP_FAILED {{
+            return Err("mmap failed".into());
+        }}
+        Ok(Self {{ fd, ptr: ptr as *mut u8, len }})
+    }}
+
+    pub fn request(&self, payload: &[u8], timeout_ms: u64) -> Result<Vec<u8>, String> {{
+        unsafe {{
+            let status = &*(self.ptr as *const AtomicU32);
+            let size_ptr = &*(self.ptr.add(8) as *const AtomicU32);
+            let payload_ptr = self.ptr.add(PAYLOAD_OFFSET);
+
+            let start = Instant::now();
+            while status.load(Ordering::SeqCst) != STATUS_IDLE {{
+                if start.elapsed().as_millis() as u64 > timeout_ms {{
+                    return Err("timeout waiting for IDLE".into());
+                }}
+            }}
+            std::ptr::copy_nonoverlapping(payload.as_ptr(), payload_ptr, payload.len());
+            size_ptr.store(payload.len() as u32, Ordering::SeqCst);
+            status.store(STATUS_CONSUMER_REQ, Ordering::SeqCst);
+
+            let resp_start = Instant::now();
+            loop {{
+                let s = status.load(Ordering::SeqCst);
+                if s == STATUS_PROVIDER_RES {{
+                    let resp_size = size_ptr.load(Ordering::SeqCst) as usize;
+                    let mut resp = vec![0u8; resp_size];
+                    std::ptr::copy_nonoverlapping(payload_ptr, resp.as_mut_ptr(), resp_size);
+                    status.store(STATUS_IDLE, Ordering::SeqCst);
+                    return Ok(resp);
+                }}
+                if resp_start.elapsed().as_millis() as u64 > timeout_ms {{
+                    return Err("timeout waiting for response".into());
+                }}
+            }}
+        }}
+    }}
+}}
+"#, channel_id = channel_id, max_size = max_size))
+    }
+
+    /// Generate a metropipe Go module (32-byte header via syscall.Mmap)
+    pub fn generate_metropipe_go_module(&self, channel_id: &str) -> Result<String, String> {
+        let channel = self.get_channel(channel_id)
+            .ok_or_else(|| format!("Channel {} not found", channel_id))?;
+        let addrs = channel.get_addresses();
+        let max_size = addrs.get("input_size").copied().unwrap_or(4096)
+            .max(addrs.get("output_size").copied().unwrap_or(4096));
+
+        Ok(format!(r#"
+// metropipe Go stub for {channel_id}
+// 32-byte header — metropipe protocol compatible
+
+package metropipe
+
+import (
+    "os"
+    "syscall"
+    "time"
+    "encoding/binary"
+    "unsafe"
+)
+
+const SHMPath = "/dev/shm/metro_{channel_id}"
+const HeaderSize = 32
+const PayloadOffset = 32
+const Capacity = {max_size}
+
+const StatusIdle = 0
+const StatusConsumerReq = 1
+const StatusProviderRes = 3
+
+type MetroChannel struct {{
+    data []byte
+}}
+
+func Open() (*MetroChannel, error) {{
+    f, err := os.OpenFile(SHMPath, os.O_RDWR, 0)
+    if err != nil {{
+        return nil, err
+    }}
+    defer f.Close()
+    fi, _ := f.Stat()
+    data, err := syscall.Mmap(int(f.Fd()), 0, int(fi.Size()),
+        syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+    if err != nil {{
+        return nil, err
+    }}
+    return &MetroChannel{{data: data}}, nil
+}}
+
+func (ch *MetroChannel) Request(payload []byte, timeoutMs int) ([]byte, error) {{
+    start := time.Now()
+    for binary.LittleEndian.Uint32(ch.data[0:4]) != StatusIdle {{
+        if time.Since(start).Milliseconds() > int64(timeoutMs) {{
+            return nil, fmt.Errorf("timeout")
+        }}
+        time.Sleep(time.Millisecond)
+    }}
+    copy(ch.data[PayloadOffset:PayloadOffset+len(payload)], payload)
+    binary.LittleEndian.PutUint32(ch.data[8:12], uint32(len(payload)))
+    binary.LittleEndian.PutUint32(ch.data[0:4], StatusConsumerReq)
+
+    respStart := time.Now()
+    for {{
+        status := binary.LittleEndian.Uint32(ch.data[0:4])
+        if status == StatusProviderRes {{
+            respSize := binary.LittleEndian.Uint32(ch.data[8:12])
+            resp := make([]byte, respSize)
+            copy(resp, ch.data[PayloadOffset:PayloadOffset+int(respSize)])
+            binary.LittleEndian.PutUint32(ch.data[0:4], StatusIdle)
+            return resp, nil
+        }}
+        if time.Since(respStart).Milliseconds() > int64(timeoutMs) {{
+            return nil, fmt.Errorf("timeout")
+        }}
+        time.Sleep(time.Millisecond)
+    }}
+}}
+"#, channel_id = channel_id, max_size = max_size))
+    }
+
+    /// Generate a metropipe Java module (32-byte header via MappedByteBuffer)
+    pub fn generate_metropipe_java_module(&self, channel_id: &str) -> Result<String, String> {
+        let channel = self.get_channel(channel_id)
+            .ok_or_else(|| format!("Channel {} not found", channel_id))?;
+        let addrs = channel.get_addresses();
+        let max_size = addrs.get("input_size").copied().unwrap_or(4096)
+            .max(addrs.get("output_size").copied().unwrap_or(4096));
+
+        Ok(format!(r#"
+// metropipe Java stub for {channel_id}
+// 32-byte header — metropipe protocol compatible
+
+import java.io.RandomAccessFile;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
+public class MetroChannel {{
+    private static final String SHM_PATH = "/dev/shm/metro_{channel_id}";
+    private static final int PAYLOAD_OFFSET = 32;
+    private static final int CAPACITY = {max_size};
+
+    private static final int STATUS_IDLE = 0;
+    private static final int STATUS_CONSUMER_REQ = 1;
+    private static final int STATUS_PROVIDER_RES = 3;
+
+    private MappedByteBuffer buf;
+
+    public MetroChannel() throws Exception {{
+        RandomAccessFile f = new RandomAccessFile(SHM_PATH, "rw");
+        FileChannel ch = f.getChannel();
+        this.buf = ch.map(FileChannel.MapMode.READ_WRITE, 0, 32 + CAPACITY);
+        this.buf.order(ByteOrder.LITTLE_ENDIAN);
+        ch.close();
+    }}
+
+    public byte[] request(byte[] payload, long timeoutMs) throws Exception {{
+        long start = System.nanoTime();
+        while (buf.getInt(0) != STATUS_IDLE) {{
+            if ((System.nanoTime() - start) / 1_000_000 > timeoutMs) throw new Exception("timeout");
+            Thread.sleep(1);
+        }}
+        buf.position(PAYLOAD_OFFSET);
+        buf.put(payload);
+        buf.putInt(8, payload.length);
+        buf.putInt(0, STATUS_CONSUMER_REQ);
+
+        long respStart = System.nanoTime();
+        while (true) {{
+            int status = buf.getInt(0);
+            if (status == STATUS_PROVIDER_RES) {{
+                int respSize = buf.getInt(8);
+                byte[] resp = new byte[respSize];
+                buf.position(PAYLOAD_OFFSET);
+                buf.get(resp, 0, respSize);
+                buf.putInt(0, STATUS_IDLE);
+                return resp;
+            }}
+            if ((System.nanoTime() - respStart) / 1_000_000 > timeoutMs) throw new Exception("timeout");
+            Thread.sleep(1);
+        }}
+    }}
+}}
+"#, channel_id = channel_id, max_size = max_size))
+    }
+
+    /// Generate a metropipe C# module (32-byte header via MemoryMappedFile)
+    pub fn generate_metropipe_csharp_module(&self, channel_id: &str) -> Result<String, String> {
+        let channel = self.get_channel(channel_id)
+            .ok_or_else(|| format!("Channel {} not found", channel_id))?;
+        let addrs = channel.get_addresses();
+        let max_size = addrs.get("input_size").copied().unwrap_or(4096)
+            .max(addrs.get("output_size").copied().unwrap_or(4096));
+
+        Ok(format!(r#"
+// metropipe C# stub for {channel_id}
+// 32-byte header — metropipe protocol compatible
+
+using System;
+using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+class MetroChannel
+{{
+    const string ShmPath = "/dev/shm/metro_{channel_id}";
+    const int PayloadOffset = 32;
+    const int Capacity = {max_size};
+
+    const int StatusIdle = 0;
+    const int StatusConsumerReq = 1;
+    const int StatusProviderRes = 3;
+
+    private MemoryMappedFile mmf;
+    private MemoryMappedViewAccessor accessor;
+
+    public MetroChannel()
+    {{
+        mmf = MemoryMappedFile.CreateFromFile(ShmPath, FileMode.Open);
+        accessor = mmf.CreateViewAccessor(0, 32 + Capacity);
+    }}
+
+    public byte[] Request(byte[] payload, int timeoutMs)
+    {{
+        var start = DateTime.Now;
+        while (accessor.ReadInt32(0) != StatusIdle)
+        {{
+            if ((DateTime.Now - start).TotalMilliseconds > timeoutMs)
+                throw new TimeoutException();
+            Thread.Sleep(1);
+        }}
+        accessor.WriteArray(PayloadOffset, payload, 0, payload.Length);
+        accessor.Write(8, payload.Length);
+        accessor.Write(0, StatusConsumerReq);
+
+        var respStart = DateTime.Now;
+        while (true)
+        {{
+            int status = accessor.ReadInt32(0);
+            if (status == StatusProviderRes)
+            {{
+                int respSize = accessor.ReadInt32(8);
+                byte[] resp = new byte[respSize];
+                accessor.ReadArray(PayloadOffset, resp, 0, respSize);
+                accessor.Write(0, StatusIdle);
+                return resp;
+            }}
+            if ((DateTime.Now - respStart).TotalMilliseconds > timeoutMs)
+                throw new TimeoutException();
+            Thread.Sleep(1);
+        }}
+    }}
+
+    public void Close()
+    {{
+        accessor?.Dispose();
+        mmf?.Dispose();
+    }}
+}}
+"#, channel_id = channel_id, max_size = max_size))
+    }
+
+    /// Generate a metropipe Ruby module (32-byte header via IO/mmap)
+    pub fn generate_metropipe_ruby_module(&self, channel_id: &str) -> Result<String, String> {
+        let channel = self.get_channel(channel_id)
+            .ok_or_else(|| format!("Channel {} not found", channel_id))?;
+        let addrs = channel.get_addresses();
+        let max_size = addrs.get("input_size").copied().unwrap_or(4096)
+            .max(addrs.get("output_size").copied().unwrap_or(4096));
+
+        Ok(format!(r#"
+# metropipe Ruby stub for {channel_id}
+# 32-byte header — metropipe protocol compatible
+
+require 'io/extra'
+
+SHM_PATH = "/dev/shm/metro_{channel_id}"
+PAYLOAD_OFFSET = 32
+CAPACITY = {max_size}
+
+STATUS_IDLE = 0
+STATUS_CONSUMER_REQ = 1
+STATUS_PROVIDER_RES = 3
+
+class MetroChannel
+  def initialize
+    @fd = IO.sysopen(SHM_PATH, File::RDWR)
+    @size = File.size(SHM_PATH)
+    @buf = IO.mmap(@fd, @size, IO::PROT_READ | IO::PROT_WRITE, IO::MAP_SHARED)
+  end
+
+  def request(payload, timeout_ms = 5000)
+    start = Time.now
+    while @buf[0, 4].unpack1('L') != STATUS_IDLE
+      raise 'timeout' if (Time.now - start) * 1000 > timeout_ms
+      sleep 0.001
+    end
+    @buf[PAYLOAD_OFFSET, payload.bytesize] = payload
+    @buf[8, 4] = [payload.bytesize].pack('L')
+    @buf[0, 4] = [STATUS_CONSUMER_REQ].pack('L')
+
+    resp_start = Time.now
+    loop do
+      status = @buf[0, 4].unpack1('L')
+      if status == STATUS_PROVIDER_RES
+        resp_size = @buf[8, 4].unpack1('L')
+        resp = @buf[PAYLOAD_OFFSET, resp_size]
+        @buf[0, 4] = [STATUS_IDLE].pack('L')
+        return resp
+      end
+      raise 'timeout' if (Time.now - resp_start) * 1000 > timeout_ms
+      sleep 0.001
+    end
+  end
+
+  def close
+    IO.munmap(@buf)
+    @fd.close
+  end
+end
+"#, channel_id = channel_id, max_size = max_size))
+    }
 }
 
 impl Default for MetropolitanHub {
