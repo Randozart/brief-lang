@@ -154,7 +154,8 @@ defn parse_alka_block(state: ParserState) -> Result<(Statement, ParserState), St
     &state = advance(state);
     
     let dangerous = false;
-    uni current_token(state)(OpNot) = {
+    let asm_tok = current_token(state);
+    uni asm_tok(OpNot) = {
         &dangerous = true;
         &state = advance(state);
     };
@@ -179,8 +180,7 @@ defn parse_alka_block(state: ParserState) -> Result<(Statement, ParserState), St
             };
             &state = advance(state);
         };
-        [!uni tok(DelimLBrace) = true] {
-            [!uni tok(DelimRBrace) = true] {
+        [tok != DelimLBrace && tok != DelimRBrace] {
                 &content_parts = append(content_parts, token_to_string(tok));
                 &state = advance(state);
             };

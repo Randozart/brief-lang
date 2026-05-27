@@ -57,7 +57,8 @@ defn analyze_call_graph(program: Program) -> CallGraphResult [
             let callees = extract_calls_from_body(t.body);
             let existing = map_get(cg.graph, t.name);
             uni existing(Some(list)) = {
-                &cg.graph = map_insert(cg.graph, t.name, list ++ callees);
+                let merged = append_all(list, callees);
+                &cg.graph = map_insert(cg.graph, t.name, merged);
             };
         };
         &j = j + 1;
@@ -82,7 +83,7 @@ defn analyze_call_graph(program: Program) -> CallGraphResult [
 
 // Extract all transaction/function call names from a list of statements
 defn extract_calls_from_body(body: List<Statement>) -> List<String> [
-    true
+    len(body) >= 0
 ][
     true
 ] {
@@ -249,4 +250,15 @@ defn detect_cycle(
     };
     
     term false;
+}
+
+
+defn append_all(a: List<String>, b: List<String>) -> List<String> {
+    let result = a;
+    let i: Int = 0;
+    [i < len(b)] {
+        &result = append(result, b[i]);
+        &i = i + 1;
+    };
+    term result;
 }

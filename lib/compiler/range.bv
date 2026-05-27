@@ -51,8 +51,9 @@ defn analyze_parameter_ranges(program: Program) -> Map<String, Map<String, Param
             // Initialize all params as unbounded
             let pi: Int = 0;
             [pi < len(t.parameters)] {
-                let (name, _) = t.parameters[pi];
-                &param_ranges = map_insert(param_ranges, name, new_param_range());
+                let param_pair = t.parameters[pi];
+            let pname = param_pair.0;
+                &param_ranges = map_insert(param_ranges, pname, new_param_range());
                 &pi = pi + 1;
             };
             

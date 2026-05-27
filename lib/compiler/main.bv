@@ -142,8 +142,16 @@ output = output.append_str(String(len(cg.cylist)));
 
 // Compile to Rust using the rust backend
 defn generate_rust(program: Program, cg: CallGraphResult) -> String {
-    import backends.rust as rust_codegen;
-    term rust_codegen.generate_rust(program, cg);
+    // TODO: delegate to backends/rust.bv
+    let output = new_builder();
+    output = output.append_str("// Rust output\n");
+    [!cg.has_cycle] {
+        output = output.append_str("// Call graph: acyclic -- static dispatch enabled\n");
+    };
+    [cg.has_cycle] {
+        output = output.append_str("// Call graph: cyclic -- dynamic dispatch required\n");
+    };
+    term output.to_string();
 }
 
 // Compile to webstack (Rust + wasm-bindgen)
