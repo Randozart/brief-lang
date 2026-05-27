@@ -1,5 +1,7 @@
 // Webstack Backend for Brief Compiler
 // Generates Rust code with wasm-bindgen glue for web frontends
+
+import call_graph;
 //
 // The webstack pipeline:
 //   1. Collect signals (state variables) and transactions
@@ -109,7 +111,7 @@ defn generate_js_glue(state_name: String, signals: List<SignalInfo>) -> String {
 }
 
 // Main entry point: generate complete webstack output
-defn generate_webstack(program: Program, program_name: String) -> WebstackOutput {
+defn generate_webstack(program: Program, program_name: String, cg: CallGraphResult) -> WebstackOutput {
     let signals: List<SignalInfo> = vec![];
     let txns: List<TransactionInfo> = vec![];
     
@@ -152,9 +154,19 @@ defn generate_webstack(program: Program, program_name: String) -> WebstackOutput
         &i = i + 1;
     };
     
+    // Emit acyclicity annotation in Rust output
+    let acyc_comment: String;
+    [!cg.has_cycle] {
+        &acyc_comment = "// Call graph: acyclic -- static dispatch enabled\n";
+    };
+    [cg.has_cycle] {
+        &acyc_comment = "// Call graph: cyclic -- dynamic dispatch required\n";
+    };
+
     // Generate components
-    let rust_code = generate_state_struct(signals);
-    let rust_code = rust_code + generate_reactive_engine(txns);
+    let rust_code = acyc_comment;
+    rust_code = rust_code + generate_state_struct(signals);
+    rust_code = rust_code + generate_reactive_engine(txns);
     let js_glue = generate_js_glue(program_name, signals);
     
     term WebstackOutput {
@@ -213,8 +225,8 @@ struct WebstackOutput {
 // Exports
 // ============================================================================
 
-export defn compile_webstack(program: Program, output: &mut String) {
-    let result = generate_webstack(program, "app");
+export defn compile_webstack(program: Program, output: &mut String, cg: CallGraphResult) {
+    let result = generate_webstack(program, "app", cg);
     output = output.append_str(result.rust_code);
     output = output.append_str("\n// JS Glue:\n");
     output = output.append_str(result.js_glue);

@@ -4,6 +4,7 @@
 // WebAssembly is a stack-based virtual machine with linear memory.
 // This backend uses guard-based execution for branchless code generation.
 
+import call_graph;
 use std::wasm;
 
 // ============================================================================
@@ -349,3 +350,11 @@ export transaction compile_wasm(program: Program, output: &mut String)
 export transaction generate_wat(module: WasmModule) -> String
     [wat = format_wat_text(module)]
     [wat]
+
+// Acyclicity annotation helper for generated WASM output
+defn wasm_acyclic_annotation(cg: CallGraphResult) -> String {
+    [!cg.has_cycle] {
+        term ";; Call graph: acyclic -- static dispatch in WASM module\n";
+    };
+    term ";; Call graph: cyclic -- dynamic dispatch with bounded stack\n";
+}

@@ -1,6 +1,8 @@
 // x86-64 Binary Backend - Direct machine code generation
 // Tier 7 Part 2
 
+import call_graph;
+
 // ===== X86_64 INSTRUCTION ENUM =====
 
 enum X64Instr {
@@ -493,8 +495,16 @@ defn x64_generate_transaction_check(txn: Transaction) -> List<X64Instr> {
     term instrs;
 }
 
-defn generate_x86_64(program: Program) -> List<u8> {
+defn generate_x86_64(program: Program, cg: CallGraphResult) -> List<u8> {
     let all_instrs: List<X64Instr> = [];
+    
+    // Emit acyclicity annotation in comment instrs
+    [!cg.has_cycle] {
+        all_instrs = all_instrs.append(X64Instr::Comment("Call graph: acyclic -- static dispatch".to_string()));
+    };
+    [cg.has_cycle] {
+        all_instrs = all_instrs.append(X64Instr::Comment("Call graph: cyclic -- dynamic dispatch".to_string()));
+    };
     
     // Extract transactions
     let txns: List<Transaction> = [];

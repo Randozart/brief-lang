@@ -4,6 +4,7 @@
 // VHDL is a hardware description language for FPGA/ASIC design.
 // This backend maps transactions to concurrent processes and signals.
 
+import call_graph;
 use std::vhdl;
 
 // ============================================================================
@@ -441,3 +442,11 @@ export transaction compile_vhdl_with_tb(program: Program, output: &mut String, t
     [output = generate_vhdl_file(design)]
     [test_vectors = generate_test_vectors(&program)]
     [tb_output = generate_testbench(design, test_vectors)]
+
+// Acyclicity annotation helper for generated VHDL output
+defn vhdl_acyclic_annotation(cg: CallGraphResult) -> String {
+    [!cg.has_cycle] {
+        term "-- Call graph: acyclic -- static dispatch in processes\n";
+    };
+    term "-- Call graph: cyclic -- sequential dispatch with depth limit\n";
+}

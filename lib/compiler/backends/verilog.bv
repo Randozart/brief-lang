@@ -4,6 +4,7 @@
 // SystemVerilog is a hardware description and verification language.
 // This backend uses modern SV features for concise, efficient RTL.
 
+import call_graph;
 use std::verilog;
 
 // ============================================================================
@@ -486,3 +487,11 @@ export transaction compile_verilog_with_tb(program: Program, output: &mut String
     [output = generate_systemverilog_file(design)]
     [tests = generate_test_cases(&program)]
     [tb_output = generate_testbench(design, tests)]
+
+// Acyclicity annotation helper for generated SV output
+defn sv_acyclic_annotation(cg: CallGraphResult) -> String {
+    [!cg.has_cycle] {
+        term "// Call graph: acyclic -- static dispatch in FSM\n";
+    };
+    term "// Call graph: cyclic -- sequential dispatch with depth limit\n";
+}

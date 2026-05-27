@@ -1,6 +1,8 @@
 // AArch64 Binary Backend - Direct machine code generation
 // Tier 7: Code Generation Backends
 
+import call_graph;
+
 // ===== AARCH64 INSTRUCTION ENUM =====
 
 enum A64Instr {
@@ -1337,8 +1339,16 @@ defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, Reg
 
 // ===== MAIN ENTRY POINT =====
 
-defn generate_aarch64(program: Program) -> List<u8> {
+defn generate_aarch64(program: Program, cg: CallGraphResult) -> List<u8> {
     let all_instrs: List<A64Instr> = [];
+    
+    // Emit acyclicity annotation in comment instrs
+    [!cg.has_cycle] {
+        all_instrs = all_instrs.append(Comment("Call graph: acyclic -- static dispatch enabled"));
+    };
+    [cg.has_cycle] {
+        all_instrs = all_instrs.append(Comment("Call graph: cyclic -- dynamic dispatch required"));
+    };
     
     // Extract transactions
     let txns: List<Transaction> = [];
@@ -1582,8 +1592,16 @@ defn get_cached_guard(cache_var: String) -> List<A64Instr> {
 
 // ===== ENHANCED CODE GENERATION =====
 
-defn generate_optimized_aarch64(program: Program) -> List<u8> {
+defn generate_optimized_aarch64(program: Program, cg: CallGraphResult) -> List<u8> {
     let mut all_instrs: List<A64Instr> = [];
+    
+    // Emit acyclicity annotation in comment instrs
+    [!cg.has_cycle] {
+        all_instrs = all_instrs.append(Comment("Call graph: acyclic -- parallel scheduling enabled"));
+    };
+    [cg.has_cycle] {
+        all_instrs = all_instrs.append(Comment("Call graph: cyclic -- sequential dispatch with depth limit"));
+    };
     
     // Extract transactions
     let mut txns: List<Transaction> = [];

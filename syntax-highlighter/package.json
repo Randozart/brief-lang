@@ -9,7 +9,10 @@
     "onLanguage:brief",
     "onLanguage:rbv",
     "onLanguage:ebv",
-    "onLanguage:dbrief"
+    "onLanguage:dbrief",
+    "onLanguage:sbrief",
+    "onLanguage:srbv",
+    "onLanguage:sebv"
   ],
   "engines": {
     "vscode": "^1.60.0"
@@ -76,6 +79,55 @@
           ".dbvl",
           ".dbvs"
         ],
+        "icon": {
+          "light": "./images/d-brief-logo.svg",
+          "dark": "./images/d-brief-logo.svg"
+        },
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "sbrief",
+        "aliases": [
+          "Strict Brief",
+          "strict-brief"
+        ],
+        "extensions": [
+          ".sbv"
+        ],
+        "icon": {
+          "light": "./images/brief-logo.svg",
+          "dark": "./images/brief-logo.svg"
+        },
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "srbv",
+        "aliases": [
+          "Strict Rendered Brief",
+          "strict-rendered-brief"
+        ],
+        "extensions": [
+          ".srbv"
+        ],
+        "icon": {
+          "light": "./images/r-brief-logo.svg",
+          "dark": "./images/r-brief-logo.svg"
+        },
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "sebv",
+        "aliases": [
+          "Strict Embedded Brief",
+          "strict-embedded-brief"
+        ],
+        "extensions": [
+          ".sebv"
+        ],
+        "icon": {
+          "light": "./images/e-brief-logo.svg",
+          "dark": "./images/e-brief-logo.svg"
+        },
         "configuration": "./language-configuration.json"
       }
     ],
@@ -99,6 +151,21 @@
         "language": "dbrief",
         "scopeName": "source.dbrief",
         "path": "./syntaxes/dbrief.tmLanguage.json"
+      },
+      {
+        "language": "sbrief",
+        "scopeName": "source.brief",
+        "path": "./syntaxes/brief.tmLanguage.json"
+      },
+      {
+        "language": "srbv",
+        "scopeName": "source.rbv",
+        "path": "./syntaxes/rbv.tmLanguage.json"
+      },
+      {
+        "language": "sebv",
+        "scopeName": "source.brief",
+        "path": "./syntaxes/brief.tmLanguage.json"
       }
     ],
     "themes": [

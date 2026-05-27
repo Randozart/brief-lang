@@ -47,16 +47,19 @@ function activate(context) {
 
     // Options to control the language client
     const clientOptions = {
-        // Register the server for Brief and DBrief files
+        // Register the server for Brief, DBrief, and Strict Brief files
         documentSelector: [
             { scheme: 'file', language: 'brief' },
             { scheme: 'file', language: 'rbv' },
             { scheme: 'file', language: 'ebv' },
-            { scheme: 'file', language: 'dbrief' }
+            { scheme: 'file', language: 'dbrief' },
+            { scheme: 'file', language: 'sbrief' },
+            { scheme: 'file', language: 'srbv' },
+            { scheme: 'file', language: 'sebv' }
         ],
         synchronize: {
             // Notify the server about file changes
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{bv,rbv,ebv,dbv,dbvl,dbvs}')
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{bv,rbv,ebv,dbv,dbvl,dbvs,sbv,srbv,sebv}')
         }
     };
 
