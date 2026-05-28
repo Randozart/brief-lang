@@ -330,6 +330,7 @@ pub enum Expr {
     BitXor(Box<Expr>, Box<Expr>),
     Shl(Box<Expr>, Box<Expr>),
     Shr(Box<Expr>, Box<Expr>),
+    Concat(Box<Expr>, Box<Expr>),
     Call(String, Vec<Expr>),
     ListLiteral(Vec<Expr>),
     ListIndex(Box<Expr>, Box<Expr>),

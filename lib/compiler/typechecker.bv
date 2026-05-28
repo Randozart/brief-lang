@@ -402,22 +402,22 @@ defn check_program(program: Program, strict_mode: Bool) -> Result<TypedProgram, 
     
     let i: Int = 0;
     [i < len(program.items)] {
-        uni program.items[i] = TopDefn(d) = {
+        uni program.items[i](TopDefn(d)) = {
             let ctx = add_function(ctx, d);
         };
-        uni program.items[i] = TopTxn(t) = {
+        uni program.items[i](TopTxn(t)) = {
             let ctx = add_transaction(ctx, t);
         };
-        uni program.items[i] = TopStruct(struct_def) = {
+        uni program.items[i](TopStruct(struct_def)) = {
         };
-        uni program.items[i] = TopEnum(enum_def) = {
+        uni program.items[i](TopEnum(enum_def)) = {
         };
         &i = i + 1;
     };
     
     let i: Int = 0;
     [i < len(program.items)] {
-        uni program.items[i] = TopDefn(d) = {
+        uni program.items[i](TopDefn(d)) = {
             let result = check_definition(d, ctx, strict_mode);
             uni result(Err(e)) = {
                 term Err(e);
@@ -425,7 +425,7 @@ defn check_program(program: Program, strict_mode: Bool) -> Result<TypedProgram, 
             uni result(Ok(_)) = {
             };
         };
-        uni program.items[i] = TopTxn(t) = {
+        uni program.items[i](TopTxn(t)) = {
             let result = check_transaction(t, ctx, strict_mode);
             uni result(Err(e)) = {
                 term Err(e);
@@ -466,7 +466,7 @@ defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Res
             uni result(Ok(_)) = {
             };
         };
-        term Ok(());
+        term Ok(Unit);
     };
     uni result(Err(e)) = {
         term Err(e);
@@ -527,17 +527,17 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
             };
         };
         uni t.contract.postcondition(ExprBool(post_val)) = {
-            [post_val] {
+[post_val] {
                 term Err("Strict mode: postcondition [true] is not allowed");
             };
         };
     };
-    
-    let result = check_block(t.body, ctx);
-    uni result(Ok(_)) = {
-        term Ok(());
+
+    let block_result = check_block(t.body, ctx);
+    uni block_result(Ok(_)) = {
+        term Ok(Unit);
     };
-    uni result(Err(e)) = {
+    uni block_result(Err(e)) = {
         term Err(e);
     };
 }

@@ -111,8 +111,8 @@ defn apply_comparison(
     true
 ] {
     // Case 1: var <op> lit  (e.g. x > 0)
-    uni(left)(ExprVar(var_name)) = {
-        uni(right)(ExprInt(val)) = {
+    uni left(ExprVar(var_name)) = {
+        uni right(ExprInt(val)) = {
             [op_is_gt] {
                 // var > lit => LOWER bound
                 term set_lower_bound(ranges, var_name, val, inclusive);
@@ -124,8 +124,8 @@ defn apply_comparison(
     };
     
     // Case 2: lit <op> var  (e.g. 0 < x)
-    uni(left)(ExprInt(val)) = {
-        uni(right)(ExprVar(var_name)) = {
+    uni left(ExprInt(val)) = {
+        uni right(ExprVar(var_name)) = {
             [op_is_gt] {
                 // lit > var => var < lit => UPPER bound
                 term set_upper_bound(ranges, var_name, val, inclusive);
@@ -150,7 +150,8 @@ defn set_lower_bound(
 ][
     true
 ] {
-    uni map_get(ranges, name)(Some(range)) = {
+    let range_entry = map_get(ranges, name);
+    uni range_entry(Some(range)) = {
         let actual_val = [inclusive] { val } else { val + 1 };
         
         uni range.min(None) = {
@@ -190,7 +191,8 @@ defn set_upper_bound(
 ][
     true
 ] {
-    uni map_get(ranges, name)(Some(range)) = {
+    let range_entry = map_get(ranges, name);
+    uni range_entry(Some(range)) = {
         let actual_val = [inclusive] { val } else { val - 1 };
         
         uni range.max(None) = {
@@ -225,7 +227,8 @@ defn has_lower_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
 ][
     true
 ] {
-    uni map_get(ranges, name)(Some(range)) = {
+    let range_entry = map_get(ranges, name);
+    uni range_entry(Some(range)) = {
         uni range.min(None) = { term false; };
         term true;
     };
@@ -238,7 +241,8 @@ defn has_upper_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
 ][
     true
 ] {
-    uni map_get(ranges, name)(Some(range)) = {
+    let range_entry = map_get(ranges, name);
+    uni range_entry(Some(range)) = {
         uni range.max(None) = { term false; };
         term true;
     };
@@ -251,7 +255,8 @@ defn min_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
 ][
     true
 ] {
-    uni map_get(ranges, name)(Some(range)) = {
+    let range_entry = map_get(ranges, name);
+    uni range_entry(Some(range)) = {
         term range.min;
     };
     term None;
@@ -263,7 +268,8 @@ defn max_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
 ][
     true
 ] {
-    uni map_get(ranges, name)(Some(range)) = {
+    let range_entry = map_get(ranges, name);
+    uni range_entry(Some(range)) = {
         term range.max;
     };
     term None;

@@ -256,7 +256,9 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
             let rest = remaining.drop(1);
             
             // Handle guarded statements (branching)
+            let was_guarded: Bool = false;
             uni stmt(StmtGuarded(condition, body)) = {
+                &was_guarded = true;
                 // Evaluate condition symbolically
                 let cond_sym = eval_symbolic(*condition, state);
                 let cond_simp = simplify(cond_sym);
@@ -276,7 +278,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
                 };
                 
                 // Unknown - explore both paths
-                [!uni cond_simp(SymBool(_)) = true] {
+                uni cond_simp(SymBool(_)) = {
                     // True path
                     let true_state = state_add_constraint(state, SymBool(true));
                     let true_stmts = body;
@@ -290,7 +292,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
             };
             
             // Non-branching statement
-            [!uni stmt(StmtGuarded(_, _)) = true] {
+            [!was_guarded] {
                 let new_state = execute_statement_symbolic(stmt, state);
                 work_queue = work_queue.append((rest, new_state, constraints));
             };

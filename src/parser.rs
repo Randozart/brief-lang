@@ -3001,7 +3001,43 @@ let span = self.current_span();
         }
     }
 
-    /// Parse the target of a unification statement: an identifier with optional [index]
+    /// Parse a sequence of pattern fields inside parentheses, handling
+    /// nested groups, string literals, identifiers, and wildcards.
+    fn parse_pattern_fields(&mut self) -> Result<Vec<String>, SyntaxError> {
+        let mut fields = Vec::new();
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::Underscore)) => {
+                    fields.push("_".to_string());
+                    self.advance();
+                }
+                Some(Ok(Token::String(s))) => {
+                    let val = s.clone();
+                    fields.push(format!("\"{}\"", val));
+                    self.advance();
+                }
+                Some(Ok(Token::LParen)) => {
+                    self.advance();
+                    let inner = self.parse_pattern_fields()?;
+                    self.expect(Token::RParen)?;
+                    fields.push(format!("({})", inner.join(",")));
+                }
+                _ => {
+                    // Try as identifier or keyword
+                    match self.expect_identifier() {
+                        Ok(name) => fields.push(name),
+                        Err(_) => break,
+                    }
+                }
+            }
+            if let Some(Ok(Token::Comma)) = self.current_token() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(fields)
+    }
     /// or .field access, but stopping before (Pattern) which belongs to unification.
     fn parse_uni_target(&mut self) -> Result<Expr, SyntaxError> {
         let ident = self.expect_identifier()?;
@@ -3247,23 +3283,7 @@ let span = self.current_span();
                     // Check for pattern data: Variant(field1, ...) or just Variant
                     let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
                         self.advance();
-                        let mut fields = Vec::new();
-                        loop {
-                            if let Some(Ok(Token::Identifier(name))) = self.current_token() {
-                                fields.push(name.clone());
-                                self.advance();
-                            } else if let Some(Ok(Token::Underscore)) = self.current_token() {
-                                fields.push("_".to_string());
-                                self.advance();
-                            } else {
-                                break;
-                            }
-                            if let Some(Ok(Token::Comma)) = self.current_token() {
-                                self.advance();
-                            } else {
-                                break;
-                            }
-                        }
+                        let fields = self.parse_pattern_fields()?;
                         self.expect(Token::RParen)?;
                         format!("{}({})", pattern_name, fields.join(","))
 } else {
@@ -3366,29 +3386,44 @@ let span = self.current_span();
                                 self.advance();
                                 "Err".to_string()
                             }
-                            _ => unreachable!(),
+                            _ => {
+                                match self.expect_identifier() {
+                                    Ok(n) => n,
+                                    Err(e) => return Err(e),
+                                }
+                            }
                         };
 
                         // Expect ( for pattern fields
                         if matches!(self.current_token(), Some(Ok(Token::LParen))) {
                             self.advance(); // consume (
                             let mut fields = Vec::new();
-                            while let Some(Ok(Token::Identifier(field_name))) = self.current_token()
-                            {
-                                fields.push(field_name.clone());
-                                self.advance();
-                                if let Some(Ok(Token::Comma)) = self.current_token() {
-                                    self.advance();
-                                } else {
-                                    break;
+                            while let Some(Ok(token)) = self.current_token() {
+                            let token_is_field = matches!(token, 
+                                Token::Identifier(_) | Token::TypeData | Token::TypeInt | Token::TypeString | 
+                                Token::TypeBool | Token::TypeChar | Token::TypeFloat | Token::TypeVoid | Token::TypeUInt);
+                            if token_is_field {
+                                match self.expect_identifier() {
+                                    Ok(field_name) => {
+                                        fields.push(field_name);
+                                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                                            self.advance();
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => break,
                                 }
+                            } else {
+                                break;
                             }
-                            self.expect(Token::RParen)?;
-                            Expr::PatternMatch {
-                                value: Box::new(Expr::Identifier(var_name_clone)),
-                                variant: variant_name,
-                                fields,
-                            }
+                        }
+                        self.expect(Token::RParen)?;
+                        Expr::PatternMatch {
+                            value: Box::new(Expr::Identifier(var_name_clone)),
+                            variant: variant_name,
+                            fields,
+                        }
                         } else {
                             // Variant without parens - still a pattern match
                             Expr::PatternMatch {
@@ -3990,6 +4025,11 @@ let span = self.current_span();
                     self.advance();
                     let right = self.parse_multiplicative()?;
                     left = Expr::Add(Box::new(left), Box::new(right));
+                }
+                Ok(Token::PlusPlus) => {
+                    self.advance();
+                    let right = self.parse_multiplicative()?;
+                    left = Expr::Concat(Box::new(left), Box::new(right));
                 }
                 Ok(Token::Minus) => {
                     self.advance();

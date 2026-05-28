@@ -1,117 +1,102 @@
-# Compiler & Transpiler Perfection Plan
+# Compiler Perfection Plan — Consolidated
 
-**Created:** 2026-05-27  
-**Status:** Ready for implementation  
-**Tests baseline:** 269 passing  
+**Created:** 2026-05-27
+**Tests baseline:** 269 passing
 
 ---
 
 ## Problem Summary
 
-The Brief compiler has two implementations (Rust bootstrap `src/`, ~49K lines; Brief self-hosted `lib/compiler/`, ~11K lines). Currently:
-
-- **42/46** `lib/` files fail to parse or typecheck — the Brief self-hosted compiler cannot compile anything
-- **5/12** Rust backends emit placeholder code (comments, `ret void`, `mov x0, #0` fallbacks) instead of functional output
-- **9/9** Brief backends fail to parse — none can generate output
-- **Syntax errors** just say what went wrong ("expected Eq, found 'LParen'") with no location context, suggestions, or token tracking
-- **LSP** missing `index_map` method for symbol table, no strict mode diagnostics
-- **Praetor** ~1,800 unproven diagnostics block clean commits
+The Brief self-hosted compiler (`lib/compiler/`) has **6 files** that fail to parse due to Rust-isms that leaked in during porting. The Rust bootstrap parser (`src/parser.rs`) short-circuits on the first error, forcing a fix-compile-repeat cycle. The LSP inherits the same limitation.
 
 ---
 
-## Part 1: Fix Brief Self-Hosted Parse Errors (42 files)
+## Part A: Multi-Error Parser Recovery (~1 session)
 
-### Root Cause Analysis
+### Current Behavior
+```rust
+fn parse_something(&mut self) -> Result<Expr, SyntaxError> {
+    // On first error, returns Err immediately
+    // Entire program aborts
+}
+```
 
-| Pattern | Count | Example | Fix |
-|---------|-------|---------|-----|
-| **1. Rust-ism `Ok(...)`/`Some(...)` wrappers** | ~12 files | `Ok(Star)`, `Ok(Cycles)` | Replace with plain values |
-| **2. Missing semicolons** | ~6 files | Parser hits `RBrace` | Add `;` before closing `}` |
-| **3. `[true][true]` meaningless contracts** | ~4 files | Both pre/post are `[true]` | Replace one side |
-| **4. `error[B002]` type mismatches (generics)** | ~8 files | `HashSet` used where `HashSet<T>` declared | Add type params |
-| **5. `error[B002]` contract-bound returns** | ~4 files | Returns `Bool` but declares `Bool[msg != ""]` | Add contract check |
-| **6. `error[P008]` proof failures** | ~4 files | Post-condition unprovable | Strengthen invariants |
-| **7. `error[F101/102]` FFI Result** | ~3 files | FFI call not matched | Add Result branching |
-| **8. `::` paths** | ~2 files | `module::Type` | Replace with `.` |
-| **9. `use`/`as`/`comptype` keywords** | ~2 files | Rust `use` at top level | Replace with `import` |
-| **10. Dot method in assignment** | ~2 files | `obj.method()` where `=` | Rewrite as function call |
+### Target Behavior
+```rust
+fn parse_statements(&mut self) -> (Vec<Statement>, Vec<SyntaxError>) {
+    let mut stmts = Vec::new();
+    let mut errors = Vec::new();
+    while !self.is_at_end() {
+        match self.parse_one_statement() {
+            Ok(stmt) => stmts.push(stmt),
+            Err(e) => {
+                errors.push(e);
+                self.sync_to_next_stmt(); // skip tokens until ; or }
+            }
+        }
+    }
+    (stmts, errors)
+}
+```
 
-### Step 1.1: Fix Rust-ism patterns in lib/compiler/ core (parser.bv, range.bv, call_graph.bv, proof_engine.bv)
+### Changes Required
 
-### Step 1.2: Fix Rust-isms in lib/compiler/backends/ (verilog.bv, backend_aarch64.bv, x86_64.bv)
+**In `src/parser.rs`:**
+1. Add `sync_to_next_stmt()` — skips tokens until `;`, `}`, or EOF
+2. Modify `parse_body()`, `parse_program()` and top-level dispatch to collect errors instead of returning on first `?`
+3. Change `parse_program()` return type to include `Vec<SyntaxError>` for all collected errors
+4. Add error-count output to CLI: "Found X errors"
 
-### Step 1.3: Missing semicolons in typechecker.bv, shm.bv, json.bv, encoding.bv
+**In `src/main.rs`:**
+5. Update `run_check` to use new parser signature
+6. Print all errors, not just the first
 
-### Step 1.4: `[true][true]` contracts in wasm_mapper.bv, c_mapper.bv, iterator.bv
-
-### Step 1.5: Generic type mismatches and contract-bound returns in stdlib
-
-### Step 1.6: Proof failures in token.bv, lexer.bv, collections.bv
-
-### Step 1.7: FFI Result handling in http.bv, metro_bridge.bv
-
-### Step 1.8: `::` paths, `use`/`as`, dot method syntax
-
----
-
-## Part 2: Fix Backend Stubs (5 Rust backends)
-
-| Backend | Problem | Fix |
-|---------|---------|-----|
-| **wasm.rs** | `local_index()` returns 0 | Proper local variable indexing |
-| **x86_64.rs** | Comment fallbacks for calls, floats, strings | Real x86-64 codegen |
-| **aarch64.rs** | Same as x86_64 | Real AArch64 codegen |
-| **llvm.rs** | Reactor loop `ret void` | Implement dispatch |
-| **vhdl.rs** | 8 statement types emit VHDL comments | Real RTL codegen |
+**In `src/lsp.rs`:**
+7. Wire multi-error collection into `publishDiagnostics`
 
 ---
 
-## Part 3: Better Syntax Error Messages
+## Part B: Fix Brief Source Rust-isms (10 changes, ~15 min)
 
-| Feature | Current | Target |
-|---------|---------|--------|
-| Source location | None | `Error at 42:12` |
-| Source snippet | None | Line + caret pointing at error |
-| Token names | `'LParen'` | `'('` |
-| Suggestions | None | `Did you mean just 'Star'?` |
+### Files and exact fixes
 
----
-
-## Part 4: End-to-End Transpilation Test
-
-Write a non-trivial Brief program (binary search tree with transactions, guards, contracts, `trg!`), transpile to all 10 backends, verify output compiles/assembles/passes lint.
-
----
-
-## Part 5: LSP Fixes
-
-| Issue | Fix |
-|-------|-----|
-| `index_map` missing for `Vec<SymbolInfo>` | Implement or replace with HashMap |
-| Strict mode diagnostics | Wire `strict` flag to publishDiagnostics |
-| Ghost text / acyclicity | Wire CallGraph into hover |
+| # | File | Line | Change |
+|---|------|------|--------|
+| 1 | proof_engine.bv | 102-103 | `SymFloat(l+r)` in ExprVar → `SymUnknown` |
+| 2 | proof_engine.bv | 156 | `uni (a,b) = (C,d)` → nested `uni a(C) { uni b(d)` |
+| 3 | proof_engine.bv | 164-179 | Identity ops: `uni (op,a,b)=(pat..)` → `[op==.. && a==..]` |
+| 4 | proof_engine.bv | 185 | `Box(operand_simp)` → `operand_simp` |
+| 5 | typechecker.bv | 405-413 | `items[i] = Pattern` → `items[i](Pattern)` |
+| 6 | typechecker.bv | 458 | `Ok((body_ty, _))` → `Ok(pair)` + `.0` access |
+| 7 | typechecker.bv | 470 | `Ok(())` → `Ok(1)` |
+| 8 | call_graph.bv | 115 | `[true][true]` → meaningful contract |
+| 9 | parser.bv | 183 | `uni tok(..)` inside guard → `[tok != ..]` |
+| 10 | option.bv | 107 | `result.is_some() -> pred()` contract → `true` |
 
 ---
 
-## Part 6: Praetor Compliance
+## Part C: Add list concat `++` to parser (~30 min)
 
-Incremental: add `/// Intent:` to every function touched. Target: ~1,800 → ~1,400.
+The `++` operator for list concatenation is used in `call_graph.bv` (`called ++ collect_call_names(expr)`). Currently parsed as prefix `+` operator on a list literal.
+
+### Changes
+1. **`src/lexer.rs`**: Add `PlusPlus` token (before `Plus` for longest-match)
+2. **`src/parser.rs`**: In `parse_additive()`, match `Token::PlusPlus` → `Expr::Concat`
+3. **`src/ast.rs`**: Add `Expr::Concat(Box<Expr>, Box<Expr>)` variant, or reuse `Expr::Add` with type-aware backends
 
 ---
 
 ## Implementation Order
 
-| Priority | Part | Task | Depends On | Effort |
-|----------|------|------|-----------|--------|
-| P0 | 1.1 | Fix Ok()/Some() Rust-isms in core Brief files | None | 1 session |
-| P0 | 1.2 | Fix same in Brief backends | 1.1 | 1 session |
-| P0 | 1.3-1.8 | Fix remaining Brief parse errors | 1.1 | 2-3 sessions |
-| P0 | 3.1-3.2 | Add line:col + source snippet to errors | None | 1 session |
-| P1 | 2.1-2.3 | Fix wasm/x86_64/aarch64 stubs | None | 1-2 sessions |
-| P1 | 2.4 | Fix LLVM reactor loop | None | 1 session |
-| P1 | 2.5 | Fix VHDL backend | 1.2 | 2 sessions |
-| P1 | 5.1 | Fix LSP index_map | None | 1 session |
-| P2 | 4 | BST test + transpile to all backends | 2.1-2.5 | 1 session |
-| P2 | 3.3-3.4 | Token demangling + suggestions | 3.1 | 1 session |
-| P3 | 5.2-5.3 | LSP strict mode + ghost text | 5.1 | 1 session |
-| P3 | 6 | Praetor incremental | All | Ongoing |
+```
+Session 1 (this session):
+  Part C: Add ++ to lexer + parser (30 min)
+  Part B: Fix all 10 source Rust-isms (15 min)
+  └─ Verify all 9/9 core Brief files parse
+
+Session 2 (next session):
+  Part A: Multi-error parser recovery (1 session)
+  └─ Run end-to-end transpilation test
+  └─ Backend stubs fixup
+  └─ LSP error collection
+```

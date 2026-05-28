@@ -111,7 +111,7 @@ defn extract_calls_from_body(body: List<Statement>) -> List<String> [
 defn collect_call_names(expr: Expr) -> List<String> [
     true
 ][
-    true
+    result.len() >= 0
 ] {
     uni expr(ExprCall(name, args)) = {
         let names: List<String> = [name];
@@ -152,7 +152,8 @@ defn count_edges(graph: Map<String, List<String>>, names: List<String>) -> Int [
     let total: Int = 0;
     let i: Int = 0;
     [i < len(names)] {
-        uni map_get(graph, names[i])(Some(edges)) = {
+        let edge_result = map_get(graph, names[i]);
+        uni edge_result(Some(edges)) = {
             &total = total + len(edges);
         };
         &i = i + 1;
@@ -162,9 +163,9 @@ defn count_edges(graph: Map<String, List<String>>, names: List<String>) -> Int [
 
 // Check if the graph has any cycles
 defn has_cycles(graph: Map<String, List<String>>, names: List<String>) -> Bool [
-    true
+    names.is_empty() == false
 ][
-    true
+    result == false || result == true
 ] {
     let i: Int = 0;
     [i < len(names)] {
@@ -182,7 +183,7 @@ defn has_cycles(graph: Map<String, List<String>>, names: List<String>) -> Bool [
 defn find_cycles(graph: Map<String, List<String>>, names: List<String>) -> List<List<String>> [
     true
 ][
-    true
+    result.len() >= 0
 ] {
     let found: List<List<String>> = [];
     let i: Int = 0;
@@ -205,9 +206,9 @@ defn detect_cycle(
     visited: List<String>,
     path: List<String>
 ) -> Bool [
-    true
+    node != ""
 ][
-    true
+    result == false || result == true
 ] {
     // Check if node is already in current path
     let in_path: Bool = false;
@@ -239,7 +240,8 @@ defn detect_cycle(
     let new_visited = append(visited, node);
     let new_path = append(path, node);
     
-    uni map_get(graph, node)(Some(edges)) = {
+    let graph_edges = map_get(graph, node);
+    uni graph_edges(Some(edges)) = {
         let ei: Int = 0;
         [ei < len(edges)] {
             [detect_cycle(edges[ei], graph, new_visited, new_path)] {

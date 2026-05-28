@@ -1530,6 +1530,17 @@ impl Interpreter {
                     _ => Ok(Value::Bool(false)),
                 }
             }
+            Expr::Concat(l, r) => {
+                let left = self.eval_expr(l)?;
+                let right = self.eval_expr(r)?;
+                match (left, right) {
+                    (Value::List(mut a), Value::List(b)) => {
+                        a.extend(b);
+                        Ok(Value::List(a))
+                    }
+                    _ => Err(RuntimeError::TypeMismatch("list concat".to_string())),
+                }
+            }
             Expr::Slice { value, start, end, stride, mask: _ } => {
                 let list_val = self.eval_expr(value)?;
                 let list = match list_val {

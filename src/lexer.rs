@@ -247,6 +247,8 @@ pub enum Token {
     TildeSlash,
     #[token("~")]
     Tilde,
+    #[token("++")]
+    PlusPlus,
     #[token("+")]
     Plus,
     #[token("*")]

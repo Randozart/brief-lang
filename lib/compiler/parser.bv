@@ -184,11 +184,10 @@ defn parse_alka_block(state: ParserState) -> Result<(Statement, ParserState), St
                 &content_parts = append(content_parts, token_to_string(tok));
                 &state = advance(state);
             };
-        };
     };
-    
-    let result = expect_token(state, OpSemicolon);
-    uni result(Ok(new_state)) = {
+
+    let alka_semi = expect_token(state, OpSemicolon);
+    uni alka_semi(Ok(new_state)) = {
         let sb = new_builder();
         let i: Int = 0;
         [i < content_parts.len()] {
@@ -200,7 +199,7 @@ defn parse_alka_block(state: ParserState) -> Result<(Statement, ParserState), St
         let alka = AlkaBlock { dangerous: dangerous, content: content };
         term Ok((StmtAlka(alka), new_state));
     };
-    uni result(Err(e)) = {
+    uni alka_semi(Err(e)) = {
         term Err(e);
     };
 }
@@ -1494,7 +1493,8 @@ defn parse_let(state: ParserState) -> Result<(Statement, ParserState), String> {
     };
     
     // Check for tuple destructuring: let (a, b) = expr;
-    uni current_token(state)(DelimLParen) = {
+    let cur_tok = current_token(state);
+    uni cur_tok(DelimLParen) = {
         &state = advance(state);
         let names: List<String> = [];
         
@@ -2473,14 +2473,14 @@ defn parse_rstruct(state: ParserState) -> Result<(RStructDefinition, ParserState
     uni result(Ok(new_state)) = { &state = new_state; };
     uni result(Err(e)) = { term Err(e); };
 
-    let rstruct = RStructDefinition {
+    let rstruct_def = RStructDefinition {
         name: unwrap_identifier(tok),
         fields: fields,
         methods: methods,
         view: None
     };
 
-    term Ok((rstruct, state));
+    term Ok((rstruct_def, state));
 }
 
 // Check if string contains substring
@@ -2489,12 +2489,12 @@ defn contains(s: String, substr: String) -> Bool {
     let i: Int = 0;
     [i <= len(s) - len(substr)] {
         let j: Int = 0;
-        let match: Bool = true;
+        let found_match: Bool = true;
         [j < len(substr)] {
-            [s[i + j] != substr[j]] { &match = false; };
+            [s[i + j] != substr[j]] { &found_match = false; };
             &j = j + 1;
         };
-        [match] { term true; };
+        [found_match] { term true; };
         &i = i + 1;
     };
     term false;

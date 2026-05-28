@@ -386,6 +386,7 @@ impl Annotator {
             Expr::Le(l, r) => format!("({} <= {})", self.format_expr(l), self.format_expr(r)),
             Expr::Gt(l, r) => format!("({} > {})", self.format_expr(l), self.format_expr(r)),
             Expr::Ge(l, r) => format!("({} >= {})", self.format_expr(l), self.format_expr(r)),
+            Expr::Concat(l, r) => format!("({} ++ {})", self.format_expr(l), self.format_expr(r)),
             Expr::Or(l, r) => format!("({} || {})", self.format_expr(l), self.format_expr(r)),
             Expr::And(l, r) => format!("({} && {})", self.format_expr(l), self.format_expr(r)),
             Expr::BitAnd(l, r) => format!("({} & {})", self.format_expr(l), self.format_expr(r)),

@@ -204,7 +204,7 @@ defn generate_rust(program: Program, state: CompilerState, cg: CallGraphResult) 
     [cg.has_cycle] {
         output = output.append_str("// Call graph: cyclic -- dynamic dispatch required\n");
         output = output.append_str("// Cycles detected: ");
-        output = output.append_str(String(len(cg.cycles)));
+        output = output.append_str(String(len(cg.cylist)));
         output = output.append_str("\n");
     };
 
