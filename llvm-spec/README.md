@@ -1,6 +1,6 @@
 # Brief LLVM Backend Specification
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-05-29  
 **Status:** Active implementation plan
 
@@ -32,7 +32,9 @@ Brief enforces strict memory boundaries, transactional atomicity, and contract-d
 | `05-CONTRACT-TO-METADATA.md` | !range, llvm.assume, constant propagation from contracts |
 | `06-MATCH-TO-SWITCH.md` | match → `switch i64 %discriminant` with phi |
 | `07-FFI-TO-DECLARE.md` | frgn → `declare @function`, C ABI marshaling |
-| `08-REACTOR-LOOP.md` | main() → tick loop, signal polling, inlined dispatch |
+| `08-REACTOR-LOOP.md` | main() → tick loop, trigger sampling, inlined dispatch |
+| `08a-TRIGGERS.md` | trg → volatile double-buffering, 3 lowering models |
+| `08b-TRANSITION-FUSING.md` | Sequential state composition (fusing guaranteed-sequential txns) |
 | `09-SIMD.md` | `<N x T>` vectors, `!llvm.loop.vectorize.enable` |
 | `10-FULL-EXAMPLE.md` | Counter.increment from .bv → annotated .ll |
 | `11-SELF-HOSTED.md` | Porting to Brief: StringBuilder IR emission |

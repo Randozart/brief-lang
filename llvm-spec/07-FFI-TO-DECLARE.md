@@ -42,8 +42,24 @@ let len = strlen("hello");
 | `Float` | `float` | Pass direct |
 | `Bool` | `int32_t` | `zext i1 %val to i32` |
 | `Char` | `uint32_t` | `zext i32 %val to i32` |
-| `String` | `const char*` | Emit `@brief_string_to_cstr` call |
+| `String` | `const char*` | Emit `@brief_string_to_cstr` call (see memory lifecycle below) |
 | `Void` | `void` | No return value |
+
+## C-String Memory Lifecycle
+
+The `@brief_string_to_cstr` intrinsic must **not** leak. Use stack allocation for small strings:
+
+```llvm
+; Strategy 1: Stack allocation (preferred — no leak, no malloc)
+%len = extractvalue { i8*, i64 } %string_val, 1
+%cstr = alloca i8, i64 %len
+%void = call void @llvm.memcpy.p0i8.p0i8.i64(i8* %cstr, i8* %ptr, i64 %len, i1 false)
+%nul = getelementptr i8, i8* %cstr, i64 %len
+store i8 0, i8* %nul
+call i64 @strlen(i8* %cstr)  ; safe — stack allocation, no free needed
+```
+
+If using heap allocation instead, the backend MUST emit a corresponding `free` call after the foreign function returns. The reactor loop is infinite, so every leaked allocation accumulates.
 
 ## Tier 2: Metropolitan Protocol
 
@@ -81,7 +97,7 @@ All other `frgn` declarations follow the standard `declare`/`call` pattern.
 ## Attribute for Foreign Calls
 
 ```llvm
-attributes #1 = { nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: readwrite) }
+attributes #1 = { nocallback nofree nosync nounwind willreturn memory(argmem: readwrite) }
 ;                                  ^-- foreign functions can't access our %State
 ```
 

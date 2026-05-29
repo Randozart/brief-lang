@@ -41,13 +41,30 @@
 |------|------|---------|
 | 2.1 | `noalias nocapture` on all `define` | Add attributes to function signature |
 | 2.2 | `local_unnamed_addr` + `mustprogress` etc. | Attributes #0 block |
-| 2.3 | `!range` on loads from bounded preconditions | Parse `[x < N]` → emit `!range !{ 0, N }` |
+| 2.3 | `!range` on loads from bounded preconditions | Parse `[x < N]` → emit `!range !{ 0, N }` using signed-correct upper bound (see CONTRACT-TO-METADATA.md) |
 | 2.4 | `@llvm.assume` for complex preconditions | Parse multi-variable `[a && b]` → emit assume chain |
 | 2.5 | `nuw nsw` on `add`/`sub` when bounds proven | If x in `[0, 100)`, x+1 is `nuw nsw` |
 | 2.6 | Guard → `select` optimization | Single-assignment guards become `select i1` |
 | 2.7 | Postcondition `@llvm.assume(i1 true)` | When proof engine proves postcondition |
 
 **Dependencies**: Phase 1 (need working load/store first).
+
+---
+
+## Phase 2.5: Transition Fusing + Trigger Sampling (3 days)
+
+**Goal**: Fuse guaranteed-sequential transactions into single-tick atomic transitions. Sample volatile triggers once per tick.
+
+| Step | What | Details |
+|------|------|---------|
+| 2.5.1 | Consume `detect_fusable_pairs` from `analysis` | Read existing fusable pairs (src/backend/mod.rs:291) |
+| 2.5.2 | Apply inhibition rules | Reject fusion if trg dependency, WAW hazard, async, or complexity budget exceeded |
+| 2.5.3 | Body composition pass | Concatenate bodies of fused txns, merge pre/post conditions |
+| 2.5.4 | Trigger sample phase at tick entry | Emit `load volatile` for each trg at top of `reactor_tick()` |
+| 2.5.5 | Trigger classification | Route each trg to MMIO, FFI poll, or Metropolitan model |
+| 2.5.6 | Wire `__poll_triggers` call in `main()` | For OS/WASM targets, insert poll call before `reactor_tick()` |
+
+**Dependencies**: Phase 1 (transaction bodies) + Phase 2 (contract analysis).
 
 ---
 
@@ -78,7 +95,7 @@
 | 4.2 | C ABI argument marshaling | String → `i8*`, Bool → `i32`, etc. |
 | 4.3 | `call` instruction at call sites | `call i64 @name(i64 %arg0, ...)` |
 | 4.4 | Return value unwrapping | `frgn` returns `Result<T,E>` → unwrap to `T` in IR |
-| 4.5 | FFI attribute `memory(inaccessiblemem: readwrite)` | Foreign calls don't alias `%State` |
+| 4.5 | FFI attribute `memory(argmem: readwrite)` | Foreign calls don't alias `%State` |
 
 **Dependencies**: Phase 1 (call instructions, SSA values).
 
@@ -86,7 +103,7 @@
 
 ## Phase 5: Reactor Loop + Acyclic Dispatch (2-3 days)
 
-**Goal**: `main()` with tick loop, precondition evaluation, inline dispatch for acyclic graphs.
+**Goal**: `main()` with tick loop, trigger sampling phase, precondition evaluation, inline dispatch for acyclic graphs.
 
 | Step | What | Details |
 |------|------|---------|
@@ -125,12 +142,13 @@
 | 7.1 | `llvm.bv` — module header + `%State` type | Mirror Phase 0 in Brief |
 | 7.2 | `llvm.bv` — load/store/arith | Mirror Phase 1 |
 | 7.3 | `llvm.bv` — `noalias` + `!range` | Mirror Phase 2 |
-| 7.4 | `llvm.bv` — `match → switch` | Mirror Phase 3 |
-| 7.5 | `llvm.bv` — FFI `declare` | Mirror Phase 4 |
-| 7.6 | `llvm.bv` — reactor loop | Mirror Phase 5 |
-| 7.7 | `main.bv` — wire `llvm` dispatch | Add `[state.backend == "llvm"]` arm |
+| 7.4 | `llvm.bv` — transition fusing + triggers | Mirror Phase 2.5 |
+| 7.5 | `llvm.bv` — `match → switch` | Mirror Phase 3 |
+| 7.6 | `llvm.bv` — FFI `declare` | Mirror Phase 4 |
+| 7.7 | `llvm.bv` — reactor loop | Mirror Phase 5 |
+| 7.8 | `main.bv` — wire `llvm` dispatch | Add `[state.backend == "llvm"]` arm |
 
-**Dependencies**: All previous phases + working self-hosted `StringBuilder` and pattern matching.
+**Dependencies**: All previous phases + Phase 2.5 (for fusing + trigger support) + working self-hosted `StringBuilder` and pattern matching.
 
 ---
 
@@ -141,9 +159,10 @@
 | 0: Scaffold | 1d | 2d | 3d |
 | 1: Basic txn | 2d | 3d | 5d |
 | 2: noalias + contracts | 2d | 3d | 5d |
+| 2.5: Fusing + Triggers | 2d | 3d | 5d |
 | 3: Match → switch | 2d | 4d | 6d |
 | 4: FFI declare | 1d | 2d | 3d |
 | 5: Reactor loop | 2d | 3d | 5d |
 | 6: SIMD | 2d | - | 2d |
 | 7: Self-hosted parity | - | 5d | 5d |
-| **Total** | **12d** | **22d** | **34d** |
+| **Total** | **14d** | **25d** | **39d** |

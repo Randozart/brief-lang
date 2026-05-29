@@ -19,7 +19,7 @@ rstruct Counter {
 define void @Counter_increment(%struct.State* noalias nocapture %state) local_unnamed_addr #0 {
 entry:
     ; 1. Load fields from state
-    %count_ptr = getelementptr inbounds %struct.State, %struct.State* %state, i64 0, i32 0
+    %count_ptr = getelementptr inbounds %struct.State, %struct.State* %state, i64 0, i32 0, i32 0
     %count = load i64, i64* %count_ptr, align 8, !range !0
 
     ; 2. Precondition injection (see CONTRACT-TO-METADATA.md)
@@ -49,6 +49,7 @@ entry:
 | `term expr;` | `ret i64 %expr` |
 | `uni val(Variant(f)) = { ... };` | `switch i64 %discriminant ...` (see MATCH-TO-SWITCH.md) |
 | `match expr { ... };` | `switch i64 %discriminant ...` (see MATCH-TO-SWITCH.md) |
+| `trg! sig: Bool;` | `%sig_sampled = load volatile i8, i8* @sig.ptr` at tick entry (see TRIGGERS.md) |
 
 ## Function Attributes
 

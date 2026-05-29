@@ -20,7 +20,7 @@ LLVM IR Generator
     ├── %State type (all rstruct fields flattened)
     ├── Transaction functions (define void @txn_name(%State* noalias nocapture))
     ├── Definition functions (define i64 @defn_name(i64 %arg0, ...))
-    ├── Reactor loop (main → tick, signal polling, dispatch)
+    ├── Reactor loop (main → tick, trigger sampling, dispatch)
     └── FFI declarations (declare i64 @strlen(i8*))
     ↓
 LLVM IR (.ll file)
@@ -44,5 +44,7 @@ Before LLVM emission, the AST runs through the peephole optimizer (`src/backend/
 - **Redundant elimination**: `let x = y; let z = x;` → `let z = y;`
 - **Guard simplification**: `[true] { ... }` → inline the block, `[false] { ... }` → delete it
 - **Select conversion**: `[cond] { x = a }; ~[cond] { x = b };` → `x = select cond, a, b`
+- **Transition fusing**: If `Txn_A`'s postcondition implies `Txn_B`'s precondition, and no async `trg` can preempt, fuse their bodies into a single atomic transition (see `08b-TRANSITION-FUSING.md`)
+- **Trigger sampling**: All volatile `trg` variables are sampled once at tick entry into immutable SSA registers, enforcing deterministic execution across the tick (see `08a-TRIGGERS.md`)
 
 The lowered AST is then passed to the LLVM IR generator.

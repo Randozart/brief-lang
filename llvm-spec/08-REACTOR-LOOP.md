@@ -19,9 +19,12 @@ tick:
 }
 
 define void @reactor_tick() local_unnamed_addr #0 {
-    ; Evaluate all transaction preconditions
-    ; Execute the first transaction whose preconditions are met
-    ; Commit state changes
+    ; 0. Sample all volatile triggers (see TRIGGERS.md)
+    ;     load volatile i8, i8* @trg_name.ptr → %trg_sampled
+    ; 1. Load state
+    ; 2. Evaluate all transaction preconditions
+    ; 3. Execute the first transaction whose preconditions are met
+    ; 4. Commit state changes
     ret void
 }
 ```

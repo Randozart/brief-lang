@@ -86,9 +86,9 @@ define void @reactor_tick() norecurse #0 {
 
     ; Evaluate preconditions
     %count = extractvalue %struct.State %state, 0, 0
-    %t1_cond = and i1
-        icmp sge i64 %count, 0,
-        icmp slt i64 %count, 100
+    %c1 = icmp sge i64 %count, 0
+    %c2 = icmp slt i64 %count, 100
+    %t1_cond = and i1 %c1, %c2
 
     br i1 %t1_cond, label %t1_body, label %noop
 
@@ -121,7 +121,7 @@ attributes #0 = {
     willreturn
     memory(argmem: readwrite)
 }
-attributes #1 = { nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: write) }
+attributes #1 = { nocallback nofree nosync nounwind willreturn memory(argmem: write) }
 
 ; ── Metadata ──────────────────────────────────────────────────────────
 

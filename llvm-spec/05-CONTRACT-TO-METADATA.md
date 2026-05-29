@@ -9,9 +9,9 @@ Preconditions that bound a variable to a numeric range become `!range` metadata 
 | Precondition | LLVM !range | Optimization Enabled |
 |-------------|-------------|---------------------|
 | `[x < 100]` | `!{ i64 0, i64 100 }` | Dead branch elimination on `x >= 100` |
-| `[x >= 0]` | `!{ i64 0, i64 -1 }` | Sign-extend removal, unsigned comparison simplification |
+| `[x >= 0]` | `!{ i64 0, i64 9223372036854775808 }` | Sign-extend removal, unsigned comparison simplification |
 | `[x in 5..10]` | `!{ i64 5, i64 10 }` | Array bounds check elimination |
-| `[len > 0]` | `!{ i64 1, i64 -1 }` | Loop trip count known to be ≥ 1 |
+| `[len > 0]` | `!{ i64 1, i64 9223372036854775808 }` | Loop trip count known to be ≥ 1 |
 
 **Implementation:**
 
