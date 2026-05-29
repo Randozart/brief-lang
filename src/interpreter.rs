@@ -176,6 +176,7 @@ pub struct Interpreter {
     pub orchestrator: Orchestrator,
     pub metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub,
     pub return_value: Option<Value>,
+    pub frgn_registry: crate::ffi::dynamic::FrgnRegistry,
 }
 
 impl Interpreter {
@@ -191,6 +192,7 @@ impl Interpreter {
             orchestrator: Orchestrator::new(),
             metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub::new(),
             return_value: None,
+            frgn_registry: crate::ffi::dynamic::FrgnRegistry::new(),
         }
     }
 
@@ -225,6 +227,57 @@ impl Interpreter {
                         .unwrap_or_else(|_| signature.location.clone())
                 };
                 self.ffi_name_to_location.insert(name.clone(), location);
+            }
+
+            // Register frgn declarations that use `from "lib.so"` (dynamic linking)
+            if let TopLevel::ForeignBinding {
+                name,
+                signature,
+                ..
+            } = item
+            {
+                let loc = &signature.location;
+                let is_dynamic = !loc.is_empty()
+                    && (loc.contains(".so") || loc.starts_with('/') || loc == "libc.so.6"
+                        || loc.ends_with(".dylib") || loc.ends_with(".dll"));
+                if is_dynamic {
+                    use crate::ffi::dynamic::{FrgnDecl, FrgnType};
+                    let params: Vec<(String, FrgnType)> = signature.inputs.iter()
+                        .filter_map(|(n, t)| {
+                            let type_name = match t {
+                                crate::ast::Type::Int => "Int",
+                                crate::ast::Type::Float => "Float",
+                                crate::ast::Type::Bool => "Bool",
+                                crate::ast::Type::Char => "Char",
+                                crate::ast::Type::String => "String",
+                                crate::ast::Type::Void => "Void",
+                                _ => return None,
+                            };
+                            FrgnType::from_name(type_name)
+                                .map(|ft| (n.clone(), ft))
+                        })
+                        .collect();
+                    let ret = if let Some((_, t)) = signature.success_output.first() {
+                            match t {
+                                crate::ast::Type::Int => FrgnType::Int,
+                                crate::ast::Type::Float => FrgnType::Float,
+                                crate::ast::Type::Bool => FrgnType::Bool,
+                                crate::ast::Type::Char => FrgnType::Char,
+                                crate::ast::Type::String => FrgnType::String,
+                                crate::ast::Type::Void => FrgnType::Void,
+                                _ => FrgnType::Int,
+                            }
+                        } else {
+                            FrgnType::Void
+                        };
+                    let decl = FrgnDecl {
+                        name: name.clone(),
+                        params,
+                        ret,
+                        lib: loc.clone(),
+                    };
+                    self.frgn_registry.register(decl);
+                }
             }
         }
 
@@ -909,6 +962,11 @@ Expr::Ge(l, r) => {
 
                 if self.definitions.contains_key(&fn_name) {
                     return self.call_defn(&fn_name, args);
+                }
+
+                // Check dynamically linked FFI (frgn declarations with from "lib.so")
+                if self.frgn_registry.declarations.contains_key(&fn_name) {
+                    return self.frgn_registry.call(&fn_name, &arg_values);
                 }
 
                 // Check if this is an enum constructor call (e.g. Ok(value), Err(error))

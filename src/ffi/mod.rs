@@ -29,6 +29,7 @@
 //! - Type mapping
 //! - Function registry
 
+pub mod dynamic;    // Dynamic linker — dlsym-based FFI resolution
 pub mod error;   // NEW: Error handling
 pub mod loader;
 pub mod mapper;
