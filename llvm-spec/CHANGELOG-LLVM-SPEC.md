@@ -177,3 +177,30 @@ LLVM 18.1.3 successfully optimized the Phase 0 output:
 - `main` → `store volatile`, then `unreachable` (LLVM proved infinite empty-tick loop is dead)
 - `noalias nocapture` verified present and functioning
 - Both `counter.ll` and `multifield.ll` pass `llc` assembly generation
+
+---
+
+## Phase 1 — Basic Transaction Emission
+
+### Delivered (2026-05-29)
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| `let` SSA bindings | ✅ | `let_bindings` HashMap tracks name→register. Expr::Identifier checks it first before field GEP |
+| `term;` → `ret void` | ✅ | Sets `terminated=true` to prevent double ret |
+| `term expr;` → `ret i64 %val` | ✅ | `values.first()` unwraps `Option<Expr>` via `Some(Some(v))` pattern |
+| `guarded` → `br i1` | ✅ | `icmp ne i64 %cond, 0` converts Bool-as-i64 to i1 for branch |
+| `Escape` → `ret` | ✅ | Sets `terminated=true` |
+| All 5 integer ops | ✅ | add, sub, mul, sdiv, srem — no changes needed |
+| Bool field trunc/zext | ✅ | Trunc on store, zext on load (from Phase 0) |
+
+### Test Fixtures (all pass `llc`)
+| Fixture | Tests | Status |
+|---------|-------|--------|
+| `tests/fixtures/phase1/let_binding.bv` | SSA let tracking + field store | ✅ |
+| `tests/fixtures/phase1/arithmetic.bv` | + - * / % all five ops | ✅ |
+| `tests/fixtures/phase1/guarded.bv` | Conditional branch + store | ✅ |
+| `tests/fixtures/phase1/full_txn.bv` | let + field read + store + term | ✅ |
+| Regression: counter, multifield, minimal | Phase 0 fixtures still pass | ✅ |
+
+### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
