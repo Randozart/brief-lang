@@ -81,6 +81,7 @@ impl LlvmBackend {
 
         writeln!(output, "declare void @llvm.assume(i1) #1").ok();
         writeln!(output, "declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1) #1").ok();
+        writeln!(output, "declare void @__wait_for_event() #1").ok();
         writeln!(output).ok();
 
         // Declare foreign bindings and populate frgn_map
@@ -154,10 +155,23 @@ impl LlvmBackend {
         writeln!(output).ok();
 
         if !txns.is_empty() {
+            for (name, txn) in &txns {
+                self.generate_precondition_function(&mut output, txn, name);
+            }
+            // Generate fused transactions for dispatch
+            let fusable_pairs = self.resolve_fusable_pairs(&txns);
+            for (a_name, b_name) in &fusable_pairs {
+                let fused_name = format!("{}_{}_fused", a_name, b_name);
+                if let Some(txn_a) = txns.iter().find(|(n, _)| n == a_name) {
+                    if let Some(txn_b) = txns.iter().find(|(n, _)| n == b_name) {
+                        self.generate_fused_transaction(&mut output, txn_a.1, txn_b.1, &fused_name);
+                    }
+                }
+            }
             self.generate_reactor(&mut output, &txns);
         }
-
         writeln!(output).ok();
+
         writeln!(output, "attributes #0 = {{").ok();
         writeln!(output, "    mustprogress").ok();
         writeln!(output, "    nofree").ok();
@@ -841,52 +855,64 @@ _ => {
         val
     }
 
+    /// Emit `define internal i1 @pre_txn(%State*)` for non-trivial preconditions.
+    fn generate_precondition_function(&mut self, output: &mut String, txn: &crate::ast::Transaction, name: &str) {
+        if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
+        writeln!(output, "define internal i1 @pre_{}(%State* noalias nocapture %state) #0 {{", name).ok();
+        writeln!(output, "entry:").ok();
+        self.txn_counter = 0;
+        self.let_bindings.clear();
+        let cond = self.generate_expr(output, &txn.contract.pre_condition, "  ");
+        let cond_i1 = format!("%pr_i1{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(output, "  {} = icmp ne i64 {}, 0", cond_i1, cond).ok();
+        writeln!(output, "  ret i1 {}", cond_i1).ok();
+        writeln!(output, "}}").ok();
+        writeln!(output).ok();
+    }
+
+    fn generate_fused_transaction(&mut self, output: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, fused_name: &str) {
+        writeln!(output, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", fused_name).ok();
+        writeln!(output, "entry:").ok();
+
+        let combined_body: Vec<Statement> = a.body.iter().cloned()
+            .chain(b.body.iter().cloned())
+            .collect();
+
+        self.txn_counter = 0;
+        self.let_bindings.clear();
+        self.terminated = false;
+
+        for stmt in &combined_body {
+            self.generate_statement(output, stmt, "  ");
+        }
+
+        if !self.terminated {
+            writeln!(output, "  ret void").ok();
+        }
+        writeln!(output, "}}").ok();
+        writeln!(output).ok();
+    }
+
     fn generate_reactor(&mut self, output: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         // Collect fusable pairs
         let fusable_pairs = self.resolve_fusable_pairs(txns);
         let mut used_fused: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        // Generate fused transactions
+        // Build dispatch list
+        let mut dispatch_txns: Vec<String> = Vec::new();
+        let mut fused_txns: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (a_name, b_name) in &fusable_pairs {
             let fused_name = format!("{}_{}_fused", a_name, b_name);
             if used_fused.contains(&fused_name) { continue; }
             used_fused.insert(fused_name.clone());
-            if let Some(txn_a) = txns.iter().find(|(n, _)| n == a_name) {
-                if let Some(txn_b) = txns.iter().find(|(n, _)| n == b_name) {
-                    self.generate_fused_transaction(output, txn_a.1, txn_b.1, &fused_name);
-                    writeln!(output).ok();
-                }
-            }
+            fused_txns.insert(a_name.clone());
+            fused_txns.insert(b_name.clone());
+            dispatch_txns.push(fused_name);
         }
-
-        // Determine which original txns are consumed by fusion
-        let mut fused_txns: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for (a, b) in &fusable_pairs {
-            fused_txns.insert(a.clone());
-            fused_txns.insert(b.clone());
-        }
-
-        writeln!(output, "define void @reactor_tick() local_unnamed_addr #0 {{").ok();
-        writeln!(output, "entry:").ok();
-
-        // Trigger sampling phase
-        let mut trig_regs: Vec<(String, String)> = Vec::new();
-        for trg_name in &self.trigger_names {
-            if let Some(trg) = self.triggers.get(trg_name) {
-                let raw_reg = format!("%trg_raw_{}", self.txn_counter);
-                self.txn_counter += 1;
-                let samp_reg = format!("%trg_{}", self.txn_counter);
-                self.txn_counter += 1;
-                match &trg.address {
-                    crate::ast::LinkRef::Explicit(addr) => {
-                        writeln!(output, "  {} = load volatile i8, i8* inttoptr (i64 {} to i8*), align 1", raw_reg, addr).ok();
-                    }
-                    crate::ast::LinkRef::Linked(sym) => {
-                        writeln!(output, "  {} = load volatile i8, i8* @{}, align 1", raw_reg, sym).ok();
-                    }
-                }
-                writeln!(output, "  {} = icmp ne i8 {}, 0", samp_reg, raw_reg).ok();
-                trig_regs.push((trg_name.clone(), samp_reg));
+        for (name, _) in txns {
+            if !fused_txns.contains(name) {
+                dispatch_txns.push(name.clone());
             }
         }
 
@@ -898,24 +924,73 @@ _ => {
             return;
         }
 
-        writeln!(output, "  ; Evaluate and dispatch first-true transaction").ok();
+        writeln!(output, "define void @reactor_tick() local_unnamed_addr #0 {{").ok();
+        writeln!(output, "entry:").ok();
 
-        let mut dispatch_txns: Vec<String> = Vec::new();
-        for (name, _) in txns {
-            if !fused_txns.contains(name) {
-                dispatch_txns.push(name.clone());
+        // Trigger sampling phase
+        for trg_name in &self.trigger_names {
+            if let Some(trg) = self.triggers.get(trg_name) {
+                let raw_reg = format!("%trg_raw{}", self.txn_counter);
+                self.txn_counter += 1;
+                let samp_reg = format!("%trg_s{}", self.txn_counter);
+                self.txn_counter += 1;
+                match &trg.address {
+                    crate::ast::LinkRef::Explicit(addr) => {
+                        writeln!(output, "  {} = load volatile i8, i8* inttoptr (i64 {} to i8*), align 1", raw_reg, addr).ok();
+                    }
+                    crate::ast::LinkRef::Linked(sym) => {
+                        writeln!(output, "  {} = load volatile i8, i8* @{}, align 1", raw_reg, sym).ok();
+                    }
+                }
+                writeln!(output, "  {} = icmp ne i8 {}, 0", samp_reg, raw_reg).ok();
             }
         }
-        for (a_name, b_name) in &fusable_pairs {
-            dispatch_txns.push(format!("{}_{}_fused", a_name, b_name));
-        }
 
+        // Dispatch chain: first transaction branches from entry
         if let Some(first) = dispatch_txns.first() {
-            writeln!(output, "  call void @{}(%State* @global_state)", first).ok();
+            let has_pre = txns.iter().find(|(n, _)| n == first).map(|(_, t)| {
+                !matches!(t.contract.pre_condition, Expr::Bool(true))
+            }).unwrap_or(false);
+            if has_pre {
+                writeln!(output, "  %pr0 = call i1 @pre_{}(%State* @global_state)", first).ok();
+                writeln!(output, "  br i1 %pr0, label %tick_b0, label %tick_c0").ok();
+            } else {
+                writeln!(output, "  br i1 true, label %tick_b0, label %tick_c0").ok();
+            }
         }
-        writeln!(output, "  ret void").ok();
 
-        writeln!(output, "commit:").ok();
+        for (i, txn_name) in dispatch_txns.iter().enumerate() {
+            let body_label = format!("tick_b{}", i);
+            let check_label = format!("tick_c{}", i);
+            writeln!(output, "{}:", body_label).ok();
+            writeln!(output, "  call void @{}(%State* @global_state)", txn_name).ok();
+            writeln!(output, "  ret void").ok();
+
+            if i + 1 < dispatch_txns.len() {
+                let next = &dispatch_txns[i + 1];
+                if i == 0 {
+                    writeln!(output, "{}:", check_label).ok();
+                } else {
+                    writeln!(output, "{}:", check_label).ok();
+                }
+                let has_pre = txns.iter().find(|(n, _)| n == next).map(|(_, t)| {
+                    !matches!(t.contract.pre_condition, Expr::Bool(true))
+                }).unwrap_or(false);
+                if has_pre {
+                    writeln!(output, "  %pr{} = call i1 @pre_{}(%State* @global_state)", i + 1, next).ok();
+                    writeln!(output, "  br i1 %pr{}, label %tick_b{}, label %tick_c{}", i + 1, i + 1, i + 1).ok();
+                } else {
+                    writeln!(output, "  br i1 true, label %tick_b{}, label %tick_c{}", i + 1, i + 1).ok();
+                }
+            }
+        }
+
+        // Equilibrium path: no preconditions met
+        if !dispatch_txns.is_empty() {
+            let last_check = format!("tick_c{}", dispatch_txns.len() - 1);
+            writeln!(output, "{}:", last_check).ok();
+        }
+        writeln!(output, "  call void @__wait_for_event()").ok();
         writeln!(output, "  ret void").ok();
         writeln!(output, "}}").ok();
         writeln!(output).ok();
@@ -963,28 +1038,6 @@ _ => {
             }
         }
         false
-    }
-
-    fn generate_fused_transaction(&mut self, output: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, fused_name: &str) {
-        writeln!(output, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", fused_name).ok();
-        writeln!(output, "entry:").ok();
-
-        let combined_body: Vec<Statement> = a.body.iter().cloned()
-            .chain(b.body.iter().cloned())
-            .collect();
-
-        self.txn_counter = 0;
-        self.let_bindings.clear();
-        self.terminated = false;
-
-        for stmt in &combined_body {
-            self.generate_statement(output, stmt, "  ");
-        }
-
-        if !self.terminated {
-            writeln!(output, "  ret void").ok();
-        }
-        writeln!(output, "}}").ok();
     }
 
     /// Emit stack-allocated null-terminated C string from a String's pointer+length.
