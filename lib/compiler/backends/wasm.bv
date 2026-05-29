@@ -38,7 +38,7 @@ enum SectionType {
     SecData
 }
 
-comptype Section(Int) // raw byte data
+// raw byte data
 
 // ===== WASM MODULE STRUCTURE =====
 

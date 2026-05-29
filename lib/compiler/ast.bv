@@ -17,6 +17,7 @@ enum Expr {
     ExprString(String),
     ExprChar(Char),
     ExprBool(Bool),
+    ExprTerm,
     
     // Variables
     ExprVar(String),

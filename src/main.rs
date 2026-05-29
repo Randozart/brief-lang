@@ -337,6 +337,7 @@ fn print_usage(program: &str) {
     eprintln!("  dbvs <file>      Parse .dbvs and export to JSON (--out, --pretty)");
     eprintln!("  dbv <file>       Parse .dbv and export to JSON (--out, --pretty)");
     eprintln!("  deps [check|install|list]  Check or install dependencies from .dbvs/.dbv files");
+    eprintln!("  selfhost <file>  Run self-hosted compiler (Brief-in-Brief)");
     eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
     eprintln!("  wrap <lib>       Generate FFI bindings for a library");
     eprintln!("  install         Install 'brief' to ~/.local/bin");
@@ -559,6 +560,110 @@ fn run_map_or_wrap(
             println!("    lib/ffi/generated/{}/lib.bv", lib_name);
             println!("    lib/ffi/generated/{}/bindings.toml", lib_name);
         }
+    }
+
+    Ok(())
+}
+
+fn run_selfhost(
+    file_path: &str,
+    backend: &str,
+    verbose: bool,
+) -> Result<(), String> {
+    use std::path::PathBuf;
+
+    let compiler_path = PathBuf::from("lib/compiler/main.bv");
+
+    // Read and parse lib/compiler/main.bv
+    let source = std::fs::read_to_string(&compiler_path)
+        .map_err(|e| format!("Failed to read {}: {}", compiler_path.display(), e))?;
+
+    let mut parser = parser::Parser::new(&source);
+    let program = parser.parse().map_err(|e| format!("Parse error: {}", e))?;
+
+    if verbose {
+        eprintln!("[Selfhost] Resolving imports for self-hosted compiler...");
+    }
+
+    // Resolve imports
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut resolved = import_resolver
+        .resolve_imports(&program, &compiler_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    if verbose {
+        eprintln!("[Selfhost] Desugaring...");
+    }
+    let mut desug = desugarer::Desugarer::new();
+    desug.desugar(&mut resolved);
+
+    if verbose {
+        eprintln!("[Selfhost] Type checking...");
+    }
+    let mut tc = typechecker::TypeChecker::new()
+        .with_target(typechecker::CompilationTarget::Interpreter);
+    let type_errors = tc.check_program(&mut resolved);
+    if !type_errors.is_empty() && verbose {
+        for err in &type_errors {
+            eprintln!("{}", err);
+        }
+        eprintln!("[Selfhost] Continuing despite type errors (interpreter handles runtime)");
+    }
+
+    if verbose {
+        eprintln!("[Selfhost] Creating interpreter...");
+    }
+    let mut interpreter = interpreter::Interpreter::new();
+    interpreter.load_program(&resolved);
+
+    // Create the call expression: compile_file(path, backend, verbose_bool)
+    let call_expr = ast::Expr::Call(
+        "compile_file".to_string(),
+        vec![
+            ast::Expr::String(file_path.to_string()),
+            ast::Expr::String(backend.to_string()),
+            ast::Expr::Bool(verbose),
+        ],
+    );
+
+    if verbose {
+        eprintln!("[Selfhost] Calling compile_file...");
+    }
+
+    let result = interpreter
+        .eval_expr(&call_expr)
+        .map_err(|e| format!("Runtime error: {:?}", e))?;
+
+    // Unwrap Result<String, String>
+    match result {
+        interpreter::Value::Enum(ref result_name, ref variant, ref fields) => {
+            if result_name == "Result" {
+                match variant.as_str() {
+                    "Ok" => {
+                        if let Some(val) = fields.get("value") {
+                            match val {
+                                interpreter::Value::String(s) => println!("{}", s),
+                                _ => return Err(format!("Unexpected Ok value type: {:?}", val)),
+                            }
+                        }
+                    }
+                    "Err" => {
+                        if let Some(val) = fields.get("value") {
+                            match val {
+                                interpreter::Value::String(s) => {
+                                    return Err(format!("Self-host compilation failed: {}", s));
+                                }
+                                _ => return Err(format!("Error: {:?}", val)),
+                            }
+                        }
+                    }
+                    _ => return Err(format!("Unexpected Result variant: {}", variant)),
+                }
+            } else {
+                return Err(format!("Unexpected result type: {:?}", result));
+            }
+        }
+        _ => return Err(format!("Unexpected result: {:?}", result)),
     }
 
     Ok(())
@@ -3695,6 +3800,29 @@ fn main() {
                 eprintln!("Error: No .bv, .sbv, .rbv, or .srbv file specified");
                 eprintln!("Usage: {} webstack <file> [--out <dir>] [--no-build]", args[0]);
                 eprintln!("  Generates Rust source + wasm-bindgen glue, compiles via wasm-pack");
+                std::process::exit(1);
+            }
+        }
+
+        "selfhost" => {
+            let file_path = args.iter().skip(2).find(|a| {
+                a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv")
+                    || a.ends_with(".rbv") || a.ends_with(".srbv")
+            }).map(|s| s.to_string());
+
+            let backend = args.iter().position(|a| a == "--backend")
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+                .unwrap_or("rust".to_string());
+
+            if let Some(path) = file_path {
+                if let Err(e) = run_selfhost(&path, &backend, verbose) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .bv, .sbv, or .rbv file specified");
+                eprintln!("Usage: {} selfhost <file> [--backend c|rust]", args[0]);
                 std::process::exit(1);
             }
         }

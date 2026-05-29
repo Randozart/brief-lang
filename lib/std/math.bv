@@ -54,7 +54,7 @@ frgn __random_int(min: Int, max: Int) -> Result<Int, MathError>;
 // ===== NATIVE DEFINITIONS =====
 
 // Absolute value (Int)
-defn abs(n: Int) [true][result >= 0] -> Int {
+defn abs(n: Int) [true][term >= 0] -> Int {
   [n < 0] {
     term -n;
   };
@@ -62,7 +62,7 @@ defn abs(n: Int) [true][result >= 0] -> Int {
 };
 
 // Absolute value (Float) - simple version
-defn abs_float(n: Float) [result >= 0.0] -> Float {
+defn abs_float(n: Float) [term >= 0.0] -> Float {
   [n < 0.0] {
     term -n;
   };
@@ -70,14 +70,14 @@ defn abs_float(n: Float) [result >= 0.0] -> Float {
 };
 
 // Min/Max (Int) - native comparisons
-defn min(a: Int, b: Int) [true][result == a || result == b] -> Int {
+defn min(a: Int, b: Int) [true][term == a || term == b] -> Int {
   [a <= b] {
     term a;
   };
   term b;
 };
 
-defn max(a: Int, b: Int) [true][result == a || result == b] -> Int {
+defn max(a: Int, b: Int) [true][term == a || term == b] -> Int {
   [a >= b] {
     term a;
   };
@@ -85,7 +85,7 @@ defn max(a: Int, b: Int) [true][result == a || result == b] -> Int {
 };
 
 // Clamp (Int)
-defn clamp(val: Int, min_val: Int, max_val: Int) [min_val <= max_val][result >= min_val && result <= max_val] -> Int {
+defn clamp(val: Int, min_val: Int, max_val: Int) [min_val <= max_val][term >= min_val && term <= max_val] -> Int {
   [val < min_val] {
     term min_val;
   };
@@ -96,17 +96,17 @@ defn clamp(val: Int, min_val: Int, max_val: Int) [min_val <= max_val][result >= 
 };
 
 // Integer division (native)
-defn div(a: Int, b: Int) [b != 0][result == a / b] -> Int {
+defn div(a: Int, b: Int) [b != 0][term == a / b] -> Int {
   term a / b;
 };
 
 // Integer modulo (native)
-defn mod(a: Int, b: Int) [b != 0][result >= 0 && result < b.abs()] -> Int {
+defn mod(a: Int, b: Int) [b != 0][term >= 0 && term < b.abs()] -> Int {
   term a % b;
 };
 
 // Power (Int) - native
-defn powi_int(base: Int, exp: Int) [exp >= 0][result >= 0 || base != 0] -> Int {
+defn powi_int(base: Int, exp: Int) [exp >= 0][term >= 0 || base != 0] -> Int {
   [exp == 0] {
     term 1;
   };
@@ -120,62 +120,62 @@ defn powi_int(base: Int, exp: Int) [exp >= 0][result >= 0 || base != 0] -> Int {
 };
 
 // Square (native)
-defn square(n: Int) [true][result == n * n] -> Int {
+defn square(n: Int) [true][term == n * n] -> Int {
   term n * n;
 };
 
 // Cube (native)
-defn cube(n: Int) [true][result == n * n * n] -> Int {
+defn cube(n: Int) [true][term == n * n * n] -> Int {
   term n * n * n;
 };
 
 // Is even
-defn is_even(n: Int) [true][result == true || result == false] -> Bool {
+defn is_even(n: Int) [true][term == true || term == false] -> Bool {
   term n % 2 == 0;
 };
 
 // Is odd
-defn is_odd(n: Int) [true][result == true || result == false] -> Bool {
+defn is_odd(n: Int) [true][term == true || term == false] -> Bool {
   term n % 2 != 0;
 };
 
 // Is positive
-defn is_positive(n: Int) [true][result == true || result == false] -> Bool {
+defn is_positive(n: Int) [true][term == true || term == false] -> Bool {
   term n > 0;
 };
 
 // Is negative
-defn is_negative(n: Int) [true][result == true || result == false] -> Bool {
+defn is_negative(n: Int) [true][term == true || term == false] -> Bool {
   term n < 0;
 };
 
 // Is zero
-defn is_zero(n: Int) [true][result == true || result == false] -> Bool {
+defn is_zero(n: Int) [true][term == true || term == false] -> Bool {
   term n == 0;
 };
 
 // Negate
-defn negate(n: Int) [true][result == -n] -> Int {
+defn negate(n: Int) [true][term == -n] -> Int {
   term -n;
 };
 
 // Double
-defn double(n: Int) [true][result == n * 2] -> Int {
+defn double(n: Int) [true][term == n * 2] -> Int {
   term n * 2;
 };
 
 // Triple
-defn triple(n: Int) [true][result == n * 3] -> Int {
+defn triple(n: Int) [true][term == n * 3] -> Int {
   term n * 3;
 };
 
 // Half (integer division)
-defn half(n: Int) [true][result == n / 2] -> Int {
+defn half(n: Int) [true][term == n / 2] -> Int {
   term n / 2;
 };
 
 // Absolute difference
-defn abs_diff(a: Int, b: Int) [result >= 0] -> Int {
+defn abs_diff(a: Int, b: Int) [term >= 0] -> Int {
   [a > b] {
     term a - b;
   };
@@ -183,13 +183,13 @@ defn abs_diff(a: Int, b: Int) [result >= 0] -> Int {
 };
 
 // Sum of range
-defn sum_range(start: Int, end: Int) [start <= end][result >= 0] -> Int {
+defn sum_range(start: Int, end: Int) [start <= end][term >= 0] -> Int {
   let n: Int = end - start + 1;
   term (start + end) * n / 2;
 };
 
 // Factorial (basic, small numbers)
-defn factorial(n: Int) [n >= 0 && n <= 20][result >= 1] -> Int {
+defn factorial(n: Int) [n >= 0 && n <= 20][term >= 1] -> Int {
   [n == 0 || n == 1] {
     term 1;
   };
@@ -203,7 +203,7 @@ defn factorial(n: Int) [n >= 0 && n <= 20][result >= 1] -> Int {
 };
 
 // Fibonacci (basic, small numbers)
-defn fibonacci(n: Int) [n >= 0][result >= 0] -> Int {
+defn fibonacci(n: Int) [n >= 0][term >= 0] -> Int {
   [n == 0] {
     term 0;
   };
@@ -223,7 +223,7 @@ defn fibonacci(n: Int) [n >= 0][result >= 0] -> Int {
 };
 
 // GCD (Euclidean algorithm) - native
-defn gcd_native(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] -> Int {
+defn gcd_native(a: Int, b: Int) [a >= 0 && b >= 0][term >= 0] -> Int {
   [b == 0] {
     term a.abs();
   };
@@ -238,7 +238,7 @@ defn gcd_native(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] -> Int {
 };
 
 // LCM - native
-defn lcm_native(a: Int, b: Int) [a >= 0 && b >= 0][result >= 0] -> Int {
+defn lcm_native(a: Int, b: Int) [a >= 0 && b >= 0][term >= 0] -> Int {
   [a == 0 || b == 0] {
     term 0;
   };

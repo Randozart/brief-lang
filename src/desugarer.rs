@@ -22,8 +22,7 @@ impl Desugarer {
     fn collect_vars(&self, expr: &Expr, vars: &mut Vec<String>) {
         match expr {
             Expr::Identifier(name) => {
-                // Skip 'result' - that's a special output variable for definitions
-                if name != "result" && !vars.contains(name) {
+                if !vars.contains(name) {
                     vars.push(name.clone());
                 }
             }
@@ -54,7 +53,7 @@ impl Desugarer {
                     self.collect_vars(arg, vars);
                 }
             }
-            Expr::Bool(_) | Expr::Integer(_) | Expr::Float(_) | Expr::String(_) => {}
+            Expr::Bool(_) | Expr::Term | Expr::Integer(_) | Expr::Float(_) | Expr::String(_) => {}
             _ => {}
         }
     }

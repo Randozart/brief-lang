@@ -3,12 +3,12 @@
 
 frgn __http_get(url: String) -> Result<String, HttpError>;
 frgn __http_post(url: String, body: String) -> Result<String, HttpError>;
-defn http_get(url: String) -> Result<String, String> [url.starts_with("http")][result.is_ok() || result.is_err()] {
+defn http_get(url: String) -> Result<String, String> [url.starts_with("http")][term.is_ok() || term.is_err()] {
     let body = __http_get(url);
     term Ok(body);
 };
 
-defn http_post(url: String, body: String) -> Result<String, String> [url.starts_with("http")][result.is_ok() || result.is_err()] {
+defn http_post(url: String, body: String) -> Result<String, String> [url.starts_with("http")][term.is_ok() || term.is_err()] {
     let response = __http_post(url, body);
     term Ok(response);
 };

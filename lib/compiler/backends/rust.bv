@@ -63,6 +63,9 @@ defn generate_rust(program: Program, cg: CallGraphResult) -> String {
     term output.to_string();
 }
 
+defn less_than_str() -> String { term "<"; }
+defn greater_than_str() -> String { term ">"; }
+
 defn type_to_rust(ty: Type) -> String {
     uni ty(TypeInt) = { term "i64"; };
     uni ty(TypeUInt) = { term "u64"; };
@@ -73,12 +76,13 @@ defn type_to_rust(ty: Type) -> String {
     uni ty(TypeVoid) = { term "()"; };
     uni ty(TypeList(inner)) = {
         let sb = new_builder();
-        sb = sb.append_str("Vec<");
-        sb = sb.append_str(type_to_rust(*inner));
-        sb = sb.append_str(">");
+        sb = sb.append_str("Vec");
+        sb = sb.append_str(less_than_str());
+        sb = sb.append_str(type_to_rust(inner));
+        sb = sb.append_str(greater_than_str());
         term sb.to_string();
     };
-    term "()"
+term "()";
 }
 
 defn generate_rust_transaction(txn: Transaction) -> String {
@@ -145,9 +149,9 @@ defn generate_rust_statement(stmt: Statement) -> String {
     
     uni stmt(StmtAssign(lhs, rhs, _modifiers)) = {
         let output = new_builder();
-        output = output.append_str(expr_to_rust(*lhs));
+        output = output.append_str(expr_to_rust(lhs));
         output = output.append_str(" = ");
-        output = output.append_str(expr_to_rust(*rhs));
+        output = output.append_str(expr_to_rust(rhs));
         output = output.append_str(";\n");
         term output.to_string();
     };
@@ -165,7 +169,7 @@ defn generate_rust_statement(stmt: Statement) -> String {
     uni stmt(StmtGuarded(condition, body)) = {
         let output = new_builder();
         output = output.append_str("if ");
-        output = output.append_str(expr_to_rust(*condition));
+        output = output.append_str(expr_to_rust(condition));
         output = output.append_str(" {\n");
         output = output.append_str(generate_rust_block(body));
         output = output.append_str("}\n");
@@ -230,24 +234,15 @@ defn expr_to_rust(expr: Expr) -> String {
     uni expr(ExprBinOp(op, left, right)) = {
         let sb = new_builder();
         sb = sb.append_str("(");
-        sb = sb.append_str(expr_to_rust(*left));
+sb = sb.append_str(expr_to_rust(left));
         sb = sb.append_str(" ");
-        [op == "+"] { sb = sb.append_str("+"); };
-        [op == "-"] { sb = sb.append_str("-"); };
-        [op == "*"] { sb = sb.append_str("*"); };
-        [op == "/"] { sb = sb.append_str("/"); };
-        [op == "=="] { sb = sb.append_str("=="); };
-        [op == "!="] { sb = sb.append_str("!="); };
-        [op == "<"] { sb = sb.append_str("<"); };
-        [op == ">"] { sb = sb.append_str(">"); };
-        [op == "&&"] { sb = sb.append_str("&&"); };
-        [op == "||"] { sb = sb.append_str("||"); };
+        sb = sb.append_str(op_to_rust(op));
         sb = sb.append_str(" ");
-        sb = sb.append_str(expr_to_rust(*right));
+        sb = sb.append_str(expr_to_rust(right));
         sb = sb.append_str(")");
         term sb.to_string();
     };
-    term "/* expr */".to_string()
+    term "/* expr */".to_string();
 }
 
 defn generate_rust_reactor(program: Program, cg: CallGraphResult) -> String {

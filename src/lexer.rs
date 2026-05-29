@@ -341,8 +341,9 @@ pub enum Token {
         }
         if inner.starts_with("\\u{") && inner.ends_with('}') {
             // Unicode escape: \u{1F600}
-            let hex = &inner[3..inner.len()-1];
-            return u32::from_str_radix(hex, 16).ok().and_then(|cp| char::from_u32(cp));
+            if let Ok(cp) = u32::from_str_radix(&inner[3..inner.len()-1], 16) {
+                return Some(char::from_u32(cp).unwrap_or('?'));
+            }
         }
         // Multi-character char literal or invalid - just take first char
         Some(inner.chars().next().unwrap_or(' '))

@@ -48,17 +48,17 @@ frgn __merge(a: Data, b: Data) -> Result<Data, JsonError>;
 // ===== NATIVE DEFINITIONS =====
 
 // Pretty Print - simple version
-defn pretty_print(data: Data) [result.len() >= 0] -> String {
+defn pretty_print(data: Data) [term.len() >= 0] -> String {
   term __stringify(data);
 };
 
 // Helper: Check if data exists and is not null
-defn exists(data: Data) [true][result == true || result == false] -> Bool {
+defn exists(data: Data) [true][term == true || term == false] -> Bool {
   term !__is_null(data);
 };
 
 // Helper: Get value with default
-defn get_or_default(data: Data, key: String, default: String) [true][result.len() >= 0] -> String {
+defn get_or_default(data: Data, key: String, default: String) [true][term.len() >= 0] -> String {
   [__has_key(data, key)] {
     term __get_string(data, key);
   };
@@ -66,7 +66,7 @@ defn get_or_default(data: Data, key: String, default: String) [true][result.len(
 };
 
 // Helper: Get number with default
-defn get_number_or(data: Data, key: String, default: Float) [true][result >= 0.0 || result < 0.0] -> Float {
+defn get_number_or(data: Data, key: String, default: Float) [true][term >= 0.0 || term < 0.0] -> Float {
   [__has_key(data, key) && __is_number(__get_object(data, key))] {
     term __get_number(data, key);
   };
@@ -74,7 +74,7 @@ defn get_number_or(data: Data, key: String, default: Float) [true][result >= 0.0
 };
 
 // Helper: Get number with default (Int)
-defn get_int_or(data: Data, key: String, default: Int) [true][result == default || result != default] -> Int {
+defn get_int_or(data: Data, key: String, default: Int) [true][term == default || term != default] -> Int {
   [__has_key(data, key) && __is_number(__get_object(data, key))] {
     let n: Float = __get_number(data, key);
     term n;
@@ -83,7 +83,7 @@ defn get_int_or(data: Data, key: String, default: Int) [true][result == default 
 };
 
 // Helper: Get bool with default
-defn get_bool_or(data: Data, key: String, default: Bool) [true][result == true || result == false] -> Bool {
+defn get_bool_or(data: Data, key: String, default: Bool) [true][term == true || term == false] -> Bool {
   [__has_key(data, key) && __is_bool(__get_object(data, key))] {
     term __get_bool(data, key);
   };
@@ -91,7 +91,7 @@ defn get_bool_or(data: Data, key: String, default: Bool) [true][result == true |
 };
 
 // Helper: Safe array access with bounds check
-defn array_get(data: Data, index: Int) [index >= 0][result.is_null() || true] -> Data {
+defn array_get(data: Data, index: Int) [index >= 0][term.is_null() || true] -> Data {
   [index < 0 || index >= __array_len(data)] {
     term __null();
   };
@@ -99,7 +99,7 @@ defn array_get(data: Data, index: Int) [index >= 0][result.is_null() || true] ->
 };
 
 // Helper: Array to list of strings (if strings)
-defn array_to_strings(data: Data) [__is_array(data)][result.len() == __array_len(data)] -> List<String> {
+defn array_to_strings(data: Data) [__is_array(data)][term.len() == __array_len(data)] -> List<String> {
   let len: Int = __array_len(data);
   [len == 0] {
     term [];
@@ -117,23 +117,23 @@ defn array_to_strings(data: Data) [__is_array(data)][result.len() == __array_len
 };
 
 // Helper: Get array item count safely
-defn array_count(data: Data) [__is_array(data)][result >= 0] -> Int {
+defn array_count(data: Data) [__is_array(data)][term >= 0] -> Int {
   term __array_len(data);
 };
 
 // Helper: Check if array is empty
-defn array_empty(data: Data) [__is_array(data)][result == true || result == false] -> Bool {
+defn array_empty(data: Data) [__is_array(data)][term == true || term == false] -> Bool {
   term __array_len(data) == 0;
 };
 
 // Helper: Object to list count
-defn object_count(data: Data) [__is_object(data)][result >= 0] -> Int {
+defn object_count(data: Data) [__is_object(data)][term >= 0] -> Int {
   let k: List<String> = __keys(data);
   term k.len();
 };
 
 // Helper: Object is empty
-defn object_empty(data: Data) [__is_object(data)][result == true || result == false] -> Bool {
+defn object_empty(data: Data) [__is_object(data)][term == true || term == false] -> Bool {
   let k: List<String> = __keys(data);
   term k.len() == 0;
 };

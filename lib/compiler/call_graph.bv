@@ -22,7 +22,7 @@ struct CallGraphResult {
 defn new_call_graph() -> CallGraph [
     true
 ][
-    result.graph == empty_map() && result.txn_names == [] && result.cylist == []
+    term.graph == empty_map() && term.txn_names == [] && term.cylist == []
 ] {
     term CallGraph {
         graph: empty_map(),
@@ -36,7 +36,7 @@ defn new_call_graph() -> CallGraph [
 defn analyze_call_graph(program: Program) -> CallGraphResult [
     true
 ][
-    result.node_count >= 0 && result.edge_count >= 0
+    term.node_count >= 0 && term.edge_count >= 0
 ] {
     let cg = new_call_graph();
     
@@ -111,7 +111,7 @@ defn extract_calls_from_body(body: List<Statement>) -> List<String> [
 defn collect_call_names(expr: Expr) -> List<String> [
     true
 ][
-    result.len() >= 0
+    term.len() >= 0
 ] {
     uni expr(ExprCall(name, args)) = {
         let names: List<String> = [name];
@@ -147,7 +147,7 @@ defn collect_call_names(expr: Expr) -> List<String> [
 defn count_edges(graph: Map<String, List<String>>, names: List<String>) -> Int [
     true
 ][
-    result >= 0
+    term >= 0
 ] {
     let total: Int = 0;
     let i: Int = 0;
@@ -162,11 +162,11 @@ defn count_edges(graph: Map<String, List<String>>, names: List<String>) -> Int [
 }
 
 // Check if the graph has any cycles
-defn has_cycles(graph: Map<String, List<String>>, names: List<String>) -> Bool [
+defn has_cycles(graph: Map<String, List<String>>, names: List<String>) [
     names.is_empty() == false
 ][
-    result == false || result == true
-] {
+    true
+] -> Bool {
     let i: Int = 0;
     [i < len(names)] {
         let visited: List<String> = [];
@@ -180,11 +180,11 @@ defn has_cycles(graph: Map<String, List<String>>, names: List<String>) -> Bool [
 }
 
 // Find all cycles in the graph
-defn find_cycles(graph: Map<String, List<String>>, names: List<String>) -> List<List<String>> [
+defn find_cycles(graph: Map<String, List<String>>, names: List<String>) [
     true
 ][
-    result.len() >= 0
-] {
+    term.len() >= 0
+] -> List<List<String>> {
     let found: List<List<String>> = [];
     let i: Int = 0;
     [i < len(names)] {
@@ -205,11 +205,11 @@ defn detect_cycle(
     graph: Map<String, List<String>>,
     visited: List<String>,
     path: List<String>
-) -> Bool [
+) [
     node != ""
 ][
-    result == false || result == true
-] {
+    true
+] -> Bool {
     // Check if node is already in current path
     let in_path: Bool = false;
     let pi: Int = 0;

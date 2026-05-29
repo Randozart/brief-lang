@@ -104,13 +104,13 @@ defn caller_saved_regs() -> List<String> {
 
 defn all_allocatable_regs() -> List<String> {
     let regs = caller_saved_regs();
-    regs.append_all(callee_saved_regs());
+    term regs.append_all(callee_saved_regs());
 }
 
 defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, RegisterAllocator) {
     // Try hint first
     [hint.is_some()] {
-        let reg = hint.unwrap();
+        let reg = unwrap(hint);
         [!alloc.used_regs.contains(reg)] {
             let used = alloc.used_regs;
             used = used.insert(reg);
@@ -148,10 +148,10 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
     let spill_reg = regs[0];  // Spill X0 first
     let spill_offset = alloc.next_spill * 8;  // 8 bytes per slot
     
-    let mut spill_instrs = alloc.spill_instrs;
+    let spill_instrs = alloc.spill_instrs;
     spill_instrs = spill_instrs.append(STR(spill_reg, "X29", spill_offset));
     
-    let mut new_spill_slots = alloc.spill_slots;
+    let new_spill_slots = alloc.spill_slots;
     new_spill_slots = new_spill_slots.insert(spill_reg, spill_offset);
     
     let used = alloc.used_regs;
@@ -253,8 +253,8 @@ defn new_memory_layout() -> MemoryLayout {
 }
 
 defn compute_memory_layout(txns: List<Transaction>) -> MemoryLayout {
-    let mut layout = new_memory_layout();
-    let mut offset: Int = 0;
+    let layout = new_memory_layout();
+    let offset: Int = 0;
     
     // First pass: collect all variables from all transactions
     let i: Int = 0;
@@ -299,7 +299,7 @@ defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
             vars = vars.append(name);
         };
         uni stmts[i](StmtAssign(lhs, _, _)) = {
-            uni *lhs(ExprVar(name)) = {
+            uni lhs(ExprVar(name)) = {
                 vars = vars.append(name);
             };
         };
@@ -415,8 +415,8 @@ defn bit_width_for_type(type_name: String, bit_range: Option<Int>) -> Int {
 }
 
 defn compute_packed_layout(fields: List<(String, String, Option<Int>)>, mmio_base: Option<Int>) -> PackedStructLayout {
-    let mut layout = new_packed_layout();
-    let mut current_bit: Int = 0;
+    let layout = new_packed_layout();
+    let current_bit: Int = 0;
     
     [mmio_base.is_some()] {
         layout.is_mmio = true;
@@ -706,7 +706,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     uni instr(ADDI(rd, rn, imm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm12 = imm AND 0xFFF;
+        let imm12 = imm  &  0xFFF;
         let enc = 0x11000000 | (imm12 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -714,7 +714,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     uni instr(SUBI(rd, rn, imm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm12 = imm AND 0xFFF;
+        let imm12 = imm  &  0xFFF;
         let enc = 0x51000000 | (imm12 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -746,7 +746,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     uni instr(LSL(rd, rn, imm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm6 = imm AND 0x3F;
+        let imm6 = imm  &  0x3F;
         let enc = 0xD3600000 | (imm6 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -754,7 +754,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     uni instr(LSR(rd, rn, imm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm6 = imm AND 0x3F;
+        let imm6 = imm  &  0x3F;
         let enc = 0xD3400000 | (imm6 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -762,7 +762,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     uni instr(ASR(rd, rn, imm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm6 = imm AND 0x3F;
+        let imm6 = imm  &  0x3F;
         let enc = 0xD3420000 | (imm6 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -770,7 +770,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     uni instr(ROR(rd, rn, imm)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm6 = imm AND 0x3F;
+        let imm6 = imm  &  0x3F;
         let enc = 0x9AC00000 | (imm6 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -779,7 +779,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         let rt1_num = reg_to_num(rt1);
         let rt2_num = reg_to_num(rt2);
         let rn_num = reg_to_num(rn);
-        let imm7 = (offset / 8) AND 0x7F;  // Scaled by 8
+        let imm7 = (offset / 8)  &  0x7F;  // Scaled by 8
         let enc = 0xA9000000 | (imm7 << 15) | (rt2_num << 10) | (rn_num << 5) | rt1_num;
         term u32_to_le_bytes(enc);
     };
@@ -788,14 +788,14 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         let rt1_num = reg_to_num(rt1);
         let rt2_num = reg_to_num(rt2);
         let rn_num = reg_to_num(rn);
-        let imm7 = (offset / 8) AND 0x7F;  // Scaled by 8
+        let imm7 = (offset / 8)  &  0x7F;  // Scaled by 8
         let enc = 0xA9400000 | (imm7 << 15) | (rt2_num << 10) | (rn_num << 5) | rt1_num;
         term u32_to_le_bytes(enc);
     };
     
     uni instr(MOVI(rd, imm)) = {
         let rd_num = reg_to_num(rd);
-        let imm16 = imm AND 0xFFFF;
+        let imm16 = imm  &  0xFFFF;
         let enc = 0x92800000 | (imm16 << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -803,7 +803,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     uni instr(LDR(rd, rn, offset)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm12 = (offset / 8) AND 0xFFF;  // Scaled by 8 for 64-bit
+        let imm12 = (offset / 8)  &  0xFFF;  // Scaled by 8 for 64-bit
         let enc = 0xF9400000 | (imm12 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -811,7 +811,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     uni instr(STR(rd, rn, offset)) = {
         let rd_num = reg_to_num(rd);
         let rn_num = reg_to_num(rn);
-        let imm12 = (offset / 8) AND 0xFFF;  // Scaled by 8 for 64-bit
+        let imm12 = (offset / 8)  &  0xFFF;  // Scaled by 8 for 64-bit
         let enc = 0xF9000000 | (imm12 << 10) | (rn_num << 5) | rd_num;
         term u32_to_le_bytes(enc);
     };
@@ -825,7 +825,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     
     uni instr(CMP_IMM(rn, imm)) = {
         let rn_num = reg_to_num(rn);
-        let imm12 = imm AND 0xFFF;
+        let imm12 = imm  &  0xFFF;
         let enc = 0x71000000 | (imm12 << 10) | (rn_num << 5) | 31;
         term u32_to_le_bytes(enc);
     };
@@ -834,7 +834,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         [labels.contains_key(label)] {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;  // PC-relative, divided by 4
-            let enc = 0x14000000 | (offset AND 0x3FFFFFF);
+            let enc = 0x14000000 | (offset  &  0x3FFFFFF);
             term u32_to_le_bytes(enc);
         };
         term [0x14, 0x00, 0x00, 0x00];  // Placeholder if label not found
@@ -844,7 +844,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         [labels.contains_key(label)] {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
-            let enc = 0x94000000 | (offset AND 0x3FFFFFF);
+            let enc = 0x94000000 | (offset  &  0x3FFFFFF);
             term u32_to_le_bytes(enc);
         };
         term [0x94, 0x00, 0x00, 0x00];
@@ -854,7 +854,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         [labels.contains_key(label)] {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
-            let enc = 0x54000000 | (offset AND 0xFFFFF);  // 20-bit offset, condition 0000 = EQ
+            let enc = 0x54000000 | (offset  &  0xFFFFF);  // 20-bit offset, condition 0000 = EQ
             term u32_to_le_bytes(enc);
         };
         term [0x54, 0x00, 0x00, 0x00];
@@ -864,7 +864,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         [labels.contains_key(label)] {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
-            let enc = 0x54000001 | (offset AND 0xFFFFF);  // Condition 0001 = NE
+            let enc = 0x54000001 | (offset  &  0xFFFFF);  // Condition 0001 = NE
             term u32_to_le_bytes(enc);
         };
         term [0x54, 0x01, 0x00, 0x00];
@@ -874,7 +874,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         [labels.contains_key(label)] {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
-            let enc = 0x5400000A | (offset AND 0xFFFFF);  // Condition 1010 = LT
+            let enc = 0x5400000A | (offset  &  0xFFFFF);  // Condition 1010 = LT
             term u32_to_le_bytes(enc);
         };
         term [0x54, 0x0A, 0x00, 0x00];
@@ -884,7 +884,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         [labels.contains_key(label)] {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
-            let enc = 0x5400000C | (offset AND 0xFFFFF);  // Condition 1100 = GT
+            let enc = 0x5400000C | (offset  &  0xFFFFF);  // Condition 1100 = GT
             term u32_to_le_bytes(enc);
         };
         term [0x54, 0x0C, 0x00, 0x00];
@@ -894,7 +894,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         [labels.contains_key(label)] {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
-            let enc = 0x5400000E | (offset AND 0xFFFFF);  // Condition 1110 = LE
+            let enc = 0x5400000E | (offset  &  0xFFFFF);  // Condition 1110 = LE
             term u32_to_le_bytes(enc);
         };
         term [0x54, 0x0E, 0x00, 0x00];
@@ -904,7 +904,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
         [labels.contains_key(label)] {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
-            let enc = 0x5400000A | (offset AND 0xFFFFF);  // Condition 1010 = GE (actually CS)
+            let enc = 0x5400000A | (offset  &  0xFFFFF);  // Condition 1010 = GE (actually CS)
             term u32_to_le_bytes(enc);
         };
         term [0x54, 0x0A, 0x00, 0x00];
@@ -941,9 +941,9 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let rt_num = reg_to_num(rt);
-            let b5 = (bit >> 5) AND 1;
-            let b40 = bit AND 0x1F;
-            let enc = 0x36000000 | (b5 << 31) | (offset AND 0x7FFFF) << 5 | (b40 << 19) | rt_num;
+            let b5 = (bit >> 5)  &  1;
+            let b40 = bit  &  0x1F;
+            let enc = 0x36000000 | (b5 << 31) | (offset  &  0x7FFFF) << 5 | (b40 << 19) | rt_num;
             term u32_to_le_bytes(enc);
         };
         term [0x36, 0x00, 0x00, 0x00];
@@ -966,7 +966,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(SVC(imm)) = {
-        let enc = 0xD4000001 | (imm AND 0xFFFF) << 5;
+        let enc = 0xD4000001 | (imm  &  0xFFFF) << 5;
         term u32_to_le_bytes(enc);
     };
     
@@ -1054,7 +1054,7 @@ defn reg_to_num(reg: String) -> u32 {
 }
 
 defn u32_to_le_bytes(n: u32) -> List<u8> {
-    term [(n AND 0xFF) as u8, ((n >> 8) AND 0xFF) as u8, ((n >> 16) AND 0xFF) as u8, ((n >> 24) AND 0xFF) as u8];
+    term [(n  &  0xFF) as u8, ((n >> 8)  &  0xFF) as u8, ((n >> 16)  &  0xFF) as u8, ((n >> 24)  &  0xFF) as u8];
 }
 
 defn cond_to_num(cond: String) -> u32 {
@@ -1201,7 +1201,7 @@ defn generate_statement_list(stmts: List<Statement>, alloc: RegisterAllocator) -
 defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64Instr>, RegisterAllocator) {
     uni stmt(StmtLet(name, _, Some(init), _modifiers, _)) = {
         // let name = init;
-        let (expr_instrs, new_alloc) = generate_expr(*init, alloc);
+        let (expr_instrs, new_alloc) = generate_expr(init, alloc);
         let (reg, final_alloc) = alloc_reg(new_alloc, None);
         
         let instrs = expr_instrs;
@@ -1214,7 +1214,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
     
     uni stmt(StmtAssign(lhs, rhs, _modifiers)) = {
         // lhs = rhs;
-        let (expr_instrs, new_alloc) = generate_expr(*rhs, alloc);
+        let (expr_instrs, new_alloc) = generate_expr(rhs, alloc);
         
         let instrs = expr_instrs;
         instrs = instrs.append(emit_comment("Assignment"));
@@ -1244,7 +1244,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
     
     uni stmt(StmtGuarded(condition, body)) = {
         // [condition] { body }
-        let (cond_instrs, new_alloc) = generate_expr(*condition, alloc);
+        let (cond_instrs, new_alloc) = generate_expr(condition, alloc);
         
         let instrs = cond_instrs;
         
@@ -1313,10 +1313,10 @@ defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, Reg
     
     uni expr(ExprBinOp(op, left, right)) = {
         // Generate code for left operand
-        let (left_instrs, left_alloc) = generate_expr(*left, alloc);
+        let (left_instrs, left_alloc) = generate_expr(left, alloc);
         
         // Generate code for right operand
-        let (right_instrs, right_alloc) = generate_expr(*right, left_alloc);
+        let (right_instrs, right_alloc) = generate_expr(right, left_alloc);
         
         // Combine with operator
         let (result_reg, final_alloc) = alloc_reg(right_alloc, None);
@@ -1382,7 +1382,7 @@ defn emit_branchless_cmp(rn: String, rm: String, condition: String) -> List<A64I
     // Generate conditional select instead of branch
     // cmp rn, rm
     // csel rd, rn, rm, condition
-    let mut instrs: List<A64Instr> = [];
+    let instrs: List<A64Instr> = [];
     instrs = instrs.append(CMP(rn, rm));
     instrs = instrs.append(CSEL("X0", rn, rm, condition));  // Conditional select
     term instrs;
@@ -1391,7 +1391,7 @@ defn emit_branchless_cmp(rn: String, rm: String, condition: String) -> List<A64I
 defn emit_branchless_guard(guard_expr: Expr, true_label: String, false_label: String) -> List<A64Instr> {
     // Instead of: cmp; b.eq true_label; b false_label
     // Generate: cmp; cset x0, eq; tbz x0, #0, false_label
-    let mut instrs: List<A64Instr> = [];
+    let instrs: List<A64Instr> = [];
     instrs = instrs.append(CMP("X0", "XZR"));  // Compare with zero
     instrs = instrs.append(CSET("X0", "EQ"));  // Set X0 = 1 if equal, 0 otherwise
     instrs = instrs.append(TBZ("X0", 0, false_label));  // Test and branch if zero
@@ -1402,14 +1402,14 @@ defn emit_branchless_guard(guard_expr: Expr, true_label: String, false_label: St
 
 defn emit_prefetch_on_guard(guard_var: String, data_addr: Int) -> List<A64Instr> {
     // When guard variable changes, pre-fetch associated data
-    let mut instrs: List<A64Instr> = [];
+    let instrs: List<A64Instr> = [];
     instrs = instrs.append(Comment("Predictive fetch for " + String(data_addr)));
     instrs = instrs.append(PRFM("PLDL1KEEP", data_addr));  // Pre-fetch to L1
     term instrs;
 }
 
 defn generate_guard_with_prefetch(guard: Expr, data_addrs: List<Int>) -> List<A64Instr> {
-    let mut instrs: List<A64Instr> = [];
+    let instrs: List<A64Instr> = [];
     
     // Generate guard evaluation
     instrs = instrs.append_all(generate_expr(guard));
@@ -1455,7 +1455,7 @@ defn fuse_transactions(txn1: Transaction, txn2: Transaction) -> Transaction {
     let fused_post = ExprBinOp("&&", Box::new(txn1.contract.postcondition), Box::new(txn2.contract.postcondition));
     
     // Merge bodies
-    let mut fused_body = txn1.body;
+    let fused_body = txn1.body;
     fused_body = fused_body.append_all(txn2.body);
     
     term Transaction {
@@ -1477,9 +1477,9 @@ defn fuse_transactions(txn1: Transaction, txn2: Transaction) -> Transaction {
 
 defn calculate_stack_layout(txns: List<Transaction>) -> HashMap<String, Int> {
     // Analyze variable lifetimes and overlay non-overlapping ones
-    let mut layout: HashMap<String, Int> = new_map();
-    let mut stack_offset: Int = 0;
-    let mut used_slots: HashSet<Int> = new_set();
+    let layout: HashMap<String, Int> = new_map();
+    let stack_offset: Int = 0;
+    let used_slots: HashSet<Int> = new_set();
     
     let i: Int = 0;
     [i < txns.len()] {
@@ -1507,13 +1507,13 @@ defn calculate_stack_layout(txns: List<Transaction>) -> HashMap<String, Int> {
 
 defn schedule_transactions_parallel(txns: List<Transaction>) -> List<List<Transaction>> {
     // Group transactions that can run in parallel
-    let mut groups: List<List<Transaction>> = [];
-    let mut scheduled: HashSet<String> = new_set();
+    let groups: List<List<Transaction>> = [];
+    let scheduled: HashSet<String> = new_set();
     
     let i: Int = 0;
     [i < txns.len()] {
         [!scheduled.contains(txns[i].name)] {
-            let mut group: List<Transaction> = [];
+            let group: List<Transaction> = [];
             group = group.append(txns[i]);
             scheduled = scheduled.insert(txns[i].name);
             
@@ -1574,7 +1574,7 @@ defn can_run_parallel(txn1: Transaction, txn2: Transaction) -> Bool {
 
 defn generate_guard_cache(guard: Expr, cache_var: String) -> List<A64Instr> {
     // Generate code to cache guard result
-    let mut instrs: List<A64Instr> = [];
+    let instrs: List<A64Instr> = [];
     
     // Evaluate guard
     instrs = instrs.append_all(generate_expr(guard));
@@ -1593,7 +1593,7 @@ defn get_cached_guard(cache_var: String) -> List<A64Instr> {
 // ===== ENHANCED CODE GENERATION =====
 
 defn generate_optimized_aarch64(program: Program, cg: CallGraphResult) -> List<u8> {
-    let mut all_instrs: List<A64Instr> = [];
+    let all_instrs: List<A64Instr> = [];
     
     // Emit acyclicity annotation in comment instrs
     [!cg.has_cycle] {
@@ -1604,7 +1604,7 @@ defn generate_optimized_aarch64(program: Program, cg: CallGraphResult) -> List<u
     };
     
     // Extract transactions
-    let mut txns: List<Transaction> = [];
+    let txns: List<Transaction> = [];
     let i: Int = 0;
     [i < program.items.len()] {
         uni program.items[i](TopTxn(txn)) = {
@@ -1614,7 +1614,7 @@ defn generate_optimized_aarch64(program: Program, cg: CallGraphResult) -> List<u
     };
     
     // OPTIMIZATION 1: Fuse transactions
-    let mut fused_txns: List<Transaction> = [];
+    let fused_txns: List<Transaction> = [];
     let j: Int = 0;
     [j < txns.len()] {
         [j + 1 < txns.len()] {
@@ -1648,7 +1648,7 @@ defn generate_optimized_aarch64(program: Program, cg: CallGraphResult) -> List<u
 }
 
 defn generate_optimized_reactor(groups: List<List<Transaction>>, layout: HashMap<String, Int>) -> List<A64Instr> {
-    let mut instrs: List<A64Instr> = [];
+    let instrs: List<A64Instr> = [];
     
     instrs = instrs.append(emit_label("reactor_entry"));
     instrs = instrs.append(emit_comment("Optimized reactor with parallel groups"));

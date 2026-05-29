@@ -10,29 +10,29 @@ defn c_string_to_brief(c_str: CString) -> String [c_str.is_valid() && c_str.not_
 // Convert Brief String to C string
 // Precondition: Brief String is valid
 // Postcondition: Returns CString (caller must free)
-defn brief_string_to_c(s: String) -> CString [true][result.not_null()] {
+defn brief_string_to_c(s: String) -> CString [true][term.not_null()] {
   term CString::new(s);
 };
 
 // Convert C int to Brief Int
-defn c_int_to_brief(c_int: CInt) -> Int [true][result == c_int.value] {
+defn c_int_to_brief(c_int: CInt) -> Int [true][term == c_int.value] {
   term c_int.value;
 };
 
 // Convert Brief Int to C int
-defn brief_int_to_c(n: Int) -> CInt [true][result.value == n] {
+defn brief_int_to_c(n: Int) -> CInt [true][term.value == n] {
   term CInt { value: n };
 };
 
 // Map C error to Brief error
 // Precondition: C error is valid
 // Postcondition: Returns Brief error string
-defn c_error_to_brief(c_err: CError) -> String [true][result.len() >= 0] {
+defn c_error_to_brief(c_err: CError) -> String [true][term.len() >= 0] {
   term c_err.message;
 };
 
 // Handle nullable C pointer
-defn c_ptr_to_maybe(ptr: CPtr) -> Bool [true][result == true || result == false] {
+defn c_ptr_to_maybe(ptr: CPtr) -> Bool [true][term == true || term == false] {
   [ptr.is_null()] {
     term false;
   };
@@ -40,12 +40,12 @@ defn c_ptr_to_maybe(ptr: CPtr) -> Bool [true][result == true || result == false]
 };
 
 // Convert C pointer to Brief Int (as address)
-defn c_ptr_to_address(ptr: CPtr) -> Int [ptr.not_null()][result >= 0] {
+defn c_ptr_to_address(ptr: CPtr) -> Int [ptr.not_null()][term >= 0] {
   term ptr.address();
 };
 
 // Safe string conversion with fallback
-defn c_string_safe(c_str: CString, fallback: String) -> String [true][result.len() >= 0] {
+defn c_string_safe(c_str: CString, fallback: String) -> String [true][term.len() >= 0] {
   [c_str.is_valid()] {
     term c_str.to_str();
   };
@@ -53,6 +53,6 @@ defn c_string_safe(c_str: CString, fallback: String) -> String [true][result.len
 };
 
 // Handle C array conversion
-defn c_array_to_list(ptr: CPtr, len: Int) -> List<Int> [ptr.not_null() && len >= 0][result.len() == len] {
+defn c_array_to_list(ptr: CPtr, len: Int) -> List<Int> [ptr.not_null() && len >= 0][term.len() == len] {
   term ptr.to_list(len);
 };

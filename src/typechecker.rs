@@ -950,6 +950,7 @@ impl TypeChecker {
 
     fn expr_has_result(&self, expr: &Expr) -> bool {
         match expr {
+            Expr::Term => true,
             Expr::Identifier(name) => name == "result",
             Expr::Eq(l, r)
             | Expr::Ne(l, r)
@@ -995,7 +996,10 @@ impl TypeChecker {
         if toml_path.is_empty() {
             // Use profile-based FFI - address and type mappings come from the FFI state
             // For now, just set a placeholder location
-            signature.location = format!("<profile:{}>", name);
+            // BUT: if the signature already has a from "..." location, keep it
+            if signature.location.is_empty() {
+                signature.location = format!("<profile:{}>", name);
+            }
             return;
         }
 
@@ -1362,10 +1366,10 @@ impl TypeChecker {
             Expr::PatternMatch { .. } => Type::Bool,
             Expr::ForAll { .. } | Expr::Exists { .. } => Type::Bool,
             Expr::Block(_stmts, last_expr) => self.infer_expression(last_expr),
-            Expr::ObjectLiteral(fields) => {
-                // Infer from first field value type, or default to Custom
+Expr::ObjectLiteral(fields) => {
                 fields.first().map(|(_, v)| self.infer_expression(v)).unwrap_or(Type::Custom("Object".to_string()))
             },
+            Expr::Cast(..) => Type::Custom("unknown".to_string()),
             _ => Type::Custom("unknown".to_string()),
         }
     }

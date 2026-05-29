@@ -2,21 +2,21 @@
 // No transformation between Rust and Brief types
 
 // Map input: 1:1 identity
-defn map_input(value: Value) -> Value [true][result == value] {
+defn map_input(value: Value) -> Value [true][term == value] {
   term value;
 };
 
 // Map output: 1:1 identity  
-defn map_output(value: Value) -> Value [true][result == value] {
+defn map_output(value: Value) -> Value [true][term == value] {
   term value;
 };
 
 // Map error: 1:1 identity
-defn map_error(err: Error) -> Error [true][result == err] {
+defn map_error(err: Error) -> Error [true][term == err] {
   term err;
 };
 
 // Identity mapper - for simple Rust FFI
-defn identity(value: Value) -> Value [true][result == value] {
+defn identity(value: Value) -> Value [true][term == value] {
   term value;
 };

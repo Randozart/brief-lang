@@ -1,14 +1,14 @@
 sig print_func: String -> true;
 
-defn my_printer(msg: String) [msg != ""][result == true] -> Bool {
+defn my_printer(msg: String) [msg != ""][term == true] -> Bool {
   term true;
 };
 
-defn apply_function(msg: String, func: sig_print_func) [func != null][result == true || result == false] -> Bool {
+defn apply_function(msg: String, func: sig_print_func) [func != null][term == true || term == false] -> Bool {
   term func(msg);
 };
 
-txn test_higher_order [true][result != null]
+txn test_higher_order [true][term != null]
 {
   let result = apply_function("hello", my_printer);
   term;

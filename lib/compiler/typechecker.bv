@@ -280,6 +280,17 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
         });
     };
     
+    uni expr(ExprTerm) = {
+        let opt = lookup_type(ctx, "term");
+        [is_some(opt)] {
+            term Ok(InferResult {
+                ty: unwrap(opt),
+                subst: empty_subst()
+            });
+        };
+        term Err("'term' used outside of contract context — bind the return type first");
+    };
+    
     uni expr(ExprVar(name)) = {
         let opt = lookup_type(ctx, name);
         [is_some(opt)] {
@@ -454,6 +465,33 @@ defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Res
         &i = i + 1;
     };
     
+    let return_ty = d.output_type;
+    [is_some(return_ty)] {
+        let result = add_binding(ctx, "term", unwrap(return_ty));
+        uni result(Ok(c)) = { &ctx = c; };
+        uni result(Err(_)) = {};
+    };
+
+    let contract_result = infer_expr(d.contract.precondition, ctx);
+    uni contract_result(Ok((pre_ty, _))) = {
+        [pre_ty != TypeBool] {
+            term Err("Precondition must be Bool, got " + type_to_string(pre_ty));
+        };
+    };
+    uni contract_result(Err(e)) = {
+        term Err(e);
+    };
+
+    let contract_result = infer_expr(d.contract.postcondition, ctx);
+    uni contract_result(Ok((post_ty, _))) = {
+        [post_ty != TypeBool] {
+            term Err("Postcondition must be Bool, got " + type_to_string(post_ty));
+        };
+    };
+    uni contract_result(Err(e)) = {
+        term Err(e);
+    };
+
     let result = check_block(d.body, ctx);
     uni result(Ok((body_ty, _))) = {
         let output = d.output_type;
@@ -488,6 +526,10 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
         &i = i + 1;
     };
     
+    let result = add_binding(ctx, "term", TypeInt);
+    uni result(Ok(c)) = { &ctx = c; };
+    uni result(Err(_)) = {};
+
     let result = infer_expr(t.contract.precondition, ctx);
     uni result(Ok((pre_ty, _))) = {
         [pre_ty != TypeBool] {

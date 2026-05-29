@@ -9,21 +9,21 @@ struct Queue<T> {
 
 // ===== CONSTRUCTION =====
 
-defn new_queue<T>() -> Queue<T> [true][result.is_empty()] {
+defn new_queue<T>() -> Queue<T> [true][term.is_empty()] {
     term Queue { items: [] };
 };
 
-defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][result.is_empty()] {
+defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][term.is_empty()] {
     term Queue { items: [] };
 };
 
 // ===== OPERATIONS =====
 
-defn enqueue<T>(queue: Queue<T>, item: T) [true][result.len() == queue.len() + 1] -> Queue<T> {
+defn enqueue<T>(queue: Queue<T>, item: T) [true][term.len() == queue.len() + 1] -> Queue<T> {
     term Queue { items: queue.items + [item] };
 };
 
-defn dequeue<T>(queue: Queue<T>) [!queue.is_empty()][result.len() == queue.len() - 1] -> Queue<T> {
+defn dequeue<T>(queue: Queue<T>) [!queue.is_empty()][term.len() == queue.len() - 1] -> Queue<T> {
     [queue.is_empty()] {
         term queue;
     };
@@ -44,20 +44,20 @@ defn head<T>(queue: Queue<T>) [!queue.is_empty()][true] -> T {
 
 // ===== METADATA =====
 
-defn len<T>(queue: Queue<T>) [true][result >= 0] -> Int {
+defn len<T>(queue: Queue<T>) [true][term >= 0] -> Int {
     term queue.items.len();
 };
 
-defn is_empty<T>(queue: Queue<T>) [true][result == true || result == false] -> Bool {
+defn is_empty<T>(queue: Queue<T>) [true][term == true || term == false] -> Bool {
     term queue.items.len() == 0;
 };
 
 // ===== CONVERSION =====
 
-defn to_list<T>(queue: Queue<T>) [true][result.len() == queue.len()] -> List<T> {
+defn to_list<T>(queue: Queue<T>) [true][term.len() == queue.len()] -> List<T> {
     term queue.items;
 };
 
-defn from_list<T>(items: List<T>) [true][result.len() == items.len()] -> Queue<T> {
+defn from_list<T>(items: List<T>) [true][term.len() == items.len()] -> Queue<T> {
     term Queue { items: items };
 };

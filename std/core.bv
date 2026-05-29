@@ -10,7 +10,7 @@
 defn absolute(x: Int) 
   -> Int 
   [true]
-  [result >= 0]
+  [term >= 0]
 {
   [x < 0] term -x;
   [x >= 0] term x;
@@ -19,7 +19,7 @@ defn absolute(x: Int)
 defn min(a: Int, b: Int) 
   -> Int 
   [true]
-  [result == a || result == b]
+  [term == a || term == b]
 {
   [a <= b] term a;
   [a > b] term b;
@@ -28,7 +28,7 @@ defn min(a: Int, b: Int)
 defn max(a: Int, b: Int) 
   -> Int 
   [true]
-  [result == a || result == b]
+  [term == a || term == b]
 {
   [a >= b] term a;
   [a < b] term b;
@@ -37,7 +37,7 @@ defn max(a: Int, b: Int)
 defn clamp(x: Int, min_val: Int, max_val: Int) 
   -> Int 
   [min_val <= max_val]
-  [result >= min_val && result <= max_val]
+  [term >= min_val && term <= max_val]
 {
   [x < min_val] term min_val;
   [x > max_val] term max_val;

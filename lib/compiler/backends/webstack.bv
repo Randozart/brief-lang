@@ -12,8 +12,7 @@ import call_graph;
 // This is the production web frontend target, distinct from the
 // direct WASM binary backend (wasm.bv).
 
-use std::string_builder;
-use std::collections;
+
 
 // ============================================================================
 // Webstack Code Generation
@@ -112,26 +111,26 @@ defn generate_js_glue(state_name: String, signals: List<SignalInfo>) -> String {
 
 // Main entry point: generate complete webstack output
 defn generate_webstack(program: Program, program_name: String, cg: CallGraphResult) -> WebstackOutput {
-    let signals: List<SignalInfo> = vec![];
-    let txns: List<TransactionInfo> = vec![];
+    let signals: List<SignalInfo> = [];
+    let txns: List<TransactionInfo> = [];
     
     // Collect signals and transactions from the program
     let i: Int = 0;
     [i < program.items.len()] {
         uni program.items[i](TopTxn(txn)) = {
-            // Register as reactive transaction
-            let guard_expr = expr_to_string(txn.contract.pre_condition);
-            txns = txns.append(TransactionInfo {
+            // Register as reactive transaction - construct temp info directly
+            signals = signals;
+            txns = txns.append({
                 name: txn.name,
                 index: txns.len(),
-                guard: guard_expr,
+                guard: expr_to_string(txn.contract.pre_condition),
             });
             
             // Collect signal declarations from body
             let j: Int = 0;
             [j < txn.body.len()] {
                 uni txn.body[j](StmtLet(let_stmt)) = {
-                    signals = signals.append(SignalInfo {
+                    signals = signals.append({
                         name: let_stmt.name,
                         signal_type: type_to_webstack_type(let_stmt.ty),
                         initializer: initializer_to_string(let_stmt.expr),
@@ -143,7 +142,7 @@ defn generate_webstack(program: Program, program_name: String, cg: CallGraphResu
         };
         uni program.items[i](TopDefn(defn)) = {
             uni defn.body[0](StmtLet(let_stmt)) = {
-                signals = signals.append(SignalInfo {
+                signals = signals.append({
                     name: let_stmt.name,
                     signal_type: type_to_webstack_type(let_stmt.ty),
                     initializer: initializer_to_string(let_stmt.expr),

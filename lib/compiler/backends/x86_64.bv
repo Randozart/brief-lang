@@ -65,7 +65,7 @@ defn x64_caller_saved() -> List<String> {
     term ["RAX", "RCX", "RDX", "RSI", "RDI", "R8", "R9", "R10", "R11"];
 }
 
-defn x64_reg_to_num(reg: String) -> u8 {
+defn x64_reg_to_num(reg: String) -> Int {
     [reg == "RAX"] { term 0; };
     [reg == "RCX"] { term 1; };
     [reg == "RDX"] { term 2; };

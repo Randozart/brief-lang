@@ -25,7 +25,7 @@ struct RangeResult {
 defn new_param_range() -> ParamRange [
     true
 ][
-    result.min == None && result.max == None
+    term.min == None && term.max == None
 ] {
     term ParamRange {
         min: None,
@@ -72,11 +72,7 @@ defn analyze_parameter_ranges(program: Program) -> Map<String, Map<String, Param
 defn extract_bounds_from_expr(
     expr: Expr,
     ranges: Map<String, ParamRange>
-) -> Map<String, ParamRange> [
-    len(program.items) >= 0
-][
-    true
-] {
+) -> Map<String, ParamRange> {
     uni expr(ExprBinOp("&&", left, right)) = {
         let r1 = extract_bounds_from_expr(left, ranges);
         term extract_bounds_from_expr(right, r1);
@@ -105,11 +101,7 @@ defn apply_comparison(
     ranges: Map<String, ParamRange>,
     op_is_gt: Bool,
     inclusive: Bool
-) -> Map<String, ParamRange> [
-    len(program.items) >= 0
-][
-    true
-] {
+) -> Map<String, ParamRange> {
     // Case 1: var <op> lit  (e.g. x > 0)
     uni left(ExprVar(var_name)) = {
         uni right(ExprInt(val)) = {
@@ -146,13 +138,16 @@ defn set_lower_bound(
     val: Int,
     inclusive: Bool
 ) -> Map<String, ParamRange> [
-    len(program.items) >= 0
+    name != ""
 ][
     true
 ] {
     let range_entry = map_get(ranges, name);
     uni range_entry(Some(range)) = {
-        let actual_val = [inclusive] { val } else { val + 1 };
+        let actual_val = val;
+        [!inclusive] {
+            &actual_val = val + 1;
+        };
         
         uni range.min(None) = {
             let new_range = ParamRange {
@@ -187,14 +182,17 @@ defn set_upper_bound(
     val: Int,
     inclusive: Bool
 ) -> Map<String, ParamRange> [
-    len(program.items) >= 0
+    name != ""
 ][
     true
 ] {
     let range_entry = map_get(ranges, name);
     uni range_entry(Some(range)) = {
-        let actual_val = [inclusive] { val } else { val - 1 };
-        
+        let actual_val = val;
+        [!inclusive] {
+            &actual_val = val - 1;
+        };
+
         uni range.max(None) = {
             let new_range = ParamRange {
                 min: range.min,
@@ -222,11 +220,11 @@ defn set_upper_bound(
 }
 
 // Check if a parameter has a known lower bound
-defn has_lower_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
-    len(program.items) >= 0
+defn has_lower_bound(ranges: Map<String, ParamRange>, name: String) [
+    name != ""
 ][
-    true
-] {
+    term == true || term == false
+] -> Bool {
     let range_entry = map_get(ranges, name);
     uni range_entry(Some(range)) = {
         uni range.min(None) = { term false; };
@@ -236,11 +234,11 @@ defn has_lower_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
 }
 
 // Check if a parameter has a known upper bound
-defn has_upper_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
-    len(program.items) >= 0
+defn has_upper_bound(ranges: Map<String, ParamRange>, name: String) [
+    name != ""
 ][
     true
-] {
+] -> Bool {
     let range_entry = map_get(ranges, name);
     uni range_entry(Some(range)) = {
         uni range.max(None) = { term false; };
@@ -251,7 +249,7 @@ defn has_upper_bound(ranges: Map<String, ParamRange>, name: String) -> Bool [
 
 // Get the minimum value of a parameter (if bounded)
 defn min_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
-    len(program.items) >= 0
+    name != ""
 ][
     true
 ] {
@@ -264,7 +262,7 @@ defn min_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
 
 // Get the maximum value of a parameter (if bounded)
 defn max_value(ranges: Map<String, ParamRange>, name: String) -> Option<Int> [
-    len(program.items) >= 0
+    name != ""
 ][
     true
 ] {

@@ -9,39 +9,39 @@ struct StringBuilder {
 
 // ===== CONSTRUCTION =====
 
-defn new_builder() -> StringBuilder [true][result.len() == 0] {
+defn new_builder() -> StringBuilder [true][term.len() == 0] {
     term StringBuilder { buffer: "" };
 };
 
-defn with_capacity(capacity: Int) -> StringBuilder [capacity > 0][result.len() == 0] {
+defn with_capacity(capacity: Int) -> StringBuilder [capacity > 0][term.len() == 0] {
     term StringBuilder { buffer: "" };
 };
 
 // ===== APPEND OPERATIONS =====
 
 defn append_char(builder: StringBuilder, c: Char) 
-    [true][result.len() == builder.len() + 1] 
+    [true][term.len() == builder.len() + 1] 
     -> StringBuilder 
 {
     term StringBuilder { buffer: builder.buffer + c };
 };
 
 defn append_str(builder: StringBuilder, s: String) 
-    [true][result.len() == builder.len() + s.len()] 
+    [true][term.len() == builder.len() + s.len()] 
     -> StringBuilder 
 {
     term StringBuilder { buffer: builder.buffer + s };
 };
 
 defn append_int(builder: StringBuilder, n: Int) 
-    [true][result.len() >= builder.len()] 
+    [true][term.len() >= builder.len()] 
     -> StringBuilder 
 {
     term StringBuilder { buffer: builder.buffer + n };
 };
 
 defn append_bool(builder: StringBuilder, b: Bool) 
-    [true][result.len() >= builder.len()] 
+    [true][term.len() >= builder.len()] 
     -> StringBuilder 
 {
     [b] {
@@ -51,7 +51,7 @@ defn append_bool(builder: StringBuilder, b: Bool)
 };
 
 defn append_float(builder: StringBuilder, f: Float) 
-    [true][result.len() >= builder.len()] 
+    [true][term.len() >= builder.len()] 
     -> StringBuilder 
 {
     term StringBuilder { buffer: builder.buffer + f };
@@ -60,14 +60,14 @@ defn append_float(builder: StringBuilder, f: Float)
 // ===== CONVERSION =====
 
 defn to_string(builder: StringBuilder) 
-    [true][result.len() == builder.len()] 
+    [true][term.len() == builder.len()] 
     -> String 
 {
     term builder.buffer;
 };
 
 defn clear(builder: StringBuilder) 
-    [true][result.len() == 0] 
+    [true][term.len() == 0] 
     -> StringBuilder 
 {
     term StringBuilder { buffer: "" };
@@ -76,21 +76,21 @@ defn clear(builder: StringBuilder)
 // ===== METADATA =====
 
 defn len(builder: StringBuilder) 
-    [true][result >= 0] 
+    [true][term >= 0] 
     -> Int 
 {
     term builder.buffer.len();
 };
 
 defn is_empty(builder: StringBuilder) 
-    [true][result == true || result == false] 
+    [true][term == true || term == false] 
     -> Bool 
 {
     term builder.buffer.len() == 0;
 };
 
 defn capacity(builder: StringBuilder) 
-    [true][result >= builder.len()] 
+    [true][term >= builder.len()] 
     -> Int 
 {
     term builder.buffer.len();

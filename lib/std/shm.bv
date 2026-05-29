@@ -108,7 +108,7 @@ let MAP_ANONYMOUS_SHARED: Int = 0x22;
 
 // ===== NATIVE MMAP WRAPPERS =====
 
-defn mmap_alloc(size: Int) -> Result<Int, MmapError> [size > 0][result.is_ok() || result.is_err()] {
+defn mmap_alloc(size: Int) -> Result<Int, MmapError> [size > 0][term.is_ok() || term.is_err()] {
     term __mmap_anonymous(size, PROT_READ_WRITE, MAP_ANONYMOUS_SHARED);
 }
 

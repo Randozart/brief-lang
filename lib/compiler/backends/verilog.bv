@@ -10,7 +10,7 @@ import std.string;
 enum SvDataType {
     Logic(Int),
     Bit(Int),
-    Int(Int),
+    IntLiteral(Int),
     Real
 }
 

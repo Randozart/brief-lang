@@ -364,6 +364,7 @@ impl Annotator {
             Expr::Char(c) => format!("'{}'", c),  // NEW
             Expr::Bool(true) => "true".to_string(),
             Expr::Bool(false) => "false".to_string(),
+            Expr::Term => "term".to_string(),
             Expr::Identifier(n) => n.clone(),
             Expr::OwnedRef(n) => format!("&{}", n),
             Expr::PriorState(n) => format!("@{}", n),
@@ -387,6 +388,7 @@ impl Annotator {
             Expr::Gt(l, r) => format!("({} > {})", self.format_expr(l), self.format_expr(r)),
             Expr::Ge(l, r) => format!("({} >= {})", self.format_expr(l), self.format_expr(r)),
             Expr::Concat(l, r) => format!("({} ++ {})", self.format_expr(l), self.format_expr(r)),
+            Expr::Cast(expr, ty) => format!("({} as {})", self.format_expr(expr), self.type_to_string(ty)),
             Expr::Or(l, r) => format!("({} || {})", self.format_expr(l), self.format_expr(r)),
             Expr::And(l, r) => format!("({} && {})", self.format_expr(l), self.format_expr(r)),
             Expr::BitAnd(l, r) => format!("({} & {})", self.format_expr(l), self.format_expr(r)),

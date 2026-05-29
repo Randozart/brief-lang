@@ -14,22 +14,22 @@ frgn string_length(s: String) -> Result<Int, StringError> from "std/bindings/str
 frgn string_concat(a: String, b: String) -> Result<String, StringError> from "std/bindings/string.toml";
 
 // Test 1: println - returns void on success, escapes on error
-txn test1 [true][result == void] {
+txn test1 [true][term == void] {
     term println("Hello from Brief FFI!");
 };
 
 // Test 2: sqrt - directly returns Float, escapes on error  
-txn test2 [true][result == 4.0] {
+txn test2 [true][term == 4.0] {
     term sqrt(16.0);
 };
 
 // Test 3: sin - directly returns Float
-txn test3 [true][result == 0.0] {
+txn test3 [true][term == 0.0] {
     term sin(0.0);
 };
 
 // Test 4: pow - directly returns Float
-txn test4 [true][result == 8.0] {
+txn test4 [true][term == 8.0] {
     term pow(2.0, 3.0);
 };
 

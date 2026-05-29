@@ -2073,7 +2073,7 @@ impl ProofEngine {
                     self.collect_identifiers(arg, vars);
                 }
             }
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) => {}
+            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term => {}
             Expr::ListLiteral(elements) => {
                 for elem in elements {
                     self.collect_identifiers(elem, vars);
@@ -2102,7 +2102,7 @@ impl ProofEngine {
             Expr::PatternMatch { value, .. } => {
                 self.collect_identifiers(value, vars);
             }
-            Expr::Slice { .. } | Expr::MultiSlice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) | Expr::Concat(_, _) => {}
+            Expr::Slice { .. } | Expr::MultiSlice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) | Expr::Concat(_, _) | Expr::Cast(_, _) => {}
         }
     }
 

@@ -175,6 +175,7 @@ pub struct Interpreter {
     pub ffi_name_to_location: HashMap<String, String>,
     pub orchestrator: Orchestrator,
     pub metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub,
+    pub return_value: Option<Value>,
 }
 
 impl Interpreter {
@@ -189,6 +190,7 @@ impl Interpreter {
             ffi_name_to_location: HashMap::new(),
             orchestrator: Orchestrator::new(),
             metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub::new(),
+            return_value: None,
         }
     }
 
@@ -229,6 +231,19 @@ impl Interpreter {
         for item in &program.items {
             if let TopLevel::Definition(defn) = item {
                 self.definitions.insert(defn.name.clone(), defn.clone());
+            } else if let TopLevel::Enum(enum_def) = item {
+                for variant in &enum_def.variants {
+                    let variant_name = match variant {
+                        EnumVariant::Unit(name) => name.clone(),
+                        EnumVariant::Tuple(name, _) => name.clone(),
+                        EnumVariant::Struct(name, _) => name.clone(),
+                    };
+                    self.state.insert(variant_name.clone(), Value::Enum(
+                        enum_def.name.clone(),
+                        variant_name,
+                        std::collections::HashMap::new(),
+                    ));
+                }
             }
         }
 
@@ -282,6 +297,7 @@ impl Interpreter {
         }
 
         let old_state = std::mem::replace(&mut self.state, local_scope);
+        let old_return = self.return_value.take();
 
         let mut result = Value::Void;
         for stmt in &defn.body {
@@ -289,16 +305,21 @@ impl Interpreter {
                 Statement::Term { values: outputs, .. } => {
                     if let Some(Some(expr)) = outputs.first() {
                         result = self.eval_expr(expr)?;
+                        self.return_value = Some(result.clone());
                     }
                 }
                 _ => {
                     self.exec_stmt(stmt)?;
                 }
             }
+            if self.return_value.is_some() {
+                result = self.return_value.take().unwrap();
+                break;
+            }
         }
 
         self.state = old_state;
-
+        self.return_value = old_return;
         Ok(result)
     }
 
@@ -437,7 +458,9 @@ impl Interpreter {
                 if let Some(first) = outputs.first() {
                     if let Some(expr) = first {
                         let value = self.eval_expr(expr)?;
-                        if value != Value::Bool(true) {}
+                        if value != Value::Bool(true) {
+                            self.return_value = Some(value);
+                        }
                     }
                 }
             }
@@ -456,7 +479,47 @@ impl Interpreter {
                     }
                 }
             }
-            Statement::Unification { .. } => {}
+            Statement::Unification {
+                name,
+                pattern,
+                expr,
+            } => {
+                // Look up value from state (set by previous let) not by evaluating expr
+                let value = self.state.get(name).cloned().unwrap_or(Value::Void);
+                let variant_name = pattern.split_once('(').map(|(n, _)| n).unwrap_or(pattern);
+                let field_names: Vec<&str> = pattern.split_once('(')
+                    .and_then(|(_, rest)| rest.strip_suffix(')'))
+                    .map(|inner| inner.split(',').map(|s| s.trim()).collect())
+                    .unwrap_or_default();
+                let matched = match &value {
+                    Value::Enum(_, variant, fields) if variant == variant_name => {
+                        let mut sorted_keys: Vec<&String> = fields.keys().collect();
+                        sorted_keys.sort();
+                        let vals: Vec<&Value> = sorted_keys.iter()
+                            .filter_map(|k| fields.get(*k)).collect();
+                        for (i, fname) in field_names.iter().enumerate() {
+                            if i < vals.len() && !fname.is_empty() && *fname != "_" {
+                                self.state.insert(fname.to_string(), vals[i].clone());
+                            }
+                        }
+                        true
+                    }
+                    _ if variant_name == pattern => {
+                        if let Some(first) = field_names.first() {
+                            if !first.is_empty() && *first != "_" {
+                                self.state.insert(first.to_string(), value);
+                            }
+                        }
+                        true
+                    }
+                    _ => false,
+                };
+                if matched {
+                    if let Expr::Block(stmts, _) = expr {
+                        for stmt in stmts { self.exec_stmt(stmt)?; }
+                    } else { self.eval_expr(expr)?; }
+                }
+            }
             Statement::LocalTrigger { name, expr, .. } => {
                 // Local trigger: await async event inside transaction
                 // For now, evaluate the expression if present and store the result
@@ -569,6 +632,11 @@ impl Interpreter {
             Expr::String(v) => Ok(Value::String(v.clone())),
             Expr::Char(v) => Ok(Value::Char(*v)),  // NEW
             Expr::Bool(v) => Ok(Value::Bool(*v)),
+            Expr::Term => self
+                .state
+                .get("term")
+                .cloned()
+                .ok_or_else(|| RuntimeError::UndefinedVariable("term".to_string())),
             Expr::Identifier(name) => self
                 .state
                 .get(name)
@@ -584,12 +652,18 @@ impl Interpreter {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
-            Expr::Add(l, r) => {
+Expr::Add(l, r) => {
                 let l_val = self.eval_expr(l)?;
                 let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
+                match (l_val.clone(), r_val.clone()) {
                     (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l + r)),
                     (Value::Float(l), Value::Float(r)) => Ok(Value::Float(l + r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::String(l + &r)),
+                    (Value::String(l), Value::Int(r)) => Ok(Value::String(l + &r.to_string())),
+                    (Value::Int(l), Value::String(r)) => Ok(Value::String(l.to_string() + &r)),
+                    (Value::String(l), Value::Char(r)) => { let mut s = l; s.push(r); Ok(Value::String(s)) },
+                    (Value::Char(l), Value::String(r)) => Ok(Value::String(l.to_string() + &r)),
+                    (Value::String(l), Value::Void) => Ok(Value::String(l)),
                     _ => Err(RuntimeError::TypeMismatch("Addition".to_string())),
                 }
             }
@@ -656,37 +730,57 @@ impl Interpreter {
             Expr::Lt(l, r) => {
                 let l_val = self.eval_expr(l)?;
                 let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
+                fn ord(v: &Value) -> String {
+                    match v { Value::Enum(_, n, _) => n.clone(), _ => format!("{:?}", v) }
+                }
+                match (&l_val, &r_val) {
                     (Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l < r)),
                     (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l < r)),
-                    _ => Err(RuntimeError::TypeMismatch("Less than".to_string())),
+                    (Value::Char(l), Value::Char(r)) => Ok(Value::Bool(l < r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l < r)),
+                    _ => Ok(Value::Bool(ord(&l_val) < ord(&r_val))),
                 }
             }
             Expr::Le(l, r) => {
                 let l_val = self.eval_expr(l)?;
                 let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
+                fn ord(v: &Value) -> String {
+                    match v { Value::Enum(_, n, _) => n.clone(), _ => format!("{:?}", v) }
+                }
+                match (&l_val, &r_val) {
                     (Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l <= r)),
                     (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l <= r)),
-                    _ => Err(RuntimeError::TypeMismatch("Less or equal".to_string())),
+                    (Value::Char(l), Value::Char(r)) => Ok(Value::Bool(l <= r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l <= r)),
+                    _ => Ok(Value::Bool(ord(&l_val) <= ord(&r_val))),
                 }
             }
             Expr::Gt(l, r) => {
                 let l_val = self.eval_expr(l)?;
                 let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
+                fn ord(v: &Value) -> String {
+                    match v { Value::Enum(_, n, _) => n.clone(), _ => format!("{:?}", v) }
+                }
+                match (&l_val, &r_val) {
                     (Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l > r)),
                     (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l > r)),
-                    _ => Err(RuntimeError::TypeMismatch("Greater than".to_string())),
+                    (Value::Char(l), Value::Char(r)) => Ok(Value::Bool(l > r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l > r)),
+                    _ => Ok(Value::Bool(ord(&l_val) > ord(&r_val))),
                 }
             }
-            Expr::Ge(l, r) => {
+Expr::Ge(l, r) => {
                 let l_val = self.eval_expr(l)?;
                 let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
+                fn ord(v: &Value) -> String {
+                    match v { Value::Enum(_, n, _) => n.clone(), _ => format!("{:?}", v) }
+                }
+                match (&l_val, &r_val) {
                     (Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l >= r)),
                     (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l >= r)),
-                    _ => Err(RuntimeError::TypeMismatch("Greater or equal".to_string())),
+                    (Value::Char(l), Value::Char(r)) => Ok(Value::Bool(l >= r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l >= r)),
+                    _ => Ok(Value::Bool(ord(&l_val) >= ord(&r_val))),
                 }
             }
             Expr::Or(l, r) => {
@@ -770,8 +864,56 @@ impl Interpreter {
             Expr::Call(name, args) => {
                 let fn_name = name.clone();
 
+                // Evaluate arguments — used by clone, to_json, from_json, len, etc.
+                let mut arg_values = Vec::new();
+                for arg in args.iter() {
+                    arg_values.push(self.eval_expr(arg)?);
+                }
+
                 if self.definitions.contains_key(&fn_name) {
                     return self.call_defn(&fn_name, args);
+                }
+
+                // Check if this is an enum constructor call (e.g. Ok(value), Err(error))
+let enum_state = self.state.get(&fn_name).cloned();
+                if let Some(Value::Enum(enum_name, variant, _)) = &enum_state {
+                    if !arg_values.is_empty() {
+                        let mut fields = HashMap::new();
+                        fields.insert("value".to_string(), arg_values[0].clone());
+                        return Ok(Value::Enum(enum_name.clone(), fn_name.clone(), fields));
+                    }
+                    return Ok(enum_state.unwrap());
+                }
+                // Known enum constructors for intrinsic types
+                if (fn_name == "Ok" || fn_name == "Err") && arg_values.len() == 1 {
+                    let field_key = if fn_name == "Ok" { "result" } else { "error" };
+                    let mut fields = HashMap::new();
+                    fields.insert(field_key.to_string(), arg_values[0].clone());
+                    return Ok(Value::Enum("Result".to_string(), fn_name, fields));
+                }
+                // Result methods: is_ok, is_err, unwrap, unwrap_err
+                if (fn_name == "is_ok" || fn_name == "is_err" || fn_name == "unwrap" || fn_name == "unwrap_err")
+                    && !arg_values.is_empty()
+                {
+                    match &arg_values[0] {
+                        Value::Enum(_, variant, fields) => {
+                            if fn_name == "is_ok" { return Ok(Value::Bool(variant == "Ok")); }
+                            if fn_name == "is_err" { return Ok(Value::Bool(variant == "Err")); }
+                            if fn_name == "unwrap" {
+                                if variant == "Ok" {
+                                    return Ok(fields.get("result").cloned().unwrap_or(Value::Void));
+                                }
+                                return Err(RuntimeError::TypeMismatch("unwrap on Err".to_string()));
+                            }
+                            if fn_name == "unwrap_err" {
+                                if variant == "Err" {
+                                    return Ok(fields.get("error").cloned().unwrap_or(Value::Void));
+                                }
+                                return Err(RuntimeError::TypeMismatch("unwrap_err on Ok".to_string()));
+                            }
+                        }
+                        _ => {}
+                    }
                 }
 
                 let defn_call = self.state.get(&fn_name).and_then(|v| {
@@ -786,100 +928,31 @@ impl Interpreter {
                     return self.call_defn(&defn_name, args);
                 }
 
-                let mut arg_values = Vec::new();
-                for arg in args {
-                    arg_values.push(self.eval_expr(arg)?);
-                }
-
-                if fn_name == "clone" && !arg_values.is_empty() {
+if fn_name == "clone" && !arg_values.is_empty() {
                     return Ok(arg_values[0].clone());
                 }
-
-                // Built-in stdlib functions: to_json and from_json
-                if fn_name == "to_json" {
-                    let arg = arg_values.first().ok_or_else(|| {
-                        RuntimeError::TypeMismatch("to_json requires 1 argument".into())
-                    })?;
-
-                    let json_str = match arg {
-                        Value::Instance { fields, .. } => {
-                            let mut map = serde_json::Map::new();
-                            for (k, v) in fields {
-                                map.insert(k.clone(), value_to_json_value(v));
-                            }
-                            JsonValue::Object(map).to_string()
-                        }
-                        Value::String(s) => s.clone(),
-                        Value::List(items) => {
-                            let arr: Vec<_> = items.iter().map(value_to_json_value).collect();
-                            JsonValue::Array(arr).to_string()
-                        }
-                        Value::Int(i) => JsonValue::Number((*i).into()).to_string(),
-                        Value::Float(f) => serde_json::json!(*f).to_string(),
-                        Value::Bool(b) => JsonValue::Bool(*b).to_string(),
-                        _ => "{}".to_string(),
-                    };
-                    return Ok(Value::String(json_str));
-                }
-
-                if fn_name == "from_json" {
-                    let arg = arg_values.first().ok_or_else(|| {
-                        RuntimeError::TypeMismatch("from_json requires 1 argument".into())
-                    })?;
-
-                    let json_str = match arg {
-                        Value::String(s) => s.clone(),
-                        _ => {
-                            // Return Err("Invalid JSON string")
-                            return Ok(Value::Enum(
-                                "Result".to_string(),
-                                "Err".to_string(),
-                                HashMap::from([(
-                                    "error".to_string(),
-                                    Value::String("Invalid JSON string".to_string()),
-                                )]),
-                            ));
-                        }
-                    };
-
-                    let result = match serde_json::from_str::<JsonValue>(&json_str) {
-                        Ok(v) => {
-                            let parsed_value = json_value_to_value(v);
-                            // Return Ok(parsed_value)
-                            Ok(Value::Enum(
-                                "Result".to_string(),
-                                "Ok".to_string(),
-                                HashMap::from([("value".to_string(), parsed_value)]),
-                            ))
-                        }
-                        Err(e) => {
-                            // Return Err(error_message)
-                            Ok(Value::Enum(
-                                "Result".to_string(),
-                                "Err".to_string(),
-                                HashMap::from([(
-                                    "error".to_string(),
-                                    Value::String(e.to_string()),
-                                )]),
-                            ))
-                        }
-                    };
-                    return result;
-                }
-
-                if let Some(first_arg) = arg_values.first() {
-                    if let Value::Instance { typename, fields } = first_arg {
-                        let method_name = format!("{}.{}", typename, fn_name);
-                        if self.definitions.contains_key(&method_name) {
-                            let mut method_args = args[1..].to_vec();
-                            method_args.insert(0, args[0].clone());
-                            return self.call_defn(&method_name, &method_args);
+                if fn_name == "char_at" && arg_values.len() == 2 {
+                    if let Value::String(s) = &arg_values[0] {
+                        if let Value::Int(idx) = &arg_values[1] {
+                            let i = *idx as usize;
+                            return Ok(s.chars().nth(i).map(Value::Char).unwrap_or(Value::Char('\0')));
                         }
                     }
                 }
-
-                // HashMap built-in methods
-                if fn_name == "HashMap::new" || fn_name == "new_map" {
+                if fn_name == "get" && arg_values.len() >= 2 {
+                    if let Value::List(list) = &arg_values[0] {
+                        if let Value::Int(idx) = &arg_values[1] {
+                            let i = if *idx < 0 { (list.len() as i64 + idx).max(0) as usize } else { *idx as usize };
+                            return Ok(if i < list.len() {
+                                Value::Enum("Option".to_string(), "Some".to_string(),
+                                    HashMap::from([("value".to_string(), list[i].clone())]))
+                            } else {
+                                Value::Enum("Option".to_string(), "None".to_string(), HashMap::new())
+                            });
+                        }
+                    }
+                }
+                if fn_name == "HashMap::new" || fn_name == "new_map" || fn_name == "empty_map" {
                     return Ok(Value::HashMap(HashMap::new()));
                 }
 
@@ -1543,6 +1616,27 @@ impl Interpreter {
             }
             Expr::Slice { value, start, end, stride, mask: _ } => {
                 let list_val = self.eval_expr(value)?;
+                // String slicing
+                if let Value::String(ref s) = list_val {
+                    let len = s.len();
+                    let start_idx = match start {
+                        Some(s_expr) => match self.eval_expr(s_expr)? {
+                            Value::Int(n) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize },
+                            _ => return Err(RuntimeError::TypeMismatch("Slice start must be integer".to_string())),
+                        },
+                        None => 0,
+                    };
+                    let end_idx = match end {
+                        Some(e_expr) => match self.eval_expr(e_expr)? {
+                            Value::Int(n) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize },
+                            _ => return Err(RuntimeError::TypeMismatch("Slice end must be integer".to_string())),
+                        },
+                        None => len,
+                    };
+                    let lo = start_idx.min(len);
+                    let hi = end_idx.min(len);
+                    return Ok(Value::String(if lo < hi { s[lo..hi].to_string() } else { String::new() }));
+                }
                 let list = match list_val {
                     Value::List(vec) => vec,
                     _ => return Err(RuntimeError::TypeMismatch("Cannot slice non-list".to_string())),
@@ -1599,11 +1693,97 @@ let s_val = self.eval_expr(s)?;
                 
                 Ok(Value::List(result))
             }
-            Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) | Expr::MultiSlice { .. } => {
-                Err(RuntimeError::TypeMismatch(
-                    "Quantifier and multidimensional slice expressions not supported in interpreter".to_string(),
-                ))
+            Expr::Block(stmts, last) => {
+                let old_state = self.state.clone();
+                for stmt in stmts {
+                    self.exec_stmt(stmt)?;
+                }
+                let result = self.eval_expr(last)?;
+                self.state = old_state;
+                Ok(result)
             }
+            Expr::Tuple(exprs) => {
+                let mut values = Vec::new();
+                for e in exprs {
+                    values.push(self.eval_expr(e)?);
+                }
+                Ok(Value::List(values))
+            }
+            Expr::TupleDestructure(names, expr) => {
+                let value = self.eval_expr(expr)?;
+                match value {
+                    Value::List(items) => {
+                        for (i, name) in names.iter().enumerate() {
+                            if i < items.len() {
+                                self.state.insert(name.clone(), items[i].clone());
+                            }
+                        }
+                        Ok(Value::Void)
+                    }
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "Tuple destructure requires a list value".to_string(),
+                    )),
+                }
+            }
+            Expr::ForAll { .. } => Ok(Value::Bool(true)),
+            Expr::Exists { var, expr } => {
+                let list = self.eval_expr(expr)?;
+                match list {
+                    Value::List(items) => Ok(Value::Bool(!items.is_empty())),
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "Exists requires a list expression".to_string(),
+                    )),
+                }
+            }
+            Expr::MultiSlice { value, coordinates, mask: _ } => {
+                if let Some(first) = coordinates.first() {
+                    match first {
+                        SliceCoordinate::Range { start, end } => {
+                            self.eval_expr(&Expr::Slice {
+                                value: value.clone(),
+                                start: start.clone(),
+                                end: end.clone(),
+                                stride: None,
+                                mask: None,
+                            })
+                        }
+                        SliceCoordinate::Index(idx) => {
+                            let list_val = self.eval_expr(value)?;
+                            match list_val {
+                                Value::List(items) => {
+                                    let idx_val = self.eval_expr(idx)?;
+                                    match idx_val {
+                                        Value::Int(n) => {
+                                            let n = if n < 0 {
+                                                (items.len() as i64 + n) as usize
+                                            } else {
+                                                n as usize
+                                            };
+                                            if n < items.len() {
+                                                Ok(items[n].clone())
+                                            } else {
+                                                Err(RuntimeError::TypeMismatch(
+                                                    "Index out of bounds".to_string(),
+                                                ))
+                                            }
+                                        }
+                                        _ => Err(RuntimeError::TypeMismatch(
+                                            "Index must be integer".to_string(),
+                                        )),
+                                    }
+                                }
+                                _ => Err(RuntimeError::TypeMismatch(
+                                    "Cannot index non-list".to_string(),
+                                )),
+                            }
+                        }
+                        SliceCoordinate::Named { .. } => self.eval_expr(value),
+                    }
+                } else {
+                    self.eval_expr(value)
+                }
+            }
+            Expr::Cast(inner, _) => self.eval_expr(inner),
         }
     }
 }
@@ -1921,8 +2101,16 @@ pub(crate) fn now_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
 pub(crate) fn read_file_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::String(path) = &args[0] {
         match std::fs::read_to_string(path) {
-            Ok(content) => Ok(Value::String(content)),
-            Err(e) => Ok(Value::String(format!("Error: {}", e))),
+            Ok(content) => Ok(Value::Enum(
+                "Result".to_string(),
+                "Ok".to_string(),
+                HashMap::from([("result".to_string(), Value::String(content))]),
+            )),
+            Err(e) => Ok(Value::Enum(
+                "Result".to_string(),
+                "Err".to_string(),
+                HashMap::from([("error".to_string(), Value::String(format!("{}", e)))]),
+            )),
         }
     } else {
         Err(RuntimeError::TypeMismatch(

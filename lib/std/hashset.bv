@@ -10,18 +10,18 @@ struct HashSet<T> {
 
 // ===== CONSTRUCTION =====
 
-defn new_set<T>() -> HashSet<T> [true][result.len() == 0] {
+defn new_set<T>() -> HashSet<T> [true][term.len() == 0] {
     term HashSet { items: [] };
 };
 
-defn with_capacity<T>(capacity: Int) -> HashSet<T> [capacity > 0][result.len() == 0] {
+defn with_capacity<T>(capacity: Int) -> HashSet<T> [capacity > 0][term.len() == 0] {
     term HashSet { items: [] };
 };
 
 // ===== OPERATIONS =====
 
 defn insert<T>(set: HashSet<T>, item: T) 
-    [true][result.contains(item)] 
+    [true][term.contains(item)] 
     -> HashSet<T> 
 {
     [set.contains(item)] {
@@ -31,7 +31,7 @@ defn insert<T>(set: HashSet<T>, item: T)
 };
 
 defn remove<T>(set: HashSet<T>, item: T) 
-    [set.contains(item)][!result.contains(item)] 
+    [set.contains(item)][!term.contains(item)] 
     -> HashSet<T> 
 {
     let new_items: List<T> = [];
@@ -46,7 +46,7 @@ defn remove<T>(set: HashSet<T>, item: T)
 };
 
 defn contains<T>(set: HashSet<T>, item: T) 
-    [true][result == true || result == false] 
+    [true][term == true || term == false] 
     -> Bool 
 {
     let i: Int = 0;
@@ -62,7 +62,7 @@ defn contains<T>(set: HashSet<T>, item: T)
 // ===== SET OPERATIONS =====
 
 defn union<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][result.len() >= a.len() && result.len() >= b.len()] 
+    [true][term.len() >= a.len() && term.len() >= b.len()] 
     -> HashSet<T> 
 {
     let result: HashSet<T> = a;
@@ -75,7 +75,7 @@ defn union<T>(a: HashSet<T>, b: HashSet<T>)
 };
 
 defn intersection<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][result.len() <= a.len() && result.len() <= b.len()] 
+    [true][term.len() <= a.len() && term.len() <= b.len()] 
     -> HashSet<T> 
 {
     let result: HashSet<T> = new_set();
@@ -90,7 +90,7 @@ defn intersection<T>(a: HashSet<T>, b: HashSet<T>)
 };
 
 defn difference<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][result.len() <= a.len()] 
+    [true][term.len() <= a.len()] 
     -> HashSet<T> 
 {
     let result: HashSet<T> = new_set();
@@ -107,14 +107,14 @@ defn difference<T>(a: HashSet<T>, b: HashSet<T>)
 // ===== METADATA =====
 
 defn len<T>(set: HashSet<T>) 
-    [true][result >= 0] 
+    [true][term >= 0] 
     -> Int 
 {
     term set.items.len();
 };
 
 defn is_empty<T>(set: HashSet<T>) 
-    [true][result == true || result == false] 
+    [true][term == true || term == false] 
     -> Bool 
 {
     term set.items.len() == 0;
@@ -123,21 +123,21 @@ defn is_empty<T>(set: HashSet<T>)
 // ===== ITERATION =====
 
 defn iter<T>(set: HashSet<T>) 
-    [true][result.len() == set.len()] 
+    [true][term.len() == set.len()] 
     -> List<T> 
 {
     term set.items;
 };
 
 defn to_list<T>(set: HashSet<T>) 
-    [true][result.len() == set.len()] 
+    [true][term.len() == set.len()] 
     -> List<T> 
 {
     term set.items;
 };
 
 defn from_list<T>(items: List<T>) 
-    [true][result.len() <= items.len()] 
+    [true][term.len() <= items.len()] 
     -> HashSet<T> 
 {
     let result: HashSet<T> = new_set();
@@ -150,7 +150,7 @@ defn from_list<T>(items: List<T>)
 };
 
 defn clear<T>(set: HashSet<T>) 
-    [true][result.len() == 0] 
+    [true][term.len() == 0] 
     -> HashSet<T> 
 {
     term HashSet { items: [] };

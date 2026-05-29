@@ -164,6 +164,7 @@ defn is_keyword(tok: Token) -> Bool {
     uni tok(KeywordTrue) = true;
     uni tok(KeywordFalse) = true;
     uni tok(KeywordUnification) = true;
+    uni tok(KeywordTerm) = true;
     term false;
 };
 
@@ -192,7 +193,6 @@ defn keyword_to_string(tok: Token) -> String {
     uni tok(KeywordFalse) = "false";
     uni tok(KeywordUnification) = "unification";
     uni tok(KeywordRender) = "render";
-    uni tok(KeywordRstruct) = "rstruct";
     term "";
 };
 
@@ -334,13 +334,13 @@ defn literal_to_string(tok: Token) -> String {
 };
 
 defn unwrap_identifier(tok: Token) -> String {
-    uni tok(TokenIdentifier(name)) = name;
-    term "";
+    uni tok(TokenIdentifier(name)) = { term name; };
+    term keyword_to_string(tok);
 };
 
 defn is_identifier(tok: Token) -> Bool {
     uni tok(TokenIdentifier(_)) = true;
-    term false;
+    term keyword_to_string(tok) != "";
 };
 
 defn is_string_token(tok: Token) -> Bool {

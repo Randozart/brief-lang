@@ -16,15 +16,15 @@
 // Required Functions (Identity by default)
 // ============================================================
 
-defn map_input(value: Value) -> Value [true][result == value] {
+defn map_input(value: Value) -> Value [true][term == value] {
     term value;
 };
 
-defn map_output(value: Value) -> Value [true][result == value] {
+defn map_output(value: Value) -> Value [true][term == value] {
     term value;
 };
 
-defn map_error(err: Error) -> Error [true][result == err] {
+defn map_error(err: Error) -> Error [true][term == err] {
     term err;
 };
 
@@ -75,22 +75,22 @@ defn map_error(err: Error) -> Error [true][result == err] {
 // ============================================================
 
 // Convert <LANG> bytes/buffer to Brief Data
-// defn <lang>_bytes_to_brief(<lang>_bytes: <LangBytes>) -> Data [<lang>_bytes.is_valid()][result.len() == <lang>_bytes.len()] {
+// defn <lang>_bytes_to_brief(<lang>_bytes: <LangBytes>) -> Data [<lang>_bytes.is_valid()][term.len() == <lang>_bytes.len()] {
 //     term <lang>_bytes.to_data();
 // };
 
 // Convert Brief Data to <LANG> bytes/buffer
-// defn brief_data_to_<lang>(data: Data) -> <LangBytes> [data.is_valid()][result.len() == data.len()] {
+// defn brief_data_to_<lang>(data: Data) -> <LangBytes> [data.is_valid()][term.len() == data.len()] {
 //     term <LangBytes>::from_data(data);
 // };
 
 // Convert <LANG> list to Brief List
-// defn <lang>_list_to_brief(<lang>_list: <LangList>, elem_type: Type) -> List<Value> [<lang>_list.is_valid()][result.len() == <lang>_list.len()] {
+// defn <lang>_list_to_brief(<lang>_list: <LangList>, elem_type: Type) -> List<Value> [<lang>_list.is_valid()][term.len() == <lang>_list.len()] {
 //     term <lang>_list.to_list();
 // };
 
 // Convert Brief List to <LANG> list
-// defn brief_list_to_<lang>(list: List<Value>) -> <LangList> [list.is_valid()][result.len() == list.len()] {
+// defn brief_list_to_<lang>(list: List<Value>) -> <LangList> [list.is_valid()][term.len() == list.len()] {
 //     term <LangList>::from_list(list);
 // };
 
@@ -99,13 +99,13 @@ defn map_error(err: Error) -> Error [true][result == err] {
 // ============================================================
 
 // Check if <LANG> pointer is null
-// defn <lang>_ptr_is_null(ptr: <LangPtr>) -> Bool [true][result == true || result == false] {
+// defn <lang>_ptr_is_null(ptr: <LangPtr>) -> Bool [true][term == true || term == false] {
 //     [ptr.is_null()] { term true; };
 //     term false;
 // };
 
 // Get <LANG> pointer address as Int
-// defn <lang>_ptr_to_address(ptr: <LangPtr>) -> Int [true][result >= 0] {
+// defn <lang>_ptr_to_address(ptr: <LangPtr>) -> Int [true][term >= 0] {
 //     term ptr.address();
 // };
 
@@ -124,7 +124,7 @@ defn map_error(err: Error) -> Error [true][result == err] {
 // };
 
 // Safe conversion with fallback
-// defn <lang>_string_safe(<lang>_str: <LangString>, fallback: String) -> String [true][result == fallback || <lang>_str.is_valid()] {
+// defn <lang>_string_safe(<lang>_str: <LangString>, fallback: String) -> String [true][term == fallback || <lang>_str.is_valid()] {
 //     [<lang>_str.is_valid()] {
 //         term <lang>_str.to_string();
 //     };
@@ -136,11 +136,11 @@ defn map_error(err: Error) -> Error [true][result == err] {
 // ============================================================
 
 // Check if <LANG> value is null
-// defn <lang>_is_null(val: <LangValue>) -> Bool [true][result == true || result == false] {
+// defn <lang>_is_null(val: <LangValue>) -> Bool [true][term == true || term == false] {
 //     term val.is_null();
 // };
 
 // Check if <LANG> value is valid
-// defn <lang>_is_valid(val: <LangValue>) -> Bool [true][result == true || result == false] {
+// defn <lang>_is_valid(val: <LangValue>) -> Bool [true][term == true || term == false] {
 //     term val.is_valid();
 // };

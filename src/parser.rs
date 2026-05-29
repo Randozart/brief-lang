@@ -223,6 +223,50 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Unification)) => { self.advance(); Ok("uni".to_string()) }
             Some(Ok(Token::Escape)) => { self.advance(); Ok("escape".to_string()) }
             Some(Ok(Token::Async)) => { self.advance(); Ok("async".to_string()) }
+            Some(Ok(Token::From)) => { self.advance(); Ok("from".to_string()) }
+            Some(Ok(Token::As)) => { self.advance(); Ok("as".to_string()) }
+            Some(Ok(Token::Registry)) => { self.advance(); Ok("reg".to_string()) }
+            Some(Ok(Token::Rstruct)) => { self.advance(); Ok("rstruct".to_string()) }
+            Some(Ok(Token::Render)) => { self.advance(); Ok("render".to_string()) }
+            Some(Ok(Token::Trg)) => { self.advance(); Ok("trg".to_string()) }
+            Some(Ok(Token::TrgBang)) => { self.advance(); Ok("trg!".to_string()) }
+            Some(Ok(Token::Link)) => { self.advance(); Ok("link".to_string()) }
+            Some(Ok(Token::Asm)) => { self.advance(); Ok("asm".to_string()) }
+            Some(Ok(Token::Stage)) => { self.advance(); Ok("stage".to_string()) }
+            Some(Ok(Token::On)) => { self.advance(); Ok("on".to_string()) }
+            Some(Ok(Token::Forall)) => { self.advance(); Ok("forall".to_string()) }
+            Some(Ok(Token::Exists)) => { self.advance(); Ok("exists".to_string()) }
+            Some(Ok(Token::Within)) => { self.advance(); Ok("within".to_string()) }
+            Some(Ok(Token::Bank)) => { self.advance(); Ok("bank".to_string()) }
+            Some(Ok(Token::Match)) => { self.advance(); Ok("match".to_string()) }
+            Some(Ok(Token::FrgnBang)) => { self.advance(); Ok("frgn!".to_string()) }
+            Some(Ok(Token::Syscall)) => { self.advance(); Ok("syscall".to_string()) }
+            Some(Ok(Token::SyscallBang)) => { self.advance(); Ok("syscall!".to_string()) }
+            Some(Ok(Token::Resource)) => { self.advance(); Ok("resource".to_string()) }
+            Some(Ok(Token::Rsrc)) => { self.advance(); Ok("rsrc".to_string()) }
+            Some(Ok(Token::Cycles)) => { self.advance(); Ok("cycles".to_string()) }
+            Some(Ok(Token::Cyc)) => { self.advance(); Ok("cyc".to_string()) }
+            Some(Ok(Token::Ms)) => { self.advance(); Ok("ms".to_string()) }
+            Some(Ok(Token::Seconds)) => { self.advance(); Ok("seconds".to_string()) }
+            Some(Ok(Token::Minute)) => { self.advance(); Ok("minute".to_string()) }
+            Some(Ok(Token::TypeUInt)) => { self.advance(); Ok("UInt".to_string()) }
+            Some(Ok(Token::TypeUnsigned)) => { self.advance(); Ok("Unsigned".to_string()) }
+            Some(Ok(Token::TypeUSgn)) => { self.advance(); Ok("USgn".to_string()) }
+            Some(Ok(Token::TypeSigned)) => { self.advance(); Ok("Signed".to_string()) }
+            Some(Ok(Token::TypeSgn)) => { self.advance(); Ok("Sgn".to_string()) }
+            Some(Ok(Token::TypeChar)) => { self.advance(); Ok("Char".to_string()) }
+            Some(Ok(Token::TypeFloat)) => { self.advance(); Ok("Float".to_string()) }
+            Some(Ok(Token::TypeString)) => { self.advance(); Ok("String".to_string()) }
+            Some(Ok(Token::TypeBool)) => { self.advance(); Ok("Bool".to_string()) }
+            Some(Ok(Token::TypeVoid)) => { self.advance(); Ok("Void".to_string()) }
+            Some(Ok(Token::TypeI8)) => { self.advance(); Ok("i8".to_string()) }
+            Some(Ok(Token::TypeU8)) => { self.advance(); Ok("u8".to_string()) }
+            Some(Ok(Token::TypeI16)) => { self.advance(); Ok("i16".to_string()) }
+            Some(Ok(Token::TypeU16)) => { self.advance(); Ok("u16".to_string()) }
+            Some(Ok(Token::TypeI32)) => { self.advance(); Ok("i32".to_string()) }
+            Some(Ok(Token::TypeU32)) => { self.advance(); Ok("u32".to_string()) }
+            Some(Ok(Token::TypeI64)) => { self.advance(); Ok("i64".to_string()) }
+            Some(Ok(Token::TypeU64)) => { self.advance(); Ok("u64".to_string()) }
             _ => Err(SyntaxError::UnexpectedToken {
                 expected: "identifier".to_string(),
                 found: format!("{:?}", self.current_token()),
@@ -620,19 +664,24 @@ impl<'a> Parser<'a> {
         let mut items = if let Some(Ok(Token::LBrace)) = self.current_token() {
             self.advance();
             let mut items = Vec::new();
-            while let Some(Ok(Token::Identifier(_))) = self.current_token() {
-                let name = self.expect_identifier()?;
-                let alias = if let Some(Ok(Token::As)) = self.current_token() {
-                    self.advance();
-                    Some(self.expect_identifier()?)
-                } else {
-                    None
-                };
-                items.push(ImportItem { name, alias });
-                if let Some(Ok(Token::Comma)) = self.current_token() {
-                    self.advance();
-                } else {
-                    break;
+            loop {
+                let name_result = self.expect_identifier();
+                match name_result {
+                    Ok(name) => {
+                        let alias = if let Some(Ok(Token::As)) = self.current_token() {
+                            self.advance();
+                            Some(self.expect_identifier()?)
+                        } else {
+                            None
+                        };
+                        items.push(ImportItem { name, alias });
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
                 }
             }
             self.expect(Token::RBrace)?;
@@ -940,11 +989,25 @@ impl<'a> Parser<'a> {
             success_output
         };
 
+        // Parse optional from "location" clause
+        let location = if let Some(Ok(Token::From)) = self.current_token() {
+            self.advance();
+            if let Some(Ok(Token::String(s))) = self.current_token() {
+                let loc = s.clone();
+                self.advance();
+                loc
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
         self.expect(Token::Semicolon)?;
 
         let frgn_sig = ForeignSignature {
             name: name.clone(),
-            location: String::new(),
+            location,
             wasm_impl: None,
             wasm_setup: None,
             inputs,
@@ -2460,15 +2523,20 @@ let span = self.current_span();
         let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
             self.advance();
             let mut params = Vec::new();
-            while let Some(Ok(Token::Identifier(_))) = self.current_token() {
-                let param_name = self.expect_identifier()?;
-                self.expect(Token::Colon)?;
-                let param_type = self.parse_type()?;
-                params.push((param_name, param_type));
-                if let Some(Ok(Token::Comma)) = self.current_token() {
-                    self.advance();
-                } else {
-                    break;
+            loop {
+                let param_result = self.expect_identifier();
+                match param_result {
+                    Ok(param_name) => {
+                        self.expect(Token::Colon)?;
+                        let param_type = self.parse_type()?;
+                        params.push((param_name, param_type));
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
                 }
             }
             self.expect(Token::RParen)?;
@@ -2602,15 +2670,20 @@ let span = self.current_span();
         let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
             self.advance();
             let mut params = Vec::new();
-            while let Some(Ok(Token::Identifier(_))) = self.current_token() {
-                let param_name = self.expect_identifier()?;
-                self.expect(Token::Colon)?;
-                let param_type = self.parse_type()?;
-                params.push((param_name, param_type));
-                if let Some(Ok(Token::Comma)) = self.current_token() {
-                    self.advance();
-                } else {
-                    break;
+            loop {
+                let param_result = self.expect_identifier();
+                match param_result {
+                    Ok(param_name) => {
+                        self.expect(Token::Colon)?;
+                        let param_type = self.parse_type()?;
+                        params.push((param_name, param_type));
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
                 }
             }
             self.expect(Token::RParen)?;
@@ -2619,23 +2692,10 @@ let span = self.current_span();
             Vec::new()
         };
 
-        let (outputs, output_names, output_type, contract) =
-            if let Some(Ok(Token::LBracket)) = self.current_token() {
-                // Contract before arrow: defn name(params) [pre][post] -> Type
-                let contract = self.parse_contract()?;
-                if let Some(Ok(Token::Arrow)) = self.current_token() {
-                    self.advance();
-                    let (outputs, output_names) = self.parse_output_types_with_names(&parameters)?;
-                    let output_type = if outputs.len() > 1 {
-                        Some(crate::ast::OutputType::Tuple(outputs.clone()))
-                    } else {
-                        None
-                    };
-                    (outputs, output_names, output_type, contract)
-                } else {
-                    (Vec::new(), Vec::new(), None, contract)
-                }
-            } else if let Some(Ok(Token::Arrow)) = self.current_token() {
+        let (outputs, output_names, output_type, contract) = if let Some(Ok(Token::LBracket)) = self.current_token() {
+            // Contract before arrow: defn name(params) [pre][post] -> Type
+            let contract = self.parse_contract()?;
+            if let Some(Ok(Token::Arrow)) = self.current_token() {
                 self.advance();
                 let (outputs, output_names) = self.parse_output_types_with_names(&parameters)?;
                 let output_type = if outputs.len() > 1 {
@@ -2643,15 +2703,27 @@ let span = self.current_span();
                 } else {
                     None
                 };
-                let contract = if let Some(Ok(Token::LBracket)) = self.current_token() {
-                    self.parse_contract()?
-                } else {
-                    Contract::new(Expr::Bool(true), Expr::Bool(true))
-                };
                 (outputs, output_names, output_type, contract)
             } else {
-                (Vec::new(), Vec::new(), None, Contract::new(Expr::Bool(true), Expr::Bool(true)))
+                (Vec::new(), Vec::new(), None, contract)
+            }
+        } else if let Some(Ok(Token::Arrow)) = self.current_token() {
+            self.advance();
+            let (outputs, output_names) = self.parse_output_types_with_names(&parameters)?;
+            let output_type = if outputs.len() > 1 {
+                Some(crate::ast::OutputType::Tuple(outputs.clone()))
+            } else {
+                None
             };
+            let contract = if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.parse_contract()?
+            } else {
+                Contract::new(Expr::Bool(true), Expr::Bool(true))
+            };
+            (outputs, output_names, output_type, contract)
+        } else {
+            (Vec::new(), Vec::new(), None, Contract::new(Expr::Bool(true), Expr::Bool(true)))
+        };
 
         // Lambda-style: allow ; termination (no body)
         let body = if let Some(Ok(Token::Semicolon)) = self.current_token() {
@@ -2870,7 +2942,7 @@ let span = self.current_span();
         Ok(outputs)
     }
 
-    fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
+fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         let mut pre_condition = Expr::Bool(true);
         let mut post_condition = Expr::Bool(true);
         let mut watchdog: Option<WatchdogSpec> = None;
@@ -2888,6 +2960,70 @@ let span = self.current_span();
                 self.expect(Token::RBracket)?;
                 count = 2; // ~/ provides both pre and post
                 break;
+            }
+
+            // [[post] shorthand: empty brackets mean [true] for pre
+            if count == 0 && matches!(self.current_token(), Some(Ok(Token::RBracket))) {
+                self.advance(); // consume ]
+                pre_condition = Expr::Bool(true);
+                count = 1;
+                continue; // continue to parse post normally
+            }
+
+            if count == 0 {
+                pre_condition = self.parse_expression()?;
+            } else if count == 1 {
+                post_condition = self.parse_expression()?;
+            } else {
+                // count >= 2 — no more contract brackets allowed
+                return self.spanned_err("Too many contract brackets (max 3: [pre][post][watchdog])".to_string());
+            }
+
+            count += 1;
+            self.expect(Token::RBracket)?;
+
+            // [pre]] shorthand: after pre's ], if next token is ], set post = true
+            if count == 1 && matches!(self.current_token(), Some(Ok(Token::RBracket))) {
+                self.advance(); // consume extra ]
+                post_condition = Expr::Bool(true);
+                count = 2;
+            }
+        }
+
+        // External watchdog: ?[cond] or ?![cond] (after all bracket pairs)
+        if let Some(Ok(Token::Question)) = self.current_token() {
+            self.advance();
+            let is_required = if let Some(Ok(Token::Not)) = self.current_token() {
+                self.advance();
+                true // ?!
+            } else {
+                false // ?
+            };
+            self.expect(Token::LBracket)?;
+            let cond = self.parse_expression()?;
+            self.expect(Token::RBracket)?;
+            if matches!(cond, Expr::Bool(true)) {
+                return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
+            }
+            watchdog = Some(WatchdogSpec {
+                condition: cond,
+                is_required,
+            });
+        }
+
+        // [true][true] is always an error — defeats contract-first programming
+        if matches!(&pre_condition, Expr::Bool(true)) && matches!(&post_condition, Expr::Bool(true)) {
+            return self.spanned_err(
+                "both precondition and postcondition are [true] — at least one side must specify meaningful constraints".to_string()
+            );
+        }
+
+        // In strict mode, both pre and post conditions are required and must be non-trivial
+        if self.strict_mode.is_strict() {
+            if count < 2 {
+                return self.spanned_err(
+                    "Strict mode requires both [precondition] and [postcondition]".to_string()
+                );
             }
 
             if count == 0 {
@@ -3021,6 +3157,26 @@ let span = self.current_span();
                     let inner = self.parse_pattern_fields()?;
                     self.expect(Token::RParen)?;
                     fields.push(format!("({})", inner.join(",")));
+                }
+                Some(Ok(Token::Integer(val))) => {
+                    fields.push(val.to_string());
+                    self.advance();
+                }
+                Some(Ok(Token::Float(val))) => {
+                    fields.push(val.to_string());
+                    self.advance();
+                }
+                Some(Ok(Token::BoolTrue)) => {
+                    fields.push("true".to_string());
+                    self.advance();
+                }
+                Some(Ok(Token::BoolFalse)) => {
+                    fields.push("false".to_string());
+                    self.advance();
+                }
+                Some(Ok(Token::Char(c))) => {
+                    fields.push(format!("'{}'", c));
+                    self.advance();
                 }
                 _ => {
                     // Try as identifier or keyword
@@ -4155,7 +4311,9 @@ let span = self.current_span();
                         }
                     }
                     self.expect(Token::RParen)?;
-                    expr = Expr::Call(member_name, vec![expr]);
+                    let mut call_args = vec![expr];
+                    call_args.extend(args);
+                    expr = Expr::Call(member_name, call_args);
                 } else {
                     expr = Expr::FieldAccess(Box::new(expr), member_name);
                 }
@@ -4226,10 +4384,16 @@ let span = self.current_span();
                         }
                     }
                     self.expect(Token::RParen)?;
-                    expr = Expr::Call(member_name, vec![expr]);
+                    let mut call_args = vec![expr];
+                    call_args.extend(args);
+                    expr = Expr::Call(member_name, call_args);
                 } else {
                     expr = Expr::FieldAccess(Box::new(expr), member_name);
                 }
+            } else if let Some(Ok(Token::As)) = self.current_token() {
+                self.advance();
+                let cast_type = self.parse_type()?;
+                expr = Expr::Cast(Box::new(expr), cast_type);
             } else {
                 break;
             }
@@ -4278,6 +4442,10 @@ let span = self.current_span();
             Some(Ok(Token::BoolFalse)) => {
                 self.advance();
                 Ok(Expr::Bool(false))
+            }
+            Some(Ok(Token::Term)) => {
+                self.advance();
+                Ok(Expr::Term)
             }
             Some(Ok(Token::Identifier(name))) => {
                 let name = name.clone();
@@ -4800,8 +4968,39 @@ let span = self.current_span();
                 let path = format!("~/{}", identifier);
                 Ok(Expr::String(path))
             }
-            Some(tok) => self.spanned_err(format!("Unexpected token in expression: {:?}", tok)),
-            None => self.spanned_err("Unexpected EOF in expression".to_string()),
+            _ => {
+                // Fallback: try expect_identifier (handles keywords + identifiers)
+                match self.expect_identifier() {
+                    Ok(name) => {
+                        if let Some(Ok(Token::LParen)) = self.current_token() {
+                            self.advance();
+                            let mut args = Vec::new();
+                            if let Some(Ok(Token::RParen)) = self.current_token() {
+                            } else {
+                                loop {
+                                    args.push(self.parse_expression()?);
+                                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                                        self.advance();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            self.expect(Token::RParen)?;
+                            Ok(Expr::Call(name, args))
+                        } else {
+                            Ok(Expr::Identifier(name))
+                        }
+                    }
+                    Err(e) => {
+                        if self.current_token().is_none() {
+                            self.spanned_err("Unexpected EOF in expression".to_string())
+                        } else {
+                            Err(e)
+                        }
+                    }
+                }
+            }
         }
     }
 

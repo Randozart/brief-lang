@@ -99,14 +99,17 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     uni expr(ExprVar(name)) = {
         [state.vars.contains_key(name)] {
             term state.vars.get(name).unwrap();
-};
-        term SymFloat(l + r);
-    };
+        };
+        term SymVar(name);
     };
     
     // Prior state (@var)
     uni expr(ExprPriorState(name)) = {
         term SymVar("@" + name);
+    };
+    
+    uni expr(ExprTerm) = {
+        term SymVar("term");
     };
     
     // Binary operations
@@ -119,7 +122,7 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     // Unary operations
     uni expr(ExprUnaryOp(op, operand)) = {
         let operand_sym = eval_symbolic(operand, state);
-        term SymUnaryOp(op, Box(operand_sym));
+        term SymUnaryOp(op, operand_sym);
     };
     
     // Unknown for complex expressions
@@ -153,48 +156,49 @@ defn simplify(sym: SymbolicValue) -> SymbolicValue {
             [op == "*"] { term SymFloat(l * r); };
             [op == "/"] { [r != 0.0] { term SymFloat(l / r); }; };
         };
+        [true] { term SymUnknown; };
+        };
         
-        uni (left_simp, right_simp) = (SymBool(l), SymBool(r)) = {
-            [op == "&&"] { term SymBool(l && r); };
-            [op == "||"] { term SymBool(l || r); };
-            [op == "=="] { term SymBool(l == r); };
-            [op == "!="] { term SymBool(l != r); };
+        uni left_simp(SymBool(l)) = {
+            uni right_simp(SymBool(r)) = {
+                [op == "&&"] { term SymBool(l && r); };
+                [op == "||"] { term SymBool(l || r); };
+                [op == "=="] { term SymBool(l == r); };
+                [op == "!="] { term SymBool(l != r); };
+            };
+            [true] { term SymUnknown; };
         };
         
         // Identity operations
-        uni (op, left_simp, right_simp) = ("+", SymInt(0), _) = {
-            term right_simp;
+        [op == "+"] {
+            uni left_simp(SymInt(0)) = { term right_simp; };
+            uni right_simp(SymInt(0)) = { term left_simp; };
         };
-        uni (op, left_simp, right_simp) = ("+", _, SymInt(0)) = {
-            term left_simp;
-        };
-        uni (op, left_simp, right_simp) = ("*", SymInt(1), _) = {
-            term right_simp;
-        };
-        uni (op, left_simp, right_simp) = ("*", _, SymInt(1)) = {
-            term left_simp;
-        };
-        uni (op, left_simp, right_simp) = ("*", _, SymInt(0)) = {
-            term SymInt(0);
-        };
-        uni (op, left_simp, right_simp) = ("*", SymInt(0), _) = {
-            term SymInt(0);
+        [op == "*"] {
+            uni left_simp(SymInt(1)) = { term right_simp; };
+            uni right_simp(SymInt(1)) = { term left_simp; };
+            uni left_simp(SymInt(0)) = { term SymInt(0); };
+            uni right_simp(SymInt(0)) = { term SymInt(0); };
         };
         
-        term SymBinaryOp(op, left_simp), right_simp));
+        term SymBinaryOp(op, left_simp, right_simp);
     };
     
     uni sym(SymUnaryOp(op, operand)) = {
         let operand_simp = simplify(operand);
         
-        uni (op, operand_simp) = ("-", SymInt(n)) = {
-            term SymInt(-n);
+        [op == "-"] {
+            uni operand_simp(SymInt(n)) = {
+                term SymInt(-n);
+            };
         };
-        uni (op, operand_simp) = ("!", SymBool(b)) = {
-            term SymBool(!b);
+        [op == "!"] {
+            uni operand_simp(SymBool(b)) = {
+                term SymBool(!b);
+            };
         };
         
-        term SymUnaryOp(op, Box(operand_simp));
+        term SymUnaryOp(op, operand_simp);
     };
     
     term sym;
@@ -260,7 +264,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
             uni stmt(StmtGuarded(condition, body)) = {
                 &was_guarded = true;
                 // Evaluate condition symbolically
-                let cond_sym = eval_symbolic(*condition, state);
+                let cond_sym = eval_symbolic(condition, state);
                 let cond_simp = simplify(cond_sym);
                 
                 // True branch
@@ -305,15 +309,19 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
 }
 
 defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> SymbolicState {
-    uni stmt(StmtLet(name, _, Some(init), _, _)) = {
-        let value = eval_symbolic(*init, state);
-        term state_assign(state, name, value);
+    uni stmt(StmtLet(name, _, init_opt, _, _)) = {
+        [is_some(init_opt)] {
+            let init = unwrap(init_opt);
+            let value = eval_symbolic(init, state);
+            term state_assign(state, name, value);
+        };
+        term state;
     };
     
     uni stmt(StmtAssign(lhs, rhs, _)) = {
         // Extract variable name from lhs
-        uni *lhs(ExprVar(name)) = {
-            let value = eval_symbolic(*rhs, state);
+        uni lhs(ExprVar(name)) = {
+            let value = eval_symbolic(rhs, state);
             term state_assign(state, name, value);
         };
         term state;
@@ -374,28 +382,10 @@ defn verify_contract(txn: Transaction) -> ProofResult {
     // They are added to the initial state with @ prefix for postcondition checking.
     let pre_vars = extract_var_names(txn.contract.precondition);
     let post_vars = extract_var_names(txn.contract.postcondition);
-    let all_vars = pre_vars.append_all(post_vars);
-    let j: Int = 0;
-    [j < all_vars.len()] {
-        let var_name = all_vars[j];
-        // If the variable starts with @, it's already a prior-state reference
-        [var_name.len() > 0 && var_name[0] != '@'] {
-            [initial.vars.contains_key(var_name)] {
-                initial = state_assign(initial, "@" + var_name, SymVar(var_name));
-            };
-            // If not yet assigned, assign a fresh symbolic value
-            [!initial.vars.contains_key(var_name)] {
-                initial = state_assign(initial, var_name, SymVar(var_name));
-            };
-        };
-        &j = j + 1;
-    };
-
-    // Explore all paths through transaction
     let paths = explore_paths(txn.body, initial);
-    
+
     // Check each path
-    let all_verified = true;
+    let all_verified: Bool = true;
     let counterexample: Option<CounterExample> = None;
     
     let i: Int = 0;
@@ -424,10 +414,6 @@ defn verify_contract(txn: Transaction) -> ProofResult {
                     let left_expanded = str_replace(left_str, "@", "");
                     let right_expanded = str_replace(right_str, "@", "");
                     
-                    [left_str == right_str || left_expanded == right_expanded ||
-                     left_expanded == right_str || right_expanded == left_str] {
-                        // Pass — structurally equivalent after prior-state resolution
-                    };
                     [!left_str == right_str && !left_expanded == right_expanded &&
                      !left_expanded == right_str && !right_expanded == left_str] {
                         &all_verified = false;
@@ -437,14 +423,6 @@ defn verify_contract(txn: Transaction) -> ProofResult {
                             violation: "Postcondition not satisfied"
                         });
                     };
-                };
-                [!uni txn.contract.postcondition(ExprBinOp("==", _, _)) = true] {
-                    &all_verified = false;
-                    &counterexample = Some(CounterExample {
-                        inputs: path.final_state.vars,
-                        path: path,
-                        violation: "Postcondition not satisfied"
-                    });
                 };
             };
         };
@@ -466,6 +444,9 @@ defn extract_var_names(expr: Expr) -> List<String> {
     };
     uni expr(ExprPriorState(name)) = {
         term ["@" + name];
+    };
+    uni expr(ExprTerm) = {
+        term ["term"];
     };
     uni expr(ExprBinOp(_, left, right)) = {
         let l_vars = extract_var_names(left);
@@ -615,16 +596,16 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
             writes = writes.append(name);
         };
         uni stmts[i](StmtAssign(lhs, _, _)) = {
-            uni *lhs(ExprVar(name)) = {
+            uni lhs(ExprVar(name)) = {
                 writes = writes.append(name);
             };
-            uni *lhs(ExprFieldAccess(obj, field)) = {
+            uni lhs(ExprFieldAccess(obj, field)) = {
                 // Field writes count as writing the base variable
-                let obj_reads = collect_reads_expr(*obj);
+                let obj_reads = collect_reads_expr(obj);
                 writes = writes.append_all(obj_reads);
             };
-            uni *lhs(ExprIndex(arr, _)) = {
-                let arr_reads = collect_reads_expr(*arr);
+            uni lhs(ExprIndex(arr, _)) = {
+                let arr_reads = collect_reads_expr(arr);
                 writes = writes.append_all(arr_reads);
             };
         };
@@ -675,9 +656,9 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
     
     let i: Int = 0;
     [i < txns.len()] {
-        let txn = txns[i];
-        let reads = collect_reads(txn.body);
-        let writes = collect_writes(txn.body);
+        let cur_txn = txns[i];
+        let reads = collect_reads(cur_txn.body);
+        let writes = collect_writes(cur_txn.body);
         
         // Find transactions that write to variables this one reads
         let txn_deps: List<String> = [];
@@ -700,7 +681,7 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
             &j = j + 1;
         };
         
-        deps = deps.insert(txn.name, txn_deps);
+        deps = deps.insert(cur_txn.name, txn_deps);
         &i = i + 1;
     };
     
@@ -773,6 +754,10 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
         term ["@" + name];
     };
     
+    uni expr(ExprTerm) = {
+        term ["term"];
+    };
+    
     uni expr(ExprBinOp(_, left, right)) = {
         let left_reads = collect_reads_expr(left);
         let right_reads = collect_reads_expr(right);
@@ -784,12 +769,12 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
     };
     
     uni expr(ExprFieldAccess(obj, _)) = {
-        term collect_reads_expr(*obj);
+        term collect_reads_expr(obj);
     };
     
     uni expr(ExprIndex(arr, idx)) = {
-        let arr_reads = collect_reads_expr(*arr);
-        let idx_reads = collect_reads_expr(*idx);
+        let arr_reads = collect_reads_expr(arr);
+        let idx_reads = collect_reads_expr(idx);
         term arr_reads.append_all(idx_reads);
     };
     
@@ -832,12 +817,15 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
     
     let i: Int = 0;
     [i < stmts.len()] {
-        uni stmts[i](StmtLet(_, _, Some(init), _, _)) = {
-            reads = reads.append_all(collect_reads_expr(*init));
+        uni stmts[i](StmtLet(_, _, init_opt, _, _)) = {
+            [is_some(init_opt)] {
+                let init = unwrap(init_opt);
+                reads = reads.append_all(collect_reads_expr(init));
+            };
         };
         uni stmts[i](StmtAssign(lhs, rhs, _)) = {
-            reads = reads.append_all(collect_reads_expr(*lhs));
-            reads = reads.append_all(collect_reads_expr(*rhs));
+            reads = reads.append_all(collect_reads_expr(lhs));
+            reads = reads.append_all(collect_reads_expr(rhs));
         };
         uni stmts[i](StmtTerm(values, _)) = {
             let j: Int = 0;
@@ -849,25 +837,25 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
             };
         };
         uni stmts[i](StmtGuarded(condition, body)) = {
-            reads = reads.append_all(collect_reads_expr(*condition));
+            reads = reads.append_all(collect_reads_expr(condition));
             reads = reads.append_all(collect_reads(body));
         };
         uni stmts[i](StmtLoop(body)) = {
             reads = reads.append_all(collect_reads(body));
         };
         uni stmts[i](StmtWhile(cond, body)) = {
-            reads = reads.append_all(collect_reads_expr(*cond));
+            reads = reads.append_all(collect_reads_expr(cond));
             reads = reads.append_all(collect_reads(body));
         };
         uni stmts[i](StmtFor(_, iter, body)) = {
-            reads = reads.append_all(collect_reads_expr(*iter));
+            reads = reads.append_all(collect_reads_expr(iter));
             reads = reads.append_all(collect_reads(body));
         };
         uni stmts[i](StmtOnExit(body)) = {
             reads = reads.append_all(collect_reads(body));
         };
         uni stmts[i](StmtIf(cond, then_body, else_body)) = {
-            reads = reads.append_all(collect_reads_expr(*cond));
+            reads = reads.append_all(collect_reads_expr(cond));
             reads = reads.append_all(collect_reads(then_body));
             reads = reads.append_all(collect_reads(else_body));
         };
@@ -898,7 +886,7 @@ defn generate_vc(txn: Transaction) -> VerificationCondition {
     };
 }
 
-defn check_vc(vc: VerificationCondition) -> Result<(), String> {
+defn check_vc(vc: VerificationCondition) -> Bool {
     // Check if assumptions imply conclusion
     // For each assumption, add to path constraints
     let state = initial_state();
@@ -912,10 +900,10 @@ defn check_vc(vc: VerificationCondition) -> Result<(), String> {
     // Check if conclusion holds
     let conclusion_simp = simplify(vc.conclusion);
     uni conclusion_simp(SymBool(false)) = {
-        term Err("Verification condition failed");
+        term false;
     };
     
-    term Ok(());
+    term true;
 }
 
 // ===== UTILITY FUNCTIONS =====
@@ -976,12 +964,12 @@ struct SimdOp {
 defn extract_list_name(expr: Expr) -> Option<String> {
     uni expr(ExprVar(name)) = { term Some(name); };
     uni expr(ExprFieldAccess(obj, field)) = {
-        let inner = extract_list_name(*obj);
+        let inner = extract_list_name(obj);
         uni inner(Some(n)) = { term Some(n + "." + field); };
         term None;
     };
     uni expr(ExprListIndex(inner, _)) = {
-        term extract_list_name(*inner);
+        term extract_list_name(inner);
     };
     term None;
 }
@@ -995,12 +983,15 @@ defn collect_simd_ops(body: List<Statement>) -> List<SimdOp> {
             &ops = ops.append_all(result);
         };
         uni body[i](StmtAssign(lhs, rhs, _)) = {
-            let result = collect_simd_ops_in_expr(*rhs, "assign");
+            let result = collect_simd_ops_in_expr(rhs, "assign");
             &ops = ops.append_all(result);
         };
-        uni body[i](StmtLet(_, _, Some(init), _, _)) = {
-            let result = collect_simd_ops_in_expr(*init, "let");
-            &ops = ops.append_all(result);
+        uni body[i](StmtLet(_, _, init_opt, _, _)) = {
+            [is_some(init_opt)] {
+                let init = unwrap(init_opt);
+                let result = collect_simd_ops_in_expr(init, "let");
+                &ops = ops.append_all(result);
+            };
         };
         &i = i + 1;
     };

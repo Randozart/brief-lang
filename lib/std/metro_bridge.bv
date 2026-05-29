@@ -66,7 +66,7 @@ defn metropolitan_rpc(
 ) -> Result<List<Int>, String> [
     true
 ][
-    result.is_ok() || result.is_err()
+    term.is_ok() || term.is_err()
 ] {
     let ch = __metro_create_channel(channel_id, 4096, 4096);
     [ch.is_ok()] {

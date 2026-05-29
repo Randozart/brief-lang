@@ -10,17 +10,17 @@ enum Option<T> {
 
 // ===== CONSTRUCTION =====
 
-defn some<T>(value: T) [true][result.is_some()] -> Option<T> {
+defn some<T>(value: T) [true][term.is_some()] -> Option<T> {
     term Some(value);
 };
 
-defn none<T>() [true][result.is_none()] -> Option<T> {
+defn none<T>() [true][term.is_none()] -> Option<T> {
     term None;
 };
 
 // ===== INSPECTION =====
 
-defn is_some<T>(opt: Option<T>) [true][result == true || result == false] -> Bool {
+defn is_some<T>(opt: Option<T>) [true][term == true || term == false] -> Bool {
     uni opt(Some(_)) = {
         term true;
     };
@@ -30,7 +30,7 @@ defn is_some<T>(opt: Option<T>) [true][result == true || result == false] -> Boo
     term false;
 };
 
-defn is_none<T>(opt: Option<T>) [true][result == true || result == false] -> Bool {
+defn is_none<T>(opt: Option<T>) [true][term == true || term == false] -> Bool {
     uni opt(Some(_)) = {
         term false;
     };
@@ -49,7 +49,7 @@ defn unwrap<T>(opt: Option<T>) [opt.is_some()][true] -> T {
     // None case impossible - precondition guarantees opt.is_some()
 };
 
-defn unwrap_or<T>(opt: Option<T>, default: T) [true][result == opt.unwrap() || result == default] -> T {
+defn unwrap_or<T>(opt: Option<T>, default: T) [true][term == unwrap(opt) || term == default] -> T {
     uni opt(Some(v)) = {
         term v;
     };
@@ -59,7 +59,7 @@ defn unwrap_or<T>(opt: Option<T>, default: T) [true][result == opt.unwrap() || r
     term default;
 };
 
-defn unwrap_or_else<T>(opt: Option<T>, fallback: () -> T) [fallback != null][result == opt.unwrap() || result == fallback()] -> T {
+defn unwrap_or_else<T>(opt: Option<T>, fallback: () -> T) [fallback != null][term == unwrap(opt) || term == fallback()] -> T {
     uni opt(Some(v)) = {
         term v;
     };
@@ -71,7 +71,7 @@ defn unwrap_or_else<T>(opt: Option<T>, fallback: () -> T) [fallback != null][res
 
 // ===== TRANSFORMATION =====
 
-defn map<T, U>(opt: Option<T>, f: T -> U) [f != null][result.is_some() == opt.is_some()] -> Option<U> {
+defn map<T, U>(opt: Option<T>, f: T -> U) [f != null][term.is_some() == opt.is_some()] -> Option<U> {
     uni opt(Some(v)) = {
         term Some(f(v));
     };
@@ -81,7 +81,7 @@ defn map<T, U>(opt: Option<T>, f: T -> U) [f != null][result.is_some() == opt.is
     term None;
 };
 
-defn and_then<T, U>(opt: Option<T>, f: T -> Option<U>) [f != null][result.is_some() == opt.is_some()] -> Option<U> {
+defn and_then<T, U>(opt: Option<T>, f: T -> Option<U>) [f != null][term.is_some() == opt.is_some()] -> Option<U> {
     uni opt(Some(v)) = {
         term f(v);
     };
@@ -91,7 +91,7 @@ defn and_then<T, U>(opt: Option<T>, f: T -> Option<U>) [f != null][result.is_som
     term None;
 };
 
-defn or_else<T>(opt: Option<T>, fallback: () -> Option<T>) [fallback != null][result.is_some() == opt.is_some() || result.is_some()] -> Option<T> {
+defn or_else<T>(opt: Option<T>, fallback: () -> Option<T>) [fallback != null][term.is_some() == opt.is_some() || term.is_some()] -> Option<T> {
     uni opt(Some(v)) = {
         term Some(v);
     };
@@ -101,7 +101,7 @@ defn or_else<T>(opt: Option<T>, fallback: () -> Option<T>) [fallback != null][re
     term fallback();
 };
 
-defn filter<T>(opt: Option<T>, pred: T -> Bool) [pred != null][result.is_some() && pred(opt.unwrap())] -> Option<T> {
+defn filter<T>(opt: Option<T>, pred: T -> Bool) [pred != null][term.is_some() && pred(unwrap(opt))] -> Option<T> {
     uni opt(Some(v)) = {
         [pred(v)] {
             term Some(v);
@@ -116,7 +116,7 @@ defn filter<T>(opt: Option<T>, pred: T -> Bool) [pred != null][result.is_some() 
 
 // ===== COMBINATION =====
 
-defn zip<T, U>(a: Option<T>, b: Option<U>) [true][result.is_some() == (a.is_some() && b.is_some())] -> Option<(T, U)> {
+defn zip<T, U>(a: Option<T>, b: Option<U>) [true][term.is_some() == (a.is_some() && b.is_some())] -> Option<(T, U)> {
     uni a(Some(x)) = {
         uni b(Some(y)) = {
             term Some((x, y));
@@ -132,7 +132,7 @@ defn zip<T, U>(a: Option<T>, b: Option<U>) [true][result.is_some() == (a.is_some
     term None;
 };
 
-defn ok_or<T, E>(opt: Option<T>, err: E) [true][result.is_ok() == opt.is_some()] -> Result<T, E> {
+defn ok_or<T, E>(opt: Option<T>, err: E) [true][term.is_ok() == opt.is_some()] -> Result<T, E> {
     uni opt(Some(v)) = {
         term Ok(v);
     };
@@ -142,7 +142,7 @@ defn ok_or<T, E>(opt: Option<T>, err: E) [true][result.is_ok() == opt.is_some()]
     term Err(err);
 };
 
-defn ok_or_else<T, E>(opt: Option<T>, err_fn: () -> E) [err_fn != null][result.is_ok() == opt.is_some()] -> Result<T, E> {
+defn ok_or_else<T, E>(opt: Option<T>, err_fn: () -> E) [err_fn != null][term.is_ok() == opt.is_some()] -> Result<T, E> {
     uni opt(Some(v)) = {
         term Ok(v);
     };

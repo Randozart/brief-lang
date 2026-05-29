@@ -9,21 +9,21 @@ struct Stack<T> {
 
 // ===== CONSTRUCTION =====
 
-defn new_stack<T>() -> Stack<T> [true][result.is_empty()] {
+defn new_stack<T>() -> Stack<T> [true][term.is_empty()] {
     term Stack { items: [] };
 };
 
-defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][result.is_empty()] {
+defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][term.is_empty()] {
     term Stack { items: [] };
 };
 
 // ===== OPERATIONS =====
 
-defn push<T>(stack: Stack<T>, item: T) [true][result.len() == stack.len() + 1] -> Stack<T> {
+defn push<T>(stack: Stack<T>, item: T) [true][term.len() == stack.len() + 1] -> Stack<T> {
     term Stack { items: stack.items + [item] };
 };
 
-defn pop<T>(stack: Stack<T>) [!stack.is_empty()][result.len() == stack.len() - 1] -> Stack<T> {
+defn pop<T>(stack: Stack<T>) [!stack.is_empty()][term.len() == stack.len() - 1] -> Stack<T> {
     [stack.is_empty()] {
         term stack;
     };
@@ -44,20 +44,20 @@ defn top<T>(stack: Stack<T>) [!stack.is_empty()][true] -> T {
 
 // ===== METADATA =====
 
-defn len<T>(stack: Stack<T>) [true][result >= 0] -> Int {
+defn len<T>(stack: Stack<T>) [true][term >= 0] -> Int {
     term stack.items.len();
 };
 
-defn is_empty<T>(stack: Stack<T>) [true][result == true || result == false] -> Bool {
+defn is_empty<T>(stack: Stack<T>) [true][term == true || term == false] -> Bool {
     term stack.items.len() == 0;
 };
 
 // ===== CONVERSION =====
 
-defn to_list<T>(stack: Stack<T>) [true][result.len() == stack.len()] -> List<T> {
+defn to_list<T>(stack: Stack<T>) [true][term.len() == stack.len()] -> List<T> {
     term stack.items;
 };
 
-defn from_list<T>(items: List<T>) [true][result.len() == items.len()] -> Stack<T> {
+defn from_list<T>(items: List<T>) [true][term.len() == items.len()] -> Stack<T> {
     term Stack { items: items };
 };

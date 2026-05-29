@@ -306,6 +306,7 @@ pub enum Expr {
     String(String),
     Char(char),  // NEW: Char literal
     Bool(bool),
+    Term,
     Identifier(String),
     OwnedRef(String),
     PriorState(String),
@@ -331,6 +332,8 @@ pub enum Expr {
     Shl(Box<Expr>, Box<Expr>),
     Shr(Box<Expr>, Box<Expr>),
     Concat(Box<Expr>, Box<Expr>),
+    /// Type cast: expr as Type
+    Cast(Box<Expr>, Type),
     Call(String, Vec<Expr>),
     ListLiteral(Vec<Expr>),
     ListIndex(Box<Expr>, Box<Expr>),

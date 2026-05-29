@@ -69,7 +69,7 @@ defn type_to_c(ty: Type) -> String {
     uni ty(TypeBool) = { term "bool"; };
     uni ty(TypeChar) = { term "char"; };
     uni ty(TypeVoid) = { term "void"; };
-    term "void"
+    term "void";
 }
 
 defn generate_c_transaction(txn: Transaction) -> String {
@@ -130,9 +130,9 @@ defn generate_c_statement(stmt: Statement) -> String {
     
     uni stmt(StmtAssign(lhs, rhs, _modifiers)) = {
         let output = new_builder();
-        output = output.append_str(expr_to_c(*lhs));
+        output = output.append_str(expr_to_c(lhs));
         output = output.append_str(" = ");
-        output = output.append_str(expr_to_c(*rhs));
+        output = output.append_str(expr_to_c(rhs));
         output = output.append_str(";\n");
         term output.to_string();
     };
@@ -151,7 +151,7 @@ defn generate_c_statement(stmt: Statement) -> String {
     uni stmt(StmtGuarded(condition, body)) = {
         let output = new_builder();
         output = output.append_str("if (");
-        output = output.append_str(expr_to_c(*condition));
+        output = output.append_str(expr_to_c(condition));
         output = output.append_str(") {\n");
         output = output.append_str(generate_c_block(body));
         output = output.append_str("}\n");
@@ -217,24 +217,15 @@ defn expr_to_c(expr: Expr) -> String {
     uni expr(ExprBinOp(op, left, right)) = {
         let sb = new_builder();
         sb = sb.append_str("(");
-        sb = sb.append_str(expr_to_c(*left));
+sb = sb.append_str(expr_to_c(left));
         sb = sb.append_str(" ");
-        [op == "+"] { sb = sb.append_str("+"); };
-        [op == "-"] { sb = sb.append_str("-"); };
-        [op == "*"] { sb = sb.append_str("*"); };
-        [op == "/"] { sb = sb.append_str("/"); };
-        [op == "=="] { sb = sb.append_str("=="); };
-        [op == "!="] { sb = sb.append_str("!="); };
-        [op == "<"] { sb = sb.append_str("<"); };
-        [op == ">"] { sb = sb.append_str(">"); };
-        [op == "&&"] { sb = sb.append_str("&&"); };
-        [op == "||"] { sb = sb.append_str("||"); };
+        sb = sb.append_str(op_to_c(op));
         sb = sb.append_str(" ");
-        sb = sb.append_str(expr_to_c(*right));
+        sb = sb.append_str(expr_to_c(right));
         sb = sb.append_str(")");
         term sb.to_string();
     };
-    term "0"
+    term "0";
 }
 
 defn generate_c_reactor(program: Program, cg: CallGraphResult) -> String {

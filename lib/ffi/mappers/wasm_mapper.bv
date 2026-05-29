@@ -10,50 +10,50 @@ defn wasm_ptr_to_string(ptr: Int, memory: Memory) -> String [ptr > 0 && memory.v
 // Convert Brief String to WASM pointer (writes to memory)
 // Precondition: string is valid UTF-8
 // Postcondition: Returns pointer to string in WASM memory
-defn brief_string_to_wasm(s: String, memory: Memory) -> Int [memory.valid()][result > 0] {
+defn brief_string_to_wasm(s: String, memory: Memory) -> Int [memory.valid()][term > 0] {
   term memory.write_string(s);
 };
 
 // Convert WASM pointer to Brief Data (bytes)
 // Precondition: pointer and length are valid
 // Postcondition: Returns byte list
-defn wasm_ptr_to_data(ptr: Int, len: Int, memory: Memory) -> Data [ptr > 0 && len >= 0 && memory.valid()][result.len() == len] {
+defn wasm_ptr_to_data(ptr: Int, len: Int, memory: Memory) -> Data [ptr > 0 && len >= 0 && memory.valid()][term.len() == len] {
   term memory.read_bytes(ptr, len);
 };
 
 // Write Brief Data to WASM memory
 // Precondition: data is valid
 // Postcondition: Returns pointer to data in memory
-defn brief_data_to_wasm(data: Data, memory: Memory) -> Int [memory.valid()][result > 0] {
+defn brief_data_to_wasm(data: Data, memory: Memory) -> Int [memory.valid()][term > 0] {
   term memory.write_bytes(data);
 };
 
 // Convert JS value to Brief Data
 // Precondition: JS value exists
 // Postcondition: Returns serialized data
-defn js_value_to_data(js_val: JsValue) -> Data [js_val.is_valid()][result.len() >= 0] {
+defn js_value_to_data(js_val: JsValue) -> Data [js_val.is_valid()][term.len() >= 0] {
   term js_val.to_bytes();
 };
 
 // Convert Brief Data to JS value
 // Precondition: data is valid
 // Postcondition: Returns JS value
-defn data_to_js_value(data: Data) -> JsValue [true][result.is_valid()] {
+defn data_to_js_value(data: Data) -> JsValue [true][term.is_valid()] {
   term JsValue::from_bytes(data);
 };
 
 // Check if JS value is null
-defn js_is_null(js_val: JsValue) -> Bool [true][result == true || result == false] {
+defn js_is_null(js_val: JsValue) -> Bool [true][term == true || term == false] {
   term js_val.is_null();
 };
 
 // Check if JS value is undefined
-defn js_is_undefined(js_val: JsValue) -> Bool [true][result == true || result == false] {
+defn js_is_undefined(js_val: JsValue) -> Bool [true][term == true || term == false] {
   term js_val.is_undefined();
 };
 
 // Get WASM memory size
-defn wasm_memory_size(memory: Memory) -> Int [memory.valid()][result >= 0] {
+defn wasm_memory_size(memory: Memory) -> Int [memory.valid()][term >= 0] {
   term memory.size();
 };
 
@@ -63,7 +63,7 @@ defn wasm_memory_grow(memory: Memory, pages: Int) -> Bool [memory.valid() && pag
 };
 
 // Validate WASM pointer alignment
-defn wasm_valid_ptr(ptr: Int, align: Int) -> Bool [align > 0][result == true || result == false] {
+defn wasm_valid_ptr(ptr: Int, align: Int) -> Bool [align > 0][term == true || term == false] {
   [ptr % align == 0] {
     term true;
   };

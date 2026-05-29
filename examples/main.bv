@@ -8,7 +8,7 @@ import compiler.lexer;
 
 // ===== COMPILER FUNCTIONS =====
 
-defn count_tokens(source: String) -> Int [source != ""][result >= 0] {
+defn count_tokens(source: String) -> Int [source != ""][term >= 0] {
     // Step 1: Tokenize using the Brief-written lexer
     let lex = new_lexer(source);
     let result = tokenize(lex);
@@ -23,7 +23,7 @@ defn count_tokens(source: String) -> Int [source != ""][result >= 0] {
 
 // ===== MAIN TRANSACTION =====
 
-txn compile_main [true][result == "compilation complete"] {
+txn compile_main [true][term == "compilation complete"] {
     let source: String = "let x: Int = 0;\n\n txn test [true][true] {\n   term;\n };";
     let count = count_tokens(source);
     term;
