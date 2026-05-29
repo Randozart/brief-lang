@@ -40,8 +40,13 @@ rct txn my_work [some_trigger] { ... term; };
 rct txn sleep [true] { __wait_for_event(); term; };
 ```
 
-Because `rct txn` uses first-true-wins dispatch, and `sleep` has precondition
-`[true]`, it can only fire if all earlier transactions had false preconditions.
+Because `rct txn` uses **fall-through dispatch** (all preconditions evaluated
+sequentially in one tick), and `sleep` is declared last, it fires only when
+no earlier transaction's precondition was true. Each transaction's side
+effects are visible to the precondition evaluation of the next transaction
+in the same tick — so `__io_pump` can set `io_ready` and a downstream
+consumer can read it within the same tick.
+
 This is the "equilibrium sleep" pattern, composed entirely from existing
 primitives.
 

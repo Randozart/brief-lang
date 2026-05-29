@@ -1047,7 +1047,6 @@ Expr::Identifier(name) => {
                 let first_txn = self.resolve_dispatch_first_txn(first);
                 writeln!(out, "  %pr0 = call i1 @pre_{}(%State* @global_state)", first_txn).ok();
                 writeln!(out, "  br i1 %pr0, label %b0, label %{}", check0).ok();
-                writeln!(out, "  br i1 %pr0, label %b0, label %{}", check0).ok();
             } else {
                 writeln!(out, "  br i1 true, label %b0, label %{}", check0).ok();
             }
@@ -1057,7 +1056,10 @@ Expr::Identifier(name) => {
                 let c = format!("ck{}", i);
                 writeln!(out, "{}:", b).ok();
                 writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
-                writeln!(out, "  ret void").ok();
+                // Fall through to this transaction's check label, which evaluates
+                // the NEXT transaction's precondition. Matches the interpreter model
+                // where all dirty transactions are evaluated sequentially in one tick.
+                writeln!(out, "  br label %{}", c).ok();
 
                 if i + 1 < dispatch.len() {
                     let next = &dispatch[i + 1];

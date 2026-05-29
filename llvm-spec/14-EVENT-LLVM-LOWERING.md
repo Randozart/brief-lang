@@ -215,6 +215,43 @@ For `trg name: Type @ 0xABCD;`:
 
 ## 9. Dispatch Ordering
 
+The dispatch chain in reactor_tick() evaluates preconditions in priority order
+using a **fall-through chain** (not first-true-wins return). Each transaction
+body branches to the next precondition check, never to `ret void`. The final
+`ret void` only executes after ALL preconditions have been evaluated:
+
+```llvm
+; Evaluate pump
+%pr_pump = call i1 @pre___io_pump(%State* @global_state)
+br i1 %pr_pump, label %b_pump, label %ck_next
+
+; Pump body — executes, then falls through to check next precondition
+b_pump:
+call void @__io_pump(%State* @global_state)
+br label %ck_next
+
+; Evaluate consumer
+ck_next:
+%pr_t1 = call i1 @pre_handle_input(%State* @global_state)
+br i1 %pr_t1, label %b_t1, label %ck_t1
+
+; Consumer body — executes, then falls through
+b_t1:
+call void @handle_input(%State* @global_state)
+br label %ck_t1
+
+; ... etc ...
+ck_t1:
+; No precondition was true — tick ends
+ret void
+```
+
+This matches the interpreter model (reactor.rs) where all dirty transactions
+are evaluated sequentially in one tick, with each transaction's side effects
+visible to the next transaction's precondition. This is essential for the
+pump/consumer pattern: `__io_pump` sets `io_ready`, and the consumer reads it
+in the same tick.
+
 The dispatch chain in reactor_tick() evaluates preconditions in priority order.
 The order is:
 

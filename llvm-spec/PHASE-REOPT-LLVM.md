@@ -529,14 +529,23 @@ documented in two companion documents:
 ### Impact on This Document
 
 The 17 bugs cataloged in Section 4 are all pre-existing in `src/backend/llvm.rs`
-and are orthogonal to the event model. The event model adds three new
-behaviors to the backend:
+and are orthogonal to the event model. The event model adds four behaviors
+to the backend:
 
 | # | Behavior | Priority |
 |---|----------|----------|
 | E1 | Emit `@sym = external global <ty>` for each `@ link` trigger | Fixes bug 4B (already in Phase D) |
 | E2 | Pre-sample triggers at reactor_tick entry into named registers | Phase F (completed) |
-| E3 | Remove hardcoded `__wait_for_event()` from equilibrium path | Phase F (completed) — sleep is now a library pattern (`frgn` + `rct txn [true]`) |
+| E3 | Remove hardcoded `__wait_for_event()` from equilibrium path | Phase F (completed) |
+| E4 | Fall-through dispatch chain (not first-true-return) | Phase F (completed) — each body branches to next precondition check, `ret void` only after all evaluated |
+
+Previously, each transaction body emitted `ret void`, causing the dispatch
+chain to exit after the first true precondition. This was incorrect — the
+interpreter model evaluates ALL dirty transactions sequentially, with each
+transaction's side effects visible to the next. The fix changes body blocks
+to `br label %ck{N+1}` (fall-through), so `__io_pump` can set `io_ready` and
+a downstream consumer reads it in the same tick. Only the final `ret void`
+at the end of the chain actually returns.
 
 The `trg!` statement (`Statement::LocalTrigger`) is emitted as a no-op comment.
 It is excluded from the LLVM backend's event model. New code should use
