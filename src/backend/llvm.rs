@@ -147,16 +147,20 @@ impl LlvmBackend {
     fn generate_init_state(&self, output: &mut String, program: &Program) {
         writeln!(output, "define void @init_state() local_unnamed_addr #0 {{").ok();
         writeln!(output, "  entry:").ok();
+        let mut reg_counter = 0u32;
         for item in &program.items {
             if let TopLevel::StateDecl(s) = item {
                 if let Some(ref expr) = s.expr {
                     let idx = self.field_index_map.get(&s.name).unwrap_or(&0);
                     let ty = self.llvm_type(&s.ty);
+                    let ptr_reg = format!("%init_ptr{}", reg_counter);
+                    reg_counter += 1;
+                    writeln!(output, "  {} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", ptr_reg, idx).ok();
                     if let Expr::Integer(n) = expr {
-                        writeln!(output, "  store volatile {} {}, {}* getelementptr inbounds (%State, %State* @global_state, i32 0, i32 {}), align {}", ty, n, ty, idx, self.align_of(ty)).ok();
+                        writeln!(output, "  store volatile {} {}, {}* {}, align {}", ty, n, ty, ptr_reg, self.align_of(ty)).ok();
                     } else if let Expr::Bool(b) = expr {
                         let val = if *b { 1 } else { 0 };
-                        writeln!(output, "  store volatile {} {}, {}* getelementptr inbounds (%State, %State* @global_state, i32 0, i32 {}), align {}", ty, val, ty, idx, self.align_of(ty)).ok();
+                        writeln!(output, "  store volatile {} {}, {}* {}, align {}", ty, val, ty, ptr_reg, self.align_of(ty)).ok();
                     }
                 }
             }
@@ -178,7 +182,7 @@ impl LlvmBackend {
     fn state_ptr(&self, output: &mut String, field_name: &str, val_reg: &str, indent: &str) {
         if let Some(&idx) = self.field_index_map.get(field_name) {
             let ty = &self.field_types[idx];
-            writeln!(output, "{}{} = getelementptr inbounds (%State, %State* %state, i32 0, i32 {})", indent, val_reg, idx).ok();
+            writeln!(output, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, val_reg, idx).ok();
         }
     }
 
@@ -231,8 +235,15 @@ impl LlvmBackend {
                     let ty = &self.field_types[idx];
                     let ptr_reg = format!("%ptr{}", self.txn_counter);
                     self.txn_counter += 1;
-                    writeln!(output, "{}{} = getelementptr inbounds (%State, %State* %state, i32 0, i32 {})", indent, ptr_reg, idx).ok();
-                    writeln!(output, "{}store {} {}, {}* {}, align {}", indent, ty, val, ty, ptr_reg, self.align_of(ty)).ok();
+                    writeln!(output, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ptr_reg, idx).ok();
+                    if ty == "i8" {
+                        let trunc_reg = format!("%tr{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(output, "{}{} = trunc i64 {} to i8", indent, trunc_reg, val).ok();
+                        writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, self.align_of(ty)).ok();
+                    } else {
+                        writeln!(output, "{}store {} {}, {}* {}, align {}", indent, ty, val, ty, ptr_reg, self.align_of(ty)).ok();
+                    }
                 } else {
                     writeln!(output, "{}; assign {} to {}", indent, val, name).ok();
                 }
@@ -311,8 +322,15 @@ impl LlvmBackend {
                     let ty = &self.field_types[idx];
                     let ptr_reg = format!("%ptr{}", self.txn_counter);
                     self.txn_counter += 1;
-                    writeln!(output, "{}{} = getelementptr inbounds (%State, %State* %state, i32 0, i32 {})", indent, ptr_reg, idx).ok();
-                    writeln!(output, "{}{} = load {}, {}* {}, align {}", indent, val, ty, ty, ptr_reg, self.align_of(ty)).ok();
+                    writeln!(output, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ptr_reg, idx).ok();
+                    let load_reg = format!("%ld{}", self.txn_counter);
+                    self.txn_counter += 1;
+                    writeln!(output, "{}{} = load {}, {}* {}, align {}", indent, load_reg, ty, ty, ptr_reg, self.align_of(ty)).ok();
+                    if ty == "i8" {
+                        writeln!(output, "{}{} = zext i8 {} to i64", indent, val, load_reg).ok();
+                    } else {
+                        writeln!(output, "{}{} = add i64 0, {}", indent, val, load_reg).ok();
+                    }
                 } else {
                     writeln!(output, "{}{} = add i64 0, 0 ; identifier {}", indent, val, name).ok();
                 }
@@ -469,9 +487,7 @@ impl LlvmBackend {
     }
 
     fn generate_reactor(&mut self, output: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
-        let norecurse_str = if self.has_cycles { "" } else { " norecurse" };
-
-        writeln!(output, "define void @reactor_tick(){} local_unnamed_addr #0 {{", norecurse_str).ok();
+        writeln!(output, "define void @reactor_tick() local_unnamed_addr #0 {{").ok();
         writeln!(output, "  ; Sample all volatile triggers (see 08a-TRIGGERS.md)").ok();
         writeln!(output, "  ;   load volatile i8, i8* @trg_ptr → %trg_sampled").ok();
         writeln!(output, "  ; Load state").ok();

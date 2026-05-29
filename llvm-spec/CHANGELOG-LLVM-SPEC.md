@@ -161,3 +161,19 @@ The Rust backend (`src/backend/llvm.rs`) has been rewritten per the Phase 0 scaf
 - Created `tests/llvm_backend_test.rs` — Rust integration test (requires llc in PATH)
 - Created fixtures: `counter.bv`, `multifield.bv`, `minimal.bv`
 - LLVM tools (llc, opt) are now installed and available
+
+## Phase 0 Rust Backend — Validation Results
+
+### LLVM 18.1.3 Compatibility Fixes
+- **GEP syntax:** LLVM 18 removed support for parenthesized GEP in instructions. `getelementptr inbounds (%State, %State* %state, ...)` → `getelementptr inbounds %State, %State* %state, ...`
+- **`norecurse` in signature:** LLVM 18 refuses inline `norecurse` in function signatures. Must be in attribute group `#0` only.
+- **Type trunc/zext:** Bool fields stored as `i8` in `%State`. `i64` values must be `trunc`'d to `i8` before store; `i8` loads must be `zext`'d to `i64` for arithmetic.
+
+### Optimized Output (opt -O3 -S)
+LLVM 18.1.3 successfully optimized the Phase 0 output:
+- `increment` → 3 instructions: `load i64`, `add i64`, `store i64` (GEP eliminated — offset 0)
+- `init_state` → inlined into `main`
+- `reactor_tick` → `ret void` (dead-function eliminated since no op)
+- `main` → `store volatile`, then `unreachable` (LLVM proved infinite empty-tick loop is dead)
+- `noalias nocapture` verified present and functioning
+- Both `counter.ll` and `multifield.ll` pass `llc` assembly generation
