@@ -33,6 +33,9 @@ defn supported_hashtags(backend: String) -> List<String> {
     [backend == "webstack"] {
         term ["volatile", "export", "wasm_bindgen"];
     };
+    [backend == "llvm"] {
+        term ["volatile", "noalias", "alwaysinline", "norecurse", "align"];
+    };
     term [];
 }
 
