@@ -476,6 +476,8 @@ self.emit_declares(&mut out);
         writeln!(out, "{}{}:", indent, panic_l).ok();
         writeln!(out, "{}  unreachable", indent).ok();
         writeln!(out, "{}{}:", indent, safe_l).ok();
+        // Feed the proven precondition to LLVM's optimizer
+        writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
     }
 
     // ── PRECONDITION FUNCTION ────────────────────────────────
@@ -1117,6 +1119,28 @@ Expr::Identifier(name) => {
         ids.iter().any(|id| self.trigger_names.contains(id))
     }
 
+    /// Check if both operands of a binary op are bounded by range metadata,
+    /// meaning `nuw nsw` is safe to emit.
+    fn binop_has_bounds(&self, l: &Expr, r: &Expr) -> bool {
+        let mut ids = Vec::new();
+        Self::collect_binop_ids(l, &mut ids);
+        Self::collect_binop_ids(r, &mut ids);
+        if ids.is_empty() { return false; }
+        ids.iter().all(|id| self.range_bounds.contains_key(id))
+    }
+
+    fn collect_binop_ids(expr: &Expr, ids: &mut Vec<String>) {
+        match expr {
+            Expr::Identifier(n) => ids.push(n.clone()),
+            Expr::OwnedRef(n) => ids.push(n.clone()),
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                Self::collect_binop_ids(l, ids);
+                Self::collect_binop_ids(r, ids);
+            }
+            _ => {}
+        }
+    }
+
     fn is_float_expr(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Float(_) => true,
@@ -1159,7 +1183,9 @@ Expr::Identifier(name) => {
             writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
         } else {
-            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a, b).ok();
+            let nuw_nsw = self.binop_has_bounds(l, r);
+            let op = if nuw_nsw { format!("{} nuw nsw", int_op) } else { int_op.to_string() };
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, op, a, b).ok();
         }
     }
 
@@ -1360,5 +1386,96 @@ mod tests {
         let mut backend = LlvmBackend::new();
         let output = backend.generate(&empty_program());
         assert!(!output.is_empty());
+    }
+
+    #[test]
+    fn test_llvm_event_model_lowering() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Trigger(TriggerDeclaration {
+                    name: "io_pending".to_string(),
+                    ty: Type::Bool,
+                    address: LinkRef::Linked("__io_pending".to_string()),
+                    bit_range: None,
+                    stages: vec![],
+                    condition: None,
+                    span: None,
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "event_count".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "pump".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+                    is_async: false,
+                    is_reactive: true,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "sleep".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+                    is_async: false,
+                    is_reactive: true,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+        };
+        let output = backend.generate(&program);
+
+        // @ link trigger emits external global
+        assert!(output.contains("external global"), "Should declare external globals for @ link");
+        assert!(output.contains("__io_pending"), "Should contain trigger global name");
+
+        // Fall-through dispatch: body blocks don't end with ret void
+        assert!(output.contains("reactor_tick"), "Should have reactor_tick");
+        assert!(output.contains("global_state"), "Should reference global state");
+        assert!(output.contains("__io_pending"), "Should reference trigger");
+
+        // Trigger sampling emits load volatile
+        assert!(output.contains("load volatile"), "Should have volatile trigger loads");
+
+        // Must not have __wait_for_event as hardcoded intrinsic
+        assert!(!output.contains("declare void @__wait_for_event()"),
+            "Should NOT have hardcoded __wait_for_event declaration");
     }
 }

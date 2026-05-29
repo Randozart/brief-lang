@@ -3612,6 +3612,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
             }
             Some(Ok(Token::TrgBang)) => {
+                // Deprecation warning: trg! inside transactions is a stub.
+                // Use top-level `trg name: Type @ link sym;` + `rct txn [name] { ... }` instead.
+                // See docs: specs/EVENT-MODEL.md
+                let prev_span = self.current_span();
+                if let Some(s) = &prev_span {
+                    eprintln!("deprecation:{}:{}: trg! is deprecated — use top-level trg + rct txn instead (see specs/EVENT-MODEL.md)", s.line, s.column);
+                }
                 self.advance();
                 let name = self.expect_identifier()?;
                 self.expect(Token::Colon)?;
@@ -3623,8 +3630,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     None
                 };
                 self.expect(Token::Semicolon)?;
-                let span = self.current_span();
-                Ok(Statement::LocalTrigger { name, ty, expr, span })
+                Ok(Statement::LocalTrigger { name, ty, expr, span: prev_span })
             }
             Some(Ok(Token::Trg)) => {
                 self.spanned_err(
