@@ -1,0 +1,11 @@
+// Phase 2.5: MMIO trigger sampling
+trg button: Bool @ 0x40001000;
+
+let count: Int = 0;
+
+rct txn inc [button && count < 10]
+  [count == @count + 1]
+{
+  &count = count + 1;
+  term;
+};

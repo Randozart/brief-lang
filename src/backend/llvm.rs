@@ -20,6 +20,9 @@ pub struct LlvmBackend {
     range_bounds: HashMap<String, (i64, i64)>,
     is_release: bool,
     field_to_meta_idx: HashMap<String, usize>,
+    triggers: HashMap<String, crate::ast::TriggerDeclaration>,
+    trigger_names: Vec<String>,
+    program_txns: Vec<String>,
 }
 
 impl LlvmBackend {
@@ -36,6 +39,9 @@ impl LlvmBackend {
             range_bounds: HashMap::new(),
             is_release: false,
             field_to_meta_idx: HashMap::new(),
+            triggers: HashMap::new(),
+            trigger_names: Vec::new(),
+            program_txns: Vec::new(),
         }
     }
 
@@ -58,6 +64,9 @@ impl LlvmBackend {
         }
 
         self.build_field_index(program);
+        self.triggers.clear();
+        self.trigger_names.clear();
+        self.program_txns.clear();
 
         let mut output = String::new();
 
@@ -76,8 +85,16 @@ impl LlvmBackend {
 
         let mut txns: Vec<(String, &crate::ast::Transaction)> = Vec::new();
         for item in &program.items {
-            if let TopLevel::Transaction(txn) = item {
-                txns.push((txn.name.clone(), txn));
+            match item {
+                TopLevel::Transaction(txn) => {
+                    txns.push((txn.name.clone(), txn));
+                    self.program_txns.push(txn.name.clone());
+                }
+                TopLevel::Trigger(trg) => {
+                    self.triggers.insert(trg.name.clone(), trg.clone());
+                    self.trigger_names.push(trg.name.clone());
+                }
+                _ => {}
             }
         }
 
@@ -623,17 +640,152 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
     }
 
     fn generate_reactor(&mut self, output: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
+        // Collect fusable pairs
+        let fusable_pairs = self.resolve_fusable_pairs(txns);
+        let mut used_fused: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Generate fused transactions
+        for (a_name, b_name) in &fusable_pairs {
+            let fused_name = format!("{}_{}_fused", a_name, b_name);
+            if used_fused.contains(&fused_name) { continue; }
+            used_fused.insert(fused_name.clone());
+            if let Some(txn_a) = txns.iter().find(|(n, _)| n == a_name) {
+                if let Some(txn_b) = txns.iter().find(|(n, _)| n == b_name) {
+                    self.generate_fused_transaction(output, txn_a.1, txn_b.1, &fused_name);
+                    writeln!(output).ok();
+                }
+            }
+        }
+
+        // Determine which original txns are consumed by fusion
+        let mut fused_txns: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (a, b) in &fusable_pairs {
+            fused_txns.insert(a.clone());
+            fused_txns.insert(b.clone());
+        }
+
         writeln!(output, "define void @reactor_tick() local_unnamed_addr #0 {{").ok();
-        writeln!(output, "  ; Sample all volatile triggers (see 08a-TRIGGERS.md)").ok();
-        writeln!(output, "  ;   load volatile i8, i8* @trg_ptr → %trg_sampled").ok();
-        writeln!(output, "  ; Load state").ok();
-        writeln!(output, "  ; Evaluate preconditions (priority order)").ok();
-        writeln!(output, "  ; Dispatch first-true transaction").ok();
-        writeln!(output, "  ; Commit state changes").ok();
+        writeln!(output, "entry:").ok();
+
+        // Trigger sampling phase
+        let mut trig_regs: Vec<(String, String)> = Vec::new();
+        for trg_name in &self.trigger_names {
+            if let Some(trg) = self.triggers.get(trg_name) {
+                let raw_reg = format!("%trg_raw_{}", self.txn_counter);
+                self.txn_counter += 1;
+                let samp_reg = format!("%trg_{}", self.txn_counter);
+                self.txn_counter += 1;
+                match &trg.address {
+                    crate::ast::LinkRef::Explicit(addr) => {
+                        writeln!(output, "  {} = load volatile i8, i8* inttoptr (i64 {} to i8*), align 1", raw_reg, addr).ok();
+                    }
+                    crate::ast::LinkRef::Linked(sym) => {
+                        writeln!(output, "  {} = load volatile i8, i8* @{}, align 1", raw_reg, sym).ok();
+                    }
+                }
+                writeln!(output, "  {} = icmp ne i8 {}, 0", samp_reg, raw_reg).ok();
+                trig_regs.push((trg_name.clone(), samp_reg));
+            }
+        }
+
+        if txns.is_empty() && fusable_pairs.is_empty() {
+            writeln!(output, "  ret void").ok();
+            writeln!(output, "}}").ok();
+            writeln!(output).ok();
+            self.write_main(output);
+            return;
+        }
+
+        writeln!(output, "  ; Evaluate and dispatch first-true transaction").ok();
+
+        let mut dispatch_txns: Vec<String> = Vec::new();
+        for (name, _) in txns {
+            if !fused_txns.contains(name) {
+                dispatch_txns.push(name.clone());
+            }
+        }
+        for (a_name, b_name) in &fusable_pairs {
+            dispatch_txns.push(format!("{}_{}_fused", a_name, b_name));
+        }
+
+        if let Some(first) = dispatch_txns.first() {
+            writeln!(output, "  call void @{}(%State* @global_state)", first).ok();
+        }
+        writeln!(output, "  ret void").ok();
+
+        writeln!(output, "commit:").ok();
         writeln!(output, "  ret void").ok();
         writeln!(output, "}}").ok();
         writeln!(output).ok();
 
+        self.write_main(output);
+    }
+
+    fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast::Transaction)]) -> Vec<(String, String)> {
+        let prg = crate::ast::Program {
+            items: txns.iter().map(|(_, t)| {
+                crate::ast::TopLevel::Transaction((*t).clone())
+            }).collect(),
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: crate::ast::StrictMode::Off,
+        };
+        let mut pairs = crate::backend::detect_fusable_pairs(&prg);
+        pairs.retain(|(a_name, b_name)| {
+            let a = txns.iter().find(|(n, _)| n == a_name);
+            let b = txns.iter().find(|(n, _)| n == b_name);
+            if let (Some((_, a_txn)), Some((_, b_txn))) = (a, b) {
+                if a_txn.is_async || b_txn.is_async { return false; }
+                let a_writes = crate::backend::collect_assigned_identifiers(&a_txn.body);
+                let b_writes = crate::backend::collect_assigned_identifiers(&b_txn.body);
+                for w in &a_writes {
+                    if b_writes.contains(w) { return false; }
+                }
+                if self.trg_in_precondition(&b_txn.contract.pre_condition) { return false; }
+                true
+            } else {
+                false
+            }
+        });
+        pairs
+    }
+
+    fn trg_in_precondition(&self, pre: &Expr) -> bool {
+        let mut ids = std::collections::HashSet::new();
+        crate::backend::collect_expr_identifiers(pre, &mut ids);
+        for id in &ids {
+            if self.trigger_names.contains(id) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn generate_fused_transaction(&mut self, output: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, fused_name: &str) {
+        writeln!(output, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", fused_name).ok();
+        writeln!(output, "entry:").ok();
+
+        let combined_body: Vec<Statement> = a.body.iter().cloned()
+            .chain(b.body.iter().cloned())
+            .collect();
+
+        self.txn_counter = 0;
+        self.let_bindings.clear();
+        self.terminated = false;
+
+        for stmt in &combined_body {
+            self.generate_statement(output, stmt, "  ");
+        }
+
+        if !self.terminated {
+            writeln!(output, "  ret void").ok();
+        }
+        writeln!(output, "}}").ok();
+    }
+
+    fn write_main(&self, output: &mut String) {
         writeln!(output, "define i32 @main() local_unnamed_addr #0 {{").ok();
         writeln!(output, "entry:").ok();
         writeln!(output, "  call void @init_state()").ok();

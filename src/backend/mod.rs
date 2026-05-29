@@ -256,7 +256,7 @@ fn collect_assigned_identifiers(body: &[Statement]) -> Vec<String> {
     let mut ids = Vec::new();
     for stmt in body {
         if let Statement::Assignment { lhs, .. } = stmt {
-            if let Expr::Identifier(name) = lhs {
+            if let Expr::Identifier(name) | Expr::OwnedRef(name) = lhs {
                 ids.push(name.clone());
             }
         }

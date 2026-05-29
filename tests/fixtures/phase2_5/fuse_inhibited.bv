@@ -1,0 +1,16 @@
+// Phase 2.5: WAW hazard should inhibit fusion
+let x: Int = 0;
+
+rct txn inc_a [x < 10]
+  [x == @x + 1]
+{
+  &x = x + 1;
+  term;
+};
+
+rct txn inc_b [x < 5]
+  [x == @x + 2]
+{
+  &x = x + 2;
+  term;
+};
