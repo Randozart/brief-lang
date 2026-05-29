@@ -254,3 +254,27 @@ LLVM 18.1.3 successfully optimized the Phase 0 output:
 | `tests/fixtures/phase2_5/fuse_inhibited.bv` | WAW hazard → no fusion | ✅ |
 
 ### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
+
+---
+
+## Phase 3 — Match Expression → switch
+
+### Delivered (2026-05-29)
+
+| Feature | Status | Details |
+|---------|--------|--------|
+| `Expr::Match` → `switch` | ✅ | `switch i64 %discriminant` with per-arm basic blocks. Discriminant encoded in low 8 bits via `and`/`lshr`. |
+| `phi` merge for expression matches | ✅ | `phi i64` at merge point selects arm value. Single arm → direct `add` fallback. |
+| Exhaustive → `unreachable` | ✅ | All variants covered + no `_` → `default` label with `unreachable`. |
+| `Expr::PatternMatch` guard | ✅ | `icmp eq` on discriminant + `zext` → i64 for guard context. |
+| `Statement::Unification` → switch | ✅ | Single-arm switch + `lshr 8` payload extraction, bound to pattern name via `let_bindings`. |
+| Label naming convention fix | ✅ | LLVM labels are bare names (no `%` prefix in defs), reference with `label %xxxx`. Eliminated `%%` double-encoding bug. |
+| `emit_precondition` label fix | ✅ | Uses bare label names with `br i1 ..., label %label`. |
+
+### Test Fixtures (all pass `llc`)
+| Fixture | Tests | Status |
+|---------|-------|--------|
+| `tests/fixtures/phase3/simple.bv` | Two-arithmetic-op txn | ✅ |
+| `tests/fixtures/phase3/unify_simple.bv` | `uni` pattern match with payload extraction | ✅ |
+
+### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
