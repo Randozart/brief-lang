@@ -55,10 +55,10 @@
 ## Usage
 
 ```brief
-import compiler.backends.aarch64;
-import compiler.backends.x86_64;
-import compiler.backends.rust;
-import compiler.backends.c;
+import "compiler/backends/aarch64";
+import "compiler/backends/x86_64";
+import "compiler/backends/rust";
+import "compiler/backends/c";
 
 defn compile_to_aarch64(program: Program) -> List<u8> {
     term generate_aarch64(program);

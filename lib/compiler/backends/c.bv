@@ -1,7 +1,7 @@
 // C Backend - Generate C code for bootstrapping and embedded
 // Tier 7 Part 4
 
-import call_graph;
+import "call_graph";
 
 defn generate_c(program: Program, cg: CallGraphResult) -> String {
     let output = new_builder();

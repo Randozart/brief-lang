@@ -1,7 +1,7 @@
 // Webstack Backend for Brief Compiler
 // Generates Rust code with wasm-bindgen glue for web frontends
 
-import call_graph;
+import "call_graph";
 //
 // The webstack pipeline:
 //   1. Collect signals (state variables) and transactions

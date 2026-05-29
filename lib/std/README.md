@@ -229,7 +229,7 @@ defn hex_decode(s: String) -> Result<Data, String>
 
 ### HashMap
 ```brief
-import std.hashmap;
+import "std/hashmap";
 
 let map = new_map<String, Int>();
 map = map.insert("age", 42);
@@ -244,7 +244,7 @@ let age = map.get("age");
 
 ### StringBuilder
 ```brief
-import std.string_builder;
+import "std/string_builder";
 
 let sb = new_builder();
 sb = sb.append_str("Hello");
@@ -259,7 +259,7 @@ println(message);
 
 ### Stack
 ```brief
-import std.stack;
+import "std/stack";
 
 let s = new_stack<Int>();
 s = s.push(1);
@@ -272,7 +272,7 @@ let top = s.peek();  // Some(2)
 
 ### Result Combinators
 ```brief
-import std.result;
+import "std/result";
 
 let result: Result<Int, String> = Ok(42);
 

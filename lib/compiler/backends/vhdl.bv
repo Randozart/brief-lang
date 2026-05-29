@@ -2,8 +2,8 @@
 // Generates synthesizable VHDL from Brief programs
 // Brief transactions map to concurrent processes and signals
 
-import call_graph;
-import std.string;
+import "call_graph";
+import "std/string";
 
 // ===== VHDL TYPES =====
 

@@ -823,7 +823,7 @@ Here's a complete Rendered Brief application:
 
 ```brief
 // shopping_cart.rbv
-import std.math;
+import "std/math";
 
 rstruct ShoppingCart {
     items: Int = 0,
@@ -913,7 +913,7 @@ An Embedded Brief example for FPGA/ARM:
 
 ```brief
 // led_blinker.ebv
-import std.time;
+import "std/time";
 
 // Hardware configuration
 let led_state: Bool = false @ 0x40020000;
@@ -968,7 +968,7 @@ Using Python libraries from Brief:
 
 ```brief
 // python_example.bv
-import std.io;
+import "std/io";
 
 // Python FFI signatures
 frgn sig py_init() -> Result<Void, String> from "python.toml";

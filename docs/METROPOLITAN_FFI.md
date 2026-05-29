@@ -56,7 +56,7 @@ The Metropolitan FFI runtime (`src/ffi/metropolitan.rs`) provides:
 ### 1. Create a Metropolitan Channel
 
 ```brief
-import std.metropolitan_ffi;
+import "std/metropolitan_ffi";
 
 // Create channel for communication with C
 let channel = create_metropolitan_channel("my_channel", "c")?;

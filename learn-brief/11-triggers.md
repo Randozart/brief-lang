@@ -147,7 +147,7 @@ Brief provides standard system triggers in `std/system.bv`:
 ### Example: Reactive Signal Handler
 
 ```brief
-import std.system;
+import "std/system";
 
 let shutting_down: Bool = false;
 let tick_count: Int = 0;

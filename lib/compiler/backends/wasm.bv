@@ -2,8 +2,8 @@
 // Generates .wasm binary modules from Brief programs
 // Uses guard-based execution for branchless code generation
 
-import call_graph;
-import std.string;
+import "call_graph";
+import "std/string";
 
 // ===== WASM TYPES =====
 

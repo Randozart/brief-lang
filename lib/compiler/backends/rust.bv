@@ -1,7 +1,7 @@
 // Rust Backend - Generate Rust code for bootstrapping
 // Tier 7 Part 3
 
-import call_graph;
+import "call_graph";
 
 defn generate_rust(program: Program, cg: CallGraphResult) -> String {
     let output = new_builder();

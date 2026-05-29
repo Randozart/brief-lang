@@ -1,9 +1,9 @@
 // Parser - Recursive descent parser for Brief
 // Tier 4: Parser Components
 
-import token;
-import ast;
-import std.collections;
+import "token";
+import "ast";
+import "std/collections";
 
 // ===== PARSER STATE =====
 

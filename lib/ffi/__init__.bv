@@ -3,13 +3,13 @@
 // This is the main entry point for the FFI system.
 // Import this module to access all foreign functions.
 
-import std.io;
-import std.math;
-import std.string;
-import std.time;
-import std.collections;
-import std.encoding;
-import std.json;
+import "std/io";
+import "std/math";
+import "std/string";
+import "std/time";
+import "std/collections";
+import "std/encoding";
+import "std/json";
 
 // Re-export all FFI functions through their wrappers
 // The actual __* functions are defined in their respective modules

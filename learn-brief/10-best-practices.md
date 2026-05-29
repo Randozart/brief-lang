@@ -114,13 +114,13 @@ export txn update_user(...) { ... }
 export defn get_user(...) -> User { ... }
 
 // auth_module.bv
-import user_module;
+import "user_module";
 export txn login(...) { ... }
 export txn logout(...) { ... }
 
 // main.bv
-import user_module;
-import auth_module;
+import "user_module";
+import "auth_module";
 ```
 
 ### 3. Separate Concerns

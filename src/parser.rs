@@ -692,54 +692,36 @@ impl<'a> Parser<'a> {
 
         let path = if let Some(Ok(Token::From)) = self.current_token() {
             self.advance();
-            // Support quoted string paths like "./landing.css" or "./icons/logo.svg"
             if let Some(Ok(Token::String(s))) = self.current_token() {
                 let s = s.clone();
                 self.advance();
-                // Convert "./path/file.css" to ["path", "file.css"]
                 let trimmed = s.trim_start_matches("./");
                 let parts: Vec<String> = trimmed.split('/').map(String::from).collect();
                 parts
             } else {
-                let mut path = Vec::new();
-                path.push(self.expect_identifier()?);
-                while let Some(Ok(Token::Dot)) = self.current_token() {
-                    self.advance();
-                    path.push(self.expect_identifier()?);
-                }
-                path
+                return self.spanned_err(
+                    "Expected quoted string path after 'from'. Use: import { foo } from \"path/to/module\";"
+                        .to_string(),
+                );
             }
         } else if let Some(Ok(Token::String(s))) = self.current_token() {
-            // Support direct quoted path: import "./file.css";
-            // Also support: import "./file.svg" as Name;
             let s = s.clone();
             self.advance();
             let trimmed = s.trim_start_matches("./");
             let parts: Vec<String> = trimmed.split('/').map(String::from).collect();
 
-            // Check for 'as Name' after the path
             if let Some(Ok(Token::As)) = self.current_token() {
                 self.advance();
                 let name = self.expect_identifier()?;
-                // For imports like `import "./logo.svg" as Logo;`, create an import item
                 items.push(ImportItem { name, alias: None });
             }
 
             parts
         } else if let Some(Ok(Token::Identifier(_))) = self.current_token() {
-            if !items.is_empty() {
-                return self.spanned_err(
-                    "Cannot have both import items and direct namespace path. Use 'from' keyword."
-                        .to_string(),
-                );
-            }
-            let mut path = Vec::new();
-            path.push(self.expect_identifier()?);
-            while let Some(Ok(Token::Dot)) = self.current_token() {
-                self.advance();
-                path.push(self.expect_identifier()?);
-            }
-            path
+            return self.spanned_err(
+                "Bare identifier paths are no longer supported. Use quoted string: import \"path/to/module\";"
+                    .to_string(),
+            );
         } else {
             Vec::new()
         };

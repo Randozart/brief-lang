@@ -100,9 +100,9 @@ frgn! send_message(msg: String);
 ### Importing
 
 ```brief
-import std.io;
-import std.math as math;
-import {File, Dir} from "std.fs" from "fs.toml";
+import "std/io";
+import "std/math" as math;
+import {File, Dir} from "std/fs" from "fs.toml";
 ```
 
 ### Multi-Output

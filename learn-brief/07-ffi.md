@@ -48,7 +48,7 @@ register 0x00 as "sqrt" {
 ## 3. Calling Foreign Functions
 
 ```brief
-import std.math;
+import "std/math";
 
 txn calculate() [true][true] {
     let result = math.sqrt(16.0);
@@ -91,7 +91,7 @@ let result = read_file("data.txt");
 For high-performance FFI, use Metropolitan FFI:
 
 ```brief
-import std.metropolitan_ffi;
+import "std/metropolitan_ffi";
 
 // Create shared memory channel
 let channel = create_metropolitan_channel("ml_inference", "python")?;

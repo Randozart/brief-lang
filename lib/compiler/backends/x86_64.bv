@@ -1,7 +1,7 @@
 // x86-64 Binary Backend - Direct machine code generation
 // Tier 7 Part 2
 
-import call_graph;
+import "call_graph";
 
 // ===== X86_64 INSTRUCTION ENUM =====
 

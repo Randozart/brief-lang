@@ -313,8 +313,8 @@ defn process(item: Int) {
 
 ```brief
 // file_processor.bv
-import std.io;
-import std.string;
+import "std/io";
+import "std/string";
 
 frgn sig read_file(path: String) -> Result<String, IOError> from "io.toml";
 frgn sig write_file(path: String, content: String) -> Result<Void, IOError> from "io.toml";

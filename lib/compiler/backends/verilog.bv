@@ -2,8 +2,8 @@
 // Generates synthesizable SystemVerilog from Brief programs
 // Uses modern SV features for concise, efficient RTL
 
-import call_graph;
-import std.string;
+import "call_graph";
+import "std/string";
 
 // ===== SV TYPES =====
 

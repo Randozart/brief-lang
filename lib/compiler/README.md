@@ -52,12 +52,12 @@ Source (.bv)
 ## Usage
 
 ```brief
-import compiler.token;
-import compiler.lexer;
-import compiler.parser;
-import compiler.typechecker;
-import compiler.proof_engine;
-import compiler.backends.aarch64;
+import "compiler/token";
+import "compiler/lexer";
+import "compiler/parser";
+import "compiler/typechecker";
+import "compiler/proof_engine";
+import "compiler/backends/aarch64";
 
 defn compile(source: String) -> Result<List<u8>, String> {
     // Phase 1: Lexing

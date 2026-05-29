@@ -830,15 +830,15 @@ Imports bring external code into scope:
 
 ```brief
 // Import entire module
-import std.math;
+import "std/math";
 let x = math.sqrt(4.0);
 
 // Import with alias
-import std.collections as coll;
+import "std/collections" as coll;
 let list = coll.new_list();
 
 // Import specific items
-import {HashMap, HashSet} from std.collections;
+import {HashMap, HashSet} from "std/collections";
 let map = HashMap::new();
 
 // Import from file
@@ -1466,7 +1466,7 @@ frgn sqrt(x: Float) -> Float from "libm.so.6";
 ### 6.2 Math Module
 
 ```brief
-import std.math;
+import "std/math";
 
 // Basic operations
 let abs_val = math.abs(-42);           // 42
@@ -1489,7 +1489,7 @@ let fib = math.fibonacci(10);          // 55
 ### 6.3 String Module
 
 ```brief
-import std.string;
+import "std/string";
 
 let s = "Hello, World!";
 
@@ -1515,7 +1515,7 @@ let sub = string.substr(s, 7, 12);     // "World"
 ### 6.4 Collections Module
 
 ```brief
-import std.collections;
+import "std/collections";
 
 // Lists
 let list = [1, 2, 3];
@@ -1553,7 +1553,7 @@ let (val, queue) = queue.dequeue();    // (Some(1), queue with [2])
 ### 6.5 IO Module
 
 ```brief
-import std.io;
+import "std/io";
 
 // Console I/O
 io.print("Hello");
@@ -1573,7 +1573,7 @@ io.formatln("Name: {}, Age: {}", "Alice", 30);
 ### 6.6 JSON Module
 
 ```brief
-import std.json;
+import "std/json";
 
 // Serialization
 let obj = json.object([("name", "Alice"), ("age", 30)]);
@@ -1592,7 +1592,7 @@ let value2 = json.from_json(json_str2);
 ### 6.7 Time Module
 
 ```brief
-import std.time;
+import "std/time";
 
 // Current time
 let now = time.now();                  // Current timestamp (seconds)
@@ -2139,8 +2139,8 @@ txn transfer_alice_to_bob(amount: Int)
 ### 13.3 FFI Usage
 
 ```brief
-import std.math;
-import std.io;
+import "std/math";
+import "std/io";
 
 frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 

@@ -1,7 +1,7 @@
 // AArch64 Binary Backend - Direct machine code generation
 // Tier 7: Code Generation Backends
 
-import call_graph;
+import "call_graph";
 
 // ===== AARCH64 INSTRUCTION ENUM =====
 

@@ -1,7 +1,7 @@
 // Lexer - Tokenizer for Brief language
 // Tier 3: Lexer Components
 
-import std.char;
+import "std/char";
 
 // ===== LEXER STATE =====
 
