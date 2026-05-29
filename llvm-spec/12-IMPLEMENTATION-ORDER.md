@@ -68,6 +68,23 @@
 
 ---
 
+## Phase 2.8: AOT Size Inference + Conditional Attributes (2 days)
+
+**Goal**: Promote heap-allocated `List` to stack-allocated `Vector[N]` when size is provable. Conditionally emit `nofree` and `alwaysinline`.
+
+| Step | What | Details |
+|------|------|---------|
+| 2.8.1 | Literal size inference | `[1,2,3]` → size 3, promote to `Vector[3]` |
+| 2.8.2 | Contract-bound inference | `[len(x) <= 16]` → max size 16 → `Vector[16]` |
+| 2.8.3 | Symbolic loop-bound inference | Loop `for i in 0..N` → `Vector[N]` |
+| 2.8.4 | Conditional `nofree` | Skip `nofree` on `#0` for any txn whose call graph contains heap ops |
+| 2.8.5 | `alwaysinline` for acyclic | Add `alwaysinline` to acyclic txn signatures |
+| 2.8.6 | Heap→Stack codegen split | LLVM IR path A: `%struct.List` (heap, `malloc`), path B: `[N x i64]` (stack, `alloca`) |
+
+**Dependencies**: Phase 2 (contract analysis for bounds inference).
+
+---
+
 ## Phase 3: Match Expression → `switch` (2-3 days)
 
 **Goal**: `match val { V1(x) => ..., V2 => ..., _ => ... }` generates `switch i64 %discriminant`.
@@ -113,7 +130,8 @@
 | 5.4 | Acyclic: inline bodies | No `call` — bodies are inlined in the tick loop |
 | 5.5 | Cyclic: dispatch table | `call` by function pointer, priority-sorted |
 | 5.6 | Load state → SSA → phi → store | Full tick body with `extractvalue`/`insertvalue` |
-| 5.7 | `norecurse` on tick for acyclic | Enables LLVM to inline everything |
+| 5.7 | `norecurse` + `alwaysinline` on tick for acyclic | Enables LLVM to inline everything |
+| 5.8 | Equilibrium `__wait_for_event()` in noop path | Suspend instead of busy-spin (see 08c-EQUILIBRIUM-SUSPENSION.md) |
 
 **Dependencies**: Phase 1 + Phase 2 (working transactions with preconditions).
 
@@ -143,10 +161,11 @@
 | 7.2 | `llvm.bv` — load/store/arith | Mirror Phase 1 |
 | 7.3 | `llvm.bv` — `noalias` + `!range` | Mirror Phase 2 |
 | 7.4 | `llvm.bv` — transition fusing + triggers | Mirror Phase 2.5 |
-| 7.5 | `llvm.bv` — `match → switch` | Mirror Phase 3 |
-| 7.6 | `llvm.bv` — FFI `declare` | Mirror Phase 4 |
-| 7.7 | `llvm.bv` — reactor loop | Mirror Phase 5 |
-| 7.8 | `main.bv` — wire `llvm` dispatch | Add `[state.backend == "llvm"]` arm |
+| 7.5 | `llvm.bv` — AOT size inference | Mirror Phase 2.8 |
+| 7.6 | `llvm.bv` — `match → switch` | Mirror Phase 3 |
+| 7.7 | `llvm.bv` — FFI `declare` | Mirror Phase 4 |
+| 7.8 | `llvm.bv` — reactor loop + equilibrium | Mirror Phase 5 |
+| 7.9 | `main.bv` — wire `llvm` dispatch | Add `[state.backend == "llvm"]` arm |
 
 **Dependencies**: All previous phases + Phase 2.5 (for fusing + trigger support) + working self-hosted `StringBuilder` and pattern matching.
 
@@ -160,9 +179,10 @@
 | 1: Basic txn | 2d | 3d | 5d |
 | 2: noalias + contracts | 2d | 3d | 5d |
 | 2.5: Fusing + Triggers | 2d | 3d | 5d |
+| 2.8: AOT size inference | 1d | 2d | 3d |
 | 3: Match → switch | 2d | 4d | 6d |
 | 4: FFI declare | 1d | 2d | 3d |
-| 5: Reactor loop | 2d | 3d | 5d |
+| 5: Reactor loop | 3d | 3d | 6d |
 | 6: SIMD | 2d | - | 2d |
 | 7: Self-hosted parity | - | 5d | 5d |
-| **Total** | **14d** | **25d** | **39d** |
+| **Total** | **15d** | **29d** | **44d** |

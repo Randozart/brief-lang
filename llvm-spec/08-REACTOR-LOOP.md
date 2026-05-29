@@ -56,17 +56,30 @@ t2_body:
     %new_state_t2 = call %struct.State @txn_decrement_body(%struct.State %state)
     br label %commit
 
-noop:
-    br label %commit
-
 commit:
     %final_state = phi %struct.State [%new_state_t1, %t1_body], [%new_state_t2, %t2_body], [%state, %noop]
     store %struct.State %final_state, %struct.State* @global_state
     ret void
+
+noop:
+    ; Equilibrium path — no preconditions met
+    call void @__wait_for_event()  ; Suspend until external trigger (see 08c-EQUILIBRIUM-SUSPENSION.md)
+    ret void
 }
+```
 ```
 
 **Key optimization**: By passing `%struct.State` by value (not pointer), LLVM sees every field as an SSA value. With `noalias` having proven no pointers alias, the `phi` at the commit point is the only stateful operation — everything between load and store is pure SSA computation.
+
+**Acyclic: `alwaysinline` Guard**
+
+Acyclic transaction bodies get `alwaysinline` to prevent LLVM from refusing to inline large `%State` by-value structs. Without this, LLVM's inliner may decide the struct exceeds its cost threshold, falling back to massive stack-copy `memcpy` operations on every tick.
+
+Since the conflict detection pass proves at most one transaction fires per tick, only one body is inlined — no code bloat concern.
+
+```llvm
+define void @Counter_increment(%struct.State* noalias nocapture %state) alwaysinline local_unnamed_addr #0 {
+```
 
 ## Acyclic Optimization: Full Inlining
 

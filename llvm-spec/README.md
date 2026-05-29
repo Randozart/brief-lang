@@ -1,6 +1,6 @@
 # Brief LLVM Backend Specification
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-05-29  
 **Status:** Active implementation plan
 
@@ -35,7 +35,11 @@ Brief enforces strict memory boundaries, transactional atomicity, and contract-d
 | `08-REACTOR-LOOP.md` | main() → tick loop, trigger sampling, inlined dispatch |
 | `08a-TRIGGERS.md` | trg → volatile double-buffering, 3 lowering models |
 | `08b-TRANSITION-FUSING.md` | Sequential state composition (fusing guaranteed-sequential txns) |
+| `08c-EQUILIBRIUM-SUSPENSION.md` | Event-driven sleep: replacing busy-spin with `__wait_for_event()` |
+| `08e-AOT-SIZE-INFERENCE.md` | List→Vector[N] promotion via contract-bound analysis |
 | `09-SIMD.md` | `<N x T>` vectors, `!llvm.loop.vectorize.enable` |
 | `10-FULL-EXAMPLE.md` | Counter.increment from .bv → annotated .ll |
 | `11-SELF-HOSTED.md` | Porting to Brief: StringBuilder IR emission |
 | `12-IMPLEMENTATION-ORDER.md` | Phases 0-7 with deps and effort |
+| `13-GPU-TARGET.md` | Future roadmap: NVPTX/SPIR-V, bank conflict elimination |
+| `CHANGELOG-LLVM-SPEC.md` | Design journal tracking all spec revisions |

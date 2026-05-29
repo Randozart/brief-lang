@@ -1,0 +1,163 @@
+# Brief LLVM Backend — Change Log & Design Journal
+
+**File:** CHANGELOG-LLVM-SPEC.md  
+**Purpose:** Tracks all architectural decisions, bug fixes, and spec additions that occurred during the llvm-spec audit on 2026-05-29.
+
+---
+
+## 2026-05-29 — v1.0 → v1.2 Revision
+
+### Environment
+- LLVM 18.1.3 installed (`llc`, `opt`, `lli` available)
+- Target confirmed: `nvptx64` — NVIDIA PTX 64-bit (GPU pathway validated)
+- Host CPU: Ivy Bridge (x86_64)
+- Compiler at commit: `1d4992b` (post v1.1 spec commit)
+
+---
+
+### Corrective Issues Found During Spec Audit (6 items)
+
+#### Issue 1: FFI `memory(inaccessiblemem)` → `memory(argmem)`
+- **File:** `07-FFI-TO-DECLARE.md:84`, `10-FULL-EXAMPLE.md:124`
+- **Root cause:** `inaccessiblemem` tells LLVM the function cannot access *any* module-visible memory. DSE removes string buffer writes before FFI calls, passing garbage pointers.
+- **Fix:** Changed to `memory(argmem: readwrite)` — restricts access only to memory reachable via pointer arguments. `%State*` is not passed to FFI, so `noalias` is preserved.
+- **Applied to:** `07-FFI-TO-DECLARE.md` (attributes #1), `10-FULL-EXAMPLE.md` (#1), `12-IMPLEMENTATION-ORDER.md` (4.5)
+
+#### Issue 2: Nested SSA Instructions in Reactor Tick
+- **File:** `10-FULL-EXAMPLE.md:89-91`
+- **Root cause:** LLVM IR is strictly flat SSA. `and i1` cannot contain nested `icmp` calls inline.
+- **Fix:** Flattened into two `icmp` temps followed by a separate `and i1`.
+- **Applied to:** `10-FULL-EXAMPLE.md` (reactor_tick example)
+
+#### Issue 3: `!range` Signed Bounds Wrapping
+- **File:** `05-CONTRACT-TO-METADATA.md:12,14`
+- **Root cause:** `i64 -1` as unsigned is `2^64-1`. Range `[0, 2^64-1)` includes all negative signed values, letting them through.
+- **Fix:** Changed to `i64 9223372036854775808` (= `2^63`), representing `[0, 2^63)` — half of the signed range with MSB=0.
+- **Applied to:** `05-CONTRACT-TO-METADATA.md` (table rows for `[x >= 0]` and `[len > 0]`)
+
+#### Issue 4: GEP Index Depth for Nested Structs
+- **File:** `03-TRANSACTIONS.md:22-23`
+- **Root cause:** `%State` contains `%struct.Counter` which contains `i64 count`. A 2-index GEP returns `%struct.Counter*`, not `i64*` — type mismatch.
+- **Fix:** Added third index `, i32 0` for the nested struct depth. (Already correct in `10-FULL-EXAMPLE.md:44`)
+- **Applied to:** `03-TRANSACTIONS.md`
+
+#### Issue 5: Enum Payload Layout (Memory Waste)
+- **File:** `06-MATCH-TO-SWITCH.md:77-79`
+- **Root cause:** Flat struct with all variant payloads embedded wastes memory for large variants.
+- **Fix:** Documented byte-array union (`[32 x i8]`) as preferred approach with `bitcast` + GEP for extraction. Kept flat struct as acceptable initial implementation.
+- **Applied to:** `06-MATCH-TO-SWITCH.md`
+
+#### Issue 6: C-String Memory Leak in FFI
+- **File:** `07-FFI-TO-DECLARE.md:31-34`
+- **Root cause:** `@brief_string_to_cstr` heap-allocates but never frees — infinite leak in reactor loop.
+- **Fix:** Documented stack-allocation strategy using `alloca` + `llvm.memcpy` as preferred default. Heap allocation documented with explicit `free` requirement.
+- **Applied to:** `07-FFI-TO-DECLARE.md` (new "C-String Memory Lifecycle" section)
+
+---
+
+### New Spec Files Created (v1.1)
+
+#### 08a-TRIGGERS.md — Volatile Double-Buffering
+- **Architecture:** Every `trg` is sampled once via `load volatile` at tick entry into an immutable SSA register
+- **Three lowering models:** MMIO (inttoptr + volatile load), FFI poll (`__poll_triggers` call), Metropolitan spinlock (status word + pause instruction)
+- **Fusing inhibition:** If `Txn_B`'s guard references a `trg`, transition fusing is refused
+
+#### 08b-TRANSITION-FUSING.md — State Composition
+- **Mechanism:** `post(Txn_A)` → `pre(Txn_B)` implication is proven by the proof engine; bodies are concatenated
+- **Inhibition rules:** volatile trg dependency, WAW hazard, async flag, complexity budget
+- **Already implemented:** `detect_fusable_pairs` at `src/backend/mod.rs:291`
+
+---
+
+### New Spec Files Created (v1.2 — this session)
+
+#### 08c-EQUILIBRIUM-SUSPENSION.md
+- **Problem:** Busy-spin at 100% CPU when no transaction preconditions are met
+- **Fix:** Replace `noop → br label %commit` with `call void @__wait_for_event()`
+- **Resolution:** Uses the existing bootstrap intrinsic mechanism (same as `__read_file`, `__print`)
+  - Linux: `epoll_wait` / `select` (0% CPU)
+  - ARM bare-metal: `wfi` (Wait For Interrupt — microwatt sleep)
+  - RISC-V: `wfi`
+  - WASM: Asyncify yield to host event loop
+- **Trigger synthesis:** Compiler generates `pollfd`/`epoll` masks from the registered `trg` map
+
+#### 08e-AOT-SIZE-INFERENCE.md
+- **Problem:** `List<T>` requires heap allocation (`{ i8*, i64, i64 }`), breaks hardware isomorphism, forces `nofree` omission
+- **Fix:** Three-path size inference during lowering pass
+  1. Literal propagation: `[1,2,3]` → size 3
+  2. Contract propagation: `[len(x) <= 16]` → max size 16
+  3. Symbolic interval analysis: loop index bounded by constant → exact size
+- **Type rewriting:** `%struct.List_I64` → `[N x i64]` (stack-allocated via `alloca`)
+- **Conditional `nofree`:** Only emitted for txns whose call graph has zero heap operations
+- **Fallback:** Heap path with bump allocator when inference fails
+
+#### 13-GPU-TARGET.md (Future Roadmap)
+- **Pipeline:** Brief → LLVM IR → `llc -march=nvptx64` → `.ptx` → `ptxas` → SASS
+- **Four optimizations CUDA cannot do:**
+  1. Static bank conflict elimination (SMT solver proves no two threads hit same bank)
+  2. Guaranteed memory coalescing (`noalias` across threads → aligned vector loads)
+  3. Automatic memory-tier placement (read-only → `__constant__`, block-local → `__shared__`)
+  4. Absolute warp divergence elimination (`select i1` → predicated execution, zero branching)
+- **Status:** Future target, not in current implementation plan
+
+---
+
+### Architectural Decisions Resolved This Session
+
+#### Decision: `alwaysinline` for Acyclic Transactions
+- **When:** All acyclic transactions when they are the single firing transaction per tick
+- **Why:** Prevents LLVM from refusing to inline large `%struct.State` by-value — the fallback would be massivestack-copy `memcpy` operations
+- **No bloat concern:** The filter analysis proves at most one transaction fires per tick (disjoint field access), so only one body is inlined
+
+#### Decision: `__wait_for_event()` as Bootstrap Intrinsic
+- **Mechanism:** Existing FFI Dictionary, not a new mechanism
+- **Why:** Matches the "NO MAGIC" policy — transparent, resolvable per-target at link time
+- **Registration:** One entry in the bootstrap intrinsic table alongside `__print`, `__read_file`, etc.
+
+#### Decision: `@llvm.assume` Debug/Release Split
+- **Debug mode:** Emit `br i1 %cond, label %safe, label %panic` — runtime check with stack trace
+- **Release mode:** Emit `call void @llvm.assume(i1 %cond)` — enables `!range`, `nuw nsw`, dead branch elimination
+- **Why:** `@llvm.assume` with a false precondition triggers undefined behavior — unacceptable during development
+
+#### Decision: Conditional `nofree`
+- **When present:** Only for txns whose call graph contains zero heap operations
+- **When omitted:** Any txn touching a `List` (append, resize) or dynamic allocation
+- **Implementation:** Call graph analysis during lowering pass scans for `malloc`/`free`/`realloc` calls
+- **Why:** `nofree` with heap ops causes LLVM to keep stale deallocated pointers in registers (use-after-free)
+
+---
+
+### Phase 2.8 Added to Implementation Order
+
+Added to `12-IMPLEMENTATION-ORDER.md` as a 2-day phase after contract optimization:
+
+| Step | What | Details |
+|------|------|---------|
+| 2.8.1 | Literal size inference | `[1,2,3]` → size 3, promote to `Vector[3]` |
+| 2.8.2 | Contract-bound inference | `[len(x) <= 16]` → max size 16 → `Vector[16]` |
+| 2.8.3 | Symbolic loop-bound inference | Loop `for i in 0..N` → `Vector[N]` |
+| 2.8.4 | Conditional `nofree` | Skip `nofree` on `#0` for any txn whose call graph contains heap ops |
+| 2.8.5 | Heap→Stack codegen split | LLVM IR path A: `%struct.List` (heap, `malloc`), path B: `[N x i64]` (stack, `alloca`) |
+
+Updated total estimate: **14d Rust backend + 27d self-hosted = 41d total** (was 39d).
+
+---
+
+### Phase 0 Rust Backend — Current State
+
+The Rust backend (`src/backend/llvm.rs`) has been rewritten per the Phase 0 scaffold:
+- **Fixed:** `i64 %arg0` → `%State* noalias nocapture %state` (the fundamental model fix)
+- **Fixed:** GEP uses correct indexing from `%state` parameter
+- **Added:** `@llvm.assume` intrinsic declaration
+- **Added:** `init_state()` function with per-field volatile stores
+- **Added:** `attributes #0` and `attributes #1` blocks
+- **Added:** `source_filename`, `target datalayout`, `local_unnamed_addr`
+- **Preserved:** All expression forms (arithmetic, comparison, bitwise, calls)
+- **Known issue:** Bool assignments truncate `i64` to `i8` — needs handling in Phase 1
+- **Tests:** All 5 unit tests pass; full suite 270 tests pass
+
+### Validation Pipeline State
+- Created `tests/llvm_compile_test.sh` — shell-based end-to-end validation
+- Created `tests/llvm_backend_test.rs` — Rust integration test (requires llc in PATH)
+- Created fixtures: `counter.bv`, `multifield.bv`, `minimal.bv`
+- LLVM tools (llc, opt) are now installed and available

@@ -16,7 +16,7 @@ rstruct Counter {
 ```
 
 ```llvm
-define void @Counter_increment(%struct.State* noalias nocapture %state) local_unnamed_addr #0 {
+define void @Counter_increment(%struct.State* noalias nocapture %state) alwaysinline local_unnamed_addr #0 {
 entry:
     ; 1. Load fields from state
     %count_ptr = getelementptr inbounds %struct.State, %struct.State* %state, i64 0, i32 0, i32 0
@@ -53,7 +53,7 @@ entry:
 
 ## Function Attributes
 
-Transactions always receive these attributes (enabling maximum LLVM optimization):
+Transactions receive these attributes. The actual set depends on the transaction's behavior (see below):
 
 ```llvm
 attributes #0 = {
@@ -65,6 +65,34 @@ attributes #0 = {
     willreturn         ; always returns
     memory(argmem: readwrite)  ; only accesses memory via pointer args
 }
+```
+
+### Conditional `nofree`
+
+The `nofree` attribute promises LLVM the function never deallocates memory. If a transaction's call graph contains heap operations (e.g., `List` append/resize which calls `realloc`), `nofree` is a false promise and must be **omitted**.
+
+**Rule:** The lowering pass scans the call graph for `malloc`/`free`/`realloc` calls. If any exist, emit `#0a` instead of `#0`:
+
+```llvm
+attributes #0a = {
+    mustprogress
+    ; nofree omitted — this transaction does heap ops
+    norecurse
+    nosync
+    nounwind
+    willreturn
+    memory(argmem: readwrite)
+}
+```
+The AOT size inference pass (`08e-AOT-SIZE-INFERENCE.md`) promotes `List` → `Vector[N]` when possible, which eliminates the heap ops and allows `#0` to be used.
+
+### `alwaysinline` for Acyclic Transactions
+
+Acyclic transactions get `alwaysinline` to prevent LLVM from refusing to inline large `%State` by-value structs (see `08-REACTOR-LOOP.md`). Without this, LLVM's inliner may decide the struct is too large, falling back to stack-copy `memcpy` operations per tick.
+
+```llvm
+define void @Counter_increment(%struct.State* noalias nocapture %state) alwaysinline local_unnamed_addr #0 {
+;                                                                       ^--- forces inlining
 ```
 
 ## Acyclic Optimization

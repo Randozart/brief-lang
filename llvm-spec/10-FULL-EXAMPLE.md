@@ -38,7 +38,7 @@ target triple = "x86_64-unknown-linux-gnu"
 
 ; ── Transaction: Counter.increment ────────────────────────────────────
 
-define void @Counter_increment(%struct.State* noalias nocapture %state) local_unnamed_addr #0 {
+define void @Counter_increment(%struct.State* noalias nocapture %state) alwaysinline local_unnamed_addr #0 {
 entry:
     ; ── Load fields ──
     %count_ptr = getelementptr inbounds %struct.State, %struct.State* %state, i64 0, i32 0, i32 0
@@ -98,6 +98,7 @@ t1_body:
     br label %commit
 
 noop:
+    call void @__wait_for_event()
     br label %commit
 
 commit:
