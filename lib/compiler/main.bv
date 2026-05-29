@@ -14,6 +14,7 @@ import ast;
 import lexer;
 import parser;
 import call_graph;
+import backends/llvm;
 
 // ===== COMPILER STATE =====
 
@@ -102,6 +103,9 @@ let token_result = tokenize(state.source);
                 };
                 [state.backend == "rust" || state.backend == ""] {
                     output = generate_rust(program, state, cg_result);
+                };
+                [state.backend == "llvm"] {
+                    output = generate_llvm(program, cg_result);
                 };
                 term Ok(output);
             };

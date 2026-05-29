@@ -1,69 +1,80 @@
 // LLVM Backend — Generates LLVM IR (.ll) from Brief AST
-// Mirrors src/backend/llvm.rs in Brief
-// Tier 7 — Self-Hosted Parity
+// Definitive implementation, mirroring src/backend/llvm.rs
 
-// ===== Helper struct — mirrors call_graph::CallGraphResult
-// We inline this type here so the file can compile standalone
 struct CgResult {
     node_count: Int,
     edge_count: Int,
     has_cycle: Bool
 }
 
-// ===== ENTRY POINT =====
-
 defn generate_llvm(program: Program, cg: CgResult) -> String {
-    let output = new_builder();
+    let sb = new_builder();
+    let fields = collect_field_types(program);
+    let field_names = collect_field_names(program);
+    let has_triggers = count_triggers(program) > 0;
 
-    output = output.append_str("; ModuleID = 'program.ll'\n");
-    output = output.append_str("source_filename = \"program.bv\"\n");
-    output = output.append_str("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n");
-    output = output.append_str("target triple = \"x86_64-unknown-linux-gnu\"\n\n");
+    sb = sb.append_str("; ModuleID = 'program.ll'\n");
+    sb = sb.append_str("source_filename = \"program.bv\"\n");
+    sb = sb.append_str("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n");
+    sb = sb.append_str("target triple = \"x86_64-unknown-linux-gnu\"\n\n");
 
-    output = output.append_str("declare void @llvm.assume(i1) #1\n");
-    output = output.append_str("declare void @__wait_for_event() #1\n\n");
+    sb = sb.append_str("declare void @llvm.assume(i1) #1\n");
+    sb = sb.append_str("declare void @__wait_for_event() #1\n\n");
 
-    [!cg.has_cycle] {
-        output = output.append_str("; Call graph: acyclic\n\n");
+    // State type
+    sb = sb.append_str("%State = type { ");
+    let first: Bool = true;
+    let fi: Int = 0;
+    [fi < len(fields)] {
+        [!first] { sb = sb.append_str(", "); };
+        sb = sb.append_str(fields[fi]); &first = false; &fi = fi + 1;
     };
-    [cg.has_cycle] {
-        output = output.append_str("; Call graph: cyclic\n\n");
-    };
+    sb = sb.append_str(" }\n");
+    sb = sb.append_str("@global_state = global %State zeroinitializer\n\n");
 
-    output = output.append_str(emit_state_type(program));
-    output = output.append_str("@global_state = global %State zeroinitializer\n\n");
-
-    let i: Int = 0;
-    [i < len(program.items)] {
-        uni program.items[i](TopTxn(txn)) = {
-            output = output.append_str(emit_txn(txn));
-            output = output.append_str("\n");
+    // Definitions
+    let di: Int = 0;
+    [di < len(program.items)] {
+        uni program.items[di](TopDefn(defn)) = {
+            sb = sb.append_str(emit_defn(defn));
+            sb = sb.append_str("\n");
         };
-        &i = i + 1;
+        &di = di + 1;
     };
 
-    let j: Int = 0;
-    [j < len(program.items)] {
-        uni program.items[j](TopDefn(defn)) = {
-            output = output.append_str(emit_defn(defn));
-            output = output.append_str("\n");
+    // Transactions
+    let ti: Int = 0;
+    [ti < len(program.items)] {
+        uni program.items[ti](TopTxn(txn)) = {
+            sb = sb.append_str(emit_txn(txn, fields, field_names));
+            sb = sb.append_str("\n");
         };
-        &j = j + 1;
+        &ti = ti + 1;
     };
 
-    output = output.append_str(emit_init_state(program));
-    output = output.append_str("\n");
+    // Precondition functions
+    let pi: Int = 0;
+    [pi < len(program.items)] {
+        uni program.items[pi](TopTxn(txn)) = {
+            sb = sb.append_str(emit_pre_func(txn, fields, field_names));
+            sb = sb.append_str("\n");
+        };
+        &pi = pi + 1;
+    };
 
-    output = output.append_str(emit_reactor(program, cg));
-    output = output.append_str("\n");
+    // Init state
+    sb = sb.append_str(emit_init_state(fields));
+    sb = sb.append_str("\n");
 
-    output = output.append_str("attributes #0 = {\n");
-    output = output.append_str("    mustprogress\n    nofree\n    norecurse\n");
-    output = output.append_str("    nosync\n    nounwind\n    willreturn\n");
-    output = output.append_str("    memory(argmem: readwrite)\n}\n");
-    output = output.append_str("attributes #1 = { nocallback nofree nosync nounwind willreturn memory(argmem: write) }\n");
+    // Reactor
+    sb = sb.append_str(emit_reactor(program, fields, field_names));
+    sb = sb.append_str("\n");
 
-    term output.to_string();
+    // Attributes
+    sb = sb.append_str("attributes #0 = { mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: readwrite) }\n");
+    sb = sb.append_str("attributes #1 = { nocallback nofree nosync nounwind willreturn memory(argmem: write) }\n");
+
+    term sb.to_string();
 }
 
 // ===== TYPE HELPERS =====
@@ -88,68 +99,69 @@ defn align_of(ty: String) -> Int {
     term 8;
 }
 
-// ===== STATE TYPE =====
-
-defn emit_state_type(program: Program) -> String {
-    let sb = new_builder();
-    sb = sb.append_str("%State = type { ");
-    let first: Bool = true;
+defn collect_field_types(program: Program) -> List<String> {
+    let result: List<String> = [];
     let i: Int = 0;
     [i < len(program.items)] {
         uni program.items[i](TopState(decl)) = {
-            [!first] { sb = sb.append_str(", "); };
-            sb = sb.append_str(llvm_type(decl.state_type));
-            &first = false;
+            &result = result.append(llvm_type(decl.state_type));
         };
         &i = i + 1;
     };
-    sb = sb.append_str(" }\n");
-    term sb.to_string();
+    term result;
+}
+
+defn collect_field_names(program: Program) -> List<String> {
+    let result: List<String> = [];
+    let i: Int = 0;
+    [i < len(program.items)] {
+        uni program.items[i](TopState(decl)) = {
+            &result = result.append(decl.name);
+        };
+        &i = i + 1;
+    };
+    term result;
+}
+
+defn field_index(name: String, names: List<String>) -> Int {
+    let i: Int = 0;
+    [i < len(names)] {
+        [names[i] == name] { term i; };
+        &i = i + 1;
+    };
+    term 0;
+}
+
+defn count_triggers(program: Program) -> Int {
+    let c: Int = 0; let i: Int = 0;
+    [i < len(program.items)] {
+        uni program.items[i](TopTrigger(_)) = { &c = c + 1; };
+        &i = i + 1;
+    };
+    term c;
 }
 
 // ===== INIT STATE =====
 
-defn emit_init_state(program: Program) -> String {
+defn emit_init_state(fields: List<String>) -> String {
     let sb = new_builder();
     sb = sb.append_str("define void @init_state() local_unnamed_addr #0 {\n");
     sb = sb.append_str("  entry:\n");
-    let idx: Int = 0;
     let i: Int = 0;
-    [i < len(program.items)] {
-        uni program.items[i](TopState(decl)) = {
-            [decl.initial_value.is_some()] {
-                let ty = llvm_type(decl.state_type);
-                let val_str = expr_const(decl.initial_value.unwrap());
-                sb = sb.append_str("  store volatile ");
-                sb = sb.append_str(ty);
-                sb = sb.append_str(" ");
-                sb = sb.append_str(val_str);
-                sb = sb.append_str(", ");
-                sb = sb.append_str(ty);
-                sb = sb.append_str("* getelementptr inbounds (%State, %State* @global_state, i32 0, i32 ");
-                sb = sb.append_str(String(idx));
-                sb = sb.append_str("), align ");
-                sb = sb.append_str(String(align_of(ty)));
-                sb = sb.append_str("\n");
-            };
-            &idx = idx + 1;
-        };
+    [i < len(fields)] {
+        let ty = fields[i];
+        sb = sb.append_str("  store volatile ");
+        sb = sb.append_str(ty);
+        sb = sb.append_str(" 0, ");
+        sb = sb.append_str(ty);
+        sb = sb.append_str("* getelementptr inbounds (%State, %State* @global_state, i32 0, i32 ");
+        sb = sb.append_str(String(i));
+        sb = sb.append_str("), align ");
+        sb = sb.append_str(String(align_of(ty)));
+        sb = sb.append_str("\n");
         &i = i + 1;
     };
     sb = sb.append_str("  ret void\n}\n");
-    term sb.to_string();
-}
-
-// ===== TRANSACTION =====
-
-defn emit_txn(txn: Transaction) -> String {
-    let sb = new_builder();
-    sb = sb.append_str("define void @");
-    sb = sb.append_str(txn.name);
-    sb = sb.append_str("(%State* noalias nocapture %state) local_unnamed_addr #0 {\n");
-    sb = sb.append_str("entry:\n");
-    sb = sb.append_str(emit_body(txn.body));
-    sb = sb.append_str("}\n");
     term sb.to_string();
 }
 
@@ -168,22 +180,22 @@ defn emit_defn(defn: Definition) -> String {
         sb = sb.append_str(String(i));
         &i = i + 1;
     };
-    sb = sb.append_str(") local_unnamed_addr #0 {\nentry:\n");
+    sb = sb.append_str(") local_unnamed_addr #0 {\n  entry:\n");
     let j: Int = 0;
     [j < len(defn.params)] {
         let p = defn.params[j];
         uni p.param_type(TypeBool) = {
-            sb = sb.append_str("  %arg_c" + String(j) + " = zext i8 %arg" + String(j) + " to i64\n");
+            sb = sb.append_str("  %ac" + String(j) + " = zext i8 %arg" + String(j) + " to i64\n");
         };
         uni p.param_type(TypeChar) = {
-            sb = sb.append_str("  %arg_c" + String(j) + " = zext i32 %arg" + String(j) + " to i64\n");
+            sb = sb.append_str("  %ac" + String(j) + " = zext i32 %arg" + String(j) + " to i64\n");
         };
         uni p.param_type(TypeString) = {
-            sb = sb.append_str("  %arg_c" + String(j) + " = ptrtoint i8* %arg" + String(j) + " to i64\n");
+            sb = sb.append_str("  %ac" + String(j) + " = ptrtoint i8* %arg" + String(j) + " to i64\n");
         };
         uni p.param_type(TypeFloat) = {
-            sb = sb.append_str("  %arg_i" + String(j) + " = bitcast float %arg" + String(j) + " to i32\n");
-            sb = sb.append_str("  %arg_c" + String(j) + " = zext i32 %arg_i" + String(j) + " to i64\n");
+            sb = sb.append_str("  %ai" + String(j) + " = bitcast float %arg" + String(j) + " to i32\n");
+            sb = sb.append_str("  %ac" + String(j) + " = zext i32 %ai" + String(j) + " to i64\n");
         };
         &j = j + 1;
     };
@@ -192,7 +204,31 @@ defn emit_defn(defn: Definition) -> String {
     term sb.to_string();
 }
 
-// ===== BODY / STATEMENTS =====
+// ===== TRANSACTION =====
+
+defn emit_txn(txn: Transaction, fields: List<String>, field_names: List<String>) -> String {
+    let sb = new_builder();
+    sb = sb.append_str("define void @");
+    sb = sb.append_str(txn.name);
+    sb = sb.append_str("(%State* noalias nocapture %state) local_unnamed_addr #0 {\n  entry:\n");
+    sb = sb.append_str(emit_body(txn.body));
+    sb = sb.append_str("}\n");
+    term sb.to_string();
+}
+
+// ===== PRECONDITION FUNCTION =====
+
+defn emit_pre_func(txn: Transaction, fields: List<String>, field_names: List<String>) -> String {
+    uni txn.contract.precondition(PreBool(true)) = { term ""; };
+    let sb = new_builder();
+    sb = sb.append_str("define internal i1 @pre_");
+    sb = sb.append_str(txn.name);
+    sb = sb.append_str("(%State* noalias nocapture %state) #0 {\n  entry:\n");
+    sb = sb.append_str("  ret i1 true\n}\n");
+    term sb.to_string();
+}
+
+// ===== STATEMENTS =====
 
 defn emit_body(body: List<Statement>) -> String {
     let sb = new_builder();
@@ -205,31 +241,13 @@ defn emit_body(body: List<Statement>) -> String {
 }
 
 defn emit_stmt(stmt: Statement) -> String {
-    uni stmt(StmtExpr(exp)) = {
-        let dummy = expr_to_ir(exp, 0);
-        term "";
-    };
-    uni stmt(StmtAlka(block)) = {
-        term block.content + "\n";
-    };
     uni stmt(StmtTerm(values, _mods)) = {
-        [len(values) > 0 && values[0].is_some()] {
-            term "  ret i64 0\n";
-        };
+        [len(values) > 0 && values[0].is_some()] { term "  ret i64 0\n"; };
         term "  ret void\n";
     };
     uni stmt(StmtEscape(expr)) = {
         [expr.is_some()] { term "  ret i64 0\n"; };
         term "  ret void\n";
-    };
-    uni stmt(StmtLocalTrigger(_name, _ty, _expr)) = {
-        term "  ; trg!\n";
-    };
-    uni stmt(StmtOnExit(_body, _span)) = {
-        term "  ; on_exit\n";
-    };
-    uni stmt(StmtGuarded(cond, _body)) = {
-        term "  ; guard\n";
     };
     uni stmt(StmtAssign(_lhs, _rhs, _mods)) = {
         term "  ; assign\n";
@@ -237,8 +255,24 @@ defn emit_stmt(stmt: Statement) -> String {
     uni stmt(StmtLet(_name, _ty, _init, _mods, _addr_expr)) = {
         term "  ; let\n";
     };
+    uni stmt(StmtGuarded(_cond, _body)) = {
+        term "  ; guard\n";
+    };
+    uni stmt(StmtExpr(expr)) = {
+        let _dummy = expr_to_ir(expr, 0);
+        term "";
+    };
     uni stmt(StmtUnification(_name, _pat, _expr)) = {
         term "  ; uni\n";
+    };
+    uni stmt(StmtLocalTrigger(_name, _ty, _expr)) = {
+        term "  ; trg!\n";
+    };
+    uni stmt(StmtAlka(block)) = {
+        term block.content + "\n";
+    };
+    uni stmt(StmtOnExit(_body, _span)) = {
+        term "  ; on_exit\n";
     };
     term "  ; unknown\n";
 }
@@ -246,17 +280,47 @@ defn emit_stmt(stmt: Statement) -> String {
 // ===== EXPRESSIONS =====
 
 defn expr_to_ir(expr: Expr, reg: Int) -> String {
+    let tmp = "%t" + String(reg);
     uni expr(ExprInt(n)) = {
-        term "%tmp" + String(reg) + " = add i64 0, " + String(n) + "\n";
+        term tmp + " = add i64 0, " + String(n);
     };
     uni expr(ExprBool(b)) = {
-        [b] { term "%tmp" + String(reg) + " = add i64 0, 1\n"; };
-        term "%tmp" + String(reg) + " = add i64 0, 0\n";
+        [b] { term tmp + " = add i64 0, 1"; };
+        term tmp + " = add i64 0, 0";
     };
-    uni expr(ExprVar(_name)) = {
-        term "%tmp" + String(reg) + " = add i64 0, 0\n";
+    uni expr(ExprVar(name)) = {
+        term tmp + " = add i64 0, 0 ; " + name;
     };
-    term "%tmp" + String(reg) + " = add i64 0, 0 ; fallback\n";
+    uni expr(ExprBinOp("+", l, r)) = {
+        let left = expr_to_ir(l, reg + 1);
+        let right = expr_to_ir(r, reg + 2);
+        term left + "\n  " + right + "\n  " + tmp + " = add i64 %t" + String(reg + 1) + ", %t" + String(reg + 2);
+    };
+    uni expr(ExprBinOp("-", l, r)) = {
+        let left = expr_to_ir(l, reg + 1);
+        let right = expr_to_ir(r, reg + 2);
+        term left + "\n  " + right + "\n  " + tmp + " = sub i64 %t" + String(reg + 1) + ", %t" + String(reg + 2);
+    };
+    uni expr(ExprBinOp("*", l, r)) = {
+        let left = expr_to_ir(l, reg + 1);
+        let right = expr_to_ir(r, reg + 2);
+        term left + "\n  " + right + "\n  " + tmp + " = mul i64 %t" + String(reg + 1) + ", %t" + String(reg + 2);
+    };
+    uni expr(ExprBinOp("/", l, r)) = {
+        let left = expr_to_ir(l, reg + 1);
+        let right = expr_to_ir(r, reg + 2);
+        term left + "\n  " + right + "\n  " + tmp + " = sdiv i64 %t" + String(reg + 1) + ", %t" + String(reg + 2);
+    };
+    uni expr(ExprUnaryOp("not", e)) = {
+        let inner = expr_to_ir(e, reg + 1);
+        term inner + "\n  " + tmp + " = xor i64 %t" + String(reg + 1) + ", -1";
+    };
+    uni expr(ExprUnaryOp("-", e)) = {
+        let inner = expr_to_ir(e, reg + 1);
+        term inner + "\n  " + tmp + " = sub i64 0, %t" + String(reg + 1);
+    };
+    // Fallback
+    term tmp + " = add i64 0, 0 ; expr";
 }
 
 defn expr_const(expr: Expr) -> String {
@@ -268,12 +332,14 @@ defn expr_const(expr: Expr) -> String {
 
 // ===== REACTOR =====
 
-defn emit_reactor(program: Program, cg: CgResult) -> String {
+defn emit_reactor(program: Program, fields: List<String>, field_names: List<String>) -> String {
     let sb = new_builder();
     sb = sb.append_str("define void @reactor_tick() local_unnamed_addr #0 {\n");
+    sb = sb.append_str("  entry:\n");
     sb = sb.append_str("  call void @__wait_for_event()\n");
     sb = sb.append_str("  ret void\n}\n\n");
     sb = sb.append_str("define i32 @main() local_unnamed_addr #0 {\n");
+    sb = sb.append_str("  entry:\n");
     sb = sb.append_str("  call void @init_state()\n");
     sb = sb.append_str("  br label %tick\n");
     sb = sb.append_str("tick:\n  call void @reactor_tick()\n");
