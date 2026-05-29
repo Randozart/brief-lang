@@ -1,0 +1,9 @@
+// Phase 1: guarded block with conditional store
+let x: Int = 0;
+
+rct txn guarded_inc [x < 100]
+  [x == @x + 1]
+{
+  &x = x + 1;
+  term;
+};

@@ -1,0 +1,11 @@
+// Phase 1: full transaction using all features
+let counter: Int = 0;
+let active: Bool = false;
+
+rct txn full [counter < 10 && active == false]
+  [counter == @counter + 1]
+{
+  let tmp: Int = counter + 1;
+  &counter = tmp;
+  term;
+};

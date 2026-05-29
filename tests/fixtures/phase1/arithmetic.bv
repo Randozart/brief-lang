@@ -1,0 +1,17 @@
+// Phase 1: arithmetic — all 5 integer ops
+let a: Int = 0;
+let b: Int = 0;
+let c: Int = 0;
+let d: Int = 0;
+let e: Int = 0;
+
+rct txn compute [true]
+  [a == @a + 10 && b == @b - 3 && c == @c * 2 && d == @d / 4 && e == @e % 5]
+{
+  &a = a + 10;
+  &b = b - 3;
+  &c = c * 2;
+  &d = d / 4;
+  &e = e % 5;
+  term;
+};

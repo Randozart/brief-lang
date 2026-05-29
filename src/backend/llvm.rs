@@ -15,6 +15,8 @@ pub struct LlvmBackend {
     txn_counter: usize,
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
+    let_bindings: HashMap<String, String>,
+    terminated: bool,
 }
 
 impl LlvmBackend {
@@ -26,6 +28,8 @@ impl LlvmBackend {
             txn_counter: 0,
             has_cycles: false,
             pending_cleanup: Vec::new(),
+            let_bindings: HashMap::new(),
+            terminated: false,
         }
     }
 
@@ -191,26 +195,34 @@ impl LlvmBackend {
         writeln!(output, "entry:").ok();
         writeln!(output, "  ; pre: {:?}", txn.contract.pre_condition).ok();
 
-        // Generate body
         self.txn_counter = 0;
+        self.let_bindings.clear();
+        self.terminated = false;
         for stmt in &txn.body {
             self.generate_statement(output, stmt, "  ");
         }
 
-        // Postcondition as comment
         writeln!(output, "  ; post: {:?}", txn.contract.post_condition).ok();
-        writeln!(output, "  ret void").ok();
+        if !self.terminated {
+            writeln!(output, "  ret void").ok();
+        }
         writeln!(output, "}}").ok();
     }
 
     fn generate_statement(&mut self, output: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
-            Statement::Term { .. } => {
+            Statement::Term { values, .. } => {
                 let cleanup = std::mem::take(&mut self.pending_cleanup);
                 for s in &cleanup {
                     self.generate_statement(output, s, indent);
                 }
-                writeln!(output, "{}; term", indent).ok();
+                if let Some(Some(v)) = values.first() {
+                    let val = self.generate_expr(output, v, indent);
+                    writeln!(output, "{}ret i64 {}", indent, val).ok();
+                } else {
+                    writeln!(output, "{}ret void", indent).ok();
+                }
+                self.terminated = true;
             }
             Statement::Let { name, expr, address_expr, .. } => {
                 if address_expr.is_some() {
@@ -218,6 +230,7 @@ impl LlvmBackend {
                 } else if let Some(e) = expr {
                     let val = self.generate_expr(output, e, indent);
                     writeln!(output, "{}; let {} = {}", indent, name, val).ok();
+                    self.let_bindings.insert(name.clone(), val.clone());
                 } else {
                     writeln!(output, "{}; let {} = uninitialized", indent, name).ok();
                 }
@@ -250,7 +263,10 @@ impl LlvmBackend {
             }
             Statement::Guarded { condition, statements, .. } => {
                 let cond = self.generate_expr(output, condition, indent);
-                writeln!(output, "{}br i1 {}, label %then, label %end", indent, cond).ok();
+                let cond_i1 = format!("%cnd{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = icmp ne i64 {}, 0", indent, cond_i1, cond).ok();
+                writeln!(output, "{}br i1 {}, label %then, label %end", indent, cond_i1).ok();
                 writeln!(output, "{}then:", indent).ok();
                 for s in statements {
                     self.generate_statement(output, s, &format!("{}  ", indent));
@@ -280,6 +296,7 @@ impl LlvmBackend {
                 } else {
                     writeln!(output, "{}ret void", indent).ok();
                 }
+                self.terminated = true;
             }
             Statement::Alka(block) => {
                 for line in block.content.lines() {
@@ -318,7 +335,9 @@ impl LlvmBackend {
                 writeln!(output, "{}{} = add i32 0, {}", indent, val, *c as i32).ok();
             }
             Expr::Identifier(name) => {
-                if let Some(&idx) = self.field_index_map.get(name) {
+                if let Some(reg) = self.let_bindings.get(name) {
+                    writeln!(output, "{}{} = add i64 0, {}", indent, val, reg).ok();
+                } else if let Some(&idx) = self.field_index_map.get(name) {
                     let ty = &self.field_types[idx];
                     let ptr_reg = format!("%ptr{}", self.txn_counter);
                     self.txn_counter += 1;
