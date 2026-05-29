@@ -1,9 +1,8 @@
 # Brief Language Specification
 
-**Version:** v0.13.0  
-**Date:** 2026-05-14  
-**Status:** Development (stable core, experimental backends, **new: Strict Brief variants**)  
-**Status:** Development (stable core, experimental backends)  
+**Version:** v0.14.0  
+**Date:** 2026-05-29  
+**Status:** Development (stable core, experimental backends, **new: Strict Brief variants, LLVM backend, match expression**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -57,6 +56,10 @@ Lexer → Parser → Type Checker → Proof Engine → Backend
 - **React Native** (`.rbv` → React Native component via target spec)
 - **Next.js** (`.rbv` → Next.js page via target spec)
 - **Vite** (`.rbv` → Vite React component via target spec)
+- **LLVM IR** (`.bv` → `.ll` with acyclic optimization, `noalias`, `!range`, `llvm.assume`) \[Added 2026-05-29\]
+- **AArch64** (`.bv`, `.ebv` → ARM64 binary via acyclic inlining) \[Added 2026-05-29\]
+- **x86_64** (`.bv`, `.ebv` → x86-64 binary via acyclic inlining) \[Added 2026-05-29\]
+- **Webstack** (`.rbv` → Next.js / Vite pages via target spec) \[Added 2026-05-29\]
 
 ---
 
@@ -246,6 +249,12 @@ cast ::= expression "as" type
 prior_state ::= "@" identifier
 
 block ::= "{" statement* "}"
+
+match_expr ::= "match" expression "{" match_arm+ "}"
+match_arm ::= match_pattern ("if" expression)? "=>" (expression | block) ("," | ";")?
+match_pattern ::= "_" | identifier ("(" identifier ("," identifier)* ")")?
+
+\[Added 2026-05-29\]
 ```
 
 ### 2.5 Contracts
@@ -279,6 +288,9 @@ ffi_attr ::= "ffi" "(" string_literal ")"
            | "map" "(" string_literal "," string_literal ")"
 ```
 
+> **\[Deprecated 2026-05-29\]** TOML-based FFI bindings (`from "*.toml"`) are superseded by inline `frgn` declarations with dynamic linking (see §5.2 Dynamic Linking).
+
+\n
 ### 2.3 Statements
 
 ```bnf
@@ -962,6 +974,59 @@ defn dot_product(a: Float[4], b: Float[4]) -> Float {
 
 ---
 
+\[Added 2026-05-29\]
+
+### 3.13 Match Expression
+
+The `match` expression performs multi-arm pattern matching on enum values. It replaces verbose chains of `uni` statements with a single exhaustive expression.
+
+**Syntax:**
+```
+match value {
+    Variant(field1, field2) => body,
+    _ => default,
+}
+```
+
+**Semantics:**
+1. The scrutinee expression is evaluated first.
+2. Arms are tried in declaration order. The first arm whose pattern matches the scrutinee's enum variant is selected.
+3. If the arm has a guard (`if condition`), the guard must also evaluate to `true`.
+4. The match is **exhaustive** — a wildcard arm `_ =>` is required if not all variants are covered. Without it, the compiler raises a compile-time error.
+5. The match is an **expression** — it can appear on the right side of `let`, inside a `term`, etc. The result is the body of the matched arm.
+6. Pattern variables are bound to the corresponding fields of the matched variant and are scoped to the arm's body.
+
+**Examples:**
+
+```brief
+// Basic enum matching
+enum Option<T> { Some(T), None };
+let val: Option<Int> = Some(42);
+let result: Int = match val {
+    Some(x) => x,
+    None => -1,
+};
+
+// With wildcard fallthrough
+match result {
+    Ok(value) => println("Success: " ++ value.to_string()),
+    _ => println("Failed"),
+};
+
+// Match as a term value
+term match status {
+    Active => "running",
+    Inactive => "stopped",
+    _ => "unknown",
+};
+```
+
+**Relation to `uni`:** The `match` expression is a higher-level construct that desugars to a sequence of `uni` statements with a `term` fallthrough. Single-arm pattern matching should still use `uni` for simplicity.
+
+**Compiler support:** Supported in Rust parser + interpreter; self-hosted (Brief-in-Brief) support pending (requires `KeywordMatch` token in `token.bv` and `parse_match_expr` in `parser.bv`).
+
+---
+
 ## 4. Type System
 
 ### 4.1 Primitive Types
@@ -1329,6 +1394,54 @@ txn read_data() [file.exists()][data.len() > 0] {
 };
 
 // Resource is automatically closed when out of scope
+```
+
+\[Added 2026-05-29\]
+
+### 5.2 Dynamic Linking
+
+Inline `frgn` declarations with `from "lib.so"` replace TOML-based FFI bindings. The compiler resolves foreign functions at runtime via dynamic linking (`dlsym`).
+
+**Syntax:**
+```brief
+// Primitive types — direct C ABI via dlsym (Tier 1)
+frgn strlen(s: String) -> Int from "libc.so.6";
+
+// Complex types — shared memory protocol (Tier 2, via metropolitan)
+frgn process_json(input: JsonValue) -> JsonValue from "libprocessor" via metropolitan;
+```
+
+**Tier 1: Direct Dynamic Linking (default)**
+- Functions with primitive parameter/return types (`Int`, `Float`, `Bool`, `Char`, `String`, `Void`) are called via `dlsym` through `libloading`.
+- Brief values are auto-converted to C ABI (strings null-terminated, booleans become `i32`, etc.).
+- Overhead: ~1-2ns per call (same as native C function pointer).
+
+**Tier 2: Metropolitan Protocol (via metropolitan)**
+- Functions with compound types (`List`, `Enum`, `Struct`, `Tuple`) use shared memory + atomic handshake.
+- Byte layout is computed at compile time (`compute_layout()`).
+- Communication via `/dev/shm/metro_<name>` with CAS handshake: `IDLE → REQ → ACK → RES → IDLE`.
+- Requires the `via metropolitan` clause explicitly.
+
+**Bootstrap Set:**
+The interpreter provides exactly 4 built-in functions — the minimum needed to load source files before any `.so` can be resolved:
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `__read_file` | `(path: String) -> Option<String>` | Load source code |
+| `__write_file` | `(path: String, data: String) -> Bool` | Write output |
+| `__print` | `(msg: String) -> Void` | Debug output |
+| `__exit` | `(code: Int) -> Void` | Termination |
+
+All other foreign functionality (`strlen`, `is_digit`, file I/O, math functions, etc.) is declared as `frgn` in `lib/std/` and resolved at runtime. The compiler contains no hardcoded FFI beyond the bootstrap set.
+
+**TOML Migration:**
+All existing `from "*.toml"` declarations remain valid but are deprecated. The recommended pattern is:
+```brief
+// Old (deprecated):
+frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+
+// New:
+frgn sqrt(x: Float) -> Float from "libm.so.6";
 ```
 
 ---
@@ -1726,6 +1839,9 @@ brief arm file.ebv       # .ebv → bare-metal Rust
 brief verilog file.ebv   # .ebv → SystemVerilog
 brief vhdl file.ebv      # .ebv → VHDL
 brief cobol file.bv      # .bv → COBOL
+brief llvm file.bv       # .bv → LLVM IR \[2026-05-29\]
+brief aarch64 file.bv    # .bv → AArch64 binary \[2026-05-29\]
+brief x86_64 file.bv     # .bv → x86_64 binary \[2026-05-29\]
 
 # Run (build and execute)
 brief run file.rbv       # Build and open in browser
@@ -1783,7 +1899,7 @@ reset = "RESETn"
 | Async transactions | ✅ Complete | With mutual exclusion checking |
 | Definitions (`defn`) | ✅ Complete | With contracts |
 | Guards | ✅ Complete | Guard-based control flow |
-| Pattern matching | ✅ Complete | Via unification |
+| Pattern matching | ✅ Complete | Via unification and match expression \[2026-05-29\] |
 | Inline assembly | ✅ Complete | C backend support |
 | **Type System** | | |
 | Primitive types | ✅ Complete | Int, UInt, Float, Bool, String, Char, Data, Void |
@@ -1818,6 +1934,10 @@ reset = "RESETn"
 | React Native | ✅ Complete | Via target spec |
 | Next.js | ✅ Complete | Via target spec |
 | Vite | ✅ Complete | Via target spec |
+| LLVM IR | ⚠️ Partial | Text IR emitter with acyclic/`noalias`/`!range` optimization \[2026-05-29\] |
+| AArch64 | ⚠️ Partial | Binary via acyclic inlining \[2026-05-29\] |
+| x86_64 | ⚠️ Partial | Binary via acyclic inlining \[2026-05-29\] |
+| Webstack | ⚠️ Partial | Next.js / Vite page generation \[2026-05-29\] |
 | **Tooling** | | |
 | Language Server (LSP) | ✅ Complete | Type-checking, go-to-def |
 | Syntax highlighting | ✅ Complete | VS Code extension |
