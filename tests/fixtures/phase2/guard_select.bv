@@ -1,0 +1,9 @@
+// Phase 2: guard→select optimization
+let flag: Bool = false;
+
+rct txn set_flag [true]
+  [flag == true]
+{
+  &flag = true;
+  term;
+};

@@ -1,0 +1,9 @@
+// Phase 2: range contract — tests !range metadata via precondition
+let counter: Int = 0;
+
+rct txn bounded_inc [counter < 100]
+  [counter == @counter + 1]
+{
+  &counter = counter + 1;
+  term;
+};

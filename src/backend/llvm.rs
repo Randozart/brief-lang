@@ -17,6 +17,9 @@ pub struct LlvmBackend {
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
     terminated: bool,
+    range_bounds: HashMap<String, (i64, i64)>,
+    is_release: bool,
+    field_to_meta_idx: HashMap<String, usize>,
 }
 
 impl LlvmBackend {
@@ -30,7 +33,15 @@ impl LlvmBackend {
             pending_cleanup: Vec::new(),
             let_bindings: HashMap::new(),
             terminated: false,
+            range_bounds: HashMap::new(),
+            is_release: false,
+            field_to_meta_idx: HashMap::new(),
         }
+    }
+
+    pub fn with_release(mut self, release: bool) -> Self {
+        self.is_release = release;
+        self
     }
 
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
@@ -46,28 +57,23 @@ impl LlvmBackend {
             println!("  LLVM backend: acyclic call graph — norecurse + inlining enabled");
         }
 
-        // Build field index map and type list
         self.build_field_index(program);
 
         let mut output = String::new();
 
-        // Module header
         writeln!(output, "; ModuleID = 'program.ll'").ok();
         writeln!(output, "source_filename = \"program.bv\"").ok();
         writeln!(output, "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"").ok();
         writeln!(output, "target triple = \"x86_64-unknown-linux-gnu\"").ok();
         writeln!(output).ok();
 
-        // Declare intrinsics
         writeln!(output, "declare void @llvm.assume(i1) #1").ok();
         writeln!(output).ok();
 
-        // State type and global
         self.declare_state_type(&mut output, program);
         self.declare_state_global(&mut output, program);
         writeln!(output).ok();
 
-        // Collect transactions
         let mut txns: Vec<(String, &crate::ast::Transaction)> = Vec::new();
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
@@ -75,22 +81,20 @@ impl LlvmBackend {
             }
         }
 
-        // Generate each transaction
+        let mut range_meta_nodes: Vec<String> = Vec::new();
+
         for (name, txn) in &txns {
-            self.generate_transaction(&mut output, txn, name);
+            self.generate_transaction(&mut output, txn, name, &mut range_meta_nodes);
             writeln!(output).ok();
         }
 
-        // Generate init_state
         self.generate_init_state(&mut output, program);
         writeln!(output).ok();
 
-        // Generate reactor loop
         if !txns.is_empty() {
             self.generate_reactor(&mut output, &txns);
         }
 
-        // Attributes
         writeln!(output).ok();
         writeln!(output, "attributes #0 = {{").ok();
         writeln!(output, "    mustprogress").ok();
@@ -102,6 +106,14 @@ impl LlvmBackend {
         writeln!(output, "    memory(argmem: readwrite)").ok();
         writeln!(output, "}}").ok();
         writeln!(output, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn memory(argmem: write) }}").ok();
+
+        if !range_meta_nodes.is_empty() {
+            writeln!(output).ok();
+            writeln!(output, "; Range metadata").ok();
+            for md in &range_meta_nodes {
+                writeln!(output, "{}", md).ok();
+            }
+        }
 
         output
     }
@@ -131,7 +143,7 @@ impl LlvmBackend {
         }
     }
 
-    fn declare_state_type(&self, output: &mut String, program: &Program) {
+    fn declare_state_type(&self, output: &mut String, _program: &Program) {
         if self.field_types.is_empty() {
             writeln!(output, "%State = type {{ i64 }}").ok();
             return;
@@ -183,21 +195,91 @@ impl LlvmBackend {
         }
     }
 
-    fn state_ptr(&self, output: &mut String, field_name: &str, val_reg: &str, indent: &str) {
-        if let Some(&idx) = self.field_index_map.get(field_name) {
-            let ty = &self.field_types[idx];
-            writeln!(output, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, val_reg, idx).ok();
+    fn extract_ranges(pre: &Expr) -> HashMap<String, (i64, i64)> {
+        let mut ranges = HashMap::new();
+        Self::extract_ranges_inner(pre, &mut ranges);
+        ranges
+    }
+
+    fn extract_ranges_inner(expr: &Expr, ranges: &mut HashMap<String, (i64, i64)>) {
+        match expr {
+            Expr::And(l, r) => {
+                Self::extract_ranges_inner(l, ranges);
+                Self::extract_ranges_inner(r, ranges);
+            }
+            Expr::Lt(l, r) => {
+                if let Expr::Identifier(name) = l.as_ref() {
+                    if let Expr::Integer(n) = r.as_ref() {
+                        let entry = ranges.entry(name.clone()).or_insert((i64::MIN, i64::MAX));
+                        if *n < entry.1 { entry.1 = *n; }
+                    }
+                }
+            }
+            Expr::Ge(l, r) => {
+                if let Expr::Identifier(name) = l.as_ref() {
+                    if let Expr::Integer(n) = r.as_ref() {
+                        let entry = ranges.entry(name.clone()).or_insert((i64::MIN, i64::MAX));
+                        if *n > entry.0 { entry.0 = *n; }
+                    }
+                }
+            }
+            Expr::Gt(l, r) => {
+                if let Expr::Identifier(name) = l.as_ref() {
+                    if let Expr::Integer(n) = r.as_ref() {
+                        let entry = ranges.entry(name.clone()).or_insert((i64::MIN, i64::MAX));
+                        if *n + 1 > entry.0 { entry.0 = *n + 1; }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
-    fn generate_transaction(&mut self, output: &mut String, txn: &crate::ast::Transaction, name: &str) {
+    fn emit_precondition(&mut self, output: &mut String, pre: &Expr, indent: &str) {
+        let cond = self.generate_expr(output, pre, indent);
+        let cond_i1 = format!("%pre_i1{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(output, "{}{} = icmp ne i64 {}, 0", indent, cond_i1, cond).ok();
+        if self.is_release {
+            writeln!(output, "{}call void @llvm.assume(i1 {})", indent, cond_i1).ok();
+        } else {
+            let panic_lab = format!("pre_panic{}", self.txn_counter);
+            self.txn_counter += 1;
+            let safe_lab = format!("pre_safe{}", self.txn_counter);
+            self.txn_counter += 1;
+            writeln!(output, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, safe_lab, panic_lab).ok();
+            writeln!(output, "{}{}:", indent, panic_lab).ok();
+            writeln!(output, "{}  unreachable", indent).ok();
+            writeln!(output, "{}{}:", indent, safe_lab).ok();
+        }
+    }
+
+    fn generate_transaction(&mut self, output: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta_nodes: &mut Vec<String>) {
         writeln!(output, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", name).ok();
         writeln!(output, "entry:").ok();
-        writeln!(output, "  ; pre: {:?}", txn.contract.pre_condition).ok();
+
+        self.range_bounds = Self::extract_ranges(&txn.contract.pre_condition);
+
+        self.field_to_meta_idx.clear();
+        for (field, &(lo, hi)) in &self.range_bounds {
+            if hi < i64::MAX {
+                let idx = range_meta_nodes.len();
+                let display_lo = if lo > i64::MIN { lo } else { 0i64 };
+                range_meta_nodes.push(format!("!{} = !{{ i64 {}, i64 {} }}", idx, display_lo, hi));
+                self.field_to_meta_idx.insert(field.clone(), idx);
+            }
+        }
 
         self.txn_counter = 0;
         self.let_bindings.clear();
         self.terminated = false;
+
+        if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
+            self.emit_precondition(output, &txn.contract.pre_condition, "  ");
+        }
+
+        writeln!(output, "  ; pre: {:?}", txn.contract.pre_condition).ok();
+
         for stmt in &txn.body {
             self.generate_statement(output, stmt, "  ");
         }
@@ -237,14 +319,14 @@ impl LlvmBackend {
             }
             Statement::Assignment { lhs, expr, .. } => {
                 let val = self.generate_expr(output, expr, indent);
-                let name = match lhs {
+                let field_name = match lhs {
                     Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
                     _ => {
                         writeln!(output, "{}; assign {}", indent, val).ok();
                         return;
                     }
                 };
-                if let Some(&idx) = self.field_index_map.get(&name) {
+                if let Some(&idx) = self.field_index_map.get(&field_name) {
                     let ty = &self.field_types[idx];
                     let ptr_reg = format!("%ptr{}", self.txn_counter);
                     self.txn_counter += 1;
@@ -258,7 +340,7 @@ impl LlvmBackend {
                         writeln!(output, "{}store {} {}, {}* {}, align {}", indent, ty, val, ty, ptr_reg, self.align_of(ty)).ok();
                     }
                 } else {
-                    writeln!(output, "{}; assign {} to {}", indent, val, name).ok();
+                    writeln!(output, "{}; assign {} to {}", indent, val, field_name).ok();
                 }
             }
             Statement::Guarded { condition, statements, .. } => {
@@ -266,6 +348,36 @@ impl LlvmBackend {
                 let cond_i1 = format!("%cnd{}", self.txn_counter);
                 self.txn_counter += 1;
                 writeln!(output, "{}{} = icmp ne i64 {}, 0", indent, cond_i1, cond).ok();
+
+                if statements.len() == 1 {
+                    if let Statement::Assignment { lhs, expr, .. } = &statements[0] {
+                        if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
+                            if let Some(&idx) = self.field_index_map.get(n) {
+                                let ty = self.field_types[idx].clone();
+                                let ptr_reg = format!("%ptr{}", self.txn_counter);
+                                self.txn_counter += 1;
+                                let assign_val = self.generate_expr(output, expr, indent);
+                                writeln!(output, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ptr_reg, idx).ok();
+                                let load_reg = format!("%ld{}", self.txn_counter);
+                                self.txn_counter += 1;
+                                writeln!(output, "{}{} = load i64, i64* {}, align 8", indent, load_reg, ptr_reg).ok();
+                                let select_reg = format!("%sel{}", self.txn_counter);
+                                self.txn_counter += 1;
+                                writeln!(output, "{}{} = select i1 {}, i64 {}, i64 {}", indent, select_reg, cond_i1, assign_val, load_reg).ok();
+                                if ty == "i8" {
+                                    let trunc_reg = format!("%tr{}", self.txn_counter);
+                                    self.txn_counter += 1;
+                                    writeln!(output, "{}{} = trunc i64 {} to i8", indent, trunc_reg, select_reg).ok();
+writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, self.align_of(&ty)).ok();
+                                } else {
+                                    writeln!(output, "{}store i64 {}, i64* {}, align {}", indent, select_reg, ptr_reg, self.align_of(&ty)).ok();
+                                }
+                                return;
+                            }
+                        }
+                    }
+                }
+
                 writeln!(output, "{}br i1 {}, label %then, label %end", indent, cond_i1).ok();
                 writeln!(output, "{}then:", indent).ok();
                 for s in statements {
@@ -344,7 +456,12 @@ impl LlvmBackend {
                     writeln!(output, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ptr_reg, idx).ok();
                     let load_reg = format!("%ld{}", self.txn_counter);
                     self.txn_counter += 1;
-                    writeln!(output, "{}{} = load {}, {}* {}, align {}", indent, load_reg, ty, ty, ptr_reg, self.align_of(ty)).ok();
+                    let range_suffix = if let Some(&meta_idx) = self.field_to_meta_idx.get(name) {
+                        format!(", !range !{}", meta_idx)
+                    } else {
+                        String::new()
+                    };
+                    writeln!(output, "{}{} = load {}, {}* {}, align {}{}", indent, load_reg, ty, ty, ptr_reg, self.align_of(ty), range_suffix).ok();
                     if ty == "i8" {
                         writeln!(output, "{}{} = zext i8 {} to i64", indent, val, load_reg).ok();
                     } else {

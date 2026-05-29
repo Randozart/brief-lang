@@ -1,0 +1,11 @@
+// Phase 2: complex precondition (multi-variable)
+let x: Int = 0;
+let y: Int = 0;
+
+rct txn multi [x > 0 && y < 100]
+  [x == @x + 1 && y == @y - 1]
+{
+  &x = x + 1;
+  &y = y - 1;
+  term;
+};
