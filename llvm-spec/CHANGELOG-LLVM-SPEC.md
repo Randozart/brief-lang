@@ -278,3 +278,58 @@ LLVM 18.1.3 successfully optimized the Phase 0 output:
 | `tests/fixtures/phase3/unify_simple.bv` | `uni` pattern match with payload extraction | ✅ |
 
 ### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
+
+---
+
+## Phase 4 — FFI declare + call
+
+### Delivered (2026-05-29)
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| `frgn_map` | ✅ | `HashMap<String, ForeignSignature>` from `TopLevel::ForeignBinding` |
+| `declare` emission | ✅ | Per-binding at module header with ABI type mapping |
+| `__print` bootstrap | ✅ | `inttoptr i64 to i8*` + `strlen` + `write(1, ptr, len)` |
+| `__exit` bootstrap | ✅ | `exit(0)` |
+| C ABI marshaling | ✅ | Bool `zext` to i32, String `ptrtoint`/`inttoptr`, Int pass-through |
+| String field fix | ✅ | `i8*` fields in `%State` use `ptrtoint` on load, `inttoptr` on FFI call |
+| `@llvm.memcpy` declare | ✅ | Intrinsic for stack-allocated string marshaling |
+| C std declares | ✅ | `write`, `strlen`, `exit`, `open`, `read` (conditional on use) |
+
+### Test Fixtures (all pass `llc`)
+| Fixture | Tests | Status |
+|---------|-------|--------|
+| `tests/fixtures/phase4/ffi_print.bv` | `__print` bootstrap with string marshaling | ✅ |
+| `tests/fixtures/phase4/ffi_declare.bv` | `strlen` declare + Int return | ✅ |
+
+### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
+
+---
+
+## Phase 5 — Reactor Loop + Dispatch + Equilibrium Suspension
+
+### Delivered (2026-05-29)
+
+| Feature | Status | Details |
+|---------|--------|--------|
+| Precondition extraction | ✅ | `define internal i1 @pre_txn(%State*)` for non-trivial preconditions |
+| Dispatch chain | ✅ | Priority-ordered `br i1 %pre, label %body, label %check_next` |
+| Equilibrium suspension | ✅ | `call void @__wait_for_event()` when no precondition met |
+| Trigger sampling preserved | ✅ | `load volatile` at tick entry |
+| Fused txn generation restored | ✅ | `generate_fused_transaction` from Phase 2.5 |
+
+### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
+
+---
+
+## Phase 6 — SIMD Loop Vectorization
+
+### Delivered (2026-05-29)
+
+| Feature | Status | Details |
+|---------|--------|--------|
+| `!llvm.loop.vectorize.enable` | ✅ | On reactor loop back-edge `br label %tick` |
+| `!llvm.loop.interleave.count` | ✅ | Set to 4 |
+| Metadata node self-reference | ✅ | `!999 = !{!999, !1000, !1001}` using fixed high indices to avoid range metadata conflict |
+
+### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
