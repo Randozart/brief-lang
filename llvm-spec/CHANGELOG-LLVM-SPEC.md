@@ -204,3 +204,28 @@ LLVM 18.1.3 successfully optimized the Phase 0 output:
 | Regression: counter, multifield, minimal | Phase 0 fixtures still pass | ✅ |
 
 ### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
+
+---
+
+## Phase 2 — Contract Optimization
+
+### Delivered (2026-05-29)
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| `!range` metadata | ✅ | `[x < N]` → `!range !{ 0, N }` on field `load`. Signed bounds use `2^63`. Parses `And(Lt(Ident, Int), ...)` patterns |
+| `@llvm.assume` debug/release | ✅ | Debug: `br i1, %safe, %panic` + `unreachable`. Release: `call void @llvm.assume(i1 %ok)` |
+| Guard→`select` | ✅ | Single-assignment `[cond] { &x = val; }` → `select i1 %cond, i64 %val, i64 %old` |
+| `emit_precondition` | ✅ | Shared code path for both modes, label naming convention `pre_safeN`/`pre_panicN` |
+| `extract_ranges` | ✅ | Recursive pattern matcher on `Expr` tree, handles `And`/`Lt`/`Ge`/`Gt` |
+| Metadata nodes | ✅ | `!0 = !{ i64 0, i64 100 }` at module footer, indexed by `field_to_meta_idx` |
+
+### Test Fixtures (all pass `llc`)
+| Fixture | Tests | Status |
+|---------|-------|--------|
+| `tests/fixtures/phase2/range_contract.bv` | `[counter < 100]` → `!range !0` on load | ✅ |
+| `tests/fixtures/phase2/complex_pre.bv` | `[x > 0 && y < 100]` → br/unreachable | ✅ |
+| `tests/fixtures/phase2/guard_select.bv` | Single-assignment guard → select | ✅ |
+| Regression: Phase 0+1 fixtures | All 6 still pass | ✅ |
+
+### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
