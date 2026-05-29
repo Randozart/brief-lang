@@ -229,3 +229,28 @@ LLVM 18.1.3 successfully optimized the Phase 0 output:
 | Regression: Phase 0+1 fixtures | All 6 still pass | ✅ |
 
 ### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
+
+---
+
+## Phase 2.5 — Transition Fusing + Trigger Sampling
+
+### Delivered (2026-05-29)
+
+| Feature | Status | Details |
+|---------|--------|--------|
+| Trigger sampling | ✅ | `load volatile` at reactor_tick entry for each `TriggerDeclaration`. MMIO via `inttoptr`, Linked via global symbol. Sampled to i1 SSA register. |
+| Transition fusing | ✅ | Consumes `detect_fusable_pairs` from `src/backend/mod.rs:291`. Generates `@xn_yn_fused` bodies by concatenating statements. |
+| WAW inhibition | ✅ | `collect_assigned_identifiers` scans both txns; fusion refused if same field is written by both. Fixed OwnedRef matching. |
+| Async inhibition | ✅ | `is_async` on either txn → refuse. |
+| Trg dependency inhibition | ✅ | `Txn_B` precondition references a `trg` name → refuse. |
+| Dispatch in reactor_tick | ✅ | Calls first-true (or fused) transaction via `call @txn(%State* @global_state)` |
+| `write_main` extracted | ✅ | Shared `write_main()` method for `main()` generation |
+
+### Test Fixtures (all pass `llc`)
+| Fixture | Tests | Status |
+|---------|-------|--------|
+| `tests/fixtures/phase2_5/triggers_mmio.bv` | MMIO trigger sampling, trg in precondition | ✅ |
+| `tests/fixtures/phase2_5/fuse_simple.bv` | Two txns with sequential dependency → fused | ✅ |
+| `tests/fixtures/phase2_5/fuse_inhibited.bv` | WAW hazard → no fusion | ✅ |
+
+### Unit Tests: 5/5 passing. Full suite: 270/270 passing.
