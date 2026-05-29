@@ -640,7 +640,8 @@ fn run_selfhost(
             if result_name == "Result" {
                 match variant.as_str() {
                     "Ok" => {
-                        if let Some(val) = fields.get("value") {
+                        let val = fields.get("value").or_else(|| fields.get("result"));
+                        if let Some(val) = val {
                             match val {
                                 interpreter::Value::String(s) => println!("{}", s),
                                 _ => return Err(format!("Unexpected Ok value type: {:?}", val)),
@@ -648,7 +649,8 @@ fn run_selfhost(
                         }
                     }
                     "Err" => {
-                        if let Some(val) = fields.get("value") {
+                        let val = fields.get("value").or_else(|| fields.get("error"));
+                        if let Some(val) = val {
                             match val {
                                 interpreter::Value::String(s) => {
                                     return Err(format!("Self-host compilation failed: {}", s));

@@ -323,6 +323,36 @@ impl Interpreter {
         Ok(result)
     }
 
+    fn handle_result_method(&mut self, fn_name: &str, arg_values: &[Value]) -> Result<Value, RuntimeError> {
+        if arg_values.is_empty() {
+            return Err(RuntimeError::TypeMismatch("Result method requires a value".to_string()));
+        }
+        match &arg_values[0] {
+            Value::Enum(_, variant, fields) => {
+                match fn_name {
+                    "is_ok" => Ok(Value::Bool(variant == "Ok")),
+                    "is_err" => Ok(Value::Bool(variant == "Err")),
+                    "unwrap" => {
+                        if variant == "Ok" {
+                            Ok(fields.get("result").cloned().unwrap_or(Value::Void))
+                        } else {
+                            Err(RuntimeError::TypeMismatch("unwrap on Err".to_string()))
+                        }
+                    }
+                    "unwrap_err" => {
+                        if variant == "Err" {
+                            Ok(fields.get("error").cloned().unwrap_or(Value::Void))
+                        } else {
+                            Err(RuntimeError::TypeMismatch("unwrap_err on Ok".to_string()))
+                        }
+                    }
+                    _ => Err(RuntimeError::TypeMismatch(format!("Unknown Result method: {}", fn_name))),
+                }
+            }
+            _ => Err(RuntimeError::TypeMismatch(format!("Result method {} requires an enum value", fn_name))),
+        }
+    }
+
     pub fn run(&mut self, program: &Program) -> Result<(), RuntimeError> {
         for item in &program.items {
             if let TopLevel::StateDecl(decl) = item {
@@ -458,9 +488,7 @@ impl Interpreter {
                 if let Some(first) = outputs.first() {
                     if let Some(expr) = first {
                         let value = self.eval_expr(expr)?;
-                        if value != Value::Bool(true) {
-                            self.return_value = Some(value);
-                        }
+                        self.return_value = Some(value);
                     }
                 }
             }
@@ -870,6 +898,15 @@ Expr::Ge(l, r) => {
                     arg_values.push(self.eval_expr(arg)?);
                 }
 
+                // Check built-in Result methods BEFORE user definitions, so that
+                // Result::Ok → unwrap doesn't get intercepted by Option::unwrap.
+                if (fn_name == "is_ok" || fn_name == "is_err" || fn_name == "unwrap" || fn_name == "unwrap_err")
+                    && !arg_values.is_empty()
+                    && matches!(&arg_values[0], Value::Enum(en, _, _) if en == "Result")
+                {
+                    return self.handle_result_method(&fn_name, &arg_values);
+                }
+
                 if self.definitions.contains_key(&fn_name) {
                     return self.call_defn(&fn_name, args);
                 }
@@ -895,25 +932,7 @@ let enum_state = self.state.get(&fn_name).cloned();
                 if (fn_name == "is_ok" || fn_name == "is_err" || fn_name == "unwrap" || fn_name == "unwrap_err")
                     && !arg_values.is_empty()
                 {
-                    match &arg_values[0] {
-                        Value::Enum(_, variant, fields) => {
-                            if fn_name == "is_ok" { return Ok(Value::Bool(variant == "Ok")); }
-                            if fn_name == "is_err" { return Ok(Value::Bool(variant == "Err")); }
-                            if fn_name == "unwrap" {
-                                if variant == "Ok" {
-                                    return Ok(fields.get("result").cloned().unwrap_or(Value::Void));
-                                }
-                                return Err(RuntimeError::TypeMismatch("unwrap on Err".to_string()));
-                            }
-                            if fn_name == "unwrap_err" {
-                                if variant == "Err" {
-                                    return Ok(fields.get("error").cloned().unwrap_or(Value::Void));
-                                }
-                                return Err(RuntimeError::TypeMismatch("unwrap_err on Ok".to_string()));
-                            }
-                        }
-                        _ => {}
-                    }
+                    return self.handle_result_method(&fn_name, &arg_values);
                 }
 
                 let defn_call = self.state.get(&fn_name).and_then(|v| {
@@ -930,6 +949,13 @@ let enum_state = self.state.get(&fn_name).cloned();
 
 if fn_name == "clone" && !arg_values.is_empty() {
                     return Ok(arg_values[0].clone());
+                }
+                if fn_name == "list_append" && arg_values.len() == 2 {
+                    if let Value::List(list) = &arg_values[0] {
+                        let mut new_list = list.clone();
+                        new_list.push(arg_values[1].clone());
+                        return Ok(Value::List(new_list));
+                    }
                 }
                 if fn_name == "char_at" && arg_values.len() == 2 {
                     if let Value::String(s) = &arg_values[0] {
