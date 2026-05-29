@@ -14,7 +14,7 @@ compile-time optimization intrinsics:
 | Precondition | `[count < 100]` | `!range` on load + `@llvm.assume` |
 | Postcondition | `[@count + 1 == count]` | `nuw nsw` on arithmetic + dead store elimination |
 | State mutation | `&field = expr` | `noalias nocapture` on `%State*` → `mem2reg` |
-| Trigger sampling | `trg! button: Bool;` | Single volatile load per tick → deterministic SSA |
+| Trigger sampling | `trg name: Type @ link sym` | Single `load volatile` per tick → deterministic SSA |
 
 The compiler proves contracts at build time, then feeds the proven bounds into
 LLVM's optimizer. The result: verified-correct code that LLVM can optimize
@@ -500,7 +500,57 @@ opt -O3 -S input.ll -o /dev/null   # Verify nuw/nsw emitted where applicable
 | `tests/fixtures/match_enum.bv` | Match expressions on enum variants |
 | `tests/fixtures/string_literal.bv` | String constants passed to FFI |
 
-## 9. Summary: What Makes Brief's LLVM Backend Unique
+### Runtime Linking
+
+After code generation, the compiled `.ll` file must be linked against
+`runtime/brief_rt.c`:
+
+```bash
+llc input.ll -o input.s
+as input.s -o input.o
+cc -c runtime/brief_rt.c -o brief_rt.o
+ld input.o brief_rt.o -o program
+```
+
+On bare-metal targets, `brief_rt.c` provides `wfi`/`hlt` implementations.
+On OS targets, it provides epoll/kqueue implementations.
+One file, C preprocessor handles platform detection. See `runtime/brief_rt.c`.
+
+## 9. Event Model Integration
+
+The event model (`@ link` as universal doorbell, `rct txn` as event handler) is
+documented in two companion documents:
+
+- **`specs/EVENT-MODEL.md`** — Core language event architecture
+- **`llvm-spec/14-EVENT-LLVM-LOWERING.md`** — LLVM IR lowering for events
+- **`runtime/brief_rt.c`** — Single-file C runtime providing `@ link` global definitions
+  and `__wait_for_event()` per platform
+
+### Impact on This Document
+
+The 17 bugs cataloged in Section 4 are all pre-existing in `src/backend/llvm.rs`
+and are orthogonal to the event model. The event model adds three new
+behaviors to the backend:
+
+| # | Behavior | Priority |
+|---|----------|----------|
+| E1 | Emit `@sym = external global <ty>` for each `@ link` trigger | Fixes bug 4B (already in Phase D) |
+| E2 | Pre-sample triggers at reactor_tick entry into named registers | Phase F (completed) |
+| E3 | Remove hardcoded `__wait_for_event()` from equilibrium path | Phase F (completed) — sleep is now a library pattern (`frgn` + `rct txn [true]`) |
+
+The `trg!` statement (`Statement::LocalTrigger`) is emitted as a no-op comment.
+It is excluded from the LLVM backend's event model. New code should use
+top-level `trg` + `rct txn`.
+
+### Bug Inventory Update
+
+The event model analysis reveals one additional backend issue:
+
+| # | Lines | Bug | Fix | Phase |
+|---|-------|-----|-----|-------|
+| E2 | 532-545 | Trigger identifiers emit fresh `load volatile` per reference instead of using pre-sampled register | Move trigger sampling to reactor_tick prologue; Expr::Identifier references pre-sampled `%sz_<name>` registers | F |
+
+## 10. Summary: What Makes Brief's LLVM Backend Unique
 
 1. **Contracts are optimization fuel.** No other language feeds precondition
    bounds into LLVM's `!range` and `@llvm.assume` as a first-class codegen

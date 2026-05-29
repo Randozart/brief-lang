@@ -1,72 +1,63 @@
-// System Triggers - Standard OS-level event triggers for Regular Brief
+// System Triggers — Standard OS-level event triggers for Regular Brief
 // These triggers map to OS events (signals, stdin, filesystem, network)
 // and provide a reactive I/O model without blocking calls.
+//
+// The `@ link` names reference global symbols defined in runtime/brief_rt.c.
+// On bare-metal/FPGA, use `trg name: Type @ 0xADDRESS` instead.
+//
+// Import this file:
+//   import system from "std/system.bv";
+//
+// Then use in reactive transactions:
+//   rct txn handle_sigint [sigint] { ... term; };
 
 // ===== SIGNAL TRIGGERS =====
 
-// SIGINT (Ctrl+C) - fires when user sends interrupt signal
-trg sigint: Bool;
+// SIGINT (Ctrl+C) — fires when user sends interrupt signal
+trg sigint: Bool @ link __sigint_flag;
 
-// SIGTERM - fires when process receives termination signal
-trg sigterm: Bool;
+// SIGTERM — fires when process receives termination signal
+trg sigterm: Bool @ link __sigterm_flag;
 
-// SIGHUP - fires when terminal hangs up
-trg sighup: Bool;
+// SIGHUP — fires when terminal hangs up
+trg sighup: Bool @ link __sighup_flag;
 
 // ===== STDIN TRIGGERS =====
 
-// stdin_line - fires when a complete line is available on stdin
-trg stdin_line: String;
+// stdin_ready — fires when stdin has data available to read
+trg stdin_ready: Bool @ link __stdin_ready;
 
-// stdin_ready - fires when stdin has data available to read
-trg stdin_ready: Bool;
+// stdin_line — fires when a complete line is available on stdin
+trg stdin_line: String @ link __stdin_buffer;
 
 // ===== TIMER TRIGGERS =====
 
-// clock_tick_1hz - fires once per second
-trg clock_tick_1hz: Int;
+// clock_tick_1hz — fires once per second
+trg clock_tick_1hz: Int @ link __timer_1hz;
 
-// clock_tick_10hz - fires 10 times per second
-trg clock_tick_10hz: Int;
+// clock_tick_100hz — fires 100 times per second (every 10ms)
+trg clock_tick_100hz: Int @ link __timer_100hz;
 
-// clock_tick_100hz - fires 100 times per second
-trg clock_tick_100hz: Int;
+// ===== IO PENDING (internal, used by std/io.bv) =====
 
-// ===== STDOUT TRIGGERS =====
-
-// stdout_ready - fires when stdout buffer has space
-trg stdout_ready: Bool;
-
-// ===== FILESYSTEM TRIGGERS =====
-
-// file_event - fires when a watched file changes (path of changed file)
-trg file_event: String;
-
-// ===== NETWORK TRIGGERS =====
-
-// network_data - fires when data arrives on a monitored socket
-trg network_data: String;
-
-// network_connected - fires when a connection is established
-trg network_connected: Bool;
-
-// network_disconnected - fires when a connection drops
-trg network_disconnected: Bool;
+// __io_pending — set by brief_rt.c whenever any event arrives
+// Used by the io pump transaction to know when to call __raw_poll.
+trg __io_pending: Bool @ link __io_pending;
 
 // ===== HELPER TRANSACTIONS =====
 
-// Reactive stdin reader - accumulates lines from stdin
+// Reactive stdin reader — accumulates lines from stdin
 let stdin_buffer: List<String> = [];
 
-rct txn read_stdin_line[sigint == false && stdin_line.len() > 0] {
+rct txn read_stdin_line [sigint == false && stdin_ready == true] {
     &stdin_buffer = stdin_buffer + [stdin_line];
     term;
 };
 
-// Reactive signal handler - sets state on signals
+// Reactive signal handler — sets state on signals
 let shutting_down: Bool = false;
 
-rct txn handle_sigint[sigint == true] {
+rct txn handle_sigint [sigint == true] {
     &shutting_down = true;
     term;
 };
@@ -74,7 +65,7 @@ rct txn handle_sigint[sigint == true] {
 // Reactive timer counter
 let tick_count: Int = 0;
 
-rct txn count_ticks[clock_tick_1hz > 0] {
+rct txn count_ticks [clock_tick_1hz > 0] {
     &tick_count = tick_count + 1;
     term;
 };

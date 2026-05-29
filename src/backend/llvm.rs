@@ -1,9 +1,101 @@
-use crate::analysis::call_graph::CallGraph;
+fn escape_llvm_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\22"),
+            '\n' => out.push_str("\\0a"),
+            '\r' => out.push_str("\\0d"),
+            '\t' => out.push_str("\\09"),
+            c if c.is_ascii_graphic() || c == ' ' => out.push(c),
+            c => { let _ = write!(out, "\\{:02x}", c as u8); }
+        }
+    }
+    out
+}
 use crate::ast::{
     Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
 };
 use std::collections::HashMap;
 use std::fmt::Write;
+
+/// Collect all unique string literal values from the program for global emission.
+fn collect_strings(program: &Program) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for item in &program.items {
+        collect_strings_tl(item, &mut seen, &mut out);
+    }
+    out
+}
+fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
+    match tl {
+        TopLevel::Transaction(t) => { for s in &t.body { collect_strings_stmt(s, seen, out); } }
+        TopLevel::Definition(d) => { for s in &d.body { collect_strings_stmt(s, seen, out); } }
+        _ => {}
+    }
+}
+fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
+    match stmt {
+        Statement::Let { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
+        Statement::Assignment { expr, .. } => { collect_strings_expr(expr, seen, out); }
+        Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
+        Statement::Term { values, .. } => { for v in values.iter().flatten() { collect_strings_expr(v, seen, out); } }
+        Statement::Guarded { condition, statements, .. } => {
+            collect_strings_expr(condition, seen, out);
+            for s in statements { collect_strings_stmt(s, seen, out); }
+        }
+        Statement::Unification { expr, .. } => { collect_strings_expr(expr, seen, out); }
+        _ => {}
+    }
+}
+fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
+    use Expr::*;
+    match expr {
+        String(s) => {
+            if !seen.contains(s) {
+                seen.insert(s.clone());
+                out.push(s.clone());
+            }
+        }
+        Add(l, r) | Sub(l, r) | Mul(l, r) | Div(l, r) | Mod(l, r) | Eq(l, r) | Ne(l, r)
+        | Lt(l, r) | Le(l, r) | Gt(l, r) | Ge(l, r) | And(l, r) | Or(l, r)
+        | BitAnd(l, r) | BitOr(l, r) | BitXor(l, r) | Shl(l, r) | Shr(l, r)
+        | Concat(l, r) => {
+            collect_strings_expr(l, seen, out);
+            collect_strings_expr(r, seen, out);
+        }
+        Not(e) | Neg(e) | BitNot(e) | Cast(e, _) | Exists { expr: e, .. } => {
+            collect_strings_expr(e, seen, out);
+        }
+        Block(stmts, last) => {
+            for s in stmts { collect_strings_stmt(s, seen, out); }
+            collect_strings_expr(last, seen, out);
+        }
+        Match { value, arms } => {
+            collect_strings_expr(value, seen, out);
+            for arm in arms { collect_strings_expr(&arm.body, seen, out); }
+        }
+        PatternMatch { value, .. } => { collect_strings_expr(value, seen, out); }
+        Call(_, args) => { for a in args { collect_strings_expr(a, seen, out); } }
+        ListLiteral(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
+        ListIndex(l, i) => { collect_strings_expr(l, seen, out); collect_strings_expr(i, seen, out); }
+        Slice { value, start, .. } => {
+            collect_strings_expr(value, seen, out);
+            if let Some(s) = start { collect_strings_expr(s, seen, out); }
+        }
+        MultiSlice { value, .. } => { collect_strings_expr(value, seen, out); }
+        Tuple(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
+        TupleDestructure(_, e) => { collect_strings_expr(e, seen, out); }
+        StructInstance(_, fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
+        ObjectLiteral(fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
+        FieldAccess(o, _) => { collect_strings_expr(o, seen, out); }
+        ForAll { expr, .. } => {
+            collect_strings_expr(expr, seen, out);
+        }
+        _ => {}
+    }
+}
 
 /// LLVM IR backend — the definitive compiler from Brief AST to `.ll`.
 ///
@@ -17,7 +109,9 @@ use std::fmt::Write;
 /// - Match→switch with phi merge, unification, pattern match
 /// - FFI declare+call with C ABI, bootstrap intrinsics (`__print`, `__exit`)
 /// - Transition fusing, trigger sampling by MMIO/linked address
-/// - Precondition extraction → internal `i1` functions, dispatch chain, `__wait_for_event()`
+/// - Precondition extraction → internal `i1` functions, dispatch chain
+/// - User-provided `frgn __wait_for_event` + `rct txn [true]` for sleep
+/// - `@ link` triggers → `external global` + `load volatile`
 pub struct LlvmBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     field_index_map: HashMap<String, usize>,
@@ -26,6 +120,7 @@ pub struct LlvmBackend {
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
+    register_types: HashMap<String, Type>,
     terminated: bool,
     returns_i64: bool,
     range_bounds: HashMap<String, (i64, i64)>,
@@ -35,6 +130,9 @@ pub struct LlvmBackend {
     program_txns: Vec<String>,
     frgn_map: HashMap<String, ForeignSignature>,
     defn_params: HashMap<String, Vec<Type>>,
+    string_constants: Vec<String>,
+    fused_to_first: HashMap<String, String>,
+    sampled_triggers: HashMap<String, String>,
 }
 
 impl LlvmBackend {
@@ -47,6 +145,7 @@ impl LlvmBackend {
             has_cycles: false,
             pending_cleanup: Vec::new(),
             let_bindings: HashMap::new(),
+            register_types: HashMap::new(),
             terminated: false,
             returns_i64: false,
             range_bounds: HashMap::new(),
@@ -56,6 +155,9 @@ impl LlvmBackend {
             program_txns: Vec::new(),
             frgn_map: HashMap::new(),
             defn_params: HashMap::new(),
+            string_constants: Vec::new(),
+            fused_to_first: HashMap::new(),
+            sampled_triggers: HashMap::new(),
         }
     }
 
@@ -74,6 +176,7 @@ impl LlvmBackend {
         self.trigger_names.clear();
         self.program_txns.clear();
         self.defn_params.clear();
+        self.string_constants = collect_strings(program);
 
         let mut txns: Vec<(String, &crate::ast::Transaction)> = Vec::new();
         for item in &program.items {
@@ -103,7 +206,10 @@ self.emit_declares(&mut out);
 
         // Emit foreign declares inline (frgn_map is populated from the scan above)
         for (name, sig) in &self.frgn_map {
-            let ret_ty = if sig.inputs.is_empty() { "void" } else { "i64" };
+            let ret_ty = match sig.result_type {
+                crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
+                crate::ast::ResultType::Projection(ref ts) => if ts.is_empty() { "void" } else { "i64" },
+            };
             let param_tys: Vec<&str> = sig.inputs.iter().map(|(_, t)| match t {
                 Type::Int | Type::UInt => "i64",
                 Type::Bool => "i32",
@@ -117,6 +223,16 @@ self.emit_declares(&mut out);
                 write!(out, "{}", pt).ok();
             }
             writeln!(out, ") #1").ok();
+        }
+
+        // Emit external global declarations for linked triggers (fixes bug 4B)
+        for (name, trg) in &self.triggers {
+            if let crate::ast::LinkRef::Linked(sym) = &trg.address {
+                writeln!(out, "@{} = external global i8, align 1", sym).ok();
+            }
+        }
+        if self.triggers.iter().any(|(_, t)| matches!(t.address, crate::ast::LinkRef::Linked(_))) {
+            writeln!(out).ok();
         }
 
         // Declare C stdlib functions for bootstrap intrinsics
@@ -133,6 +249,13 @@ self.emit_declares(&mut out);
 
         self.declare_state_type(&mut out);
         writeln!(out, "@global_state = global %State zeroinitializer\n").ok();
+
+        // Emit string constants
+        for (si, s) in self.string_constants.iter().enumerate() {
+            let escaped = escape_llvm_string(s);
+            writeln!(out, "@str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1", si, s.len() + 1, escaped).ok();
+        }
+        if !self.string_constants.is_empty() { writeln!(out).ok(); }
 
         let mut range_meta: Vec<String> = Vec::new();
 
@@ -198,7 +321,9 @@ self.emit_declares(&mut out);
     fn emit_declares(&self, out: &mut String) {
         writeln!(out).ok();
         writeln!(out, "declare void @llvm.assume(i1) #1").ok();
-        writeln!(out, "declare void @__wait_for_event() #1").ok();
+        // __wait_for_event is no longer a built-in intrinsic.
+        // Users declare it via frgn __wait_for_event() -> Void from "libruntime";
+        // and the normal FFI path handles the declare emission.
     }
 
     fn emit_foreign_declares(&mut self, out: &mut String) {
@@ -275,6 +400,7 @@ self.emit_declares(&mut out);
 
     // ── DEFINITION ────────────────────────────────────────────
     fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
+        self.let_bindings.clear();
         write!(out, "define i64 @{}(", d.name).ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
@@ -323,7 +449,8 @@ self.emit_declares(&mut out);
                 self.field_to_meta_idx.insert(f.clone(), mi);
             }
         }
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", name).ok();
+        let alwaysinline = if !self.has_cycles { " alwaysinline" } else { "" };
+        writeln!(out, "define void @{}(%State* noalias nocapture %state){} local_unnamed_addr #0 {{", name, alwaysinline).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear();
@@ -423,12 +550,22 @@ self.emit_declares(&mut out);
                     let ty = &self.field_types[idx];
                     let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
-                    if ty == &"i8".to_string() {
-                        let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val).ok();
-                        writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, tr, p, self.align_of(ty)).ok();
-                    } else {
-                        writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, val, ty, p, self.align_of(ty)).ok();
+                    match ty.as_str() {
+                        "i8" => {
+                            let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val).ok();
+                            writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, tr, p, self.align_of(ty)).ok();
+                        }
+                        "float" => {
+                            let tr = format!("%ftr{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val).ok();
+                            let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                            writeln!(out, "{}store float {}, float* {}, align {}", indent, fl, p, self.align_of(ty)).ok();
+                        }
+                        _ => {
+                            writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, val, ty, p, self.align_of(ty)).ok();
+                        }
                     }
                 } else {
                     writeln!(out, "{}; assign {} to {}", indent, val, fname).ok();
@@ -445,19 +582,35 @@ self.emit_declares(&mut out);
                         if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
                             if let Some(&idx) = self.field_index_map.get(n) {
                                 let p = format!("%gp{}", self.txn_counter); self.txn_counter += 1;
-                                let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
-                                let se = format!("%gs{}", self.txn_counter); self.txn_counter += 1;
                                 let av = self.emit_expr(out, expr, indent);
-                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
-                                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
-                                writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, se, i1, av, ld).ok();
                                 let ty = &self.field_types[idx];
-                                if ty == "i8" {
-                                    let tr = format!("%gtr{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, se).ok();
-                                    writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, tr, p, self.align_of(ty)).ok();
-                                } else {
-                                    writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, se, p, self.align_of(ty)).ok();
+                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
+                                let se = format!("%gs{}", self.txn_counter); self.txn_counter += 1;
+                                match ty.as_str() {
+                                    "i8" => {
+                                        let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
+                                        writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, ld, p, self.align_of(ty)).ok();
+                                        let av_tr = format!("%gatr{}", self.txn_counter); self.txn_counter += 1;
+                                        writeln!(out, "{}{} = trunc i64 {} to i8", indent, av_tr, av).ok();
+                                        writeln!(out, "{}{} = select i1 {}, i8 {}, i8 {}", indent, se, i1, av_tr, ld).ok();
+                                        writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, se, p, self.align_of(ty)).ok();
+                                    }
+                                    "float" => {
+                                        let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
+                                        writeln!(out, "{}{} = load float, float* {}, align {}", indent, ld, p, self.align_of(ty)).ok();
+                                        let av_tr = format!("%gatr{}", self.txn_counter); self.txn_counter += 1;
+                                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, av_tr, av).ok();
+                                        let av_fl = format!("%gafl{}", self.txn_counter); self.txn_counter += 1;
+                                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, av_fl, av_tr).ok();
+                                        writeln!(out, "{}{} = select i1 {}, float {}, float {}", indent, se, i1, av_fl, ld).ok();
+                                        writeln!(out, "{}store float {}, float* {}, align {}", indent, se, p, self.align_of(ty)).ok();
+                                    }
+                                    _ => {
+                                        let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
+                                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
+                                        writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, se, i1, av, ld).ok();
+                                        writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, se, p, self.align_of(ty)).ok();
+                                    }
                                 }
                                 return;
                             }
@@ -469,11 +622,14 @@ self.emit_declares(&mut out);
                 let gid = format!("g{}", self.txn_counter); self.txn_counter += 1;
                 let then_l = format!("{}_t", gid);
                 let end_l = format!("{}_e", gid);
+                let prev_terminated = self.terminated;
+                self.terminated = false;
                 writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, then_l, end_l).ok();
                 writeln!(out, "{}{}:", indent, then_l).ok();
                 for s in statements { self.emit_stmt(out, s, &format!("{}  ", indent)); }
                 if !self.terminated { writeln!(out, "{}  br label %{}", indent, end_l).ok(); }
                 writeln!(out, "{}{}:", indent, end_l).ok();
+                self.terminated = prev_terminated;
             }
             Statement::Unification { pattern, expr, .. } => {
                 let val = self.emit_expr(out, expr, indent);
@@ -489,7 +645,7 @@ self.emit_declares(&mut out);
                 self.let_bindings.insert(pattern.clone(), pay.clone());
                 writeln!(out, "{}br label %{}", indent, merge_l).ok();
                 writeln!(out, "{}{}:", indent, def_l).ok();
-                writeln!(out, "{}br label %{}", indent, merge_l).ok();
+                writeln!(out, "{}  unreachable", indent).ok();
                 writeln!(out, "{}{}:", indent, merge_l).ok();
             }
             Statement::Expression(e) => { let _ = self.emit_expr(out, e, indent); }
@@ -505,8 +661,8 @@ self.emit_declares(&mut out);
         let v = format!("%t{}", self.txn_counter);
         self.txn_counter += 1;
         match expr {
-            Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); }
-            Expr::Bool(b) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok(); }
+            Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); self.register_types.insert(v.clone(), Type::Int); }
+            Expr::Bool(b) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok(); self.register_types.insert(v.clone(), Type::Bool); }
             Expr::Float(f) => {
                 let f32 = format!("%ff{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = fadd float 0.0, {}", indent, f32, f).ok();
@@ -516,9 +672,13 @@ self.emit_declares(&mut out);
                 let _ = ();
             }
             Expr::String(s) => {
+                // Find the index of this string in pre-collected constants
+                let si = self.string_constants.iter().position(|x| x == s).unwrap_or(0);
+                let g = format!("@str.{}", si);
                 let p = format!("%sp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = alloca i8, i64 {}", indent, p, s.len() + 1).ok();
+                writeln!(out, "{}{} = getelementptr inbounds [{} x i8], [{} x i8]* {}, i64 0, i64 0", indent, p, s.len() + 1, s.len() + 1, g).ok();
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, p).ok();
+                self.register_types.insert(v.clone(), Type::String);
             }
             Expr::Char(c) => {
                 let ci = format!("%cc{}", self.txn_counter); self.txn_counter += 1;
@@ -526,23 +686,26 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ci).ok();
             }
             Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); }
-            Expr::Identifier(name) => {
+Expr::Identifier(name) => {
                 if let Some(reg) = self.let_bindings.get(name) {
                     writeln!(out, "{}{} = add i64 0, {}", indent, v, reg).ok();
                 } else if self.trigger_names.contains(name) {
-                    // Trigger identifier — load volatile and convert to i64
-                    let raw = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                    if let Some(t) = self.triggers.get(name) {
-                        let _ = match &t.address {
-                            crate::ast::LinkRef::Explicit(addr) => writeln!(out, "{}{} = load volatile i8, i8* inttoptr (i64 {} to i8*), align 1", indent, raw, addr),
-                            crate::ast::LinkRef::Linked(sym) => writeln!(out, "{}{} = load volatile i8, i8* @{}, align 1", indent, raw, sym),
-                        };
+                    if let Some(sampled) = self.sampled_triggers.get(name) {
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, sampled).ok();
                     } else {
-                        writeln!(out, "{}{} = add i8 0, 0", indent, raw).ok();
+                        let raw = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                        if let Some(t) = self.triggers.get(name) {
+                            let _ = match &t.address {
+                                crate::ast::LinkRef::Explicit(addr) => writeln!(out, "{}{} = load volatile i8, i8* inttoptr (i64 {} to i8*), align 1", indent, raw, addr),
+                                crate::ast::LinkRef::Linked(sym) => writeln!(out, "{}{} = load volatile i8, i8* @{}, align 1", indent, raw, sym),
+                            };
+                        } else {
+                            writeln!(out, "{}{} = add i8 0, 0", indent, raw).ok();
+                        }
+                        let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
                     }
-                    let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
-                    writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
                 } else if let Some(&idx) = self.field_index_map.get(name) {
                     let ty = &self.field_types[idx];
                     let p = format!("%fdp{}", self.txn_counter); self.txn_counter += 1;
@@ -566,23 +729,38 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = add i64 0, 0 ; @{}", indent, v, name).ok();
             }
             // Binary ops
-            Expr::Add(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = add i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::Sub(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = sub i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::Mul(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = mul i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::Div(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, a, b).ok(); }
+            Expr::Add(l, r) => { self.emit_binop(out, indent, &v, l, r, "add", "fadd"); }
+            Expr::Sub(l, r) => { self.emit_binop(out, indent, &v, l, r, "sub", "fsub"); }
+            Expr::Mul(l, r) => { self.emit_binop(out, indent, &v, l, r, "mul", "fmul"); }
+            Expr::Div(l, r) => { self.emit_binop(out, indent, &v, l, r, "sdiv", "fdiv"); }
             Expr::Mod(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = srem i64 {}, {}", indent, v, a, b).ok(); }
             // Comparisons
-            Expr::Eq(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); let c = format!("%c{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, c, a, b).ok(); writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok(); }
-            Expr::Ne(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); let c = format!("%c{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, c, a, b).ok(); writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok(); }
-            Expr::Lt(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); let c = format!("%c{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, c, a, b).ok(); writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok(); }
-            Expr::Le(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); let c = format!("%c{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, c, a, b).ok(); writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok(); }
-            Expr::Gt(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); let c = format!("%c{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, c, a, b).ok(); writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok(); }
-            Expr::Ge(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); let c = format!("%c{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, c, a, b).ok(); writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok(); }
+            Expr::Eq(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "oeq"); }
+            Expr::Ne(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "one"); }
+            Expr::Lt(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "olt"); }
+            Expr::Le(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "ole"); }
+            Expr::Gt(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "ogt"); }
+            Expr::Ge(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "oge"); }
             // Logical
             Expr::And(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = and i64 {}, {}", indent, v, a, b).ok(); }
             Expr::Or(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = or i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::Not(e) => { let inner = self.emit_expr(out, e, indent); writeln!(out, "{}{} = xor i64 {}, -1", indent, v, inner).ok(); }
-            Expr::Neg(e) => { let inner = self.emit_expr(out, e, indent); writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner).ok(); }
+            Expr::Not(e) => { let inner = self.emit_expr(out, e, indent); writeln!(out, "{}{} = xor i64 {}, 1", indent, v, inner).ok(); }
+            Expr::Neg(e) => {
+                let inner = self.emit_expr(out, e, indent);
+                if self.is_float_expr(e) {
+                    let tr = format!("%ntr{}", self.txn_counter); self.txn_counter += 1;
+                    let fl = format!("%nfl{}", self.txn_counter); self.txn_counter += 1;
+                    let fs = format!("%nfs{}", self.txn_counter); self.txn_counter += 1;
+                    let fi = format!("%nfi{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, inner).ok();
+                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                    writeln!(out, "{}{} = fsub float -0.0, {}", indent, fs, fl).ok();
+                    writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fs).ok();
+                    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
+                } else {
+                    writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner).ok();
+                }
+            }
             // Bitwise
             Expr::BitAnd(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = and i64 {}, {}", indent, v, a, b).ok(); }
             Expr::BitOr(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = or i64 {}, {}", indent, v, a, b).ok(); }
@@ -602,8 +780,15 @@ self.emit_declares(&mut out);
                             let raw = self.emit_expr(out, &args[i], indent);
                             match arg_ty {
                                 Type::Int | Type::UInt => marshaled.push(format!("i64 {}", raw)),
-                                Type::Bool => { let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = zext i64 {} to i32", indent, z, raw).ok(); marshaled.push(format!("i32 {}", z)); }
-                                Type::Char => { let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = zext i32 {} to i32", indent, z, raw).ok(); marshaled.push(format!("i32 {}", z)); }
+                                Type::Bool => { let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = trunc i64 {} to i32", indent, z, raw).ok(); marshaled.push(format!("i32 {}", z)); }
+                                Type::Char => { let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = trunc i64 {} to i32", indent, z, raw).ok(); marshaled.push(format!("i32 {}", z)); }
+                                Type::Float => {
+                                    let tr = format!("%fftr{}", self.txn_counter); self.txn_counter += 1;
+                                    let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, raw).ok();
+                                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                                    marshaled.push(format!("float {}", fl));
+                                }
                                 Type::String | Type::Data => { let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, raw).ok(); marshaled.push(format!("i8* {}", p)); }
                                 _ => marshaled.push(format!("i64 {}", raw)),
                             }
@@ -653,8 +838,20 @@ self.emit_declares(&mut out);
                         }
                     }
                     if name.starts_with(|c: char| c.is_uppercase()) && !self.program_txns.contains(name) {
+                        let n_slots = a_strs.len() + 1;
                         let p = format!("%cop{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, a_strs.len() + 1).ok();
+                        let disc_val = if name == "None" || name == "Err" { 0u64 } else { 1u64 };
+                        writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, n_slots).ok();
+                        let disc_gep = format!("%cdg{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, disc_gep, p).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, disc_val, disc_gep).ok();
+                        for (ai, arg_reg) in a_strs.iter().enumerate() {
+                            let pay_gep = format!("%cpg{}", self.txn_counter); self.txn_counter += 1;
+                            let parts: Vec<&str> = arg_reg.splitn(2, ' ').collect();
+                            let rn = if parts.len() == 2 { parts[1] } else { arg_reg };
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, pay_gep, p, ai + 1).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, rn, pay_gep).ok();
+                        }
                         writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
                     } else {
                         writeln!(out, "{}{} = call i64 @{}({})", indent, v, name, a_strs.join(", ")).ok();
@@ -662,9 +859,16 @@ self.emit_declares(&mut out);
                 }
             }
             // Lists
-            Expr::ListLiteral(_) => {
+            Expr::ListLiteral(elems) => {
+                let n = elems.len();
                 let p = format!("%llp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = alloca i64, i64 0", indent, p).ok();
+                writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, n).ok();
+                for (ei, e) in elems.iter().enumerate() {
+                    let ev = self.emit_expr(out, e, indent);
+                    let ep = format!("%lep{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, p, ei).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, ev, ep).ok();
+                }
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
             }
             Expr::ListIndex(list, idx) => {
@@ -711,18 +915,20 @@ self.emit_declares(&mut out);
                 let has_wc = arms.iter().any(|a| a.pattern == MatchPattern::Wildcard);
                 let def_l = if has_wc { format!("mdf{}", self.txn_counter) } else { format!("mur{}", self.txn_counter) };
                 self.txn_counter += 1;
+                let mid = self.txn_counter;
+                self.txn_counter += 1;
                 writeln!(out, "{}switch i64 {}, label %{} [", indent, disc, def_l).ok();
                 let mut vi = 0u64;
-                for arm in arms { if let MatchPattern::Variant { .. } = &arm.pattern { writeln!(out, "{}  i64 {}, label %ma{}", indent, vi, vi).ok(); vi += 1; } }
+                for arm in arms { if let MatchPattern::Variant { .. } = &arm.pattern { writeln!(out, "{}  i64 {}, label %ma{}_{}", indent, vi, mid, vi).ok(); vi += 1; } }
                 writeln!(out, "{}]", indent).ok();
                 let mut phi_v: Vec<String> = Vec::new();
                 let mut phi_l: Vec<String> = Vec::new();
                 vi = 0;
                 for arm in arms {
                     if let MatchPattern::Variant { .. } = &arm.pattern {
-                        writeln!(out, "{}ma{}:", indent, vi).ok();
+                        writeln!(out, "{}ma{}_{}:", indent, mid, vi).ok();
                         let av = self.emit_expr(out, &arm.body, indent);
-                        phi_v.push(av); phi_l.push(format!("%%ma{}", vi));
+                        phi_v.push(av); phi_l.push(format!("%%ma{}_{}", mid, vi));
                         writeln!(out, "{}br label %{}", indent, merge).ok();
                         vi += 1;
                     }
@@ -785,8 +991,22 @@ self.emit_declares(&mut out);
         }
     }
 
+    fn resolve_dispatch_first_txn(&self, name: &str) -> String {
+        self.fused_to_first.get(name).cloned().unwrap_or_else(|| name.to_string())
+    }
+
+    fn dispatch_has_pre(&self, txns: &[(String, &crate::ast::Transaction)], name: &str) -> bool {
+        let first = self.resolve_dispatch_first_txn(name);
+        txns.iter().find(|(n, _)| n == &first).map(|(_, t)| !matches!(t.contract.pre_condition, Expr::Bool(true))).unwrap_or(false)
+    }
+
     // ── REACTOR LOOP ──────────────────────────────────────────
     fn emit_reactor(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)], fusable: &[(String, String)]) {
+        self.fused_to_first.clear();
+        for (a, b) in fusable {
+            let fn_ = format!("{}_{}_fused", a, b);
+            self.fused_to_first.insert(fn_, a.clone());
+        }
         let mut used_fused: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut dispatch: Vec<String> = Vec::new();
         let mut fused_txns: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -801,7 +1021,8 @@ self.emit_declares(&mut out);
 
         writeln!(out, "define void @reactor_tick() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
-        // Trigger sampling
+        // Trigger sampling — load volatile into named registers
+        self.sampled_triggers.clear();
         for tn in &self.trigger_names {
             if let Some(t) = self.triggers.get(tn) {
                 let raw = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
@@ -809,6 +1030,9 @@ self.emit_declares(&mut out);
                     crate::ast::LinkRef::Explicit(addr) => writeln!(out, "  {} = load volatile i8, i8* inttoptr (i64 {} to i8*), align 1", raw, addr),
                     crate::ast::LinkRef::Linked(sym) => writeln!(out, "  {} = load volatile i8, i8* @{}, align 1", raw, sym),
                 };
+                let sz = format!("%sz_{}", tn);
+                writeln!(out, "  {} = zext i8 {} to i64", sz, raw).ok();
+                self.sampled_triggers.insert(tn.clone(), sz);
             }
         }
 
@@ -817,10 +1041,12 @@ self.emit_declares(&mut out);
         } else {
             // First dispatch branch
             let first = &dispatch[0];
-            let has_pre = txns.iter().find(|(n, _)| n == first).map(|(_, t)| !matches!(t.contract.pre_condition, Expr::Bool(true))).unwrap_or(false);
+            let has_pre = self.dispatch_has_pre(txns, first);
             let check0 = format!("ck0");
             if has_pre {
-                writeln!(out, "  %pr0 = call i1 @pre_{}(%State* @global_state)", first).ok();
+                let first_txn = self.resolve_dispatch_first_txn(first);
+                writeln!(out, "  %pr0 = call i1 @pre_{}(%State* @global_state)", first_txn).ok();
+                writeln!(out, "  br i1 %pr0, label %b0, label %{}", check0).ok();
                 writeln!(out, "  br i1 %pr0, label %b0, label %{}", check0).ok();
             } else {
                 writeln!(out, "  br i1 true, label %b0, label %{}", check0).ok();
@@ -836,10 +1062,11 @@ self.emit_declares(&mut out);
                 if i + 1 < dispatch.len() {
                     let next = &dispatch[i + 1];
                     writeln!(out, "{}:", c).ok();
-                    let has_next_pre = txns.iter().find(|(n, _)| n == next).map(|(_, t)| !matches!(t.contract.pre_condition, Expr::Bool(true))).unwrap_or(false);
+                    let has_next_pre = self.dispatch_has_pre(txns, next);
                     let next_check = format!("ck{}", i + 1);
                     if has_next_pre {
-                        writeln!(out, "  %pr{} = call i1 @pre_{}(%State* @global_state)", i + 1, next).ok();
+                        let next_txn = self.resolve_dispatch_first_txn(next);
+                        writeln!(out, "  %pr{} = call i1 @pre_{}(%State* @global_state)", i + 1, next_txn).ok();
                         writeln!(out, "  br i1 %pr{}, label %b{}, label %{}", i + 1, i + 1, next_check).ok();
                     } else {
                         writeln!(out, "  br i1 true, label %b{}, label %{}", i + 1, next_check).ok();
@@ -848,7 +1075,6 @@ self.emit_declares(&mut out);
             }
             let last_check = format!("ck{}", dispatch.len() - 1);
             writeln!(out, "{}:", last_check).ok();
-            writeln!(out, "  call void @__wait_for_event()").ok();
             writeln!(out, "  ret void").ok();
         }
         writeln!(out, "}}").ok();
@@ -887,6 +1113,80 @@ self.emit_declares(&mut out);
         let mut ids = std::collections::HashSet::new();
         crate::backend::collect_expr_identifiers(pre, &mut ids);
         ids.iter().any(|id| self.trigger_names.contains(id))
+    }
+
+    fn is_float_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Float(_) => true,
+            Expr::Identifier(name) => {
+                if let Some(&idx) = self.field_index_map.get(name) {
+                    self.field_types[idx] == "float"
+                } else {
+                    false
+                }
+            }
+            Expr::OwnedRef(name) => {
+                if let Some(&idx) = self.field_index_map.get(name.as_str()) {
+                    self.field_types[idx] == "float"
+                } else {
+                    false
+                }
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.is_float_expr(l) || self.is_float_expr(r)
+            }
+            Expr::Neg(e) => self.is_float_expr(e),
+            _ => false,
+        }
+    }
+
+    fn emit_binop(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) {
+        let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
+        if self.is_float_expr(l) || self.is_float_expr(r) {
+            let fa = format!("%bfa{}", self.txn_counter); self.txn_counter += 1;
+            let fb = format!("%bfb{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = trunc i64 {} to i32", indent, fa, a).ok();
+            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fb, fa).ok();
+            let fc = format!("%bfc{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = trunc i64 {} to i32", indent, fc, b).ok();
+            let fd = format!("%bfd{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fd, fc).ok();
+            let fr = format!("%bfr{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = {} float {}, {}", indent, fr, float_op, fb, fd).ok();
+            let fi = format!("%bfi{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
+        } else {
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a, b).ok();
+        }
+    }
+
+    fn emit_fcmp(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, cond: &str) {
+        let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
+        let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
+        if self.is_float_expr(l) || self.is_float_expr(r) {
+            let fa = format!("%cfa{}", self.txn_counter); self.txn_counter += 1;
+            let fb = format!("%cfb{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = trunc i64 {} to i32", indent, fa, a).ok();
+            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fb, fa).ok();
+            let fc = format!("%cfc{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = trunc i64 {} to i32", indent, fc, b).ok();
+            let fd = format!("%cfd{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fd, fc).ok();
+            writeln!(out, "{}{} = fcmp {} float {}, {}", indent, c, cond, fb, fd).ok();
+        } else {
+            let icmp_cond = match cond {
+                "oeq" => "eq",
+                "one" => "ne",
+                "olt" => "slt",
+                "ole" => "sle",
+                "ogt" => "sgt",
+                "oge" => "sge",
+                _ => cond,
+            };
+            writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a, b).ok();
+        }
+        writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok();
     }
 }
 
