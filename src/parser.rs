@@ -4447,6 +4447,10 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 self.advance();
                 Ok(Expr::Term)
             }
+            Some(Ok(Token::Match)) => {
+                self.advance();
+                self.parse_match_expr()
+            }
             Some(Ok(Token::Identifier(name))) => {
                 let name = name.clone();
                 self.advance();
@@ -5002,6 +5006,130 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
             }
         }
+    }
+
+    fn parse_match_expr(&mut self) -> Result<Expr, SyntaxError> {
+        // Parse the scrutinee — explicitly without the struct-literal lookahead
+        // that parse_primary() does for `Ident { ... }`.
+        let mut value = match self.current_token() {
+            Some(Ok(Token::Integer(n))) => { let n = *n; self.advance(); Expr::Integer(n) }
+            Some(Ok(Token::Float(f))) => { let f = *f; self.advance(); Expr::Float(f) }
+            Some(Ok(Token::String(s))) => { let s = s.clone(); self.advance(); Expr::String(s) }
+            Some(Ok(Token::Char(c))) => { let c = *c; self.advance(); Expr::Char(c) }
+            Some(Ok(Token::BoolTrue)) => { self.advance(); Expr::Bool(true) }
+            Some(Ok(Token::BoolFalse)) => { self.advance(); Expr::Bool(false) }
+            Some(Ok(Token::Term)) => { self.advance(); Expr::Term }
+            Some(Ok(Token::Underscore)) => { self.advance(); Expr::Identifier("_".to_string()) }
+            Some(Ok(Token::Match)) => {
+                self.advance();
+                return self.parse_match_expr();
+            }
+            Some(Ok(Token::LParen)) => {
+                self.advance();
+                let mut elements = Vec::new();
+                if let Some(Ok(Token::RParen)) = self.current_token() {
+                    self.advance();
+                    return Err(SyntaxError::UnexpectedToken {
+                        expected: "expression".to_string(),
+                        found: "empty tuple in match scrutinee".to_string(),
+                        span: self.current_span().unwrap_or_else(Span::dummy),
+                    });
+                }
+                loop {
+                    elements.push(self.parse_expression()?);
+                    if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    } else {
+                        self.expect(Token::RParen)?;
+                        break;
+                    }
+                }
+                if elements.len() == 1 {
+                    elements.remove(0)
+                } else {
+                    Expr::Tuple(elements)
+                }
+            }
+            _ => {
+                // Must be an identifier or known keyword-as-identifier
+                let name = self.expect_identifier()?;
+                Expr::Identifier(name)
+            }
+        };
+        // Allow field access on the scrutinee: match obj.field { ... }
+        while let Some(Ok(Token::Dot)) = self.current_token() {
+            self.advance();
+            let member = self.expect_identifier()?;
+            value = Expr::FieldAccess(Box::new(value), member);
+        }
+        self.expect(Token::LBrace)?;
+
+        let mut arms = Vec::new();
+        loop {
+            // Check for closing brace
+            if let Some(Ok(Token::RBrace)) = self.current_token() {
+                self.advance();
+                break;
+            }
+            // Parse pattern
+            let pattern = if let Some(Ok(Token::Underscore)) = self.current_token() {
+                self.advance();
+                MatchPattern::Wildcard
+            } else {
+                let pattern_name = self.expect_identifier()?;
+                // Check for variant fields: Variant(f1, f2, ...)
+                let fields = if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut fields = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                        self.advance();
+                    } else {
+                        loop {
+                            fields.push(self.expect_identifier()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                self.expect(Token::RParen)?;
+                                break;
+                            }
+                        }
+                    }
+                    fields
+                } else {
+                    Vec::new()
+                };
+                MatchPattern::Variant { name: pattern_name, fields }
+            };
+
+            // Parse = (consistent with uni pattern = expr syntax)
+            self.expect(Token::Eq)?;
+
+            // Parse body: expression or block
+            let body = if let Some(Ok(Token::LBrace)) = self.current_token() {
+                self.advance();
+                let mut stmts = Vec::new();
+                while let Some(Ok(token)) = self.current_token() {
+                    if matches!(token, Token::RBrace) { break; }
+                    stmts.push(self.parse_statement()?);
+                }
+                self.expect(Token::RBrace)?;
+                Box::new(Expr::Block(stmts, Box::new(Expr::Term)))
+            } else {
+                Box::new(self.parse_expression()?)
+            };
+
+            // Parse optional comma after arm
+            if let Some(Ok(Token::Comma)) = self.current_token() {
+                self.advance();
+            }
+
+            arms.push(MatchArm { pattern, guard: None, body });
+        }
+
+        Ok(Expr::Match {
+            value: Box::new(value),
+            arms,
+        })
     }
 
     fn parse_bracket_contents(&mut self) -> Result<BracketContents, SyntaxError> {

@@ -1366,6 +1366,12 @@ impl TypeChecker {
             Expr::PatternMatch { .. } => Type::Bool,
             Expr::ForAll { .. } | Expr::Exists { .. } => Type::Bool,
             Expr::Block(_stmts, last_expr) => self.infer_expression(last_expr),
+            Expr::Match { value: _, arms } => {
+                // Try to infer from the last arm first (usually _ = default)
+                arms.last().map(|a| self.infer_expression(&a.body))
+                    .or_else(|| arms.first().map(|a| self.infer_expression(&a.body)))
+                    .unwrap_or(Type::Custom("unknown".to_string()))
+            },
 Expr::ObjectLiteral(fields) => {
                 fields.first().map(|(_, v)| self.infer_expression(v)).unwrap_or(Type::Custom("Object".to_string()))
             },

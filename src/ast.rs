@@ -355,11 +355,16 @@ pub enum Expr {
     FieldAccess(Box<Expr>, String),
     StructInstance(String, Vec<(String, Expr)>),
     ObjectLiteral(Vec<(String, Expr)>),
-    // Pattern matching in guards: [value Variant(field1, field2)] { ... }
+// Pattern matching in guards: [value Variant(field1, field2)] { ... }
     PatternMatch {
         value: Box<Expr>,
         variant: String,
         fields: Vec<String>,
+    },
+    // Match expression: match value { Variant(f1) => body, _ => default }
+    Match {
+        value: Box<Expr>,
+        arms: Vec<MatchArm>,
     },
     ForAll {
         var: String,
@@ -375,6 +380,21 @@ pub enum Expr {
     TupleDestructure(Vec<String>, Box<Expr>),
     // Tuple literal: (a, b, c)
     Tuple(Vec<Expr>),
+}
+
+/// A pattern in a match arm: `Variant(f1, f2)` or `_`
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchPattern {
+    Wildcard,
+    Variant { name: String, fields: Vec<String> },
+}
+
+/// A single arm in a match expression
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub guard: Option<Box<Expr>>,
+    pub body: Box<Expr>,
 }
 
 impl Expr {

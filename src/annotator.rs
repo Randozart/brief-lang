@@ -481,6 +481,22 @@ impl Annotator {
                 let mask_str = mask.as_ref().map(|m| format!("; {}", self.format_expr(m))).unwrap_or_default();
                 format!("{}[{}{}]", self.format_expr(value), coords_str, mask_str)
             }
+            Expr::Match { value, arms } => {
+                let arms_str = arms.iter().map(|arm| {
+                    let pat = match &arm.pattern {
+                        MatchPattern::Wildcard => "_".to_string(),
+                        MatchPattern::Variant { name, fields } => {
+                            if fields.is_empty() { name.clone() }
+                            else { format!("{}({})", name, fields.join(", ")) }
+                        }
+                    };
+                    let guard_str = arm.guard.as_ref()
+                        .map(|g| format!(" if {}", self.format_expr(g)))
+                        .unwrap_or_default();
+                    format!("{}{}=> {}", pat, guard_str, self.format_expr(&arm.body))
+                }).collect::<Vec<_>>().join(", ");
+                format!("match {} {{ {} }}", self.format_expr(value), arms_str)
+            }
         }
     }
 

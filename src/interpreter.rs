@@ -1810,6 +1810,45 @@ let s_val = self.eval_expr(s)?;
                 }
             }
             Expr::Cast(inner, _) => self.eval_expr(inner),
+            Expr::Match { value, arms } => {
+                let target = self.eval_expr(value)?;
+                for arm in arms {
+                    let matched = match &arm.pattern {
+                        MatchPattern::Wildcard => true,
+                        MatchPattern::Variant { name, fields } => {
+                            match &target {
+                                Value::Enum(_, variant, enum_fields) if variant == name => {
+                                    for (i, field_name) in fields.iter().enumerate() {
+                                        let key = if i == 0 { "value" } else { "" };
+                                        let val = if i == 0 {
+                                            enum_fields.get("value").cloned()
+                                        } else {
+                                            enum_fields.get(&format!("field{}", i)).cloned()
+                                        };
+                                        if let Some(v) = val {
+                                            self.state.insert(field_name.clone(), v);
+                                        }
+                                    }
+                                    true
+                                }
+                                _ => false,
+                            }
+                        }
+                    };
+                    if matched {
+                        if let Some(guard) = &arm.guard {
+                            let guard_val = self.eval_expr(guard)?;
+                            if guard_val != Value::Bool(true) {
+                                continue;
+                            }
+                        }
+                        return self.eval_expr(&arm.body);
+                    }
+                }
+                Err(RuntimeError::TypeMismatch(
+                    "Non-exhaustive match: no arm matched".to_string(),
+                ))
+            }
         }
     }
 }

@@ -2103,6 +2103,9 @@ impl ProofEngine {
                 self.collect_identifiers(value, vars);
             }
             Expr::Slice { .. } | Expr::MultiSlice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) | Expr::Concat(_, _) | Expr::Cast(_, _) => {}
+            Expr::Match { value, .. } => {
+                self.collect_identifiers(value, vars);
+            }
         }
     }
 
