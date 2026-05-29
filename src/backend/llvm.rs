@@ -1,5 +1,6 @@
 use crate::analysis::call_graph::CallGraph;
 use crate::ast::{Expr, MatchPattern, Program, Statement, TopLevel, Type};
+use crate::ast::ForeignSignature;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -23,6 +24,7 @@ pub struct LlvmBackend {
     triggers: HashMap<String, crate::ast::TriggerDeclaration>,
     trigger_names: Vec<String>,
     program_txns: Vec<String>,
+    frgn_map: HashMap<String, ForeignSignature>,
 }
 
 impl LlvmBackend {
@@ -42,6 +44,7 @@ impl LlvmBackend {
             triggers: HashMap::new(),
             trigger_names: Vec::new(),
             program_txns: Vec::new(),
+            frgn_map: HashMap::new(),
         }
     }
 
@@ -77,7 +80,30 @@ impl LlvmBackend {
         writeln!(output).ok();
 
         writeln!(output, "declare void @llvm.assume(i1) #1").ok();
+        writeln!(output, "declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1) #1").ok();
         writeln!(output).ok();
+
+        // Declare foreign bindings and populate frgn_map
+        self.frgn_map.clear();
+        for item in &program.items {
+            if let TopLevel::ForeignBinding { name, signature, .. } = item {
+                self.frgn_map.insert(name.clone(), signature.clone());
+                let ret_ty = if signature.inputs.is_empty() { "void" } else { "i64" };
+                let param_tys: Vec<&str> = signature.inputs.iter().map(|(_, t)| match t {
+                    Type::Int | Type::UInt => "i64",
+                    Type::Bool => "i32",
+                    Type::Char => "i32",
+                    Type::String | Type::Data => "i8*",
+                    _ => "i64",
+                }).collect();
+                write!(output, "declare {} @{}(", ret_ty, name).ok();
+                for (i, pt) in param_tys.iter().enumerate() {
+                    if i > 0 { write!(output, ", ").ok(); }
+                    write!(output, "{}", pt).ok();
+                }
+                writeln!(output, ") #1").ok();
+            }
+        }
 
         self.declare_state_type(&mut output, program);
         self.declare_state_global(&mut output, program);
@@ -96,6 +122,25 @@ impl LlvmBackend {
                 }
                 _ => {}
             }
+        }
+
+        // Declare C standard functions for bootstrap intrinsics
+        let has_print = self.frgn_map.contains_key("__print");
+        let has_exit = self.frgn_map.contains_key("__exit");
+        let has_read = self.frgn_map.contains_key("__read_file");
+        let has_write = self.frgn_map.contains_key("__write_file");
+        if has_print || has_read || has_write {
+            writeln!(output, "declare i64 @write(i32, i8*, i64) #1").ok();
+        }
+        if has_print {
+            writeln!(output, "declare i64 @strlen(i8*) #1").ok();
+        }
+        if has_exit {
+            writeln!(output, "declare void @exit(i32) #1").ok();
+        }
+        if has_read || has_write {
+            writeln!(output, "declare i64 @open(i8*, i32) #1").ok();
+            writeln!(output, "declare i64 @read(i32, i8*, i64) #1").ok();
         }
 
         let mut range_meta_nodes: Vec<String> = Vec::new();
@@ -501,6 +546,8 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
                     writeln!(output, "{}{} = load {}, {}* {}, align {}{}", indent, load_reg, ty, ty, ptr_reg, self.align_of(ty), range_suffix).ok();
                     if ty == "i8" {
                         writeln!(output, "{}{} = zext i8 {} to i64", indent, val, load_reg).ok();
+                    } else if ty == "i8*" {
+                        writeln!(output, "{}{} = ptrtoint i8* {} to i64", indent, val, load_reg).ok();
                     } else {
                         writeln!(output, "{}{} = add i64 0, {}", indent, val, load_reg).ok();
                     }
@@ -629,12 +676,68 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
                 writeln!(output, "{}{} = lshr i64 {}, {}", indent, val, left, right).ok();
             }
             Expr::Call(name, args) => {
-                let mut arg_strs = Vec::new();
-                for arg in args {
-                    arg_strs.push(self.generate_expr(output, arg, indent));
+                if let Some(_sig) = self.frgn_map.get(name) {
+                    // FFI path — marshaling + call
+                    match name.as_str() {
+"__print" if args.len() == 1 => {
+                            let str_reg = self.generate_expr(output, &args[0], indent);
+                            let ptr_reg = format!("%ffi_p{}", self.txn_counter);
+                            self.txn_counter += 1;
+                            writeln!(output, "{}{} = inttoptr i64 {} to i8*", indent, ptr_reg, str_reg).ok();
+                            let len_reg = format!("%ffi_l{}", self.txn_counter);
+                            self.txn_counter += 1;
+                            writeln!(output, "{}{} = call i64 @strlen(i8* {})", indent, len_reg, ptr_reg).ok();
+                            writeln!(output, "{}{} = call i64 @write(i32 1, i8* {}, i64 {})", indent, val, ptr_reg, len_reg).ok();
+                        }
+                        "__exit" => {
+                            writeln!(output, "{}{} = call void @exit(i32 0)", indent, val).ok();
+                            writeln!(output, "{}{} = add i64 0, 0", indent, val).ok();
+                        }
+_ => {
+                            let mut marshaled: Vec<String> = Vec::new();
+                            let sig_inputs: Vec<(String, Type)> = self.frgn_map.get(name)
+                                .map(|s| s.inputs.clone())
+                                .unwrap_or_default();
+                            for (i, (_, arg_ty)) in sig_inputs.iter().enumerate() {
+                                if i < args.len() {
+                                    let raw = self.generate_expr(output, &args[i], indent);
+                                    match arg_ty {
+                                        Type::Int | Type::UInt => marshaled.push(format!("i64 {}", raw)),
+                                        Type::Bool => {
+                                            let z = format!("%ffi_z{}", self.txn_counter);
+                                            self.txn_counter += 1;
+                                            writeln!(output, "{}{} = zext i64 {} to i32", indent, z, raw).ok();
+                                            marshaled.push(format!("i32 {}", z));
+                                        }
+                                        Type::Char => {
+                                            let z = format!("%ffi_z{}", self.txn_counter);
+                                            self.txn_counter += 1;
+                                            writeln!(output, "{}{} = zext i32 {} to i32", indent, z, raw).ok();
+                                            marshaled.push(format!("i32 {}", z));
+                                        }
+                                        Type::String | Type::Data => {
+                                            let ptr = format!("%ffi_p{}", self.txn_counter);
+                                            self.txn_counter += 1;
+                                            writeln!(output, "{}{} = inttoptr i64 {} to i8*", indent, ptr, raw).ok();
+                                            marshaled.push(format!("i8* {}", ptr));
+                                        }
+                                        _ => marshaled.push(format!("i64 {}", raw)),
+                                    }
+                                }
+                            }
+                            let args_str = marshaled.join(", ");
+                            writeln!(output, "{}{} = call i64 @{}({})", indent, val, name, args_str).ok();
+                        }
+                    }
+                } else {
+                    // Internal call (no marshaling)
+                    let mut arg_strs = Vec::new();
+                    for arg in args {
+                        arg_strs.push(self.generate_expr(output, arg, indent));
+                    }
+                    let args_str = arg_strs.join(", ");
+                    writeln!(output, "{}{} = call i64 @{}({})", indent, val, name, args_str).ok();
                 }
-                let args_str = arg_strs.join(", ");
-                writeln!(output, "{}{} = call i64 @{}({})", indent, val, name, args_str).ok();
             }
             Expr::ListLiteral(_) => {
                 writeln!(output, "{}{} = alloca i64, i64 0", indent, val).ok();
@@ -882,6 +985,23 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
             writeln!(output, "  ret void").ok();
         }
         writeln!(output, "}}").ok();
+    }
+
+    /// Emit stack-allocated null-terminated C string from a String's pointer+length.
+    /// Returns the SSA register name for the i8* C string.
+    fn emit_string_to_cstr(&mut self, output: &mut String, ptr_reg: String, len_reg: String, indent: &str) -> String {
+        let cstr = format!("%cstr{}", self.txn_counter);
+        self.txn_counter += 1;
+        let dest = format!("%cstr_d{}", self.txn_counter);
+        self.txn_counter += 1;
+        let nul = format!("%cstr_n{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(output, "{}{} = alloca i8, i64 {}", indent, cstr, len_reg).ok();
+        writeln!(output, "{}{} = getelementptr i8, i8* {}, i64 0", indent, dest, cstr).ok();
+        writeln!(output, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)", indent, dest, ptr_reg, len_reg).ok();
+        writeln!(output, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, nul, cstr, len_reg).ok();
+        writeln!(output, "{}store i8 0, i8* {}", indent, nul).ok();
+        cstr
     }
 
     fn write_main(&self, output: &mut String) {

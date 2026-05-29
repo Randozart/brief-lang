@@ -1,0 +1,13 @@
+// Phase 4: bootstrap __print intrinsic
+frgn __print(s: String) -> Result<Void, String> from "bootstrap";
+
+let msg: String = "hello, world!";
+let printed: Bool = false;
+
+rct txn print_it [printed == false]
+  [printed == true]
+{
+  __print(msg);
+  &printed = true;
+  term;
+};

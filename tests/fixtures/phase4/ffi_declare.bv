@@ -1,0 +1,15 @@
+// Phase 4: FFI declare — strlen via libc
+frgn strlen(s: String) -> Result<Int, String> from "libc.so.6";
+
+let msg: String = "hello";
+let done: Bool = false;
+let result: Int = 0;
+
+rct txn test [done == false]
+  [done == true]
+{
+  let len: Int = strlen(msg);
+  &result = len;
+  &done = true;
+  term;
+};
