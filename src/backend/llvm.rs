@@ -1,5 +1,5 @@
 use crate::analysis::call_graph::CallGraph;
-use crate::ast::{Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{Expr, MatchPattern, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -252,7 +252,7 @@ impl LlvmBackend {
         }
     }
 
-    fn emit_precondition(&mut self, output: &mut String, pre: &Expr, indent: &str) {
+fn emit_precondition(&mut self, output: &mut String, pre: &Expr, indent: &str) {
         let cond = self.generate_expr(output, pre, indent);
         let cond_i1 = format!("%pre_i1{}", self.txn_counter);
         self.txn_counter += 1;
@@ -435,9 +435,29 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
             Statement::InlineAsm { asm_string, .. } => {
                 writeln!(output, "{}{}", indent, asm_string).ok();
             }
-            Statement::Unification { name, pattern, expr } => {
+            Statement::Unification { name: _, pattern, expr } => {
                 let val = self.generate_expr(output, expr, indent);
-                writeln!(output, "{}; unification: {} {} = {}", indent, name, pattern, val).ok();
+                let disc_reg = format!("%u_disc{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = and i64 {}, 255", indent, disc_reg, val).ok();
+                let arm_label = format!("u_arm{}", self.txn_counter);
+                self.txn_counter += 1;
+                let def_label = format!("u_def{}", self.txn_counter);
+                self.txn_counter += 1;
+                let merge_label = format!("u_merge{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}switch i64 {}, label %{} [", indent, disc_reg, def_label).ok();
+                writeln!(output, "{}  i64 0, label %{}", indent, arm_label).ok();
+                writeln!(output, "{}]", indent).ok();
+                writeln!(output, "{}:", arm_label).ok();
+                let payload_reg = format!("%u_pay{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = lshr i64 {}, 8", indent, payload_reg, val).ok();
+                self.let_bindings.insert(pattern.clone(), payload_reg.clone());
+                writeln!(output, "{}br label %{}", indent, merge_label).ok();
+                writeln!(output, "{}:", def_label).ok();
+                writeln!(output, "{}br label %{}", indent, merge_label).ok();
+                writeln!(output, "{}:", merge_label).ok();
             }
         }
     }
@@ -630,6 +650,85 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
             Expr::FieldAccess(obj, field) => {
                 let obj_val = self.generate_expr(output, obj, indent);
                 writeln!(output, "{}{} = add i64 0, 0 ; {}.{}", indent, val, obj_val, field).ok();
+            }
+            Expr::Match { value, arms } => {
+                let val_inner = self.generate_expr(output, value, indent);
+                let disc_reg = format!("%m_disc{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = and i64 {}, 255", indent, disc_reg, val_inner).ok();
+
+                let merge_label = format!("m_merge{}", self.txn_counter);
+                self.txn_counter += 1;
+
+                let has_wildcard = arms.iter().any(|a| a.pattern == MatchPattern::Wildcard);
+                let default_label = if has_wildcard {
+                    format!("m_def{}", self.txn_counter)
+                } else {
+                    format!("m_unreach{}", self.txn_counter)
+                };
+                self.txn_counter += 1;
+
+                writeln!(output, "{}switch i64 {}, label %{} [", indent, disc_reg, default_label).ok();
+                let mut variant_idx = 0u64;
+                for arm in arms.iter() {
+                    if let MatchPattern::Variant { name: _, fields: _ } = &arm.pattern {
+                        writeln!(output, "{}  i64 {}, label %m_arm{}", indent, variant_idx, variant_idx).ok();
+                        variant_idx += 1;
+                    }
+                }
+                writeln!(output, "{}]", indent).ok();
+
+                variant_idx = 0;
+                let mut phi_regs: Vec<String> = Vec::new();
+                let mut phi_labels: Vec<String> = Vec::new();
+                for arm in arms.iter() {
+                    match &arm.pattern {
+                        MatchPattern::Variant { name: _, fields } => {
+                            writeln!(output, "{}m_arm{}:", indent, variant_idx).ok();
+                            let payload_reg = format!("%m_pay{}", self.txn_counter);
+                            self.txn_counter += 1;
+                            writeln!(output, "{}{} = lshr i64 {}, 8", indent, payload_reg, val_inner).ok();
+                            let arm_val = self.generate_expr(output, &arm.body, indent);
+                            phi_regs.push(arm_val);
+                            phi_labels.push(format!("%%m_arm{}", variant_idx));
+                            writeln!(output, "{}br label %{}", indent, merge_label).ok();
+                            variant_idx += 1;
+                        }
+                        MatchPattern::Wildcard => {}
+                    }
+                }
+
+                if has_wildcard {
+                    let wildcard_arm = arms.iter().find(|a| a.pattern == MatchPattern::Wildcard).unwrap();
+                    writeln!(output, "{}:", default_label).ok();
+                    let wc_val = self.generate_expr(output, &wildcard_arm.body, indent);
+                    phi_regs.push(wc_val);
+                    phi_labels.push(format!("%%{}", default_label));
+                    writeln!(output, "{}br label %{}", indent, merge_label).ok();
+                } else {
+                    writeln!(output, "{}:", default_label).ok();
+                    writeln!(output, "{}  unreachable", indent).ok();
+                }
+
+                writeln!(output, "{}:", merge_label).ok();
+                if phi_regs.len() == 1 {
+                    writeln!(output, "{}{} = add i64 0, {}", indent, val, phi_regs[0]).ok();
+                } else {
+                    let phi_strs: Vec<String> = phi_regs.iter().enumerate()
+                        .map(|(i, r)| format!("[i64 {}, {}]", r, phi_labels[i])).collect();
+                    writeln!(output, "{}{} = phi i64 {}", indent, val, phi_strs.join(", ")).ok();
+                }
+            }
+            Expr::PatternMatch { value, variant, fields: _ } => {
+                let inner = self.generate_expr(output, value, indent);
+                let disc = format!("%pm_d{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = and i64 {}, 255", indent, disc, inner).ok();
+                let target = if variant == "None" || variant == "Err" { 0u64 } else { 1u64 };
+                let cmp = format!("%pm_c{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = icmp eq i64 {}, {}", indent, cmp, disc, target).ok();
+                writeln!(output, "{}{} = zext i1 {} to i64", indent, val, cmp).ok();
             }
             _ => {
                 writeln!(output, "{}{} = add i64 0, 0 ; fallback", indent, val).ok();

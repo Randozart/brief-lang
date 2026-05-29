@@ -1,0 +1,12 @@
+// Phase 3: uni pattern match with enum
+let x: Int = 0;
+
+rct txn test [true]
+  [x == @x + 1]
+{
+  let val: Int = 1;
+  uni val(Some(v)) = {
+    &x = x + v;
+    term;
+  };
+};
