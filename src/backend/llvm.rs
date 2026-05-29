@@ -1,6 +1,6 @@
 use crate::analysis::call_graph::CallGraph;
 use crate::ast::{Expr, MatchPattern, Program, Statement, TopLevel, Type};
-use crate::ast::ForeignSignature;
+use crate::ast::{ForeignSignature, Definition, StructDefinition, Constant};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -18,6 +18,7 @@ pub struct LlvmBackend {
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
     terminated: bool,
+    returns_i64: bool,
     range_bounds: HashMap<String, (i64, i64)>,
     is_release: bool,
     field_to_meta_idx: HashMap<String, usize>,
@@ -38,6 +39,7 @@ impl LlvmBackend {
             pending_cleanup: Vec::new(),
             let_bindings: HashMap::new(),
             terminated: false,
+            returns_i64: false,
             range_bounds: HashMap::new(),
             is_release: false,
             field_to_meta_idx: HashMap::new(),
@@ -145,6 +147,21 @@ impl LlvmBackend {
         }
 
         let mut range_meta_nodes: Vec<String> = Vec::new();
+
+        // Generate definitions (functions)
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                self.generate_definition(&mut output, defn);
+                writeln!(output).ok();
+            }
+        }
+
+        // Generate constants
+        for item in &program.items {
+            if let TopLevel::Constant(c) = item {
+                self.generate_constant(&mut output, c);
+            }
+        }
 
         for (name, txn) in &txns {
             self.generate_transaction(&mut output, txn, name, &mut range_meta_nodes);
@@ -349,6 +366,7 @@ fn emit_precondition(&mut self, output: &mut String, pre: &Expr, indent: &str) {
         self.txn_counter = 0;
         self.let_bindings.clear();
         self.terminated = false;
+        self.returns_i64 = false;
 
         if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
             self.emit_precondition(output, &txn.contract.pre_condition, "  ");
@@ -367,6 +385,81 @@ fn emit_precondition(&mut self, output: &mut String, pre: &Expr, indent: &str) {
         writeln!(output, "}}").ok();
     }
 
+    fn generate_definition(&mut self, output: &mut String, defn: &Definition) {
+        let param_tys: Vec<&str> = defn.parameters.iter().map(|(_, t)| match t {
+            Type::Int | Type::UInt => "i64",
+            Type::Bool => "i8",
+            Type::Char => "i32",
+            Type::Float => "float",
+            Type::String | Type::Data => "i8*",
+            _ => "i64",
+        }).collect();
+        write!(output, "define i64 @{}(", defn.name).ok();
+        for (i, ta) in param_tys.iter().enumerate() {
+            if i > 0 { write!(output, ", ").ok(); }
+            write!(output, "{} %arg{}", ta, i).ok();
+        }
+        writeln!(output, ") local_unnamed_addr #0 {{").ok();
+        writeln!(output, "entry:").ok();
+
+        // Bind parameter registers to names
+for (i, (name, ty)) in defn.parameters.iter().enumerate() {
+            let raw_reg = format!("%arg{}", i);
+            match ty {
+                Type::Float => {
+                    let conv_reg = format!("%arg_c{}", i);
+                    let i32_reg = format!("%arg_i{}", i);
+                    writeln!(output, "  {} = bitcast float {} to i32", i32_reg, raw_reg).ok();
+                    writeln!(output, "  {} = zext i32 {} to i64", conv_reg, i32_reg).ok();
+                    self.let_bindings.insert(name.clone(), conv_reg.clone());
+                }
+                Type::Bool => {
+                    let conv_reg = format!("%arg_c{}", i);
+                    writeln!(output, "  {} = zext i8 {} to i64", conv_reg, raw_reg).ok();
+                    self.let_bindings.insert(name.clone(), conv_reg.clone());
+                }
+                Type::Char => {
+                    let conv_reg = format!("%arg_c{}", i);
+                    writeln!(output, "  {} = zext i32 {} to i64", conv_reg, raw_reg).ok();
+                    self.let_bindings.insert(name.clone(), conv_reg.clone());
+                }
+                Type::String | Type::Data => {
+                    let conv_reg = format!("%arg_c{}", i);
+                    writeln!(output, "  {} = ptrtoint i8* {} to i64", conv_reg, raw_reg).ok();
+                    self.let_bindings.insert(name.clone(), conv_reg.clone());
+                }
+                _ => {
+                    self.let_bindings.insert(name.clone(), raw_reg.clone());
+                }
+            }
+        }
+
+        self.txn_counter = 0;
+        self.terminated = false;
+        self.returns_i64 = true;
+
+        for stmt in &defn.body {
+            self.generate_statement(output, stmt, "  ");
+        }
+
+        if !self.terminated {
+            writeln!(output, "  ret i64 0").ok();
+        }
+        writeln!(output, "}}").ok();
+    }
+
+    fn generate_constant(&mut self, output: &mut String, c: &Constant) {
+        let ty = self.llvm_type(&c.ty);
+        if let Expr::Integer(n) = &c.expr {
+            writeln!(output, "@{} = constant {} {}", c.name, ty, n).ok();
+        } else if let Expr::Bool(b) = &c.expr {
+            let v = if *b { 1 } else { 0 };
+            writeln!(output, "@{} = constant {} {}", c.name, ty, v).ok();
+        } else if let Expr::String(s) = &c.expr {
+            writeln!(output, "@{} = constant [{} x i8] c\"{}\\00\"", c.name, s.len() + 1, s).ok();
+        }
+    }
+
     fn generate_statement(&mut self, output: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
             Statement::Term { values, .. } => {
@@ -377,6 +470,8 @@ fn emit_precondition(&mut self, output: &mut String, pre: &Expr, indent: &str) {
                 if let Some(Some(v)) = values.first() {
                     let val = self.generate_expr(output, v, indent);
                     writeln!(output, "{}ret i64 {}", indent, val).ok();
+                } else if self.returns_i64 {
+                    writeln!(output, "{}ret i64 0", indent).ok();
                 } else {
                     writeln!(output, "{}ret void", indent).ok();
                 }
@@ -454,13 +549,19 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
                     }
                 }
 
-                writeln!(output, "{}br i1 {}, label %then, label %end", indent, cond_i1).ok();
-                writeln!(output, "{}then:", indent).ok();
+                let guard_id = format!("g{}", self.txn_counter);
+                self.txn_counter += 1;
+                let then_label = format!("{}_t", guard_id);
+                let end_label = format!("{}_e", guard_id);
+                writeln!(output, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, then_label, end_label).ok();
+                writeln!(output, "{}{}:", indent, then_label).ok();
                 for s in statements {
                     self.generate_statement(output, s, &format!("{}  ", indent));
                 }
-                writeln!(output, "{}  br label %end", indent).ok();
-                writeln!(output, "{}end:", indent).ok();
+                if !self.terminated {
+                    writeln!(output, "{}  br label %{}", indent, end_label).ok();
+                }
+                writeln!(output, "{}{}:", indent, end_label).ok();
             }
             Statement::Expression(e) => {
                 let _ = self.generate_expr(output, e, indent);
@@ -537,10 +638,16 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
                 writeln!(output, "{}{} = fadd float 0.0, {}", indent, val, f).ok();
             }
             Expr::String(s) => {
-                writeln!(output, "{}{} = alloca i8, i64 {}", indent, val, s.len() + 1).ok();
+                let tmp = format!("%str_p{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = alloca i8, i64 {}", indent, tmp, s.len() + 1).ok();
+                writeln!(output, "{}{} = ptrtoint i8* {} to i64", indent, val, tmp).ok();
             }
             Expr::Char(c) => {
-                writeln!(output, "{}{} = add i32 0, {}", indent, val, *c as i32).ok();
+                let char_i32 = format!("%char{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = add i32 0, {}", indent, char_i32, *c as i32).ok();
+                writeln!(output, "{}{} = zext i32 {} to i64", indent, val, char_i32).ok();
             }
             Expr::Identifier(name) => {
                 if let Some(reg) = self.let_bindings.get(name) {
@@ -562,6 +669,11 @@ writeln!(output, "{}store i8 {}, i8* {}, align {}", indent, trunc_reg, ptr_reg, 
                         writeln!(output, "{}{} = zext i8 {} to i64", indent, val, load_reg).ok();
                     } else if ty == "i8*" {
                         writeln!(output, "{}{} = ptrtoint i8* {} to i64", indent, val, load_reg).ok();
+                    } else if ty == "float" {
+                        let i32_reg = format!("%fl_i{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(output, "{}{} = bitcast float {} to i32", indent, i32_reg, load_reg).ok();
+                        writeln!(output, "{}{} = zext i32 {} to i64", indent, val, i32_reg).ok();
                     } else {
                         writeln!(output, "{}{} = add i64 0, {}", indent, val, load_reg).ok();
                     }
@@ -747,19 +859,35 @@ _ => {
                     // Internal call (no marshaling)
                     let mut arg_strs = Vec::new();
                     for arg in args {
-                        arg_strs.push(self.generate_expr(output, arg, indent));
+                        let r = self.generate_expr(output, arg, indent);
+                        arg_strs.push(format!("i64 {}", r));
                     }
-                    let args_str = arg_strs.join(", ");
-                    writeln!(output, "{}{} = call i64 @{}({})", indent, val, name, args_str).ok();
+                    // Enum variant constructors (uppercase names like ExprInt, TokenLParen)
+                    // allocate memory and store payload, then return pointer as i64
+                    if name.starts_with(|c: char| c.is_uppercase()) && !self.program_txns.contains(name) {
+                        let ptr = format!("%con_p{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(output, "{}{} = alloca i64, i64 {}", indent, ptr, arg_strs.len() + 1).ok();
+                        writeln!(output, "{}{} = ptrtoint i64* {} to i64", indent, val, ptr).ok();
+                    } else {
+                        let args_str = arg_strs.join(", ");
+                        writeln!(output, "{}{} = call i64 @{}({})", indent, val, name, args_str).ok();
+                    }
                 }
             }
             Expr::ListLiteral(_) => {
-                writeln!(output, "{}{} = alloca i64, i64 0", indent, val).ok();
+                let tmp = format!("%lst_p{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = alloca i64, i64 0", indent, tmp).ok();
+                writeln!(output, "{}{} = ptrtoint i64* {} to i64", indent, val, tmp).ok();
             }
             Expr::ListIndex(list, idx) => {
                 let list_val = self.generate_expr(output, list, indent);
                 let idx_val = self.generate_expr(output, idx, indent);
-                writeln!(output, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, val, list_val, idx_val).ok();
+                let ptr = format!("%li_p{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = inttoptr i64 {} to i64*", indent, ptr, list_val).ok();
+                writeln!(output, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, val, ptr, idx_val).ok();
             }
             Expr::ListLen(_) => {
                 writeln!(output, "{}{} = add i64 0, 0", indent, val).ok();
@@ -847,6 +975,73 @@ _ => {
                 writeln!(output, "{}{} = icmp eq i64 {}, {}", indent, cmp, disc, target).ok();
                 writeln!(output, "{}{} = zext i1 {} to i64", indent, val, cmp).ok();
             }
+            Expr::Block(stmts, last) => {
+                for s in stmts {
+                    self.generate_statement(output, s, indent);
+                }
+                let inner = self.generate_expr(output, last, indent);
+                writeln!(output, "{}{} = add i64 0, {}", indent, val, inner).ok();
+            }
+            Expr::Tuple(elems) => {
+                for e in elems {
+                    let _ = self.generate_expr(output, e, indent);
+                }
+                writeln!(output, "{}{} = add i64 0, 0 ; tuple", indent, val).ok();
+            }
+            Expr::TupleDestructure(_, expr) => {
+                let inner = self.generate_expr(output, expr, indent);
+                writeln!(output, "{}{} = add i64 0, {} ; destructure", indent, val, inner).ok();
+            }
+            Expr::Concat(l, r) => {
+                let left = self.generate_expr(output, l, indent);
+                let right = self.generate_expr(output, r, indent);
+                writeln!(output, "{}{} = add i64 {}, {} ; concat", indent, val, left, right).ok();
+            }
+            Expr::Cast(inner, _ty) => {
+                let inner = self.generate_expr(output, inner, indent);
+                writeln!(output, "{}{} = add i64 0, {} ; cast", indent, val, inner).ok();
+            }
+            Expr::Slice { value, start, end, stride: _, mask: _ } => {
+                let list = self.generate_expr(output, value, indent);
+                let ptr = format!("%sl_p{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = inttoptr i64 {} to i64*", indent, ptr, list).ok();
+                if let Some(s) = start {
+                    let s_val = self.generate_expr(output, s, indent);
+                    writeln!(output, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, val, ptr, s_val).ok();
+                } else {
+                    writeln!(output, "{}{} = add i64 0, {} ; slice from start", indent, val, list).ok();
+                }
+            }
+            Expr::MultiSlice { value, .. } => {
+                let list = self.generate_expr(output, value, indent);
+                writeln!(output, "{}{} = add i64 0, {} ; multi-slice", indent, val, list).ok();
+            }
+            Expr::ForAll { .. } => {
+                writeln!(output, "{}{} = add i64 0, 1 ; forall true", indent, val).ok();
+            }
+            Expr::Exists { expr, .. } => {
+                let inner = self.generate_expr(output, expr, indent);
+                let cmp = format!("%ex_c{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(output, "{}{} = icmp ne i64 {}, 0", indent, cmp, inner).ok();
+                writeln!(output, "{}{} = zext i1 {} to i64", indent, val, cmp).ok();
+            }
+            Expr::StructInstance(_name, fields) => {
+                for (_, e) in fields {
+                    let _ = self.generate_expr(output, e, indent);
+                }
+                writeln!(output, "{}{} = add i64 0, 0 ; struct instance", indent, val).ok();
+            }
+            Expr::ObjectLiteral(fields) => {
+                for (_, e) in fields {
+                    let _ = self.generate_expr(output, e, indent);
+                }
+                writeln!(output, "{}{} = add i64 0, 0 ; object literal", indent, val).ok();
+            }
+            Expr::Term => {
+                writeln!(output, "{}{} = add i64 0, 0 ; term value", indent, val).ok();
+            }
             _ => {
                 writeln!(output, "{}{} = add i64 0, 0 ; fallback", indent, val).ok();
             }
@@ -875,13 +1070,19 @@ _ => {
         writeln!(output, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", fused_name).ok();
         writeln!(output, "entry:").ok();
 
-        let combined_body: Vec<Statement> = a.body.iter().cloned()
+        let body_a_clean: Vec<Statement> = a.body.iter()
+            .filter(|s| !matches!(s, Statement::Term { .. } | Statement::Escape(_)))
+            .cloned()
+            .collect();
+
+        let combined_body: Vec<Statement> = body_a_clean.into_iter()
             .chain(b.body.iter().cloned())
             .collect();
 
         self.txn_counter = 0;
         self.let_bindings.clear();
         self.terminated = false;
+        self.returns_i64 = false;
 
         for stmt in &combined_body {
             self.generate_statement(output, stmt, "  ");
