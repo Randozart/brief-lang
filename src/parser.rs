@@ -22,6 +22,7 @@
 
 use crate::ast::*;
 use crate::errors::{Span, SyntaxError};
+use crate::io_registry;
 use crate::lexer::Token;
 use logos::{Lexer, Logos};
 use std::path::Path;
@@ -482,6 +483,7 @@ impl<'a> Parser<'a> {
         // Parse file-level attributes #![...] or #!pragma ... ]
         if matches!(self.current_token(), Some(Ok(Token::HashBangBracket)))
             || matches!(self.current_token(), Some(Ok(Token::PragmaBang)))
+            || matches!(self.current_token(), Some(Ok(Token::HashBang)))
         {
             file_attrs = self.parse_attributes()?;
         }
@@ -490,6 +492,18 @@ impl<'a> Parser<'a> {
         let ffi_state = Self::process_ffi_attributes(&file_attrs);
         // Process dispatch mode from file attributes
         let dispatch_mode = Self::process_dispatch_attribute(&file_attrs);
+
+        // Parse #io declarations at file level
+        let mut io_triggers = Vec::new();
+        while let Some(Ok(Token::Hash)) = self.current_token() {
+            let is_io = matches!(&self.peek, Some((Ok(Token::Identifier(n)), _)) if n == "io");
+            if !is_io { break; }
+            self.advance(); // consume #
+            self.advance(); // consume io
+            let trg = self.parse_io_declaration()?;
+            io_triggers.push(TopLevel::Trigger(trg));
+        }
+        items.splice(0..0, io_triggers);
 
         while self.current_token().is_some() {
             items.push(self.parse_top_level()?);
@@ -2311,8 +2325,13 @@ let span = self.current_span();
                 is_pragma = true;
                 is_file_level = true;
             }
+            Some(Ok(Token::HashBang)) => {
+                self.advance(); // consume #!
+                is_pragma = true;
+                is_file_level = true;
+            }
             _ => {
-                return self.spanned_err("Expected #[, #![, #pragma, or #!pragma for attribute".to_string());
+                return self.spanned_err("Expected #[, #![, #pragma, #!pragma, or #! for attribute".to_string());
             }
         }
         
@@ -2467,6 +2486,24 @@ let span = self.current_span();
             self.expect(Token::RBracket)?;
         }
 
+        let mut is_wake = false;
+        if let Some(Ok(Token::Hash)) = self.current_token() {
+            self.advance();
+            if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                if n == "wake" {
+                    self.advance();
+                    is_wake = true;
+                } else {
+                    return self.spanned_err("Expected 'wake' after '#' modifier".to_string());
+                }
+            }
+        }
+
+        // Error if MMIO trigger has #wake (redundant)
+        if is_wake && matches!(address, crate::ast::LinkRef::Explicit(_)) {
+            return self.spanned_err("MMIO triggers are natively wake-capable; #wake is redundant".to_string());
+        }
+
         let span = self.current_span();
         self.expect(Token::Semicolon)?;
 
@@ -2477,6 +2514,81 @@ let span = self.current_span();
             bit_range,
             stages,
             condition,
+            is_wake,
+            span,
+        })
+    }
+
+    /// Parse #io declaration: `#io sigint;` or `#io sigint -> trg name: Type;`
+    fn parse_io_declaration(&mut self) -> Result<TriggerDeclaration, SyntaxError> {
+        // Read concept name
+        let concept = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+            let mut name = n.clone();
+            self.advance();
+            // Check for parametrized concept: `timer(1hz)`
+            if let Some(Ok(Token::LParen)) = self.current_token() {
+                self.advance();
+                let param = if let Some(Ok(Token::Identifier(p))) = self.current_token() {
+                    let p = p.clone();
+                    self.advance();
+                    p
+                } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                    let s = n.to_string();
+                    self.advance();
+                    s
+                } else {
+                    return self.spanned_err("Expected parameter value in #io concept".to_string());
+                };
+                self.expect(Token::RParen)?;
+                name.push('(');
+                name.push_str(&param);
+                name.push(')');
+            }
+            name
+        } else {
+            return self.spanned_err("Expected IO concept name after #io".to_string());
+        };
+
+        let io_concept = io_registry::io_lookup(&concept).ok_or_else(|| {
+            let available = io_registry::list_concepts();
+            SyntaxError::InvalidStatement {
+                reason: format!(
+                    "Unknown IO concept '{}'.\nAvailable concepts:\n{}",
+                    concept, available
+                ),
+                span: self.current_span().unwrap_or_else(Span::dummy),
+            }
+        })?;
+
+        let (name, ty) = if let Some(Ok(Token::Arrow)) = self.current_token() {
+            self.advance();
+            self.expect(Token::Trg)?;
+            let user_name = self.expect_identifier()?;
+            self.expect(Token::Colon)?;
+            let user_ty = self.parse_type()?;
+            if user_ty != io_concept.ty {
+                return self.spanned_err(format!(
+                    "Type mismatch for IO concept '{}': registry says {:?}, but you wrote {:?}",
+                    concept, io_concept.ty, user_ty
+                ));
+            }
+            (user_name, user_ty)
+        } else {
+            let ty = io_concept.ty.clone();
+            (concept.clone(), ty)
+        };
+
+        let span = self.current_span();
+        self.expect(Token::Semicolon)?;
+
+        Ok(TriggerDeclaration {
+            name,
+            ty,
+            address: crate::ast::LinkRef::Linked(io_concept.symbol.to_string()),
+            bit_range: None,
+            stages: Vec::new(),
+            condition: None,
+            is_wake: true,
             span,
         })
     }

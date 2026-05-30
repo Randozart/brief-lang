@@ -1,14 +1,14 @@
 fn escape_llvm_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\22"),
-            '\n' => out.push_str("\\0a"),
-            '\r' => out.push_str("\\0d"),
-            '\t' => out.push_str("\\09"),
-            c if c.is_ascii_graphic() || c == ' ' => out.push(c),
-            c => { let _ = write!(out, "\\{:02x}", c as u8); }
+    for byte in s.bytes() {
+        match byte {
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\22"),
+            b'\n' => out.push_str("\\0a"),
+            b'\r' => out.push_str("\\0d"),
+            b'\t' => out.push_str("\\09"),
+            0x20..=0x7e => out.push(byte as char),
+            b => { let _ = write!(out, "\\{:02x}", b); }
         }
     }
     out
@@ -536,7 +536,7 @@ self.emit_declares(&mut out);
         for (f, &(lo, hi)) in &self.range_bounds {
             if hi < i64::MAX {
                 let mi = range_meta.len();
-                let dlo = if lo > i64::MIN { lo } else { 0 };
+                let dlo = if lo > i64::MIN { lo } else { i64::MIN };
                 range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, dlo, hi));
                 self.field_to_meta_idx.insert(f.clone(), mi);
             }
@@ -725,14 +725,15 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{}:", indent, end_l).ok();
                 self.terminated = prev_terminated;
             }
-            Statement::Unification { pattern, expr, .. } => {
+            Statement::Unification { name, pattern, expr } => {
                 let val = self.emit_expr(out, expr, indent);
                 let disc = format!("%ud{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = and i64 {}, 255", indent, disc, val).ok();
                 let arm_l = format!("ua{}", self.txn_counter); self.txn_counter += 1;
                 let def_l = format!("ud{}", self.txn_counter); self.txn_counter += 1;
                 let merge_l = format!("um{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}switch i64 {}, label %{} [ i64 0, label %{} ]", indent, disc, def_l, arm_l).ok();
+                let target = if name == "None" || name == "Err" { 0u64 } else { 1u64 };
+                writeln!(out, "{}switch i64 {}, label %{} [ i64 {}, label %{} ]", indent, disc, def_l, target, arm_l).ok();
                 writeln!(out, "{}{}:", indent, arm_l).ok();
                 let pay = format!("%up{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = lshr i64 {}, 8", indent, pay, val).ok();
@@ -763,7 +764,7 @@ self.emit_declares(&mut out);
                 let i32 = format!("%fi{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast float {} to i32", indent, i32, f32).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i32).ok();
-                let _ = ();
+                self.register_types.insert(v.clone(), Type::Float);
             }
             Expr::String(s) => {
                 // Find the index of this string in pre-collected constants
@@ -1190,7 +1191,6 @@ Expr::Identifier(name) => {
         self.txn_write_masks.clear();
         for item in &program.items {
             if let TopLevel::Transaction(t) = item {
-                if !t.is_reactive { continue; }
                 let writes = crate::backend::collect_assigned_identifiers(&t.body);
                 let mut mask = 0u64;
                 for w in &writes {
@@ -1353,40 +1353,22 @@ Expr::Identifier(name) => {
         ids.iter().any(|id| self.trigger_names.contains(id))
     }
 
-    /// Check if both operands of a binary op are bounded by range metadata,
-    /// meaning `nuw nsw` is safe to emit.
-    fn binop_has_bounds(&self, l: &Expr, r: &Expr) -> bool {
-        let mut ids = Vec::new();
-        Self::collect_binop_ids(l, &mut ids);
-        Self::collect_binop_ids(r, &mut ids);
-        if ids.is_empty() { return false; }
-        ids.iter().all(|id| self.range_bounds.contains_key(id))
-    }
-
-    fn collect_binop_ids(expr: &Expr, ids: &mut Vec<String>) {
-        match expr {
-            Expr::Identifier(n) => ids.push(n.clone()),
-            Expr::OwnedRef(n) => ids.push(n.clone()),
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
-                Self::collect_binop_ids(l, ids);
-                Self::collect_binop_ids(r, ids);
-            }
-            _ => {}
-        }
-    }
-
     fn is_float_expr(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Float(_) => true,
             Expr::Identifier(name) => {
-                if let Some(&idx) = self.field_index_map.get(name) {
+                if let Some(reg) = self.let_bindings.get(name) {
+                    self.register_types.get(reg) == Some(&Type::Float)
+                } else if let Some(&idx) = self.field_index_map.get(name) {
                     self.field_types[idx] == "float"
                 } else {
                     false
                 }
             }
             Expr::OwnedRef(name) => {
-                if let Some(&idx) = self.field_index_map.get(name.as_str()) {
+                if let Some(reg) = self.let_bindings.get(name.as_str()) {
+                    self.register_types.get(reg) == Some(&Type::Float)
+                } else if let Some(&idx) = self.field_index_map.get(name.as_str()) {
                     self.field_types[idx] == "float"
                 } else {
                     false
@@ -1417,9 +1399,7 @@ Expr::Identifier(name) => {
             writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
         } else {
-            let nuw_nsw = self.binop_has_bounds(l, r);
-            let op = if nuw_nsw { format!("{} nuw nsw", int_op) } else { int_op.to_string() };
-            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, op, a, b).ok();
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a, b).ok();
         }
     }
 
@@ -1638,6 +1618,7 @@ mod tests {
                     bit_range: None,
                     stages: vec![],
                     condition: None,
+                    is_wake: false,
                     span: None,
                 }),
                 TopLevel::StateDecl(StateDecl {

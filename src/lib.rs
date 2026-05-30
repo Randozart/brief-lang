@@ -57,3 +57,4 @@ pub mod typechecker;
 pub mod view_compiler;
 pub mod watch;
 pub mod wrapper;
+pub mod io_registry;

@@ -2,7 +2,8 @@
 // These triggers map to OS events (signals, stdin, filesystem, network)
 // and provide a reactive I/O model without blocking calls.
 //
-// The `@ link` names reference global symbols defined in runtime/brief_rt.c.
+// Uses the `#io` pragma syntax to declare OS-linked triggers without
+// needing to know the underlying C runtime symbol names.
 // On bare-metal/FPGA, use `trg name: Type @ 0xADDRESS` instead.
 //
 // Import this file:
@@ -14,35 +15,29 @@
 // ===== SIGNAL TRIGGERS =====
 
 // SIGINT (Ctrl+C) — fires when user sends interrupt signal
-trg sigint: Bool @ link __sigint_flag;
+#io sigint;
 
 // SIGTERM — fires when process receives termination signal
-trg sigterm: Bool @ link __sigterm_flag;
+#io sigterm;
 
 // SIGHUP — fires when terminal hangs up
-trg sighup: Bool @ link __sighup_flag;
+#io sighup;
 
 // ===== STDIN TRIGGERS =====
 
 // stdin_ready — fires when stdin has data available to read
-trg stdin_ready: Bool @ link __stdin_ready;
+#io stdin_ready;
 
 // stdin_line — fires when a complete line is available on stdin
-trg stdin_line: String @ link __stdin_buffer;
+#io stdin_line;
 
 // ===== TIMER TRIGGERS =====
 
 // clock_tick_1hz — fires once per second
-trg clock_tick_1hz: Int @ link __timer_1hz;
+#io timer(1hz) -> trg clock_tick_1hz: Int;
 
 // clock_tick_100hz — fires 100 times per second (every 10ms)
-trg clock_tick_100hz: Int @ link __timer_100hz;
-
-// ===== IO PENDING (internal, used by std/io.bv) =====
-
-// __io_pending — set by brief_rt.c whenever any event arrives
-// Used by the io pump transaction to know when to call __raw_poll.
-trg __io_pending: Bool @ link __io_pending;
+#io timer(100hz) -> trg clock_tick_100hz: Int;
 
 // ===== HELPER TRANSACTIONS =====
 

@@ -715,6 +715,7 @@ pub struct TriggerDeclaration {
     pub bit_range: Option<BitRange>,
     pub stages: Vec<String>,
     pub condition: Option<Expr>,
+    pub is_wake: bool,
     pub span: Option<Span>,
 }
 
