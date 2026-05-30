@@ -1089,6 +1089,10 @@ Expr::Identifier(name) => {
             // Fallback
             _ => { writeln!(out, "{}{} = add i64 0, 0 ; expr", indent, v).ok(); }
         }
+        // Universal float type-propagation catch-all
+        if self.is_float_expr(expr) {
+            self.register_types.insert(v.to_string(), Type::Float);
+        }
         v
     }
 
@@ -1427,6 +1431,8 @@ Expr::Identifier(name) => {
                 self.is_float_expr(l) || self.is_float_expr(r)
             }
             Expr::Neg(e) => self.is_float_expr(e),
+            Expr::Cast(_, ty) => ty == &Type::Float,
+            Expr::Block(_, last) => self.is_float_expr(last),
             _ => false,
         }
     }
