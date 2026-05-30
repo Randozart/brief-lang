@@ -186,7 +186,48 @@ rct txn debounced_action()
 };
 ```
 
-## 7. Debugging Reactive Code
+## 7. Polling Mode (`@Hz`)
+
+By default, reactive transactions fire on **dependency changes** — the system tracks which variables each transaction's precondition reads, and only evaluates dirty transactions. This is the reactive equilibrium model.
+
+Sometimes you need a **fixed tick rate** instead — e.g., sensor polling, animation frames, watchdog timers. Add `@Hz` to opt into polling:
+
+```brief
+// Reactive (default): fires when precondition changes
+rct txn on_signal [signal][handled == true] {
+    &handled = true;
+    term;
+};
+
+// Polling: fires every 10ms regardless of precondition state
+rct txn read_sensor @100Hz [true][logged == true] {
+    &value = read_adc();
+    &logged = true;
+    term;
+};
+```
+
+**How polling works:**
+1. The `@Hz` annotation attaches a speed requirement to the transaction
+2. Multiple files with different `@Hz` speeds are coordinated by the `ReactorScheduler` — the global tick runs at max(`@Hz`) and slower files are intelligently skipped
+3. Polling transactions still use the same reactive pipeline (precondition check, term verification, equilibrium loop) — `@Hz` only adds a time-based gate
+4. Pure library files with no `rct` blocks consume zero overhead
+
+**When to use polling:**
+- Hardware polling (ADC, GPIO, I2C)
+- Timer-driven logic
+- Animation/rendering at fixed frame rates
+- Watchdog or heartbeat patterns
+
+**Comparison:**
+
+| Mode | Syntax | Fires when | Use case |
+|------|--------|-----------|----------|
+| Passive | `txn` | Explicit call only | API, callbacks |
+| Reactive | `rct txn` | Precondition becomes true | State machines, event handlers |
+| Polling | `rct txn @Hz` | Precondition true + tick interval met | Sensors, timers, animation |
+
+## 8. Debugging Reactive Code
 
 Add logging transactions:
 
@@ -212,7 +253,7 @@ rct txn check_invariants() [true][true] {
 };
 ```
 
-## 8. Complete Example: Shopping Cart
+## 9. Complete Example: Shopping Cart
 
 ```brief
 // shopping_cart.bv
@@ -256,7 +297,7 @@ rct txn clear_cart() [items > 0][items == 0 && total == 0.0] {
 3. `apply_bulk_discount` fires, applies 10% discount
 4. Equilibrium: no more transactions can fire
 
-## Exercises
+## 10. Exercises
 
 1. Create a reactive thermostat that turns on/off based on temperature
 2. Build a traffic light system with reactive state transitions
