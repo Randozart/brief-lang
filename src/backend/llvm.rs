@@ -329,6 +329,13 @@ self.emit_declares(&mut out);
                 }
             }
         }
+        // Main
+        let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
+        self.emit_main(&mut out, has_wake_triggers);
+        // Wake trigger metadata
+        if has_wake_triggers {
+            self.emit_wake_metadata(&mut out);
+        }
         // Attributes
         writeln!(out).ok();
         writeln!(out, "attributes #0 = {{").ok();
@@ -360,6 +367,10 @@ self.emit_declares(&mut out);
         // __wait_for_event is no longer a built-in intrinsic.
         // Users declare it via frgn __wait_for_event() -> Void from "libruntime";
         // and the normal FFI path handles the declare emission.
+        // __rt_init and __rt_wait are weak symbols provided by the C runtime.
+        // If not linked, these resolve to a no-op stub or linker error.
+        writeln!(out, "declare void @__rt_init() local_unnamed_addr").ok();
+        writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
     }
 
     fn emit_foreign_declares(&mut self, out: &mut String) {
@@ -1175,15 +1186,6 @@ Expr::Identifier(name) => {
         }
         writeln!(out, "}}").ok();
         writeln!(out).ok();
-        // main
-        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  entry:").ok();
-        writeln!(out, "  call void @init_state()").ok();
-        writeln!(out, "  br label %tick").ok();
-        writeln!(out, "  tick:").ok();
-        writeln!(out, "  call void @reactor_tick()").ok();
-        writeln!(out, "  br label %tick").ok();
-        writeln!(out, "}}").ok();
     }
 
     // ── WRITE MASKS (Parallel Dispatch) ──────────────────────
@@ -1317,14 +1319,46 @@ Expr::Identifier(name) => {
         }
         writeln!(out, "}}").ok();
         writeln!(out).ok();
-        // main
+    }
+
+    // ── MAIN FUNCTION ─────────────────────────────────────────
+    fn emit_main(&self, out: &mut String, has_wake_triggers: bool) {
         writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
+        if has_wake_triggers {
+            writeln!(out, "  call void @__rt_init()").ok();
+        }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
         writeln!(out, "  call void @reactor_tick()").ok();
+        if has_wake_triggers {
+            writeln!(out, "  call void @__rt_wait()").ok();
+        }
         writeln!(out, "  br label %tick").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    // ── WAKE TRIGGER METADATA ─────────────────────────────────
+    fn emit_wake_metadata(&self, out: &mut String) {
+        let wake_symbols: Vec<&str> = self.triggers.values()
+            .filter(|t| t.is_wake)
+            .filter_map(|t| match &t.address {
+                crate::ast::LinkRef::Linked(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        if wake_symbols.is_empty() { return; }
+        let count = wake_symbols.len();
+        let sym_list = wake_symbols.iter().map(|s| format!("i8* @{}", s)).collect::<Vec<_>>().join(", ");
+        writeln!(out, "@llvm.wake_triggers = appending global [{} x i8*] [{}]", count, sym_list).ok();
+        writeln!(out, "!llvm.wake_triggers = !{{!0}}").ok();
+        write!(out, "!0 = !{{").ok();
+        for (i, sym) in wake_symbols.iter().enumerate() {
+            if i > 0 { write!(out, ", ").ok(); }
+            write!(out, "!\"{}\"", sym).ok();
+        }
         writeln!(out, "}}").ok();
     }
 
@@ -1909,5 +1943,165 @@ mod tests {
         // Must NOT emit nuw nsw — we removed manual emission
         assert!(!output.contains("nuw nsw"),
             "add on bounded variables should NOT emit nuw nsw (LLVM infers from !range)");
+    }
+
+    // ── Phase 5: Wake trigger and blocking wait tests ────────────────
+
+    fn make_wake_trg_program(trg_name: &str, sym: &str, ty: Type, is_wake: bool) -> Program {
+        Program {
+            items: vec![
+                TopLevel::Trigger(TriggerDeclaration {
+                    name: trg_name.to_string(),
+                    ty,
+                    address: LinkRef::Linked(sym.to_string()),
+                    bit_range: None,
+                    stages: vec![],
+                    condition: None,
+                    is_wake,
+                    span: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Identifier(trg_name.to_string()),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Term { values: vec![], modifiers: vec![] },
+                    ],
+                    is_async: false,
+                    is_reactive: true,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_no_wake_triggers_no_metadata() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, false);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(!output.contains("@llvm.wake_triggers"),
+            "No wake triggers → no @llvm.wake_triggers metadata");
+        assert!(!output.contains("call void @__rt_init()"),
+            "No wake triggers → no __rt_init call");
+        assert!(!output.contains("call void @__rt_wait()"),
+            "No wake triggers → no __rt_wait call");
+    }
+
+    #[test]
+    fn test_single_wake_trigger_metadata() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(output.contains("@llvm.wake_triggers = appending global [1 x i8*] [i8* @__sigint_flag]"),
+            "Single wake trigger → appending global with one symbol");
+        assert!(output.contains("!llvm.wake_triggers = !{!0}"),
+            "Named metadata node present");
+        assert!(output.contains("!0 = !{!\"__sigint_flag\"}"),
+            "Metadata references __sigint_flag");
+    }
+
+    #[test]
+    fn test_multiple_wake_triggers_metadata() {
+        let mut p1 = make_wake_trg_program("sigint", "__sigint_flag", Type::Bool, true);
+        p1.items.insert(1, TopLevel::Trigger(TriggerDeclaration {
+            name: "stdin".to_string(),
+            ty: Type::Bool,
+            address: LinkRef::Linked("__stdin_ready".to_string()),
+            bit_range: None,
+            stages: vec![],
+            condition: None,
+            is_wake: true,
+            span: None,
+        }));
+        let output = LlvmBackend::new().generate(&p1);
+        assert!(output.contains("[2 x i8*]"),
+            "Multiple wake triggers → array size 2");
+        assert!(output.contains("__sigint_flag"),
+            "First symbol present");
+        assert!(output.contains("__stdin_ready"),
+            "Second symbol present");
+    }
+
+    #[test]
+    fn test_main_calls_rt_init_and_rt_wait_with_wake_triggers() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(output.contains("call void @__rt_init()"),
+            "main() calls __rt_init() when wake triggers exist");
+        assert!(output.contains("call void @__rt_wait()"),
+            "main() calls __rt_wait() after reactor_tick");
+    }
+
+    #[test]
+    fn test_main_no_init_wait_without_wake_triggers() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, false);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(!output.contains("call void @__rt_init()"),
+            "main() does not call __rt_init() without wake triggers");
+        assert!(!output.contains("call void @__rt_wait()"),
+            "main() does not call __rt_wait() without wake triggers");
+    }
+
+    #[test]
+    fn test_rt_declares_present() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, false);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(output.contains("declare void @__rt_init()"),
+            "__rt_init always declared");
+        assert!(output.contains("declare void @__rt_wait()"),
+            "__rt_wait always declared");
+    }
+
+    #[test]
+    fn test_wake_non_link_trigger_no_metadata() {
+        // MMIO triggers with #wake should not appear in metadata (parse-time error, but belt-and-suspenders)
+        let program = Program {
+            items: vec![
+                TopLevel::Trigger(TriggerDeclaration {
+                    name: "mmio".to_string(),
+                    ty: Type::Bool,
+                    address: LinkRef::Explicit(0x4000),
+                    bit_range: None,
+                    stages: vec![],
+                    condition: None,
+                    is_wake: true,
+                    span: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), span: None, watchdog: None },
+                    body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+                    is_async: false, is_reactive: true, reactor_speed: None, span: None,
+                    is_lambda: false, dependencies: vec![], attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        };
+        let output = LlvmBackend::new().generate(&program);
+        // MMIO triggers with is_wake → metadata only includes LinkRef::Linked symbols, not Explicit
+        assert!(!output.contains("@llvm.wake_triggers"),
+            "MMIO wake trigger should not produce metadata (not a linked symbol)");
     }
 }

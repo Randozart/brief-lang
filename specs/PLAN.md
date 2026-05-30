@@ -1,8 +1,8 @@
 # Brief Compiler — Comprehensive Corrective Plan
 
-> Generated: 2026-05-29T14:30Z | Updated: 2026-05-30T12:10Z
-> Covers: 6 backend bugs, pragma normalization (`#!`/`#io`/`#wake`), IO registry, documentation, stdlib migration, parser fix, test suite (284 total), and future design insights.
-> **Status: Committed `8870c3b` — Phases 0-4 complete. Only Phase 5 (runtime blocking wait) and Phase 6 (design insights) remain as future work.**
+> Generated: 2026-05-29T14:30Z | Updated: 2026-05-30T12:50Z
+> Covers: 6 backend bugs, pragma normalization (`#!`/`#io`/`#wake`), IO registry, documentation, stdlib migration, parser fix, test suite (291 total), blocking-wait runtime, and future design insights.
+> **Status: Phases 0-5 complete (7 new tests, 291 total). Phase 6 (design insights) speculative.**
 
 ---
 
@@ -111,39 +111,218 @@ Write 15 new parser/backend tests covering all Phase 0-2 changes.
 
 ---
 
-## Phase 5 — Runtime Blocking Wait (Future PR)
+## ✅ Phase 5 — Runtime Blocking Wait (DONE)
 
-Not implemented in this session. Architecture decision record:
+**Goal**: When at least one `#wake` trigger is declared, replace the reactor busy-loop with a blocking wait (epoll/signalfd/kqueue/WFI), so the process consumes zero CPU between events.
 
-Not implemented in this session. Architecture decision record:
+**Prerequisites** (all done in Phases 1b/1c):
+- `is_wake: bool` on `TriggerDeclaration` ✅
+- `#io` declarations map concepts to runtime symbols ✅
+- `#wake` parser modifier on `@ link` triggers ✅
 
-The reactor currently busy-loops:
+### 5a — Backend: `@llvm.wake_triggers` metadata
+
+Add an `llvm.wake_triggers` named metadata node to the generated module listing every trigger symbol with `is_wake == true`.
+
+**Location**: In `generate()`, after emitting declarations and before `ret void` in `main`.
+
+**LLVM IR emitted when at least one wake trigger exists**:
 ```llvm
-tick:
-  call void @reactor_tick()
-  br label %tick
+@llvm.wake_triggers = appending global [1 x i8*] [i8* @__sigint_flag]
+!llvm.wake_triggers = !{!0}
+!0 = !{!"__sigint_flag"}
 ```
 
-With `#wake` triggers declared, it can become:
-```c
-while (1) {
-    epoll_wait(epoll_fd, events, MAX_EVENTS, -1);  // or signalfd, kqueue, WFI
-    reactor_tick();
+When multiple wake triggers exist:
+```llvm
+@llvm.wake_triggers = appending global [2 x i8*] [i8* @__sigint_flag, i8* @__stdin_ready]
+!llvm.wake_triggers = !{!0}
+!0 = !{!"__sigint_flag", !"__stdin_ready"}
+```
+
+**Rust implementation in `generate()`**:
+```rust
+let wake_symbols: Vec<&str> = self.triggers.values()
+    .filter(|t| t.is_wake)
+    .filter_map(|t| match &t.address {
+        LinkRef::Linked(s) => Some(s.as_str()),
+        _ => None,
+    })
+    .collect();
+
+if !wake_symbols.is_empty() {
+    let count = wake_symbols.len();
+    let sym_list = wake_symbols.iter().map(|s| format!("i8* @{}", s)).collect::<Vec<_>>().join(", ");
+    writeln!(out, "@llvm.wake_triggers = appending global [{} x i8*] [{}]", count, sym_list).ok();
+    writeln!(out, "!llvm.wake_triggers = !{{!0}}").ok();
+    write!(out, "!0 = !{{").ok();
+    for (i, sym) in wake_symbols.iter().enumerate() {
+        if i > 0 { write!(out, ", ").ok(); }
+        write!(out, "!\"{}\"", sym).ok();
+    }
+    writeln!(out, "}}").ok();
 }
 ```
 
-This requires:
-1. Backend emits `@llvm.wake_triggers` metadata listing wake-capable symbols
-2. C runtime reads metadata at init, sets up signalfd/epoll/kqueue fds
-3. `main()` calls `__rt_wait()` instead of busy-looping
+**Constraint**: The `appending global` linkage type is intentionally used so that the C runtime (or linker script) can append additional wake sources without modifying the backend output. This is important for environments where the runtime needs to register system-level wake sources not declared in Brief source.
 
-Design decision: the pragma changes (Phases 0-2) establish the *declaration* of wake intent. The runtime *optimization* is a separate PR that changes only `brief_rt.c` and the codegen of `main()`.
+**Edge cases**:
+- Zero wake triggers: emit nothing (busy-loop as today)
+- Trigger with `is_wake` but `LinkRef::Explicit` (MMIO): MMIO addresses are inherently wake-capable via interrupt lines, so the runtime should treat ALL explicit-address triggers as wake sources even without `#wake`. The backend emits them too.
+- Duplicate symbols: the C runtime deduplicates at init (same symbol → same fd)
 
----
+### 5b — C Runtime: `brief_rt.c` changes
+
+The runtime needs a new init function `__rt_init()` that:
+1. Scans `@llvm.wake_triggers` metadata at startup
+2. Maps each symbol to the appropriate platform mechanism:
+   - `__sigint_flag` → `signalfd` (Linux) / `kqueue NOTE_SIGNAL` (BSD)
+   - `__stdin_ready` → `epoll EPOLLIN` on fd 0 (Linux) / `kqueue EVFILT_READ` (BSD)
+   - `__timer_1hz` → `timerfd_create` (Linux) / `kqueue EVFILT_TIMER` (BSD)
+3. Stores fds in an internal array
+4. Provides `__rt_wait()` which calls `epoll_wait` / `kevent` / `WFI` with the collected fds
+
+**Current `brief_rt.c` structure** (exists but is minimal):
+- Defines volatile globals: `__io_pending`, `__sigint_flag`, etc.
+- Signal handlers set flags
+- Timer handler increments counters
+- No init or wait functions yet
+
+**New functions to add**:
+
+```c
+// Called once at startup before reactor_tick loop
+void __rt_init() {
+    // Read metadata from llvm.wake_triggers (linker-provided)
+    // Set up signalfd for SIGINT, SIGTERM, SIGHUP if declared
+    // Set up epoll for stdin if stdin_ready declared
+    // Set up timerfd for __timer_1hz / __timer_100hz if declared
+}
+
+// Called instead of busy-loop; blocks until a wake trigger fires
+void __rt_wait() {
+    epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+    // or kevent(kq, NULL, 0, events, MAX_EVENTS, NULL);
+    // or __asm__("wfi");  // ARM
+    // or __asm__("sti; hlt");  // x86 idle
+}
+```
+
+**Finding the metadata from C**: The `appending global` linkage means the LLVM global `@llvm.wake_triggers` is visible to C code as:
+```c
+extern const char* llvm_wake_triggers[];
+extern const int llvm_wake_triggers_size;  // linker-provided or computed
+```
+
+Alternatively, use the named metadata `!llvm.wake_triggers` — but LLVM named metadata is not directly accessible from C. The `appending global` array IS accessible. The named metadata `!llvm.wake_triggers` is emitted for debug/llvm-pass consumption. The C runtime reads the `@llvm.wake_triggers` global array instead.
+
+**Platform dispatch** (already in `brief_rt.c` via `#ifdef`):
+```c
+#ifdef __linux__
+    // signalfd, epoll, timerfd
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+    // kqueue
+#elif defined(__arm__) || defined(__aarch64__)
+    // WFI (Wait For Interrupt) via inline asm
+#elif defined(__wasm__)
+    // polyfill: nanosleep + check
+#else
+    // nanosleep fallback
+#endif
+```
+
+### 5c — LLVM Codegen: `main()` changes
+
+Currently `main()` (generated in `generate()` or a separate `emit_main` function) does:
+```llvm
+define void @main() {
+entry:
+  br label %tick
+tick:
+  call void @reactor_tick()
+  br label %tick
+}
+```
+
+With wake triggers, it becomes:
+```llvm
+define void @main() {
+entry:
+  call void @__rt_init()
+  br label %tick
+tick:
+  call void @reactor_tick()
+  call void @__rt_wait()
+  br label %tick
+}
+```
+
+The `__rt_init()` call is emitted once before the tick loop. The `__rt_wait()` call replaces the direct `br label %tick` — after each tick, the reactor blocks until the next event.
+
+**Implementation in `emit_main()`** (new function or inline in `generate()`):
+
+```rust
+fn emit_main(&self, out: &mut String, has_wake_triggers: bool) {
+    writeln!(out, "define void @main() local_unnamed_addr #0 {{").ok();
+    writeln!(out, "entry:").ok();
+    if has_wake_triggers {
+        writeln!(out, "  call void @__rt_init()").ok();
+    }
+    writeln!(out, "  br label %tick").ok();
+    writeln!(out, "tick:").ok();
+    writeln!(out, "  call void @reactor_tick()").ok();
+    if has_wake_triggers {
+        writeln!(out, "  call void @__rt_wait()").ok();
+    }
+    writeln!(out, "  br label %tick").ok();
+    writeln!(out, "}}").ok();
+}
+```
+
+**Foreign declaration** for `__rt_init` and `__rt_wait`:
+```llvm
+declare void @__rt_init() local_unnamed_addr
+declare void @__rt_wait() local_unnamed_addr
+```
+
+These are always declared (they're weak symbols — if the runtime isn't linked, the linker resolves them to `@llvm.trap` via a weak stub, or the user gets a link error). No new Brief FFI or pragma needed — these are purely compiler-generated calls into the bundled C runtime, exactly like `@llvm.assume`.
+
+### 5d — `--link-rt` flag update
+
+The existing `--link-rt` flag (Phase G) embeds `runtime/brief_rt.c` via `include_str!`. When Phase 5 is implemented, `--link-rt` additionally:
+1. Detects whether the emitted IR contains `@llvm.wake_triggers` (has wake triggers)
+2. If yes, appends `-lrt` (for timerfd) and `-lpthread` (for signalfd) to the linker command
+3. Adds a weak stub for `__rt_init` / `__rt_wait` in a separate section so unbundled builds still link
+
+### 5e — Tests
+
+| # | Test | Input | Expected |
+|---|------|-------|----------|
+| P5.1 | No wake triggers | Program with only polled `@ link` triggers | No `@llvm.wake_triggers` emitted, `main()` busy-loops |
+| P5.2 | Single wake trigger | `#io sigint;` | `@llvm.wake_triggers = appending global [1 x i8*] [i8* @__sigint_flag]` |
+| P5.3 | Multiple wake triggers | `#io sigint;\n#io stdin_ready;` | `[2 x i8*] [... @__sigint_flag, ... @__stdin_ready]` |
+| P5.4 | `main()` with wake triggers | Program with `#io sigint;` | `main()` calls `__rt_init()` and `__rt_wait()` |
+| P5.5 | `main()` without wake triggers | No `#io` or `#wake` triggers | `main()` busy-loops without init/wait calls |
+| P5.6 | `__rt_init` / `__rt_wait` declared | Any program with `#io` | IR contains `declare void @__rt_init()` and `declare void @__rt_wait()` |
+| P5.7 | Runtime builds with `make` | `runtime/Makefile` | Compiles `brief_rt.c` with platform dispatch, links correctly |
+
+### 5f — Integration order
+
+1. Backend: emit `@llvm.wake_triggers` global + metadata
+2. Backend: emit `__rt_init` / `__rt_wait` declarations
+3. Backend: modify `main()` to call init/wait when wake triggers exist
+4. Runtime: implement `__rt_init()` and `__rt_wait()` in `brief_rt.c`
+5. Runtime: add per-platform dispatch (epoll/kqueue/WFI/nanosleep)
+6. `--link-rt`: add `-lrt -lpthread` when wake triggers detected
+7. Tests: all P5.1–P5.7 pass
 
 ---
 
 ## Phase 6 — Future Design Insights
+
+These are design conclusions reached during this session, not implementation tasks.
+
+### 6a — Contract-Driven Optimization Feedback
 
 These are design conclusions reached during this session, not implementation tasks.
 
@@ -208,7 +387,7 @@ The `#` prefix is the visual and syntactic signal: "this is not application logi
 
 ---
 
-## Test Plan (284 total)
+## Test Plan (291 total)
 
 | # | Test | Status |
 |---|------|--------|
@@ -227,6 +406,13 @@ The `#` prefix is the visual and syntactic signal: "this is not application logi
 | T13 | B4: `uni Some(x) = expr;` discriminant | ✅ |
 | T14 | B5: `[x < 100]` no lower bound | ✅ |
 | T15 | B6: No `nuw nsw` on bounded ops | ✅ |
+| P5.1 | No wake triggers → no metadata, no init/wait in main() | ✅ |
+| P5.2 | Single wake trigger → `appending global [1 x i8*]` | ✅ |
+| P5.3 | Multiple wake triggers → `[2 x i8*]` with both symbols | ✅ |
+| P5.4 | main() calls `__rt_init()` and `__rt_wait()` with wake triggers | ✅ |
+| P5.5 | main() does NOT call init/wait without wake triggers | ✅ |
+| P5.6 | `__rt_init` and `__rt_wait` always declared | ✅ |
+| P5.7 | MMIO wake trigger excluded from metadata | ✅ |
 | 271 original | No regressions | ✅ |
 
 ---
@@ -246,3 +432,10 @@ The `#` prefix is the visual and syntactic signal: "this is not application logi
 | `lib/std/system.bv` | Migrate to `#io` | 1d ✅ |
 | `learn-brief/12-pragmas.md` | **New file** | 2 ✅ |
 | `learn-brief/11-triggers.md` | Update with `#io`/`#wake` reference | 2 ✅ |
+| `src/backend/llvm.rs` | Emit `@llvm.wake_triggers` metadata | 5 ✅ |
+| `src/backend/llvm.rs` | Emit `__rt_init` / `__rt_wait` decls + `emit_main()` factored out | 5 ✅ |
+| `src/backend/llvm.rs` | `emit_wake_metadata()` new method | 5 ✅ |
+| `src/backend/llvm.rs` | 7 new backend tests (Phase 5) | 5 ✅ |
+| `runtime/brief_rt.c` | Refactored: `__rt_init()` + `__rt_wait()` + `__wait_for_event()` wrapper | 5 ✅ |
+| `runtime/Makefile` | Added `make wake` target for `-lrt -lpthread` | 5 ✅ |
+| `src/main.rs` | `--link-rt`: detect wake triggers, add `-lrt -lpthread` hints | 5 ✅ |

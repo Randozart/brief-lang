@@ -3,8 +3,9 @@
  *
  * Provides:
  *   1. @ link global definitions (__io_pending, __sigint_flag, etc.)
- *   2. __wait_for_event() — per-platform blocking sleep
- *   3. Initialization of signal handlers and epoll/kqueue
+ *   2. __rt_init() — signal handlers, timers, epoll/kqueue setup (called by main())
+ *   3. __rt_wait() — per-platform blocking sleep (called by main())
+ *   4. __wait_for_event() — user-callable FFI wrapper over __rt_wait()
  *
  * Compile once per target:
  *   cc -c brief_rt.c -o brief_rt.o
@@ -99,16 +100,16 @@ static int setup_timer(timer_t* tid, int signo, long sec, long nsec) {
 }
 
 /* ===================================================================
- * 4. Platform-specific __wait_for_event
+ * 4. __rt_wait — Platform blocking sleep
  *
- * This is the blocking sleep called from the user's idle transaction.
- * The user declares:
- *   frgn __wait_for_event() -> Void from "libruntime";
- * and writes:
- *   rct txn sleep_when_idle [true] { __wait_for_event(); term; };
- *
- * On bare-metal, maps to CPU halt instructions.
- * On OS targets, maps to epoll_wait / kevent / poll.
+ * Called by the LLVM backend after each reactor_tick() to block
+ * until the next event. Uses per-platform primitives:
+ *   - Linux:   epoll_wait with signalfd, timerfd, stdin
+ *   - BSD/mac: kqueue with EVFILT_SIGNAL, EVFILT_TIMER, EVFILT_READ
+ *   - ARM:     WFI (Wait For Interrupt)
+ *   - x86:     STI; HLT
+ *   - WASM:    host yield
+ *   - Other:   nanosleep poll
  * =================================================================== */
 
 #if defined(__linux__)
@@ -133,7 +134,7 @@ static int ensure_epoll(void) {
     return 0;
 }
 
-void __wait_for_event(void) {
+void __rt_wait(void) {
     /* If epoll is available, use it */
     if (ensure_epoll() == 0) {
         struct epoll_event events[MAX_EPOLL_EVENTS];
@@ -184,7 +185,7 @@ static int ensure_kqueue(void) {
     return 0;
 }
 
-void __wait_for_event(void) {
+void __rt_wait(void) {
     if (ensure_kqueue() == 0) {
         struct kevent events[MAX_KQUEUE_EVENTS];
         struct timespec ts = {1, 0};
@@ -213,21 +214,21 @@ void __wait_for_event(void) {
 }
 
 #elif defined(__arm__) || defined(__aarch64__) || defined(_ARM_) || defined(_M_ARM)
-void __wait_for_event(void) {
+void __rt_wait(void) {
     /* ARM Wait For Interrupt — CPU halts until interrupt/event */
     __asm__ volatile("wfi" ::: "memory");
     __io_pending = 1;
 }
 
 #elif defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)
-void __wait_for_event(void) {
+void __rt_wait(void) {
     /* x86: enable interrupts then halt — CPU sleeps until IRQ */
     __asm__ volatile("sti; hlt" ::: "memory");
     __io_pending = 1;
 }
 
 #elif defined(__wasm__) || defined(__EMSCRIPTEN__)
-void __wait_for_event(void) {
+void __rt_wait(void) {
     /* WASM: yield to host event loop. Returns when re-entered. */
     __builtin_wasm_memory_grow(0, 0);
     __io_pending = 1;
@@ -235,7 +236,7 @@ void __wait_for_event(void) {
 
 #else
 /* Fallback: busy-sleep with 1ms polling */
-void __wait_for_event(void) {
+void __rt_wait(void) {
     struct timespec ts = {0, 1000000}; /* 1ms */
     nanosleep(&ts, NULL);
     __io_pending = 1;
@@ -243,14 +244,28 @@ void __wait_for_event(void) {
 #endif
 
 /* ===================================================================
- * 5. Constructor — auto-runs before main()
+ * 4b. __wait_for_event — User-callable FFI wrapper
  *
- * Sets up signal handlers, timers, and OS event sources.
- * User never calls this explicitly.
+ * Thin wrapper over __rt_wait() for user code that declares:
+ *   frgn __wait_for_event() -> Void from "libruntime";
+ * =================================================================== */
+void __wait_for_event(void) {
+    __rt_wait();
+}
+
+/* ===================================================================
+ * 5. Initialization — __rt_init() and constructor wrapper
+ *
+ * __rt_init() is called by the LLVM backend at the start of main()
+ * before the reactor loop begins. It sets up signal handlers, timers,
+ * and OS event sources.
+ *
+ * The constructor wrapper ensures init also runs for FFI-only usage
+ * (e.g. when the user calls __wait_for_event via frgn without the
+ * generated main()).
  * =================================================================== */
 
-__attribute__((constructor))
-static void brief_rt_init(void) {
+void __rt_init(void) {
     /* Signal handlers */
     signal(SIGINT,  handle_sigint);
     signal(SIGTERM, handle_sigterm);
@@ -270,4 +285,10 @@ static void brief_rt_init(void) {
 
     /* Mark io as pending initially so the first tick checks for work */
     __io_pending = 1;
+}
+
+/* Constructor wrapper — ensures init runs even without the generated main() */
+__attribute__((constructor))
+static void brief_rt_ctor(void) {
+    __rt_init();
 }

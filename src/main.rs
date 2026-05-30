@@ -1839,25 +1839,40 @@ fn run_llvm_compile(
         let out_base = out_dir.unwrap_or(std::path::Path::new("."));
         let rt_c_path = out_base.join("brief_rt.c");
         let rt_o_path = out_base.join("brief_rt.o");
+        // Detect whether output has wake triggers
+        let has_wake = output.contains("@llvm.wake_triggers");
         // Write embedded C source to disk
         fs::write(&rt_c_path, BRIEF_RT_SOURCE)?;
         // Compile it
-        let cc_status = std::process::Command::new("cc")
-            .args(["-c", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"])
+        let mut cc_args = vec!["-c", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"];
+        if has_wake {
+            // __rt_wait uses signalfd/timerfd on Linux → needs librt
+            cc_args.push("-lrt");
+            cc_args.push("-lpthread");
+        }
+        let mut cmd = std::process::Command::new("cc");
+        cmd.args(&cc_args)
             .arg("-o")
             .arg(&rt_o_path)
-            .arg(&rt_c_path)
-            .status()
+            .arg(&rt_c_path);
+        let cc_status = cmd.status()
             .map_err(|e| format!("Failed to invoke cc: {}. Is a C compiler installed?", e))?;
         if cc_status.success() {
             println!("  Runtime object: {}", rt_o_path.display());
-            println!("  Link with:      ld {}.o {} -o {}", stem, rt_o_path.display(), stem);
+            print!("  Link with:      ld {}.o {} -o {}", stem, rt_o_path.display(), stem);
+            if has_wake {
+                print!(" -lrt -lpthread");
+            }
+            println!();
             println!("  Or:             llc {} -filetype=obj -o {}.o", output_file.display(), stem);
         } else {
             eprintln!("  Warning: cc compilation failed. Compile manually:");
             eprintln!("    cc -c {} -o {}", rt_c_path.display(), rt_o_path.display());
             eprintln!("    llc {} -filetype=obj -o {}.o", output_file.display(), stem);
             eprintln!("    ld {}.o {} -o {}", stem, rt_o_path.display(), stem);
+            if has_wake {
+                eprintln!("    (add -lrt -lpthread for timerfd/signalfd)");
+            }
         }
     }
 
