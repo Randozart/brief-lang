@@ -13,6 +13,12 @@ fn escape_llvm_string(s: &str) -> String {
     }
     out
 }
+
+fn float_to_llvm_hex(f: f64) -> String {
+    let f32_val = f as f32;
+    let bits = f32_val.to_bits();
+    format!("{}", bits)
+}
 use crate::ast::{
     DispatchMode, Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
 };
@@ -130,6 +136,7 @@ pub struct LlvmBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     field_index_map: HashMap<String, usize>,
     field_types: Vec<String>,
+    field_initializers: HashMap<String, Option<Expr>>,
     txn_counter: usize,
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
@@ -156,6 +163,7 @@ impl LlvmBackend {
             spec: None,
             field_index_map: HashMap::new(),
             field_types: Vec::new(),
+            field_initializers: HashMap::new(),
             txn_counter: 0,
             has_cycles: false,
             pending_cleanup: Vec::new(),
@@ -318,30 +326,68 @@ self.emit_declares(&mut out);
         self.emit_init_state(&mut out);
         writeln!(out).ok();
         // Reactor — sequential or parallel
-        if !txns.is_empty() {
-            match program.dispatch_mode {
-                DispatchMode::Parallel => {
-                    self.build_write_masks(program);
-                    self.emit_parallel_reactor(&mut out, &txns, &fusable);
+        // Reactor tick — use folded path when a single bounded-counter txn
+        // with no triggers can be collapsed into a canonical while loop.
+        let graph = &analysis.transition_graph;
+        let foldable = graph.nodes.len() == 1
+            && !graph.has_triggers
+            && txns.len() == 1
+            && graph.nodes[0].bounded_pre.is_some()
+            && graph.nodes[0].increments.is_some()
+            && graph.nodes[0].is_reactive;
+
+        let folded = if foldable {
+            let node = &graph.nodes[0];
+            let bp = node.bounded_pre.as_ref().unwrap();
+            let inc = node.increments.as_ref().unwrap();
+            if bp.var == inc.var {
+                if let (Some(&total_idx), Some(&counter_idx)) = (
+                    self.field_index_map.get(&bp.bound_var),
+                    self.field_index_map.get(&bp.var),
+                ) {
+                    if node.is_pure_body {
+                        let total_val = self.field_initializers
+                            .get(&bp.bound_var)
+                            .and_then(|e| e.as_ref())
+                            .and_then(|e| {
+                                if let Expr::Integer(n) = e { Some(*n) } else { None }
+                            })
+                            .unwrap_or(1);
+                        self.emit_folded_pure_counter(&mut out, counter_idx, total_val);
+                        true
+                    } else {
+                        self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx);
+                        true
+                    }
+                } else { false }
+            } else { false }
+        } else { false };
+
+        if !folded {
+            if !txns.is_empty() {
+                match program.dispatch_mode {
+                    DispatchMode::Parallel => {
+                        self.build_write_masks(program);
+                        self.emit_parallel_reactor(&mut out, &txns, &fusable);
+                    }
+                    DispatchMode::Sequential => {
+                        self.emit_reactor(&mut out, &txns, &fusable);
+                    }
                 }
-                DispatchMode::Sequential => {
-                    self.emit_reactor(&mut out, &txns, &fusable);
-                }
+            } else {
+                writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
+                writeln!(out, "  entry:").ok();
+                writeln!(out, "  ret void").ok();
+                writeln!(out, "}}").ok();
+                writeln!(out).ok();
             }
-        } else {
-            // No transactions: emit no-op reactor_tick so main() has a target
-            writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
-            writeln!(out, "  entry:").ok();
-            writeln!(out, "  ret void").ok();
-            writeln!(out, "}}").ok();
-            writeln!(out).ok();
-        }
-        // Main
-        let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
-        self.emit_main(&mut out, has_wake_triggers);
-        // Wake trigger metadata
-        if has_wake_triggers {
-            self.emit_wake_metadata(&mut out);
+            // Main
+            let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
+            self.emit_main(&mut out, has_wake_triggers);
+            // Wake trigger metadata
+            if has_wake_triggers {
+                self.emit_wake_metadata(&mut out);
+            }
         }
         // Attributes
         writeln!(out).ok();
@@ -350,7 +396,8 @@ self.emit_declares(&mut out);
         writeln!(out, "    memory(argmem: readwrite)").ok();
         writeln!(out, "}}").ok();
         writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn memory(argmem: write) }}").ok();
-        writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(argmem: readwrite) }}").ok();
+        writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(readwrite) }}").ok();
+        writeln!(out, "attributes #3 = {{ nofree norecurse nosync nounwind memory(readwrite) }}").ok();
         // Range metadata
         if !range_meta.is_empty() {
             writeln!(out).ok();
@@ -393,11 +440,13 @@ self.emit_declares(&mut out);
     fn build_field_index(&mut self, program: &Program) {
         self.field_index_map.clear();
         self.field_types.clear();
+        self.field_initializers.clear();
         for item in &program.items {
             if let TopLevel::StateDecl(s) = item {
                 self.field_index_map
                     .insert(s.name.clone(), self.field_types.len());
                 self.field_types.push(self.llvm_type(&s.ty).to_string());
+                self.field_initializers.insert(s.name.clone(), s.expr.clone());
             }
         }
     }
@@ -504,8 +553,28 @@ self.emit_declares(&mut out);
             let ty = &self.field_types[idx];
             let p = format!("%ip{}", reg); reg += 1;
             writeln!(out, "  {} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", p, idx).ok();
-            let val = if ty == &"i8*".to_string() { "null" } else { "0" };
-            writeln!(out, "  store volatile {} {}, {}* {}, align {}", ty, val, ty, p, self.align_of(ty)).ok();
+            let init = self.field_initializers.get(name).and_then(|e| e.as_ref());
+            let val_str = match init {
+                Some(Expr::Integer(n)) => n.to_string(),
+                Some(Expr::Float(f)) => float_to_llvm_hex(*f),
+                Some(Expr::Neg(inner)) => match inner.as_ref() {
+                    Expr::Float(f) => float_to_llvm_hex(-*f),
+                    Expr::Integer(n) => format!("-{}", n),
+                    _ => "0".to_string(),
+                },
+                Some(Expr::Bool(b)) => if *b { "1".to_string() } else { "0".to_string() },
+                Some(Expr::String(_)) => "null".to_string(),
+                Some(Expr::Char(c)) => (*c as i32).to_string(),
+                _ => if ty == "i8*" { "null".to_string() } else { "0".to_string() },
+            };
+            let is_float_init = matches!(init, Some(Expr::Float(_)) | Some(Expr::Neg(_)));
+            if is_float_init {
+                let bits_reg = format!("%ip{}b", reg - 1);
+                writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, val_str).ok();
+                writeln!(out, "  store volatile float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
+            } else {
+                writeln!(out, "  store volatile {} {}, {}* {}, align {}", ty, val_str, ty, p, self.align_of(ty)).ok();
+            }
         }
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
@@ -659,31 +728,33 @@ self.emit_declares(&mut out);
                     writeln!(out, "{}; let {} = undef", indent, name).ok();
                 }
             }
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assignment { lhs, expr, modifiers, .. } => {
                 let val = self.emit_expr(out, expr, indent);
                 let fname = match lhs {
                     Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
                     _ => { writeln!(out, "{}; assign {}", indent, val).ok(); return; }
                 };
+                let is_volatile = modifiers.iter().any(|h| h.name == "volatile");
                 if let Some(&idx) = self.field_index_map.get(&fname) {
                     let ty = &self.field_types[idx];
                     let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
+                    let vol_str = if is_volatile { " volatile" } else { "" };
                     match ty.as_str() {
                         "i8" => {
                             let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val).ok();
-                            writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, tr, p, self.align_of(ty)).ok();
+                            writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, vol_str, tr, p, self.align_of(ty)).ok();
                         }
                         "float" => {
                             let tr = format!("%ftr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val).ok();
                             let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-                            writeln!(out, "{}store float {}, float* {}, align {}", indent, fl, p, self.align_of(ty)).ok();
+                            writeln!(out, "{}store{} float {}, float* {}, align {}", indent, vol_str, fl, p, self.align_of(ty)).ok();
                         }
                         _ => {
-                            writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, val, ty, p, self.align_of(ty)).ok();
+                            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val, ty, p, self.align_of(ty)).ok();
                         }
                     }
                 } else {
@@ -697,9 +768,11 @@ self.emit_declares(&mut out);
 
                 // Guard→select if single assignment
                 if statements.len() == 1 {
-                    if let Statement::Assignment { lhs, expr, .. } = &statements[0] {
+                    if let Statement::Assignment { lhs, expr, modifiers, .. } = &statements[0] {
                         if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
                             if let Some(&idx) = self.field_index_map.get(n) {
+                                let g_is_volatile = modifiers.iter().any(|h| h.name == "volatile");
+                                let gvol = if g_is_volatile { " volatile" } else { "" };
                                 let p = format!("%gp{}", self.txn_counter); self.txn_counter += 1;
                                 let av = self.emit_expr(out, expr, indent);
                                 let ty = &self.field_types[idx];
@@ -712,7 +785,7 @@ self.emit_declares(&mut out);
                                         let av_tr = format!("%gatr{}", self.txn_counter); self.txn_counter += 1;
                                         writeln!(out, "{}{} = trunc i64 {} to i8", indent, av_tr, av).ok();
                                         writeln!(out, "{}{} = select i1 {}, i8 {}, i8 {}", indent, se, i1, av_tr, ld).ok();
-                                        writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, se, p, self.align_of(ty)).ok();
+                                        writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, gvol, se, p, self.align_of(ty)).ok();
                                     }
                                     "float" => {
                                         let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
@@ -722,13 +795,13 @@ self.emit_declares(&mut out);
                                         let av_fl = format!("%gafl{}", self.txn_counter); self.txn_counter += 1;
                                         writeln!(out, "{}{} = bitcast i32 {} to float", indent, av_fl, av_tr).ok();
                                         writeln!(out, "{}{} = select i1 {}, float {}, float {}", indent, se, i1, av_fl, ld).ok();
-                                        writeln!(out, "{}store float {}, float* {}, align {}", indent, se, p, self.align_of(ty)).ok();
+                                        writeln!(out, "{}store{} float {}, float* {}, align {}", indent, gvol, se, p, self.align_of(ty)).ok();
                                     }
                                     _ => {
                                         let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
                                         writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
                                         writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, se, i1, av, ld).ok();
-                                        writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, se, p, self.align_of(ty)).ok();
+                                        writeln!(out, "{}store{} i64 {}, i64* {}, align {}", indent, gvol, se, p, self.align_of(ty)).ok();
                                     }
                                 }
                                 return;
@@ -784,10 +857,11 @@ self.emit_declares(&mut out);
             Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); self.register_types.insert(v.clone(), Type::Int); }
             Expr::Bool(b) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok(); self.register_types.insert(v.clone(), Type::Bool); }
             Expr::Float(f) => {
-                let f32 = format!("%ff{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = fadd float 0.0, {}", indent, f32, f).ok();
+                let bits = float_to_llvm_hex(*f);
+                let fl = format!("%ff{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, bits).ok();
                 let i32 = format!("%fi{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast float {} to i32", indent, i32, f32).ok();
+                writeln!(out, "{}{} = bitcast float {} to i32", indent, i32, fl).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i32).ok();
                 self.register_types.insert(v.to_string(), Type::Float);
             }
@@ -1016,7 +1090,12 @@ Expr::Identifier(name) => {
             Expr::ObjectLiteral(fields) => { for (_, e) in fields { let _ = self.emit_expr(out, e, indent); } writeln!(out, "{}{} = add i64 0, 0 ; object", indent, v).ok(); }
             Expr::FieldAccess(obj, f) => { let o = self.emit_expr(out, obj, indent); writeln!(out, "{}{} = add i64 0, {} ; field", indent, v, o).ok(); }
             // Cast
-            Expr::Cast(inner, _) => { let r = self.emit_expr(out, inner, indent); writeln!(out, "{}{} = add i64 0, {} ; cast", indent, v, r).ok(); }
+            Expr::Cast(inner, target_ty) => {
+                let src_reg = self.emit_expr(out, inner, indent);
+                let src_ty = self.resolve_source_type(inner, &src_reg);
+                self.emit_cast_convert(out, indent, &v, &src_reg, src_ty, target_ty);
+                self.register_types.insert(v.clone(), target_ty.clone());
+            }
             // Block
             Expr::Block(stmts, last) => {
                 for s in stmts { self.emit_stmt(out, s, indent); }
@@ -1342,7 +1421,7 @@ Expr::Identifier(name) => {
 
     // ── MAIN FUNCTION ─────────────────────────────────────────
     fn emit_main(&self, out: &mut String, has_wake_triggers: bool) {
-        writeln!(out, "define i32 @main() local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr #3 {{").ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
         if has_wake_triggers {
@@ -1355,6 +1434,39 @@ Expr::Identifier(name) => {
             writeln!(out, "  call void @__rt_wait()").ok();
         }
         writeln!(out, "  br label %tick").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    fn emit_folded_main(&self, out: &mut String, txn_name: &str, counter_idx: usize, total_idx: usize) {
+        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  call void @init_state()").ok();
+        let tp = format!("%ft0"); let c0 = self.txn_counter;
+        writeln!(out, "  %gt{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0, total_idx).ok();
+        writeln!(out, "  %lt{} = load i64, i64* %gt{}, align 8", c0, c0).ok();
+        writeln!(out, "  br label %hdr").ok();
+        writeln!(out, "hdr:").ok();
+        writeln!(out, "  %gp{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0 + 1, counter_idx).ok();
+        writeln!(out, "  %lp{} = load i64, i64* %gp{}, align 8", c0 + 1, c0 + 1).ok();
+        writeln!(out, "  %cp{} = icmp slt i64 %lp{}, %lt{}", c0 + 2, c0 + 1, c0).ok();
+        writeln!(out, "  br i1 %cp{}, label %body, label %done", c0 + 2).ok();
+        writeln!(out, "body:").ok();
+        writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
+        writeln!(out, "  br label %hdr").ok();
+        writeln!(out, "done:").ok();
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    fn emit_folded_pure_counter(&self, out: &mut String, counter_idx: usize, total_value: i64) {
+        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  call void @init_state()").ok();
+        writeln!(out, "  %gp = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", counter_idx).ok();
+        writeln!(out, "  store i64 {}, i64* %gp, align 8", total_value).ok();
+        writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }
@@ -1400,10 +1512,104 @@ Expr::Identifier(name) => {
         });
         pairs
     }
-    fn trg_in_pre(&self, pre: &Expr) -> bool {
+        fn trg_in_pre(&self, pre: &Expr) -> bool {
         let mut ids = std::collections::HashSet::new();
         crate::backend::collect_expr_identifiers(pre, &mut ids);
         ids.iter().any(|id| self.trigger_names.contains(id))
+    }
+
+    fn resolve_source_type(&self, expr: &Expr, reg: &str) -> Option<Type> {
+        if let Some(ty) = self.register_types.get(reg) {
+            return Some(ty.clone());
+        }
+        match expr {
+            Expr::Integer(_) => Some(Type::Int),
+            Expr::Float(_) => Some(Type::Float),
+            Expr::Bool(_) => Some(Type::Bool),
+            Expr::String(_) => Some(Type::String),
+            Expr::Char(_) => Some(Type::Char),
+            Expr::Identifier(name) | Expr::OwnedRef(name) => {
+                if let Some(&idx) = self.field_index_map.get(name.as_str()) {
+                    let ll_ty = &self.field_types[idx];
+                    Some(match ll_ty.as_str() {
+                        "i8" => Type::Bool,
+                        "float" => Type::Float,
+                        "i32" => Type::Char,
+                        "i8*" => Type::String,
+                        _ => Type::Int,
+                    })
+                } else if let Some(let_reg) = self.let_bindings.get(name.as_str()) {
+                    self.register_types.get(let_reg).cloned()
+                } else {
+                    None
+                }
+            }
+            Expr::Cast(_, ty) => Some(ty.clone()),
+            Expr::Block(_, last) => self.resolve_source_type(last, reg),
+            _ => {
+                if self.is_float_expr(expr) { Some(Type::Float) }
+                else { Some(Type::Int) }
+            }
+        }
+    }
+
+    fn emit_cast_convert(&mut self, out: &mut String, indent: &str, dst: &str, src: &str, src_ty: Option<Type>, target: &Type) {
+        let src_ty = match src_ty {
+            Some(t) => t,
+            None => {
+                let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
+                return;
+            }
+        };
+        if &src_ty == target {
+            let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
+            return;
+        }
+        match (&src_ty, target) {
+            (Type::Int | Type::UInt, Type::Float) => {
+                let si = format!("%csf{}", self.txn_counter); self.txn_counter += 1;
+                let fi = format!("%cfi{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = sitofp i64 {} to float", indent, si, src);
+                let _ = writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, si);
+                let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, fi);
+            }
+            (Type::Float, Type::Int | Type::UInt) => {
+                let tr = format!("%ctr{}", self.txn_counter); self.txn_counter += 1;
+                let fl = format!("%cfl{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
+                let _ = writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr);
+                let _ = writeln!(out, "{}{} = fptosi float {} to i64", indent, dst, fl);
+            }
+            (Type::Int | Type::UInt, Type::Bool) => {
+                let ci = format!("%ccb{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
+                let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
+            }
+            (Type::Bool, Type::Int | Type::UInt) => {
+                let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
+            }
+            (Type::Float, Type::Bool) => {
+                let tr = format!("%cfbtr{}", self.txn_counter); self.txn_counter += 1;
+                let fl = format!("%cfbfl{}", self.txn_counter); self.txn_counter += 1;
+                let ci = format!("%cfbci{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
+                let _ = writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr);
+                let _ = writeln!(out, "{}{} = fcmp une float {}, 0.0", indent, ci, fl);
+                let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
+            }
+            (Type::Bool, Type::Float) => {
+                let ci = format!("%cbfci{}", self.txn_counter); self.txn_counter += 1;
+                let fl = format!("%cbffl{}", self.txn_counter); self.txn_counter += 1;
+                let fi = format!("%cbffi{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
+                let _ = writeln!(out, "{}{} = select i1 {}, float 1.000000e+00, float 0.000000e+00", indent, fl, ci);
+                let _ = writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fl);
+                let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, fi);
+            }
+            _ => {
+                let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
+            }
+        }
     }
 
     fn is_float_expr(&self, expr: &Expr) -> bool {
@@ -2175,8 +2381,8 @@ mod tests {
         let output = backend.generate(&program);
         assert!(output.contains("bitcast float"),
             "Float expression should emit bitcast float to i32");
-        assert!(output.contains("fadd float"),
-            "Float literal should appear as fadd float in IR");
+        assert!(output.contains("bitcast i32"),
+            "Float literal should appear as bitcast i32 to float in IR");
     }
 
     #[test]
@@ -2235,9 +2441,13 @@ mod tests {
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
         let output = LlvmBackend::new().generate(&program);
         assert!(output.contains("attributes #2"),
-            "Should emit attributes #2 without willreturn");
-        assert!(output.contains("define i32 @main() local_unnamed_addr #2"),
-            "main() should use non-willreturn attribute #2");
+            "Should emit attributes #2 for reactor_tick");
+        assert!(output.contains("attributes #3"),
+            "Should emit attributes #3 for main (no mustprogress)");
+        assert!(!output.contains("define i32 @main() local_unnamed_addr #2"),
+            "main() should NOT use mustprogress attribute #2");
+        assert!(output.contains("define i32 @main() local_unnamed_addr #3"),
+            "main() should use non-mustprogress attribute #3");
         assert!(output.contains("define void @reactor_tick() local_unnamed_addr #2"),
             "reactor_tick() should use non-willreturn attribute #2");
         assert!(output.contains("attributes #0"),

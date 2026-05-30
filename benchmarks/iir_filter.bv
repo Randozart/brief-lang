@@ -1,0 +1,67 @@
+// Biquad IIR Filter Cascade — DSP benchmark for the LLVM backend
+//
+// Tests:
+//   - Float arithmetic pipeline (fmul, fadd, fsub)
+//   - Register promotion via noalias nocapture + alwaysinline
+//   - SMT-driven bounds-check elision via @llvm.assume
+//   - Precondition dispatch: [count < total] guarded reactive transaction
+//
+// Equivalent C reference: iir_filter_c.c
+//
+// Build:
+//   cargo run --bin brief-compiler -- llvm benchmarks/iir_filter.bv -o benchmarks/iir_filter.ll
+//   clang -O3 -march=native -o benchmarks/iir_filter benchmarks/iir_filter.ll
+//
+// Benchmarks:
+//   perf stat ./benchmarks/iir_filter    (Ctrl-C after a few seconds)
+//   perf stat ./benchmarks/iir_filter_c
+
+// State: biquad coefficients (low-pass Butterworth, fc=0.1, fs=1.0)
+let b0: Float = 0.003916126444;
+let b1: Float = 0.007832252889;
+let b2: Float = 0.003916126444;
+let a1: Float = -1.815341082700;
+let a2: Float = 0.831005589300;
+
+// Delay-line state (feedback path)
+let x1: Float = 0.0;
+let x2: Float = 0.0;
+let y1: Float = 0.0;
+let y2: Float = 0.0;
+
+// Impulse input — constant for impulse response
+let input: Float = 1.0;
+
+// Loop control
+let total: Int = 50000000;
+let count: Int = 0;
+
+// One reactive transaction fires per tick while count < total.
+// The precondition [count < total] generates:
+//   - A pre_process function evaluated in reactor_tick
+//   - An @llvm.assume(count < total) inside the transaction body
+// LLVM uses this to eliminate bounds checks and promote loop invariants.
+rct txn process [count < total] {
+    // Feedforward path: b0*input + b1*x1 + b2*x2
+    let f0: Float = b0 * input;
+    let f1: Float = b1 * x1;
+    let f2: Float = b2 * x2;
+    let ff: Float = f0 + f1 + f2;
+
+    // Feedback path: a1*y1 + a2*y2
+    let fb1: Float = a1 * y1;
+    let fb2: Float = a2 * y2;
+    let fb: Float = fb1 + fb2;
+
+    // Output = feedforward - feedback
+    let out: Float = ff - fb;
+
+    // Shift delay line
+    &x2 = x1;
+    &x1 = input;
+    &y2 = y1;
+    &y1 = out;
+
+    // Bump loop counter
+    &count = count + 1;
+};

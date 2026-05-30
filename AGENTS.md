@@ -12,10 +12,10 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 - **Selfhost**: `cargo run --bin brief-compiler -- selfhost <file.bv>`
 
 ### File Types
-- **.br** - Pure Brief (specification only, no view)
-- **.rbv** - Rendered Brief (Brief + View, compiles to frontend)
-- **.bv** - Brief Volume (standard Brief file)
-- **.dbv/.dbvs** - Data Brief (configuration with schema)
+- **.bv** - Brief (standard Brief file)
+- **.rbv** - Rendered Brief (Brief + View, compiles to web frontend. Designed for web specifically. Like `.tsx` is to `.ts`)
+- **.ebv** - Embedded Brief (Brief with less OS based abstractions, and more oriented towards bare metal and embedded programming)
+- **.dbv/.dbvs/.dbvl** - Data Brief (configuration with schema and lines, think `.xml` compared to `.xmls` and `.json` compared to `.jsonl`)
 
 ### Critical Philosophy
 
