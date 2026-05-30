@@ -2946,8 +2946,8 @@ let span = self.current_span();
                 None
             };
 
-            // Parse the type
-            outputs.push(self.parse_type()?);
+            // Parse the type (no ContractBound — brackets belong to contract, not type)
+            outputs.push(self.parse_type_inner(false)?);
             names.push(name);
 
             // Check for comma (tuple separator) or pipe (union)
@@ -3869,6 +3869,10 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
     }
 
     fn parse_type(&mut self) -> Result<Type, SyntaxError> {
+        self.parse_type_inner(true)
+    }
+
+    fn parse_type_inner(&mut self, allow_contract_bound: bool) -> Result<Type, SyntaxError> {
         let mut ty = match self.current_token() {
             Some(Ok(Token::Identifier(name))) => {
                 let name = name.clone();
@@ -4006,11 +4010,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         }
 
         // Check for contract bound: Type[expr] (e.g. Int[product > 0])
-        if let Some(Ok(Token::LBracket)) = self.current_token() {
-            self.advance();
-            let contract_expr = self.parse_expression()?;
-            self.expect(Token::RBracket)?;
-            ty = Type::ContractBound(Box::new(ty), Box::new(contract_expr));
+        if allow_contract_bound {
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance();
+                let contract_expr = self.parse_expression()?;
+                self.expect(Token::RBracket)?;
+                ty = Type::ContractBound(Box::new(ty), Box::new(contract_expr));
+            }
         }
 
         if let Some(Ok(Token::Lt)) = self.current_token() {

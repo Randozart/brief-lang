@@ -623,7 +623,7 @@ self.emit_declares(&mut out);
     fn emit_stmt(&mut self, out: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
             Statement::Term { values, .. } => {
-                let c = std::mem::take(&mut self.pending_cleanup);
+                let c = self.pending_cleanup.clone();
                 for s in &c { self.emit_stmt(out, s, indent); }
                 if let Some(Some(v)) = values.first() {
                     let r = self.emit_expr(out, v, indent);
@@ -636,6 +636,8 @@ self.emit_declares(&mut out);
                 self.terminated = true;
             }
             Statement::Escape(e) => {
+                let c = self.pending_cleanup.clone();
+                for s in &c { self.emit_stmt(out, s, indent); }
                 if let Some(v) = e {
                     let r = self.emit_expr(out, v, indent);
                     writeln!(out, "{}ret i64 {}", indent, r).ok();
@@ -783,7 +785,7 @@ self.emit_declares(&mut out);
                 let i32 = format!("%fi{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast float {} to i32", indent, i32, f32).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i32).ok();
-                self.register_types.insert(v.clone(), Type::Float);
+                self.register_types.insert(v.to_string(), Type::Float);
             }
             Expr::String(s) => {
                 // Find the index of this string in pre-collected constants
@@ -867,6 +869,7 @@ Expr::Identifier(name) => {
                     writeln!(out, "{}{} = fsub float -0.0, {}", indent, fs, fl).ok();
                     writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fs).ok();
                     writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
+                    self.register_types.insert(v.to_string(), Type::Float);
                 } else {
                     writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner).ok();
                 }
@@ -1440,6 +1443,7 @@ Expr::Identifier(name) => {
             let fi = format!("%bfi{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
+            self.register_types.insert(v.to_string(), Type::Float);
         } else {
             writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a, b).ok();
         }

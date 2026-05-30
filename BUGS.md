@@ -198,3 +198,45 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 - **Fix**: Changed both `desugarer.rs:345` and `import_resolver.rs:84` to use `dispatch_mode: program.dispatch_mode` instead of `Default::default()`.
 
 - **Lesson**: Whenever a pipeline stage constructs a new `Program` from an existing one, all fields must be explicitly forwarded. This is a brittle pattern — consider a builder or `Clone` for `Program` that preserves metadata fields. Also add a test that verifies dispatch-mode propagation through the full pipeline from parse → resolve → desugar → backend.
+
+## 2026-05-30 — Contract-after-arrow `-> Type [pre][post]` steals first bracket as `Type::ContractBound`
+
+**Issue**: `-> Int [pre][post]` parsed both contract brackets incorrectly — `[pre]` was silently consumed as `Type::ContractBound(Int, pre)` on the output type, and `parse_contract()` only saw `[post]`, setting `pre_condition = post` and `post_condition = Bool(true)`.
+
+**Root Cause**: The contract-after-arrow path (parser.rs:2833) calls `parse_output_types_with_names()` before `parse_contract()`. Inside that function, `parse_type()` at line 4008 greedily consumes `[expr]` as `Type::ContractBound` on *any* type, not just types where the user explicitly wrote `Int[pre]`. Since the bracket check happens after the type name is parsed and before `<` generics, it catches contract brackets that belong to the function, not the type.
+
+**Fix**: Split `parse_type()` into `parse_type()` (public, legacy) and `parse_type_inner(allow_contract_bound)`. `parse_output_types_with_names()` calls `parse_type_inner(false)` so contract brackets are never stolen. The `ContractBound` feature is still available for cases like `Int[product > 0]` when `parse_type()` is called directly.
+
+**Lesson**: When parsing ordered syntax (`-> Type [contract]`), each parser component must be constrained to not consume tokens meant for later components. Greedy `[` consumption in `parse_type` was correct for standalone type parsing but wrong when types and contracts appear adjacent.
+
+## 2026-05-30 — `len()` infinite recursion in self-host interpreter
+
+**Issue**: The self-host pipeline (`brief-compiler selfhost`) failed with a stack overflow / hang on any input. The Brief-written lexer (`lib/compiler/lexer.bv`) called `len(state.source)` which dispatched to `call_defn("len")`, causing infinite recursion through `lib/std/string.bv`'s `term s.len()`.
+
+**Root Cause**: The interpreter's `Expr::Call` handler (interpreter.rs:963) checked user `definitions` **before** any built-in handler for `len`. Since `lib/std/string.bv` defines `defn len(s: String) { term s.len(); }`, calling `len(x)` on a `String` value found the user definition first, dispatched to `call_defn`, which evaluated `term s.len()` — which called `len` again via `Expr::Call("len", [Identifier("s")])` — ad infinitum.
+
+**Fix**: Added a built-in `len` handler for `Value::String` and `Value::List` **before** the definitions check. This short-circuits the recursive definition and returns the correct length directly.
+
+**Lesson**: User definitions must never shadow built-in handlers for primitive type operations. The ordering of checks in `Expr::Call` must be: (1) built-in Result methods, (2) built-in primitives like `len`, (3) user definitions, (4) FFI, (5) enum constructors.
+
+## 2026-05-30 — Float result registers not tracked, causing compound float math to emit integer ops
+
+**Issue**: Compound float arithmetic — `let x = 1.0 + 2.0; let z = x + y;` — silently corrupted results. The second addition emitted `add i64` instead of `fadd float` because `is_float_expr(x)` returned `false`.
+
+**Root Cause**: `emit_binop` (llvm.rs:1442) and `Expr::Neg` (llvm.rs:872) converted float results back to i64 but never registered the output register as `Type::Float` in `self.register_types`. Subsequent `is_float_expr` for `Expr::Identifier(name)` at llvm.rs:1401-1403 looked up the register in `register_types` and got no match (or `Type::Int` from the literal insertion), returning `false`.
+
+**Fix**: Added `self.register_types.insert(v.to_string(), Type::Float)` at the end of both float code paths in `emit_binop` and `Expr::Neg`.
+
+**Lesson**: Every code path that produces a value of a particular type must register it in `register_types`. The existing pattern (literals do register, but compound expressions don't) is inconsistent and fragile.
+
+## 2026-05-30 — OnExit cleanup drained on first exit point, lost on subsequent exits
+
+**Issue**: Functions with multiple exit points (multiple `term;` paths, `Escape`, or guarded blocks) only emitted cleanup code on the first exit. All subsequent exits generated zero cleanup, leaking resources.
+
+**Root Cause**: `Statement::Term` (llvm.rs:626) used `std::mem::take(&mut self.pending_cleanup)` which **drains** the vector, leaving it empty for all subsequent exit points. `Statement::Escape` (llvm.rs:638) didn't emit cleanup at all.
+
+**Fix**: 
+1. Changed `std::mem::take` → `.clone()` in `Statement::Term` so `pending_cleanup` is preserved for future exits.
+2. Added cleanup emission to `Statement::Escape` with the same clone pattern.
+
+**Lesson**: Shared state like `pending_cleanup` must not be mutably consumed at the first use site when multiple consumers exist. Clone the data for each consumer instead.

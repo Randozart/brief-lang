@@ -960,6 +960,16 @@ Expr::Ge(l, r) => {
                     return self.handle_result_method(&fn_name, &arg_values);
                 }
 
+                // Built-in len for String and List — must run before user definitions
+                // to prevent infinite recursion from std/string.bv's self-referential defn len.
+                if fn_name == "len" && arg_values.len() == 1 {
+                    match &arg_values[0] {
+                        Value::String(s) => return Ok(Value::Int(s.len() as i64)),
+                        Value::List(l) => return Ok(Value::Int(l.len() as i64)),
+                        _ => {}
+                    }
+                }
+
                 if self.definitions.contains_key(&fn_name) {
                     return self.call_defn(&fn_name, args);
                 }
