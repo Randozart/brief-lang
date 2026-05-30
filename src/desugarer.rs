@@ -495,23 +495,8 @@ impl Desugarer {
     }
 
     fn expand_implicit_terms_txn(&mut self, txn: &Transaction) -> Transaction {
-        let postcond_is_bool = matches!(txn.contract.post_condition, Expr::Bool(_));
-
-        let new_body: Vec<Statement> = txn
-            .body
-            .iter()
-            .map(|stmt| {
-                if let Statement::Term { values: outputs, .. } = stmt {
-                    if outputs.is_empty() && postcond_is_bool {
-                        return Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![] }
-                    }
-                }
-                stmt.clone()
-            })
-            .collect();
-
         Transaction {
-            body: new_body,
+            body: txn.body.clone(),
             attrs: Vec::new(),
             ..txn.clone()
         }
@@ -641,12 +626,7 @@ mod tests {
         let result = desugarer.expand_implicit_terms_txn(&txn);
 
         if let Statement::Term { values: outputs, .. } = &result.body[0] {
-            assert_eq!(outputs.len(), 1, "Should have 1 output after desugaring");
-            if let Some(Expr::Bool(true)) = &outputs[0] {
-                println!("✓ Implicit term true correctly added in txn");
-            } else {
-                panic!("Expected Bool(true)");
-            }
+            assert!(outputs.is_empty(), "transaction term should NOT be expanded");
         } else {
             panic!("Expected Term statement");
         }

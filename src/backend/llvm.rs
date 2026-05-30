@@ -328,6 +328,13 @@ self.emit_declares(&mut out);
                     self.emit_reactor(&mut out, &txns, &fusable);
                 }
             }
+        } else {
+            // No transactions: emit no-op reactor_tick so main() has a target
+            writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
+            writeln!(out, "  entry:").ok();
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+            writeln!(out).ok();
         }
         // Main
         let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
@@ -343,6 +350,7 @@ self.emit_declares(&mut out);
         writeln!(out, "    memory(argmem: readwrite)").ok();
         writeln!(out, "}}").ok();
         writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn memory(argmem: write) }}").ok();
+        writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(argmem: readwrite) }}").ok();
         // Range metadata
         if !range_meta.is_empty() {
             writeln!(out).ok();
@@ -553,7 +561,7 @@ self.emit_declares(&mut out);
             }
         }
         let alwaysinline = if !self.has_cycles { " alwaysinline" } else { "" };
-        writeln!(out, "define void @{}(%State* noalias nocapture %state){} local_unnamed_addr #0 {{", name, alwaysinline).ok();
+        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0{} {{", name, alwaysinline).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear();
@@ -1121,7 +1129,7 @@ Expr::Identifier(name) => {
         }
         for (n, _) in txns { if !fused_txns.contains(n) { dispatch.push(n.clone()); } }
 
-        writeln!(out, "define void @reactor_tick() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
         // Trigger sampling — load volatile into named registers
         self.sampled_triggers.clear();
@@ -1229,7 +1237,7 @@ Expr::Identifier(name) => {
         }
         for (n, _) in txns { if !fused_txns.contains(n) { dispatch.push(n.clone()); } }
 
-        writeln!(out, "define void @reactor_tick() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
         // Trigger sampling
         self.sampled_triggers.clear();
@@ -1323,7 +1331,7 @@ Expr::Identifier(name) => {
 
     // ── MAIN FUNCTION ─────────────────────────────────────────
     fn emit_main(&self, out: &mut String, has_wake_triggers: bool) {
-        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
         if has_wake_triggers {
@@ -2103,5 +2111,124 @@ mod tests {
         // MMIO triggers with is_wake → metadata only includes LinkRef::Linked symbols, not Explicit
         assert!(!output.contains("@llvm.wake_triggers"),
             "MMIO wake trigger should not produce metadata (not a linked symbol)");
+    }
+
+    // ── Plan C: Local float binding tests ─────────────────────────
+
+    #[test]
+    fn test_local_float_binding() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".to_string(),
+                    ty: Type::Float,
+                    expr: Some(Expr::Float(1.5)),
+                    address: None, bit_range: None,
+                    is_override: false, os_mode: false,
+                    span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None, watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("x".to_string()),
+                            expr: Expr::Float(2.0),
+                            timeout: None, modifiers: vec![],
+                        },
+                        Statement::Term { values: vec![], modifiers: vec![] },
+                    ],
+                    is_async: false, is_reactive: false,
+                    reactor_speed: None, span: None,
+                    is_lambda: false, dependencies: vec![],
+                    attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("bitcast float"),
+            "Float expression should emit bitcast float to i32");
+        assert!(output.contains("fadd float"),
+            "Float literal should appear as fadd float in IR");
+    }
+
+    #[test]
+    fn test_float_binary_add() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".to_string(),
+                    ty: Type::Float,
+                    expr: Some(Expr::Float(1.0)),
+                    address: None, bit_range: None,
+                    is_override: false, os_mode: false,
+                    span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None, watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("x".to_string()),
+                            expr: Expr::Add(
+                                Box::new(Expr::Identifier("x".to_string())),
+                                Box::new(Expr::Float(2.0)),
+                            ),
+                            timeout: None, modifiers: vec![],
+                        },
+                        Statement::Term { values: vec![], modifiers: vec![] },
+                    ],
+                    is_async: false, is_reactive: false,
+                    reactor_speed: None, span: None,
+                    is_lambda: false, dependencies: vec![],
+                    attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("fadd float"),
+            "Float binary add should emit fadd float");
+    }
+
+    #[test]
+    fn test_main_and_reactor_use_non_willreturn_attr() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(output.contains("attributes #2"),
+            "Should emit attributes #2 without willreturn");
+        assert!(output.contains("define i32 @main() local_unnamed_addr #2"),
+            "main() should use non-willreturn attribute #2");
+        assert!(output.contains("define void @reactor_tick() local_unnamed_addr #2"),
+            "reactor_tick() should use non-willreturn attribute #2");
+        assert!(output.contains("attributes #0"),
+            "attributes #0 should still be present for terminating functions");
+        assert!(output.contains("define void @init_state() local_unnamed_addr #0"),
+            "init_state() should still use #0 with willreturn");
     }
 }

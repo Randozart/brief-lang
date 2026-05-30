@@ -159,6 +159,36 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 **Lesson**: (pending investigation)
 
+## 2026-05-30 — `expand_implicit_terms_txn` injects `term true;` into void-returning transactions
+
+**Issue**: `rct txn handle_sigint [sigint] { term; };` produced `ret i64 1` in a `define void` function, causing LLVM verification to fail with "value doesn't match function result type 'void'". The `wake_triggers.bv` fixture exposed this.
+
+**Root Cause**: `desugarer.rs:expand_implicit_terms_txn` unconditionally converted `term;` → `term true;` for all transactions with `Bool` postconditions, mirroring the defn path. But transaction functions are `define void` — they cannot return an `i64`. The `emit_stmt` handler correctly emitted `ret i64 <val>` when `values.first()` was `Some`, never reaching the `ret void` path.
+
+**Fix**: Removed the expansion logic entirely from `expand_implicit_terms_txn`. It is now a passthrough that clones the body unchanged. Transactions return void; their contract semantics are handled by the reactive desugaring pipeline and precondition emission, not by injecting values into `term;`.
+
+**Lesson**: `term;` in transactions means "this transaction has no return value" (void-termination). `term;` in definitions means "terminate with the default postcondition value". These are semantically different — never unify the desugaring paths.
+
+## 2026-05-30 — `opt` new PM syntax: `-passes=verify` not `-verify`
+
+**Issue**: Integration tests called `opt -verify` which failed silently on LLVM 18+ because the legacy pass manager was removed.
+
+**Root Cause**: LLVM 18 defaults to the new pass manager (`-passes=...`). The old `-verify` flag syntax is recognized but no-ops without the legacy PM enabled.
+
+**Fix**: Changed test helper to use `opt -passes=verify` and `opt -passes=default<O3>`.
+
+**Lesson**: Always verify LLVM tooling syntax matches the installed version. The new PM syntax is now canonical for LLVM 17+.
+
+## 2026-05-30 — `alwaysinline` must precede attribute group in LLVM 18
+
+**Issue**: `define void @fn(...) local_unnamed_addr alwaysinline #0` was rejected by LLVM 18 verifier.
+
+**Root Cause**: LLVM 18 requires `alwaysinline` to appear AFTER the attribute group reference, i.e. `define void @fn(...) local_unnamed_addr #0 alwaysinline`.
+
+**Fix**: Swapped the order in `emit_transaction`: `local_unnamed_addr #0{}` with the `alwaysinline` string appended after `#0`.
+
+**Lesson**: LLVM 18 tightened the IR syntax for `alwaysinline`. The canonical position is `#N alwaysinline`.
+
 ## 2026-05-29 — `dispatch_mode` lost during desugaring and import resolution
 
 - **Issue**: `#pragma dispatch(parallel)` was parsed correctly by the parser but silently ignored — the LLVM backend always emitted sequential reactor code regardless of the directive.

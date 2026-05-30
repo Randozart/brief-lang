@@ -9,7 +9,7 @@ fn compile_and_verify_llvm(source: &str, name: &str) -> Result<String, String> {
     // Parse + generate via the full pipeline (same as `brief llvm`)
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_brief-compiler"))
         .args(["llvm", "--out", "/tmp"])
-        .arg(format!("{}.bv", name))
+        .arg(source)
         .output()
         .map_err(|e| format!("Failed to run brief-compiler: {}", e))?;
 
@@ -22,9 +22,9 @@ fn compile_and_verify_llvm(source: &str, name: &str) -> Result<String, String> {
     let ll_content = std::fs::read_to_string(&ll_path)
         .map_err(|e| format!("Failed to read {}: {}", ll_path, e))?;
 
-    // Run opt -verify
+    // Run opt -verify (new PM syntax: -passes=verify)
     let verify = Command::new("opt")
-        .args(["-verify", &ll_path, "-o", "/dev/null"])
+        .args(["-passes=verify", &ll_path, "-o", "/dev/null"])
         .output()
         .map_err(|e| format!("opt -verify failed: {}", e))?;
 
@@ -33,9 +33,9 @@ fn compile_and_verify_llvm(source: &str, name: &str) -> Result<String, String> {
         return Err(format!("LLVM verification failed: {}", stderr));
     }
 
-    // Run opt -O3
+    // Run opt -O3 (new PM syntax: -passes='default<O3>')
     let optimize = Command::new("opt")
-        .args(["-O3", &ll_path, "-o", "/dev/null"])
+        .args(["-passes=default<O3>", &ll_path, "-o", "/dev/null"])
         .output()
         .map_err(|e| format!("opt -O3 failed: {}", e))?;
 
@@ -76,6 +76,46 @@ fn test_llvm_backend_minimal() {
     match compile_and_verify_llvm("tests/fixtures/minimal.bv", "minimal") {
         Ok(ir) => {
             assert!(ir.contains("%State"), "Output should contain %State type");
+        }
+        Err(e) => panic!("{}", e),
+    }
+}
+
+#[test]
+fn test_llvm_backend_wake_triggers() {
+    match compile_and_verify_llvm("tests/fixtures/wake_triggers.bv", "wake_triggers") {
+        Ok(ir) => {
+            assert!(ir.contains("@llvm.wake_triggers = appending global [2 x i8*]"),
+                "Should have wake triggers metadata with 2 symbols");
+            assert!(ir.contains("__sigint_flag"),
+                "Should reference __sigint_flag");
+            assert!(ir.contains("__sigterm_flag"),
+                "Should reference __sigterm_flag");
+            assert!(ir.contains("call void @__rt_init()"),
+                "main() should call __rt_init()");
+            assert!(ir.contains("call void @__rt_wait()"),
+                "main() should call __rt_wait()");
+            assert!(ir.contains("declare void @__rt_init()"),
+                "__rt_init should always be declared");
+            assert!(ir.contains("declare void @__rt_wait()"),
+                "__rt_wait should always be declared");
+            assert!(ir.contains("define i32 @main() local_unnamed_addr #2"),
+                "main() should use non-willreturn attribute #2");
+        }
+        Err(e) => panic!("{}", e),
+    }
+}
+
+#[test]
+fn test_llvm_backend_no_wake_busy_loop() {
+    match compile_and_verify_llvm("tests/fixtures/minimal.bv", "minimal") {
+        Ok(ir) => {
+            assert!(!ir.contains("call void @__rt_init()"),
+                "No wake triggers should not call __rt_init()");
+            assert!(!ir.contains("call void @__rt_wait()"),
+                "No wake triggers should not call __rt_wait()");
+            assert!(!ir.contains("@llvm.wake_triggers"),
+                "No wake triggers should not emit @llvm.wake_triggers");
         }
         Err(e) => panic!("{}", e),
     }
