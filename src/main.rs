@@ -383,6 +383,10 @@ fn print_usage(program: &str) {
     eprintln!("  .dbv, .dbvs, .dbvl  Data Brief (configuration)");
 }
 
+/// Embedded C runtime source for the LLVM backend.
+/// Written to disk when --link-rt is used.
+const BRIEF_RT_SOURCE: &str = include_str!("../runtime/brief_rt.c");
+
 const STDLIB_BINDINGS: &[(&str, &str)] = &[
     (
         "collections.toml",
@@ -1679,7 +1683,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             }
         },
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, false) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1789,6 +1793,7 @@ fn run_llvm_compile(
     out_dir: Option<&Path>,
     target: Option<&TargetSpec>,
     _strict: bool,
+    link_rt: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -1829,6 +1834,32 @@ fn run_llvm_compile(
     let output_file = out_dir.unwrap_or_else(|| std::path::Path::new(".")).join(format!("{}.ll", stem));
     fs::write(&output_file, &output)?;
     println!("  Output: {}", output_file.display());
+
+    if link_rt {
+        let out_base = out_dir.unwrap_or(std::path::Path::new("."));
+        let rt_c_path = out_base.join("brief_rt.c");
+        let rt_o_path = out_base.join("brief_rt.o");
+        // Write embedded C source to disk
+        fs::write(&rt_c_path, BRIEF_RT_SOURCE)?;
+        // Compile it
+        let cc_status = std::process::Command::new("cc")
+            .args(["-c", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"])
+            .arg("-o")
+            .arg(&rt_o_path)
+            .arg(&rt_c_path)
+            .status()
+            .map_err(|e| format!("Failed to invoke cc: {}. Is a C compiler installed?", e))?;
+        if cc_status.success() {
+            println!("  Runtime object: {}", rt_o_path.display());
+            println!("  Link with:      ld {}.o {} -o {}", stem, rt_o_path.display(), stem);
+            println!("  Or:             llc {} -filetype=obj -o {}.o", output_file.display(), stem);
+        } else {
+            eprintln!("  Warning: cc compilation failed. Compile manually:");
+            eprintln!("    cc -c {} -o {}", rt_c_path.display(), rt_o_path.display());
+            eprintln!("    llc {} -filetype=obj -o {}.o", output_file.display(), stem);
+            eprintln!("    ld {}.o {} -o {}", stem, rt_o_path.display(), stem);
+        }
+    }
 
     Ok(output_file)
 }
@@ -3261,6 +3292,7 @@ fn main() {
             let mut file_path = None;
             let mut out_dir = None;
             let mut target = None;
+            let mut link_rt = false;
 
             let mut i = 2;
             while i < args.len() {
@@ -3271,6 +3303,9 @@ fn main() {
                 } else if arg == "--target" && i + 1 < args.len() {
                     target = Some(args[i + 1].as_str());
                     i += 2;
+                } else if arg == "--link-rt" {
+                    link_rt = true;
+                    i += 1;
                 } else if !arg.starts_with('-') {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -3281,13 +3316,13 @@ fn main() {
 
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
-                if let Err(e) = run_llvm_compile(&path, out_dir.as_deref(), None, strict) {
+                if let Err(e) = run_llvm_compile(&path, out_dir.as_deref(), None, strict, link_rt) {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
             } else {
                 eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} llvm <file.bv> [--out <dir>]", args[0]);
+                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--link-rt]", args[0]);
                 std::process::exit(1);
             }
         }

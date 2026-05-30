@@ -112,6 +112,20 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// - Precondition extraction → internal `i1` functions, dispatch chain
 /// - User-provided `frgn __wait_for_event` + `rct txn [true]` for sleep
 /// - `@ link` triggers → `external global` + `load volatile`
+
+/// LLVM storage type for an `@ link` trigger global.
+/// The C runtime provides `char` (Bool→i8), `int64_t` (Int→i64),
+/// and `char*` (String→i8*).
+fn trg_llvm_storage_ty(ty: &Type) -> &str {
+    match ty {
+        Type::Bool => "i8",
+        Type::Int | Type::UInt => "i64",
+        Type::Char => "i32",
+        Type::String | Type::Data => "i8*",
+        _ => "i8", // fallback for unsupported types
+    }
+}
+
 pub struct LlvmBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     field_index_map: HashMap<String, usize>,
@@ -228,7 +242,19 @@ self.emit_declares(&mut out);
         // Emit external global declarations for linked triggers (fixes bug 4B)
         for (name, trg) in &self.triggers {
             if let crate::ast::LinkRef::Linked(sym) = &trg.address {
-                writeln!(out, "@{} = external global i8, align 1", sym).ok();
+                let store_ty = trg_llvm_storage_ty(&trg.ty);
+                let align = if store_ty == "i64" { 8 } else if store_ty == "i32" { 4 } else { 1 };
+                writeln!(out, "@{} = external global {}, align {}", sym, store_ty, align).ok();
+                // Warn on unsupported trigger types
+                match &trg.ty {
+                    Type::Bool | Type::Int | Type::UInt | Type::Char | Type::String | Type::Data => {}
+                    _ => {
+                        eprintln!("warning:{}:{}: trigger '{}' has type {:?} which the LLVM runtime does not fully support; using i8 storage",
+                            trg.span.as_ref().map(|s| s.line).unwrap_or(0),
+                            trg.span.as_ref().map(|s| s.column).unwrap_or(0),
+                            name, trg.ty);
+                    }
+                }
             }
         }
         if self.triggers.iter().any(|(_, t)| matches!(t.address, crate::ast::LinkRef::Linked(_))) {
@@ -356,6 +382,62 @@ self.emit_declares(&mut out);
             Type::String | Type::Data => "i8*",
             Type::Void => "void",
             _ => "i64",
+        }
+    }
+
+    /// LLVM storage type for an `@ link` trigger global.
+    /// The C runtime provides `char` (Bool→i8), `int64_t` (Int→i64),
+    /// and `char*` (String→i8*).
+    /// Emit a volatile load of a trigger into an i64 register.
+    /// Different source types need different load+convert sequences.
+    fn emit_trg_load(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        dst: &str,
+        addr_src: &str,
+        addr_is_ptr: bool,
+        trg_ty: &Type,
+    ) {
+        let store_ty = trg_llvm_storage_ty(trg_ty);
+        let tr_counter = self.txn_counter;
+        self.txn_counter += 1;
+        let raw = format!("%tr{}", tr_counter);
+        if addr_is_ptr {
+            writeln!(out, "{}{} = load volatile {}, {}* {}", indent, raw, store_ty, store_ty, addr_src).ok();
+        } else {
+            writeln!(out, "{}{} = load volatile {}, {}* inttoptr (i64 {} to {}*), align 1", indent, raw, store_ty, store_ty, addr_src, store_ty).ok();
+        }
+        // Convert to i64
+        match trg_ty {
+            Type::Bool => {
+                let zc = self.txn_counter; self.txn_counter += 1;
+                let z = format!("%tz{}", zc);
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+            }
+            Type::Int | Type::UInt => {
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
+            }
+            Type::Char => {
+                let zc = self.txn_counter; self.txn_counter += 1;
+                let z = format!("%tz{}", zc);
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, raw).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+            }
+            Type::String | Type::Data => {
+                let pc = self.txn_counter; self.txn_counter += 1;
+                let p = format!("%tp{}", pc);
+                writeln!(out, "{}{} = ptrtoint {} {} to i64", indent, p, store_ty, raw).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, p).ok();
+            }
+            _ => {
+                // fallback for unsupported types — handle as i8
+                let zc = self.txn_counter; self.txn_counter += 1;
+                let z = format!("%tz{}", zc);
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+            }
         }
     }
 
@@ -694,19 +776,15 @@ Expr::Identifier(name) => {
                 } else if self.trigger_names.contains(name) {
                     if let Some(sampled) = self.sampled_triggers.get(name) {
                         writeln!(out, "{}{} = add i64 0, {}", indent, v, sampled).ok();
+                    } else if let Some(t) = self.triggers.get(name).cloned() {
+                        let addr_str = match &t.address {
+                            crate::ast::LinkRef::Explicit(a) => a.to_string(),
+                            crate::ast::LinkRef::Linked(s) => format!("@{}", s),
+                        };
+                        let addr_is_ptr = matches!(t.address, crate::ast::LinkRef::Linked(_));
+                        self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);
                     } else {
-                        let raw = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                        if let Some(t) = self.triggers.get(name) {
-                            let _ = match &t.address {
-                                crate::ast::LinkRef::Explicit(addr) => writeln!(out, "{}{} = load volatile i8, i8* inttoptr (i64 {} to i8*), align 1", indent, raw, addr),
-                                crate::ast::LinkRef::Linked(sym) => writeln!(out, "{}{} = load volatile i8, i8* @{}, align 1", indent, raw, sym),
-                            };
-                        } else {
-                            writeln!(out, "{}{} = add i8 0, 0", indent, raw).ok();
-                        }
-                        let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
-                        writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                     }
                 } else if let Some(&idx) = self.field_index_map.get(name) {
                     let ty = &self.field_types[idx];
@@ -1025,17 +1103,18 @@ Expr::Identifier(name) => {
         writeln!(out, "  entry:").ok();
         // Trigger sampling — load volatile into named registers
         self.sampled_triggers.clear();
-        for tn in &self.trigger_names {
-            if let Some(t) = self.triggers.get(tn) {
-                let raw = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                let _ = match &t.address {
-                    crate::ast::LinkRef::Explicit(addr) => writeln!(out, "  {} = load volatile i8, i8* inttoptr (i64 {} to i8*), align 1", raw, addr),
-                    crate::ast::LinkRef::Linked(sym) => writeln!(out, "  {} = load volatile i8, i8* @{}, align 1", raw, sym),
-                };
-                let sz = format!("%sz_{}", tn);
-                writeln!(out, "  {} = zext i8 {} to i64", sz, raw).ok();
-                self.sampled_triggers.insert(tn.clone(), sz);
-            }
+        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.trigger_names
+            .iter()
+            .filter_map(|tn| self.triggers.get(tn).map(|t| (tn.clone(), t.clone())))
+            .collect();
+        for (tn, t) in &trigger_snapshot {
+            let sz = format!("%sz_{}", tn);
+            let (addr_str, addr_is_ptr) = match &t.address {
+                crate::ast::LinkRef::Explicit(a) => (a.to_string(), false),
+                crate::ast::LinkRef::Linked(s) => (format!("@{}", s), true),
+            };
+            self.emit_trg_load(out, "  ", &sz, &addr_str, addr_is_ptr, &t.ty);
+            self.sampled_triggers.insert(tn.clone(), sz);
         }
 
         if dispatch.is_empty() {
@@ -1061,6 +1140,8 @@ Expr::Identifier(name) => {
                 // Fall through to this transaction's check label, which evaluates
                 // the NEXT transaction's precondition. Matches the interpreter model
                 // where all dirty transactions are evaluated sequentially in one tick.
+                // NOTE: this br is dead LLVM IR when the body ends in `term` (always true).
+                //       LLVM -O3 eliminates it. We emit it for correct uni-cyclic IR.
                 writeln!(out, "  br label %{}", c).ok();
 
                 if i + 1 < dispatch.len() {

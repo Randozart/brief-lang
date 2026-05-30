@@ -22,7 +22,7 @@
 // __raw_poll: non-blocking read of all pending events from the OS.
 // Guaranteed non-blocking because __wait_for_event already determined
 // that data is available. Returns a raw byte buffer.
-frgn __raw_poll() -> Vector<u8> from "libruntime";
+frgn __raw_poll() -> String from "libruntime";
 
 // __wait_for_event: blocks the thread until at least one event source
 // has data. Maps to epoll_wait (Linux), kevent (BSD), wfi (ARM), hlt (x86).
@@ -91,6 +91,20 @@ rct txn __io_sleep [true] {
 //
 // Pure functions on the cached __io_buffer. Zero FFI calls.
 // The buffer was already populated by __io_pump in the same tick.
+
+// ── CONVENIENCE ──
+//
+// Resets io_ready after consuming the event data.
+// Call at the end of your handler:
+//   rct txn my_handler [io.io_ready] {
+//       let c = io.get_char();
+//       io.consume();
+//       term;
+//   };
+defn consume() -> Bool {
+    &io_ready = false;
+    term true;
+};
 
 defn key_pressed(key: String) -> Bool {
     let i: Int = 0;

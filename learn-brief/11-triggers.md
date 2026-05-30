@@ -14,14 +14,31 @@ Top-level triggers are declared in the global scope and represent events that ca
 // Hardware trigger (Embedded Brief)
 trg button: Bool @ 0x1000A000;
 
-// System trigger (Regular Brief)
-trg sigint: Bool;
-trg stdin_line: String;
-trg clock_tick_1hz: Int;
-
-// Network trigger
-trg network_data: String;
+// System trigger — linked to a runtime symbol (LLVM backend)
+trg sigint: Bool @ link __sigint_flag;
+trg stdin_ready: Bool @ link __stdin_ready;
+trg clock_tick_1hz: Int @ link __timer_1hz;
 ```
+
+### `@ link` — Binding to External Symbols
+
+The `@ link sym` syntax binds a trigger to an external symbol defined by the runtime. The compiler emits:
+
+- **LLVM backend**: `@sym = external global <type>, align N` — the linker resolves this
+- **C backend**: `extern volatile <type> sym;`
+- **Runtime**: `runtime/brief_rt.c` provides `volatile char __io_pending`, `volatile int64_t __timer_1hz`, etc.
+
+The `@ link` mechanism is **zero-magic**: the compiler knows nothing about the symbol name. It emits whatever name you provide. The runtime/OS provides the definition. This lets any C/assembly symbol be used as a Brief trigger.
+
+**Supported trigger types** for `@ link`:
+| Brief Type | Runtime C Type | LLVM IR Type |
+|-----------|----------------|-------------|
+| `Bool` | `volatile char` | `i8` |
+| `Int` | `volatile int64_t` | `i64` |
+| `Char` | `volatile int32_t` | `i32` |
+| `String` | `volatile char*` | `i8*` |
+
+**Unsupported types** (e.g., `Float`, `List`) produce a compiler warning and fall back to `i8` storage.
 
 ### Trigger Aliases
 
@@ -35,46 +52,77 @@ trigger button: Bool;   // full word
 TRIGGER button: Bool;   // uppercase full word
 ```
 
-## Local Triggers (`trg!`)
+## Event Model: `rct txn` + `@ link`
 
-Local triggers are declared **inside transaction bodies** and represent mid-flight async waits. They require the `!` suffix as a psychological speedbump - you're introducing asynchronous chaos into a verified transaction.
+The event-driven dispatch uses `rct txn` (reactive transaction) with trigger-based preconditions:
 
 ```brief
-txn fetch_user[user_requested] {
-    let user_id = state.current_user;
-    
-    // Local trigger: await DB response
-    // The ! warns: "this may cause a rollback!"
-    trg! db_response: Result<Data, DbError> = fetch_from_db(user_id);
-    
-    [db_response.is_err()] {
-        escape Err("DB Timeout");  // Rolls back all state changes
-    };
-    
-    state.verified = true;
+import io from "std/io.bv";
+
+rct txn handle_input [io.io_ready] {
+    let c = io.get_char();
+    io.consume();
     term;
 };
 ```
 
-### Why the `!`?
+**Dispatch semantics** (first-true-wins fallthrough):
+1. Evaluate all transaction preconditions in declaration order
+2. Fire the **first** transaction whose precondition is true
+3. Fall through to the next tick
+
+**Parallel dispatch** (with `#pragma dispatch parallel`):
+1. Evaluate ALL preconditions upfront
+2. Fire every transaction whose precondition is true AND whose write set does not conflict with any already-fired transaction
+3. Non-conflicting transactions fire in the same tick
+
+### Zero-Magic Sleep
+
+Blocking sleep is a library pattern, not a compiler intrinsic:
+
+```brief
+// lib/std/io.bv
+frgn __wait_for_event() -> Void from "libruntime";
+rct txn __io_sleep [true] {
+    __wait_for_event();
+    term;
+};
+```
+
+Because `[true]` is always the last precondition evaluated (it's declared last), `__io_sleep` only fires when no other transaction has work to do. This is the **equilibrium sleep** pattern.
+
+## Local Triggers (`trg!`) — DEPRECATED
+
+> **Deprecation notice**: `trg!` inside transaction bodies is deprecated. Use `@ link` triggers + `rct txn` instead. The compiler emits a deprecation warning at parse time.
+
+Local triggers were declared **inside transaction bodies** and represented mid-flight async waits. They required the `!` suffix as a psychological speedbump — warning "async rollback risk here".
+
+```brief
+// OLD pattern — deprecated:
+txn fetch_user[user_requested] {
+    trg! db_response: Result<Data, DbError> = fetch_from_db(user_id);
+    [db_response.is_err()] {
+        escape Err("DB Timeout");
+    };
+    term;
+};
+
+// NEW pattern — use @ link triggers:
+trg db_response: Bool @ link __db_response;
+rct txn handle_db_response [db_response] {
+    // ... handle response
+    term;
+};
+```
+
+### Why the `!` was used?
 
 The `!` suffix follows a tradition in language design:
 - **Ruby**: `sort!` warns "this mutates in-place"
 - **Rust**: `unsafe {}` warns "pointer math ahead"
-- **Rust**: `println!` warns "this isn't a normal function"
-- **Brief**: `trg!` warns "async rollback risk here"
+- **Brief**: `trg!` warned "async rollback risk here"
 
-If you forget the `!` inside a transaction, the compiler gives a helpful error:
-
-```
-Error: Local triggers introduce asynchronous rollback risks.
-       You must use 'trg!' or 'trigger!' to explicitly acknowledge this boundary.
-       (Top-level trigger declarations use 'trg' without '!')
-```
-
-### Local Trigger Aliases
-
-- `trg!` / `TRG!` / `trigger!` / `TRIGGER!` - all equivalent for local triggers
+The modern event model (`@ link` + `rct txn`) eliminates rollback risk by keeping triggers at the top level, making the entire reactive loop stateless with respect to event arrival.
 
 ## Volatile Semantics
 
@@ -126,54 +174,51 @@ rct txn handle_button[button == true] {
 
 ## System Triggers
 
-Brief provides standard system triggers in `std/system.bv`:
+Brief provides standard system triggers in `lib/std/system.bv`. These use `@ link` bindings to runtime symbols:
 
-| Trigger | Type | Description |
-|---------|------|-------------|
-| `sigint` | Bool | Ctrl+C signal |
-| `sigterm` | Bool | Termination signal |
-| `sighup` | Bool | Terminal hangup |
-| `stdin_line` | String | Line available on stdin |
-| `stdin_ready` | Bool | Stdin has data |
-| `clock_tick_1hz` | Int | Fires once per second |
-| `clock_tick_10hz` | Int | Fires 10 times/second |
-| `clock_tick_100hz` | Int | Fires 100 times/second |
-| `stdout_ready` | Bool | Stdout buffer has space |
-| `file_event` | String | Watched file changed |
-| `network_data` | String | Data arrived on socket |
-| `network_connected` | Bool | Connection established |
-| `network_disconnected` | Bool | Connection dropped |
+| Trigger | Type | `@ link` Symbol | Description |
+|---------|------|-----------------|-------------|
+| `sigint` | Bool | `__sigint_flag` | Ctrl+C signal |
+| `sigterm` | Bool | `__sigterm_flag` | Termination signal |
+| `sighup` | Bool | `__sighup_flag` | Terminal hangup |
+| `stdin_ready` | Bool | `__stdin_ready` | Stdin has data |
+| `stdin_buffer` | String | `__stdin_buffer` | Raw stdin data |
+| `clock_tick_1hz` | Int | `__timer_1hz` | Fires once per second |
+| `clock_tick_100hz` | Int | `__timer_100hz` | Fires 100 times/second |
+| `__io_pending` | Bool | `__io_pending` | Any event pending |
 
-### Example: Reactive Signal Handler
+Additional triggers in `io.bv`:
+| Trigger | `@ link` Symbol | Description |
+|---------|----------------|-------------|
+| `__io_pending` | `__io_pending` | Set by runtime when any event arrives |
+
+### Example: Reactive Event Handler (LLVM Backend)
 
 ```brief
-import "std/system";
+import io from "std/io.bv";
 
-let shutting_down: Bool = false;
-let tick_count: Int = 0;
+let counter: Int = 0;
 
-// Handle Ctrl+C
-rct txn handle_sigint[sigint == true] {
-    &shutting_down = true;
+rct txn count_input [io.io_ready] {
+    let key = io.get_char();
+    [key == " "] {
+        &counter = counter + 1;
+    };
+    io.consume();
     term;
 };
 
-// Count seconds
-rct txn count_ticks[clock_tick_1hz > 0] {
-    &tick_count = tick_count + 1;
-    term;
-};
-
-// Graceful shutdown
-rct txn graceful_shutdown[shutting_down == true] {
-    println("Shutting down after {} seconds", tick_count);
-    term;
-};
+// Compile:     brief llvm program.bv --link-rt
+// The --link-rt flag writes brief_rt.c to the output directory
+// and invokes cc to produce brief_rt.o.
+// Link:        ld program.o brief_rt.o -o program
 ```
 
 ## Trigger Configuration
 
-Triggers map to OS events through DBVS schema files (`std/bindings/system_triggers.dbvs`):
+Triggers map to OS events through:
+1. **`@ link` symbol bindings** in `.bv` files (LLVM backend)
+2. **DBVS schema files** for hardware targets: `std/bindings/system_triggers.dbvs`
 
 ```dbvs
 register 0x100 as "sigint" {
@@ -217,10 +262,47 @@ txn transfer(amount: Int) [amount > 0][balance == @balance] {
 | Rollback risk | None | Yes (requires `!`) |
 | FFI side effects | N/A | May fire before escape |
 
+## LLVM Backend + Runtime
+
+The LLVM backend is the primary compilation target for event-driven Brief programs.
+
+### Compile and Link
+
+```bash
+# Generate .ll file
+brief llvm program.bv --link-rt
+
+# Or manually:
+brief llvm program.bv -o output/
+llc output/program.ll -filetype=obj -o output/program.o
+cc -c runtime/brief_rt.c -o output/brief_rt.o
+ld output/program.o output/brief_rt.o -o program
+```
+
+The `--link-rt` flag writes the embedded `brief_rt.c` source to the output directory, compiles it with `cc`, and prints the final `ld` command.
+
+### Runtime Source
+
+`runtime/brief_rt.c` is a single C file that provides:
+- **`@ link` global definitions**: `volatile` variables in section `brief_trg` for signal handlers, timers, stdin
+- **`__wait_for_event()`**: platform-optimized blocking sleep (epoll on Linux, kqueue on BSD, WFI on ARM, HLT on x86, fallback nanosleep)
+- **Constructor**: auto-runs before `main()` to set up signal handlers and timers
+
+### Platform Support
+
+| Platform | Mechanism | Source |
+|----------|-----------|--------|
+| Linux | `epoll` + `signal` | `runtime/brief_rt.c` |
+| macOS/BSD | `kqueue` + `signal` | `runtime/brief_rt.c` |
+| ARM bare-metal | `WFI` instruction | `runtime/brief_rt.c` |
+| x86 bare-metal | `STI; HLT` | `runtime/brief_rt.c` |
+| WASM | `memory.grow` yield | `runtime/brief_rt.c` |
+| Fallback | `nanosleep` (1ms) | `runtime/brief_rt.c` |
+
 ## Best Practices
 
-1. **Use top-level `trg`** for external events that drive your state machine
-2. **Use `trg!` sparingly** - only when you truly need mid-transaction async waits
-3. **Place `trg!` early** in transactions to minimize wasted FFI calls on escape
-4. **Test with fault injection** - use `brief test` to verify your code handles trigger chaos
-5. **Pre-evaluate escape conditions** - the compiler does this automatically, but design your guards to be checkable
+1. **Use top-level `trg @ link`** for all external events — no rollback risk, verifiable by proof engine
+2. **Import `io`** from `lib/std/io.bv` for the pump/sleep/accessor pattern
+3. **Use `io.consume()`** after processing input to reset `io_ready`
+4. **Place `__io_sleep` last in dispatch** — the `[true]` precondition ensures it fires only when idle
+5. **Test with fault injection** to verify your code handles trigger chaos
