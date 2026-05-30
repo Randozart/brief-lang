@@ -498,7 +498,9 @@ self.emit_declares(&mut out);
         writeln!(out, "define void @init_state() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         let mut reg = 0u32;
-        for (name, &idx) in &self.field_index_map {
+        let mut fields: Vec<(&String, &usize)> = self.field_index_map.iter().collect();
+        fields.sort_by_key(|&(_, &idx)| idx);
+        for (name, &idx) in fields {
             let ty = &self.field_types[idx];
             let p = format!("%ip{}", reg); reg += 1;
             writeln!(out, "  {} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", p, idx).ok();
@@ -511,6 +513,7 @@ self.emit_declares(&mut out);
 
     // ── DEFINITION ────────────────────────────────────────────
     fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
+        self.pending_cleanup.clear();
         self.let_bindings.clear();
         write!(out, "define i64 @{}(", d.name).ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
@@ -550,6 +553,7 @@ self.emit_declares(&mut out);
 
     // ── TRANSACTION ───────────────────────────────────────────
     fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
+        self.pending_cleanup.clear();
         self.range_bounds = Self::extract_ranges(&txn.contract.pre_condition);
         self.field_to_meta_idx.clear();
         for (f, &(lo, hi)) in &self.range_bounds {
