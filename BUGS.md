@@ -158,3 +158,13 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 - The `None` variant of `Option` may not exist in the interpreter's state
 
 **Lesson**: (pending investigation)
+
+## 2026-05-29 — `dispatch_mode` lost during desugaring and import resolution
+
+- **Issue**: `#pragma dispatch(parallel)` was parsed correctly by the parser but silently ignored — the LLVM backend always emitted sequential reactor code regardless of the directive.
+
+- **Root Cause**: The `Program` struct has a `dispatch_mode: DispatchMode` field set by the parser. However, both the `Desugarer::desugar()` (desugarer.rs:345) and `ImportResolver::resolve_imports()` (import_resolver.rs:84) construct new `Program` objects with `dispatch_mode: Default::default()` (i.e., `Sequential`) instead of preserving `program.dispatch_mode` from the input program. Since the `run_llvm_compile` pipeline runs `resolve_imports` → `desugar` → `llvm_backend.generate`, the dispatch mode is lost before code generation.
+
+- **Fix**: Changed both `desugarer.rs:345` and `import_resolver.rs:84` to use `dispatch_mode: program.dispatch_mode` instead of `Default::default()`.
+
+- **Lesson**: Whenever a pipeline stage constructs a new `Program` from an existing one, all fields must be explicitly forwarded. This is a brittle pattern — consider a builder or `Clone` for `Program` that preserves metadata fields. Also add a test that verifies dispatch-mode propagation through the full pipeline from parse → resolve → desugar → backend.

@@ -1201,6 +1201,7 @@ use crate::ast::*;
             attrs: Vec::new(),
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         };
         let files = backend.generate(&program);
         let output = files.iter().map(|(_, s)| s.as_str()).collect::<Vec<&str>>().join("\n");

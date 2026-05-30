@@ -755,6 +755,7 @@ mod tests {
             attrs: vec![],
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         }
     }
 
@@ -800,6 +801,7 @@ mod tests {
             attrs: Vec::new(),
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         };
         let output = backend.generate(&program, "test_program");
         assert!(output.contains("PROGRAM-ID"));

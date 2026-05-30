@@ -875,6 +875,22 @@ impl StrictMode {
     }
 }
 
+/// Dispatch mode for the reactor loop.
+/// Sequential (default): first-true-wins fallthrough chain.
+/// Parallel: evaluate all preconditions upfront, fire every
+/// non-conflicting transaction in one tick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DispatchMode {
+    Sequential,
+    Parallel,
+}
+
+impl Default for DispatchMode {
+    fn default() -> Self {
+        DispatchMode::Sequential
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Program {
     pub items: Vec<TopLevel>,
@@ -883,6 +899,7 @@ pub struct Program {
     pub attrs: Vec<Attribute>,  // NEW: file-level #![...] attributes
     pub ffi: Option<FfiState>,  // NEW: FFI state from #![ffi.*, ...]
     pub strict_mode: StrictMode,
+    pub dispatch_mode: DispatchMode,
 }
 
 /// FFI State captured from file-level attribute

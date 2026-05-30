@@ -81,6 +81,7 @@ impl ImportResolver {
             attrs: Vec::new(),
             ffi: None,
             strict_mode: self.strict_mode,
+            dispatch_mode: program.dispatch_mode,
         })
     }
 
@@ -98,6 +99,7 @@ impl ImportResolver {
                 attrs: Vec::new(),
                 ffi: None,
                 strict_mode: self.strict_mode,
+                dispatch_mode: Default::default(),
             });
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
@@ -111,6 +113,7 @@ impl ImportResolver {
                     attrs: Vec::new(),
                     ffi: None,
                     strict_mode: self.strict_mode,
+                    dispatch_mode: Default::default(),
                 });
             }
             if last_component.ends_with(".css") || last_component.ends_with(".svg") {
@@ -146,6 +149,7 @@ self.loaded_modules.insert(
                         attrs: Vec::new(),
                         ffi: None,
                         strict_mode: self.strict_mode,
+                        dispatch_mode: Default::default(),
                     },
                 );
                 return Ok(Program {
@@ -155,6 +159,7 @@ self.loaded_modules.insert(
                     attrs: Vec::new(),
                     ffi: None,
                     strict_mode: self.strict_mode,
+                    dispatch_mode: Default::default(),
                 });
             }
         }
@@ -211,6 +216,7 @@ self.loaded_modules.insert(
                         attrs: Vec::new(),
                         ffi: None,
                         strict_mode: self.strict_mode,
+                        dispatch_mode: Default::default(),
                     },
                 );
                 return Ok(Program {
@@ -223,6 +229,7 @@ self.loaded_modules.insert(
                     attrs: Vec::new(),
                     ffi: None,
                     strict_mode: self.strict_mode,
+                    dispatch_mode: Default::default(),
                 });
             }
         }
@@ -354,6 +361,7 @@ self.loaded_modules.insert(
             attrs: Vec::new(),
             ffi: None,
             strict_mode: self.strict_mode,
+            dispatch_mode: Default::default(),
         })
     }
 }

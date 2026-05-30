@@ -39,6 +39,7 @@ pub fn arb_program(max_depth: usize) -> impl Strategy<Value = Program> {
             attrs: vec![],
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         })
     })
 }

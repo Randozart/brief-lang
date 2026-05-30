@@ -488,6 +488,8 @@ impl<'a> Parser<'a> {
 
         // Process FFI state from file attributes
         let ffi_state = Self::process_ffi_attributes(&file_attrs);
+        // Process dispatch mode from file attributes
+        let dispatch_mode = Self::process_dispatch_attribute(&file_attrs);
 
         while self.current_token().is_some() {
             items.push(self.parse_top_level()?);
@@ -499,6 +501,7 @@ impl<'a> Parser<'a> {
             attrs: file_attrs,
             ffi: ffi_state,
             strict_mode: self.strict_mode,
+            dispatch_mode,
         })
     }
 
@@ -543,6 +546,21 @@ impl<'a> Parser<'a> {
             import_path,
             global_maps,
         })
+    }
+
+    /// Process file-level attributes to extract dispatch mode.
+    /// Recognizes: `#pragma dispatch(parallel)` → `DispatchMode::Parallel`
+    fn process_dispatch_attribute(attrs: &[crate::ast::Attribute]) -> DispatchMode {
+        for attr in attrs {
+            if attr.key == "dispatch" {
+                if let Some(ref v) = attr.value {
+                    if v == "parallel" {
+                        return DispatchMode::Parallel;
+                    }
+                }
+            }
+        }
+        DispatchMode::Sequential
     }
 
     /// Parse map("from","to") pair from attribute value

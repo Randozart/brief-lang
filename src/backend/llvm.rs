@@ -14,7 +14,7 @@ fn escape_llvm_string(s: &str) -> String {
     out
 }
 use crate::ast::{
-    Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
+    DispatchMode, Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
 };
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -147,6 +147,7 @@ pub struct LlvmBackend {
     string_constants: Vec<String>,
     fused_to_first: HashMap<String, String>,
     sampled_triggers: HashMap<String, String>,
+    txn_write_masks: HashMap<String, u64>,
 }
 
 impl LlvmBackend {
@@ -172,6 +173,7 @@ impl LlvmBackend {
             string_constants: Vec::new(),
             fused_to_first: HashMap::new(),
             sampled_triggers: HashMap::new(),
+            txn_write_masks: HashMap::new(),
         }
     }
 
@@ -315,9 +317,17 @@ self.emit_declares(&mut out);
         // Init
         self.emit_init_state(&mut out);
         writeln!(out).ok();
-        // Reactor
+        // Reactor — sequential or parallel
         if !txns.is_empty() {
-            self.emit_reactor(&mut out, &txns, &fusable);
+            match program.dispatch_mode {
+                DispatchMode::Parallel => {
+                    self.build_write_masks(program);
+                    self.emit_parallel_reactor(&mut out, &txns, &fusable);
+                }
+                DispatchMode::Sequential => {
+                    self.emit_reactor(&mut out, &txns, &fusable);
+                }
+            }
         }
         // Attributes
         writeln!(out).ok();
@@ -1175,11 +1185,154 @@ Expr::Identifier(name) => {
         writeln!(out, "}}").ok();
     }
 
+    // ── WRITE MASKS (Parallel Dispatch) ──────────────────────
+    fn build_write_masks(&mut self, program: &Program) {
+        self.txn_write_masks.clear();
+        for item in &program.items {
+            if let TopLevel::Transaction(t) = item {
+                if !t.is_reactive { continue; }
+                let writes = crate::backend::collect_assigned_identifiers(&t.body);
+                let mut mask = 0u64;
+                for w in &writes {
+                    if let Some(&idx) = self.field_index_map.get(w.as_str()) {
+                        if idx < 64 { mask |= 1u64 << idx; }
+                    }
+                }
+                self.txn_write_masks.insert(t.name.clone(), mask);
+            }
+        }
+    }
+
+    // ── PARALLEL DISPATCH REACTOR ────────────────────────────
+    /// Fires multiple non-conflicting transactions per tick.
+    /// Phase 1: evaluate ALL preconditions upfront into %pr0..%prN.
+    /// Phase 2: fire each transaction if its precondition is true AND
+    ///          its write mask doesn't overlap with the fired_mask.
+    fn emit_parallel_reactor(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)],
+                             fusable: &[(String, String)]) {
+        self.fused_to_first.clear();
+        for (a, b) in fusable {
+            let fn_ = format!("{}_{}_fused", a, b);
+            self.fused_to_first.insert(fn_, a.clone());
+        }
+        let mut used_fused: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut dispatch: Vec<String> = Vec::new();
+        let mut fused_txns: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (a, b) in fusable {
+            let fn_ = format!("{}_{}_fused", a, b);
+            if used_fused.contains(&fn_) { continue; }
+            used_fused.insert(fn_.clone());
+            fused_txns.insert(a.clone()); fused_txns.insert(b.clone());
+            dispatch.push(fn_);
+        }
+        for (n, _) in txns { if !fused_txns.contains(n) { dispatch.push(n.clone()); } }
+
+        writeln!(out, "define void @reactor_tick() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        // Trigger sampling
+        self.sampled_triggers.clear();
+        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.trigger_names
+            .iter()
+            .filter_map(|tn| self.triggers.get(tn).map(|t| (tn.clone(), t.clone())))
+            .collect();
+        for (tn, t) in &trigger_snapshot {
+            let sz = format!("%sz_{}", tn);
+            let (addr_str, addr_is_ptr) = match &t.address {
+                crate::ast::LinkRef::Explicit(a) => (a.to_string(), false),
+                crate::ast::LinkRef::Linked(s) => (format!("@{}", s), true),
+            };
+            self.emit_trg_load(out, "  ", &sz, &addr_str, addr_is_ptr, &t.ty);
+            self.sampled_triggers.insert(tn.clone(), sz);
+        }
+
+        // fired_mask: tracks which fields have been written by fired txns
+        writeln!(out, "  %fired_mask = alloca i64, align 8").ok();
+        writeln!(out, "  store i64 0, i64* %fired_mask").ok();
+
+        if dispatch.is_empty() {
+            writeln!(out, "  ret void").ok();
+        } else {
+            let n = dispatch.len();
+            // Phase 1: evaluate all preconditions upfront
+            for (i, txn_name) in dispatch.iter().enumerate() {
+                let has_pre = self.dispatch_has_pre(txns, txn_name);
+                if has_pre {
+                    let first_txn = self.resolve_dispatch_first_txn(txn_name);
+                    writeln!(out, "  %pr{} = call i1 @pre_{}(%State* @global_state)", i, first_txn).ok();
+                } else {
+                    writeln!(out, "  %pr{} = add i1 0, 1", i).ok();
+                }
+            }
+
+            // Phase 2: dispatch chain — all preconds known, fire if true + no conflict
+            for i in 0..n {
+                let txn_name = &dispatch[i];
+                let b = format!("b{}", i);
+                let next_c = format!("ck{}", i + 1);
+
+                if i == 0 {
+                    // First txn: from entry, no conflict check needed
+                    writeln!(out, "  br i1 %pr0, label %b0, label %ck1").ok();
+                } else {
+                    let c = format!("ck{}", i);
+                    writeln!(out, "{}:", c).ok();
+                    let wm = self.txn_write_masks.get(txn_name).copied().unwrap_or(0);
+                    if wm == 0 {
+                        // No writes → never conflicts with anything
+                        writeln!(out, "  br i1 %pr{}, label %{}, label %{}", i, b, next_c).ok();
+                    } else {
+                        let fm = format!("%fm{}", i);
+                        let ca = format!("%ca{}", i);
+                        let nc = format!("%nc{}", i);
+                        writeln!(out, "  {} = load i64, i64* %fired_mask", fm).ok();
+                        writeln!(out, "  {} = and i64 {}, {}", ca, fm, wm).ok();
+                        writeln!(out, "  {} = icmp eq i64 {}, 0", nc, ca).ok();
+                        writeln!(out, "  %can{} = and i1 %pr{}, {}", i, i, nc).ok();
+                        writeln!(out, "  br i1 %can{}, label %{}, label %{}", i, b, next_c).ok();
+                    }
+                }
+            }
+
+            // Body blocks + fired_mask updates
+            for i in 0..n {
+                let txn_name = &dispatch[i];
+                let b = format!("b{}", i);
+                let next_c = format!("ck{}", i + 1);
+                let wm = self.txn_write_masks.get(txn_name).copied().unwrap_or(0);
+                writeln!(out, "{}:", b).ok();
+                writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
+                if wm != 0 {
+                    let fm = format!("%fm{}a", i);
+                    let fmu = format!("%fm{}b", i);
+                    writeln!(out, "  {} = load i64, i64* %fired_mask", fm).ok();
+                    writeln!(out, "  {} = or i64 {}, {}", fmu, fm, wm).ok();
+                    writeln!(out, "  store i64 {}, i64* %fired_mask", fmu).ok();
+                }
+                writeln!(out, "  br label %{}", next_c).ok();
+            }
+
+            // Last check label → ret void
+            writeln!(out, "ck{}:", n).ok();
+            writeln!(out, "  ret void").ok();
+        }
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+        // main
+        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  call void @init_state()").ok();
+        writeln!(out, "  br label %tick").ok();
+        writeln!(out, "  tick:").ok();
+        writeln!(out, "  call void @reactor_tick()").ok();
+        writeln!(out, "  br label %tick").ok();
+        writeln!(out, "}}").ok();
+    }
+
     // ── FUSABLE PAIRS ────────────────────────────────────────
     fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast::Transaction)]) -> Vec<(String, String)> {
         let prg = crate::ast::Program {
             items: txns.iter().map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect(),
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off,
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential,
         };
         let mut pairs = crate::backend::detect_fusable_pairs(&prg);
         pairs.retain(|(a, b)| {
@@ -1312,6 +1465,7 @@ mod tests {
             attrs: Vec::new(),
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         }
     }
 
@@ -1345,6 +1499,7 @@ mod tests {
             attrs: Vec::new(),
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         };
         let output = backend.generate(&program);
         assert!(output.contains("%State"));
@@ -1405,6 +1560,7 @@ mod tests {
             attrs: Vec::new(),
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         };
         let output = backend.generate(&program);
         assert!(output.contains("@increment("));
@@ -1452,6 +1608,7 @@ mod tests {
             attrs: Vec::new(),
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         };
         let output = backend.generate(&program);
         assert!(output.contains("noalias"), "Transaction should have noalias");
@@ -1540,6 +1697,7 @@ mod tests {
             attrs: Vec::new(),
             ffi: None,
             strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
         };
         let output = backend.generate(&program);
 
