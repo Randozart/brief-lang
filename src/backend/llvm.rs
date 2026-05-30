@@ -1698,4 +1698,216 @@ mod tests {
         assert!(!output.contains("declare void @__wait_for_event()"),
             "Should NOT have hardcoded __wait_for_event declaration");
     }
+
+    // ── Phase 4: Backend correctness tests ──────────────────────────
+
+    #[test]
+    fn test_escape_non_ascii_string() {
+        let output = escape_llvm_string("héllo");
+        // 'é' is U+00E9 → bytes C3 A9
+        assert!(output.contains("\\c3"), "Should hex-escape byte C3");
+        assert!(output.contains("\\a9"), "Should hex-escape byte A9");
+        // ASCII 'h' 'e' 'l' 'l' 'o' should be preserved as-is
+        assert!(output.contains("h"), "ASCII 'h' should be preserved");
+        assert!(output.contains("llo"), "ASCII 'llo' should be preserved after escape bytes");
+    }
+
+    #[test]
+    fn test_unification_payload_discriminant() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "s".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Unification {
+                            name: "Some".to_string(),
+                            pattern: "v".to_string(),
+                            expr: Expr::Integer(1),
+                        },
+                        Statement::Term { values: vec![], modifiers: vec![] },
+                    ],
+                    is_async: false,
+                    is_reactive: false,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        };
+        let output = backend.generate(&program);
+        // Payload variant Some → discriminant 1
+        assert!(output.contains("i64 1, label"),
+            "Unification of 'Some' should target discriminant 1");
+    }
+
+    #[test]
+    fn test_no_range_lower_bound_defaults_to_i64_min() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Lt(
+                            Box::new(Expr::Identifier("x".to_string())),
+                            Box::new(Expr::Integer(100)),
+                        ),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Term { values: vec![], modifiers: vec![] },
+                    ],
+                    is_async: false,
+                    is_reactive: false,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        };
+        let output = backend.generate(&program);
+        // Lower bound should be i64::MIN = -9223372036854775808
+        assert!(output.contains("-9223372036854775808"),
+            "Range with no lower bound should use i64::MIN");
+    }
+
+    #[test]
+    fn test_binop_no_nuw_nsw() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "y".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::And(
+                            Box::new(Expr::And(
+                                Box::new(                Expr::Ge(
+                                    Box::new(Expr::Identifier("x".to_string())),
+                                    Box::new(Expr::Integer(0)),
+                                )),
+                                Box::new(Expr::Lt(
+                                    Box::new(Expr::Identifier("x".to_string())),
+                                    Box::new(Expr::Integer(10)),
+                                )),
+                            )),
+                            Box::new(Expr::Lt(
+                                Box::new(Expr::Identifier("y".to_string())),
+                                Box::new(Expr::Integer(10)),
+                            )),
+                        ),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::OwnedRef("x".to_string()),
+                            expr: Expr::Add(
+                                Box::new(Expr::Identifier("x".to_string())),
+                                Box::new(Expr::Identifier("y".to_string())),
+                            ),
+                            timeout: None,
+                            modifiers: vec![],
+                        },
+                        Statement::Term { values: vec![], modifiers: vec![] },
+                    ],
+                    is_async: false,
+                    is_reactive: false,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        };
+        let output = backend.generate(&program);
+        // Must NOT emit nuw nsw — we removed manual emission
+        assert!(!output.contains("nuw nsw"),
+            "add on bounded variables should NOT emit nuw nsw (LLVM infers from !range)");
+    }
 }

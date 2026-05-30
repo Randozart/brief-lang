@@ -494,13 +494,17 @@ impl<'a> Parser<'a> {
         let dispatch_mode = Self::process_dispatch_attribute(&file_attrs);
 
         // Parse #io declarations at file level
-        let mut io_triggers = Vec::new();
+        let mut io_triggers: Vec<TopLevel> = Vec::new();
+        let mut io_concepts_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         while let Some(Ok(Token::Hash)) = self.current_token() {
             let is_io = matches!(&self.peek, Some((Ok(Token::Identifier(n)), _)) if n == "io");
             if !is_io { break; }
             self.advance(); // consume #
             self.advance(); // consume io
-            let trg = self.parse_io_declaration()?;
+            let (concept, trg) = self.parse_io_declaration()?;
+            if !io_concepts_seen.insert(concept) {
+                return self.spanned_err(format!("Duplicate #io concept '{}'", trg.name));
+            }
             io_triggers.push(TopLevel::Trigger(trg));
         }
         items.splice(0..0, io_triggers);
@@ -2335,15 +2339,26 @@ let span = self.current_span();
             }
         }
         
-        // Parse comma-separated items
+        // Parse items
         // For #[...] / #![...]: items are inside brackets, terminated by ]
-        // For #pragma.c: single item, no brackets (already handled above)
-        // For #!pragma: items comma-separated, no brackets needed
-        while !matches!(self.current_token(), Some(Ok(Token::RBracket))) {
-            let attr = if is_pragma {
-                self.parse_pragma_item(None)?
-            } else {
-                // #[...]: parse old-style item
+        // For #pragma.c: single item, no brackets (already handled above with return)
+        // For #!/#!pragma: comma-separated items, no brackets needed (optional trailing ])
+        if is_pragma {
+            // Pragma form: parse comma-separated items without bracket enclosure
+            loop {
+                attrs.push(self.parse_pragma_item(None)?);
+                if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            if matches!(self.current_token(), Some(Ok(Token::RBracket))) {
+                self.advance(); // consume optional ]
+            }
+        } else {
+            // #[...] / #![...] form: items inside brackets
+            while !matches!(self.current_token(), Some(Ok(Token::RBracket))) {
                 let key = if let Some(Ok(Token::Identifier(name))) = self.current_token() {
                     let name = name.clone();
                     self.advance();
@@ -2396,25 +2411,15 @@ let span = self.current_span();
                     None
                 };
 
-                crate::ast::Attribute { target, key, value }
-            };
+                attrs.push(crate::ast::Attribute { target, key, value });
 
-            attrs.push(attr);
-
-            // Expect comma or ]
-            if matches!(self.current_token(), Some(Ok(Token::Comma))) {
-                self.advance();
-            } else {
-                break;
+                if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                    self.advance();
+                } else {
+                    break;
+                }
             }
-        }
-
-        // For #[...] and #![...] syntax, expect closing bracket
-        // For #pragma variants, consume optional closing bracket if present
-        if !is_pragma {
             self.expect(Token::RBracket)?;
-        } else if matches!(self.current_token(), Some(Ok(Token::RBracket))) {
-            self.advance(); // consume optional ]
         }
         Ok(attrs)
     }
@@ -2520,7 +2525,8 @@ let span = self.current_span();
     }
 
     /// Parse #io declaration: `#io sigint;` or `#io sigint -> trg name: Type;`
-    fn parse_io_declaration(&mut self) -> Result<TriggerDeclaration, SyntaxError> {
+    /// Returns (concept_name, TriggerDeclaration).
+    fn parse_io_declaration(&mut self) -> Result<(String, TriggerDeclaration), SyntaxError> {
         // Read concept name
         let concept = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
             let mut name = n.clone();
@@ -2533,8 +2539,13 @@ let span = self.current_span();
                     self.advance();
                     p
                 } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
-                    let s = n.to_string();
+                    let mut s = n.to_string();
                     self.advance();
+                    // Handle `1hz` tokenized as Integer(1) + Identifier("hz")
+                    if let Some(Ok(Token::Identifier(unit))) = self.current_token() {
+                        s.push_str(unit);
+                        self.advance();
+                    }
                     s
                 } else {
                     return self.spanned_err("Expected parameter value in #io concept".to_string());
@@ -2581,7 +2592,7 @@ let span = self.current_span();
         let span = self.current_span();
         self.expect(Token::Semicolon)?;
 
-        Ok(TriggerDeclaration {
+        Ok((concept, TriggerDeclaration {
             name,
             ty,
             address: crate::ast::LinkRef::Linked(io_concept.symbol.to_string()),
@@ -2590,7 +2601,7 @@ let span = self.current_span();
             condition: None,
             is_wake: true,
             span,
-        })
+        }))
     }
 
     fn parse_constant(&mut self) -> Result<Constant, SyntaxError> {
@@ -6049,6 +6060,120 @@ mod parser_tests {
                 panic!("Expected Struct");
             }
         }
+    }
+
+    // ── Phase 3/4: Pragma and IO tests ────────────────────────────
+
+    #[test]
+    fn test_hashbang_dispatch_parallel() {
+        let s = "#!dispatch(parallel)\ntrg x: Bool @ link __x;\nrct txn t [x] { term; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "#!dispatch(parallel) should parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.dispatch_mode, crate::ast::DispatchMode::Parallel,
+            "dispatch_mode should be Parallel");
+    }
+
+    #[test]
+    fn test_wake_modifier() {
+        let s = "trg x: Bool @ link __x #wake;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse_trigger();
+        assert!(result.is_ok(), "#wake modifier should parse: {:?}", result.err());
+        let trg = result.unwrap();
+        assert!(trg.is_wake, "is_wake should be true");
+    }
+
+    #[test]
+    fn test_wake_on_mmio_error() {
+        let s = "trg x: Bool @ 0x4000 #wake;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse_trigger();
+        assert!(result.is_err(), "#wake on MMIO should error");
+    }
+
+    #[test]
+    fn test_io_sigint_implicit() {
+        let s = "#io sigint;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "#io sigint should parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.items.len(), 1, "Should have one item");
+        if let TopLevel::Trigger(trg) = &program.items[0] {
+            assert_eq!(trg.name, "sigint", "Trigger name should be sigint");
+            assert_eq!(trg.ty, Type::Bool, "Type should be Bool");
+            assert!(matches!(trg.address, crate::ast::LinkRef::Linked(ref s) if s == "__sigint_flag"),
+                "Address should be @ link __sigint_flag");
+            assert!(trg.is_wake, "#io implies #wake");
+        } else {
+            panic!("Expected Trigger, got {:?}", program.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_io_sigint_explicit() {
+        let s = "#io sigint -> trg mysig: Bool;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "#io sigint explicit should parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.items.len(), 1, "Should have one item");
+        if let TopLevel::Trigger(trg) = &program.items[0] {
+            assert_eq!(trg.name, "mysig", "Trigger name should be mysig");
+            assert_eq!(trg.ty, Type::Bool, "Type should be Bool");
+            assert!(trg.is_wake, "#io implies #wake");
+        } else {
+            panic!("Expected Trigger, got {:?}", program.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_io_timer_parametrized() {
+        let s = "#io timer(1hz);";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "#io timer(1hz) should parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.items.len(), 1, "Should have one item");
+        if let TopLevel::Trigger(trg) = &program.items[0] {
+            assert_eq!(trg.name, "timer(1hz)", "Trigger name should be timer(1hz)");
+            assert_eq!(trg.ty, Type::Int, "Type should be Int");
+            assert!(matches!(trg.address, crate::ast::LinkRef::Linked(ref s) if s == "__timer_1hz"),
+                "Address should be @ link __timer_1hz");
+        } else {
+            panic!("Expected Trigger, got {:?}", program.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_io_nonexistent_concept_error() {
+        let s = "#io nonexistent;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_err(), "#io nonexistent should error");
+        let err = format!("{:?}", result.err().unwrap());
+        assert!(err.contains("sigint"), "Error should list available concepts");
+    }
+
+    #[test]
+    fn test_io_duplicate_error() {
+        let s = "#io sigint;\n#io sigint;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_err(), "Duplicate #io sigint should error");
+    }
+
+    #[test]
+    fn test_pragmabang_without_bracket() {
+        let s = "#!pragma dispatch(parallel)\ntrg x: Bool @ link __x;\nrct txn t [x] { term; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "#!pragma without ] should parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.dispatch_mode, crate::ast::DispatchMode::Parallel,
+            "dispatch_mode should be Parallel");
     }
 }
 

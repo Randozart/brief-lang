@@ -58,14 +58,14 @@ const IO_CONCEPTS: &[IoConcept] = &[
     },
     IoConcept {
         concept: "timer(1hz)",
-        symbol: "__io_timer_1hz",
+        symbol: "__timer_1hz",
         ty: Type::Int,
         has_param: true,
         description: "1-second timer tick",
     },
     IoConcept {
         concept: "timer(100hz)",
-        symbol: "__io_timer_100hz",
+        symbol: "__timer_100hz",
         ty: Type::Int,
         has_param: true,
         description: "10ms timer tick",
