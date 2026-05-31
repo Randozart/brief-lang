@@ -739,6 +739,12 @@ pub struct ImportItem {
 }
 
 #[derive(Debug, Clone)]
+pub struct LinkDependency {
+    pub path: String,
+    pub is_bundled_rt: bool,
+}
+
+#[derive(Debug, Clone)]
 pub enum TopLevel {
     Signature(Signature),
     Definition(Definition),
@@ -747,6 +753,7 @@ pub enum TopLevel {
     Trigger(TriggerDeclaration),
     Constant(Constant),
     Import(Import),
+    LinkDependency(LinkDependency),
     ForeignBinding {
         name: String,
         toml_path: String,

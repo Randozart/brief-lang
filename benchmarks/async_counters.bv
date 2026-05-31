@@ -1,0 +1,31 @@
+// Async Parallel Counters — Tests thread pool dispatch (Path 5)
+//
+// Tests:
+//   - Auto-categorization: two txns with disjoint writes → async candidates
+//   - Thread pool: workers execute body functions concurrently
+//   - Dual-barrier synchronization: release → reactor → wait per tick
+//   - Auto-wake: @link triggers default to wake
+//
+// inc_a and inc_b write different state fields (a, b). The proof engine
+// guarantees no data races — plain loads/stores, no atomics needed.
+//
+// import "link/brief_rt.o" in brief_rt.bv pulls in the runtime automatically.
+//
+// Build:
+//   cargo run --bin brief-compiler -- llvm benchmarks/async_counters.bv --out benchmarks --optimize-budget 256
+//
+// C reference: async_counters_c.c (two pthreads)
+
+import io_pending from "std/brief_rt.bv";
+
+let a: Int = 0;
+let b: Int = 0;
+const N: Int = 25000000;  // 25M per counter = 50M total
+
+rct async txn inc_a [a < N][a == N] {
+    &a = a + 1;
+};
+
+rct async txn inc_b [b < N][b == N] {
+    &b = b + 1;
+};

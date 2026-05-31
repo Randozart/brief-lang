@@ -2,9 +2,9 @@
 // These triggers map to OS events (signals, stdin, filesystem, network)
 // and provide a reactive I/O model without blocking calls.
 //
-// Uses the `#io` pragma syntax to declare OS-linked triggers without
-// needing to know the underlying C runtime symbol names.
-// On bare-metal/FPGA, use `trg name: Type @ 0xADDRESS` instead.
+// All trigger declarations come from std/brief_rt.bv.
+// import "link/brief_rt.o" in that file tells the compiler driver
+// to compile and link the runtime automatically — no CLI flags needed.
 //
 // Import this file:
 //   import system from "std/system.bv";
@@ -12,32 +12,11 @@
 // Then use in reactive transactions:
 //   rct txn handle_sigint [sigint] { ... term; };
 
-// ===== SIGNAL TRIGGERS =====
-
-// SIGINT (Ctrl+C) — fires when user sends interrupt signal
-#io sigint;
-
-// SIGTERM — fires when process receives termination signal
-#io sigterm;
-
-// SIGHUP — fires when terminal hangs up
-#io sighup;
-
-// ===== STDIN TRIGGERS =====
-
-// stdin_ready — fires when stdin has data available to read
-#io stdin_ready;
-
-// stdin_line — fires when a complete line is available on stdin
-#io stdin_line;
-
-// ===== TIMER TRIGGERS =====
-
-// clock_tick_1hz — fires once per second
-#io timer(1hz) -> trg clock_tick_1hz: Int;
-
-// clock_tick_100hz — fires 100 times per second (every 10ms)
-#io timer(100hz) -> trg clock_tick_100hz: Int;
+import {
+    sigint, sigterm, sighup,
+    stdin_ready, stdin_line,
+    clock_1hz, clock_100hz
+} from "std/brief_rt.bv";
 
 // ===== HELPER TRANSACTIONS =====
 

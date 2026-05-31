@@ -1,0 +1,34 @@
+// Precompute Sum Benchmark — Compile-Time Complete Evaluation (Path 3)
+//
+// Tests: the optimization framework's ability to detect that the entire
+// state space fits within the --optimize-budget and precompute all final
+// values at compile time. The emitted main() contains only stores and
+// has zero runtime loops, switches, or reactor_tick calls.
+//
+// Path 3 trigger: fully-precomputable chain with all_internal counters.
+// Default budget is 256; this 2-chain program uses 2 entries.
+//
+// Expected LLVM: init_state() + stores + ret i32 0. No while loops.
+//
+// Build:
+//   cargo run --bin brief-compiler -- llvm benchmarks/precompute_sum.bv --out benchmarks --optimize-budget 256
+//   clang -O3 -march=native -o benchmarks/precompute benchmarks/precompute_sum.ll
+//
+// C reference: precompute_sum_c.c
+//   clang -O3 -march=native -o benchmarks/precompute_c benchmarks/precompute_sum_c.c
+
+const total: Int = 500;
+
+let count: Int = 0;
+let acc_a: Int = 0;
+let acc_b: Int = 0;
+
+rct txn step_a [count < total][count == total] {
+    &acc_a = acc_a + count;
+    &count = count + 1;
+};
+
+rct txn step_b [count < total][count == total] {
+    &acc_b = acc_b + count;
+    &count = count + 1;
+};

@@ -22,7 +22,6 @@
 
 use crate::ast::*;
 use crate::errors::{Span, SyntaxError};
-use crate::io_registry;
 use crate::lexer::Token;
 use logos::{Lexer, Logos};
 use std::path::Path;
@@ -493,22 +492,6 @@ impl<'a> Parser<'a> {
         // Process dispatch mode from file attributes
         let dispatch_mode = Self::process_dispatch_attribute(&file_attrs);
 
-        // Parse #io declarations at file level
-        let mut io_triggers: Vec<TopLevel> = Vec::new();
-        let mut io_concepts_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        while let Some(Ok(Token::Hash)) = self.current_token() {
-            let is_io = matches!(&self.peek, Some((Ok(Token::Identifier(n)), _)) if n == "io");
-            if !is_io { break; }
-            self.advance(); // consume #
-            self.advance(); // consume io
-            let (concept, trg) = self.parse_io_declaration()?;
-            if !io_concepts_seen.insert(concept) {
-                return self.spanned_err(format!("Duplicate #io concept '{}'", trg.name));
-            }
-            io_triggers.push(TopLevel::Trigger(trg));
-        }
-        items.splice(0..0, io_triggers);
-
         while self.current_token().is_some() {
             items.push(self.parse_top_level()?);
         }
@@ -612,8 +595,7 @@ impl<'a> Parser<'a> {
 
         match self.current_token() {
             Some(Ok(Token::Import)) => {
-                let import = self.parse_import()?;
-                Ok(TopLevel::Import(import))
+                return self.parse_import();
             }
             Some(Ok(Token::Sig)) => {
                 let sig = self.parse_signature()?;
@@ -694,7 +676,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_import(&mut self) -> Result<Import, SyntaxError> {
+    fn parse_import(&mut self) -> Result<TopLevel, SyntaxError> {
         self.expect(Token::Import)?;
 
         let mut items = if let Some(Ok(Token::LBrace)) = self.current_token() {
@@ -762,8 +744,24 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
+        let last = path.last().map(|s| s.as_str()).unwrap_or("");
+        if last.ends_with(".o") || last.ends_with(".a") {
+            if !items.is_empty() {
+                return self.spanned_err(
+                    "Link dependencies ('.o'/'.a') do not support named imports. Use: import \"link/brief_rt.o\";"
+                        .to_string(),
+                );
+            }
+            let is_bundled_rt = last == "brief_rt.o";
+            self.expect(Token::Semicolon)?;
+            return Ok(TopLevel::LinkDependency(crate::ast::LinkDependency {
+                path: path.join("/"),
+                is_bundled_rt,
+            }));
+        }
+
         self.expect(Token::Semicolon)?;
-        Ok(Import { items, path })
+        Ok(TopLevel::Import(Import { items, path }))
     }
 
     fn parse_signature(&mut self) -> Result<Signature, SyntaxError> {
@@ -2525,86 +2523,6 @@ let span = self.current_span();
             is_wake,
             span,
         })
-    }
-
-    /// Parse #io declaration: `#io sigint;` or `#io sigint -> trg name: Type;`
-    /// Returns (concept_name, TriggerDeclaration).
-    fn parse_io_declaration(&mut self) -> Result<(String, TriggerDeclaration), SyntaxError> {
-        // Read concept name
-        let concept = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
-            let mut name = n.clone();
-            self.advance();
-            // Check for parametrized concept: `timer(1hz)`
-            if let Some(Ok(Token::LParen)) = self.current_token() {
-                self.advance();
-                let param = if let Some(Ok(Token::Identifier(p))) = self.current_token() {
-                    let p = p.clone();
-                    self.advance();
-                    p
-                } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
-                    let mut s = n.to_string();
-                    self.advance();
-                    // Handle `1hz` tokenized as Integer(1) + Identifier("hz")
-                    if let Some(Ok(Token::Identifier(unit))) = self.current_token() {
-                        s.push_str(unit);
-                        self.advance();
-                    }
-                    s
-                } else {
-                    return self.spanned_err("Expected parameter value in #io concept".to_string());
-                };
-                self.expect(Token::RParen)?;
-                name.push('(');
-                name.push_str(&param);
-                name.push(')');
-            }
-            name
-        } else {
-            return self.spanned_err("Expected IO concept name after #io".to_string());
-        };
-
-        let io_concept = io_registry::io_lookup(&concept).ok_or_else(|| {
-            let available = io_registry::list_concepts();
-            SyntaxError::InvalidStatement {
-                reason: format!(
-                    "Unknown IO concept '{}'.\nAvailable concepts:\n{}",
-                    concept, available
-                ),
-                span: self.current_span().unwrap_or_else(Span::dummy),
-            }
-        })?;
-
-        let (name, ty) = if let Some(Ok(Token::Arrow)) = self.current_token() {
-            self.advance();
-            self.expect(Token::Trg)?;
-            let user_name = self.expect_identifier()?;
-            self.expect(Token::Colon)?;
-            let user_ty = self.parse_type()?;
-            if user_ty != io_concept.ty {
-                return self.spanned_err(format!(
-                    "Type mismatch for IO concept '{}': registry says {:?}, but you wrote {:?}",
-                    concept, io_concept.ty, user_ty
-                ));
-            }
-            (user_name, user_ty)
-        } else {
-            let ty = io_concept.ty.clone();
-            (concept.clone(), ty)
-        };
-
-        let span = self.current_span();
-        self.expect(Token::Semicolon)?;
-
-        Ok((concept, TriggerDeclaration {
-            name,
-            ty,
-            address: crate::ast::LinkRef::Linked(io_concept.symbol.to_string()),
-            bit_range: None,
-            stages: Vec::new(),
-            condition: None,
-            is_wake: true,
-            span,
-        }))
     }
 
     fn parse_constant(&mut self) -> Result<Constant, SyntaxError> {
@@ -6103,75 +6021,67 @@ mod parser_tests {
     }
 
     #[test]
-    fn test_io_sigint_implicit() {
-        let s = "#io sigint;";
+    fn test_link_dependency_parsed() {
+        let s = "import \"link/brief_rt.o\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_ok(), "#io sigint should parse: {:?}", result.err());
+        assert!(result.is_ok(), "import link dep should parse: {:?}", result.err());
         let program = result.unwrap();
-        assert_eq!(program.items.len(), 1, "Should have one item");
-        if let TopLevel::Trigger(trg) = &program.items[0] {
-            assert_eq!(trg.name, "sigint", "Trigger name should be sigint");
-            assert_eq!(trg.ty, Type::Bool, "Type should be Bool");
-            assert!(matches!(trg.address, crate::ast::LinkRef::Linked(ref s) if s == "__sigint_flag"),
-                "Address should be @ link __sigint_flag");
-            assert!(trg.is_wake, "#io implies #wake");
+        assert_eq!(program.items.len(), 1);
+        if let TopLevel::LinkDependency(dep) = &program.items[0] {
+            assert_eq!(dep.path, "link/brief_rt.o");
+            assert!(dep.is_bundled_rt);
         } else {
-            panic!("Expected Trigger, got {:?}", program.items[0]);
+            panic!("Expected LinkDependency, got {:?}", program.items[0]);
         }
     }
 
     #[test]
-    fn test_io_sigint_explicit() {
-        let s = "#io sigint -> trg mysig: Bool;";
+    fn test_link_dependency_user_o() {
+        let s = "import \"lib/foo.o\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_ok(), "#io sigint explicit should parse: {:?}", result.err());
+        assert!(result.is_ok(), "import lib/foo.o should parse: {:?}", result.err());
         let program = result.unwrap();
-        assert_eq!(program.items.len(), 1, "Should have one item");
-        if let TopLevel::Trigger(trg) = &program.items[0] {
-            assert_eq!(trg.name, "mysig", "Trigger name should be mysig");
-            assert_eq!(trg.ty, Type::Bool, "Type should be Bool");
-            assert!(trg.is_wake, "#io implies #wake");
+        if let TopLevel::LinkDependency(dep) = &program.items[0] {
+            assert_eq!(dep.path, "lib/foo.o");
+            assert!(!dep.is_bundled_rt);
         } else {
-            panic!("Expected Trigger, got {:?}", program.items[0]);
+            panic!("Expected LinkDependency, got {:?}", program.items[0]);
         }
     }
 
     #[test]
-    fn test_io_timer_parametrized() {
-        let s = "#io timer(1hz);";
+    fn test_link_dependency_user_a() {
+        let s = "import \"lib/custom_hw.a\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_ok(), "#io timer(1hz) should parse: {:?}", result.err());
+        assert!(result.is_ok(), "import .a file should parse: {:?}", result.err());
         let program = result.unwrap();
-        assert_eq!(program.items.len(), 1, "Should have one item");
-        if let TopLevel::Trigger(trg) = &program.items[0] {
-            assert_eq!(trg.name, "timer(1hz)", "Trigger name should be timer(1hz)");
-            assert_eq!(trg.ty, Type::Int, "Type should be Int");
-            assert!(matches!(trg.address, crate::ast::LinkRef::Linked(ref s) if s == "__timer_1hz"),
-                "Address should be @ link __timer_1hz");
+        if let TopLevel::LinkDependency(dep) = &program.items[0] {
+            assert_eq!(dep.path, "lib/custom_hw.a");
         } else {
-            panic!("Expected Trigger, got {:?}", program.items[0]);
+            panic!("Expected LinkDependency, got {:?}", program.items[0]);
         }
     }
 
     #[test]
-    fn test_io_nonexistent_concept_error() {
-        let s = "#io nonexistent;";
+    fn test_import_not_link_dep() {
+        let s = "import { X } from \"std/system.bv\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_err(), "#io nonexistent should error");
-        let err = format!("{:?}", result.err().unwrap());
-        assert!(err.contains("sigint"), "Error should list available concepts");
+        assert!(result.is_ok(), "import module should still parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert!(matches!(&program.items[0], TopLevel::Import(_)),
+            "Expected Import, got {:?}", program.items[0]);
     }
 
     #[test]
-    fn test_io_duplicate_error() {
-        let s = "#io sigint;\n#io sigint;";
+    fn test_link_dep_rejects_named_imports() {
+        let s = "import { foo } from \"link/brief_rt.o\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_err(), "Duplicate #io sigint should error");
+        assert!(result.is_err(), "Named imports on link deps should error");
     }
 
     #[test]

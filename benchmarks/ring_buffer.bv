@@ -1,0 +1,27 @@
+// Enum Switched Counter — Tests enum dispatch with wake hybrid (Path 4)
+//
+// Tests:
+//   - Auto-wake: @link trigger → is_wake = true
+//   - Enumerable bool trigger gating (io_pending: Bool → 2 values ≤ budget)
+//   - Switch-dispatch entry point (eliminates @reactor_tick)
+//   - Folded while-loop (ops < N → ops == N convergence)
+//   - Wake+enum hybrid: @__rt_init()/@__rt_wait() with switch loop-back
+//
+// @__io_pending is set to 1 by __rt_init() on startup. On the first tick,
+// the switch hits case 1, enters the folded loop, and runs N iterations.
+//
+// import "link/brief_rt.o" in brief_rt.bv pulls in the runtime automatically.
+//
+// Build:
+//   cargo run --bin brief-compiler -- llvm benchmarks/ring_buffer.bv --out benchmarks --optimize-budget 256
+//
+// C reference: ring_buffer_c.c
+
+import io_pending from "std/brief_rt.bv";
+
+let ops: Int = 0;
+const N: Int = 50000000;  // 50M ops
+
+rct txn work [io_pending][ops == N] {
+    &ops = ops + 1;
+};

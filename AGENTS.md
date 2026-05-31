@@ -71,24 +71,9 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: All optimization phases complete. 347 tests pass. Thread pool async dispatch done. Benchmarks next.
+**Current**: All optimization phases complete. 347 tests pass. `#io`/`io_registry.rs` eliminated. Benchmarks next.
 
-### Done — Optimization Framework (complete)
-- 7 LLVM backend bug fixes (cast no-op, zero-init, float hex, mustprogress UB, memory scoping, #volatile, negative float)
-- `transition_graph.rs` — bounded pre detection, increment patterns, pure/impure body
-- `emit_folded_main()` / `emit_folded_pure_counter()` — while-loop collapse for bounded-counter rxns (Path 2)
-- IIR filter benchmark: Brief 0.15s vs C 0.23s (1.53× faster)
-- `TopLevel::Constant` in LLVM backend (`@name = constant` globals, const identifier resolution)
-- Convergence verification (`check_convergence`) — pre validation, relational post-ops, overshoot detection
-- **RegionAnalyzer** (`src/analysis/region.rs`): VarClass (Pure/Bounded/Opaque), Interval, dep graph, BFS prop, region detection, value-set estimation, 9 unit tests
-- **Phase 2**: Value-set enumeration, `emit_enum_main` with switch dispatch for enumerable triggers (Path 4)
-- **Phase 3**: `--optimize-budget <N>`, `--optimize-report`, `--optimize-size <bytes>` CLI flags
-- **Phase 4.1-4.3**: Linear transaction chain detection, expression substitution, `emit_fused_composed()`, pure counter elimination
-- **Phase A**: Wake-trigger/enum dispatch soundness fix (was `has_wake → enumerable=None` gate; now enum+wake hybrid)
-- **Phase B**: Compile-time complete evaluation — `is_fully_precomputable`, `collect_final_values`, `emit_precomputed_main` (Path 3)
-- **Phase C**: IIR filter benchmark regression test (guard against optimization regressions)
-
-### Done — Eliminate Redundant Pragmas (Steps 1-5, complete)
+### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
 - **Step 2**: `@ link` triggers default to wake (no `#wake` needed)
 - **Step 3**: Wake+enum mutual exclusion lifted — enum dispatch enters hybrid wake mode with `@__rt_wait()` loop
@@ -104,6 +89,16 @@ brief-compiler selfhost <file.bv>
 - **Phase 5f**: `main.rs` link step — detects `@llvm.thread_pool`, adds `-DBRIEF_THREAD_POOL -lpthread`
 - **4 new tests** (async body emission, thread pool metadata, barrier calls in main, no thread pool without async txns)
 - **No atomics on state fields** — the proof engine guarantees disjoint field access per txn group, so plain loads/stores are data-race-free (C11 5.1.2.4p25)
+- **Step 5f**: `main.rs` link step — detects `@llvm.thread_pool`, adds `-DBRIEF_THREAD_POOL -lpthread`
+- **Step 6**: Eliminate `io_registry.rs` and `#io` pragma — replaced by `import "link/brief_rt.o"` auto-dependency mechanism
+  - Deleted `src/io_registry.rs` (94 lines of hardcoded concept→symbol table)
+  - Deleted `parse_io_declaration()` (~80 lines) and `#io` parsing loop (~15 lines)
+  - New AST node `TopLevel::LinkDependency` — parser detects `.o`/`.a` imports
+  - New `lib/std/brief_rt.bv` — declares all `@ link` triggers as pure Brief code
+  - `lib/std/system.bv` rewritten to import from `brief_rt.bv` (no more `#io`)
+  - Compiler driver auto-detects link deps from source; `--link-rt` flag removed
+  - 5 new parser tests for link dep detection
+  - Zero compiler knowledge of OS signal concepts afterward
 
 ### Optimization Path Summary
 | Path | What | Status |
@@ -115,12 +110,14 @@ brief-compiler selfhost <file.bv>
 
 ### Next Up
 - 3 new benchmarks (ring buffer / async counters / precompute sum) + IIR filter regression
-- Benchmark infrastructure: monotonic clock FFI, extended `build_and_bench.sh` with `--link-rt` support
+- Benchmark infrastructure: monotonic clock FFI, extended `build_and_bench.sh` (no `--link-rt` needed — source-declared)
 
 ## Key Plan Documents
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases
 - **`plans/2026-06-01-optimization-completion.md`** — Phases A/B/C (wake fix, precompute, regression)
 - **`plans/2026-06-01-eliminate-redundant-pragmas.md`** — Steps 1-5 (auto-wake, auto-parallel, async inference, thread pool)
 - **`plans/2026-06-01-thread-pool-async-dispatch.md`** — Step 5 design (thread pool, barrier, auto-inference)
+- **`plans/2026-05-31-eliminate-io-registry-link-deps.md`** — Step 6 design (eliminate `io_registry.rs` with `import "link/"`)
+- **`plans/2026-05-31-benchmarks-plan.md`** — Benchmarks plan (3 new + regression)
 - **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual optimization architecture
 - **`docs/design/optimization-cost-model.md`** — Full cost model specification
