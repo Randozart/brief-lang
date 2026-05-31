@@ -2491,7 +2491,10 @@ let span = self.current_span();
             self.expect(Token::RBracket)?;
         }
 
-        let mut is_wake = false;
+        // @ link triggers are wake-capable by default - they monitor volatile globals
+        // that change during sleep. MMIO triggers (Explicit) are natively wake-capable.
+        let mut is_wake = matches!(address, crate::ast::LinkRef::Linked(_));
+        // #wake is retained for backward compat but is now the default for @ link
         if let Some(Ok(Token::Hash)) = self.current_token() {
             self.advance();
             if let Some(Ok(Token::Identifier(n))) = self.current_token() {

@@ -263,6 +263,52 @@ impl LlvmBackend {
             }
         }
 
+        // Auto-select Parallel dispatch when all reactive transactions
+        // are proven conflict-free. The proof engine's check_mutual_exclusion
+        // already validates this for async txns; here we extend the check to
+        // ALL reactive txns. If no pair has read/write or write/write conflicts
+        // with overlapping preconditions, parallel dispatch is safe.
+        let dispatch_mode = if program.dispatch_mode == crate::ast::DispatchMode::Sequential {
+            let reactive_txns: Vec<&crate::ast::Transaction> = txns.iter()
+                .filter(|(_, t)| t.is_reactive)
+                .map(|(_, t)| *t)
+                .collect();
+            let mut cf = true;
+            for i in 0..reactive_txns.len() {
+                for j in (i + 1)..reactive_txns.len() {
+                    let a = reactive_txns[i];
+                    let b = reactive_txns[j];
+                    let a_writes: std::collections::HashSet<String> =
+                        crate::backend::collect_assigned_identifiers(&a.body)
+                            .into_iter().collect();
+                    let b_writes: std::collections::HashSet<String> =
+                        crate::backend::collect_assigned_identifiers(&b.body)
+                            .into_iter().collect();
+                    let a_reads = crate::backend::collect_read_identifiers(&a.body);
+                    let b_reads = crate::backend::collect_read_identifiers(&b.body);
+                    // Write/write conflict?
+                    if !a_writes.is_disjoint(&b_writes) { cf = false; break; }
+                    // Write/read conflict?
+                    let mut a_pre_ids = std::collections::HashSet::new();
+                    crate::backend::collect_expr_identifiers(&a.contract.pre_condition, &mut a_pre_ids);
+                    let mut b_pre_ids = std::collections::HashSet::new();
+                    crate::backend::collect_expr_identifiers(&b.contract.pre_condition, &mut b_pre_ids);
+                    if !a_pre_ids.is_disjoint(&b_pre_ids) {
+                        if !a_writes.is_disjoint(&b_reads) { cf = false; break; }
+                        if !b_writes.is_disjoint(&a_reads) { cf = false; break; }
+                    }
+                }
+                if !cf { break; }
+            }
+            if cf {
+                crate::ast::DispatchMode::Parallel
+            } else {
+                program.dispatch_mode
+            }
+        } else {
+            program.dispatch_mode
+        };
+
         let mut out = String::new();
         self.emit_header(&mut out);
 self.emit_declares(&mut out);
@@ -444,13 +490,15 @@ self.emit_declares(&mut out);
         // Wake triggers must never take the enumerable switch-dispatch path.
         // Switch arms end with `ret i32 0`, which exits after one tick.
         // Wake reactors need the infinite-loop `@main` with `@__rt_wait()`.
+        // When has_wake_triggers is true, emit_enum_main enters hybrid mode:
+        // it emits the tick + @__rt_wait loop with trigger re-sampling.
         let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
 
         // Pre-compute into an owned Vec to avoid borrow conflicts with later
         // mutable `self` usage.
         let enumerable: Option<Vec<(String, Option<u64>)>> = {
             let region = &analysis.region_analyzer;
-            if !self.trigger_names.is_empty() && !has_wake_triggers {
+            if !self.trigger_names.is_empty() {
                 let mut sizes = Vec::new();
                 let mut total: u64 = 1;
                 let mut ok = true;
@@ -545,7 +593,7 @@ self.emit_declares(&mut out);
                 } else { (0, None, None) };
 
                 // Emit the reactor_tick function (needed for residual fallback path)
-                match program.dispatch_mode {
+                match dispatch_mode {
                     DispatchMode::Parallel => {
                         self.build_write_masks(program);
                         self.emit_parallel_reactor(&mut out, &txns, &fusable);
@@ -578,13 +626,14 @@ self.emit_declares(&mut out);
                     composed_fn,
                     composed_trig_ref,
                     all_int_ref,
+                    has_wake_triggers,
                 );
 
                 if has_wake_triggers {
                     self.emit_wake_metadata(&mut out);
                 }
             } else if !txns.is_empty() {
-                match program.dispatch_mode {
+                match dispatch_mode {
                     DispatchMode::Parallel => {
                         self.build_write_masks(program);
                         self.emit_parallel_reactor(&mut out, &txns, &fusable);
@@ -1912,10 +1961,18 @@ self.emit_declares(&mut out);
         composed_fn: Option<&str>,
         composed_trig_map: Option<&HashMap<String, Vec<(i64, String)>>>,
         all_internal_map: Option<&HashMap<String, (usize, i64)>>,
+        has_wake: bool,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        // #0 = willreturn, mustprogress (one-shot). #3 = no willreturn, no mustprogress (wake loop).
+        let attr = if has_wake { "#3" } else { "#0" };
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
+        if has_wake {
+            writeln!(out, "  call void @__rt_init()").ok();
+            writeln!(out, "  br label %tick").ok();
+            writeln!(out, "tick:").ok();
+        }
 
         // Sample triggers (clone trigger data to avoid borrow conflict)
         let trigger_data: Vec<(String, String, bool, crate::ast::Type)> = enum_sizes.iter()
@@ -1958,6 +2015,12 @@ self.emit_declares(&mut out);
             all_internal_map.and_then(|m| m.get(fn_name).copied())
         };
 
+        // "Done" label for each branch — in wake mode this is do_wait, in one-shot mode
+        // this is a ret i32 0 or a terminal. We use br label %<done_label> as the
+        // exit for each case arm.
+        let done_label = if has_wake { "do_wait" } else { "exit" };
+        if !has_wake { writeln!(out, "  br label %dispatch").ok(); writeln!(out, "dispatch:").ok(); }
+
         if total_combos == 1 && enum_sizes.len() == 1 {
             // Single-value trigger: just fall through to the loop
             let fn_name = trig_to_fn.get(&0).map(|s| s.as_str()).unwrap_or(txn_name);
@@ -1967,7 +2030,11 @@ self.emit_declares(&mut out);
             } else {
                 self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, "sc");
             }
-            writeln!(out, "  ret i32 0").ok();
+            if has_wake {
+                writeln!(out, "  br label %{}", done_label).ok();
+            } else {
+                writeln!(out, "  ret i32 0").ok();
+            }
         } else if enum_sizes.len() == 1 {
             // Single enumerable trigger — one switch axis
             let tn = &enum_sizes[0].0;
@@ -1988,22 +2055,42 @@ self.emit_declares(&mut out);
                 } else {
                     self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, &prefix);
                 }
-                writeln!(out, "  ret i32 0").ok();
+                if has_wake {
+                    writeln!(out, "  br label %{}", done_label).ok();
+                } else {
+                    writeln!(out, "  ret i32 0").ok();
+                }
             }
             writeln!(out, "{}_residual:", tn).ok();
-            writeln!(out, "  br label %{}_residual_loop", tn).ok();
-            writeln!(out, "{}_residual_loop:", tn).ok();
             writeln!(out, "  call void @reactor_tick()").ok();
-            writeln!(out, "  br label %{}_residual_loop", tn).ok();
+            if has_wake {
+                writeln!(out, "  br label %{}", done_label).ok();
+            } else {
+                writeln!(out, "  br label %{}_residual_loop", tn).ok();
+                writeln!(out, "{}_residual_loop:", tn).ok();
+                writeln!(out, "  call void @reactor_tick()").ok();
+                writeln!(out, "  br label %{}_residual_loop", tn).ok();
+            }
         } else {
             // Multi-trigger case: just fall through to standard reactor
-            writeln!(out, "  br label %residual_entry").ok();
-            writeln!(out, "residual_entry:").ok();
-            writeln!(out, "  call void @init_state()").ok();
-            writeln!(out, "  br label %residual_loop").ok();
-            writeln!(out, "residual_loop:").ok();
-            writeln!(out, "  call void @reactor_tick()").ok();
-            writeln!(out, "  br label %residual_loop").ok();
+            if has_wake {
+                writeln!(out, "  call void @reactor_tick()").ok();
+                writeln!(out, "  br label %{}", done_label).ok();
+            } else {
+                writeln!(out, "  br label %residual_entry").ok();
+                writeln!(out, "residual_entry:").ok();
+                writeln!(out, "  call void @init_state()").ok();
+                writeln!(out, "  br label %residual_loop").ok();
+                writeln!(out, "residual_loop:").ok();
+                writeln!(out, "  call void @reactor_tick()").ok();
+                writeln!(out, "  br label %residual_loop").ok();
+            }
+        }
+
+        if has_wake {
+            writeln!(out, "do_wait:").ok();
+            writeln!(out, "  call void @__rt_wait()").ok();
+            writeln!(out, "  br label %tick").ok();
         }
 
         writeln!(out, "}}").ok();
@@ -2857,13 +2944,22 @@ mod tests {
     }
 
     #[test]
-    fn test_wake_triggers_bypass_enum_dispatch() {
+    fn test_enum_with_wake_triggers_hybrid() {
+        // Bool trigger with is_wake → enters enum dispatch in hybrid wake mode.
+        // Previously this bypassed enum entirely (Phase A gate). Now enum dispatch
+        // is active, with @__rt_init()/__rt_wait() wrapping the switch arms.
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
         let output = LlvmBackend::new().generate(&program);
         assert!(output.contains("call void @__rt_wait()"),
-            "Wake trigger must use standard reactor path with __rt_wait");
-        assert!(!output.contains("switch i8"),
-            "Enum dispatch must be bypassed for wake triggers");
+            "Wake triggers get __rt_wait between ticks");
+        assert!(output.contains("call void @__rt_init()"),
+            "Wake triggers get __rt_init at startup");
+        assert!(output.contains("switch i8"),
+            "Enum dispatch IS used with wake triggers (hybrid mode — switch arms loop back via __rt_wait)");
+        assert!(output.contains("load volatile"),
+            "Triggers are volatile-loaded for sampling");
+        assert!(output.contains("define i32 @main() local_unnamed_addr #3"),
+            "Wake hybrid uses #3 attribute (no willreturn, no mustprogress) for infinite tick loop");
     }
 
     #[test]

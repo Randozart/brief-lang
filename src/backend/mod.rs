@@ -221,7 +221,7 @@ pub fn validate_hashtags_in_program(program: &Program, backend: &str, strict: bo
 }
 
 /// Intent: Collect all identifiers referenced by an expression.
-fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet<String>) {
+pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet<String>) {
     match expr {
         Expr::Identifier(n) | Expr::OwnedRef(n) | Expr::PriorState(n) => {
             ids.insert(n.clone());
@@ -261,7 +261,7 @@ fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet<Str
 }
 
 /// Intent: Collect all identifiers assigned in a guarded statement body.
-fn collect_assigned_identifiers(body: &[Statement]) -> Vec<String> {
+pub fn collect_assigned_identifiers(body: &[Statement]) -> Vec<String> {
     let mut ids = Vec::new();
     for stmt in body {
         if let Statement::Assignment { lhs, .. } = stmt {
@@ -274,7 +274,7 @@ fn collect_assigned_identifiers(body: &[Statement]) -> Vec<String> {
 }
 
 /// Intent: Collect all identifiers read by an expression/statement.
-fn collect_read_identifiers(body: &[Statement]) -> std::collections::HashSet<String> {
+pub fn collect_read_identifiers(body: &[Statement]) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
     for stmt in body {
         match stmt {

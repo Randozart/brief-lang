@@ -1342,6 +1342,7 @@ impl ProofEngine {
         self.collect_transactions(program);
         self.check_exhaustiveness(program);
         self.check_mutual_exclusion(program);
+        self.suggest_async_promotion(program);
         self.check_total_path(program);
         self.check_true_assertions(program);
         self.check_postcondition_contradictions(program);
@@ -2579,6 +2580,71 @@ impl ProofEngine {
                             self.errors.push(err);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// Suggest `async` for reactive transactions that are proven conflict-free.
+    /// Unlike check_mutual_exclusion (which validates already-async txns),
+    /// this scans ALL rct txn pairs and emits a lint for conflict-free ones
+    /// that haven't been marked async yet.
+    fn suggest_async_promotion(&mut self, program: &Program) {
+        // Collect all reactive transactions
+        let mut reactive_txns: Vec<&Transaction> = Vec::new();
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                if txn.is_reactive {
+                    reactive_txns.push(txn);
+                }
+            }
+        }
+
+        for i in 0..reactive_txns.len() {
+            for j in (i + 1)..reactive_txns.len() {
+                let txn1 = reactive_txns[i];
+                let txn2 = reactive_txns[j];
+
+                // Skip if both are already async — check_mutual_exclusion handles that
+                if txn1.is_async && txn2.is_async { continue; }
+
+                let conflicts = self.find_read_write_conflicts(txn1, txn2);
+                if conflicts.is_empty() {
+                    // No read/write or write/write conflicts — emit lint
+                    let both_non_async = !txn1.is_async && !txn2.is_async;
+                    let mut warn = ProofError::new_warning(
+                        "A001",
+                        "async transaction candidate",
+                    );
+                    warn.explanation = if both_non_async {
+                        format!(
+                            "transactions '{}' and '{}' are conflict-free — consider marking both 'async' for concurrent dispatch",
+                            txn1.name, txn2.name
+                        )
+                    } else {
+                        let non_async = if !txn1.is_async { &txn1.name } else { &txn2.name };
+                        let already_async = if txn1.is_async { &txn1.name } else { &txn2.name };
+                        format!(
+                            "transaction '{}' is conflict-free with async '{}' — consider marking it 'async' too",
+                            non_async, already_async
+                        )
+                    };
+                    warn.proof_chain.push(format!(
+                        "1. '{}' writes to: {:?} — reads from: {:?}",
+                        txn1.name,
+                        self.extract_write_vars(txn1),
+                        self.extract_read_vars(txn1),
+                    ));
+                    warn.proof_chain.push(format!(
+                        "2. '{}' writes to: {:?} — reads from: {:?}",
+                        txn2.name,
+                        self.extract_write_vars(txn2),
+                        self.extract_read_vars(txn2),
+                    ));
+                    warn.hints.push(
+                        "add 'async' keyword after 'rct' to enable concurrent dispatch".to_string(),
+                    );
+                    self.errors.push(warn);
                 }
             }
         }
