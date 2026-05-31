@@ -21,6 +21,7 @@
 // or embeds the Work.
 
 use crate::analysis::call_graph::CallGraph;
+use crate::analysis::region::RegionAnalyzer;
 use crate::ast::*;
 use crate::errors::{Diagnostic, Severity, Span};
 use crate::sig_casting;
@@ -1306,6 +1307,7 @@ pub struct ProofEngine {
     state_dag: HashMap<String, HashSet<String>>,
     transactions: Vec<Transaction>,
     strict: bool,
+    pub region_analyzer: Option<RegionAnalyzer>,
 }
 
 impl ProofEngine {
@@ -1315,6 +1317,7 @@ impl ProofEngine {
             state_dag: HashMap::new(),
             transactions: Vec::new(),
             strict: false,
+            region_analyzer: None,
         }
     }
 
@@ -1332,6 +1335,9 @@ impl ProofEngine {
     }
 
     pub fn verify_program(&mut self, program: &Program) -> Vec<ProofError> {
+        // Run region analysis for optimizer queries
+        self.region_analyzer = Some(RegionAnalyzer::analyze(program));
+
         self.build_state_dag(program);
         self.collect_transactions(program);
         self.check_exhaustiveness(program);
