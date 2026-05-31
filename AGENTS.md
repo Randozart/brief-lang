@@ -71,34 +71,56 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: Phases 3-4.3 done. 334 tests pass. Pure counter elimination and integration tests added.
+**Current**: All optimization phases complete. 347 tests pass. Thread pool async dispatch done. Benchmarks next.
 
-### Done
+### Done — Optimization Framework (complete)
 - 7 LLVM backend bug fixes (cast no-op, zero-init, float hex, mustprogress UB, memory scoping, #volatile, negative float)
 - `transition_graph.rs` — bounded pre detection, increment patterns, pure/impure body
-- `emit_folded_main()` / `emit_folded_pure_counter()` — while-loop collapse for bounded-counter rxns
+- `emit_folded_main()` / `emit_folded_pure_counter()` — while-loop collapse for bounded-counter rxns (Path 2)
 - IIR filter benchmark: Brief 0.15s vs C 0.23s (1.53× faster)
 - `TopLevel::Constant` in LLVM backend (`@name = constant` globals, const identifier resolution)
 - Convergence verification (`check_convergence`) — pre validation, relational post-ops, overshoot detection
-- Architecture: convergence skip moved to `ProofEngine::verify_contracts`
 - **RegionAnalyzer** (`src/analysis/region.rs`): VarClass (Pure/Bounded/Opaque), Interval, dep graph, BFS prop, region detection, value-set estimation, 9 unit tests
-- **Phase 2**: `region_analyzer` in `AnalysisResults`, `emit_folded_loop` helper refactor, `emit_enum_main` with switch dispatch for enumerable triggers (budget=256 combos)
-- **Phase 3**: `--optimize-budget <N>`, `--optimize-report`, `--optimize-size <bytes>` CLI flags. Budget wired through to enum check. Report shows trigger value sets, combinations, budget fit, size estimation.
-- **Phase 4.1**: Linear transaction chain detection — txn_reads/txn_writes per txn, A→B→C traversal, maximal chain dedup. Shown in `--optimize-report`.
-- **Phase 4.2**: Expression substitution engine (`substitute_var`/`substitute_expr` for all 46 Expr variants). Chain composition with slack-link variable forwarding. Composability constraint validation (single upstream producer, shared convergence contract, no FFI). 12 new unit tests.
-- **Phase 4.3**: `emit_fused_composed()` — emits composed chain bodies as LLVM functions. `emit_enum_main()` extended with per-trigger-value composed function dispatch. Trigger branching produces one fused function per concretized trigger value (Bool → `@txn_fused_txn_trg_0` / `_trg_1`). Partial composability tracks `all_internal` flag for store elimination. Pure counter elimination for all-internal chains: skips fused function emission, stores final counter value directly in per-case switch arm.
-- **Report**: Extended with optimization priority ranking table (RID, txns, class, weight, iter, cost, score, chain/GPU tags), budget allocation plan (allocated/skipped regions), composed chain details (trigger values, all-internal status).
-- **Types**: `ComplexityClass` (Trivial/Light/Medium/Heavy/Unbounded), `RegionScore`, `BudgetPlan`, `ComposedChain` with `trigger_values: Option<Vec<(String, i64)>>` and `all_internal: bool`.
-- **Analysis pipeline**: 10-phase `analyze()` — register→depgraph→seed→propagate→regions→value_sets→chains→iter_bounds→region_scores→compose; `build_budget_plan()` called separately with budget parameter.
-- **Integration tests**: 6 new tests — report ranking, budget plan, chain detection, size estimation, enum dispatch with composed chains, all-internal pure counter verification.
-- **Design docs**: `determinism-and-optimization-frontier.md`, `optimization-cost-model.md`
-- **Plan doc**: `plans/2026-06-01-optimization-framework.md`
+- **Phase 2**: Value-set enumeration, `emit_enum_main` with switch dispatch for enumerable triggers (Path 4)
+- **Phase 3**: `--optimize-budget <N>`, `--optimize-report`, `--optimize-size <bytes>` CLI flags
+- **Phase 4.1-4.3**: Linear transaction chain detection, expression substitution, `emit_fused_composed()`, pure counter elimination
+- **Phase A**: Wake-trigger/enum dispatch soundness fix (was `has_wake → enumerable=None` gate; now enum+wake hybrid)
+- **Phase B**: Compile-time complete evaluation — `is_fully_precomputable`, `collect_final_values`, `emit_precomputed_main` (Path 3)
+- **Phase C**: IIR filter benchmark regression test (guard against optimization regressions)
+
+### Done — Eliminate Redundant Pragmas (Steps 1-5, complete)
+- **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
+- **Step 2**: `@ link` triggers default to wake (no `#wake` needed)
+- **Step 3**: Wake+enum mutual exclusion lifted — enum dispatch enters hybrid wake mode with `@__rt_wait()` loop
+- **Step 4**: `suggest_async_promotion()` lint — A001 warning for conflict-free `rct` txns that could be async
+- **Step 5**: Thread pool auto-inference + concurrent async dispatch (Path 5)
+
+### Step 5 Details — Thread Pool + Auto Async/Enum Inference
+- **Phase 5a**: Thread pool primitives in `runtime/brief_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `brief_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
+- **Phase 5b**: Builtin declares (`brief_thread_pool_init`, `brief_barrier_release`, `brief_barrier_wait`)
+- **Phase 5c**: Auto-categorize txns in `generate()` — enum candidates (trigger-gated), async candidates (conflict-free pairwise), enum beats async
+- **Phase 5d**: `emit_async_body` — per-txn worker functions (`pre→fire` pattern)
+- **Phase 5e**: Async phase injection in `emit_main` and `emit_enum_main` — thread pool init at entry, `barrier_release → reactor_tick → barrier_wait`
+- **Phase 5f**: `main.rs` link step — detects `@llvm.thread_pool`, adds `-DBRIEF_THREAD_POOL -lpthread`
+- **4 new tests** (async body emission, thread pool metadata, barrier calls in main, no thread pool without async txns)
+- **No atomics on state fields** — the proof engine guarantees disjoint field access per txn group, so plain loads/stores are data-race-free (C11 5.1.2.4p25)
+
+### Optimization Path Summary
+| Path | What | Status |
+|------|------|--------|
+| Path 2 | Folded while-loop (counter convergence) | Done — IIR filter |
+| Path 3 | Compile-time precompute (state space ≤ budget) | Done — `emit_precomputed_main` |
+| Path 4 | Enum switch-dispatch (bounded trigger values) | Done — wake+enum hybrid |
+| Path 5 | Thread pool async dispatch (conflict-free txns) | Done — auto-inference |
 
 ### Next Up
-- Phase 5: Compile-time complete evaluation (if state space ≤ budget, precompute all results)
+- 3 new benchmarks (ring buffer / async counters / precompute sum) + IIR filter regression
+- Benchmark infrastructure: monotonic clock FFI, extended `build_and_bench.sh` with `--link-rt` support
 
-## Key Design Documents
-
-- **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual architecture for Brief's optimization framework: determinism analysis, atomic reactive regions, value-set enumeration, budget-controlled compile-time optimization.
-- **`docs/design/optimization-cost-model.md`** — Full specification for the optimization cost model: `ComplexityClass`, `RegionScore`, `BudgetPlan`, `ComposedChain` types; complexity estimation, region scoring with ROI metric, greedy budget allocation, chain composition with trigger branching, fused emission, GPU eligibility analysis, report format. Target: O(n) → O(1) reduction on every provable axis.
-- **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for building the framework, phased from tactical convergence-proof fixes through value-set enumeration and report system.
+## Key Plan Documents
+- **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases
+- **`plans/2026-06-01-optimization-completion.md`** — Phases A/B/C (wake fix, precompute, regression)
+- **`plans/2026-06-01-eliminate-redundant-pragmas.md`** — Steps 1-5 (auto-wake, auto-parallel, async inference, thread pool)
+- **`plans/2026-06-01-thread-pool-async-dispatch.md`** — Step 5 design (thread pool, barrier, auto-inference)
+- **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual optimization architecture
+- **`docs/design/optimization-cost-model.md`** — Full cost model specification
