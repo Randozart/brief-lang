@@ -68,3 +68,8 @@ brief-compiler selfhost <file.bv>
 - `Statement::Unification` — properly implemented (looks up state, matches variant, executes block)
 
 **Do NOT add as built-ins**: `is_digit`, `is_alpha`, `is_alphanumeric`, `is_upper`, `is_lower`, `is_space`, `char_to_string`, `None`, `Some`, `Ok`, `Err`. These are in `lib/std/` and should be imported.
+
+## Key Design Documents
+
+- **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual architecture for Brief's optimization framework: determinism analysis, atomic reactive regions, value-set enumeration, budget-controlled compile-time optimization.
+- **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for building the framework, phased from tactical convergence-proof fixes through value-set enumeration and report system.

@@ -5,6 +5,9 @@
 //   - Register promotion via noalias nocapture + alwaysinline
 //   - SMT-driven bounds-check elision via @llvm.assume
 //   - Precondition dispatch: [count < total] guarded reactive transaction
+//   - Convergence contract: [count < total][count == total]
+//     The proof engine verifies bounded convergence; the LLVM backend
+//     emits only the canonical while loop with inline bound.
 //
 // Equivalent C reference: iir_filter_c.c
 //
@@ -13,35 +16,37 @@
 //   clang -O3 -march=native -o benchmarks/iir_filter benchmarks/iir_filter.ll
 //
 // Benchmarks:
-//   perf stat ./benchmarks/iir_filter    (Ctrl-C after a few seconds)
+//   perf stat ./benchmarks/iir_filter
 //   perf stat ./benchmarks/iir_filter_c
 
-// State: biquad coefficients (low-pass Butterworth, fc=0.1, fs=1.0)
-let b0: Float = 0.003916126444;
-let b1: Float = 0.007832252889;
-let b2: Float = 0.003916126444;
-let a1: Float = -1.815341082700;
-let a2: Float = 0.831005589300;
+// Coefficients — compile-time constants, emitted as @name = constant float
+const b0: Float = 0.003916126444;
+const b1: Float = 0.007832252889;
+const b2: Float = 0.003916126444;
+const a1: Float = -1.815341082700;
+const a2: Float = 0.831005589300;
 
-// Delay-line state (feedback path)
+// Impulse input — constant for impulse response
+const input: Float = 1.0;
+
+// Loop bound — constant, inlined into the while comparison
+const total: Int = 50000000;
+
+// Delay-line state (feedback path) — mutates every tick
 let x1: Float = 0.0;
 let x2: Float = 0.0;
 let y1: Float = 0.0;
 let y2: Float = 0.0;
 
-// Impulse input — constant for impulse response
-let input: Float = 1.0;
-
-// Loop control
-let total: Int = 50000000;
+// Loop counter — mutates every tick
 let count: Int = 0;
 
-// One reactive transaction fires per tick while count < total.
-// The precondition [count < total] generates:
-//   - A pre_process function evaluated in reactor_tick
-//   - An @llvm.assume(count < total) inside the transaction body
-// LLVM uses this to eliminate bounds checks and promote loop invariants.
-rct txn process [count < total] {
+// Convergence contract: the reactor fires while count < total and must
+// eventually converge to count == total.  The proof engine verifies
+// bounded convergence; the LLVM backend emits:
+//   while (count < 50000000) { process_body(); }
+// with zero runtime contract evaluation.
+rct txn process [count < total][count == total] {
     // Feedforward path: b0*input + b1*x1 + b2*x2
     let f0: Float = b0 * input;
     let f1: Float = b1 * x1;

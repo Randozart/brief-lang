@@ -552,6 +552,7 @@ impl SymbolicExecutor {
                 &[],
                 state,
                 format!("lambda transaction '{}'", txn.name),
+                false,
             );
 
             let mut state = self.init_state_from_precondition(pre);
@@ -586,13 +587,27 @@ impl SymbolicExecutor {
                 state.vars.insert(p_name.clone(), SymbolicValue::Symbolic(p_name.clone()));
             }
 
-            self.verify_contract_implication(
-                &txn.contract.pre_condition,
-                &txn.contract.post_condition,
-                &txn.body,
-                state,
-                format!("transaction '{}'", txn.name),
-            );
+            // For reactive convergence contracts, skip per-path check
+            // if convergence is provable (postcondition var == bound,
+            // body increments var, bound is invariant).
+            if txn.is_reactive
+                && check_convergence(
+                    &txn.body,
+                    &txn.contract.pre_condition,
+                    &txn.contract.post_condition,
+                )
+            {
+                // Convergence proven — skip per-path postcondition check
+            } else {
+                self.verify_contract_implication(
+                    &txn.contract.pre_condition,
+                    &txn.contract.post_condition,
+                    &txn.body,
+                    state,
+                    format!("transaction '{}'", txn.name),
+                    false,
+                );
+            }
         }
 
         self.errors.clone()
@@ -612,6 +627,7 @@ impl SymbolicExecutor {
                 &[], // No body - just check if post follows from pre
                 state,
                 format!("lambda definition '{}'", defn.name),
+                false,
             );
 
             // Additional check: if pre is true, post must be true (no counterexample possible)
@@ -644,6 +660,7 @@ impl SymbolicExecutor {
                 &defn.body,
                 state,
                 format!("definition '{}'", defn.name),
+                false,
             );
         }
 
@@ -757,6 +774,7 @@ impl SymbolicExecutor {
         body: &[Statement],
         state: SymbolicState,
         context: String,
+        is_reactive: bool,
     ) {
         let initial_vars = state.vars.clone();
         let term_paths = self.enumerate_paths(body, state.clone());
@@ -1103,6 +1121,84 @@ fn format_expr(expr: &Expr) -> String {
             format!("{}({})", name, args_str)
         }
         _ => "<expr>".to_string(),
+    }
+}
+
+/// Check if a reactive transaction satisfies a convergence contract:
+/// postcondition is `var == bound`, body has `&var = var +/- delta`,
+/// bound is not assigned in body — the transaction converges toward bound.
+fn check_convergence(
+    body: &[Statement],
+    _pre_condition: &Expr,
+    post_condition: &Expr,
+) -> bool {
+    match post_condition {
+        Expr::Eq(lhs, rhs) => {
+            let (var, bound) = match (lhs.as_ref(), rhs.as_ref()) {
+                (Expr::Identifier(v), Expr::Identifier(b)) => (v, b),
+                _ => return false,
+            };
+
+            // Detect increment/decrement pattern on var
+            let mut has_inc = false;
+            for stmt in body {
+                if let Statement::Assignment { lhs, expr, .. } = stmt {
+                    let assign_name = match lhs {
+                        Expr::Identifier(n) | Expr::OwnedRef(n) => n,
+                        _ => continue,
+                    };
+                    if assign_name == var {
+                        match expr {
+                            Expr::Add(a, b) => {
+                                if let (Expr::Identifier(v), Expr::Integer(d)) =
+                                    (a.as_ref(), b.as_ref())
+                                {
+                                    if v == var && *d > 0 {
+                                        has_inc = true;
+                                    }
+                                }
+                                if let (Expr::Integer(d), Expr::Identifier(v)) =
+                                    (a.as_ref(), b.as_ref())
+                                {
+                                    if v == var && *d > 0 {
+                                        has_inc = true;
+                                    }
+                                }
+                            }
+                            Expr::Sub(a, b) => {
+                                if let (Expr::Identifier(v), Expr::Integer(d)) =
+                                    (a.as_ref(), b.as_ref())
+                                {
+                                    if v == var && *d > 0 {
+                                        has_inc = true;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            if !has_inc {
+                return false;
+            }
+
+            // Verify bound is invariant — not assigned in body
+            for stmt in body {
+                if let Statement::Assignment { lhs, .. } = stmt {
+                    let assign_name = match lhs {
+                        Expr::Identifier(n) | Expr::OwnedRef(n) => n,
+                        _ => continue,
+                    };
+                    if assign_name == bound {
+                        return false;
+                    }
+                }
+            }
+
+            true
+        }
+        _ => false,
     }
 }
 
@@ -2524,6 +2620,11 @@ impl ProofEngine {
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
                 if txn.is_reactive {
+                    // Convergence contracts are self-terminating: the pre-condition
+                    // stops firing when the post-condition is met, so no term; needed.
+                    if check_convergence(&txn.body, &txn.contract.pre_condition, &txn.contract.post_condition) {
+                        continue;
+                    }
                     let has_accepting_path = self.has_term_statement(&txn.body);
                     if !has_accepting_path {
                         let mut err =

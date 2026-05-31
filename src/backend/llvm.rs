@@ -38,6 +38,7 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
     match tl {
         TopLevel::Transaction(t) => { for s in &t.body { collect_strings_stmt(s, seen, out); } }
         TopLevel::Definition(d) => { for s in &d.body { collect_strings_stmt(s, seen, out); } }
+        TopLevel::Constant(c) => { collect_strings_expr(&c.expr, seen, out); }
         _ => {}
     }
 }
@@ -152,6 +153,7 @@ pub struct LlvmBackend {
     frgn_map: HashMap<String, ForeignSignature>,
     defn_params: HashMap<String, Vec<Type>>,
     string_constants: Vec<String>,
+    constants: HashMap<String, (Type, Expr)>,
     fused_to_first: HashMap<String, String>,
     sampled_triggers: HashMap<String, String>,
     txn_write_masks: HashMap<String, u64>,
@@ -179,6 +181,7 @@ impl LlvmBackend {
             frgn_map: HashMap::new(),
             defn_params: HashMap::new(),
             string_constants: Vec::new(),
+            constants: HashMap::new(),
             fused_to_first: HashMap::new(),
             sampled_triggers: HashMap::new(),
             txn_write_masks: HashMap::new(),
@@ -200,11 +203,15 @@ impl LlvmBackend {
         self.trigger_names.clear();
         self.program_txns.clear();
         self.defn_params.clear();
+        self.constants.clear();
         self.string_constants = collect_strings(program);
 
         let mut txns: Vec<(String, &crate::ast::Transaction)> = Vec::new();
         for item in &program.items {
             match item {
+                TopLevel::Constant(c) => {
+                    self.constants.insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
+                }
                 TopLevel::Transaction(t) => {
                     txns.push((t.name.clone(), t));
                     self.program_txns.push(t.name.clone());
@@ -283,6 +290,35 @@ self.emit_declares(&mut out);
         }
         writeln!(out).ok();
 
+        // Emit constant globals for TopLevel::Constant declarations
+        for (name, (ty, expr)) in &self.constants {
+            let llvm_ty = match ty {
+                Type::Float => "float",
+                Type::Int | Type::UInt => "i64",
+                Type::Bool => "i1",
+                _ => "i64",
+            };
+            let val_str = match expr {
+                Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
+                Expr::Integer(n) => n.to_string(),
+                Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
+                Expr::Neg(inner) => match inner.as_ref() {
+                    Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f)),
+                    Expr::Integer(n) => format!("-{}", n),
+                    _ => "0".to_string(),
+                },
+                Expr::String(_) => "null".to_string(),
+                _ => "0".to_string(),
+            };
+            if *ty == Type::Float {
+                writeln!(out, "@{} = constant {} {}",
+                    name, llvm_ty, val_str).ok();
+            } else {
+                writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
+            }
+        }
+        if !self.constants.is_empty() { writeln!(out).ok(); }
+
         self.declare_state_type(&mut out);
         writeln!(out, "@global_state = global %State zeroinitializer\n").ok();
 
@@ -341,24 +377,34 @@ self.emit_declares(&mut out);
             let bp = node.bounded_pre.as_ref().unwrap();
             let inc = node.increments.as_ref().unwrap();
             if bp.var == inc.var {
-                if let (Some(&total_idx), Some(&counter_idx)) = (
-                    self.field_index_map.get(&bp.bound_var),
-                    self.field_index_map.get(&bp.var),
-                ) {
-                    if node.is_pure_body {
-                        let total_val = self.field_initializers
-                            .get(&bp.bound_var)
-                            .and_then(|e| e.as_ref())
-                            .and_then(|e| {
-                                if let Expr::Integer(n) = e { Some(*n) } else { None }
-                            })
-                            .unwrap_or(1);
-                        self.emit_folded_pure_counter(&mut out, counter_idx, total_val);
-                        true
-                    } else {
-                        self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx);
-                        true
-                    }
+                if let Some(&counter_idx) = self.field_index_map.get(&bp.var) {
+                    let total_idx = self.field_index_map.get(&bp.bound_var).copied();
+                    let total_const_name: Option<&str> = if total_idx.is_none() {
+                        if self.constants.contains_key(&bp.bound_var) {
+                            Some(bp.bound_var.as_str())
+                        } else { None }
+                    } else { None };
+                    if total_idx.is_some() || total_const_name.is_some() {
+                        if node.is_pure_body {
+                            let total_val = self.field_initializers
+                                .get(&bp.bound_var)
+                                .and_then(|e| e.as_ref())
+                                .and_then(|e| {
+                                    if let Expr::Integer(n) = e { Some(*n) } else { None }
+                                })
+                                .or_else(|| {
+                                    self.constants.get(&bp.bound_var).and_then(|(_, e)| {
+                                        if let Expr::Integer(n) = e { Some(*n) } else { None }
+                                    })
+                                })
+                                .unwrap_or(1);
+                            self.emit_folded_pure_counter(&mut out, counter_idx, total_val);
+                            true
+                        } else {
+                            self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name);
+                            true
+                        }
+                    } else { false }
                 } else { false }
             } else { false }
         } else { false };
@@ -880,7 +926,7 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ci).ok();
             }
             Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); }
-Expr::Identifier(name) => {
+            Expr::Identifier(name) => {
                 if let Some(reg) = self.let_bindings.get(name) {
                     writeln!(out, "{}{} = add i64 0, {}", indent, v, reg).ok();
                 } else if self.trigger_names.contains(name) {
@@ -895,6 +941,30 @@ Expr::Identifier(name) => {
                         self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);
                     } else {
                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                    }
+                } else if let Some((ty, _)) = self.constants.get(name) {
+                    let ll_ty = match ty {
+                        Type::Float => "float",
+                        Type::Int | Type::UInt => "i64",
+                        Type::Bool => "i8",
+                        _ => "i64",
+                    };
+                    let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = load {}, {}* @{}, align {}", indent, ld, ll_ty, ll_ty, name, self.align_of(ll_ty)).ok();
+                    match ty {
+                        t if t == &Type::Float => {
+                            let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ld).ok();
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
+                        }
+                        Type::Bool => {
+                            let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ld).ok();
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                        }
+                        _ => {
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok();
+                        }
                     }
                 } else if let Some(&idx) = self.field_index_map.get(name) {
                     let ty = &self.field_types[idx];
@@ -1438,13 +1508,26 @@ Expr::Identifier(name) => {
         writeln!(out).ok();
     }
 
-    fn emit_folded_main(&self, out: &mut String, txn_name: &str, counter_idx: usize, total_idx: usize) {
+    fn emit_folded_main(
+        &self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+    ) {
         writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
-        let tp = format!("%ft0"); let c0 = self.txn_counter;
-        writeln!(out, "  %gt{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0, total_idx).ok();
-        writeln!(out, "  %lt{} = load i64, i64* %gt{}, align 8", c0, c0).ok();
+        let c0 = self.txn_counter;
+        if let Some(ti) = total_idx {
+            writeln!(out, "  %gt{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0, ti).ok();
+            writeln!(out, "  %lt{} = load i64, i64* %gt{}, align 8", c0, c0).ok();
+        } else if let Some(cn) = total_const_name {
+            writeln!(out, "  %lt{} = load i64, i64* @{}, align 8", c0, cn).ok();
+        } else {
+            writeln!(out, "  %lt{} = add i64 0, 0", c0).ok();
+        }
         writeln!(out, "  br label %hdr").ok();
         writeln!(out, "hdr:").ok();
         writeln!(out, "  %gp{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0 + 1, counter_idx).ok();
@@ -1540,6 +1623,8 @@ Expr::Identifier(name) => {
                     })
                 } else if let Some(let_reg) = self.let_bindings.get(name.as_str()) {
                     self.register_types.get(let_reg).cloned()
+                } else if let Some((ty, _)) = self.constants.get(name.as_str()) {
+                    Some(ty.clone())
                 } else {
                     None
                 }
@@ -1620,6 +1705,8 @@ Expr::Identifier(name) => {
                     self.register_types.get(reg) == Some(&Type::Float)
                 } else if let Some(&idx) = self.field_index_map.get(name) {
                     self.field_types[idx] == "float"
+                } else if let Some((ty, _)) = self.constants.get(name) {
+                    *ty == Type::Float
                 } else {
                     false
                 }
@@ -1629,6 +1716,8 @@ Expr::Identifier(name) => {
                     self.register_types.get(reg) == Some(&Type::Float)
                 } else if let Some(&idx) = self.field_index_map.get(name.as_str()) {
                     self.field_types[idx] == "float"
+                } else if let Some((ty, _)) = self.constants.get(name.as_str()) {
+                    *ty == Type::Float
                 } else {
                     false
                 }
