@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: Phase 2 (value-set enum dispatch) done. 316 tests pass.
+**Current**: Phase 3 + 4.1 done. 316 tests pass.
 
 ### Done
 - 7 LLVM backend bug fixes (cast no-op, zero-init, float hex, mustprogress UB, memory scoping, #volatile, negative float)
@@ -83,12 +83,14 @@ brief-compiler selfhost <file.bv>
 - Architecture: convergence skip moved to `ProofEngine::verify_contracts`
 - **RegionAnalyzer** (`src/analysis/region.rs`): VarClass (Pure/Bounded/Opaque), Interval, dep graph, BFS prop, region detection, value-set estimation, 9 unit tests
 - **Phase 2 integration**: `region_analyzer` in `AnalysisResults`, `emit_folded_loop` helper refactor, `emit_enum_main` with switch dispatch for enumerable triggers (budget=256 combos)
+- **Phase 3**: `--optimize-budget <N>`, `--optimize-report`, `--optimize-size <bytes>` CLI flags. Budget wired through to enum check replacing hardcoded 256. Report shows trigger value sets, combinations, budget fit, size estimation.
+- **Phase 4.1**: Linear transaction chain detection — tracks txn_reads/txn_writes per transaction, finds linear chains (A→B→C) via dependency traversal, deduplicates to maximal chains. Shown in `--optimize-report`.
 - Design doc: `docs/design/determinism-and-optimization-frontier.md`
 - Plan doc: `plans/2026-06-01-optimization-framework.md`
 
 ### Next Up
-- Phase 3: Budget and report system (`--optimize-budget`, `--optimize-report`)
-- Phase 4 (stretch): Chain equivalence
+- Phase 4.2: Symbolic composition of linear transforms (substitute chain expressions)
+- Phase 4.3: Parallel schedule emission (fused transaction function)
 
 ## Key Design Documents
 

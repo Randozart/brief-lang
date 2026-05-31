@@ -1683,7 +1683,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             }
         },
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, false) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, false, 256, false, None) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1794,6 +1794,9 @@ fn run_llvm_compile(
     target: Option<&TargetSpec>,
     _strict: bool,
     link_rt: bool,
+    optimize_budget: u64,
+    optimize_report: bool,
+    optimize_size: Option<u64>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -1824,11 +1827,22 @@ fn run_llvm_compile(
     // Run shared program analysis
     let _analysis = backend::analyze_program(&program, false);
 
-    let mut llvm_backend = crate::backend::llvm::LlvmBackend::new();
+    let mut llvm_backend = crate::backend::llvm::LlvmBackend::new()
+        .with_optimize_budget(optimize_budget)
+        .with_optimize_report(optimize_report);
+    if let Some(byte_limit) = optimize_size {
+        llvm_backend = llvm_backend.with_optimize_size(byte_limit);
+    }
     if let Some(spec) = target.cloned() {
         llvm_backend = llvm_backend.with_spec(spec);
     }
     let output = llvm_backend.generate(&program);
+
+    if optimize_report {
+        for line in llvm_backend.report() {
+            println!("{}", line);
+        }
+    }
 
     let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
     let output_file = out_dir.unwrap_or_else(|| std::path::Path::new(".")).join(format!("{}.ll", stem));
@@ -3333,6 +3347,9 @@ fn main() {
             let mut link_rt = false;
 
             let mut i = 2;
+            let mut optimize_budget: Option<u64> = None;
+            let mut optimize_report = false;
+            let mut optimize_size: Option<u64> = None;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
@@ -3344,6 +3361,15 @@ fn main() {
                 } else if arg == "--link-rt" {
                     link_rt = true;
                     i += 1;
+                } else if arg == "--optimize-budget" && i + 1 < args.len() {
+                    optimize_budget = Some(args[i + 1].parse::<u64>().unwrap_or(256));
+                    i += 2;
+                } else if arg == "--optimize-report" {
+                    optimize_report = true;
+                    i += 1;
+                } else if arg == "--optimize-size" && i + 1 < args.len() {
+                    optimize_size = Some(args[i + 1].parse::<u64>().unwrap_or(0));
+                    i += 2;
                 } else if !arg.starts_with('-') {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -3354,13 +3380,15 @@ fn main() {
 
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
-                if let Err(e) = run_llvm_compile(&path, out_dir.as_deref(), None, strict, link_rt) {
+                let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict, link_rt,
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size);
+                if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
             } else {
                 eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--link-rt]", args[0]);
+                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--link-rt] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>]", args[0]);
                 std::process::exit(1);
             }
         }

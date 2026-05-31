@@ -157,6 +157,10 @@ pub struct LlvmBackend {
     fused_to_first: HashMap<String, String>,
     sampled_triggers: HashMap<String, String>,
     txn_write_masks: HashMap<String, u64>,
+    optimize_budget: u64,
+    optimize_report: bool,
+    optimize_size: Option<u64>,
+    report_lines: Vec<String>,
 }
 
 impl LlvmBackend {
@@ -185,11 +189,31 @@ impl LlvmBackend {
             fused_to_first: HashMap::new(),
             sampled_triggers: HashMap::new(),
             txn_write_masks: HashMap::new(),
+            optimize_budget: 256,
+            optimize_report: false,
+            optimize_size: None,
+            report_lines: Vec::new(),
         }
     }
 
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
         self.spec = Some(spec);
+        self
+    }
+
+    pub fn with_optimize_budget(mut self, budget: u64) -> Self {
+        self.optimize_budget = budget;
+        self
+    }
+
+    pub fn with_optimize_report(mut self, report: bool) -> Self {
+        self.optimize_report = report;
+        self
+    }
+
+    pub fn with_optimize_size(mut self, byte_limit: u64) -> Self {
+        self.optimize_size = Some(byte_limit);
+        self.optimize_report = true;
         self
     }
 
@@ -371,13 +395,12 @@ self.emit_declares(&mut out);
             if !self.trigger_names.is_empty() {
                 let mut sizes = Vec::new();
                 let mut total: u64 = 1;
-                let budget: u64 = 256;
                 let mut ok = true;
                 for tn in &self.trigger_names {
                     let sz = region.value_set_size_of(tn);
                     if let Some(s) = sz {
                         total = total.saturating_mul(s);
-                        if total > budget { ok = false; break; }
+                        if total > self.optimize_budget { ok = false; break; }
                         sizes.push((tn.clone(), sz));
                     } else {
                         ok = false;
@@ -526,7 +549,85 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}", m).ok();
             }
         }
+
+        // Build optimization report if requested
+        if self.optimize_report {
+            self.report_lines.push("=== Optimization Report ===".to_string());
+            self.report_lines.push(format!("Optimize budget: {}", self.optimize_budget));
+            let enum_count = enumerable.as_ref().map(|e| e.len()).unwrap_or(0);
+            self.report_lines.push(format!("Triggers found: {} (enumerable: {})", self.trigger_names.len(), enum_count));
+            if let Some(ref sizes) = enumerable {
+                let mut total_combos: u64 = 1;
+                self.report_lines.push("".to_string());
+                self.report_lines.push("Trigger variable value sets:".to_string());
+                for (tn, sz) in sizes {
+                    let s = sz.unwrap_or(0);
+                    self.report_lines.push(format!("  {}: {} values", tn, s));
+                    total_combos = total_combos.saturating_mul(s);
+                }
+                self.report_lines.push(format!("Total combinations: {}", total_combos));
+                if total_combos <= self.optimize_budget {
+                    self.report_lines.push(format!("  ✅ Within budget ({} ≤ {})", total_combos, self.optimize_budget));
+                    self.report_lines.push("  → Switch-dispatch enumeration enabled".to_string());
+                } else {
+                    self.report_lines.push(format!("  ❌ Exceeds budget ({} > {})", total_combos, self.optimize_budget));
+                    self.report_lines.push("  → Standard reactor path used".to_string());
+                }
+
+                // Size estimation when --optimize-size is set
+                if let Some(byte_limit) = self.optimize_size {
+                    self.report_lines.push("".to_string());
+                    self.report_lines.push("Size estimation:".to_string());
+                    let bytes_per_combo: u64 = 80; // approximate bytes per switch case + folded loop
+                    let base_estimate: u64 = 5000;
+                    let enum_estimate = base_estimate + total_combos.saturating_mul(bytes_per_combo);
+                    self.report_lines.push(format!("  Base binary (standard reactor): ~{} KB", base_estimate / 1024));
+                    self.report_lines.push(format!("  With {} enumerated combos: ~{} KB", total_combos, enum_estimate / 1024));
+                    if enum_estimate <= byte_limit {
+                        self.report_lines.push(format!("  ✅ Enumeration fits within {} KB limit", byte_limit / 1024));
+                        self.report_lines.push(format!("  Recommended budget: {}", total_combos));
+                    } else {
+                        self.report_lines.push(format!("  ❌ Enumeration exceeds {} KB limit", byte_limit / 1024));
+                        let max_fit: u64 = if bytes_per_combo > 0 {
+                            (byte_limit.saturating_sub(base_estimate)) / bytes_per_combo
+                        } else { 0 };
+                        self.report_lines.push(format!("  Max combos within limit: {}", max_fit));
+                        self.report_lines.push(format!("  Recommended budget: {} (partial enumeration)", max_fit));
+                    }
+                }
+            }
+            if let Some(ref graph) = Some(&analysis.transition_graph) {
+                self.report_lines.push("".to_string());
+                self.report_lines.push("Transaction graph:".to_string());
+                self.report_lines.push(format!("  Nodes: {}", graph.nodes.len()));
+                self.report_lines.push(format!("  Has triggers: {}", graph.has_triggers));
+                if let Some(node) = graph.nodes.first() {
+                    if let Some(ref bp) = node.bounded_pre {
+                        self.report_lines.push(format!("  Bounded pre: {} < {}", bp.var, bp.bound_var));
+                    }
+                    self.report_lines.push(format!("  Is reactive: {}", node.is_reactive));
+                    self.report_lines.push(format!("  Pure body: {}", node.is_pure_body));
+                    if let Some(ref inc) = node.increments {
+                        self.report_lines.push(format!("  Increment: {} += {}", inc.var, inc.delta));
+                    }
+                }
+            }
+            let chains = &analysis.region_analyzer.linear_chains;
+            if !chains.is_empty() {
+                self.report_lines.push("".to_string());
+                self.report_lines.push("Linear transaction chains detected:".to_string());
+                for (i, chain) in chains.iter().enumerate() {
+                    let chain_str: String = chain.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" -> ");
+                    self.report_lines.push(format!("  Chain {}: {}", i + 1, chain_str));
+                }
+            }
+        }
         out
+    }
+
+    /// Return the optimization report lines collected during `generate()`.
+    pub fn report(&self) -> &[String] {
+        &self.report_lines
     }
 
     // ── Header ────────────────────────────────────────────────
@@ -926,10 +1027,10 @@ self.emit_declares(&mut out);
                                     }
                                 }
                                 return;
-                            }
-                        }
                     }
                 }
+            }
+        }
 
                 // Standard guarded block with unique labels
                 let gid = format!("g{}", self.txn_counter); self.txn_counter += 1;

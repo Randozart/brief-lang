@@ -60,6 +60,9 @@ pub struct RegionAnalyzer {
     pub regions: Vec<Vec<String>>,
     deps: HashMap<String, HashSet<String>>,
     rev_deps: HashMap<String, HashSet<String>>,
+    txn_reads: HashMap<String, HashSet<String>>,
+    txn_writes: HashMap<String, HashSet<String>>,
+    pub linear_chains: Vec<Vec<String>>,
 }
 
 impl RegionAnalyzer {
@@ -71,6 +74,9 @@ impl RegionAnalyzer {
             regions: Vec::new(),
             deps: HashMap::new(),
             rev_deps: HashMap::new(),
+            txn_reads: HashMap::new(),
+            txn_writes: HashMap::new(),
+            linear_chains: Vec::new(),
         };
 
         analyzer.register_declarations(program);
@@ -79,6 +85,7 @@ impl RegionAnalyzer {
         analyzer.propagate_classification();
         analyzer.compute_regions();
         analyzer.estimate_value_sets();
+        analyzer.detect_linear_chains(program);
 
         analyzer
     }
@@ -137,6 +144,9 @@ impl RegionAnalyzer {
     fn build_dependency_graph(&mut self, program: &Program) {
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
+                let mut txn_read_vars = HashSet::new();
+                let mut txn_write_vars = HashSet::new();
+
                 // Dependencies from pre/post conditions
                 self.collect_identifiers(&txn.contract.pre_condition, &txn.name);
                 self.collect_identifiers(&txn.contract.post_condition, &txn.name);
@@ -144,20 +154,26 @@ impl RegionAnalyzer {
                 // Dependencies from body assignments
                 for stmt in &txn.body {
                     if let Statement::Assignment { lhs, expr, .. } = stmt {
-                        // Writer is the LHS identifier
                         let writer = match lhs {
                             Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
                             _ => continue,
                         };
-                        // Readers are all identifiers in the RHS
+                        txn_write_vars.insert(writer.clone());
+                        txn_read_vars.extend(expr_to_var_set(expr));
                         self.collect_identifiers(expr, &writer);
                     }
                     if let Statement::Let { name, expr, .. } = stmt {
                         if let Some(e) = expr {
+                            txn_write_vars.insert(name.clone());
+                            txn_read_vars.extend(expr_to_var_set(e));
                             self.collect_identifiers(e, name);
                         }
                     }
                 }
+
+                // Track per-transaction reads and writes
+                self.txn_reads.entry(txn.name.clone()).or_default().extend(txn_read_vars);
+                self.txn_writes.entry(txn.name.clone()).or_default().extend(txn_write_vars);
             }
         }
     }
@@ -441,6 +457,79 @@ impl RegionAnalyzer {
         }
     }
 
+    // ── Phase H: Detect linear transaction chains ───────────────────────
+
+    fn detect_linear_chains(&mut self, _program: &Program) {
+        self.linear_chains.clear();
+        let txn_names: Vec<String> = self.txn_reads.keys().cloned().collect();
+
+        for txn in &txn_names {
+            let reads = self.txn_reads.get(txn).cloned().unwrap_or_default();
+            let writes = self.txn_writes.get(txn).cloned().unwrap_or_default();
+
+            // A linear chain starts when a transaction's writes are exclusively
+            // consumed by another single transaction's reads.
+            for written in &writes {
+                if let Some(readers) = self.rev_deps.get(written) {
+                    let downstream_txns: Vec<&String> = txn_names
+                        .iter()
+                        .filter(|tn| {
+                            *tn != txn
+                                && self.txn_reads.get(*tn).map(|r| r.contains(written)).unwrap_or(false)
+                        })
+                        .collect();
+
+                    if downstream_txns.len() == 1 {
+                        let next = downstream_txns[0].clone();
+                        let mut chain = vec![txn.clone(), next.clone()];
+
+                        // Extend the chain: follow reads→writes forward
+                        loop {
+                            let last = match chain.last() {
+                                Some(l) => l.clone(),
+                                None => break,
+                            };
+                            let cur_writes = self.txn_writes.get(&last).cloned().unwrap_or_default();
+                            let mut extended = false;
+                            for cw in &cur_writes {
+                                let further: Vec<String> = txn_names
+                                    .iter()
+                                    .filter(|tn| {
+                                        !chain.contains(tn)
+                                            && self.txn_reads.get(*tn).map(|r| r.contains(cw)).unwrap_or(false)
+                                    })
+                                    .cloned()
+                                    .collect();
+                                if further.len() == 1 {
+                                    chain.push(further[0].clone());
+                                    extended = true;
+                                    break;
+                                }
+                            }
+                            if !extended { break; }
+                        }
+
+                        self.linear_chains.push(chain);
+                    }
+                }
+            }
+        }
+
+        // Deduplicate: keep only maximal chains (supersets of others)
+        self.linear_chains.sort_by(|a, b| b.len().cmp(&a.len()));
+        let mut deduped: Vec<Vec<String>> = Vec::new();
+        for chain in &self.linear_chains {
+            let chain_set: HashSet<&String> = chain.iter().collect();
+            if !deduped.iter().any(|existing| {
+                let existing_set: HashSet<&String> = existing.iter().collect();
+                existing_set.is_superset(&chain_set) && existing.len() > chain.len()
+            }) {
+                deduped.push(chain.clone());
+            }
+        }
+        self.linear_chains = deduped;
+    }
+
     // ── Public query API ────────────────────────────────────────────────
 
     /// Get the region ID for a given variable.
@@ -464,6 +553,35 @@ impl RegionAnalyzer {
     /// Get the estimated value-set size for a variable, or `None` if unbounded.
     pub fn value_set_size_of(&self, var: &str) -> Option<u64> {
         self.var_info.get(var).and_then(|i| i.value_set_size)
+    }
+}
+
+fn expr_to_var_set(expr: &Expr) -> HashSet<String> {
+    let mut vars = HashSet::new();
+    collect_var_ids(expr, &mut vars);
+    vars
+}
+
+fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
+    match expr {
+        Expr::Identifier(n) | Expr::OwnedRef(n) => { vars.insert(n.clone()); }
+        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+        | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
+        | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
+        | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+        | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
+            collect_var_ids(a, vars);
+            collect_var_ids(b, vars);
+        }
+        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
+        | Expr::ListLen(a) => collect_var_ids(a, vars),
+        Expr::Call(_, args) => { for a in args { collect_var_ids(a, vars); } }
+        Expr::ListLiteral(elems) => { for e in elems { collect_var_ids(e, vars); } }
+        Expr::Tuple(elems) => { for e in elems { collect_var_ids(e, vars); } }
+        Expr::ListIndex(l, i) => { collect_var_ids(l, vars); collect_var_ids(i, vars); }
+        Expr::FieldAccess(o, _) => collect_var_ids(o, vars),
+        Expr::Block(_, last) | Expr::TupleDestructure(_, last) => collect_var_ids(last, vars),
+        _ => {}
     }
 }
 
