@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: Phase 3 + 4.1 done. 316 tests pass.
+**Current**: Phase 3 + 4.1 done. 316 tests pass. Cost model and Phase 4.2–4.3 designed.
 
 ### Done
 - 7 LLVM backend bug fixes (cast no-op, zero-init, float hex, mustprogress UB, memory scoping, #volatile, negative float)
@@ -85,14 +85,18 @@ brief-compiler selfhost <file.bv>
 - **Phase 2 integration**: `region_analyzer` in `AnalysisResults`, `emit_folded_loop` helper refactor, `emit_enum_main` with switch dispatch for enumerable triggers (budget=256 combos)
 - **Phase 3**: `--optimize-budget <N>`, `--optimize-report`, `--optimize-size <bytes>` CLI flags. Budget wired through to enum check replacing hardcoded 256. Report shows trigger value sets, combinations, budget fit, size estimation.
 - **Phase 4.1**: Linear transaction chain detection — tracks txn_reads/txn_writes per transaction, finds linear chains (A→B→C) via dependency traversal, deduplicates to maximal chains. Shown in `--optimize-report`.
-- Design doc: `docs/design/determinism-and-optimization-frontier.md`
-- Plan doc: `plans/2026-06-01-optimization-framework.md`
+- **Design doc**: `docs/design/determinism-and-optimization-frontier.md`
+- **Plan doc**: `plans/2026-06-01-optimization-framework.md`
+- **Design doc**: `docs/design/optimization-cost-model.md` — full spec for complexity estimation, region scoring, budget planning, chain composition (4.2), fused emission (4.3), GPU eligibility analysis, report format
 
 ### Next Up
-- Phase 4.2: Symbolic composition of linear transforms (substitute chain expressions)
-- Phase 4.3: Parallel schedule emission (fused transaction function)
+- Implement cost model (~330 lines): `ComplexityClass`, `RegionScore`, `BudgetPlan`, `ComposedChain` types
+- Phase 4.2: Expression substitution engine + chain composition with trigger branching
+- Phase 4.3: Fused txn emission in LLVM backend, enum dispatch with chain targets
+- ~9 new unit tests, ~325 total
 
 ## Key Design Documents
 
 - **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual architecture for Brief's optimization framework: determinism analysis, atomic reactive regions, value-set enumeration, budget-controlled compile-time optimization.
+- **`docs/design/optimization-cost-model.md`** — Full specification for the optimization cost model: `ComplexityClass`, `RegionScore`, `BudgetPlan`, `ComposedChain` types; complexity estimation, region scoring with ROI metric, greedy budget allocation, chain composition with trigger branching, fused emission, GPU eligibility analysis, report format. Target: O(n) → O(1) reduction on every provable axis.
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for building the framework, phased from tactical convergence-proof fixes through value-set enumeration and report system.
