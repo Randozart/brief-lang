@@ -587,27 +587,14 @@ impl SymbolicExecutor {
                 state.vars.insert(p_name.clone(), SymbolicValue::Symbolic(p_name.clone()));
             }
 
-            // For reactive convergence contracts, skip per-path check
-            // if convergence is provable (postcondition var == bound,
-            // body increments var, bound is invariant).
-            if txn.is_reactive
-                && check_convergence(
-                    &txn.body,
-                    &txn.contract.pre_condition,
-                    &txn.contract.post_condition,
-                )
-            {
-                // Convergence proven — skip per-path postcondition check
-            } else {
-                self.verify_contract_implication(
-                    &txn.contract.pre_condition,
-                    &txn.contract.post_condition,
-                    &txn.body,
-                    state,
-                    format!("transaction '{}'", txn.name),
-                    false,
-                );
-            }
+            self.verify_contract_implication(
+                &txn.contract.pre_condition,
+                &txn.contract.post_condition,
+                &txn.body,
+                state,
+                format!("transaction '{}'", txn.name),
+                false,
+            );
         }
 
         self.errors.clone()
@@ -1124,82 +1111,194 @@ fn format_expr(expr: &Expr) -> String {
     }
 }
 
-/// Check if a reactive transaction satisfies a convergence contract:
-/// postcondition is `var == bound`, body has `&var = var +/- delta`,
-/// bound is not assigned in body — the transaction converges toward bound.
+/// Extract the variable name and bound expression from a comparison.
+/// Returns `(var, bound)` where `var` is always an identifier and `bound`
+/// can be an identifier, integer literal, or other expression.
+fn extract_var_bound(expr: &Expr) -> Option<(String, Expr)> {
+    let (lhs, rhs) = match expr {
+        Expr::Eq(l, r)
+        | Expr::Ne(l, r)
+        | Expr::Lt(l, r)
+        | Expr::Le(l, r)
+        | Expr::Gt(l, r)
+        | Expr::Ge(l, r) => (l.as_ref(), r.as_ref()),
+        _ => return None,
+    };
+    match (lhs, rhs) {
+        (Expr::Identifier(v), b) => Some((v.clone(), b.clone())),
+        (b, Expr::Identifier(v)) => Some((v.clone(), b.clone())),
+        _ => None,
+    }
+}
+
+/// Check if a pre-condition is structurally `var <op> bound_expr` for one of `valid_ops`.
+/// `bound_expr` can be an identifier or an integer literal.
+fn check_pre_matches(pre: &Expr, var: &str, bound_expr: &Expr, valid_ops: &[&str]) -> bool {
+    let op = match pre {
+        Expr::Lt(..) => "<",
+        Expr::Gt(..) => ">",
+        Expr::Le(..) => "<=",
+        Expr::Ge(..) => ">=",
+        Expr::Eq(..) => "==",
+        Expr::Ne(..) => "!=",
+        _ => return false,
+    };
+    if !valid_ops.contains(&op) {
+        return false;
+    }
+    let (lhs, rhs) = match pre {
+        Expr::Lt(l, r)
+        | Expr::Gt(l, r)
+        | Expr::Le(l, r)
+        | Expr::Ge(l, r)
+        | Expr::Eq(l, r)
+        | Expr::Ne(l, r) => (l.as_ref(), r.as_ref()),
+        _ => return false,
+    };
+    match (lhs, rhs) {
+        (Expr::Identifier(v), b) => v == var && b == bound_expr,
+        (b, Expr::Identifier(v)) => v == var && b == bound_expr,
+        _ => false,
+    }
+}
+
+/// Check if a reactive transaction has a structurally provable convergence contract.
+///
+/// A convergence contract `[pre][post]` requires:
+/// 1. `post → ¬pre` — the post being true guarantees the pre is false (loop terminates).
+/// 2. The body increments or decrements `var` by a constant positive step.
+/// 3. `bound` is not assigned in the body (invariant).
+/// 4. When step > 1 and post is `var == bound`: the step divides the distance
+///    from the initial value to the bound (no overshoot).
+///
+/// `initial_values` provides compile-time-known initial values for state variables
+/// and constants, used for overshoot detection.
 fn check_convergence(
     body: &[Statement],
-    _pre_condition: &Expr,
+    pre_condition: &Expr,
     post_condition: &Expr,
+    initial_values: &HashMap<String, Expr>,
 ) -> bool {
-    match post_condition {
-        Expr::Eq(lhs, rhs) => {
-            let (var, bound) = match (lhs.as_ref(), rhs.as_ref()) {
-                (Expr::Identifier(v), Expr::Identifier(b)) => (v, b),
-                _ => return false,
-            };
+    // Step 1: Extract (var, bound_expr) from postcondition
+    let (var, bound_expr) = match extract_var_bound(post_condition) {
+        Some(pair) => pair,
+        None => return false,
+    };
 
-            // Detect increment/decrement pattern on var
-            let mut has_inc = false;
-            for stmt in body {
-                if let Statement::Assignment { lhs, expr, .. } = stmt {
-                    let assign_name = match lhs {
-                        Expr::Identifier(n) | Expr::OwnedRef(n) => n,
-                        _ => continue,
-                    };
-                    if assign_name == var {
-                        match expr {
-                            Expr::Add(a, b) => {
-                                if let (Expr::Identifier(v), Expr::Integer(d)) =
-                                    (a.as_ref(), b.as_ref())
-                                {
-                                    if v == var && *d > 0 {
-                                        has_inc = true;
-                                    }
-                                }
-                                if let (Expr::Integer(d), Expr::Identifier(v)) =
-                                    (a.as_ref(), b.as_ref())
-                                {
-                                    if v == var && *d > 0 {
-                                        has_inc = true;
-                                    }
-                                }
-                            }
-                            Expr::Sub(a, b) => {
-                                if let (Expr::Identifier(v), Expr::Integer(d)) =
-                                    (a.as_ref(), b.as_ref())
-                                {
-                                    if v == var && *d > 0 {
-                                        has_inc = true;
-                                    }
-                                }
-                            }
-                            _ => {}
+    // Step 2: Validate post → ¬pre
+    let pre_valid = match post_condition {
+        // post: var == bound → pre must be <, >, or !=
+        Expr::Eq(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<", ">", "!="]),
+        // post: var >= bound → pre must be <
+        Expr::Ge(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<"]),
+        // post: var > bound → pre must be <=
+        Expr::Gt(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<="]),
+        // post: var <= bound → pre must be >
+        Expr::Le(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &[">"]),
+        // post: var < bound → pre must be >=
+        Expr::Lt(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &[">="]),
+        // post: var != bound → pre must be ==
+        Expr::Ne(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["=="]),
+        _ => false,
+    };
+    if !pre_valid {
+        return false;
+    }
+
+    // Step 3: Detect increment/decrement on var, extract direction and step
+    let mut step: i64 = 0;
+    let mut direction: i8 = 0; // 1 = counting up, -1 = counting down
+    for stmt in body {
+        if let Statement::Assignment { lhs, expr, .. } = stmt {
+            let assign_name = match lhs {
+                Expr::Identifier(n) | Expr::OwnedRef(n) => n,
+                _ => continue,
+            };
+            if assign_name != &var {
+                continue;
+            }
+            match expr {
+                Expr::Add(a, b) => {
+                    if let (Expr::Identifier(v), Expr::Integer(d)) = (a.as_ref(), b.as_ref()) {
+                        if v == &var && *d > 0 {
+                            step = *d;
+                            direction = 1;
+                        }
+                    }
+                    if let (Expr::Integer(d), Expr::Identifier(v)) = (a.as_ref(), b.as_ref()) {
+                        if v == &var && *d > 0 {
+                            step = *d;
+                            direction = 1;
                         }
                     }
                 }
-            }
-            if !has_inc {
-                return false;
-            }
-
-            // Verify bound is invariant — not assigned in body
-            for stmt in body {
-                if let Statement::Assignment { lhs, .. } = stmt {
-                    let assign_name = match lhs {
-                        Expr::Identifier(n) | Expr::OwnedRef(n) => n,
-                        _ => continue,
-                    };
-                    if assign_name == bound {
-                        return false;
+                Expr::Sub(a, b) => {
+                    if let (Expr::Identifier(v), Expr::Integer(d)) = (a.as_ref(), b.as_ref()) {
+                        if v == &var && *d > 0 {
+                            step = *d;
+                            direction = -1;
+                        }
                     }
                 }
+                _ => {}
             }
-
-            true
         }
-        _ => false,
     }
+    if step == 0 {
+        return false;
+    }
+
+    // Step 4: Bound invariance — bound must not be assigned in body.
+    // Only checkable when bound is an identifier (not a literal).
+    if let Expr::Identifier(ref bound_name) = bound_expr {
+        for stmt in body {
+            if let Statement::Assignment { lhs, .. } = stmt {
+                let assign_name = match lhs {
+                    Expr::Identifier(n) | Expr::OwnedRef(n) => n,
+                    _ => continue,
+                };
+                if assign_name == bound_name {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // Step 5: Overshoot detection — only matters for exact-equality postcondition
+    // when the step size is greater than 1 (e.g., count = count + 5 could skip past bound).
+    if matches!(post_condition, Expr::Eq(_, _)) && step > 1 {
+        let init_val = initial_values.get(&var).and_then(|e| match e {
+            Expr::Integer(n) => Some(*n),
+            _ => None,
+        });
+        // Bound value: could be from initial_values, or a literal integer in bound_expr
+        let bound_val = match &bound_expr {
+            Expr::Integer(n) => Some(*n),
+            Expr::Identifier(name) => initial_values.get(name).and_then(|e| match e {
+                Expr::Integer(n) => Some(*n),
+                _ => None,
+            }),
+            _ => None,
+        };
+
+        if let (Some(init), Some(bound)) = (init_val, bound_val) {
+            let dist = if direction == 1 {
+                bound - init
+            } else {
+                init - bound
+            };
+            // If dist <= 0, the transaction never fires (pre is false initially) —
+            // convergence is vacuously true.  Otherwise verify no overshoot.
+            if dist > 0 && dist % step != 0 {
+                return false;
+            }
+        } else {
+            // Can't verify — conservatively reject convergence
+            return false;
+        }
+    }
+
+    true
 }
 
 pub struct ProofEngine {
@@ -1250,6 +1349,22 @@ impl ProofEngine {
     }
 
     fn verify_contracts(&mut self, program: &Program) {
+        // Build initial-values map from StateDecl and Constant declarations
+        let mut initial_values: HashMap<String, Expr> = HashMap::new();
+        for item in &program.items {
+            match item {
+                TopLevel::StateDecl(decl) => {
+                    if let Some(ref expr) = decl.expr {
+                        initial_values.insert(decl.name.clone(), expr.clone());
+                    }
+                }
+                TopLevel::Constant(constant) => {
+                    initial_values.insert(constant.name.clone(), constant.expr.clone());
+                }
+                _ => {}
+            }
+        }
+
         // Collect all trigger variable names (volatile variables)
         let mut volatile_vars = HashSet::new();
         for item in &program.items {
@@ -1263,8 +1378,22 @@ impl ProofEngine {
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
-                    let errs = sym_exec.verify_transaction(txn);
-                    self.errors.extend(errs);
+                    // For reactive convergence contracts, skip symbolic execution
+                    // entirely — the structural convergence proof is stronger than
+                    // the per-path postcondition check (P008).
+                    if txn.is_reactive
+                        && check_convergence(
+                            &txn.body,
+                            &txn.contract.pre_condition,
+                            &txn.contract.post_condition,
+                            &initial_values,
+                        )
+                    {
+                        // Convergence proven — no symbolic execution needed
+                    } else {
+                        let errs = sym_exec.verify_transaction(txn);
+                        self.errors.extend(errs);
+                    }
                 }
                 TopLevel::Definition(defn) => {
                     let errs = sym_exec.verify_definition(defn);
@@ -2617,12 +2746,28 @@ impl ProofEngine {
     }
 
     fn check_total_path(&mut self, program: &Program) {
+        // Build initial-values map for overshoot detection
+        let mut initial_values: HashMap<String, Expr> = HashMap::new();
+        for item in &program.items {
+            match item {
+                TopLevel::StateDecl(decl) => {
+                    if let Some(ref expr) = decl.expr {
+                        initial_values.insert(decl.name.clone(), expr.clone());
+                    }
+                }
+                TopLevel::Constant(constant) => {
+                    initial_values.insert(constant.name.clone(), constant.expr.clone());
+                }
+                _ => {}
+            }
+        }
+
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
                 if txn.is_reactive {
                     // Convergence contracts are self-terminating: the pre-condition
                     // stops firing when the post-condition is met, so no term; needed.
-                    if check_convergence(&txn.body, &txn.contract.pre_condition, &txn.contract.post_condition) {
+                    if check_convergence(&txn.body, &txn.contract.pre_condition, &txn.contract.post_condition, &initial_values) {
                         continue;
                     }
                     let has_accepting_path = self.has_term_statement(&txn.body);
@@ -3170,5 +3315,190 @@ mod tests {
             exec.eval_eq(&x, &y, &SymbolicState::new()),
             "Two reads of stable variable should be equal"
         );
+    }
+
+    #[test]
+    fn test_convergence_rejects_true_precondition() {
+        // [true][count == total] — pre doesn't imply ¬post, should NOT converge.
+        // Falls through to P005 (no term;) and P008 (post not provable from true).
+        let code = r#"
+            let count: Int = 0;
+            const total: Int = 100;
+
+            rct txn process [true][count == total] {
+                &count = count + 1;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // Convergence fails — expects at least P005 (no term) or P008 (post not provable)
+        assert!(!errors.is_empty(), "Expected errors for [true] convergence rejection, got none");
+    }
+
+    #[test]
+    fn test_convergence_rejects_leq_precondition() {
+        // [count <= total][count == total] — post→¬pre fails (count == total still satisfies <=)
+        let code = r#"
+            let count: Int = 0;
+            const total: Int = 100;
+
+            rct txn process [count <= total][count == total] {
+                &count = count + 1;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // Convergence fails, falls through to normal verification
+        let has_error = errors.iter().any(|e| e.code == "P008" || e.code == "P005");
+        assert!(has_error, "Expected error for invalid convergence pattern");
+    }
+
+    #[test]
+    fn test_convergence_accepts_relational_post() {
+        // [count < total][count >= total] — relational post op, should converge
+        let code = r#"
+            let count: Int = 0;
+            const total: Int = 100;
+
+            rct txn process [count < total][count >= total] {
+                &count = count + 1;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // Convergence proven — no errors expected
+        let has_error = errors.iter().any(|e| e.code == "P008" || e.code == "P005");
+        assert!(!has_error, "Relational post convergence should produce no errors: {:?}", errors);
+    }
+
+    #[test]
+    fn test_convergence_rejects_overshoot() {
+        // [count < total][count == total] with step 5, total=7, init=0
+        // (7-0) % 5 = 2 ≠ 0 → overshoot, convergence fails
+        let code = r#"
+            let count: Int = 0;
+            const total: Int = 7;
+
+            rct txn process [count < total][count == total] {
+                &count = count + 5;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // Convergence fails, falls through to P008
+        let has_error = errors.iter().any(|e| e.code == "P008" || e.code == "P005");
+        assert!(has_error, "Expected error for overshooting step: {:?}", errors);
+    }
+
+    #[test]
+    fn test_convergence_accepts_step_divides_bound() {
+        // [count < total][count == total] with step 5, total=10, init=0
+        // (10-0) % 5 = 0 → no overshoot, convergence proven
+        let code = r#"
+            let count: Int = 0;
+            const total: Int = 10;
+
+            rct txn process [count < total][count == total] {
+                &count = count + 5;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // Convergence proven — no errors expected
+        let has_error = errors.iter().any(|e| e.code == "P008" || e.code == "P005");
+        assert!(!has_error, "Step dividing bound should produce no errors: {:?}", errors);
+    }
+
+    #[test]
+    fn test_convergence_accepts_countdown() {
+        // [count > 0][count == 0] with step count-1, init=10
+        let code = r#"
+            let count: Int = 10;
+
+            rct txn process [count > 0][count == 0] {
+                &count = count - 1;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // Convergence proven — no errors expected
+        let has_error = errors.iter().any(|e| e.code == "P008" || e.code == "P005");
+        assert!(!has_error, "Countdown convergence should produce no errors: {:?}", errors);
+    }
+
+    #[test]
+    fn test_convergence_accepts_neq_precondition() {
+        // [count != total][count == total] — valid: when count == total, count != total is false
+        let code = r#"
+            let count: Int = 0;
+            const total: Int = 100;
+
+            rct txn process [count != total][count == total] {
+                &count = count + 1;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // Convergence proven — no errors expected
+        let has_error = errors.iter().any(|e| e.code == "P008" || e.code == "P005");
+        assert!(!has_error, "!= precondition convergence should produce no errors: {:?}", errors);
+    }
+
+    #[test]
+    fn test_convergence_accepts_neq_postcondition() {
+        // [count == total][count != total] — converge FROM equal TO not-equal
+        let code = r#"
+            let count: Int = 0;
+            const total: Int = 100;
+
+            rct txn process [count == total][count != total] {
+                &count = count + 1;
+            };
+        "#;
+
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+
+        let mut pe = ProofEngine::new();
+        let errors = pe.verify_program(&program);
+
+        // Convergence proven — no errors expected
+        let has_error = errors.iter().any(|e| e.code == "P008" || e.code == "P005");
+        assert!(!has_error, "!= postcondition convergence should produce no errors: {:?}", errors);
     }
 }
