@@ -12,14 +12,14 @@
 - **Architecture restructure**: Convergence check moved from `SymbolicExecutor::verify_transaction` to `ProofEngine::verify_contracts`, giving program-level access for `initial_values`.
 - **8 new tests**, 307 total passing.
 
-### Phase 1 — RegionAnalyzer (in progress)
+### Phase 1 — RegionAnalyzer (complete)
 Building the analysis pipeline from `docs/design/determinism-and-optimization-frontier.md`:
 
-- **1.1 RegionAnalyzer struct** — trace dependency graph, compute connected components
-- **1.2 Variable classification** — Pure / Bounded / Opaque axis
-- **1.3 Bound propagation** — interval arithmetic through expressions
-- **1.4 Value-set estimation** — state space size per frontier variable
-- **1.5 Integration into ProofEngine**
+- **1.1 RegionAnalyzer struct** — trace dependency graph from trg roots, compute connected components via DFS. 9 unit tests.
+- **1.2 Variable classification** — Pure / Bounded / Opaque axis. Bool triggers → Bounded, Int triggers → Opaque. BFS propagates from frontier through rev_deps.
+- **1.3 Bound propagation** — Interval (lo, hi) extraction from literals and type bounds (U8 → [0,255], Bool → [0,1]). Requires contract-bound integration for broader coverage.
+- **1.4 Value-set estimation** — size = hi - lo + 1 when interval known; Opaque vars → None.
+- **1.5 Integration into ProofEngine** — `region_analyzer: Option<RegionAnalyzer>` field on `ProofEngine`, populated in `verify_program()`. Public query API: `region_of()`, `classification_of()`, `is_frontier_dependent()`.**
 
 ## Running Benchmark
 ```
