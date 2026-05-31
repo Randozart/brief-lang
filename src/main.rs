@@ -1857,13 +1857,18 @@ fn run_llvm_compile(
         let exe_path = out_base.join(stem);
         // Detect whether output has wake triggers
         let has_wake = output.contains("@llvm.wake_triggers");
+        // Detect whether output uses thread pool for async dispatch
+        let has_thread_pool = output.contains("@llvm.thread_pool");
         // Write embedded C source to disk
         fs::write(&rt_c_path, BRIEF_RT_SOURCE)?;
         // Compile runtime
         let cc_status = {
             let mut cmd = std::process::Command::new("cc");
-            cmd.args(["-c", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"])
-                .arg("-o").arg(&rt_o_path).arg(&rt_c_path);
+            cmd.args(["-c", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"]);
+            if has_thread_pool {
+                cmd.arg("-DBRIEF_THREAD_POOL");
+            }
+            cmd.arg("-o").arg(&rt_o_path).arg(&rt_c_path);
             cmd.status()
                 .map_err(|e| format!("Failed to invoke cc: {}. Is a C compiler installed?", e))?
         };
@@ -1888,7 +1893,7 @@ fn run_llvm_compile(
                 eprintln!("  Warning: llc not found or failed. Compile manually:");
                 eprintln!("    llc {} -filetype=obj -o {}", output_file.display(), ll_o_path.display());
                 print!("    ld {}.o {} -o {}", stem, rt_o_path.display(), stem);
-                if has_wake { print!(" -lrt -lpthread"); }
+                if has_wake { print!(" -lrt -lpthread"); } else if has_thread_pool { print!(" -lpthread"); }
                 println!();
                 return Ok(output_file);
             }
@@ -1899,6 +1904,8 @@ fn run_llvm_compile(
         link_cmd.args(["-O2", "-o"]).arg(&exe_path).arg(&ll_o_path).arg(&rt_o_path);
         if has_wake {
             link_cmd.args(["-lrt", "-lpthread"]);
+        } else if has_thread_pool {
+            link_cmd.arg("-lpthread");
         }
         let link_status = link_cmd.status();
         match link_status {
@@ -1909,6 +1916,7 @@ fn run_llvm_compile(
                 eprintln!("  Warning: linking failed. Link manually:");
                 eprintln!("    cc {} {} -o {}", ll_o_path.display(), rt_o_path.display(), exe_path.display());
                 if has_wake { eprintln!("    (add -lrt -lpthread for timerfd/signalfd)"); }
+                if has_thread_pool && !has_wake { eprintln!("    (add -lpthread for thread pool)"); }
             }
         }
     }

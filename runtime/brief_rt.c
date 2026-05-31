@@ -287,6 +287,134 @@ void __rt_init(void) {
     __io_pending = 1;
 }
 
+/* ===================================================================
+ * 6. Thread Pool — Concurrent async transaction dispatch
+ *
+ * Workers are spawned once at init and synchronize via two barriers
+ * per tick: one for releasing workers (main → workers), one for
+ * collecting them back (workers → main).
+ *
+ *   main loop:      workers (each):
+ *     barrier_release  →  barrier_enter
+ *     (enum/seq work)     fire_body()
+ *     barrier_wait    ←  barrier_exit
+ *
+ * On macOS, pthread_barrier_t is unavailable. We use a portable
+ * implementation with mutex+cond+counter.
+ *
+ * Gated behind #if defined(BRIEF_THREAD_POOL). The LLVM backend
+ * emits @llvm.thread_pool metadata when async txns exist, and the
+ * compiler driver adds -DBRIEF_THREAD_POOL -lpthread.
+ * =================================================================== */
+
+#if defined(BRIEF_THREAD_POOL)
+#include <pthread.h>
+#include <stdlib.h>
+
+/* Portable barrier — works on all pthread platforms */
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t  cond;
+    unsigned        count;
+    unsigned        target;
+} brief_barrier_t;
+
+static void brief_barrier_init(brief_barrier_t *b, unsigned n) {
+    pthread_mutex_init(&b->mutex, NULL);
+    pthread_cond_init(&b->cond, NULL);
+    b->count = 0;
+    b->target = n;
+}
+
+static void brief_barrier_wait_impl(brief_barrier_t *b) {
+    pthread_mutex_lock(&b->mutex);
+    b->count++;
+    if (b->count >= b->target) {
+        b->count = 0;
+        pthread_cond_broadcast(&b->cond);
+    } else {
+        pthread_cond_wait(&b->cond, &b->mutex);
+    }
+    pthread_mutex_unlock(&b->mutex);
+}
+
+/* Per-worker state */
+typedef void (*brief_work_fn)(void);
+
+static int              g_thread_pool_active = 0;
+static unsigned         g_num_workers = 0;
+static pthread_t       *g_workers = NULL;
+static brief_work_fn   *g_work_fns = NULL;
+static brief_work_fn    *g_work_fns_base = NULL;  /* pointer to first slot */
+static int              g_shutdown = 0;
+static brief_barrier_t  g_barrier_enter;  /* main releases → workers start */
+static brief_barrier_t  g_barrier_exit;   /* workers finish → main continues */
+
+static void* brief_worker_main(void* arg) {
+    unsigned idx = (unsigned)(uintptr_t)arg;
+    while (1) {
+        brief_barrier_wait_impl(&g_barrier_enter);  /* wait for tick start */
+        if (g_shutdown) return NULL;
+        if (idx < g_num_workers && g_work_fns[idx]) {
+            g_work_fns[idx]();
+        }
+        brief_barrier_wait_impl(&g_barrier_exit);   /* signal tick done */
+    }
+    return NULL;
+}
+#endif /* BRIEF_THREAD_POOL */
+
+void brief_thread_pool_init(unsigned num_workers, void** fn_ptrs) {
+#if defined(BRIEF_THREAD_POOL)
+    if (g_thread_pool_active) return;
+    if (num_workers == 0) return;
+    g_num_workers = num_workers;
+    g_workers = (pthread_t*)calloc(num_workers, sizeof(pthread_t));
+    g_work_fns = (brief_work_fn*)calloc(num_workers, sizeof(brief_work_fn));
+    g_work_fns_base = g_work_fns;
+    for (unsigned i = 0; i < num_workers; i++) {
+        g_work_fns[i] = (brief_work_fn)(uintptr_t)fn_ptrs[i];
+    }
+    brief_barrier_init(&g_barrier_enter, num_workers + 1);  /* +1 for main */
+    brief_barrier_init(&g_barrier_exit, num_workers + 1);
+    g_shutdown = 0;
+    for (unsigned i = 0; i < num_workers; i++) {
+        pthread_create(&g_workers[i], NULL, brief_worker_main,
+                       (void*)(uintptr_t)i);
+    }
+    g_thread_pool_active = 1;
+#else
+    (void)num_workers; (void)fn_ptrs;
+#endif
+}
+
+void brief_barrier_release(void) {
+#if defined(BRIEF_THREAD_POOL)
+    if (!g_thread_pool_active || g_num_workers == 0) return;
+    brief_barrier_wait_impl(&g_barrier_enter);
+#endif
+}
+
+void brief_barrier_wait(void) {
+#if defined(BRIEF_THREAD_POOL)
+    if (!g_thread_pool_active || g_num_workers == 0) return;
+    brief_barrier_wait_impl(&g_barrier_exit);
+#endif
+}
+
+void brief_thread_pool_shutdown(void) {
+#if defined(BRIEF_THREAD_POOL)
+    g_shutdown = 1;
+    brief_barrier_wait_impl(&g_barrier_enter);  /* wake workers */
+    for (unsigned i = 0; i < g_num_workers; i++) {
+        pthread_join(g_workers[i], NULL);
+    }
+    free(g_workers); g_workers = NULL;
+    free(g_work_fns_base); g_work_fns = NULL; g_work_fns_base = NULL;
+    g_thread_pool_active = 0;
+#endif
+}
+
 /* Constructor wrapper — ensures init runs even without the generated main() */
 __attribute__((constructor))
 static void brief_rt_ctor(void) {

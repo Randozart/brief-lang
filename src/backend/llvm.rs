@@ -133,6 +133,15 @@ fn trg_llvm_storage_ty(ty: &Type) -> &str {
     }
 }
 
+/// Returns true if the expression is a direct reference to one of the given
+/// trigger names (i.e., the precondition is `trg_name` with no operators).
+fn is_trigger_gated(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> bool {
+    match pre {
+        Expr::Identifier(name) => trigger_names.contains(name.as_str()),
+        _ => false,
+    }
+}
+
 pub struct LlvmBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     field_index_map: HashMap<String, usize>,
@@ -161,6 +170,9 @@ pub struct LlvmBackend {
     optimize_report: bool,
     optimize_size: Option<u64>,
     report_lines: Vec<String>,
+    has_async_txns: bool,
+    async_txn_names: Vec<String>,
+    async_thread_pool_size: u32,
 }
 
 impl LlvmBackend {
@@ -193,6 +205,9 @@ impl LlvmBackend {
             optimize_report: false,
             optimize_size: None,
             report_lines: Vec::new(),
+            has_async_txns: false,
+            async_txn_names: Vec::new(),
+            async_thread_pool_size: 0,
         }
     }
 
@@ -308,6 +323,79 @@ impl LlvmBackend {
         } else {
             program.dispatch_mode
         };
+
+        // Auto-categorize reactive transactions for dispatch path:
+        //   - enum_txns: trigger-gated + bounded value sets → switch dispatch
+        //   - async_txns: conflict-free pairwise → concurrent thread pool
+        //   - sequential_txns: everything else → main-thread sequential
+        // Priority: enum > async > sequential (enum is O(1) folded loops)
+        let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
+        let enumerable: Option<Vec<(String, Option<u64>)>> = {
+            let region = &analysis.region_analyzer;
+            if !self.trigger_names.is_empty() {
+                let mut sizes = Vec::new();
+                let mut total: u64 = 1;
+                let mut ok = true;
+                for tn in &self.trigger_names {
+                    let sz = region.value_set_size_of(tn);
+                    if let Some(s) = sz {
+                        total = total.saturating_mul(s);
+                        if total > self.optimize_budget { ok = false; break; }
+                        sizes.push((tn.clone(), sz));
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+                if ok { Some(sizes) } else { None }
+            } else { None }
+        };
+        // Determine which txns are enum candidates based on trigger data
+        let enum_txn_names: std::collections::HashSet<String> = if let Some(ref en) = enumerable {
+            let enum_trigger_names: std::collections::HashSet<&str> =
+                en.iter().map(|(n, _)| n.as_str()).collect();
+            txns.iter()
+                .filter(|(_, t)| {
+                    t.is_reactive
+                        && is_trigger_gated(&t.contract.pre_condition, &enum_trigger_names)
+                })
+                .map(|(n, _)| n.clone())
+                .collect()
+        } else { std::collections::HashSet::new() };
+        // Async candidates: conflict-free reactive txns not claimed by enum dispatch
+        let async_candidates: Vec<&crate::ast::Transaction> = txns.iter()
+            .filter(|(n, t)| t.is_reactive && !enum_txn_names.contains(n.as_str()))
+            .map(|(_, t)| *t)
+            .collect();
+        let ac_writes: Vec<std::collections::HashSet<String>> = async_candidates.iter()
+            .map(|t| crate::backend::collect_assigned_identifiers(&t.body).into_iter().collect())
+            .collect();
+        let ac_reads: Vec<std::collections::HashSet<String>> = async_candidates.iter()
+            .map(|t| crate::backend::collect_read_identifiers(&t.body))
+            .collect();
+        let mut is_async_eligible: Vec<bool> = vec![true; async_candidates.len()];
+        for i in 0..async_candidates.len() {
+            for j in (i + 1)..async_candidates.len() {
+                let has_conflict = !ac_writes[i].is_disjoint(&ac_writes[j])
+                    || !ac_writes[i].is_disjoint(&ac_reads[j])
+                    || !ac_writes[j].is_disjoint(&ac_reads[i]);
+                if has_conflict {
+                    is_async_eligible[i] = false;
+                    is_async_eligible[j] = false;
+                }
+            }
+        }
+        let all_async_eligible = !async_candidates.is_empty() && is_async_eligible.iter().all(|&x| x);
+        let mut async_txn_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if all_async_eligible {
+            for ac in &async_candidates {
+                async_txn_names.insert(ac.name.clone());
+            }
+        }
+        // Store for use by emit_main / emit_enum_main / metadata
+        self.has_async_txns = !async_txn_names.is_empty();
+        self.async_txn_names = async_txn_names.iter().cloned().collect();
+        self.async_thread_pool_size = self.async_txn_names.len() as u32;
 
         let mut out = String::new();
         self.emit_header(&mut out);
@@ -425,6 +513,13 @@ self.emit_declares(&mut out);
         for (name, txn) in &txns {
             self.emit_pre_function(&mut out, txn, name);
         }
+        // Async body functions — simple pre→fire wrapper for worker threads
+        for (name, txn) in &txns {
+            if async_txn_names.contains(name.as_str()) {
+                self.emit_async_body(&mut out, txn, name);
+                writeln!(out).ok();
+            }
+        }
         // Fused transactions
         let fusable = self.resolve_fusable_pairs(&txns);
         for (a, b) in &fusable {
@@ -485,37 +580,8 @@ self.emit_declares(&mut out);
         self.emit_init_state(&mut out);
         writeln!(out).ok();
         // Reactor — sequential or parallel
-        // Determine whether all triggers have small enough value sets
-        // for compile-time enumeration. This powers the switch-dispatch path.
-        // Wake triggers must never take the enumerable switch-dispatch path.
-        // Switch arms end with `ret i32 0`, which exits after one tick.
-        // Wake reactors need the infinite-loop `@main` with `@__rt_wait()`.
-        // When has_wake_triggers is true, emit_enum_main enters hybrid mode:
-        // it emits the tick + @__rt_wait loop with trigger re-sampling.
-        let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
-
-        // Pre-compute into an owned Vec to avoid borrow conflicts with later
-        // mutable `self` usage.
-        let enumerable: Option<Vec<(String, Option<u64>)>> = {
-            let region = &analysis.region_analyzer;
-            if !self.trigger_names.is_empty() {
-                let mut sizes = Vec::new();
-                let mut total: u64 = 1;
-                let mut ok = true;
-                for tn in &self.trigger_names {
-                    let sz = region.value_set_size_of(tn);
-                    if let Some(s) = sz {
-                        total = total.saturating_mul(s);
-                        if total > self.optimize_budget { ok = false; break; }
-                        sizes.push((tn.clone(), sz));
-                    } else {
-                        ok = false;
-                        break;
-                    }
-                }
-                if ok { Some(sizes) } else { None }
-            } else { None }
-        };
+        // Enumeration and wake trigger detection were computed above
+        // in the auto-categorization step (lines ~312-380).
 
         // Reactor tick — use folded path when a single bounded-counter txn
         // with no triggers can be collapsed into a canonical while loop.
@@ -632,6 +698,7 @@ self.emit_declares(&mut out);
                 if has_wake_triggers {
                     self.emit_wake_metadata(&mut out);
                 }
+                self.emit_thread_pool_metadata(&mut out);
             } else if !txns.is_empty() {
                 match dispatch_mode {
                     DispatchMode::Parallel => {
@@ -643,12 +710,12 @@ self.emit_declares(&mut out);
                     }
                 }
                 // Main
-                let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
                 self.emit_main(&mut out, has_wake_triggers);
                 // Wake trigger metadata
                 if has_wake_triggers {
                     self.emit_wake_metadata(&mut out);
                 }
+                self.emit_thread_pool_metadata(&mut out);
             } else {
                 writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
                 writeln!(out, "  entry:").ok();
@@ -853,6 +920,12 @@ self.emit_declares(&mut out);
         // If not linked, these resolve to a no-op stub or linker error.
         writeln!(out, "declare void @__rt_init() local_unnamed_addr").ok();
         writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
+        // Thread pool entry points — provided by brief_rt.c when BRIEF_THREAD_POOL is defined.
+        // If not linked, the linker will error. The metadata section @llvm.thread_pool
+        // tells the compiler driver to add -DBRIEF_THREAD_POOL.
+        writeln!(out, "declare void @brief_thread_pool_init(i32, i8**) local_unnamed_addr").ok();
+        writeln!(out, "declare void @brief_barrier_release() local_unnamed_addr").ok();
+        writeln!(out, "declare void @brief_barrier_wait() local_unnamed_addr").ok();
     }
 
     fn emit_foreign_declares(&mut self, out: &mut String) {
@@ -1102,6 +1175,34 @@ self.emit_declares(&mut out);
         let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
         writeln!(out, "  ret i1 {}", i1).ok();
+        writeln!(out, "}}").ok();
+    }
+
+    // ── ASYNC BODY FUNCTION ──────────────────────────────────
+    /// Emit a worker-thread body for an async transaction.
+    /// Structure: evaluate precondition, if true fire the txn body, return.
+    /// Called once per tick per worker thread. Uses `#4` attribute
+    /// (always returns from a single tick, called in a loop).
+    fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
+        let async_name = format!("async_body_{}", name);
+        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", async_name).ok();
+        writeln!(out, "  entry:").ok();
+        self.txn_counter = 0;
+        self.let_bindings.clear();
+        // Evaluate precondition
+        let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
+        let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+        let txn_fire_l = format!("%txn_fire_{}", self.txn_counter + 1);
+        writeln!(out, "  br i1 {}, label %{}, label %{}_done", i1, txn_fire_l, async_name).ok();
+        writeln!(out, "{}:", txn_fire_l).ok();
+        // Fire the txn body
+        self.terminated = false;
+        self.returns_i64 = false;
+        for s in &txn.body { self.emit_stmt(out, s, "  "); }
+        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        writeln!(out, "{}_done:", async_name).ok();
+        writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
     }
 
@@ -1887,9 +1988,18 @@ self.emit_declares(&mut out);
         if has_wake_triggers {
             writeln!(out, "  call void @__rt_init()").ok();
         }
+        if self.has_async_txns {
+            let count = self.async_txn_names.len() as i32;
+            writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
+            writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
+        }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
-        writeln!(out, "  call void @reactor_tick()").ok();
+        if self.has_async_txns {
+            self.emit_async_phase(out);
+        } else {
+            writeln!(out, "  call void @reactor_tick()").ok();
+        }
         if has_wake_triggers {
             writeln!(out, "  call void @__rt_wait()").ok();
         }
@@ -1970,6 +2080,13 @@ self.emit_declares(&mut out);
         writeln!(out, "  call void @init_state()").ok();
         if has_wake {
             writeln!(out, "  call void @__rt_init()").ok();
+        }
+        if self.has_async_txns {
+            let count = self.async_txn_names.len() as i32;
+            writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
+            writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
+        }
+        if has_wake {
             writeln!(out, "  br label %tick").ok();
             writeln!(out, "tick:").ok();
         }
@@ -2017,8 +2134,11 @@ self.emit_declares(&mut out);
 
         // "Done" label for each branch — in wake mode this is do_wait, in one-shot mode
         // this is a ret i32 0 or a terminal. We use br label %<done_label> as the
-        // exit for each case arm.
-        let done_label = if has_wake { "do_wait" } else { "exit" };
+        // exit for each case arm. When async txns exist, we inject an async_phase
+        // label between the switch arms and do_wait.
+        let done_label = if has_wake {
+            if self.has_async_txns { "async_phase" } else { "do_wait" }
+        } else { "exit" };
         if !has_wake { writeln!(out, "  br label %dispatch").ok(); writeln!(out, "dispatch:").ok(); }
 
         if total_combos == 1 && enum_sizes.len() == 1 {
@@ -2088,6 +2208,11 @@ self.emit_declares(&mut out);
         }
 
         if has_wake {
+            if self.has_async_txns {
+                writeln!(out, "async_phase:").ok();
+                self.emit_async_phase(out);
+                writeln!(out, "  br label %do_wait").ok();
+            }
             writeln!(out, "do_wait:").ok();
             writeln!(out, "  call void @__rt_wait()").ok();
             writeln!(out, "  br label %tick").ok();
@@ -2151,6 +2276,34 @@ self.emit_declares(&mut out);
             write!(out, "!\"{}\"", sym).ok();
         }
         writeln!(out, "}}").ok();
+    }
+
+    // ── THREAD POOL METADATA ────────────────────────────────
+    fn emit_thread_pool_metadata(&self, out: &mut String) {
+        if !self.has_async_txns { return; }
+        let count = self.async_txn_names.len();
+        let fn_list: Vec<String> = self.async_txn_names.iter()
+            .map(|n| format!("i8* bitcast (void (%State*)* @async_body_{} to i8*)", n))
+            .collect();
+        writeln!(out, "@llvm.thread_pool = appending global [{} x i8*] [{}]",
+            count, fn_list.join(", ")).ok();
+        // Emit a packed array of function pointers for brief_thread_pool_init
+        writeln!(out, "@thread_pool_fns = private constant [{} x void (%State*)*] [{}]",
+            count,
+            self.async_txn_names.iter()
+                .map(|n| format!("void (%State*)* @async_body_{}", n))
+                .collect::<Vec<_>>().join(", "),
+        ).ok();
+    }
+
+    /// Emit the async phase calls in main: release workers, run sequential
+    /// reactor, wait for workers. Used by emit_main and emit_enum_main.
+    fn emit_async_phase(&self, out: &mut String) {
+        if !self.has_async_txns { return; }
+        writeln!(out, "  call void @brief_barrier_release()").ok();
+        // Sequential reactor runs in main thread concurrently with workers
+        writeln!(out, "  call void @reactor_tick()").ok();
+        writeln!(out, "  call void @brief_barrier_wait()").ok();
     }
 
     // ── FUSABLE PAIRS ────────────────────────────────────────
@@ -3411,5 +3564,132 @@ mod tests {
             "Folded main should contain while-loop branches");
         assert!(output.contains("ret i32 0"),
             "Should return normally after loop");
+    }
+
+    fn make_async_pair_program() -> Program {
+        Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "a".to_string(),
+                    ty: Type::Int,
+                    expr: Some(int_s(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "b".to_string(),
+                    ty: Type::Int,
+                    expr: Some(int_s(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "inc_a".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::OwnedRef("a".to_string()),
+                            expr: Expr::Add(Box::new(ident_s("a")), Box::new(int_s(1))),
+                            timeout: None,
+                            modifiers: vec![],
+                        },
+                        Statement::Term { values: vec![], modifiers: vec![] },
+                    ],
+                    is_async: true,
+                    is_reactive: true,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "inc_b".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::OwnedRef("b".to_string()),
+                            expr: Expr::Add(Box::new(ident_s("b")), Box::new(int_s(1))),
+                            timeout: None,
+                            modifiers: vec![],
+                        },
+                        Statement::Term { values: vec![], modifiers: vec![] },
+                    ],
+                    is_async: true,
+                    is_reactive: true,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_async_body_functions_emitted() {
+        let program = make_async_pair_program();
+        let output = LlvmBackend::new().generate(&program);
+        assert!(output.contains("@async_body_inc_a"),
+            "Async body function for inc_a should be emitted");
+        assert!(output.contains("@async_body_inc_b"),
+            "Async body function for inc_b should be emitted");
+    }
+
+    #[test]
+    fn test_thread_pool_metadata_emitted() {
+        let program = make_async_pair_program();
+        let output = LlvmBackend::new().generate(&program);
+        assert!(output.contains("@llvm.thread_pool"),
+            "Thread pool metadata should be emitted for async txns");
+        assert!(output.contains("@thread_pool_fns"),
+            "Thread pool function pointer array should be emitted");
+    }
+
+    #[test]
+    fn test_async_barrier_calls_in_main() {
+        let program = make_async_pair_program();
+        let output = LlvmBackend::new().generate(&program);
+        assert!(output.contains("call void @brief_thread_pool_init"),
+            "Main should call thread_pool_init");
+        assert!(output.contains("call void @brief_barrier_release"),
+            "Main should call barrier_release");
+        assert!(output.contains("call void @brief_barrier_wait"),
+            "Main should call barrier_wait");
+    }
+
+    #[test]
+    fn test_no_thread_pool_without_async_txns() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, false);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(!output.contains("@llvm.thread_pool"),
+            "No thread pool metadata without async txns");
+        assert!(!output.contains("call void @brief_barrier"),
+            "No barrier calls without async txns");
+        assert!(!output.contains("call void @brief_thread_pool_init"),
+            "No thread pool init without async txns");
     }
 }
