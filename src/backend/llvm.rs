@@ -362,6 +362,32 @@ self.emit_declares(&mut out);
         self.emit_init_state(&mut out);
         writeln!(out).ok();
         // Reactor — sequential or parallel
+        // Determine whether all triggers have small enough value sets
+        // for compile-time enumeration. This powers the switch-dispatch path.
+        // Pre-compute into an owned Vec to avoid borrow conflicts with later
+        // mutable `self` usage.
+        let enumerable: Option<Vec<(String, Option<u64>)>> = {
+            let region = &analysis.region_analyzer;
+            if !self.trigger_names.is_empty() {
+                let mut sizes = Vec::new();
+                let mut total: u64 = 1;
+                let budget: u64 = 256;
+                let mut ok = true;
+                for tn in &self.trigger_names {
+                    let sz = region.value_set_size_of(tn);
+                    if let Some(s) = sz {
+                        total = total.saturating_mul(s);
+                        if total > budget { ok = false; break; }
+                        sizes.push((tn.clone(), sz));
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+                if ok { Some(sizes) } else { None }
+            } else { None }
+        };
+
         // Reactor tick — use folded path when a single bounded-counter txn
         // with no triggers can be collapsed into a canonical while loop.
         let graph = &analysis.transition_graph;
@@ -410,7 +436,28 @@ self.emit_declares(&mut out);
         } else { false };
 
         if !folded {
-            if !txns.is_empty() {
+            if let Some(ref enum_sizes) = enumerable {
+                // Enumerable triggers — emit switch-dispatch main
+                // This path handles triggers with small compile-time-known value sets.
+                // We emit a single @main that samples triggers once, then switch
+                // dispatches to per-value folded loops.
+
+                // Extract folding params if available for enum dispatch
+                let (enum_ci, enum_ti, enum_tcn): (usize, Option<usize>, Option<String>) = if graph.nodes.len() == 1 && txns.len() == 1 {
+                    if let Some(bp) = graph.nodes[0].bounded_pre.as_ref() {
+                        if let Some(&cidx) = self.field_index_map.get(&bp.var) {
+                            let tidx = self.field_index_map.get(&bp.bound_var).copied();
+                            let tcname = if tidx.is_none() {
+                                if self.constants.contains_key(&bp.bound_var) {
+                                    Some(bp.bound_var.clone())
+                                } else { None }
+                            } else { None };
+                            (cidx, tidx, tcname)
+                        } else { (0, None, None) }
+                    } else { (0, None, None) }
+                } else { (0, None, None) };
+
+                // Emit the reactor_tick function (needed for residual fallback path)
                 match program.dispatch_mode {
                     DispatchMode::Parallel => {
                         self.build_write_masks(program);
@@ -420,19 +467,47 @@ self.emit_declares(&mut out);
                         self.emit_reactor(&mut out, &txns, &fusable);
                     }
                 }
+
+                // Emit enum main with switch dispatch
+                let enum_tcn_ref = enum_tcn.as_deref();
+                self.emit_enum_main(
+                    &mut out,
+                    &txns,
+                    enum_sizes,
+                    enum_ci,
+                    enum_ti,
+                    enum_tcn_ref,
+                );
+
+                let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
+                if has_wake_triggers {
+                    self.emit_wake_metadata(&mut out);
+                }
+            } else if !txns.is_empty() {
+                match program.dispatch_mode {
+                    DispatchMode::Parallel => {
+                        self.build_write_masks(program);
+                        self.emit_parallel_reactor(&mut out, &txns, &fusable);
+                    }
+                    DispatchMode::Sequential => {
+                        self.emit_reactor(&mut out, &txns, &fusable);
+                    }
+                }
+                // Main
+                let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
+                self.emit_main(&mut out, has_wake_triggers);
+                // Wake trigger metadata
+                if has_wake_triggers {
+                    self.emit_wake_metadata(&mut out);
+                }
             } else {
                 writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
                 writeln!(out, "  entry:").ok();
                 writeln!(out, "  ret void").ok();
                 writeln!(out, "}}").ok();
                 writeln!(out).ok();
-            }
-            // Main
-            let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
-            self.emit_main(&mut out, has_wake_triggers);
-            // Wake trigger metadata
-            if has_wake_triggers {
-                self.emit_wake_metadata(&mut out);
+                // Main
+                self.emit_main(&mut out, false);
             }
         }
         // Attributes
@@ -1508,6 +1583,38 @@ self.emit_declares(&mut out);
         writeln!(out).ok();
     }
 
+    /// Emit the folded while-loop body (without `@init_state()` or the enclosing
+    /// `define` / `ret`).  Used by both `emit_folded_main` and the enum dispatch path.
+    fn emit_folded_loop(
+        &self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        label_prefix: &str,
+    ) {
+        let c0 = self.txn_counter;
+        if let Some(ti) = total_idx {
+            writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
+            writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+        } else if let Some(cn) = total_const_name {
+            writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
+        } else {
+            writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c0).ok();
+        }
+        writeln!(out, "  br label %{}_hdr", label_prefix).ok();
+        writeln!(out, "{}_hdr:", label_prefix).ok();
+        writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
+        writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
+        writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
+        writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
+        writeln!(out, "{}_body:", label_prefix).ok();
+        writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
+        writeln!(out, "  br label %{}_hdr", label_prefix).ok();
+        writeln!(out, "{}_done:", label_prefix).ok();
+    }
+
     fn emit_folded_main(
         &self,
         out: &mut String,
@@ -1519,26 +1626,84 @@ self.emit_declares(&mut out);
         writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
-        let c0 = self.txn_counter;
-        if let Some(ti) = total_idx {
-            writeln!(out, "  %gt{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0, ti).ok();
-            writeln!(out, "  %lt{} = load i64, i64* %gt{}, align 8", c0, c0).ok();
-        } else if let Some(cn) = total_const_name {
-            writeln!(out, "  %lt{} = load i64, i64* @{}, align 8", c0, cn).ok();
-        } else {
-            writeln!(out, "  %lt{} = add i64 0, 0", c0).ok();
-        }
-        writeln!(out, "  br label %hdr").ok();
-        writeln!(out, "hdr:").ok();
-        writeln!(out, "  %gp{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0 + 1, counter_idx).ok();
-        writeln!(out, "  %lp{} = load i64, i64* %gp{}, align 8", c0 + 1, c0 + 1).ok();
-        writeln!(out, "  %cp{} = icmp slt i64 %lp{}, %lt{}", c0 + 2, c0 + 1, c0).ok();
-        writeln!(out, "  br i1 %cp{}, label %body, label %done", c0 + 2).ok();
-        writeln!(out, "body:").ok();
-        writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
-        writeln!(out, "  br label %hdr").ok();
-        writeln!(out, "done:").ok();
+        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case");
         writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// Emit a `main()` that samples enumerable triggers once and switch-dispatches
+    /// to per-value folded loops.  Each trigger combination gets its own while-loop
+    /// that runs the folded transaction body.
+    fn emit_enum_main(
+        &mut self,
+        out: &mut String,
+        txns: &[(String, &crate::ast::Transaction)],
+        enum_sizes: &[(String, Option<u64>)],
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+    ) {
+        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  call void @init_state()").ok();
+
+        // Sample triggers (clone trigger data to avoid borrow conflict)
+        let trigger_data: Vec<(String, String, bool, crate::ast::Type)> = enum_sizes.iter()
+            .filter_map(|(tn, _)| {
+                self.triggers.get(tn).map(|t| {
+                    let rn = format!("%sz_{}", tn);
+                    let (addr_str, addr_is_ptr) = match &t.address {
+                        crate::ast::LinkRef::Explicit(a) => (a.to_string(), false),
+                        crate::ast::LinkRef::Linked(s) => (format!("@{}", s), true),
+                    };
+                    (rn, addr_str, addr_is_ptr, t.ty.clone())
+                })
+            })
+            .collect();
+        for (rn, addr_str, addr_is_ptr, ty) in &trigger_data {
+            self.emit_trg_load(out, "  ", rn, addr_str, *addr_is_ptr, ty);
+        }
+
+        // Build switch dispatch
+        let txn_name = txns.first().map(|(n, _)| n.as_str()).unwrap_or("__missing");
+        let total_combos: u64 = enum_sizes.iter().map(|(_, s)| s.unwrap_or(1)).product();
+
+        if total_combos == 1 && enum_sizes.len() == 1 {
+            // Single-value trigger: just fall through to the loop
+            self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "sc");
+            writeln!(out, "  ret i32 0").ok();
+        } else if enum_sizes.len() == 1 {
+            // Single enumerable trigger — one switch axis
+            let tn = &enum_sizes[0].0;
+            let n = enum_sizes[0].1.unwrap_or(2);
+            writeln!(out, "  switch i8 %sz_{}, label %{}_residual [", tn, tn).ok();
+            for val in 0..n as i64 {
+                writeln!(out, "    i8 {}, label %{}_case_{}", val, tn, val).ok();
+            }
+            writeln!(out, "  ]").ok();
+            for val in 0..n as i64 {
+                let prefix = format!("{}_{}", tn, val);
+                writeln!(out, "{}_case_{}:", tn, val).ok();
+                self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, &prefix);
+                writeln!(out, "  ret i32 0").ok();
+            }
+            writeln!(out, "{}_residual:", tn).ok();
+            writeln!(out, "  br label %{}_residual_loop", tn).ok();
+            writeln!(out, "{}_residual_loop:", tn).ok();
+            writeln!(out, "  call void @reactor_tick()").ok();
+            writeln!(out, "  br label %{}_residual_loop", tn).ok();
+        } else {
+            // Multi-trigger case: just fall through to standard reactor
+            writeln!(out, "  br label %residual_entry").ok();
+            writeln!(out, "residual_entry:").ok();
+            writeln!(out, "  call void @init_state()").ok();
+            writeln!(out, "  br label %residual_loop").ok();
+            writeln!(out, "residual_loop:").ok();
+            writeln!(out, "  call void @reactor_tick()").ok();
+            writeln!(out, "  br label %residual_loop").ok();
+        }
+
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }
@@ -2357,7 +2522,8 @@ mod tests {
 
     #[test]
     fn test_main_calls_rt_init_and_rt_wait_with_wake_triggers() {
-        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
+        // Use Int trigger (non-enumerable) to force standard reactor path
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, true);
         let output = LlvmBackend::new().generate(&program);
         assert!(output.contains("call void @__rt_init()"),
             "main() calls __rt_init() when wake triggers exist");
@@ -2367,7 +2533,8 @@ mod tests {
 
     #[test]
     fn test_main_no_init_wait_without_wake_triggers() {
-        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, false);
+        // Use Int trigger (non-enumerable) to force standard reactor path
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, false);
         let output = LlvmBackend::new().generate(&program);
         assert!(!output.contains("call void @__rt_init()"),
             "main() does not call __rt_init() without wake triggers");
@@ -2377,7 +2544,8 @@ mod tests {
 
     #[test]
     fn test_rt_declares_present() {
-        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, false);
+        // Use Int trigger (non-enumerable) to force standard reactor path
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, false);
         let output = LlvmBackend::new().generate(&program);
         assert!(output.contains("declare void @__rt_init()"),
             "__rt_init always declared");
@@ -2527,7 +2695,7 @@ mod tests {
 
     #[test]
     fn test_main_and_reactor_use_non_willreturn_attr() {
-        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, true);
         let output = LlvmBackend::new().generate(&program);
         assert!(output.contains("attributes #2"),
             "Should emit attributes #2 for reactor_tick");

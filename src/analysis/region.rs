@@ -273,12 +273,12 @@ impl RegionAnalyzer {
             // Propagate to all vars that read this frontier_var
             if let Some(readers) = self.rev_deps.get(&frontier_var).cloned() {
                 for reader in readers {
-                    let needs_update = {
-                        let cur_class = &self.var_info[&reader].classification;
-                        *cur_class == VarClass::Pure
-                            || (frontier_class == VarClass::Opaque
-                                && *cur_class == VarClass::Bounded)
-                    };
+                    // Skip unregistered vars (e.g. transaction params, foreign bindings)
+                    let Some(reader_info) = self.var_info.get(&reader) else { continue; };
+                    let cur_class = &reader_info.classification;
+                    let needs_update = *cur_class == VarClass::Pure
+                        || (frontier_class == VarClass::Opaque
+                            && *cur_class == VarClass::Bounded);
                     if needs_update {
                         if let Some(info) = self.var_info.get_mut(&reader) {
                             info.classification = if frontier_class == VarClass::Opaque {
@@ -459,6 +459,11 @@ impl RegionAnalyzer {
             .get(var)
             .map(|i| i.classification != VarClass::Pure)
             .unwrap_or(false)
+    }
+
+    /// Get the estimated value-set size for a variable, or `None` if unbounded.
+    pub fn value_set_size_of(&self, var: &str) -> Option<u64> {
+        self.var_info.get(var).and_then(|i| i.value_set_size)
     }
 }
 

@@ -13,6 +13,7 @@ pub mod cobol;
 use crate::analysis::call_graph::CallGraph;
 use crate::analysis::range::ParameterRanges;
 use crate::analysis::dataflow::DataflowError;
+use crate::analysis::region::RegionAnalyzer;
 use crate::analysis::transition_graph::ReactorTransitionGraph;
 use crate::ast::{Expr, Hashtag, Program, Statement, TopLevel, Transaction, Definition, StructDefinition};
 
@@ -26,6 +27,7 @@ pub struct AnalysisResults {
     pub dataflow_errors: Vec<DataflowError>,
     pub optimize_mode: bool,
     pub transition_graph: ReactorTransitionGraph,
+    pub region_analyzer: RegionAnalyzer,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -53,6 +55,7 @@ pub fn analyze_program(program: &Program, optimize: bool) -> AnalysisResults {
     };
 
     let transition_graph = ReactorTransitionGraph::build(program);
+    let region_analyzer = RegionAnalyzer::analyze(program);
 
     AnalysisResults {
         call_graph: cg,
@@ -61,6 +64,7 @@ pub fn analyze_program(program: &Program, optimize: bool) -> AnalysisResults {
         dataflow_errors,
         optimize_mode: optimize,
         transition_graph,
+        region_analyzer,
     }
 }
 

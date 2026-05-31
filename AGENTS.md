@@ -69,6 +69,27 @@ brief-compiler selfhost <file.bv>
 
 **Do NOT add as built-ins**: `is_digit`, `is_alpha`, `is_alphanumeric`, `is_upper`, `is_lower`, `is_space`, `char_to_string`, `None`, `Some`, `Ok`, `Err`. These are in `lib/std/` and should be imported.
 
+## Anchored Summary
+
+**Current**: Phase 2 (value-set enum dispatch) done. 316 tests pass.
+
+### Done
+- 7 LLVM backend bug fixes (cast no-op, zero-init, float hex, mustprogress UB, memory scoping, #volatile, negative float)
+- `transition_graph.rs` — bounded pre detection, increment patterns, pure/impure body
+- `emit_folded_main()` / `emit_folded_pure_counter()` — while-loop collapse for bounded-counter rxns
+- IIR filter benchmark: Brief 0.15s vs C 0.23s (1.53× faster)
+- `TopLevel::Constant` in LLVM backend (`@name = constant` globals, const identifier resolution)
+- Convergence verification (`check_convergence`) — pre validation, relational post-ops, overshoot detection
+- Architecture: convergence skip moved to `ProofEngine::verify_contracts`
+- **RegionAnalyzer** (`src/analysis/region.rs`): VarClass (Pure/Bounded/Opaque), Interval, dep graph, BFS prop, region detection, value-set estimation, 9 unit tests
+- **Phase 2 integration**: `region_analyzer` in `AnalysisResults`, `emit_folded_loop` helper refactor, `emit_enum_main` with switch dispatch for enumerable triggers (budget=256 combos)
+- Design doc: `docs/design/determinism-and-optimization-frontier.md`
+- Plan doc: `plans/2026-06-01-optimization-framework.md`
+
+### Next Up
+- Phase 3: Budget and report system (`--optimize-budget`, `--optimize-report`)
+- Phase 4 (stretch): Chain equivalence
+
 ## Key Design Documents
 
 - **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual architecture for Brief's optimization framework: determinism analysis, atomic reactive regions, value-set enumeration, budget-controlled compile-time optimization.
