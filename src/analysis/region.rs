@@ -830,6 +830,11 @@ impl RegionAnalyzer {
         });
     }
 
+    /// Query the resolved iteration bound for a given transaction name.
+    pub fn iteration_bound_of(&self, txn_name: &str) -> Option<u64> {
+        self.iter_bounds.get(txn_name).copied()
+    }
+
     // ── Chain composition (Phase 4.2) ─────────────────────────────
 
     pub fn compose_chains(&mut self) {
@@ -902,6 +907,7 @@ impl RegionAnalyzer {
                 if let Some(reads_next) = self.txn_reads.get(&chain[i + 1]) {
                     let shared: Vec<_> = writes_a.iter().filter(|w| reads_next.contains(*w)).collect();
                     for sv in &shared {
+                        if self.is_chain_counter_var(chain, sv) { continue; }
                         let writer_count: usize = chain.iter()
                             .filter(|tn| {
                                 if let Some(w) = self.txn_writes.get(*tn) {
@@ -982,6 +988,15 @@ impl RegionAnalyzer {
             trigger_values: trigger_values.map(|tv| tv.to_vec()),
             all_internal,
         });
+    }
+
+    fn is_chain_counter_var(&self, chain: &[String], var: &str) -> bool {
+        chain.iter().any(|tn| {
+            if let Some(body) = self.txn_bodies.get(tn) {
+                let cv = find_counter_var(body);
+                cv.as_deref() == Some(var)
+            } else { false }
+        })
     }
 
     fn compute_link_vars(&self, chain: &[String]) -> Vec<String> {

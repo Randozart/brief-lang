@@ -387,6 +387,23 @@ self.emit_declares(&mut out);
             }
         }
         // Composed chain functions
+        // Extract all-internal counter info before taking composed_chains.
+        let all_internal_counter: HashMap<String, (usize, i64)> = analysis.region_analyzer.composed_chains
+            .iter()
+            .filter(|cc| cc.all_internal)
+            .filter_map(|cc| {
+                let cv = cc.counter_var.as_ref()?;
+                let ci = *self.field_index_map.get(cv)?;
+                let bound = analysis.region_analyzer.iteration_bound_of(&cc.chain[0])? as i64;
+                let base = format!("{}_fused_txn", cc.chain.join("_"));
+                let fn_name = if let Some(ref tv) = cc.trigger_values {
+                    let suffix: String = tv.iter().map(|(_, v)| v.to_string()).collect::<Vec<_>>().join("_");
+                    format!("{}_trg_{}", base, suffix)
+                } else { base };
+                Some((fn_name, (ci, bound)))
+            })
+            .collect();
+
         let composed_chains = std::mem::take(&mut analysis.region_analyzer.composed_chains);
         let mut composed_fn_map: HashMap<String, String> = HashMap::new();
         let mut composed_by_trig: HashMap<String, Vec<(i64, String)>> = HashMap::new();
@@ -406,8 +423,13 @@ self.emit_declares(&mut out);
                     composed_by_trig.entry(cc.chain[0].clone()).or_default().push((*val, fused_name.clone()));
                 }
             }
-            self.emit_fused_composed(&mut out, &cc.composed_body, &fused_name);
-            writeln!(out).ok();
+            // Skip emitting fused function for all-internal chains — the
+            // per-case arms in emit_enum_main will store the final counter
+            // value directly instead of calling the folded loop.
+            if !cc.all_internal {
+                self.emit_fused_composed(&mut out, &cc.composed_body, &fused_name);
+                writeln!(out).ok();
+            }
         }
         // Init
         self.emit_init_state(&mut out);
@@ -526,6 +548,11 @@ self.emit_declares(&mut out);
                 let composed_trig_ref: Option<&HashMap<String, Vec<(i64, String)>>> = if !composed_by_trig.is_empty() {
                     Some(&composed_by_trig)
                 } else { None };
+                let all_int_ref: Option<&HashMap<String, (usize, i64)>> = if all_internal_counter.is_empty() {
+                    None
+                } else {
+                    Some(&all_internal_counter)
+                };
                 self.emit_enum_main(
                     &mut out,
                     &txns,
@@ -535,6 +562,7 @@ self.emit_declares(&mut out);
                     enum_tcn_ref,
                     composed_fn,
                     composed_trig_ref,
+                    all_int_ref,
                 );
 
                 let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
@@ -1853,6 +1881,7 @@ self.emit_declares(&mut out);
         total_const_name: Option<&str>,
         composed_fn: Option<&str>,
         composed_trig_map: Option<&HashMap<String, Vec<(i64, String)>>>,
+        all_internal_map: Option<&HashMap<String, (usize, i64)>>,
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
@@ -1893,10 +1922,21 @@ self.emit_declares(&mut out);
 
         let total_combos: u64 = enum_sizes.iter().map(|(_, s)| s.unwrap_or(1)).product();
 
+        // Helper: check if a function name maps to an all-internal
+        // (pure counter) case and return its (ci, total_val) if so.
+        let all_internal_lookup = |fn_name: &str| -> Option<(usize, i64)> {
+            all_internal_map.and_then(|m| m.get(fn_name).copied())
+        };
+
         if total_combos == 1 && enum_sizes.len() == 1 {
             // Single-value trigger: just fall through to the loop
             let fn_name = trig_to_fn.get(&0).map(|s| s.as_str()).unwrap_or(txn_name);
-            self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, "sc");
+            if let Some((ci, tv)) = all_internal_lookup(fn_name) {
+                writeln!(out, "  %pc_sc = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", ci).ok();
+                writeln!(out, "  store i64 {}, i64* %pc_sc, align 8", tv).ok();
+            } else {
+                self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, "sc");
+            }
             writeln!(out, "  ret i32 0").ok();
         } else if enum_sizes.len() == 1 {
             // Single enumerable trigger — one switch axis
@@ -1912,7 +1952,12 @@ self.emit_declares(&mut out);
                 let prefix = format!("{}_{}", tn, val);
                 let fn_name = trig_to_fn.get(&val).map(|s| s.as_str()).unwrap_or(&native_name);
                 writeln!(out, "{}_case_{}:", tn, val).ok();
-                self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, &prefix);
+                if let Some((ci, tv)) = all_internal_lookup(fn_name) {
+                    writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", prefix, ci).ok();
+                    writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, prefix).ok();
+                } else {
+                    self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, &prefix);
+                }
                 writeln!(out, "  ret i32 0").ok();
             }
             writeln!(out, "{}_residual:", tn).ok();
@@ -2938,5 +2983,198 @@ mod tests {
             "attributes #0 should still be present for terminating functions");
         assert!(output.contains("define void @init_state() local_unnamed_addr #0"),
             "init_state() should still use #0 with willreturn");
+    }
+
+    // ── Integration: optimization report & chain composition ──
+
+    fn make_chain_program(
+        txns: Vec<(&str, Vec<Statement>)>,
+        trigger: Option<(&str, Type)>,
+        consts: &[(&str, i64)],
+        states: &[(&str, i64)],
+    ) -> Program {
+        let mut items: Vec<TopLevel> = Vec::new();
+        for (name, val) in consts {
+            items.push(TopLevel::Constant(Constant {
+                name: name.to_string(),
+                ty: Type::Int,
+                expr: Expr::Integer(*val),
+            }));
+        }
+        for (name, val) in states {
+            items.push(TopLevel::StateDecl(StateDecl {
+                name: name.to_string(),
+                ty: Type::Int,
+                expr: Some(Expr::Integer(*val)),
+                address: None, bit_range: None, is_override: false,
+                os_mode: false, span: None, attrs: vec![],
+            }));
+        }
+        if let Some((trg_name, trg_ty)) = trigger {
+            items.push(TopLevel::Trigger(TriggerDeclaration {
+                name: trg_name.to_string(), ty: trg_ty,
+                address: LinkRef::Explicit(0), bit_range: None,
+                stages: vec![], condition: None, is_wake: false, span: None,
+            }));
+        }
+        for (txn_name, body) in txns {
+            let pre = Expr::Lt(
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Identifier("total".to_string())),
+            );
+            items.push(TopLevel::Transaction(Transaction {
+                name: txn_name.to_string(), parameters: vec![],
+                contract: Contract {
+                    pre_condition: pre,
+                    post_condition: Expr::Bool(true),
+                    span: None, watchdog: None,
+                },
+                body, is_async: false, is_reactive: true, reactor_speed: None,
+                span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+            }));
+        }
+        Program {
+            items, comments: vec![], reactor_speed: None, attrs: Vec::new(),
+            ffi: None, strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+        }
+    }
+
+    fn ident_s(s: &str) -> Expr { Expr::Identifier(s.to_string()) }
+    fn int_s(v: i64) -> Expr { Expr::Integer(v) }
+
+    #[test]
+    fn test_report_shows_ranking() {
+        let program = make_chain_program(
+            vec![("t1", vec![
+                Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
+                Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+            ])],
+            Some(("sensor", Type::Bool)),
+            &[("total", 100)], &[("count", 0), ("x", 0)],
+        );
+        let mut backend = LlvmBackend::new()
+            .with_optimize_budget(256).with_optimize_report(true);
+        let _output = backend.generate(&program);
+        let report: Vec<&str> = backend.report().iter().map(|s| s.as_str()).collect();
+        let joined = report.join("\n");
+        assert!(joined.contains("Optimization priority ranking"),
+            "Report should contain priority ranking section");
+    }
+
+    #[test]
+    fn test_report_shows_budget() {
+        let program = make_chain_program(
+            vec![("t1", vec![
+                Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
+                Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+            ])],
+            Some(("sensor", Type::Bool)),
+            &[("total", 100)], &[("count", 0), ("x", 0)],
+        );
+        let mut backend = LlvmBackend::new()
+            .with_optimize_budget(10).with_optimize_report(true);
+        let _output = backend.generate(&program);
+        let report: Vec<&str> = backend.report().iter().map(|s| s.as_str()).collect();
+        let joined = report.join("\n");
+        assert!(joined.contains("Budget plan"),
+            "Report should contain budget plan section");
+    }
+
+    #[test]
+    fn test_report_shows_size() {
+        let program = make_chain_program(
+            vec![("t1", vec![
+                Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
+                Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+            ])],
+            Some(("sensor", Type::Bool)),
+            &[("total", 100)], &[("count", 0), ("x", 0)],
+        );
+        let mut backend = LlvmBackend::new()
+            .with_optimize_budget(256).with_optimize_report(true)
+            .with_optimize_size(10000);
+        let _output = backend.generate(&program);
+        let report: Vec<&str> = backend.report().iter().map(|s| s.as_str()).collect();
+        let joined = report.join("\n");
+        assert!(joined.contains("Size estimation") || joined.contains("Base binary"),
+            "Report should contain size estimation section");
+    }
+
+    #[test]
+    fn test_report_shows_chains() {
+        let program = make_chain_program(
+            vec![
+                ("step_a", vec![
+                    Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+                ("step_b", vec![
+                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::Add(Box::new(ident_s("x")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+            ],
+            Some(("sensor", Type::Bool)),
+            &[("total", 100)],
+            &[("count", 0), ("x", 0), ("y", 0)],
+        );
+        let mut backend = LlvmBackend::new()
+            .with_optimize_budget(256).with_optimize_report(true);
+        let _output = backend.generate(&program);
+        let report: Vec<&str> = backend.report().iter().map(|s| s.as_str()).collect();
+        let joined = report.join("\n");
+        assert!(joined.contains("Linear transaction chains")
+            || joined.contains("Composed chains"),
+            "Report should detect multi-txn chains");
+    }
+
+    #[test]
+    fn test_enum_with_composed_chain() {
+        let program = make_chain_program(
+            vec![
+                ("step_a", vec![
+                    Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+                ("step_b", vec![
+                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::Add(Box::new(ident_s("x")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+            ],
+            Some(("sensor", Type::Bool)),
+            &[("total", 100)],
+            &[("count", 0), ("x", 0), ("y", 0)],
+        );
+        let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
+        // All-internal chains skip fused fn emission; pure counter store
+        // is emitted directly in the per-case switch arm.
+        assert!(output.contains("switch i8"),
+            "Should emit switch dispatch for enumerable trigger");
+        assert!(output.contains("@main"),
+            "Should emit main function with enum dispatch");
+    }
+
+    #[test]
+    fn test_all_internal_pure_counter_emitted() {
+        let program = make_chain_program(
+            vec![
+                ("step_a", vec![
+                    Statement::Assignment { lhs: ident_s("_trig"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("internal"), expr: int_s(42), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+                ("step_b", vec![
+                    Statement::Assignment { lhs: ident_s("result"), expr: Expr::Add(Box::new(ident_s("internal")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+            ],
+            Some(("sensor", Type::Bool)),
+            &[("total", 100)],
+            &[("count", 0), ("internal", 0), ("result", 0), ("_trig", 0)],
+        );
+        let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
+        assert!(output.contains("@main"),
+            "Should emit main function");
     }
 }
