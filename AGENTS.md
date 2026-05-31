@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: Phase 3 + 4.1 done. 316 tests pass. Cost model and Phase 4.2–4.3 designed.
+**Current**: Phases 3-4.3 done. 328 tests pass. Cost model, chain composition, and branching implemented.
 
 ### Done
 - 7 LLVM backend bug fixes (cast no-op, zero-init, float hex, mustprogress UB, memory scoping, #volatile, negative float)
@@ -82,18 +82,22 @@ brief-compiler selfhost <file.bv>
 - Convergence verification (`check_convergence`) — pre validation, relational post-ops, overshoot detection
 - Architecture: convergence skip moved to `ProofEngine::verify_contracts`
 - **RegionAnalyzer** (`src/analysis/region.rs`): VarClass (Pure/Bounded/Opaque), Interval, dep graph, BFS prop, region detection, value-set estimation, 9 unit tests
-- **Phase 2 integration**: `region_analyzer` in `AnalysisResults`, `emit_folded_loop` helper refactor, `emit_enum_main` with switch dispatch for enumerable triggers (budget=256 combos)
-- **Phase 3**: `--optimize-budget <N>`, `--optimize-report`, `--optimize-size <bytes>` CLI flags. Budget wired through to enum check replacing hardcoded 256. Report shows trigger value sets, combinations, budget fit, size estimation.
-- **Phase 4.1**: Linear transaction chain detection — tracks txn_reads/txn_writes per transaction, finds linear chains (A→B→C) via dependency traversal, deduplicates to maximal chains. Shown in `--optimize-report`.
-- **Design doc**: `docs/design/determinism-and-optimization-frontier.md`
+- **Phase 2**: `region_analyzer` in `AnalysisResults`, `emit_folded_loop` helper refactor, `emit_enum_main` with switch dispatch for enumerable triggers (budget=256 combos)
+- **Phase 3**: `--optimize-budget <N>`, `--optimize-report`, `--optimize-size <bytes>` CLI flags. Budget wired through to enum check. Report shows trigger value sets, combinations, budget fit, size estimation.
+- **Phase 4.1**: Linear transaction chain detection — txn_reads/txn_writes per txn, A→B→C traversal, maximal chain dedup. Shown in `--optimize-report`.
+- **Phase 4.2**: Expression substitution engine (`substitute_var`/`substitute_expr` for all 46 Expr variants). Chain composition with slack-link variable forwarding. Composability constraint validation (single upstream producer, shared convergence contract, no FFI). 12 new unit tests.
+- **Phase 4.3**: `emit_fused_composed()` — emits composed chain bodies as LLVM functions. `emit_enum_main()` extended with per-trigger-value composed function dispatch. Trigger branching produces one fused function per concretized trigger value (Bool → `@txn_fused_txn_trg_0` / `_trg_1`). Partial composability tracks `all_internal` flag for store elimination eligibility.
+- **Report**: Extended with optimization priority ranking table (RID, txns, class, weight, iter, cost, score, chain/GPU tags), budget allocation plan (allocated/skipped regions), composed chain details (trigger values, all-internal status).
+- **Types**: `ComplexityClass` (Trivial/Light/Medium/Heavy/Unbounded), `RegionScore`, `BudgetPlan`, `ComposedChain` with `trigger_values: Option<Vec<(String, i64)>>` and `all_internal: bool`.
+- **Analysis pipeline**: 10-phase `analyze()` — register→depgraph→seed→propagate→regions→value_sets→chains→iter_bounds→region_scores→compose; `build_budget_plan()` called separately with budget parameter.
+- **Design docs**: `determinism-and-optimization-frontier.md`, `optimization-cost-model.md`
 - **Plan doc**: `plans/2026-06-01-optimization-framework.md`
-- **Design doc**: `docs/design/optimization-cost-model.md` — full spec for complexity estimation, region scoring, budget planning, chain composition (4.2), fused emission (4.3), GPU eligibility analysis, report format
 
 ### Next Up
-- Implement cost model (~330 lines): `ComplexityClass`, `RegionScore`, `BudgetPlan`, `ComposedChain` types
-- Phase 4.2: Expression substitution engine + chain composition with trigger branching
-- Phase 4.3: Fused txn emission in LLVM backend, enum dispatch with chain targets
-- ~9 new unit tests, ~325 total
+- Phase 5: Compile-time complete evaluation (if state space ≤ budget, precompute all results)
+- Partial composability optimization: eliminate stores for all-internal chain variables
+- GPU backend exploration (LLVM AMDGPU/NVPTX triple toggle)
+- ~325 total tests currently passing
 
 ## Key Design Documents
 

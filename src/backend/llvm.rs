@@ -218,7 +218,11 @@ impl LlvmBackend {
     }
 
     pub fn generate(&mut self, program: &Program) -> String {
-        let analysis = crate::backend::analyze_program(program, false);
+        let mut analysis = crate::backend::analyze_program(program, false);
+
+        analysis.region_analyzer.compose_chains();
+        analysis.region_analyzer.build_budget_plan(self.optimize_budget);
+
         let cg = &analysis.call_graph;
         self.has_cycles = cg.has_cycle();
 
@@ -382,6 +386,29 @@ self.emit_declares(&mut out);
                 writeln!(out).ok();
             }
         }
+        // Composed chain functions
+        let composed_chains = std::mem::take(&mut analysis.region_analyzer.composed_chains);
+        let mut composed_fn_map: HashMap<String, String> = HashMap::new();
+        let mut composed_by_trig: HashMap<String, Vec<(i64, String)>> = HashMap::new();
+        for cc in &composed_chains {
+            let base = format!("{}_fused_txn", cc.chain.join("_"));
+            let fused_name = if let Some(ref tv) = cc.trigger_values {
+                let variant_suffix: String = tv.iter()
+                    .map(|(_, v)| v.to_string())
+                    .collect::<Vec<_>>().join("_");
+                format!("{}_trg_{}", base, variant_suffix)
+            } else {
+                base.clone()
+            };
+            composed_fn_map.insert(cc.chain[0].clone(), fused_name.clone());
+            if let Some(ref tv) = cc.trigger_values {
+                for (_, val) in tv {
+                    composed_by_trig.entry(cc.chain[0].clone()).or_default().push((*val, fused_name.clone()));
+                }
+            }
+            self.emit_fused_composed(&mut out, &cc.composed_body, &fused_name);
+            writeln!(out).ok();
+        }
         // Init
         self.emit_init_state(&mut out);
         writeln!(out).ok();
@@ -493,6 +520,12 @@ self.emit_declares(&mut out);
 
                 // Emit enum main with switch dispatch
                 let enum_tcn_ref = enum_tcn.as_deref();
+                let composed_fn = txns.first()
+                    .and_then(|(n, _)| composed_fn_map.get(n))
+                    .map(|s| s.as_str());
+                let composed_trig_ref: Option<&HashMap<String, Vec<(i64, String)>>> = if !composed_by_trig.is_empty() {
+                    Some(&composed_by_trig)
+                } else { None };
                 self.emit_enum_main(
                     &mut out,
                     &txns,
@@ -500,6 +533,8 @@ self.emit_declares(&mut out);
                     enum_ci,
                     enum_ti,
                     enum_tcn_ref,
+                    composed_fn,
+                    composed_trig_ref,
                 );
 
                 let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
@@ -619,6 +654,69 @@ self.emit_declares(&mut out);
                 for (i, chain) in chains.iter().enumerate() {
                     let chain_str: String = chain.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" -> ");
                     self.report_lines.push(format!("  Chain {}: {}", i + 1, chain_str));
+                }
+            }
+            let scores = &analysis.region_analyzer.region_scores;
+            if !scores.is_empty() {
+                self.report_lines.push("".to_string());
+                self.report_lines.push("Optimization priority ranking:".to_string());
+                for (rank, score) in scores.iter().enumerate() {
+                    let class_str = format!("{:?}", score.complexity);
+                    let gpu = if score.gpu_eligible { " GPU" } else { "" };
+                    let chain_tag = if score.chain_composed { " Chain" } else { "" };
+                    let score_str = if score.optimization_score.is_infinite() || score.optimization_score <= 0.0 {
+                        "—".to_string()
+                    } else {
+                        format!("{:.1}", score.optimization_score)
+                    };
+                    let vs_size = match score.value_set_size {
+                        Some(n) => format!("{}", n),
+                        None => "∞".to_string(),
+                    };
+                    let txn_list = score.txn_names.join(",");
+                    self.report_lines.push(format!(
+                        "  #{:<3} R{:<4} {:<20} {:<9} {:<7} {:<8} {:<8} {:<8} {}{}",
+                        rank + 1, score.region_id, txn_list, class_str,
+                        score.body_weight, score.iteration_count, vs_size, score_str,
+                        chain_tag, gpu
+                    ));
+                }
+            }
+            if let Some(ref plan) = analysis.region_analyzer.budget_plan {
+                self.report_lines.push("".to_string());
+                self.report_lines.push(format!("Budget plan (budget={}):", plan.total_budget));
+                let spent: u64 = plan.total_budget - plan.residual_budget;
+                self.report_lines.push(format!("  Allocated: {} regions, spent {}/{}", plan.allocated.len(), spent, plan.total_budget));
+                for (rid, cls, cost, score) in &plan.allocated {
+                    self.report_lines.push(format!("    R{}: {:?}, cost={}, score={:.1}", rid, cls, cost, score));
+                }
+                self.report_lines.push(format!("  Residual: {} budget units", plan.residual_budget));
+                if !plan.skipped.is_empty() {
+                    self.report_lines.push(format!("  Skipped: {} regions (unbounded or exceeds budget)", plan.skipped.len()));
+                    for (rid, cls, _) in &plan.skipped {
+                        self.report_lines.push(format!("    R{}: {:?}", rid, cls));
+                    }
+                }
+            }
+            if !composed_chains.is_empty() {
+                self.report_lines.push("".to_string());
+                self.report_lines.push("Composed chains:".to_string());
+                for cc in &composed_chains {
+                    let chain_str: String = cc.chain.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" → ");
+                    let triggers = if cc.root_triggers.is_empty() {
+                        "none".to_string()
+                    } else {
+                        cc.root_triggers.join(", ")
+                    };
+                    let tv_str = match &cc.trigger_values {
+                        Some(tv) => tv.iter().map(|(n, v)| format!("{}={}", n, v)).collect::<Vec<_>>().join(", "),
+                        None => if cc.root_triggers.is_empty() { "—".to_string() } else { "unbranched".to_string() },
+                    };
+                    let internal = if cc.all_internal { " all-internal" } else { "" };
+                    self.report_lines.push(format!(
+                        "  {} (link vars: {}, triggers: {}, values: [{}], fused weight: {}{})",
+                        chain_str, cc.link_vars.join(","), triggers, tv_str, cc.fused_weight, internal
+                    ));
                 }
             }
         }
@@ -910,6 +1008,15 @@ self.emit_declares(&mut out);
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined { self.emit_stmt(out, s, "  "); }
+        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        writeln!(out, "}}").ok();
+    }
+
+    fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
+        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", name).ok();
+        writeln!(out, "  entry:").ok();
+        self.txn_counter = 0; self.let_bindings.clear(); self.terminated = false; self.returns_i64 = false;
+        for s in body { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
     }
@@ -1744,6 +1851,8 @@ self.emit_declares(&mut out);
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        composed_fn: Option<&str>,
+        composed_trig_map: Option<&HashMap<String, Vec<(i64, String)>>>,
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
@@ -1767,17 +1876,33 @@ self.emit_declares(&mut out);
         }
 
         // Build switch dispatch
-        let txn_name = txns.first().map(|(n, _)| n.as_str()).unwrap_or("__missing");
+        let txn_name = composed_fn.unwrap_or(
+            txns.first().map(|(n, _)| n.as_str()).unwrap_or("__missing")
+        );
+
+        // Build per-trigger-value composed function lookup (for chain branching)
+        let root_txn = txns.first().map(|(n, _)| n.as_str()).unwrap_or("");
+        let mut trig_to_fn: HashMap<i64, String> = HashMap::new();
+        if let Some(ctm) = composed_trig_map {
+            if let Some(entries) = ctm.get(root_txn) {
+                for (val, fname) in entries {
+                    trig_to_fn.insert(*val, fname.clone());
+                }
+            }
+        }
+
         let total_combos: u64 = enum_sizes.iter().map(|(_, s)| s.unwrap_or(1)).product();
 
         if total_combos == 1 && enum_sizes.len() == 1 {
             // Single-value trigger: just fall through to the loop
-            self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "sc");
+            let fn_name = trig_to_fn.get(&0).map(|s| s.as_str()).unwrap_or(txn_name);
+            self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, "sc");
             writeln!(out, "  ret i32 0").ok();
         } else if enum_sizes.len() == 1 {
             // Single enumerable trigger — one switch axis
             let tn = &enum_sizes[0].0;
             let n = enum_sizes[0].1.unwrap_or(2);
+            let native_name = txn_name.to_string();
             writeln!(out, "  switch i8 %sz_{}, label %{}_residual [", tn, tn).ok();
             for val in 0..n as i64 {
                 writeln!(out, "    i8 {}, label %{}_case_{}", val, tn, val).ok();
@@ -1785,8 +1910,9 @@ self.emit_declares(&mut out);
             writeln!(out, "  ]").ok();
             for val in 0..n as i64 {
                 let prefix = format!("{}_{}", tn, val);
+                let fn_name = trig_to_fn.get(&val).map(|s| s.as_str()).unwrap_or(&native_name);
                 writeln!(out, "{}_case_{}:", tn, val).ok();
-                self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, &prefix);
+                self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, &prefix);
                 writeln!(out, "  ret i32 0").ok();
             }
             writeln!(out, "{}_residual:", tn).ok();

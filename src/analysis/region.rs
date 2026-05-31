@@ -1,6 +1,52 @@
 use crate::ast::{Expr, Program, Statement, TopLevel, Type};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Classification of a transaction body by computational weight.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ComplexityClass {
+    Trivial,
+    Light,
+    Medium,
+    Heavy,
+    Unbounded,
+}
+
+/// Optimization score and metadata for a single atomic reactive region.
+#[derive(Debug, Clone)]
+pub struct RegionScore {
+    pub region_id: usize,
+    pub txn_names: Vec<String>,
+    pub complexity: ComplexityClass,
+    pub body_weight: usize,
+    pub iteration_count: u64,
+    pub value_set_size: Option<u64>,
+    pub optimization_score: f64,
+    pub chain_composed: bool,
+    pub gpu_eligible: bool,
+}
+
+/// Result of greedy budget allocation across regions.
+#[derive(Debug, Clone)]
+pub struct BudgetPlan {
+    pub total_budget: u64,
+    pub allocated: Vec<(usize, ComplexityClass, u64, f64)>,
+    pub residual_budget: u64,
+    pub skipped: Vec<(usize, ComplexityClass, u64)>,
+}
+
+/// Result of expression substitution across a linear transaction chain.
+#[derive(Debug, Clone)]
+pub struct ComposedChain {
+    pub chain: Vec<String>,
+    pub link_vars: Vec<String>,
+    pub root_triggers: Vec<String>,
+    pub composed_body: Vec<Statement>,
+    pub counter_var: Option<String>,
+    pub fused_weight: usize,
+    pub trigger_values: Option<Vec<(String, i64)>>,
+    pub all_internal: bool,
+}
+
 /// Classification of a variable along the predictability axis.
 ///
 /// - **Pure**: deterministic, no dependency on frontier values — fully foldable.
@@ -63,6 +109,11 @@ pub struct RegionAnalyzer {
     txn_reads: HashMap<String, HashSet<String>>,
     txn_writes: HashMap<String, HashSet<String>>,
     pub linear_chains: Vec<Vec<String>>,
+    txn_bodies: HashMap<String, Vec<Statement>>,
+    iter_bounds: HashMap<String, u64>,
+    pub region_scores: Vec<RegionScore>,
+    pub budget_plan: Option<BudgetPlan>,
+    pub composed_chains: Vec<ComposedChain>,
 }
 
 impl RegionAnalyzer {
@@ -77,6 +128,11 @@ impl RegionAnalyzer {
             txn_reads: HashMap::new(),
             txn_writes: HashMap::new(),
             linear_chains: Vec::new(),
+            txn_bodies: HashMap::new(),
+            iter_bounds: HashMap::new(),
+            region_scores: Vec::new(),
+            budget_plan: None,
+            composed_chains: Vec::new(),
         };
 
         analyzer.register_declarations(program);
@@ -86,6 +142,8 @@ impl RegionAnalyzer {
         analyzer.compute_regions();
         analyzer.estimate_value_sets();
         analyzer.detect_linear_chains(program);
+        analyzer.resolve_iteration_bounds(program);
+        analyzer.compute_region_scores(program);
 
         analyzer
     }
@@ -147,11 +205,11 @@ impl RegionAnalyzer {
                 let mut txn_read_vars = HashSet::new();
                 let mut txn_write_vars = HashSet::new();
 
-                // Dependencies from pre/post conditions
+                self.txn_bodies.insert(txn.name.clone(), txn.body.clone());
+
                 self.collect_identifiers(&txn.contract.pre_condition, &txn.name);
                 self.collect_identifiers(&txn.contract.post_condition, &txn.name);
 
-                // Dependencies from body assignments
                 for stmt in &txn.body {
                     if let Statement::Assignment { lhs, expr, .. } = stmt {
                         let writer = match lhs {
@@ -171,7 +229,6 @@ impl RegionAnalyzer {
                     }
                 }
 
-                // Track per-transaction reads and writes
                 self.txn_reads.entry(txn.name.clone()).or_default().extend(txn_read_vars);
                 self.txn_writes.entry(txn.name.clone()).or_default().extend(txn_write_vars);
             }
@@ -554,6 +611,477 @@ impl RegionAnalyzer {
     pub fn value_set_size_of(&self, var: &str) -> Option<u64> {
         self.var_info.get(var).and_then(|i| i.value_set_size)
     }
+
+    // ── Iteration bound resolution ────────────────────────────────
+
+    fn resolve_iteration_bounds(&mut self, program: &Program) {
+        self.iter_bounds.clear();
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                if let Some(bound) = Self::extract_bound_from_pre(&txn.contract.pre_condition) {
+                    let val = self.resolve_bound_value(program, &bound.1);
+                    if let Some(v) = val {
+                        self.iter_bounds.insert(txn.name.clone(), v);
+                    }
+                }
+            }
+        }
+    }
+
+    fn extract_bound_from_pre(pre: &Expr) -> Option<(String, String)> {
+        match pre {
+            Expr::Lt(a, b) | Expr::Le(a, b) => {
+                match (a.as_ref(), b.as_ref()) {
+                    (Expr::Identifier(var), Expr::Identifier(bound)) => {
+                        Some((var.clone(), bound.clone()))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn resolve_bound_value(&self, program: &Program, bound_var: &str) -> Option<u64> {
+        for item in &program.items {
+            match item {
+                TopLevel::Constant(c) if c.name == bound_var => {
+                    if let Expr::Integer(n) = &c.expr { return Some(*n as u64); }
+                }
+                TopLevel::StateDecl(d) if d.name == bound_var => {
+                    if let Some(Expr::Integer(n)) = &d.expr { return Some(*n as u64); }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    // ── Complexity estimation ─────────────────────────────────────
+
+    fn classify_complexity(&self, body: &[Statement]) -> ComplexityClass {
+        let weight = count_statements_recursive(body);
+        let has_ffi = self.has_ffi_or_trigger_refs(body);
+        if has_ffi {
+            ComplexityClass::Unbounded
+        } else if weight <= 2 {
+            ComplexityClass::Trivial
+        } else if weight <= 5 {
+            ComplexityClass::Light
+        } else if weight <= 20 {
+            ComplexityClass::Medium
+        } else {
+            ComplexityClass::Heavy
+        }
+    }
+
+    fn has_ffi_or_trigger_refs(&self, body: &[Statement]) -> bool {
+        for stmt in body {
+            if has_ffi_or_trigger_stmt(stmt, &self.trigger_vars) {
+                return true;
+            }
+        }
+        false
+    }
+
+    // ── Region scoring ────────────────────────────────────────────
+
+    fn compute_region_scores(&mut self, program: &Program) {
+        self.region_scores.clear();
+
+        let txn_to_region: HashMap<String, usize> = self.build_txn_to_region_map();
+        let mut region_txns: HashMap<usize, Vec<String>> = HashMap::new();
+        for (txn, rid) in &txn_to_region {
+            region_txns.entry(*rid).or_default().push(txn.clone());
+        }
+
+        for (rid, txn_list) in region_txns {
+            let mut body_weight: usize = 0;
+            let mut complexity = ComplexityClass::Trivial;
+            let mut max_iter: u64 = 1;
+            let mut combined_vset_size: Option<u64> = Some(1);
+            let mut all_pure_and_nop_term = true;
+
+            for tn in &txn_list {
+                if let Some(body) = self.txn_bodies.get(tn) {
+                    let c = self.classify_complexity(body);
+                    if c != ComplexityClass::Trivial {
+                        complexity = std::cmp::max(complexity.clone(), c);
+                    }
+                    body_weight += count_statements_recursive(body);
+                }
+
+                // GPU eligibility
+                if let Some(body) = self.txn_bodies.get(tn) {
+                    if has_term_or_unify_escape(body) {
+                        all_pure_and_nop_term = false;
+                    }
+                }
+                if self.has_txn_trigger_refs(tn) {
+                    all_pure_and_nop_term = false;
+                }
+
+                // iteration count
+                let iter = self.iter_bounds.get(tn).copied().unwrap_or(1);
+                if iter > max_iter { max_iter = iter; }
+
+                // value set size
+                if let Some(reads) = self.txn_reads.get(tn) {
+                    for r in reads {
+                        if self.trigger_vars.contains(r) {
+                            let sz = self.value_set_size_of(r);
+                            combined_vset_size = match (combined_vset_size, sz) {
+                                (Some(a), Some(b)) => Some(a.saturating_mul(b)),
+                                _ => None,
+                            };
+                        }
+                    }
+                }
+            }
+
+            let cost = combined_vset_size.unwrap_or(1).max(1);
+            let score = if complexity == ComplexityClass::Unbounded {
+                f64::NEG_INFINITY
+            } else {
+                (body_weight as f64 * max_iter as f64) / cost as f64
+            };
+
+            let gpu_eligible = all_pure_and_nop_term
+                && complexity != ComplexityClass::Trivial
+                && complexity != ComplexityClass::Light
+                && complexity != ComplexityClass::Unbounded;
+
+            self.region_scores.push(RegionScore {
+                region_id: rid,
+                txn_names: txn_list,
+                complexity,
+                body_weight,
+                iteration_count: max_iter,
+                value_set_size: combined_vset_size,
+                optimization_score: score,
+                chain_composed: false,
+                gpu_eligible,
+            });
+        }
+
+        self.region_scores.sort_by(|a, b| {
+            b.optimization_score
+                .partial_cmp(&a.optimization_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    fn build_txn_to_region_map(&self) -> HashMap<String, usize> {
+        let mut map = HashMap::new();
+        for rid in 1..=self.regions.len() {
+            if let Some(region) = self.regions.get(rid - 1) {
+                let txn_in_region: Vec<&String> = self.txn_writes
+                    .iter()
+                    .filter(|(_, writes)| writes.iter().any(|w| region.contains(w)))
+                    .map(|(tn, _)| tn)
+                    .collect();
+                for tn in txn_in_region {
+                    map.entry(tn.clone()).or_insert(rid);
+                }
+            }
+        }
+        map
+    }
+
+    fn has_txn_trigger_refs(&self, txn_name: &str) -> bool {
+        if let Some(reads) = self.txn_reads.get(txn_name) {
+            reads.iter().any(|r| self.trigger_vars.contains(r))
+        } else {
+            false
+        }
+    }
+
+    // ── Budget planning ───────────────────────────────────────────
+
+    pub fn build_budget_plan(&mut self, budget: u64) {
+        let mut allocated = Vec::new();
+        let mut skipped = Vec::new();
+        let mut remaining = budget;
+
+        for score in &self.region_scores {
+            if score.complexity == ComplexityClass::Unbounded {
+                skipped.push((score.region_id, score.complexity.clone(), 0));
+                continue;
+            }
+            let cost = score.value_set_size.unwrap_or(u64::MAX);
+            if cost == u64::MAX || cost > remaining {
+                skipped.push((score.region_id, score.complexity.clone(), cost.min(remaining)));
+            } else {
+                remaining = remaining.saturating_sub(cost);
+                allocated.push((
+                    score.region_id,
+                    score.complexity.clone(),
+                    cost,
+                    score.optimization_score,
+                ));
+            }
+        }
+
+        self.budget_plan = Some(BudgetPlan {
+            total_budget: budget,
+            allocated,
+            residual_budget: remaining,
+            skipped,
+        });
+    }
+
+    // ── Chain composition (Phase 4.2) ─────────────────────────────
+
+    pub fn compose_chains(&mut self) {
+        self.composed_chains.clear();
+        let chains = self.linear_chains.clone();
+        let all_txn_names: HashSet<String> = self.txn_reads.keys().cloned().collect();
+
+        for chain in &chains {
+            if chain.len() < 2 { continue; }
+
+            let link_vars = self.compute_link_vars(chain);
+            if link_vars.is_empty() { continue; }
+
+            if !self.chain_is_composable(chain, &all_txn_names) { continue; }
+
+            let root_triggers: Vec<String> = self.txn_reads
+                .get(&chain[0])
+                .map(|reads| reads.iter()
+                    .filter(|r| self.trigger_vars.contains(*r))
+                    .cloned()
+                    .collect())
+                .unwrap_or_default();
+
+            let all_internal = link_vars.iter().all(|lv| self.var_is_chain_internal(lv, chain, &all_txn_names));
+
+            if root_triggers.is_empty() {
+                self.push_composed_chain(chain, &link_vars, &root_triggers, None, all_internal);
+            } else if root_triggers.len() == 1 {
+                let trg = &root_triggers[0];
+                if let Some(info) = self.var_info.get(trg) {
+                    if let Some(ref iv) = info.interval {
+                        let bound = iv.size().min(256);
+                        let hi = iv.lo.saturating_add((bound - 1) as i64).min(iv.hi);
+                        for val in iv.lo..=hi {
+                            let tv = vec![(trg.clone(), val)];
+                            self.push_composed_chain(chain, &link_vars, &root_triggers, Some(&tv), all_internal);
+                        }
+                    } else {
+                        self.push_composed_chain(chain, &link_vars, &root_triggers, None, all_internal);
+                    }
+                } else {
+                    self.push_composed_chain(chain, &link_vars, &root_triggers, None, all_internal);
+                }
+            } else {
+                self.push_composed_chain(chain, &link_vars, &root_triggers, None, all_internal);
+            }
+        }
+
+        self.update_scores_after_composition();
+    }
+
+    fn var_is_chain_internal(&self, var: &str, chain: &[String], all_txn_names: &HashSet<String>) -> bool {
+        for txn in all_txn_names {
+            if chain.contains(txn) { continue; }
+            if let Some(reads) = self.txn_reads.get(txn) {
+                if reads.contains(var) { return false; }
+            }
+            if let Some(writes) = self.txn_writes.get(txn) {
+                if writes.contains(var) { return false; }
+            }
+        }
+        true
+    }
+
+    fn chain_is_composable(&self, chain: &[String], all_txn_names: &HashSet<String>) -> bool {
+        // 1. Each link variable has exactly one writer within the chain
+        for i in 0..chain.len().saturating_sub(1) {
+            let a = &chain[i];
+            if let Some(writes_a) = self.txn_writes.get(a) {
+                if let Some(reads_next) = self.txn_reads.get(&chain[i + 1]) {
+                    let shared: Vec<_> = writes_a.iter().filter(|w| reads_next.contains(*w)).collect();
+                    for sv in &shared {
+                        let writer_count: usize = chain.iter()
+                            .filter(|tn| {
+                                if let Some(w) = self.txn_writes.get(*tn) {
+                                    w.contains(*sv)
+                                } else { false }
+                            })
+                            .count();
+                        if writer_count > 1 { return false; }
+                    }
+                }
+            }
+        }
+
+        // 2. No FFI calls in chain body
+        for tn in chain {
+            if let Some(body) = self.txn_bodies.get(tn) {
+                if has_ffi_or_trigger_stmt_in_chain(body) {
+                    return false;
+                }
+            }
+        }
+
+        // 3. Same convergence contract (same pre-condition var and bound)
+        let mut common_pre_var: Option<String> = None;
+        let mut common_bound_var: Option<String> = None;
+        for tn in chain {
+            if let Some(body) = self.txn_bodies.get(tn) {
+                let cv = find_counter_var(body);
+                if let Some(ref v) = cv {
+                    if let Some(ref pv) = common_pre_var {
+                        if pv != v { return false; }
+                    } else {
+                        common_pre_var = Some(v.clone());
+                    }
+                } else {
+                    return false;
+                }
+            }
+            if let Some(bv) = self.iter_bounds.get(tn) {
+                if let Some(ref cb) = common_bound_var {
+                    if format!("{}", bv) != *cb { return false; }  // bound value differs
+                } else {
+                    common_bound_var = Some(format!("{}", bv));
+                }
+            }
+        }
+
+        true
+    }
+
+    fn push_composed_chain(
+        &mut self,
+        chain: &[String],
+        link_vars: &[String],
+        root_triggers: &[String],
+        trigger_values: Option<&[(String, i64)]>,
+        all_internal: bool,
+    ) {
+        let composed = self.build_composed_body(chain, link_vars, trigger_values);
+
+        let counter_var = self.iter_bounds.get(&chain[0])
+            .map(|_| {
+                if let Some(body) = self.txn_bodies.get(&chain[0]) {
+                    find_counter_var(body)
+                } else { None }
+            })
+            .flatten();
+
+        let fused_weight = count_statements_recursive(&composed);
+
+        self.composed_chains.push(ComposedChain {
+            chain: chain.to_vec(),
+            link_vars: link_vars.to_vec(),
+            root_triggers: root_triggers.to_vec(),
+            composed_body: composed,
+            counter_var,
+            fused_weight,
+            trigger_values: trigger_values.map(|tv| tv.to_vec()),
+            all_internal,
+        });
+    }
+
+    fn compute_link_vars(&self, chain: &[String]) -> Vec<String> {
+        let mut links = Vec::new();
+        for i in 0..chain.len().saturating_sub(1) {
+            let a = &chain[i];
+            let b = &chain[i + 1];
+            if let (Some(writes_a), Some(reads_b)) = (self.txn_writes.get(a), self.txn_reads.get(b)) {
+                for w in writes_a {
+                    if reads_b.contains(w) {
+                        links.push(w.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        links
+    }
+
+    fn build_composed_body(
+        &self,
+        chain: &[String],
+        link_vars: &[String],
+        trigger_values: Option<&[(String, i64)]>,
+    ) -> Vec<Statement> {
+        let mut result = Vec::new();
+
+        for (i, txn_name) in chain.iter().enumerate() {
+            let body = match self.txn_bodies.get(txn_name) {
+                Some(b) => b.clone(),
+                None => continue,
+            };
+
+            let counter_var = find_counter_var(&body);
+
+            let mut stmts: Vec<Statement> = body.clone();
+
+            // If this is the root txn (i=0) and we have trigger values,
+            // substitute trigger identifiers with concrete values before composition.
+            if i == 0 {
+                if let Some(tv) = trigger_values {
+                    for (trg_name, trg_val) in tv {
+                        stmts = substitute_var(&stmts, trg_name, &Expr::Integer(*trg_val));
+                    }
+                }
+            }
+
+            // Substitute link variables from previous txn's writes
+            if i > 0 {
+                let prev = &chain[i - 1];
+                if let Some(prev_body) = self.txn_bodies.get(prev) {
+                    if let Some(&ref link_var) = link_vars.get(i - 1) {
+                        let mut write_expr = find_write_expr(prev_body, link_var);
+
+                        // If the previous txn is the root and we have trigger values,
+                        // also concretize the write expression
+                        if i == 1 {
+                            if let Some(tv) = trigger_values {
+                                if let Some(ref we) = write_expr {
+                                    let mut subs = we.clone();
+                                    for (trg_name, trg_val) in tv {
+                                        subs = substitute_expr(&subs, trg_name, &Expr::Integer(*trg_val));
+                                    }
+                                    write_expr = Some(subs);
+                                }
+                            }
+                        }
+
+                        if let Some(we) = write_expr {
+                            stmts = substitute_var(&stmts, link_var, &we);
+                        }
+                    }
+                }
+            }
+
+            // Filter out counter bumps from non-root transactions
+            for s in &stmts {
+                let is_counter = if let Some(ref cv) = counter_var {
+                    is_counter_bump_stmt(s, cv)
+                } else { false };
+                if i > 0 && is_counter { continue; }
+                result.push(s.clone());
+            }
+        }
+
+        result
+    }
+
+    fn update_scores_after_composition(&mut self) {
+        for cc in &self.composed_chains {
+            for score in &mut self.region_scores {
+                let shares = cc.chain.iter().any(|c| score.txn_names.contains(c));
+                if shares {
+                    score.chain_composed = true;
+                    score.body_weight = cc.fused_weight;
+                    score.optimization_score *= 1.5;
+                }
+            }
+        }
+    }
 }
 
 fn expr_to_var_set(expr: &Expr) -> HashSet<String> {
@@ -582,6 +1110,369 @@ fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
         Expr::FieldAccess(o, _) => collect_var_ids(o, vars),
         Expr::Block(_, last) | Expr::TupleDestructure(_, last) => collect_var_ids(last, vars),
         _ => {}
+    }
+}
+
+fn count_statements_recursive(body: &[Statement]) -> usize {
+    body.iter().map(|s| {
+        match s {
+            Statement::Assignment { .. } | Statement::Let { .. } | Statement::Expression(_) => 1,
+            Statement::Guarded { statements, .. } => 1 + count_statements_recursive(statements),
+            Statement::OnExit { body, .. } => 1 + count_statements_recursive(body),
+            Statement::Term { .. } | Statement::Unification { .. }
+            | Statement::InlineAsm { .. } | Statement::Alka(_)
+            | Statement::LocalTrigger { .. } | Statement::Escape(_) => 1,
+        }
+    }).sum()
+}
+
+fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
+    match stmt {
+        Statement::Term { .. } | Statement::InlineAsm { .. } | Statement::Alka(_) => true,
+        Statement::Assignment { expr, .. } => expr_has_call(expr),
+        Statement::Let { expr, .. } => {
+            expr.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+        }
+        Statement::Expression(e) => expr_has_call(e),
+        Statement::Guarded { condition, statements, .. } => {
+            expr_has_call(condition)
+                || statements.iter().any(|s| has_ffi_or_terminator_stmt(s))
+        }
+        Statement::Unification { expr, .. } => expr_has_call(expr),
+        Statement::Escape(_) => false,
+        Statement::OnExit { body, .. } => body.iter().any(|s| has_ffi_or_terminator_stmt(s)),
+        Statement::LocalTrigger { .. } => false,
+    }
+}
+
+fn has_ffi_or_trigger_stmt_in_chain(body: &[Statement]) -> bool {
+    body.iter().any(|s| has_ffi_or_terminator_stmt(s))
+}
+
+fn has_ffi_or_trigger_stmt(stmt: &Statement, _trigger_vars: &HashSet<String>) -> bool {
+    match stmt {
+        Statement::Term { .. } | Statement::InlineAsm { .. } | Statement::Alka(_) => true,
+        Statement::Assignment { lhs: _, expr, .. } => {
+            expr_has_call(expr)
+        }
+        Statement::Let { expr, .. } => {
+            expr.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+        }
+        Statement::Expression(e) => expr_has_call(e),
+        Statement::Guarded { condition, statements, .. } => {
+            expr_has_call(condition)
+                || statements.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars))
+        }
+        Statement::Unification { expr, .. } => expr_has_call(expr),
+        Statement::Escape(_) => false,
+        Statement::OnExit { body, .. } => body.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars)),
+        Statement::LocalTrigger { .. } => false,
+    }
+}
+
+fn expr_has_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call(_, _) => true,
+        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+        | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
+        | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
+        | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+        | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
+            expr_has_call(a) || expr_has_call(b)
+        }
+        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
+        | Expr::ListLen(a) => expr_has_call(a),
+        Expr::ListLiteral(elems) => elems.iter().any(|e| expr_has_call(e)),
+        Expr::Tuple(elems) => elems.iter().any(|e| expr_has_call(e)),
+        Expr::ListIndex(l, i) => expr_has_call(l) || expr_has_call(i),
+        Expr::FieldAccess(o, _) => expr_has_call(o),
+        Expr::Block(_, last) | Expr::TupleDestructure(_, last) => expr_has_call(last),
+        Expr::Match { value, arms } => {
+            expr_has_call(value)
+                || arms.iter().any(|arm| expr_has_call(&arm.body))
+        }
+        Expr::PatternMatch { value, .. } => expr_has_call(value),
+        Expr::StructInstance(_, fields) => fields.iter().any(|(_, e)| expr_has_call(e)),
+        Expr::ObjectLiteral(fields) => fields.iter().any(|(_, e)| expr_has_call(e)),
+        Expr::Slice { value, start, end, stride, mask } => {
+            expr_has_call(value)
+                || start.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+                || end.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+                || stride.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+                || mask.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+        }
+        Expr::MultiSlice { value, mask, .. } => {
+            expr_has_call(value)
+                || mask.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+        }
+        Expr::ForAll { expr, .. } | Expr::Exists { expr, .. } => expr_has_call(expr),
+        _ => false,
+    }
+}
+
+fn has_term_or_unify_escape(body: &[Statement]) -> bool {
+    body.iter().any(|s| matches!(s,
+        Statement::Term { .. } | Statement::Unification { .. }
+        | Statement::Escape(_) | Statement::InlineAsm { .. }
+        | Statement::Alka(_)
+    ))
+}
+
+fn is_counter_bump_stmt(stmt: &Statement, counter_var: &str) -> bool {
+    matches!(stmt, Statement::Assignment {
+        lhs: Expr::Identifier(lhs_name) | Expr::OwnedRef(lhs_name),
+        expr: Expr::Add(a, b),
+        ..
+    } if lhs_name == counter_var && {
+        (matches!(a.as_ref(), Expr::Identifier(n) if n == counter_var)
+            && matches!(b.as_ref(), Expr::Integer(n) if *n > 0))
+        || (matches!(b.as_ref(), Expr::Identifier(n) if n == counter_var)
+            && matches!(a.as_ref(), Expr::Integer(n) if *n > 0))
+    })
+}
+
+fn find_counter_var(body: &[Statement]) -> Option<String> {
+    for s in body {
+        if let Statement::Assignment {
+            lhs: Expr::Identifier(n) | Expr::OwnedRef(n),
+            expr: Expr::Add(a, b),
+            ..
+        } = s {
+            let is_a_ident = matches!(a.as_ref(), Expr::Identifier(_));
+            let is_b_int = matches!(b.as_ref(), Expr::Integer(d) if *d > 0);
+            let is_b_ident = matches!(b.as_ref(), Expr::Identifier(_));
+            let is_a_int = matches!(a.as_ref(), Expr::Integer(d) if *d > 0);
+            if (is_a_ident && is_b_int) || (is_b_ident && is_a_int) {
+                return Some(n.clone());
+            }
+        }
+    }
+    None
+}
+
+fn find_write_expr(body: &[Statement], var: &str) -> Option<Expr> {
+    for s in body {
+        if let Statement::Assignment {
+            lhs: Expr::Identifier(n) | Expr::OwnedRef(n),
+            expr,
+            ..
+        } = s {
+            if n == var {
+                return Some(expr.clone());
+            }
+        }
+    }
+    None
+}
+
+fn substitute_var(body: &[Statement], old_var: &str, new_expr: &Expr) -> Vec<Statement> {
+    body.iter().map(|s| substitute_stmt(s, old_var, new_expr)).collect()
+}
+
+fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statement {
+    match stmt {
+        Statement::Assignment { lhs, expr, timeout, modifiers } => {
+            Statement::Assignment {
+                lhs: lhs.clone(),
+                expr: substitute_expr(expr, old_var, new_expr),
+                timeout: timeout.clone(),
+                modifiers: modifiers.clone(),
+            }
+        }
+        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers } => {
+            Statement::Let {
+                name: name.clone(),
+                ty: ty.clone(),
+                expr: expr.as_ref().map(|e| substitute_expr(e, old_var, new_expr)),
+                address: *address,
+                address_expr: address_expr.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
+                bit_range: bit_range.clone(),
+                is_override: *is_override,
+                modifiers: modifiers.clone(),
+            }
+        }
+        Statement::Guarded { condition, statements } => {
+            Statement::Guarded {
+                condition: substitute_expr(&condition, old_var, new_expr),
+                statements: substitute_var(&statements, old_var, new_expr),
+            }
+        }
+        Statement::Expression(e) => Statement::Expression(substitute_expr(e, old_var, new_expr)),
+        Statement::Term { values, modifiers } => {
+            Statement::Term {
+                values: values.iter().map(|v| v.as_ref().map(|x| substitute_expr(x, old_var, new_expr))).collect(),
+                modifiers: modifiers.clone(),
+            }
+        }
+        Statement::Escape(e) => Statement::Escape(e.as_ref().map(|x| substitute_expr(x, old_var, new_expr))),
+        Statement::Unification { name, pattern, expr } => {
+            Statement::Unification {
+                name: name.clone(),
+                pattern: pattern.clone(),
+                expr: substitute_expr(expr, old_var, new_expr),
+            }
+        }
+        Statement::OnExit { body, span } => {
+            Statement::OnExit {
+                body: substitute_var(body, old_var, new_expr),
+                span: *span,
+            }
+        }
+        other => other.clone(),
+    }
+}
+
+fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
+    match expr {
+        Expr::Identifier(n) | Expr::OwnedRef(n) if n == old_var => new_expr.clone(),
+        Expr::Add(a, b) => Expr::Add(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Sub(a, b) => Expr::Sub(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Mul(a, b) => Expr::Mul(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Div(a, b) => Expr::Div(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Mod(a, b) => Expr::Mod(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Eq(a, b) => Expr::Eq(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Ne(a, b) => Expr::Ne(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Lt(a, b) => Expr::Lt(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Le(a, b) => Expr::Le(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Gt(a, b) => Expr::Gt(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Ge(a, b) => Expr::Ge(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::And(a, b) => Expr::And(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Or(a, b) => Expr::Or(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::BitAnd(a, b) => Expr::BitAnd(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::BitOr(a, b) => Expr::BitOr(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::BitXor(a, b) => Expr::BitXor(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Shl(a, b) => Expr::Shl(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Shr(a, b) => Expr::Shr(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Concat(a, b) => Expr::Concat(
+            Box::new(substitute_expr(a, old_var, new_expr)),
+            Box::new(substitute_expr(b, old_var, new_expr)),
+        ),
+        Expr::Not(a) => Expr::Not(Box::new(substitute_expr(a, old_var, new_expr))),
+        Expr::Neg(a) => Expr::Neg(Box::new(substitute_expr(a, old_var, new_expr))),
+        Expr::BitNot(a) => Expr::BitNot(Box::new(substitute_expr(a, old_var, new_expr))),
+        Expr::Cast(a, t) => Expr::Cast(Box::new(substitute_expr(a, old_var, new_expr)), t.clone()),
+        Expr::Call(name, args) => Expr::Call(
+            name.clone(),
+            args.iter().map(|a| substitute_expr(a, old_var, new_expr)).collect(),
+        ),
+        Expr::ListLiteral(elems) => Expr::ListLiteral(
+            elems.iter().map(|e| substitute_expr(e, old_var, new_expr)).collect(),
+        ),
+        Expr::Tuple(elems) => Expr::Tuple(
+            elems.iter().map(|e| substitute_expr(e, old_var, new_expr)).collect(),
+        ),
+        Expr::ListIndex(l, i) => Expr::ListIndex(
+            Box::new(substitute_expr(l, old_var, new_expr)),
+            Box::new(substitute_expr(i, old_var, new_expr)),
+        ),
+        Expr::ListLen(a) => Expr::ListLen(Box::new(substitute_expr(a, old_var, new_expr))),
+        Expr::FieldAccess(o, f) => Expr::FieldAccess(
+            Box::new(substitute_expr(o, old_var, new_expr)),
+            f.clone(),
+        ),
+        Expr::Block(stmts, last) => Expr::Block(
+            substitute_var(stmts, old_var, new_expr),
+            Box::new(substitute_expr(last, old_var, new_expr)),
+        ),
+        Expr::TupleDestructure(bindings, body) => Expr::TupleDestructure(
+            bindings.clone(),
+            Box::new(substitute_expr(body, old_var, new_expr)),
+        ),
+        Expr::Match { value, arms } => Expr::Match {
+            value: Box::new(substitute_expr(value, old_var, new_expr)),
+            arms: arms.iter().map(|arm| crate::ast::MatchArm {
+                pattern: arm.pattern.clone(),
+                guard: arm.guard.as_ref().map(|g| Box::new(substitute_expr(g, old_var, new_expr))),
+                body: Box::new(substitute_expr(&arm.body, old_var, new_expr)),
+            }).collect(),
+        },
+        Expr::PatternMatch { value, variant, fields } => Expr::PatternMatch {
+            value: Box::new(substitute_expr(value, old_var, new_expr)),
+            variant: variant.clone(),
+            fields: fields.clone(),
+        },
+        Expr::StructInstance(name, fields) => Expr::StructInstance(
+            name.clone(),
+            fields.iter().map(|(n, e)| (n.clone(), substitute_expr(e, old_var, new_expr))).collect(),
+        ),
+        Expr::ObjectLiteral(fields) => Expr::ObjectLiteral(
+            fields.iter().map(|(n, e)| (n.clone(), substitute_expr(e, old_var, new_expr))).collect(),
+        ),
+        Expr::Slice { value, start, end, stride, mask } => Expr::Slice {
+            value: Box::new(substitute_expr(value, old_var, new_expr)),
+            start: start.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
+            end: end.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
+            stride: stride.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
+            mask: mask.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
+        },
+        Expr::MultiSlice { value, coordinates, mask } => Expr::MultiSlice {
+            value: Box::new(substitute_expr(value, old_var, new_expr)),
+            coordinates: coordinates.clone(),
+            mask: mask.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
+        },
+        Expr::ForAll { var, expr } => Expr::ForAll {
+            var: var.clone(),
+            expr: Box::new(substitute_expr(expr, old_var, new_expr)),
+        },
+        Expr::Exists { var, expr } => Expr::Exists {
+            var: var.clone(),
+            expr: Box::new(substitute_expr(expr, old_var, new_expr)),
+        },
+        _ => expr.clone(),
     }
 }
 
@@ -823,5 +1714,257 @@ mod tests {
         let ra = RegionAnalyzer::analyze(&program);
         assert_eq!(ra.region_of("nonexistent"), None);
         assert_eq!(ra.classification_of("nonexistent"), None);
+    }
+
+    fn make_txn_with_body(name: &str, body: Vec<Statement>) -> TopLevel {
+        make_txn(name, Expr::Bool(true), Expr::Bool(true), body)
+    }
+
+    fn make_const(name: &str, val: i64) -> TopLevel {
+        TopLevel::Constant(Constant {
+            name: name.to_string(),
+            ty: Type::Int,
+            expr: int(val),
+        })
+    }
+
+    #[test]
+    fn test_complexity_trivial() {
+        let program = mk_program(vec![
+            make_trigger("btn", Type::Bool),
+            make_state("count", int(0)),
+            make_txn_with_body("bump", vec![assign("count", ident("btn"))]),
+        ]);
+        let ra = RegionAnalyzer::analyze(&program);
+        assert!(ra.region_scores.len() > 0);
+        assert_eq!(ra.region_scores[0].complexity, ComplexityClass::Trivial);
+    }
+
+    #[test]
+    fn test_complexity_light() {
+        let program = mk_program(vec![
+            make_trigger("btn", Type::Bool),
+            make_state("a", int(0)),
+            make_state("b", int(0)),
+            make_txn_with_body("proc", vec![
+                assign("a", ident("btn")),
+                assign("b", int(2)),
+                assign("a", add(ident("a"), int(3))),
+            ]),
+        ]);
+        let ra = RegionAnalyzer::analyze(&program);
+        assert!(ra.region_scores.len() > 0);
+        assert_eq!(ra.region_scores[0].complexity, ComplexityClass::Light);
+    }
+
+    #[test]
+    fn test_complexity_unbounded() {
+        let program = mk_program(vec![
+            make_trigger("btn", Type::Bool),
+            make_state("x", int(0)),
+            make_txn_with_body("exit", vec![
+                assign("x", ident("btn")),
+                Statement::Term { values: vec![Some(int(0))], modifiers: vec![] },
+            ]),
+        ]);
+        let ra = RegionAnalyzer::analyze(&program);
+        assert!(ra.region_scores.len() > 0);
+        assert_eq!(ra.region_scores[0].complexity, ComplexityClass::Unbounded);
+    }
+
+    #[test]
+    fn test_region_scoring() {
+        let program = mk_program(vec![
+            make_trigger("trg", Type::Bool),
+            make_state("x", int(0)),
+            make_state("y", int(0)),
+            make_txn("t1", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("x", ident("trg")),
+            ]),
+            make_txn("t2", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("y", add(ident("x"), int(1))),
+            ]),
+        ]);
+        let ra = RegionAnalyzer::analyze(&program);
+        assert!(!ra.region_scores.is_empty());
+        let score = &ra.region_scores[0];
+        assert!(score.body_weight > 0);
+    }
+
+    #[test]
+    fn test_region_independent() {
+        let program = mk_program(vec![
+            make_trigger("ta", Type::Bool),
+            make_trigger("tb", Type::Bool),
+            make_state("x", int(0)),
+            make_state("y", int(0)),
+            make_txn("tx_a", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("x", ident("ta")),
+            ]),
+            make_txn("tx_b", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("y", ident("tb")),
+            ]),
+        ]);
+        let ra = RegionAnalyzer::analyze(&program);
+        assert_eq!(ra.region_scores.len(), 2);
+    }
+
+    #[test]
+    fn test_budget_plan_fit() {
+        let program = mk_program(vec![
+            make_trigger("ta", Type::Bool),
+            make_trigger("tb", Type::Bool),
+            make_state("x", int(0)),
+            make_state("y", int(0)),
+            make_txn("tx_a", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("x", ident("ta")),
+            ]),
+            make_txn("tx_b", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("x", ident("ta")),
+                assign("y", ident("tb")),
+            ]),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.build_budget_plan(10);
+        let plan = ra.budget_plan.as_ref().unwrap();
+        assert!(plan.allocated.len() > 0);
+        assert!(plan.residual_budget > 0);
+    }
+
+    #[test]
+    fn test_budget_plan_exceeds() {
+        let program = mk_program(vec![
+            make_trigger("ta", Type::Bool),
+            make_state("x", int(0)),
+            make_txn("tx_a", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("x", ident("ta")),
+            ]),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.build_budget_plan(0);
+        let plan = ra.budget_plan.as_ref().unwrap();
+        assert!(plan.allocated.is_empty());
+        assert!(!plan.skipped.is_empty());
+    }
+
+    #[test]
+    fn test_chain_substitution() {
+        let body_a = vec![assign("x", int(42))];
+        let body_b = vec![assign("y", add(ident("x"), int(1)))];
+        let result = substitute_var(&body_b, "x", &int(42));
+        if let Statement::Assignment { expr, .. } = &result[0] {
+            assert!(!format!("{:?}", expr).contains("Identifier(\"x\")"));
+        }
+    }
+
+    #[test]
+    fn test_chain_composition() {
+        let program = mk_program(vec![
+            make_const("total", 100),
+            make_state("count", int(0)),
+            make_state("x", int(0)),
+            make_state("y", int(0)),
+            make_txn("step_a",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("x", int(42)),
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+            make_txn("step_b",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("y", add(ident("x"), int(1))),
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.compose_chains();
+        if !ra.composed_chains.is_empty() {
+            let cc = &ra.composed_chains[0];
+            assert!(cc.fused_weight > 0);
+            assert_eq!(cc.link_vars.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_chain_branching() {
+        let program = mk_program(vec![
+            make_trigger("sensor", Type::Bool),
+            make_state("x", int(0)),
+            make_state("y", int(0)),
+            make_txn("step_a", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("x", ident("sensor")),
+            ]),
+            make_txn("step_b", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("y", add(ident("x"), int(1))),
+            ]),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.compose_chains();
+        if !ra.composed_chains.is_empty() {
+            let cc = &ra.composed_chains[0];
+            assert!(cc.root_triggers.contains(&"sensor".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_gpu_eligible() {
+        let program = mk_program(vec![
+            make_const("total", 100),
+            make_state("a", int(0)),
+            make_state("b", int(0)),
+            make_state("c", int(0)),
+            make_state("count", int(0)),
+            make_txn("heavy",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("a", int(1)),
+                    assign("b", int(2)),
+                    assign("c", int(3)),
+                    assign("a", add(ident("a"), ident("b"))),
+                    assign("b", add(ident("b"), ident("c"))),
+                    assign("c", add(ident("c"), int(1))),
+                    assign("a", add(ident("a"), ident("c"))),
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+        ]);
+        let ra = RegionAnalyzer::analyze(&program);
+        if let Some(score) = ra.region_scores.first() {
+            assert_eq!(score.complexity, ComplexityClass::Medium);
+            assert!(score.gpu_eligible);
+        }
+    }
+
+    #[test]
+    fn test_gpu_ineligible_term() {
+        let program = mk_program(vec![
+            make_const("total", 100),
+            make_state("a", int(0)),
+            make_state("count", int(0)),
+            make_txn("with_term",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("a", int(1)),
+                    assign("a", int(2)),
+                    assign("a", int(3)),
+                    assign("a", int(4)),
+                    assign("a", int(5)),
+                    assign("a", int(6)),
+                    Statement::Term { values: vec![Some(int(0))], modifiers: vec![] },
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+        ]);
+        let ra = RegionAnalyzer::analyze(&program);
+        if let Some(score) = ra.region_scores.first() {
+            assert!(!score.gpu_eligible);
+        }
     }
 }

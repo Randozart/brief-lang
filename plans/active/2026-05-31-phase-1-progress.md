@@ -27,3 +27,11 @@ IIR filter benchmark (50M iterations):
   Brief: 0.15s  C: 0.23s
   Brief is 1.53× faster than C
 ```
+
+## Next: Phase 2 — Value-Set Enumeration in LLVM Backend
+
+Goals:
+- 2.1 Region cloning: for small value sets (e.g., Bool → 2), clone folding pass with concretized frontier var
+- 2.2 Switch dispatch: `switch(trg) { case true: ...; case false: ... }` 
+- 2.3 Residual fallback: uncovered values fall through to reactive segment-folded execution
+- 2.4 Integration: `--optimize-budget <N>` CLI flag controls enumeration depth
