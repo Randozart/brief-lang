@@ -223,6 +223,10 @@ impl LlvmBackend {
         analysis.region_analyzer.compose_chains();
         analysis.region_analyzer.build_budget_plan(self.optimize_budget);
 
+        let precomputed_final_values = if analysis.region_analyzer.is_fully_precomputable(self.optimize_budget) {
+            analysis.region_analyzer.collect_final_values(program)
+        } else { None };
+
         let cg = &analysis.call_graph;
         self.has_cycles = cg.has_cycle();
 
@@ -437,11 +441,16 @@ self.emit_declares(&mut out);
         // Reactor — sequential or parallel
         // Determine whether all triggers have small enough value sets
         // for compile-time enumeration. This powers the switch-dispatch path.
+        // Wake triggers must never take the enumerable switch-dispatch path.
+        // Switch arms end with `ret i32 0`, which exits after one tick.
+        // Wake reactors need the infinite-loop `@main` with `@__rt_wait()`.
+        let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
+
         // Pre-compute into an owned Vec to avoid borrow conflicts with later
         // mutable `self` usage.
         let enumerable: Option<Vec<(String, Option<u64>)>> = {
             let region = &analysis.region_analyzer;
-            if !self.trigger_names.is_empty() {
+            if !self.trigger_names.is_empty() && !has_wake_triggers {
                 let mut sizes = Vec::new();
                 let mut total: u64 = 1;
                 let mut ok = true;
@@ -508,7 +517,13 @@ self.emit_declares(&mut out);
         } else { false };
 
         if !folded {
-            if let Some(ref enum_sizes) = enumerable {
+            let precomputed = if let Some(ref final_values) = precomputed_final_values {
+                self.emit_precomputed_main(&mut out, final_values);
+                true
+            } else { false };
+
+            if !precomputed {
+                if let Some(ref enum_sizes) = enumerable {
                 // Enumerable triggers — emit switch-dispatch main
                 // This path handles triggers with small compile-time-known value sets.
                 // We emit a single @main that samples triggers once, then switch
@@ -565,7 +580,6 @@ self.emit_declares(&mut out);
                     all_int_ref,
                 );
 
-                let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
                 if has_wake_triggers {
                     self.emit_wake_metadata(&mut out);
                 }
@@ -594,6 +608,7 @@ self.emit_declares(&mut out);
                 writeln!(out).ok();
                 // Main
                 self.emit_main(&mut out, false);
+            }
             }
         }
         // Attributes
@@ -745,6 +760,21 @@ self.emit_declares(&mut out);
                         "  {} (link vars: {}, triggers: {}, values: [{}], fused weight: {}{})",
                         chain_str, cc.link_vars.join(","), triggers, tv_str, cc.fused_weight, internal
                     ));
+                }
+            }
+            if precomputed_final_values.is_some() {
+                self.report_lines.push("".to_string());
+                self.report_lines.push("Precomputed (compile-time evaluation):".to_string());
+                self.report_lines.push("  All state values determined at compile time — O(1) runtime.".to_string());
+                if let Some(ref fv) = precomputed_final_values {
+                    self.report_lines.push(format!("  {} chains precomputed.", fv.len()));
+                    for (chain, bindings) in fv {
+                        let chain_str: String = chain.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" → ");
+                        let vars: Vec<String> = bindings.iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect();
+                        self.report_lines.push(format!("    {} → final state: [{}]", chain_str, vars.join(", ")));
+                    }
                 }
             }
         }
@@ -1991,6 +2021,29 @@ self.emit_declares(&mut out);
         writeln!(out).ok();
     }
 
+    fn emit_precomputed_main(
+        &self,
+        out: &mut String,
+        final_values: &[(Vec<String>, std::collections::HashMap<String, i64>)],
+    ) {
+        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  call void @init_state()").ok();
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (_, bindings) in final_values {
+            for (var, val) in bindings {
+                if !seen.insert(var) { continue; }
+                if let Some(&idx) = self.field_index_map.get(var) {
+                    writeln!(out, "  %gp_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", var, idx).ok();
+                    writeln!(out, "  store i64 {}, i64* %gp_{}, align 8", val, var).ok();
+                }
+            }
+        }
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
     // ── WAKE TRIGGER METADATA ─────────────────────────────────
     fn emit_wake_metadata(&self, out: &mut String) {
         let wake_symbols: Vec<&str> = self.triggers.values()
@@ -2804,6 +2857,16 @@ mod tests {
     }
 
     #[test]
+    fn test_wake_triggers_bypass_enum_dispatch() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(output.contains("call void @__rt_wait()"),
+            "Wake trigger must use standard reactor path with __rt_wait");
+        assert!(!output.contains("switch i8"),
+            "Enum dispatch must be bypassed for wake triggers");
+    }
+
+    #[test]
     fn test_main_no_init_wait_without_wake_triggers() {
         // Use Int trigger (non-enumerable) to force standard reactor path
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, false);
@@ -3176,5 +3239,81 @@ mod tests {
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
         assert!(output.contains("@main"),
             "Should emit main function");
+    }
+
+    #[test]
+    fn test_precompute_pure_counter() {
+        let program = make_chain_program(
+            vec![
+                ("step_a", vec![
+                    Statement::Assignment { lhs: ident_s("x"), expr: int_s(42), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+                ("step_b", vec![
+                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::Add(Box::new(ident_s("x")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+            ],
+            None,
+            &[("total", 100)],
+            &[("count", 0), ("x", 0), ("y", 0)],
+        );
+        let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
+        assert!(output.contains("call void @init_state()"),
+            "Should call init_state");
+        assert!(!output.contains("switch i8"),
+            "No enum dispatch for precomputed path");
+        assert!(!output.contains("@reactor_tick"),
+            "No reactor_tick for precomputed path");
+        assert!(output.contains("ret i32 0"),
+            "Should return normally");
+    }
+
+    #[test]
+    fn test_precompute_budget_exceeded_fallback() {
+        let program = make_chain_program(
+            vec![
+                ("step_a", vec![
+                    Statement::Assignment { lhs: ident_s("x"), expr: int_s(42), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+                ("step_b", vec![
+                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::Add(Box::new(ident_s("x")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                ]),
+            ],
+            None,
+            &[("total", 100)],
+            &[("count", 0), ("x", 0), ("y", 0)],
+        );
+        let output = LlvmBackend::new().with_optimize_budget(0).generate(&program);
+        assert!(!output.contains("switch i8"),
+            "No enum dispatch without triggers");
+        assert!(output.contains("@reactor_tick"),
+            "Falls back to reactor_tick when budget exceeded");
+    }
+
+    #[test]
+    fn test_iir_filter_folded_path_regression() {
+        let program = make_chain_program(
+            vec![("process", vec![
+                Statement::Assignment { lhs: ident_s("x"), expr: int_s(42), timeout: None, modifiers: vec![] },
+                Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+            ])],
+            None,
+            &[("total", 50000000)],
+            &[("count", 0), ("x", 0)],
+        );
+        let output = LlvmBackend::new().generate(&program);
+        assert!(!output.contains("switch i8"),
+            "Single-txn convergence should use folded path, not enum dispatch");
+        assert!(!output.contains("@reactor_tick"),
+            "Single-txn convergence should use folded path, not standard reactor");
+        assert!(output.contains("icmp slt i64"),
+            "Folded main should contain counter comparison");
+        assert!(output.contains("br label"),
+            "Folded main should contain while-loop branches");
+        assert!(output.contains("ret i32 0"),
+            "Should return normally after loop");
     }
 }

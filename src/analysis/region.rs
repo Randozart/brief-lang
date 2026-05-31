@@ -886,6 +886,164 @@ impl RegionAnalyzer {
         self.update_scores_after_composition();
     }
 
+    pub fn is_fully_precomputable(&self, budget: u64) -> bool {
+        if self.composed_chains.is_empty() {
+            return false;
+        }
+        let mut total: u64 = 0;
+        for cc in &self.composed_chains {
+            if has_ffi_or_trigger_stmt_in_chain(&cc.composed_body) {
+                return false;
+            }
+            if cc.trigger_values.is_some() {
+                return false;
+            }
+            if cc.all_internal {
+                total = total.saturating_add(1);
+            } else {
+                return false;
+            }
+        }
+        for score in &self.region_scores {
+            if score.complexity == ComplexityClass::Unbounded {
+                return false;
+            }
+        }
+        total <= budget
+    }
+
+    pub fn collect_final_values(&self, program: &Program) -> Option<Vec<(Vec<String>, HashMap<String, i64>)>> {
+        let mut all_bindings = Vec::new();
+        for cc in &self.composed_chains {
+            let mut bindings = Self::initial_bindings(program);
+            let mut chain_bindings = HashMap::new();
+            if cc.all_internal {
+                if let Some(ref cv) = cc.counter_var {
+                    if let Some(&bound) = self.iter_bounds.get(&cc.chain[0]) {
+                        bindings.insert(cv.clone(), bound as i64);
+                        chain_bindings.insert(cv.clone(), bound as i64);
+                    }
+                }
+                all_bindings.push((cc.chain.clone(), chain_bindings));
+                continue;
+            }
+            for stmt in &cc.composed_body {
+                if !Self::eval_stmt(stmt, &mut bindings) {
+                    return None;
+                }
+            }
+            for (k, v) in &bindings {
+                chain_bindings.insert(k.clone(), *v);
+            }
+            all_bindings.push((cc.chain.clone(), chain_bindings));
+        }
+        Some(all_bindings)
+    }
+
+    fn initial_bindings(program: &Program) -> HashMap<String, i64> {
+        let mut bindings = HashMap::new();
+        for item in &program.items {
+            match item {
+                TopLevel::StateDecl(decl) => {
+                    if let Some(ref e) = decl.expr {
+                        if let Some(v) = Self::eval_expr_simple(e, &HashMap::new()) {
+                            bindings.insert(decl.name.clone(), v);
+                        }
+                    }
+                }
+                TopLevel::Constant(c) => {
+                    if let Some(v) = Self::eval_expr_simple(&c.expr, &HashMap::new()) {
+                        bindings.insert(c.name.clone(), v);
+                    }
+                }
+                _ => {}
+            }
+        }
+        bindings
+    }
+
+    fn eval_stmt(stmt: &Statement, bindings: &mut HashMap<String, i64>) -> bool {
+        match stmt {
+            Statement::Assignment { lhs: Expr::Identifier(name), expr, .. } => {
+                if let Some(val) = Self::eval_expr_simple(expr, bindings) {
+                    bindings.insert(name.clone(), val);
+                    true
+                } else { false }
+            }
+            Statement::Let { name, expr, .. } => {
+                if let Some(e) = expr {
+                    if let Some(val) = Self::eval_expr_simple(e, bindings) {
+                        bindings.insert(name.clone(), val);
+                    }
+                }
+                true
+            }
+            Statement::Expression(e) => {
+                Self::eval_expr_simple(e, bindings).is_some()
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                if let Some(cond) = Self::eval_expr_simple(condition, bindings) {
+                    if cond != 0 {
+                        for s in statements {
+                            if !Self::eval_stmt(s, bindings) { return false; }
+                        }
+                    }
+                    true
+                } else { false }
+            }
+            Statement::Term { .. } | Statement::InlineAsm { .. }
+            | Statement::Alka(_) => false,
+            _ => true,
+        }
+    }
+
+    fn eval_expr_simple(expr: &Expr, bindings: &HashMap<String, i64>) -> Option<i64> {
+        match expr {
+            Expr::Integer(n) => Some(*n),
+            Expr::Bool(b) => Some(if *b { 1 } else { 0 }),
+            Expr::Identifier(n) | Expr::OwnedRef(n) => bindings.get(n).copied(),
+            Expr::Add(a, b) => Some(Self::eval_expr_simple(a, bindings)?.wrapping_add(Self::eval_expr_simple(b, bindings)?)),
+            Expr::Sub(a, b) => Some(Self::eval_expr_simple(a, bindings)?.wrapping_sub(Self::eval_expr_simple(b, bindings)?)),
+            Expr::Mul(a, b) => Some(Self::eval_expr_simple(a, bindings)?.wrapping_mul(Self::eval_expr_simple(b, bindings)?)),
+            Expr::Div(a, b) => {
+                let rhs = Self::eval_expr_simple(b, bindings)?;
+                if rhs == 0 { return None; }
+                Some(Self::eval_expr_simple(a, bindings)? / rhs)
+            }
+            Expr::Mod(a, b) => {
+                let rhs = Self::eval_expr_simple(b, bindings)?;
+                if rhs == 0 { return None; }
+                Some(Self::eval_expr_simple(a, bindings)? % rhs)
+            }
+            Expr::And(a, b) => {
+                let av = Self::eval_expr_simple(a, bindings)?;
+                let bv = Self::eval_expr_simple(b, bindings)?;
+                Some(if av != 0 && bv != 0 { 1 } else { 0 })
+            }
+            Expr::Or(a, b) => {
+                let av = Self::eval_expr_simple(a, bindings)?;
+                let bv = Self::eval_expr_simple(b, bindings)?;
+                Some(if av != 0 || bv != 0 { 1 } else { 0 })
+            }
+            Expr::Not(a) => Some(if Self::eval_expr_simple(a, bindings)? == 0 { 1 } else { 0 }),
+            Expr::Neg(a) => Some(-Self::eval_expr_simple(a, bindings)?),
+            Expr::Eq(a, b) => Some(if Self::eval_expr_simple(a, bindings)? == Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
+            Expr::Ne(a, b) => Some(if Self::eval_expr_simple(a, bindings)? != Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
+            Expr::Lt(a, b) => Some(if Self::eval_expr_simple(a, bindings)? < Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
+            Expr::Le(a, b) => Some(if Self::eval_expr_simple(a, bindings)? <= Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
+            Expr::Gt(a, b) => Some(if Self::eval_expr_simple(a, bindings)? > Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
+            Expr::Ge(a, b) => Some(if Self::eval_expr_simple(a, bindings)? >= Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
+            Expr::BitAnd(a, b) => Some(Self::eval_expr_simple(a, bindings)? & Self::eval_expr_simple(b, bindings)?),
+            Expr::BitOr(a, b) => Some(Self::eval_expr_simple(a, bindings)? | Self::eval_expr_simple(b, bindings)?),
+            Expr::BitXor(a, b) => Some(Self::eval_expr_simple(a, bindings)? ^ Self::eval_expr_simple(b, bindings)?),
+            Expr::BitNot(a) => Some(!Self::eval_expr_simple(a, bindings)?),
+            Expr::Shl(a, b) => Some(Self::eval_expr_simple(a, bindings)? << (Self::eval_expr_simple(b, bindings)? as u32 & 63)),
+            Expr::Shr(a, b) => Some(Self::eval_expr_simple(a, bindings)? >> (Self::eval_expr_simple(b, bindings)? as u32 & 63)),
+            Expr::Cast(a, _) => Self::eval_expr_simple(a, bindings),
+            _ => None,
+        }
+    }
+
     fn var_is_chain_internal(&self, var: &str, chain: &[String], all_txn_names: &HashSet<String>) -> bool {
         for txn in all_txn_names {
             if chain.contains(txn) { continue; }
@@ -948,7 +1106,7 @@ impl RegionAnalyzer {
             }
             if let Some(bv) = self.iter_bounds.get(tn) {
                 if let Some(ref cb) = common_bound_var {
-                    if format!("{}", bv) != *cb { return false; }  // bound value differs
+                    if format!("{}", bv) != *cb { return false; }
                 } else {
                     common_bound_var = Some(format!("{}", bv));
                 }
@@ -1253,11 +1411,10 @@ fn find_counter_var(body: &[Statement]) -> Option<String> {
             expr: Expr::Add(a, b),
             ..
         } = s {
-            let is_a_ident = matches!(a.as_ref(), Expr::Identifier(_));
-            let is_b_int = matches!(b.as_ref(), Expr::Integer(d) if *d > 0);
-            let is_b_ident = matches!(b.as_ref(), Expr::Identifier(_));
-            let is_a_int = matches!(a.as_ref(), Expr::Integer(d) if *d > 0);
-            if (is_a_ident && is_b_int) || (is_b_ident && is_a_int) {
+            let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(an) if an == n);
+            let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(bn) if bn == n);
+            let pos_int = |e: &Expr| matches!(e, Expr::Integer(d) if *d > 0);
+            if (lhs_in_a && pos_int(b)) || (lhs_in_b && pos_int(a)) {
                 return Some(n.clone());
             }
         }
@@ -1981,5 +2138,134 @@ mod tests {
         if let Some(score) = ra.region_scores.first() {
             assert!(!score.gpu_eligible);
         }
+    }
+
+    #[test]
+    fn test_is_fully_precomputable_chain() {
+        let program = mk_program(vec![
+            make_const("total", 100),
+            make_state("count", int(0)),
+            make_state("x", int(0)),
+            make_state("y", int(0)),
+            make_txn("step_a",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("x", int(42)),
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+            make_txn("step_b",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("y", add(ident("x"), int(1))),
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.compose_chains();
+        assert!(ra.is_fully_precomputable(10));
+        assert!(!ra.is_fully_precomputable(0));
+    }
+
+    #[test]
+    fn test_is_not_precomputable_no_chains() {
+        let program = mk_program(vec![
+            make_trigger("btn", Type::Bool),
+            make_state("x", int(0)),
+            make_txn("t1", Expr::Bool(true), Expr::Bool(true), vec![
+                assign("x", ident("btn")),
+            ]),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.compose_chains();
+        assert!(!ra.is_fully_precomputable(100));
+    }
+
+    #[test]
+    fn test_is_not_precomputable_ffi() {
+        let program = mk_program(vec![
+            make_const("total", 100),
+            make_state("count", int(0)),
+            make_state("x", int(0)),
+            make_txn("heavy",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("x", int(1)),
+                    Statement::Term { values: vec![Some(int(0))], modifiers: vec![] },
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.compose_chains();
+        assert!(!ra.is_fully_precomputable(100));
+    }
+
+    #[test]
+    fn test_collect_final_values_all_internal() {
+        let program = mk_program(vec![
+            make_const("total", 100),
+            make_state("count", int(0)),
+            make_state("x", int(0)),
+            make_state("y", int(0)),
+            make_txn("step_a",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("x", int(42)),
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+            make_txn("step_b",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("y", add(ident("x"), int(1))),
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.compose_chains();
+        let result = ra.collect_final_values(&program);
+        assert!(result.is_some());
+        let bindings = result.unwrap();
+        assert!(!bindings.is_empty());
+        let found_count = bindings.iter().any(|(_, m)| m.get("count") == Some(&100));
+        assert!(found_count, "Final count should equal bound (100), got {:?}", bindings);
+    }
+
+    #[test]
+    fn test_collect_final_values_with_trigger() {
+        let program = mk_program(vec![
+            make_const("total", 50),
+            make_trigger("sensor", Type::Bool),
+            make_state("count", int(0)),
+            make_state("x", int(0)),
+            make_state("y", int(0)),
+            make_txn("step_a",
+                Expr::Bool(true),
+                Expr::Bool(true),
+                vec![
+                    assign("x", ident("sensor")),
+                ],
+            ),
+            make_txn("step_b",
+                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::Bool(true),
+                vec![
+                    assign("y", add(ident("x"), int(1))),
+                    assign("count", add(ident("count"), int(1))),
+                ],
+            ),
+        ]);
+        let mut ra = RegionAnalyzer::analyze(&program);
+        ra.compose_chains();
+        let result = ra.collect_final_values(&program);
+        assert!(result.is_some());
     }
 }
