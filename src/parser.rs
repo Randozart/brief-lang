@@ -479,12 +479,36 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Parse file-level attributes #![...] or #!pragma ... ]
-        if matches!(self.current_token(), Some(Ok(Token::HashBangBracket)))
-            || matches!(self.current_token(), Some(Ok(Token::PragmaBang)))
-            || matches!(self.current_token(), Some(Ok(Token::HashBang)))
-        {
-            file_attrs = self.parse_attributes()?;
+        // Parse file-level directives in a loop: #!exit, #![...], #!pragma, #!...
+        // Supports any ordering of these directives before the first top-level item.
+        let mut exit_condition = None;
+        let mut file_attrs = Vec::new();
+
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::HashBang)) => {
+                    // Could be #!exit or #! key(value) (legacy pragma)
+                    if let Some(Ok(Token::Identifier(kw))) = self.peek.as_ref().map(|(t, _)| t) {
+                        if kw == "exit" {
+                            self.advance(); // consume #!
+                            self.advance(); // consume "exit"
+                            exit_condition = Some(Box::new(self.parse_expression()?));
+                            self.expect(Token::Semicolon)?;
+                            continue;
+                        }
+                    }
+                    // Not #!exit — treat as legacy #! attribues
+                    file_attrs.append(&mut self.parse_attributes()?);
+                    continue;
+                }
+                Some(Ok(Token::HashBangBracket))
+                | Some(Ok(Token::PragmaBang))
+                | Some(Ok(Token::Pragma)) => {
+                    file_attrs.append(&mut self.parse_attributes()?);
+                    continue;
+                }
+                _ => break,
+            }
         }
 
         // Process FFI state from file attributes
@@ -503,6 +527,7 @@ impl<'a> Parser<'a> {
             ffi: ffi_state,
             strict_mode: self.strict_mode,
             dispatch_mode,
+            exit_condition,
         })
     }
 

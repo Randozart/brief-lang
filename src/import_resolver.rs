@@ -82,6 +82,7 @@ impl ImportResolver {
             ffi: None,
             strict_mode: self.strict_mode,
             dispatch_mode: program.dispatch_mode,
+            exit_condition: program.exit_condition.clone(),
         })
     }
 
@@ -100,6 +101,7 @@ impl ImportResolver {
                 ffi: None,
                 strict_mode: self.strict_mode,
                 dispatch_mode: Default::default(),
+                exit_condition: None,
             });
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
@@ -114,6 +116,7 @@ impl ImportResolver {
                     ffi: None,
                     strict_mode: self.strict_mode,
                     dispatch_mode: Default::default(),
+                    exit_condition: None,
                 });
             }
             if last_component.ends_with(".css") || last_component.ends_with(".svg") {
@@ -140,7 +143,7 @@ impl ImportResolver {
                     .map_err(|e| format!("Failed to read CSS '{}': {}", css_path.display(), e))?;
                 let css_for_cache = css_content.clone();
                 let css_for_return = css_content.clone();
-self.loaded_modules.insert(
+ self.loaded_modules.insert(
                     path_str.clone(),
                     Program {
                         items: vec![TopLevel::Stylesheet(css_for_cache)],
@@ -150,6 +153,7 @@ self.loaded_modules.insert(
                         ffi: None,
                         strict_mode: self.strict_mode,
                         dispatch_mode: Default::default(),
+                        exit_condition: None,
                     },
                 );
                 return Ok(Program {
@@ -160,6 +164,7 @@ self.loaded_modules.insert(
                     ffi: None,
                     strict_mode: self.strict_mode,
                     dispatch_mode: Default::default(),
+                    exit_condition: None,
                 });
             }
         }
@@ -217,6 +222,7 @@ self.loaded_modules.insert(
                         ffi: None,
                         strict_mode: self.strict_mode,
                         dispatch_mode: Default::default(),
+                        exit_condition: None,
                     },
                 );
                 return Ok(Program {
@@ -230,6 +236,7 @@ self.loaded_modules.insert(
                     ffi: None,
                     strict_mode: self.strict_mode,
                     dispatch_mode: Default::default(),
+                    exit_condition: None,
                 });
             }
         }
@@ -375,6 +382,7 @@ self.loaded_modules.insert(
             ffi: None,
             strict_mode: self.strict_mode,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         })
     }
 }

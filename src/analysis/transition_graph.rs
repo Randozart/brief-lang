@@ -316,6 +316,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None,
         };
         let graph = ReactorTransitionGraph::build(&program);
         assert_eq!(graph.nodes.len(), 1);

@@ -138,6 +138,11 @@ fn trg_llvm_storage_ty(ty: &Type) -> &str {
 fn is_trigger_gated(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> bool {
     match pre {
         Expr::Identifier(name) => trigger_names.contains(name.as_str()),
+        // And(trigger, bounded_pre) — the common pattern for
+        // trigger-gated counter transactions in benchmarks.
+        Expr::And(l, r) => {
+            is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names)
+        }
         _ => false,
     }
 }
@@ -173,6 +178,7 @@ pub struct LlvmBackend {
     has_async_txns: bool,
     async_txn_names: Vec<String>,
     async_thread_pool_size: u32,
+    exit_condition: Option<Box<Expr>>,
 }
 
 impl LlvmBackend {
@@ -208,6 +214,7 @@ impl LlvmBackend {
             has_async_txns: false,
             async_txn_names: Vec::new(),
             async_thread_pool_size: 0,
+            exit_condition: None,
         }
     }
 
@@ -245,6 +252,7 @@ impl LlvmBackend {
         let cg = &analysis.call_graph;
         self.has_cycles = cg.has_cycle();
 
+        self.exit_condition = program.exit_condition.clone();
         self.build_field_index(program);
         self.triggers.clear();
         self.trigger_names.clear();
@@ -643,7 +651,34 @@ self.emit_declares(&mut out);
                 // We emit a single @main that samples triggers once, then switch
                 // dispatches to per-value folded loops.
 
-                // Extract folding params if available for enum dispatch
+                // Build per-txn folding params for all enum-candidate txns.
+                // Each trigger-gated bounded-counter txn gets its own folded
+                // loop in the case arm.  Multi-txn programs (e.g. async_counters)
+                // need this to converge in O(1) ticks instead of one increment
+                // per tick via reactor_tick.
+                let enum_fold_params: HashMap<String, (usize, Option<usize>, Option<String>)> = {
+                    let mut m = HashMap::new();
+                    for txn_name in &enum_txn_names {
+                        if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
+                            if let Some(ref bp) = node.bounded_pre {
+                                if let Some(&cidx) = self.field_index_map.get(&bp.var) {
+                                    let tidx = self.field_index_map.get(&bp.bound_var).copied();
+                                    let tcname = if tidx.is_none() {
+                                        if self.constants.contains_key(&bp.bound_var) {
+                                            Some(bp.bound_var.clone())
+                                        } else { None }
+                                    } else { None };
+                                    let inc = node.increments.as_ref();
+                                    if inc.map_or(false, |i| i.var == bp.var && i.delta > 0) {
+                                        m.insert(txn_name.clone(), (cidx, tidx, tcname));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    m
+                };
+                // Legacy single-txn params for chain composition (unchanged)
                 let (enum_ci, enum_ti, enum_tcn): (usize, Option<usize>, Option<String>) = if graph.nodes.len() == 1 && txns.len() == 1 {
                     if let Some(bp) = graph.nodes[0].bounded_pre.as_ref() {
                         if let Some(&cidx) = self.field_index_map.get(&bp.var) {
@@ -686,6 +721,7 @@ self.emit_declares(&mut out);
                     &mut out,
                     &txns,
                     enum_sizes,
+                    &enum_fold_params,
                     enum_ci,
                     enum_ti,
                     enum_tcn_ref,
@@ -1980,8 +2016,108 @@ self.emit_declares(&mut out);
         writeln!(out).ok();
     }
 
+    // ── EXIT CONDITION EXPRESSION ────────────────────────────
+    /// Recursively evaluate a boolean expression for the exit condition check.
+    /// All values are emitted as `i64` for uniformity; comparisons are zext'd from `i1`.
+    fn emit_exit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> String {
+        let v = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
+        match expr {
+            Expr::Integer(n) => {
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
+                v
+            }
+            Expr::Bool(b) => {
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok();
+                v
+            }
+            Expr::Identifier(name) => {
+                if let Some(&idx) = self.field_index_map.get(name) {
+                    let p = format!("%gep_exit_{}", self.txn_counter);
+                    self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", indent, p, idx).ok();
+                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok();
+                } else if self.constants.contains_key(name) {
+                    writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
+                } else {
+                    writeln!(out, "{}{} = add i64 0, 0 ; unknown id '{}'", indent, v, name).ok();
+                }
+                v
+            }
+            Expr::Eq(l, r) => {
+                let lv = self.emit_exit_expr(out, l, indent);
+                let rv = self.emit_exit_expr(out, r, indent);
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, lv, rv).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                v
+            }
+            Expr::Ne(l, r) => {
+                let lv = self.emit_exit_expr(out, l, indent);
+                let rv = self.emit_exit_expr(out, r, indent);
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, cmp, lv, rv).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                v
+            }
+            Expr::Lt(l, r) => {
+                let lv = self.emit_exit_expr(out, l, indent);
+                let rv = self.emit_exit_expr(out, r, indent);
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cmp, lv, rv).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                v
+            }
+            Expr::Le(l, r) => {
+                let lv = self.emit_exit_expr(out, l, indent);
+                let rv = self.emit_exit_expr(out, r, indent);
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, cmp, lv, rv).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                v
+            }
+            Expr::Gt(l, r) => {
+                let lv = self.emit_exit_expr(out, l, indent);
+                let rv = self.emit_exit_expr(out, r, indent);
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, cmp, lv, rv).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                v
+            }
+            Expr::Ge(l, r) => {
+                let lv = self.emit_exit_expr(out, l, indent);
+                let rv = self.emit_exit_expr(out, r, indent);
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, cmp, lv, rv).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                v
+            }
+            Expr::And(l, r) => {
+                let lv = self.emit_exit_expr(out, l, indent);
+                let rv = self.emit_exit_expr(out, r, indent);
+                writeln!(out, "{}{} = and i64 {}, {}", indent, v, lv, rv).ok();
+                v
+            }
+            Expr::Or(l, r) => {
+                let lv = self.emit_exit_expr(out, l, indent);
+                let rv = self.emit_exit_expr(out, r, indent);
+                writeln!(out, "{}{} = or i64 {}, {}", indent, v, lv, rv).ok();
+                v
+            }
+            Expr::Not(e) => {
+                let inner = self.emit_exit_expr(out, e, indent);
+                writeln!(out, "{}{} = xor i64 {}, 1", indent, v, inner).ok();
+                v
+            }
+            _ => {
+                writeln!(out, "{}{} = add i64 0, 0 ; unsupported exit expr", indent, v).ok();
+                v
+            }
+        }
+    }
+
     // ── MAIN FUNCTION ─────────────────────────────────────────
-    fn emit_main(&self, out: &mut String, has_wake_triggers: bool) {
+    fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
         writeln!(out, "define i32 @main() local_unnamed_addr #3 {{").ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
@@ -2000,10 +2136,28 @@ self.emit_declares(&mut out);
         } else {
             writeln!(out, "  call void @reactor_tick()").ok();
         }
-        if has_wake_triggers {
-            writeln!(out, "  call void @__rt_wait()").ok();
+        let has_exit = self.exit_condition.is_some();
+        if has_exit {
+            let cond = self.exit_condition.clone().unwrap();
+            let val = self.emit_exit_expr(out, &cond, "  ");
+            let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
+            if has_wake_triggers {
+                writeln!(out, "  br i1 {}, label %done, label %wait", tr).ok();
+                writeln!(out, "  wait:").ok();
+                writeln!(out, "  call void @__rt_wait()").ok();
+                writeln!(out, "  br label %tick").ok();
+            } else {
+                writeln!(out, "  br i1 {}, label %done, label %tick", tr).ok();
+            }
+            writeln!(out, "  done:").ok();
+            writeln!(out, "  ret i32 0").ok();
+        } else {
+            if has_wake_triggers {
+                writeln!(out, "  call void @__rt_wait()").ok();
+            }
+            writeln!(out, "  br label %tick").ok();
         }
-        writeln!(out, "  br label %tick").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }
@@ -2060,11 +2214,17 @@ self.emit_declares(&mut out);
     /// Emit a `main()` that samples enumerable triggers once and switch-dispatches
     /// to per-value folded loops.  Each trigger combination gets its own while-loop
     /// that runs the folded transaction body.
+    ///
+    /// `fold_params` maps txn_name → (counter_idx, total_idx, total_const_name)
+    /// for all enum-candidate transactions that have proven bounded convergence.
+    /// Each case arm emits one folded loop per entry, allowing multi-txn programs
+    /// (e.g. `async_counters`) to converge all counters in a single tick.
     fn emit_enum_main(
         &mut self,
         out: &mut String,
         txns: &[(String, &crate::ast::Transaction)],
         enum_sizes: &[(String, Option<u64>)],
+        fold_params: &HashMap<String, (usize, Option<usize>, Option<String>)>,
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
@@ -2132,14 +2292,41 @@ self.emit_declares(&mut out);
             all_internal_map.and_then(|m| m.get(fn_name).copied())
         };
 
-        // "Done" label for each branch — in wake mode this is do_wait, in one-shot mode
-        // this is a ret i32 0 or a terminal. We use br label %<done_label> as the
-        // exit for each case arm. When async txns exist, we inject an async_phase
-        // label between the switch arms and do_wait.
+        // "Done" label for each branch — in wake mode this is either exit_check
+        // (when #!exit is declared), async_phase (when async txns exist), or do_wait.
+        // In one-shot mode this is "exit" (ret i32 0).
+        // All case arms branch to done_label; done_label routes through the
+        // exit condition check (if present) before reaching the wait loop.
         let done_label = if has_wake {
-            if self.has_async_txns { "async_phase" } else { "do_wait" }
+            if self.exit_condition.is_some() { "exit_check" }
+            else if self.has_async_txns { "async_phase" }
+            else { "do_wait" }
         } else { "exit" };
         if !has_wake { writeln!(out, "  br label %dispatch").ok(); writeln!(out, "dispatch:").ok(); }
+
+        /// Emit one or more per-txn folded loops for a case arm.
+        /// When fold_params contains entries, emits one loop per entry;
+        /// otherwise falls back to the legacy single-txn params.
+        let emit_case_folded_loops = |this: &mut LlvmBackend,
+                                      out: &mut String,
+                                      prefix: &str,
+                                      fn_name: &str,
+                                      ci: usize,
+                                      ti: Option<usize>,
+                                      tcn: Option<&str>|
+        {
+            if !fold_params.is_empty() {
+                // Multi-txn: emit one folded loop per bounded-counter txn
+                for (ptxn_name, &(pci, pti, ref ptcn)) in fold_params.iter() {
+                    let sub_prefix = format!("{}_{}", prefix, ptxn_name);
+                    let ptcn_ref = ptcn.as_deref();
+                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix);
+                }
+            } else {
+                // Single-txn (legacy): use the caller-provided params
+                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix);
+            }
+        };
 
         if total_combos == 1 && enum_sizes.len() == 1 {
             // Single-value trigger: just fall through to the loop
@@ -2148,7 +2335,7 @@ self.emit_declares(&mut out);
                 writeln!(out, "  %pc_sc = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", ci).ok();
                 writeln!(out, "  store i64 {}, i64* %pc_sc, align 8", tv).ok();
             } else {
-                self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, "sc");
+                emit_case_folded_loops(self, out, "sc", fn_name, counter_idx, total_idx, total_const_name);
             }
             if has_wake {
                 writeln!(out, "  br label %{}", done_label).ok();
@@ -2173,7 +2360,7 @@ self.emit_declares(&mut out);
                     writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", prefix, ci).ok();
                     writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, prefix).ok();
                 } else {
-                    self.emit_folded_loop(out, fn_name, counter_idx, total_idx, total_const_name, &prefix);
+                    emit_case_folded_loops(self, out, &prefix, fn_name, counter_idx, total_idx, total_const_name);
                 }
                 if has_wake {
                     writeln!(out, "  br label %{}", done_label).ok();
@@ -2208,6 +2395,19 @@ self.emit_declares(&mut out);
         }
 
         if has_wake {
+            let has_exit = self.exit_condition.is_some();
+            if has_exit {
+                let cond = self.exit_condition.clone().unwrap();
+                writeln!(out, "exit_check:").ok();
+                let val = self.emit_exit_expr(out, &cond, "  ");
+                let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
+                if self.has_async_txns {
+                    writeln!(out, "  br i1 {}, label %done, label %async_phase", tr).ok();
+                } else {
+                    writeln!(out, "  br i1 {}, label %done, label %do_wait", tr).ok();
+                }
+            }
             if self.has_async_txns {
                 writeln!(out, "async_phase:").ok();
                 self.emit_async_phase(out);
@@ -2216,6 +2416,10 @@ self.emit_declares(&mut out);
             writeln!(out, "do_wait:").ok();
             writeln!(out, "  call void @__rt_wait()").ok();
             writeln!(out, "  br label %tick").ok();
+            if has_exit {
+                writeln!(out, "done:").ok();
+                writeln!(out, "  ret i32 0").ok();
+            }
         }
 
         writeln!(out, "}}").ok();
@@ -2310,7 +2514,7 @@ self.emit_declares(&mut out);
     fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast::Transaction)]) -> Vec<(String, String)> {
         let prg = crate::ast::Program {
             items: txns.iter().map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect(),
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential,
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential, exit_condition: None,
         };
         let mut pairs = crate::backend::detect_fusable_pairs(&prg);
         pairs.retain(|(a, b)| {
@@ -2527,6 +2731,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         }
     }
 
@@ -2561,6 +2766,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("%State"));
@@ -2622,6 +2828,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("@increment("));
@@ -2670,6 +2877,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("noalias"), "Transaction should have noalias");
@@ -2760,6 +2968,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
 
@@ -2843,6 +3052,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         // Payload variant Some → discriminant 1
@@ -2898,6 +3108,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         // Lower bound should be i64::MIN = -9223372036854775808
@@ -2985,6 +3196,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         // Must NOT emit nuw nsw — we removed manual emission
@@ -3036,6 +3248,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         }
     }
 
@@ -3167,6 +3380,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = LlvmBackend::new().generate(&program);
         // MMIO triggers with is_wake → metadata only includes LinkRef::Linked symbols, not Explicit
@@ -3218,6 +3432,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("bitcast float"),
@@ -3271,6 +3486,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("fadd float"),
@@ -3350,6 +3566,7 @@ mod tests {
             items, comments: vec![], reactor_speed: None, attrs: Vec::new(),
             ffi: None, strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         }
     }
 
@@ -3646,6 +3863,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         }
     }
 
@@ -3691,5 +3909,159 @@ mod tests {
             "No barrier calls without async txns");
         assert!(!output.contains("call void @brief_thread_pool_init"),
             "No thread pool init without async txns");
+    }
+
+    // ── Exit condition tests ──────────────────────────────────
+
+    fn make_exit_program(exit_expr: Option<Expr>, trg_ty: Type, is_wake: bool) -> Program {
+        let trg_name = "io_pending";
+        let mut items = vec![
+            TopLevel::StateDecl(StateDecl {
+                name: "ops".to_string(),
+                ty: Type::Int,
+                expr: Some(int_s(0)),
+                address: None, bit_range: None, is_override: false,
+                os_mode: false, span: None, attrs: vec![],
+            }),
+        ];
+        items.push(TopLevel::Constant(Constant {
+            name: "N".to_string(),
+            ty: Type::Int,
+            expr: int_s(100),
+        }));
+        items.push(TopLevel::Trigger(TriggerDeclaration {
+            name: trg_name.to_string(),
+            ty: trg_ty,
+            address: LinkRef::Linked("__io_pending".to_string()),
+            bit_range: None, stages: vec![], condition: None,
+            is_wake, span: None,
+        }));
+        let pre = Expr::And(
+            Box::new(Expr::Identifier(trg_name.to_string())),
+            Box::new(Expr::Lt(
+                Box::new(Expr::Identifier("ops".to_string())),
+                Box::new(Expr::Identifier("N".to_string())),
+            )),
+        );
+        items.push(TopLevel::Transaction(Transaction {
+            name: "work".to_string(),
+            parameters: vec![],
+            contract: Contract {
+                pre_condition: pre,
+                post_condition: Expr::Bool(true),
+                span: None, watchdog: None,
+            },
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("ops".to_string()),
+                    expr: Expr::Add(Box::new(ident_s("ops")), Box::new(int_s(1))),
+                    timeout: None, modifiers: vec![],
+                },
+                Statement::Term { values: vec![], modifiers: vec![] },
+            ],
+            is_async: false, is_reactive: true, reactor_speed: None,
+            span: None, is_lambda: false, dependencies: vec![],
+            attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+        }));
+        Program {
+            items,
+            comments: vec![], reactor_speed: None, attrs: vec![],
+            ffi: None, strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: exit_expr.map(Box::new),
+        }
+    }
+
+    #[test]
+    fn test_exit_pragma_in_wake_main() {
+        // #!exit ops == N; with Int trigger (standard reactor path)
+        let exit_cond = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("N".to_string())),
+        );
+        let program = make_exit_program(Some(exit_cond), Type::Int, true);
+        let output = LlvmBackend::new().generate(&program);
+        // Exit check should appear before __rt_wait
+        assert!(output.contains("trunc i64"),
+            "Exit condition should trunc i64 to i1");
+        assert!(output.contains("br i1"),
+            "Exit condition should branch on icmp result");
+        assert!(output.contains("done:"),
+            "Exit condition should emit done label");
+        assert!(output.contains("wait:"),
+            "Wake main should emit wait label after exit check");
+        assert!(output.contains("ret i32 0"),
+            "done label should return 0");
+    }
+
+    #[test]
+    fn test_exit_pragma_without_wake_no_change() {
+        // #!exit ops == N; with Int trigger but is_wake=false → no __rt_wait
+        let exit_cond = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("N".to_string())),
+        );
+        let program = make_exit_program(Some(exit_cond), Type::Int, false);
+        let output = LlvmBackend::new().generate(&program);
+        // Exit check still emitted, but no wait label
+        assert!(output.contains("trunc i64"),
+            "Exit condition should trunc i64 to i1 even without wake");
+        assert!(output.contains("br i1"),
+            "Exit condition should branch");
+        assert!(output.contains("done:"),
+            "Exit condition should emit done label");
+        assert!(!output.contains("wait:"),
+            "No wait label without wake triggers");
+        assert!(output.contains("ret i32 0"),
+            "done label should return 0");
+    }
+
+    #[test]
+    fn test_no_exit_without_pragma() {
+        let program = make_exit_program(None, Type::Int, true);
+        let output = LlvmBackend::new().generate(&program);
+        assert!(!output.contains("trunc i64"),
+            "No trunc without exit condition");
+        assert!(!output.contains("done:"),
+            "No done label without exit condition");
+    }
+
+    #[test]
+    fn test_exit_in_enum_main() {
+        // Bool trigger → enum dispatch path, no wake → one-shot: exit check not applicable
+        let exit_cond = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("N".to_string())),
+        );
+        let program = make_exit_program(Some(exit_cond), Type::Bool, false);
+        let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
+        // One-shot enum dispatch: no tick loop, no exit check needed
+        assert!(output.contains("switch i64"),
+            "Bool trigger should use enum dispatch");
+        assert!(output.contains("ret i32 0"),
+            "One-shot path returns 0 at each case arm");
+        assert!(!output.contains("exit_check:"),
+            "No exit check label in one-shot path (no tick loop)");
+    }
+
+    #[test]
+    fn test_exit_in_enum_hybrid_wake() {
+        // Bool trigger with is_wake → hybrid path (enum + wake)
+        let exit_cond = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("N".to_string())),
+        );
+        let program = make_exit_program(Some(exit_cond), Type::Bool, true);
+        let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
+        assert!(output.contains("switch i64"),
+            "Bool trigger should use enum dispatch in hybrid mode");
+        assert!(output.contains("exit_check:"),
+            "Hybrid mode should emit exit_check label");
+        assert!(output.contains("do_wait:"),
+            "Hybrid mode should still have do_wait for wake path");
+        assert!(output.contains("call void @__rt_wait()"),
+            "Hybrid mode should have __rt_wait");
+        assert!(output.contains("ret i32 0"),
+            "Should return 0 on exit");
     }
 }

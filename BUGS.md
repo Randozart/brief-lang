@@ -279,8 +279,39 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 **Current workaround**: `timeout --signal=KILL 30s` for benchmarks.
 
-**Planned fix**: Natural death semantics — reactor signals convergence to main loop which exits. Plan at `plans/2026-06-01-exit-semantics.md`.
+**Fix**: Added `#!exit <expr>;` pragma — file-level boolean expression from the source `.bv` file, evaluated every tick before `__rt_wait()`. When true, `main()` returns 0. Backed by convergence-based exit (natural death) detection.
 
-**Files**: `src/backend/llvm.rs:2139-2141`, `plans/2026-06-01-exit-semantics.md`
+**Files**: `src/parser.rs` (`#!exit` parsing), `src/backend/llvm.rs` (`emit_exit_check`, `emit_exit_expr`, modified `emit_main`/`emit_enum_main`), `plans/2026-06-01-exit-semantics.md`
 
 **Lesson**: Compile-time analysis data must propagate to ALL codegen paths that can use it. Convergence data is computed once and used for Path 3 (precompute) but Path 4/5 (enum/async dispatch) need it equally. The commit that added `is_fully_precomputable` should have wired it into `emit_enum_main` at the same time.
+
+## 2026-06-01 — `is_trigger_gated` only matches bare `Identifier`, misses `And(trigger, condition)`
+
+**Issue**: `async_counters.bv` with precondition `[io_pending && counter < N]` was classified as async dispatch (Path 5) instead of enum dispatch (Path 4). The async path runs increments via `reactor_tick()` only, achieving ~1 increment per 100ms tick — 29 days for 25M iterations.
+
+**Root Cause**: `src/backend/llvm.rs:is_trigger_gated()` matched only `Expr::Identifier(name)` at the top level. `And(io_pending, Lt(counter, total))` was not recognized as trigger-gated. The `enum_txn_names` set was empty for all compound preconditions, so all txns fell through to `async_candidates`.
+
+**How discovered**: `async_counters` benchmark hung after `#!exit` was added. Even with exit condition `a == N && b == N`, the counters never reached N because the enum dispatch path (which runs folded loops) was never selected.
+
+**Fix**: Added `Expr::And(l, r)` arm to `is_trigger_gated` that recurses into both sides.
+
+**Files**: `src/backend/llvm.rs:138-144`
+
+**Lesson**: When classification functions check preconditions for structural properties (trigger-gated, bounded-convergence), they must recurse into ALL expression types that can wrap the target pattern. The common pattern `trigger && counter < N` is an `And` node — a bare `Identifier` match will never see it.
+
+## 2026-06-01 — `emit_enum_main` single-txn `graph.nodes.len() == 1 && txns.len() == 1` guard prevents multi-txn folded loops
+
+**Issue**: Even when multiple trigger-gated txns with bounded convergence enter the enum dispatch path, only one folded loop was emitted per case arm — the one corresponding to the first (and assumed-only) transaction. Multi-txn programs like `async_counters` (inc_a + inc_b) converged zero counters per tick.
+
+**Root Cause**: `generate()` at `llvm.rs:650-662` extracted folding params only for the single-txn guard `graph.nodes.len() == 1 && txns.len() == 1`. For multi-txn programs, `(enum_ci, enum_ti, enum_tcn) = (0, None, None)` — every folded loop got limit `add i64 0, 0`.
+
+**How discovered**: After fixing `is_trigger_gated`, async_counters entered enum dispatch but still ran 0 iterations per tick. LLVM IR inspection showed `%lt... = add i64 0, 0` for all case arm loops.
+
+**Fix**: 
+1. Built `enum_fold_params: HashMap<String, (usize, Option<usize>, Option<String>)>` in `generate()` — per-txn folding params extracted from the transition graph.
+2. Added `fold_params` parameter to `emit_enum_main`.
+3. Added `emit_case_folded_loops` closure that iterates over all fold param entries and emits one folded loop per entry per case arm.
+
+**Files**: `src/backend/llvm.rs:647-665` (enum_fold_params build), `src/backend/llvm.rs:2285-2315` (multi-txn case arm emission)
+
+**Lesson**: The enum dispatch path was designed for single-txn programs. Multi-txn programs with multiple bounded counters need per-txn folded loops. The `graph.nodes.len() == 1 && txns.len() == 1` guard was a premature optimization assumption that excluded valid multi-txn convergence programs. Always verify classification/path-selection logic handles N>1 inputs.

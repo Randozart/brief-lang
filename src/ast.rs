@@ -908,6 +908,7 @@ pub struct Program {
     pub ffi: Option<FfiState>,  // NEW: FFI state from #![ffi.*, ...]
     pub strict_mode: StrictMode,
     pub dispatch_mode: DispatchMode,
+    pub exit_condition: Option<Box<Expr>>, // NEW: #!exit <expr>;
 }
 
 /// FFI State captured from file-level attribute

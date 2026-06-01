@@ -243,6 +243,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         }
     }
 
@@ -256,6 +257,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -272,6 +274,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -288,6 +291,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -308,6 +312,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -328,6 +333,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -346,6 +352,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -366,6 +373,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);

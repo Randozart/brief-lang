@@ -1738,6 +1738,7 @@ mod tests {
             ffi: None,
             strict_mode: crate::ast::StrictMode::Off,
             dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None,
         }
     }
 

@@ -888,6 +888,7 @@ mod tests {
             ffi: None,
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
+            exit_condition: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("(module"));

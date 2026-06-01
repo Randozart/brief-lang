@@ -16,6 +16,8 @@
 //
 // C reference: async_counters_c.c (two pthreads)
 
+#!exit a == N && b == N;
+
 import { io_pending } from "std/brief_rt.bv";
 
 let a: Int = 0;

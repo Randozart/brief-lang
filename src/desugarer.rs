@@ -344,6 +344,7 @@ impl Desugarer {
             ffi: program.ffi.clone(),
             strict_mode: StrictMode::Off,
             dispatch_mode: program.dispatch_mode,
+            exit_condition: program.exit_condition.clone(),
         }
     }
 

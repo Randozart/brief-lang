@@ -17,6 +17,8 @@
 //
 // C reference: ring_buffer_c.c
 
+#!exit ops == N;
+
 import { io_pending } from "std/brief_rt.bv";
 
 let ops: Int = 0;
