@@ -589,13 +589,50 @@ self.emit_declares(&mut out);
         }
         writeln!(out).ok();
 
-        // Emit constant globals for TopLevel::Constant declarations
+        // Emit constant globals for TopLevel::Constant declarations.
+        // Deduplicate identical constants to avoid redundant cache lines.
+        // LLVM `@alias` maps multiple names to the same global without
+        // allocating separate storage.
+        let mut dedup_map: HashMap<String, String> = HashMap::new(); // key → canonical_name
+        let mut alias_map: HashMap<String, String> = HashMap::new(); // name → canonical_name
         for (name, (ty, expr)) in &self.constants {
             let llvm_ty = match ty {
-                Type::Float => "float",
-                Type::Int | Type::UInt => "i64",
-                Type::Bool => "i1",
-                _ => "i64",
+                Type::Float => "float", Type::Int | Type::UInt => "i64",
+                Type::Bool => "i1", _ => "i64",
+            };
+            let key = match expr {
+                Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
+                Expr::Integer(n) => format!("{}:{}", llvm_ty, n),
+                Expr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
+                Expr::Neg(inner) => match inner.as_ref() {
+                    Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f)),
+                    Expr::Integer(n) => format!("{}:-{}", llvm_ty, n),
+                    _ => format!("{}:0", llvm_ty),
+                },
+                Expr::String(_) => format!("{}:null", llvm_ty),
+                _ => format!("{}:0", llvm_ty),
+            };
+            if let Some(canonical) = dedup_map.get(&key) {
+                alias_map.insert(name.clone(), canonical.clone());
+            } else {
+                dedup_map.insert(key, name.clone());
+                alias_map.insert(name.clone(), name.clone());
+            }
+        }
+        // Emit declaration for canonical names only; emit alias for duplicates
+        for (name, (ty, expr)) in &self.constants {
+            let canonical = alias_map.get(name).cloned().unwrap_or_else(|| name.clone());
+            if canonical != *name {
+                let llvm_ty = match ty {
+                    Type::Float => "float", Type::Int | Type::UInt => "i64",
+                    Type::Bool => "i1", _ => "i64",
+                };
+                writeln!(out, "@{} = alias {} @{}", name, llvm_ty, canonical).ok();
+                continue;
+            }
+            let llvm_ty = match ty {
+                Type::Float => "float", Type::Int | Type::UInt => "i64",
+                Type::Bool => "i1", _ => "i64",
             };
             let val_str = match expr {
                 Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
@@ -610,8 +647,7 @@ self.emit_declares(&mut out);
                 _ => "0".to_string(),
             };
             if *ty == Type::Float {
-                writeln!(out, "@{} = constant {} {}",
-                    name, llvm_ty, val_str).ok();
+                writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
             } else {
                 writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
             }
@@ -2615,41 +2651,17 @@ self.emit_declares(&mut out);
     /// Recursively evaluate a boolean expression for the exit condition check.
     /// All values are emitted as `i64` for uniformity; comparisons are zext'd from `i1`.
     fn emit_exit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> String {
+        // Leaf expressions: delegate to emit_expr for consistent constant
+        // inlining, float promotion, and SSA field access.
+        match expr {
+            Expr::Integer(_) | Expr::Bool(_) | Expr::Identifier(_) | Expr::OwnedRef(_) => {
+                return self.emit_expr(out, expr, indent);
+            }
+            _ => {}
+        }
         let v = format!("%t{}", self.txn_counter);
         self.txn_counter += 1;
         match expr {
-            Expr::Integer(n) => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
-                v
-            }
-            Expr::Bool(b) => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok();
-                v
-            }
-            Expr::Identifier(name) => {
-                if let Some(&idx) = self.field_index_map.get(name) {
-                    let p = format!("%gep_exit_{}", self.txn_counter);
-                    self.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", indent, p, idx).ok();
-                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok();
-                } else if self.constants.contains_key(name) {
-                    writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
-                } else if self.trigger_names.contains(name) {
-                    if let Some(t) = self.triggers.get(name).cloned() {
-                        let addr_str = match &t.address {
-                            crate::ast::LinkRef::Explicit(a) => a.to_string(),
-                            crate::ast::LinkRef::Linked(s) => format!("@{}", s),
-                        };
-                        let addr_is_ptr = matches!(t.address, crate::ast::LinkRef::Linked(_));
-                        self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);
-                    } else {
-                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-                    }
-                } else {
-                    writeln!(out, "{}{} = add i64 0, 0 ; unknown id '{}'", indent, v, name).ok();
-                }
-                v
-            }
             Expr::Eq(l, r) => {
                 let lv = self.emit_exit_expr(out, l, indent);
                 let rv = self.emit_exit_expr(out, r, indent);
@@ -3556,6 +3568,25 @@ self.emit_declares(&mut out);
     }
 
     fn emit_binop(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) {
+        // Peephole: constant-fold integer binops at compile time
+        if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
+            let result = match int_op {
+                "add" => Some(li.wrapping_add(*ri)),
+                "sub" => Some(li.wrapping_sub(*ri)),
+                "mul" => Some(li.wrapping_mul(*ri)),
+                "sdiv" if *ri != 0 => Some(li / ri),
+                "and" => Some(li & ri),
+                "or"  => Some(li | ri),
+                "xor" => Some(li ^ ri),
+                "shl" => Some(li.wrapping_shl(*ri as u32)),
+                "lshr" => Some((*li as u64).wrapping_shr(*ri as u32) as i64),
+                _ => None,
+            };
+            if let Some(folded) = result {
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, folded).ok();
+                return;
+            }
+        }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         if self.is_float_expr(l) || self.is_float_expr(r) {
             let fa = self.i64_to_float_reg(out, &a, indent);
@@ -3572,6 +3603,20 @@ self.emit_declares(&mut out);
     }
 
     fn emit_fcmp(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, cond: &str) {
+        // Peephole: constant-fold integer comparisons at compile time
+        if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
+            let result = match cond {
+                "oeq" => li == ri,
+                "one" => li != ri,
+                "olt" => li < ri,
+                "ole" => li <= ri,
+                "ogt" => li > ri,
+                "oge" => li >= ri,
+                _ => false,
+            };
+            writeln!(out, "{}{} = add i64 0, {}", indent, v, if result { 1 } else { 0 }).ok();
+            return;
+        }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
         if self.is_float_expr(l) || self.is_float_expr(r) {
