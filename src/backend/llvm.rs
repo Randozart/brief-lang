@@ -179,6 +179,7 @@ pub struct LlvmBackend {
     has_async_txns: bool,
     async_txn_names: Vec<String>,
     async_thread_pool_size: u32,
+    is_lightweight_async: bool,
     exit_condition: Option<Box<Expr>>,
     has_natural_exit: bool,
     warnings: Vec<String>,
@@ -217,6 +218,7 @@ impl LlvmBackend {
             has_async_txns: false,
             async_txn_names: Vec::new(),
             async_thread_pool_size: 0,
+            is_lightweight_async: false,
             exit_condition: None,
             has_natural_exit: false,
             warnings: Vec::new(),
@@ -421,6 +423,30 @@ impl LlvmBackend {
         self.async_txn_names = async_txn_names.iter().cloned().collect();
         self.async_thread_pool_size = self.async_txn_names.len() as u32;
 
+        // Lightweight async: all async txns are effectively pure with runtime-
+        // variable bounds.  Skip thread pool + barriers; use sequential
+        // reactor_tick() instead.  The barrier is always a net loss when the
+        // txn body is a single add+store (~2ns) and the barrier costs ~1µs.
+        if !async_txn_names.is_empty() {
+            let all_lightweight = async_txn_names.iter().all(|name| {
+                analysis.transition_graph.nodes.iter().find(|n| n.name == *name).map_or(false, |node| {
+                    let is_pure = node.is_pure_body || node.is_effectively_pure;
+                    if !is_pure { return false; }
+                    if let Some(ref bp) = node.bounded_pre {
+                        let is_const = self.field_initializers.get(&bp.bound_var)
+                            .and_then(|e| e.as_ref())
+                            .map_or(false, |e| matches!(e, Expr::Integer(_)))
+                            || self.constants.get(&bp.bound_var)
+                                .map_or(false, |(_, e)| matches!(e, Expr::Integer(_)));
+                        !is_const
+                    } else { false }
+                })
+            });
+            if all_lightweight {
+                self.is_lightweight_async = true;
+            }
+        }
+
         let mut out = String::new();
         self.emit_header(&mut out);
 self.emit_declares(&mut out);
@@ -539,7 +565,7 @@ self.emit_declares(&mut out);
         }
         // Async body functions — simple pre→fire wrapper for worker threads
         for (name, txn) in &txns {
-            if async_txn_names.contains(name.as_str()) {
+            if async_txn_names.contains(name.as_str()) && !self.is_lightweight_async {
                 self.emit_async_body(&mut out, txn, name);
                 writeln!(out).ok();
             }
@@ -2341,14 +2367,14 @@ self.emit_declares(&mut out);
             writeln!(out, "  call void @__rt_init()").ok();
             writeln!(out, "  call void @__rt_poll()").ok();
         }
-        if self.has_async_txns {
+        if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
             writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
         }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
-        if self.has_async_txns {
+        if self.has_async_txns && !self.is_lightweight_async {
             self.emit_async_phase(out);
         } else {
             writeln!(out, "  call void @reactor_tick()").ok();
@@ -2460,7 +2486,7 @@ self.emit_declares(&mut out);
             writeln!(out, "  call void @__rt_init()").ok();
             writeln!(out, "  call void @__rt_poll()").ok();
         }
-        if self.has_async_txns {
+        if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
             writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
@@ -2518,7 +2544,7 @@ self.emit_declares(&mut out);
         // exit condition check (if present) before reaching the wait loop.
         let done_label = if has_wake {
             if self.exit_condition.is_some() { "exit_check" }
-            else if self.has_async_txns { "async_phase" }
+            else if self.has_async_txns && !self.is_lightweight_async { "async_phase" }
             else { "do_wait" }
         } else { "exit" };
         if !has_wake { writeln!(out, "  br label %dispatch").ok(); writeln!(out, "dispatch:").ok(); }
@@ -2632,13 +2658,13 @@ self.emit_declares(&mut out);
                 let val = self.emit_exit_expr(out, &cond, "  ");
                 let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
-                if self.has_async_txns {
+                if self.has_async_txns && !self.is_lightweight_async {
                     writeln!(out, "  br i1 {}, label %done, label %async_phase", tr).ok();
                 } else {
                     writeln!(out, "  br i1 {}, label %done, label %do_wait", tr).ok();
                 }
             }
-            if self.has_async_txns {
+            if self.has_async_txns && !self.is_lightweight_async {
                 writeln!(out, "async_phase:").ok();
                 self.emit_async_phase(out);
                 writeln!(out, "  br label %do_wait").ok();
@@ -2714,7 +2740,7 @@ self.emit_declares(&mut out);
 
     // ── THREAD POOL METADATA ────────────────────────────────
     fn emit_thread_pool_metadata(&self, out: &mut String) {
-        if !self.has_async_txns { return; }
+        if !self.has_async_txns || self.is_lightweight_async { return; }
         let count = self.async_txn_names.len();
         let fn_list: Vec<String> = self.async_txn_names.iter()
             .map(|n| format!("i8* bitcast (void (%State*)* @async_body_{} to i8*)", n))
@@ -2733,7 +2759,7 @@ self.emit_declares(&mut out);
     /// Emit the async phase calls in main: release workers, run sequential
     /// reactor, wait for workers. Used by emit_main and emit_enum_main.
     fn emit_async_phase(&self, out: &mut String) {
-        if !self.has_async_txns { return; }
+        if !self.has_async_txns || self.is_lightweight_async { return; }
         writeln!(out, "  call void @brief_barrier_release()").ok();
         // Sequential reactor runs in main thread concurrently with workers
         writeln!(out, "  call void @reactor_tick()").ok();
