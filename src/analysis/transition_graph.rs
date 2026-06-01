@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Hashtag, Program, Statement, TopLevel};
+use crate::ast::{Expr, Hashtag, Program, SliceCoordinate, Statement, TopLevel};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
@@ -22,6 +22,8 @@ pub struct ReactorNode {
     pub bounded_pre: Option<BoundedPre>,
     pub increments: Option<IncrementInfo>,
     pub is_pure_body: bool,
+    pub write_set: HashSet<String>,
+    pub is_effectively_pure: bool,
 }
 
 pub struct ReactorTransitionGraph {
@@ -51,6 +53,7 @@ impl ReactorTransitionGraph {
                         })
                         .collect();
                     let is_pure = is_pure_body(&txn.body, &state_field_names, &increments);
+                    let write_set = extract_write_set(&txn.body, &state_field_names);
 
                     nodes.push(ReactorNode {
                         name: txn.name.clone(),
@@ -60,6 +63,8 @@ impl ReactorTransitionGraph {
                         bounded_pre,
                         increments,
                         is_pure_body: is_pure,
+                        write_set,
+                        is_effectively_pure: false,
                     });
                 }
                 TopLevel::Trigger(_) => {
@@ -67,6 +72,11 @@ impl ReactorTransitionGraph {
                 }
                 _ => {}
             }
+        }
+
+        let live_fields = compute_live_fields(&program.exit_condition, &nodes);
+        for node in &mut nodes {
+            compute_effectively_pure(node, &live_fields);
         }
 
         ReactorTransitionGraph { nodes, has_triggers }
@@ -184,6 +194,147 @@ fn references_triggers_or_ffi(expr: &Expr) -> bool {
         Expr::FieldAccess(obj, _) => references_triggers_or_ffi(obj),
         _ => false,
     }
+}
+
+pub fn compute_live_fields(
+    exit_condition: &Option<Box<Expr>>,
+    nodes: &[ReactorNode],
+) -> HashSet<String> {
+    let mut live = HashSet::new();
+    if let Some(ec) = exit_condition {
+        collect_identifiers(ec, &mut live);
+    }
+    for node in nodes {
+        collect_identifiers(&node.precondition, &mut live);
+    }
+    live
+}
+
+fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String>) {
+    if let (Some(bp), Some(inc)) = (&node.bounded_pre, &node.increments) {
+        if inc.var == bp.var && inc.delta > 0 && live_fields.contains(&inc.var) {
+            let non_counter_writes: Vec<&String> = node.write_set.iter()
+                .filter(|f| *f != &inc.var)
+                .collect();
+            if non_counter_writes.iter().all(|f| !live_fields.contains(*f)) {
+                node.is_effectively_pure = true;
+            }
+        }
+    }
+}
+
+fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
+    match expr {
+        Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => {
+            out.insert(name.clone());
+        }
+        Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term => {}
+        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+        | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
+        | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::Or(a, b)
+        | Expr::And(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+        | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
+            collect_identifiers(a, out);
+            collect_identifiers(b, out);
+        }
+        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::ListLen(a) => {
+            collect_identifiers(a, out);
+        }
+        Expr::Cast(a, _) => collect_identifiers(a, out),
+        Expr::Call(_, args) => {
+            for arg in args {
+                collect_identifiers(arg, out);
+            }
+        }
+        Expr::ListLiteral(elems) => {
+            for elem in elems {
+                collect_identifiers(elem, out);
+            }
+        }
+        Expr::ListIndex(list, idx) => {
+            collect_identifiers(list, out);
+            collect_identifiers(idx, out);
+        }
+        Expr::Slice { value, start, end, stride, mask } => {
+            collect_identifiers(value, out);
+            if let Some(s) = start { collect_identifiers(s, out); }
+            if let Some(e) = end { collect_identifiers(e, out); }
+            if let Some(s) = stride { collect_identifiers(s, out); }
+            if let Some(m) = mask { collect_identifiers(m, out); }
+        }
+        Expr::MultiSlice { value, coordinates, mask } => {
+            collect_identifiers(value, out);
+            for coord in coordinates {
+                collect_identifiers_in_coord(coord, out);
+            }
+            if let Some(m) = mask { collect_identifiers(m, out); }
+        }
+        Expr::FieldAccess(obj, _) => {
+            collect_identifiers(obj, out);
+        }
+        Expr::StructInstance(_, fields) => {
+            for (_, expr) in fields {
+                collect_identifiers(expr, out);
+            }
+        }
+        Expr::ObjectLiteral(fields) => {
+            for (_, expr) in fields {
+                collect_identifiers(expr, out);
+            }
+        }
+        Expr::PatternMatch { value, .. } => {
+            collect_identifiers(value, out);
+        }
+        Expr::Match { value, arms } => {
+            collect_identifiers(value, out);
+            for arm in arms {
+                if let Some(ref guard) = arm.guard {
+                    collect_identifiers(guard, out);
+                }
+                collect_identifiers(&arm.body, out);
+            }
+        }
+        Expr::ForAll { expr, .. } | Expr::Exists { expr, .. } => {
+            collect_identifiers(expr, out);
+        }
+        Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
+            collect_identifiers(last, out);
+        }
+        Expr::Tuple(elems) => {
+            for elem in elems {
+                collect_identifiers(elem, out);
+            }
+        }
+    }
+}
+
+fn collect_identifiers_in_coord(coord: &SliceCoordinate, out: &mut HashSet<String>) {
+    match coord {
+        SliceCoordinate::Index(e) => collect_identifiers(e, out),
+        SliceCoordinate::Range { start, end } => {
+            if let Some(s) = start { collect_identifiers(s, out); }
+            if let Some(e) = end { collect_identifiers(e, out); }
+        }
+        SliceCoordinate::Named { coord, .. } => {
+            collect_identifiers_in_coord(coord, out);
+        }
+    }
+}
+
+fn extract_write_set(body: &[Statement], state_fields: &HashSet<String>) -> HashSet<String> {
+    let mut writes = HashSet::new();
+    for stmt in body {
+        if let Statement::Assignment { lhs, .. } = stmt {
+            let name = match lhs {
+                Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                _ => continue,
+            };
+            if state_fields.contains(&name) {
+                writes.insert(name);
+            }
+        }
+    }
+    writes
 }
 
 #[cfg(test)]

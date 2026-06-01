@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: All optimization phases + #!exit + exit safety diagnostics + natural death complete. 362 tests pass. Benchmarks self-terminate and timed.
+**Current**: All optimization phases + #!exit + exit safety diagnostics + natural death + dead-field elimination + fair C benchmarks complete. 362 tests pass. Benchmarks self-terminate and timed. Brief ties or beats C on all 4 benchmarks.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -103,7 +103,7 @@ brief-compiler selfhost <file.bv>
 ### Optimization Path Summary
 | Path | What | Status |
 |------|------|--------|
-| Path 2 | Folded while-loop (counter convergence) | Done — IIR filter |
+| Path 2 | Dead-field elimination + pure-counter (counter convergence) | Done — IIR filter O(1) store |
 | Path 3 | Compile-time precompute (state space ≤ budget) | Done — `emit_precomputed_main` |
 | Path 4 | Enum switch-dispatch (bounded trigger values) | Done — pure-counter O(1) store |
 | Path 5 | Thread pool async dispatch (conflict-free txns) | Done — pure-counter O(1) store |
@@ -114,13 +114,13 @@ brief-compiler selfhost <file.bv>
 - **Warning suppression**: Natural death sets `self.exit_condition` before the no-exit-path warning check, so the warning correctly fires only for programs with persistent txns.
 - **3 new tests** (foldable exits, persistent skipped, non-wake skipped)
 
-### Benchmark Timing Results (all self-terminating, exit 0)
+### Benchmark Timing Results (fair — C references no longer hobbled by volatile)
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | 2 (folded while-loop) | 0.18s | 0.23s | **1.28× faster** |
+| iir_filter | 2 (dead-field elim + pure counter) | 0.00s | 0.10s | **∞ (Brief O(1), C volatile incq)** |
 | precompute_sum | 3 (compile-time) | 0.00s | 0.00s | ~equal |
-| ring_buffer | 4 (enum dispatch) | 0.00s | 0.08s | **∞ (C looped, Brief O(1))** |
-| async_counters | 5 (thread pool) | 0.00s | 0.06s | **∞ (C looped, Brief O(1))** |
+| ring_buffer | 4 (enum O(1) pure-counter) | 0.00s | 0.00s | ~equal |
+| async_counters | 5 (thread pool O(1) pure-counter) | 0.00s | 0.00s | ~equal |
 
 ### .gitignore / Infrastructure Cleanup
 - All benchmark build artifacts (`*.o`, `*.ll`, binaries, generated `brief_rt.c`) now ignored
@@ -143,9 +143,30 @@ brief-compiler selfhost <file.bv>
 - **async_counters**: 0.00s (was 0.11s, 110× speedup) — now O(1) beats C's O(N) loop
 - **File**: `src/backend/llvm.rs` (~25 lines net in `generate()` + `emit_case_folded_loops`)
 
+### Dead-Field Elimination (Step 7)
+- **Problem**: C compiler proved IIR filter's non-volatile float delay-line state (x1/x2/y1/y2) is never observed, eliminated all 50M biquad iterations, leaving only `volatile long count` incq loop (0.09s). Brief emitted the full body verbatim (0.15s).
+- **Root Cause**: Brief had no liveness analysis — every state store was emitted regardless of whether the field value was ever consumed.
+- **Solution**: `compute_live_fields()` + `compute_effectively_pure()` pass in `transition_graph.rs`.
+  - Live set = identifiers in `#!exit <expr>` + preconditions of all txns
+  - A txn is "effectively pure" if its only live stores are bounded counter increments; all dead-field stores are dropped.
+  - For IIR: live = `{count}`, dead = `{x1, x2, y1, y2}` → effectively pure → `emit_folded_pure_counter` → O(1) `store i64 50000000`
+- **Files**: `src/analysis/transition_graph.rs` (~110 lines new), `src/backend/llvm.rs` (1 line change)
+- **Tests**: 5 existing transition_graph tests updated; test `test_iir_filter_folded_path_regression` updated to expect pure counter, not while-loop
+
+### Phase 1 — Fair C Benchmarks
+- **Problem**: C reference benchmarks used `volatile` for loop state (ring_buffer, async_counters, precompute_sum) and delay-line floats (iir_filter), explicitly preventing clang from applying standard compiler optimizations.
+- **Fix**: Removed `volatile` qualifiers where they hobbled the C compiler:
+  - `ring_buffer_c.c`: `volatile long ops + for-loop` → `long ops = N` (O(1))
+  - `async_counters_c.c`: `volatile + 2 pthreads` → `long g_a=N; long g_b=N` (O(1))
+  - `precompute_sum_c.c`: dropped all volatile — clang eliminates 500-iter loop
+  - `iir_filter_c.c`: removed volatile from float state (x1/x2/y1/y2) — register promotion
+- **Result**: Brief ties or beats C on all 4 benchmarks when both get equal compiler optimization
+- **Files**: 4 `.c` files, `build_and_bench.sh`
+
 ### Next Up
-- Investigate reducing `__rt_wait()` tick (100ms epoll timeout dominates cold-start latency)
-- Benchmark `build_and_bench.sh` integration test
+- Input fuzzing — compile-time and runtime modes (Phase 2a/2b)
+- Investigate reducing `__rt_wait()` tick (100ms epoll timeout)
+- `build_and_bench.sh` integration test
 
 ## Key Plan Documents
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases
@@ -158,3 +179,5 @@ brief-compiler selfhost <file.bv>
 - **`docs/design/optimization-cost-model.md`** — Full cost model specification
 - **`plans/2026-06-01-exit-safety-warnings.md`** — Implementation plan for exit diagnostics (unknown identifier error, one-shot warning, no-exit-path warning)
 - **`plans/2026-06-01-pure-counter-enum-dispatch.md`** — Pure-counter fold elimination for enum/async dispatch (store total instead of while-loop)
+- **`plans/2026-06-01-fair-c-benchmarks-fuzzing.md`** — Phase 1: fair C benchmarks + Phase 2: input fuzzing (compile-time and runtime modes)
+- **`plans/2026-06-01-dead-field-elimination.md`** — Dead-field elimination: liveness analysis for effectively-pure body detection

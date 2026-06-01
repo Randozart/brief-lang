@@ -672,7 +672,7 @@ self.emit_declares(&mut out);
                         } else { None }
                     } else { None };
                     if total_idx.is_some() || total_const_name.is_some() {
-                        if node.is_pure_body {
+                        if node.is_pure_body || node.is_effectively_pure {
                             let total_val = self.field_initializers
                                 .get(&bp.bound_var)
                                 .and_then(|e| e.as_ref())
@@ -3939,12 +3939,19 @@ mod tests {
             "Single-txn convergence should use folded path, not enum dispatch");
         assert!(!output.contains("@reactor_tick"),
             "Single-txn convergence should use folded path, not standard reactor");
-        assert!(output.contains("icmp slt i64"),
-            "Folded main should contain counter comparison");
-        assert!(output.contains("br label"),
-            "Folded main should contain while-loop branches");
+        // With dead-field elimination, the float state x is never observed
+        // (no exit condition references it, no other txn reads it).
+        // The txn becomes effectively pure — only count = count + 1 survives.
+        assert!(output.contains("store i64 50000000"),
+            "Effectively-pure body should emit O(1) store i64 total, not a while-loop");
         assert!(output.contains("ret i32 0"),
-            "Should return normally after loop");
+            "Should return after store");
+        // The while-loop body (process) is still emitted but main is O(1).
+        // Verify main is the pure counter form by checking main is between
+        // the store and the return.
+        let main_idx = output.find("define i32 @main()").unwrap_or(0);
+        let store_in_main = output[main_idx..].contains("store i64 50000000");
+        assert!(store_in_main, "store must be in main, not in process");
     }
 
     fn make_async_pair_program() -> Program {
