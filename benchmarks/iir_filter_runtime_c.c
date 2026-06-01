@@ -1,7 +1,9 @@
 // Biquad IIR Filter — Runtime-variable bound (BOUND env var)
-// C reference for iir_filter_runtime.bv.
-// Loop bound unknown at compile time — must emit actual while-loop.
-// Float delay-line state is kept volatile to force actual computation.
+// Perfect C reference for iir_filter_runtime.bv.
+//
+// Float state kept local (optimal SSE register allocation).
+// Count is local, no volatile. Returns count + y1 to make both
+// the loop count and the biquad result observable.
 //
 // Build:
 //   clang -O3 -march=native -o benchmarks/iir_filter_runtime_c \
@@ -19,31 +21,15 @@ int main(void) {
     const float a1 = -1.815341082700f;
     const float a2 = 0.831005589300f;
 
-    float x1 = 0.0f;
-    float x2 = 0.0f;
-    float y1 = 0.0f;
-    float y2 = 0.0f;
-
+    float x1 = 0.0f, x2 = 0.0f, y1 = 0.0f, y2 = 0.0f;
     const float input = 1.0f;
 
-    volatile long count = 0;
+    long count = 0;
     for (; count < total; count++) {
-        const float f0 = b0 * input;
-        const float f1 = b1 * x1;
-        const float f2 = b2 * x2;
-        const float ff = f0 + f1 + f2;
-
-        const float fb1 = a1 * y1;
-        const float fb2 = a2 * y2;
-        const float fb = fb1 + fb2;
-
-        const float out = ff - fb;
-
-        x2 = x1;
-        x1 = input;
-        y2 = y1;
-        y1 = out;
+        float ff = b0 * input + b1 * x1 + b2 * x2;
+        float fb = a1 * y1 + a2 * y2;
+        float out = ff - fb;
+        x2 = x1; x1 = input; y2 = y1; y1 = out;
     }
-
-    return 0;
+    return (int)(count + y1);
 }

@@ -1,6 +1,9 @@
 // Precompute Sum — Runtime-variable bound (BOUND env var)
-// C reference for precompute_sum_runtime.bv.
-// Loop bound unknown at compile time — must emit actual while-loop.
+// Perfect C reference for precompute_sum_runtime.bv.
+//
+// Local variables, no volatile, returns accumulated sum.
+// The interleaved accumulation pattern is what Brief's two-txn
+// dispatch produces; clang cannot fold this to O(1).
 //
 // Build:
 //   clang -O3 -march=native -o benchmarks/precompute_sum_runtime_c \
@@ -11,17 +14,11 @@
 int main(void) {
     const char* env = getenv("BOUND");
     long bound = env ? atol(env) : 500L;
-    volatile long count = 0;
-    volatile long acc_a = 0;
-    volatile long acc_b = 0;
-
+    long count = 0, acc_a = 0, acc_b = 0;
     for (; count < bound;) {
-        acc_a += count;
-        count++;
+        acc_a += count; count++;
         if (count >= bound) break;
-        acc_b += count;
-        count++;
+        acc_b += count; count++;
     }
-
-    return 0;
+    return (int)(acc_a + acc_b);
 }
