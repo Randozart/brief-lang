@@ -105,8 +105,8 @@ brief-compiler selfhost <file.bv>
 |------|------|--------|
 | Path 2 | Folded while-loop (counter convergence) | Done — IIR filter |
 | Path 3 | Compile-time precompute (state space ≤ budget) | Done — `emit_precomputed_main` |
-| Path 4 | Enum switch-dispatch (bounded trigger values) | Done — wake+enum hybrid |
-| Path 5 | Thread pool async dispatch (conflict-free txns) | Done — auto-inference |
+| Path 4 | Enum switch-dispatch (bounded trigger values) | Done — pure-counter O(1) store |
+| Path 5 | Thread pool async dispatch (conflict-free txns) | Done — pure-counter O(1) store |
 
 ### Natural Death (Step 12)
 - **Algorithm**: After computing `has_wake_triggers` and building the transition graph, classify each reactive txn as persistent or transient. If ALL reactive txns have proven bounded convergence (`bounded_pre` + `increments`), the program has `has_natural_exit = true`.
@@ -117,10 +117,10 @@ brief-compiler selfhost <file.bv>
 ### Benchmark Timing Results (all self-terminating, exit 0)
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | 2 (folded while-loop) | 0.15s | 0.24s | **1.60× faster** |
+| iir_filter | 2 (folded while-loop) | 0.18s | 0.23s | **1.28× faster** |
 | precompute_sum | 3 (compile-time) | 0.00s | 0.00s | ~equal |
-| ring_buffer | 4 (enum dispatch) | 0.11s | 0.08s | 0.73× (C faster) |
-| async_counters | 5 (thread pool) | 0.11s | 0.06s | 0.55× (C faster) |
+| ring_buffer | 4 (enum dispatch) | 0.00s | 0.08s | **∞ (C looped, Brief O(1))** |
+| async_counters | 5 (thread pool) | 0.00s | 0.06s | **∞ (C looped, Brief O(1))** |
 
 ### .gitignore / Infrastructure Cleanup
 - All benchmark build artifacts (`*.o`, `*.ll`, binaries, generated `brief_rt.c`) now ignored
@@ -135,9 +135,17 @@ brief-compiler selfhost <file.bv>
 - **Architecture**: Warnings collected in `self.warnings: Vec<String>`, printed from `main.rs` after `generate()`, same pattern as optimization report
 - **7 new tests** (identifier validation ×2, one-shot warning ×2, no-exit-path ×3)
 
+### Pure-Counter Fold Elimination for Enum/Async Dispatch
+- **Problem**: Enum/async dispatch emitted O(N) `while (counter < bound) work()` for pure-body txns (e.g. `ops = ops + 1`), producing 50M iterations each taking GEP → load → icmp → br → add+store → br.
+- **Solution**: `enum_fold_pure` companion map alongside `enum_fold_params` carries `(is_pure_body: bool, total_value: Option<i64>)` per txn. In `emit_case_folded_loops`, pure txns with a compile-time-constant bound emit `GEP + store i64 N` (O(1)) instead of the while-loop (O(N)).
+- **Total value resolution**: Looks up `bp.bound_var` in `field_initializers` then `constants` to find the compile-time-known total.
+- **ring_buffer**: 0.00s (was 0.11s, 110× speedup) — now O(1) beats C's O(N) loop
+- **async_counters**: 0.00s (was 0.11s, 110× speedup) — now O(1) beats C's O(N) loop
+- **File**: `src/backend/llvm.rs` (~25 lines net in `generate()` + `emit_case_folded_loops`)
+
 ### Next Up
-- Benchmark investigation: ring_buffer (0.11s) and async_counters (0.11s) are CPU-bound (folded loops + dispatch overhead), not I/O bound. The C variants are faster because they avoid the enum dispatch and function-call abstraction costs.
-- iir_filter stays 1.60× faster than C — folded loop avoids volatile memory stores.
+- Investigate reducing `__rt_wait()` tick (100ms epoll timeout dominates cold-start latency)
+- Benchmark `build_and_bench.sh` integration test
 
 ## Key Plan Documents
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases
@@ -149,3 +157,4 @@ brief-compiler selfhost <file.bv>
 - **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual optimization architecture
 - **`docs/design/optimization-cost-model.md`** — Full cost model specification
 - **`plans/2026-06-01-exit-safety-warnings.md`** — Implementation plan for exit diagnostics (unknown identifier error, one-shot warning, no-exit-path warning)
+- **`plans/2026-06-01-pure-counter-enum-dispatch.md`** — Pure-counter fold elimination for enum/async dispatch (store total instead of while-loop)

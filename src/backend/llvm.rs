@@ -736,6 +736,28 @@ self.emit_declares(&mut out);
                     }
                     m
                 };
+                // Companion map: pure-body flag + total value for each foldable txn.
+                // When a txn is pure and its bound is a compile-time constant, the
+                // case arm can store the total directly instead of looping 50M times.
+                let enum_fold_pure: HashMap<String, (bool, Option<i64>)> = {
+                    let mut m = HashMap::new();
+                    for txn_name in &enum_txn_names {
+                        if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
+                            let total_val = node.bounded_pre.as_ref().and_then(|bp| {
+                                self.field_initializers.get(&bp.bound_var)
+                                    .and_then(|e| e.as_ref())
+                                    .and_then(|e| if let Expr::Integer(n) = e { Some(*n) } else { None })
+                                    .or_else(|| {
+                                        self.constants.get(&bp.bound_var).and_then(|(_, e)| {
+                                            if let Expr::Integer(n) = e { Some(*n) } else { None }
+                                        })
+                                    })
+                            });
+                            m.insert(txn_name.clone(), (node.is_pure_body, total_val));
+                        }
+                    }
+                    m
+                };
                 // Legacy single-txn params for chain composition (unchanged)
                 let (enum_ci, enum_ti, enum_tcn): (usize, Option<usize>, Option<String>) = if graph.nodes.len() == 1 && txns.len() == 1 {
                     if let Some(bp) = graph.nodes[0].bounded_pre.as_ref() {
@@ -780,6 +802,7 @@ self.emit_declares(&mut out);
                     &txns,
                     enum_sizes,
                     &enum_fold_params,
+                    &enum_fold_pure,
                     enum_ci,
                     enum_ti,
                     enum_tcn_ref,
@@ -1559,7 +1582,7 @@ self.emit_declares(&mut out);
                         let addr_str = match &t.address {
                             crate::ast::LinkRef::Explicit(a) => a.to_string(),
                             crate::ast::LinkRef::Linked(s) => format!("@{}", s),
-                        };
+                };
                         let addr_is_ptr = matches!(t.address, crate::ast::LinkRef::Linked(_));
                         self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);
                     } else {
@@ -2353,6 +2376,7 @@ self.emit_declares(&mut out);
         txns: &[(String, &crate::ast::Transaction)],
         enum_sizes: &[(String, Option<u64>)],
         fold_params: &HashMap<String, (usize, Option<usize>, Option<String>)>,
+        fold_pure: &HashMap<String, (bool, Option<i64>)>,
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
@@ -2448,6 +2472,17 @@ self.emit_declares(&mut out);
                 // Multi-txn: emit one folded loop per bounded-counter txn
                 for (ptxn_name, &(pci, pti, ref ptcn)) in fold_params.iter() {
                     let sub_prefix = format!("{}_{}", prefix, ptxn_name);
+                    // Pure-counter shortcut: if txn is pure and bound is a compile-time
+                    // constant, store the total directly (O(1)) instead of looping (O(N)).
+                    if let Some(&(pure, tv)) = fold_pure.get(ptxn_name) {
+                        if pure {
+                            if let Some(tv) = tv {
+                                writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", sub_prefix, pci).ok();
+                                writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, sub_prefix).ok();
+                                continue;
+                            }
+                        }
+                    }
                     let ptcn_ref = ptcn.as_deref();
                     this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix);
                 }
