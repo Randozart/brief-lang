@@ -16,16 +16,16 @@
 //
 // C reference: async_counters_c.c (two pthreads)
 
-import io_pending from "std/brief_rt.bv";
+import { io_pending } from "std/brief_rt.bv";
 
 let a: Int = 0;
 let b: Int = 0;
 const N: Int = 25000000;  // 25M per counter = 50M total
 
-rct async txn inc_a [a < N][a == N] {
+rct async txn inc_a [io_pending && a < N][a == N] {
     &a = a + 1;
 };
 
-rct async txn inc_b [b < N][b == N] {
+rct async txn inc_b [io_pending && b < N][b == N] {
     &b = b + 1;
 };

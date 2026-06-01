@@ -235,7 +235,15 @@ self.loaded_modules.insert(
         }
 
         // Default: Brief module (.bv or .ebv)
-        let module_path = path_str.replace('.', "/");
+        let module_path = {
+            if path_str.ends_with(".bv") {
+                path_str[..path_str.len() - 3].replace('.', "/")
+            } else if path_str.ends_with(".ebv") {
+                path_str[..path_str.len() - 4].replace('.', "/")
+            } else {
+                path_str.replace('.', "/")
+            }
+        };
         let source_dir = source_file
             .parent()
             .map(|p| p.to_path_buf())
@@ -339,6 +347,9 @@ self.loaded_modules.insert(
             .items
             .iter()
             .filter(|item| {
+                if matches!(item, TopLevel::LinkDependency(_)) {
+                    return true;
+                }
                 let name = match item {
                     TopLevel::Definition(d) => Some(d.name.as_str()),
                     TopLevel::Signature(s) => Some(s.name.as_str()),
@@ -347,6 +358,8 @@ self.loaded_modules.insert(
                     TopLevel::Struct(s) => Some(s.name.as_str()),
                     TopLevel::RStruct(r) => Some(r.name.as_str()),
                     TopLevel::RenderBlock(rb) => Some(rb.struct_name.as_str()),
+                    TopLevel::Trigger(t) => Some(t.name.as_str()),
+                    TopLevel::StateDecl(s) => Some(s.name.as_str()),
                     _ => None,
                 };
                 name.map(|n| item_names.contains(&n)).unwrap_or(false)

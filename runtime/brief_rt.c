@@ -135,12 +135,10 @@ static int ensure_epoll(void) {
 }
 
 void __rt_wait(void) {
-    /* If epoll is available, use it */
     if (ensure_epoll() == 0) {
         struct epoll_event events[MAX_EPOLL_EVENTS];
-        int n = epoll_wait(g_epoll_fd, events, MAX_EPOLL_EVENTS, -1);
+        int n = epoll_wait(g_epoll_fd, events, MAX_EPOLL_EVENTS, 100);
         if (n > 0) {
-            /* Check stdin */
             for (int i = 0; i < n; i++) {
                 if (events[i].data.fd == STDIN_FILENO
                     && (events[i].events & EPOLLIN)) {
@@ -149,18 +147,24 @@ void __rt_wait(void) {
                 }
             }
         }
+        /* Timeout or EINTR: signal handlers may have updated globals.
+           Set io_pending so the reactor re-samples all triggers. */
+        if (n <= 0) {
+            __io_pending = 1;
+        }
         return;
     }
-    /* Fallback: poll stdin with 1-second timeout */
+    /* Fallback: poll stdin with 100ms timeout */
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(STDIN_FILENO, &rfds);
-    struct timeval tv = {1, 0};
+    struct timeval tv = {0, 100000};
     select(1, &rfds, NULL, NULL, &tv);
     if (FD_ISSET(STDIN_FILENO, &rfds)) {
         __stdin_ready = 1;
         __io_pending = 1;
     }
+    __io_pending = 1;
 }
 
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)

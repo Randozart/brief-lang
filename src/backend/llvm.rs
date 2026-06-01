@@ -385,7 +385,7 @@ impl LlvmBackend {
                 }
             }
         }
-        let all_async_eligible = !async_candidates.is_empty() && is_async_eligible.iter().all(|&x| x);
+        let all_async_eligible = async_candidates.len() >= 2 && is_async_eligible.iter().all(|&x| x);
         let mut async_txn_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         if all_async_eligible {
             for ac in &async_candidates {
@@ -1193,7 +1193,7 @@ self.emit_declares(&mut out);
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
-        let txn_fire_l = format!("%txn_fire_{}", self.txn_counter + 1);
+        let txn_fire_l = format!("txn_fire_{}", self.txn_counter + 1);
         writeln!(out, "  br i1 {}, label %{}, label %{}_done", i1, txn_fire_l, async_name).ok();
         writeln!(out, "{}:", txn_fire_l).ok();
         // Fire the txn body
@@ -2160,9 +2160,9 @@ self.emit_declares(&mut out);
             let tn = &enum_sizes[0].0;
             let n = enum_sizes[0].1.unwrap_or(2);
             let native_name = txn_name.to_string();
-            writeln!(out, "  switch i8 %sz_{}, label %{}_residual [", tn, tn).ok();
+            writeln!(out, "  switch i64 %sz_{}, label %{}_residual [", tn, tn).ok();
             for val in 0..n as i64 {
-                writeln!(out, "    i8 {}, label %{}_case_{}", val, tn, val).ok();
+                writeln!(out, "    i64 {}, label %{}_case_{}", val, tn, val).ok();
             }
             writeln!(out, "  ]").ok();
             for val in 0..n as i64 {
@@ -2268,7 +2268,7 @@ self.emit_declares(&mut out);
         if wake_symbols.is_empty() { return; }
         let count = wake_symbols.len();
         let sym_list = wake_symbols.iter().map(|s| format!("i8* @{}", s)).collect::<Vec<_>>().join(", ");
-        writeln!(out, "@llvm.wake_triggers = appending global [{} x i8*] [{}]", count, sym_list).ok();
+        writeln!(out, "@llvm.wake_triggers = constant [{} x i8*] [{}]", count, sym_list).ok();
         writeln!(out, "!llvm.wake_triggers = !{{!0}}").ok();
         write!(out, "!0 = !{{").ok();
         for (i, sym) in wake_symbols.iter().enumerate() {
@@ -2285,7 +2285,7 @@ self.emit_declares(&mut out);
         let fn_list: Vec<String> = self.async_txn_names.iter()
             .map(|n| format!("i8* bitcast (void (%State*)* @async_body_{} to i8*)", n))
             .collect();
-        writeln!(out, "@llvm.thread_pool = appending global [{} x i8*] [{}]",
+        writeln!(out, "@llvm.thread_pool = constant [{} x i8*] [{}]",
             count, fn_list.join(", ")).ok();
         // Emit a packed array of function pointers for brief_thread_pool_init
         writeln!(out, "@thread_pool_fns = private constant [{} x void (%State*)*] [{}]",
@@ -3055,8 +3055,8 @@ mod tests {
     fn test_single_wake_trigger_metadata() {
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
         let output = LlvmBackend::new().generate(&program);
-        assert!(output.contains("@llvm.wake_triggers = appending global [1 x i8*] [i8* @__sigint_flag]"),
-            "Single wake trigger → appending global with one symbol");
+        assert!(output.contains("@llvm.wake_triggers = constant [1 x i8*] [i8* @__sigint_flag]"),
+            "Single wake trigger → constant global with one symbol");
         assert!(output.contains("!llvm.wake_triggers = !{!0}"),
             "Named metadata node present");
         assert!(output.contains("!0 = !{!\"__sigint_flag\"}"),
@@ -3107,7 +3107,7 @@ mod tests {
             "Wake triggers get __rt_wait between ticks");
         assert!(output.contains("call void @__rt_init()"),
             "Wake triggers get __rt_init at startup");
-        assert!(output.contains("switch i8"),
+        assert!(output.contains("switch i64"),
             "Enum dispatch IS used with wake triggers (hybrid mode — switch arms loop back via __rt_wait)");
         assert!(output.contains("load volatile"),
             "Triggers are volatile-loaded for sampling");
@@ -3461,7 +3461,7 @@ mod tests {
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
         // All-internal chains skip fused fn emission; pure counter store
         // is emitted directly in the per-case switch arm.
-        assert!(output.contains("switch i8"),
+        assert!(output.contains("switch i64"),
             "Should emit switch dispatch for enumerable trigger");
         assert!(output.contains("@main"),
             "Should emit main function with enum dispatch");
@@ -3510,7 +3510,7 @@ mod tests {
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
         assert!(output.contains("call void @init_state()"),
             "Should call init_state");
-        assert!(!output.contains("switch i8"),
+        assert!(!output.contains("switch i64"),
             "No enum dispatch for precomputed path");
         assert!(!output.contains("@reactor_tick"),
             "No reactor_tick for precomputed path");
@@ -3536,7 +3536,7 @@ mod tests {
             &[("count", 0), ("x", 0), ("y", 0)],
         );
         let output = LlvmBackend::new().with_optimize_budget(0).generate(&program);
-        assert!(!output.contains("switch i8"),
+        assert!(!output.contains("switch i64"),
             "No enum dispatch without triggers");
         assert!(output.contains("@reactor_tick"),
             "Falls back to reactor_tick when budget exceeded");
@@ -3554,7 +3554,7 @@ mod tests {
             &[("count", 0), ("x", 0)],
         );
         let output = LlvmBackend::new().generate(&program);
-        assert!(!output.contains("switch i8"),
+        assert!(!output.contains("switch i64"),
             "Single-txn convergence should use folded path, not enum dispatch");
         assert!(!output.contains("@reactor_tick"),
             "Single-txn convergence should use folded path, not standard reactor");

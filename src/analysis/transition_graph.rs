@@ -84,6 +84,9 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                 _ => None,
             }
         }
+        Expr::And(l, r) => {
+            extract_bounded_pre(l).or_else(|| extract_bounded_pre(r))
+        }
         _ => None,
     }
 }

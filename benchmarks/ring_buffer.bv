@@ -17,11 +17,11 @@
 //
 // C reference: ring_buffer_c.c
 
-import io_pending from "std/brief_rt.bv";
+import { io_pending } from "std/brief_rt.bv";
 
 let ops: Int = 0;
 const N: Int = 50000000;  // 50M ops
 
-rct txn work [io_pending][ops == N] {
+rct txn work [io_pending && ops < N][ops == N] {
     &ops = ops + 1;
 };

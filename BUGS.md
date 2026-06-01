@@ -240,3 +240,47 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 2. Added cleanup emission to `Statement::Escape` with the same clone pattern.
 
 **Lesson**: Shared state like `pending_cleanup` must not be mutably consumed at the first use site when multiple consumers exist. Clone the data for each consumer instead.
+
+## 2026-06-01 — `extract_bounded_pre` drops `And` preconditions, fold limit stuck at 0
+
+**Issue**: Benchmarks using `[io_pending && ops < N]` produced folded while-loops comparing against `add i64 0, 0` (limit = 0, loop never executes). Benchmarks hung forever doing zero iterations per tick, trapped in wake main loop.
+
+**Root Cause**: `src/analysis/transition_graph.rs:extract_bounded_pre` matched only `Expr::Lt(var, bound)` and `Expr::Le(var, bound)` at the top level. When the precondition was `Expr::And(io_pending, Expr::Lt(ops, N))`, the `And` wrapper was never unwrapped. `emit_folded_loop` at `llvm.rs:2029` defaults the limit to `add i64 0, 0` when no total is available.
+
+**How discovered**: `timeout 5s ./benchmarks/ring_buffer` never terminated. LLVM IR inspection showed `%lt = add i64 0, 0` instead of `load i64, i64* @N`. `strace -c` confirmed 693 `epoll_wait` calls in 5 seconds with no useful work.
+
+**Fix**: Added recursive `And` unwrapping to `extract_bounded_pre` — decomposes compound preconditions like `trigger && counter < total`.
+
+**Files**: `src/analysis/transition_graph.rs:88-90`, `benchmarks/ring_buffer.bv:21`, `benchmarks/async_counters.bv:17,23`
+
+**Lesson**: Fold analysis must recurse into logical operators in the precondition tree. Non-recursive extraction silently produces valid-looking LLVM IR with zero-iteration loops — the worst kind of silent failure because the binary doesn't crash, it hangs.
+
+## 2026-06-01 — Solo reactive txn auto-promoted to async, injects unnecessary thread pool + barrier
+
+**Issue**: `ring_buffer.bv` with a single `rct txn work` (no `async` keyword) generated `@async_body_work`, `@llvm.thread_pool`, thread pool init, and barrier calls in the main loop — all for one transaction that does sequential work.
+
+**Root Cause**: `src/backend/llvm.rs:388`: the async eligibility check requires ALL non-enum reactive txns to be pairwise conflict-free. For a single txn, the pairwise loop (`for i..for j>i`) never executes, leaving `is_async_eligible = [true]` via vacuous truth. Solo txns are trivially "conflict-free with all others" because there are no others.
+
+**How discovered**: LLVM IR inspection of `ring_buffer.ll` showed `define void @async_body_work` and `@llvm.thread_pool` despite the source having no `async` keyword and only one txn.
+
+**Fix**: Require at least 2 async candidates: `all_async_eligible` gated on `async_candidates.len() >= 2`.
+
+**Files**: `src/backend/llvm.rs:388`, `benchmarks/ring_buffer.bv`
+
+**Lesson**: "All elements satisfy predicate" is true for single-element collections. When "all" implies "there should be multiple things to distribute work across", the guard must explicitly check `len() >= 2`.
+
+## 2026-06-01 — Wake hybrid programs idle forever after convergence (no exit mechanism)
+
+**Issue**: Wake hybrid programs with `@ link` triggers never terminate after convergence. Ring buffer completes 50M iterations then spins: `__rt_wait() → tick → switch (case_1) → done → __rt_wait() → ...` forever.
+
+**Root Cause**: The wake main loop unconditionally routes case arms to `do_wait` → `__rt_wait()` → `br label %tick`. No convergence-based exit path exists in the wake codegen paths. Compiler already computes convergence data but doesn't use it in `emit_enum_main` or `emit_main`.
+
+**How discovered**: `timeout 5s ./benchmarks/ring_buffer` never terminated. SIGTERM is caught by `brief_rt.c` signal handler — program refuses to die. Only SIGKILL works.
+
+**Current workaround**: `timeout --signal=KILL 30s` for benchmarks.
+
+**Planned fix**: Natural death semantics — reactor signals convergence to main loop which exits. Plan at `plans/2026-06-01-exit-semantics.md`.
+
+**Files**: `src/backend/llvm.rs:2139-2141`, `plans/2026-06-01-exit-semantics.md`
+
+**Lesson**: Compile-time analysis data must propagate to ALL codegen paths that can use it. Convergence data is computed once and used for Path 3 (precompute) but Path 4/5 (enum/async dispatch) need it equally. The commit that added `is_fully_precomputable` should have wired it into `emit_enum_main` at the same time.
