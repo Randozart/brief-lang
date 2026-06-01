@@ -1,0 +1,25 @@
+// Async Parallel Counters — Runtime-variable bound via __get_env_int
+// Uses sequential dispatch (not async/thread pool) to avoid thread pool
+// barrier bug at high iteration counts. The thread pool path with runtime
+// bounds is a separate optimization target.
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/async_counters_runtime.bv \
+//       --out benchmarks --optimize-budget 256
+
+#!exit a == bound && b == bound;
+
+import { __get_env_int } from "std/env.bv";
+import "link/brief_rt.o";
+
+let bound: Int = __get_env_int("BOUND");
+let a: Int = 0;
+let b: Int = 0;
+
+rct txn inc_a [bound > 0 && a < bound][a == bound] {
+    &a = a + 1;
+};
+
+rct txn inc_b [bound > 0 && b < bound][b == bound] {
+    &b = b + 1;
+};

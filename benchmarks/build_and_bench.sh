@@ -21,11 +21,13 @@ cd "$(dirname "$0")/.."
 
 SELECTED_BENCH=""
 MODE="all"
+FUZZ_N=""
 
-for arg in "$@"; do
-    case "$arg" in
-        all) MODE="all" ;;
-        *)   SELECTED_BENCH="$arg" ; MODE="single" ;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --fuzz) FUZZ_N="$2"; shift 2 ;;
+        all)    MODE="all"; shift ;;
+        *)      SELECTED_BENCH="$1"; MODE="single"; shift ;;
     esac
 done
 
@@ -104,6 +106,20 @@ for name in "${BENCHMARKS[@]}"; do
 
     bench_self_term "$name"
 done
+
+if [ -n "$FUZZ_N" ]; then
+    echo ""
+    echo "================================================"
+    echo "  FUZZING (n=$FUZZ_N)"
+    echo "================================================"
+    for name in "${BENCHMARKS[@]}"; do
+        if [ "$MODE" = "single" ] && [ "$name" != "$SELECTED_BENCH" ]; then
+            continue
+        fi
+        echo ""
+        bash benchmarks/fuzz.sh "$name" --mode runtime --runs "$FUZZ_N"
+    done
+fi
 
 echo ""
 echo "================================================"

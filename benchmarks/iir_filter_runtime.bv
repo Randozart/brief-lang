@@ -1,0 +1,47 @@
+// Biquad IIR Filter — Runtime-variable bound via __get_env_int
+// Bound is a state field, compiler cannot constant-fold.
+// Float delay-line state is still subject to dead-field elimination
+// (only count is in #!exit).
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/iir_filter_runtime.bv \
+//       --out benchmarks --optimize-budget 256
+
+#!exit count == bound;
+
+import { __get_env_int } from "std/env.bv";
+import "link/brief_rt.o";
+
+let bound: Int = __get_env_int("BOUND");
+let x1: Float = 0.0;
+let x2: Float = 0.0;
+let y1: Float = 0.0;
+let y2: Float = 0.0;
+let count: Int = 0;
+
+const b0: Float = 0.003916126444;
+const b1: Float = 0.007832252889;
+const b2: Float = 0.003916126444;
+const a1: Float = -1.815341082700;
+const a2: Float = 0.831005589300;
+const input: Float = 1.0;
+
+rct txn process [bound > 0 && count < bound][count == bound] {
+    let f0: Float = b0 * input;
+    let f1: Float = b1 * x1;
+    let f2: Float = b2 * x2;
+    let ff: Float = f0 + f1 + f2;
+
+    let fb1: Float = a1 * y1;
+    let fb2: Float = a2 * y2;
+    let fb: Float = fb1 + fb2;
+
+    let out: Float = ff - fb;
+
+    &x2 = x1;
+    &x1 = input;
+    &y2 = y1;
+    &y1 = out;
+
+    &count = count + 1;
+};

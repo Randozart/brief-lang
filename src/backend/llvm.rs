@@ -39,6 +39,7 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
         TopLevel::Transaction(t) => { for s in &t.body { collect_strings_stmt(s, seen, out); } }
         TopLevel::Definition(d) => { for s in &d.body { collect_strings_stmt(s, seen, out); } }
         TopLevel::Constant(c) => { collect_strings_expr(&c.expr, seen, out); }
+        TopLevel::StateDecl(s) => { if let Some(ref e) = s.expr { collect_strings_expr(e, seen, out); } }
         _ => {}
     }
 }
@@ -683,10 +684,16 @@ self.emit_declares(&mut out);
                                     self.constants.get(&bp.bound_var).and_then(|(_, e)| {
                                         if let Expr::Integer(n) = e { Some(*n) } else { None }
                                     })
-                                })
-                                .unwrap_or(1);
-                            self.emit_folded_pure_counter(&mut out, counter_idx, total_val);
-                            true
+                                });
+                            if let Some(tv) = total_val {
+                                // Compile-time constant total — emit O(1) store
+                                self.emit_folded_pure_counter(&mut out, counter_idx, tv);
+                                true
+                            } else {
+                                // Total value unknown at compile time — emit while-loop
+                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name);
+                                true
+                            }
                         } else {
                             self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name);
                             true
@@ -1202,33 +1209,80 @@ self.emit_declares(&mut out);
         writeln!(out, "define void @init_state() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         let mut reg = 0u32;
-        let mut fields: Vec<(&String, &usize)> = self.field_index_map.iter().collect();
-        fields.sort_by_key(|&(_, &idx)| idx);
-        for (name, &idx) in fields {
-            let ty = &self.field_types[idx];
+        let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
+            .map(|(name, &idx)| (name.clone(), idx, self.field_types[idx].clone()))
+            .collect();
+        fields.sort_by_key(|&(_, idx, _)| idx);
+        for (name, idx, ty) in fields {
             let p = format!("%ip{}", reg); reg += 1;
             writeln!(out, "  {} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", p, idx).ok();
-            let init = self.field_initializers.get(name).and_then(|e| e.as_ref());
-            let val_str = match init {
-                Some(Expr::Integer(n)) => n.to_string(),
-                Some(Expr::Float(f)) => float_to_llvm_hex(*f),
-                Some(Expr::Neg(inner)) => match inner.as_ref() {
-                    Expr::Float(f) => float_to_llvm_hex(-*f),
-                    Expr::Integer(n) => format!("-{}", n),
-                    _ => "0".to_string(),
-                },
-                Some(Expr::Bool(b)) => if *b { "1".to_string() } else { "0".to_string() },
-                Some(Expr::String(_)) => "null".to_string(),
-                Some(Expr::Char(c)) => (*c as i32).to_string(),
-                _ => if ty == "i8*" { "null".to_string() } else { "0".to_string() },
-            };
-            let is_float_init = matches!(init, Some(Expr::Float(_)) | Some(Expr::Neg(_)));
-            if is_float_init {
-                let bits_reg = format!("%ip{}b", reg - 1);
-                writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, val_str).ok();
-                writeln!(out, "  store volatile float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
-            } else {
-                writeln!(out, "  store volatile {} {}, {}* {}, align {}", ty, val_str, ty, p, self.align_of(ty)).ok();
+            let init_clone = self.field_initializers.get(&name).and_then(|e| e.clone());
+            match init_clone {
+                Some(Expr::Integer(n)) => {
+                    writeln!(out, "  store volatile i64 {}, i64* {}, align {}", n, p, self.align_of("i64")).ok();
+                }
+                Some(Expr::Float(f)) => {
+                    let h = float_to_llvm_hex(f);
+                    let bits_reg = format!("%ip{}b", reg - 1);
+                    writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
+                    writeln!(out, "  store volatile float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
+                }
+                Some(Expr::Neg(ref inner)) => {
+                    let s = match inner.as_ref() {
+                        Expr::Float(f) => float_to_llvm_hex(-*f),
+                        Expr::Integer(n) => format!("-{}", n),
+                        _ => "0".to_string(),
+                    };
+                    writeln!(out, "  store volatile i64 {}, i64* {}, align {}", s, p, self.align_of("i64")).ok();
+                }
+                Some(Expr::Bool(b)) => {
+                    let v = if b { "1" } else { "0" };
+                    writeln!(out, "  store volatile i8 {}, i8* {}, align {}", v, p, self.align_of("i8")).ok();
+                }
+                Some(Expr::String(_)) => {
+                    writeln!(out, "  store volatile i8* null, i8** {}, align {}", p, self.align_of("i8*")).ok();
+                }
+                Some(Expr::Char(c)) => {
+                    let v = c as i32;
+                    writeln!(out, "  store volatile i32 {}, i32* {}, align {}", v, p, self.align_of("i32")).ok();
+                }
+                Some(expr) => {
+                    // Non-literal initializer — e.g. __get_env_int("BOUND").
+                    // Emit the expression and store the result. The expression
+                    // always produces i64; truncate/bitcast for non-Int types.
+                    let val_reg = self.emit_expr(out, &expr, "  ");
+                    match ty.as_str() {
+                        "i8" => {
+                            let t = format!("%ip{}t", reg); reg += 1;
+                            writeln!(out, "  {} = trunc i64 {} to i8", t, val_reg).ok();
+                            writeln!(out, "  store volatile i8 {}, i8* {}, align {}", t, p, self.align_of("i8")).ok();
+                        }
+                        "i32" => {
+                            let t = format!("%ip{}t", reg); reg += 1;
+                            writeln!(out, "  {} = trunc i64 {} to i32", t, val_reg).ok();
+                            writeln!(out, "  store volatile i32 {}, i32* {}, align {}", t, p, self.align_of("i32")).ok();
+                        }
+                        "float" => {
+                            let t = format!("%ip{}t", reg); reg += 1;
+                            let b = format!("%ip{}b", reg); reg += 1;
+                            writeln!(out, "  {} = trunc i64 {} to i32", t, val_reg).ok();
+                            writeln!(out, "  {} = bitcast i32 {} to float", b, t).ok();
+                            writeln!(out, "  store volatile float {}, float* {}, align {}", b, p, self.align_of("float")).ok();
+                        }
+                        "i8*" => {
+                            let t = format!("%ip{}t", reg); reg += 1;
+                            writeln!(out, "  {} = inttoptr i64 {} to i8*", t, val_reg).ok();
+                            writeln!(out, "  store volatile i8* {}, i8** {}, align {}", t, p, self.align_of("i8*")).ok();
+                        }
+                        _ => {
+                            writeln!(out, "  store volatile i64 {}, {}* {}, align {}", val_reg, ty, p, self.align_of(&ty)).ok();
+                        }
+                    }
+                }
+                None => {
+                    let default = if ty == "i8*" { "null".to_string() } else { "0".to_string() };
+                    writeln!(out, "  store volatile {} {}, {}* {}, align {}", ty, default, ty, p, self.align_of(&ty)).ok();
+                }
             }
         }
         writeln!(out, "  ret void").ok();
@@ -2150,9 +2204,10 @@ self.emit_declares(&mut out);
             Expr::Identifier(name) => {
                 if !self.field_index_map.contains_key(name)
                     && !self.constants.contains_key(name)
+                    && !self.trigger_names.contains(name)
                 {
                     errors.push(format!(
-                        "error: #!exit references unknown variable '{}'\n  note: '{}' is not a state field or a constant",
+                        "error: #!exit references unknown variable '{}'\n  note: '{}' is not a state field, constant, or trigger",
                         name, name
                     ));
                 }
@@ -2189,6 +2244,17 @@ self.emit_declares(&mut out);
                     writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok();
                 } else if self.constants.contains_key(name) {
                     writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
+                } else if self.trigger_names.contains(name) {
+                    if let Some(t) = self.triggers.get(name).cloned() {
+                        let addr_str = match &t.address {
+                            crate::ast::LinkRef::Explicit(a) => a.to_string(),
+                            crate::ast::LinkRef::Linked(s) => format!("@{}", s),
+                        };
+                        let addr_is_ptr = matches!(t.address, crate::ast::LinkRef::Linked(_));
+                        self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);
+                    } else {
+                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                    }
                 } else {
                     writeln!(out, "{}{} = add i64 0, 0 ; unknown id '{}'", indent, v, name).ok();
                 }

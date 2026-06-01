@@ -1,0 +1,26 @@
+// Precompute Sum — Runtime-variable bound via __get_env_int
+// Bound is a state field, compiler cannot precompute.
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/precompute_sum_runtime.bv \
+//       --out benchmarks --optimize-budget 256
+
+#!exit count == bound;
+
+import { __get_env_int } from "std/env.bv";
+import "link/brief_rt.o";
+
+let bound: Int = __get_env_int("BOUND");
+let count: Int = 0;
+let acc_a: Int = 0;
+let acc_b: Int = 0;
+
+rct txn step_a [bound > 0 && count < bound][count == bound] {
+    &acc_a = acc_a + count;
+    &count = count + 1;
+};
+
+rct txn step_b [bound > 0 && count < bound][count == bound] {
+    &acc_b = acc_b + count;
+    &count = count + 1;
+};

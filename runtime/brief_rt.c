@@ -21,6 +21,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* ===================================================================
  * 1. @ link Global Definitions
@@ -43,6 +44,22 @@ volatile int64_t   __timer_1hz     __attribute__((section("brief_trg")));
 volatile int64_t   __timer_100hz   __attribute__((section("brief_trg")));
 volatile char      __stdin_ready   __attribute__((section("brief_trg")));
 volatile char*     __stdin_buffer  __attribute__((section("brief_trg")));
+/* ===================================================================
+ * 1.5 Environment Variable Reader
+ *
+ * Called at init_state() time to read a 64-bit integer from an
+ * environment variable. Used by runtime-mode benchmarks where the
+ * compiler cannot constant-fold the bound.
+ * =================================================================== */
+
+int64_t __get_env_int(const char* name) {
+    const char* val = getenv(name);
+    if (!val) return 0;
+    char* end = NULL;
+    long v = strtol(val, &end, 10);
+    if (end == val) return 0;
+    return (int64_t)v;
+}
 
 /* ===================================================================
  * 2. Signal Handlers
@@ -404,8 +421,9 @@ void __rt_init(void) {
 typedef struct {
     pthread_mutex_t mutex;
     pthread_cond_t  cond;
-    unsigned        count;
-    unsigned        target;
+    unsigned count;
+    unsigned target;
+    unsigned generation;
 } brief_barrier_t;
 
 static void brief_barrier_init(brief_barrier_t *b, unsigned n) {
@@ -413,16 +431,21 @@ static void brief_barrier_init(brief_barrier_t *b, unsigned n) {
     pthread_cond_init(&b->cond, NULL);
     b->count = 0;
     b->target = n;
+    b->generation = 0;
 }
 
 static void brief_barrier_wait_impl(brief_barrier_t *b) {
     pthread_mutex_lock(&b->mutex);
+    unsigned my_gen = b->generation;
     b->count++;
     if (b->count >= b->target) {
         b->count = 0;
+        b->generation++;
         pthread_cond_broadcast(&b->cond);
     } else {
-        pthread_cond_wait(&b->cond, &b->mutex);
+        while (b->generation == my_gen) {
+            pthread_cond_wait(&b->cond, &b->mutex);
+        }
     }
     pthread_mutex_unlock(&b->mutex);
 }

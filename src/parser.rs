@@ -984,49 +984,47 @@ impl<'a> Parser<'a> {
         } else {
             self.expect(Token::Arrow)?;
 
-            // Expect "Result<T, E>" pattern
-            if let Some(Ok(Token::Identifier(result_id))) = self.current_token() {
-                if result_id != "Result" {
-                    return self.spanned_err(format!("Expected 'Result<T, E>', found {}", result_id));
-                }
-                self.advance();
-            } else {
-                return self.spanned_err("Expected Result type for frgn binding".to_string());
-            }
-
-            // Parse <SuccessType, E>
-            self.expect(Token::Lt)?;
-
-            // Parse success type
+            // Expect "Result<T, E>" or plain type
             let mut success_output = Vec::new();
-            if let Some(Ok(Token::LParen)) = self.current_token() {
-                // Multi-field success output: (field1: T1, field2: T2)
+            let is_result = matches!(self.current_token(), Some(Ok(Token::Identifier(id))) if id == "Result");
+            if is_result {
                 self.advance();
-                loop {
-                    let field_name = self.expect_identifier()?;
-                    self.expect(Token::Colon)?;
-                    let field_type = self.parse_type()?;
-                    success_output.push((field_name, field_type));
+                // Parse <SuccessType, E>
+                self.expect(Token::Lt)?;
 
-                    if let Some(Ok(Token::Comma)) = self.current_token() {
-                        self.advance();
-                    } else {
-                        break;
+                // Parse success type
+                if let Some(Ok(Token::LParen)) = self.current_token() {
+                    // Multi-field success output: (field1: T1, field2: T2)
+                    self.advance();
+                    loop {
+                        let field_name = self.expect_identifier()?;
+                        self.expect(Token::Colon)?;
+                        let field_type = self.parse_type()?;
+                        success_output.push((field_name, field_type));
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
                     }
+                    self.expect(Token::RParen)?;
+                } else {
+                    // Single-field success output: T -> becomes (result: T)
+                    let success_type = self.parse_type()?;
+                    success_output.push(("result".to_string(), success_type));
                 }
-                self.expect(Token::RParen)?;
+
+                self.expect(Token::Comma)?;
+
+                // Parse error type
+                let _error_type = self.parse_type()?;
+
+                self.expect(Token::Gt)?;
             } else {
-                // Single-field success output: T -> becomes (result: T)
-                let success_type = self.parse_type()?;
-                success_output.push(("result".to_string(), success_type));
+                // Plain return type, not Result — e.g. `-> String` or `-> Int`
+                let plain_type = self.parse_type()?;
+                success_output.push(("result".to_string(), plain_type));
             }
-
-            self.expect(Token::Comma)?;
-
-            // Parse error type
-            let _error_type = self.parse_type()?;
-
-            self.expect(Token::Gt)?;
             success_output
         };
 
@@ -1046,21 +1044,26 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::Semicolon)?;
 
+        let result_type = if success_output.is_empty() {
+            ResultType::TrueAssertion
+        } else {
+            ResultType::Projection(success_output.iter().map(|(_, t)| t.clone()).collect())
+        };
         let frgn_sig = ForeignSignature {
             name: name.clone(),
-            location,
-            wasm_impl: None,
-            wasm_setup: None,
             inputs,
             success_output,
-            error_type_name: "Err".to_string(),
+            error_type_name: String::new(),
             error_fields: Vec::new(),
+            location: String::new(),
             input_layout: None,
             output_layout: None,
             precondition: None,
             postcondition: None,
             buffer_mode: None,
-            result_type: ResultType::TrueAssertion,
+            wasm_impl: None,
+            wasm_setup: None,
+            result_type,
             ffi_kind: Some(ffi_kind),
             span: None,
         };
