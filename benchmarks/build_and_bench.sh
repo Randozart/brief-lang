@@ -60,7 +60,6 @@ build_c() {
 
     case "$name" in
         iir_filter)      extra_flags="-lm" ;;
-        async_counters)  extra_flags="-lpthread" ;;
     esac
 
     clang -O3 -march=native -o "benchmarks/${name}_c" "benchmarks/${name}_c.c" ${extra_flags} 2>&1
@@ -105,8 +104,10 @@ echo ""
 echo "================================================"
 echo "  SUMMARY"
 echo "================================================"
-echo "  Path 2 (folded while-loop):  iir_filter     — 1.53× faster than C (IIR DSP)"
-echo "  Path 3 (compile-time eval):  precompute_sum — O(1) stores vs O(N) loop"
-echo "  Path 4 (enum dispatch):      ring_buffer    — switch-dispatch entry"
-echo "  Path 5 (thread pool):        async_counters — concurrent worker dispatch"
+echo "  Path 2 (folded while-loop):  iir_filter     — IIR DSP, register promotion"
+echo "  Path 3 (compile-time eval):  precompute_sum — full precompute, zero loops"
+echo "  Path 4 (enum dispatch):      ring_buffer    — O(1) store, pure-body fold"
+echo "  Path 5 (thread pool):        async_counters — O(1) stores, pure-body fold"
+echo ""
+echo "  (C references now get matching compiler optimizations — no volatile hobbling)"
 echo "================================================"
