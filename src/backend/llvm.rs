@@ -183,6 +183,7 @@ pub struct LlvmBackend {
     exit_condition: Option<Box<Expr>>,
     has_natural_exit: bool,
     warnings: Vec<String>,
+    ssa_state_reg: Option<String>,
 }
 
 impl LlvmBackend {
@@ -222,6 +223,7 @@ impl LlvmBackend {
             exit_condition: None,
             has_natural_exit: false,
             warnings: Vec::new(),
+            ssa_state_reg: None,
         }
     }
 
@@ -717,11 +719,12 @@ self.emit_declares(&mut out);
                                 true
                             } else {
                                 // Pure body + runtime-variable bound → phi-node register pipeline
-                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, true);
+                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, true, None);
                                 true
                             }
                         } else {
-                            self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false);
+                            // Non-pure body → SSA mode (load/store state once, emit body inline)
+                            self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&txns[0].1.body));
                             true
                         }
                     } else { false }
@@ -770,6 +773,14 @@ self.emit_declares(&mut out);
                 if !multi_fold_params.is_empty() {
                     self.emit_folded_multi_main(&mut out, &multi_fold_params);
                     self.emit_thread_pool_metadata(&mut out);
+                } else if dispatch_mode == DispatchMode::Sequential && !txns.is_empty()
+                    && enumerable.is_none() && !has_wake_triggers
+                    && txns.iter().filter(|(_, t)| t.is_reactive).all(|(name, _)| {
+                        graph.nodes.iter().find(|n| n.name == *name)
+                            .map_or(false, |n| n.bounded_pre.is_some() && n.increments.is_some())
+                    })
+                {
+                    self.emit_ssa_main(&mut out, &txns);
                 } else if let Some(ref enum_sizes) = enumerable {
                 // Enumerable triggers — emit switch-dispatch main
                 // This path handles triggers with small compile-time-known value sets.
@@ -1541,6 +1552,39 @@ self.emit_declares(&mut out);
                     _ => { writeln!(out, "{}; assign {}", indent, val).ok(); return; }
                 };
                 let is_volatile = modifiers.iter().any(|h| h.name == "volatile");
+                // SSA mode: use insertvalue instead of GEP + store
+                if let Some(ssa_reg) = self.ssa_state_reg.clone() {
+                    if let Some(&idx) = self.field_index_map.get(&fname) {
+                        if !is_volatile {
+                            let ty = &self.field_types[idx];
+                            let new_reg = format!("%in{}", self.txn_counter); self.txn_counter += 1;
+                            match ty.as_str() {
+                                "i8" => {
+                                    let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val).ok();
+                                    writeln!(out, "{}{} = insertvalue %State {}, i8 {}, {}", indent, new_reg, ssa_reg, tr, idx).ok();
+                                }
+                                "float" => {
+                                    let tr = format!("%ftr{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val).ok();
+                                    let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                                    writeln!(out, "{}{} = insertvalue %State {}, float {}, {}", indent, new_reg, ssa_reg, fl, idx).ok();
+                                }
+                                "i8*" => {
+                                    let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, val).ok();
+                                    writeln!(out, "{}{} = insertvalue %State {}, i8* {}, {}", indent, new_reg, ssa_reg, p, idx).ok();
+                                }
+                                _ => {
+                                    writeln!(out, "{}{} = insertvalue %State {}, i64 {}, {}", indent, new_reg, ssa_reg, val, idx).ok();
+                                }
+                            }
+                            self.ssa_state_reg = Some(new_reg);
+                            return;
+                        }
+                    }
+                }
                 if let Some(&idx) = self.field_index_map.get(&fname) {
                     let ty = &self.field_types[idx];
                     let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
@@ -1572,8 +1616,8 @@ self.emit_declares(&mut out);
                 let i1 = format!("%gc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1, cond).ok();
 
-                // Guard→select if single assignment
-                if statements.len() == 1 {
+                // Guard→select if single assignment (not in SSA mode — branch-based path handles insertvalue)
+                if statements.len() == 1 && self.ssa_state_reg.is_none() {
                     if let Statement::Assignment { lhs, expr, modifiers, .. } = &statements[0] {
                         if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
                             if let Some(&idx) = self.field_index_map.get(n) {
@@ -1687,6 +1731,33 @@ self.emit_declares(&mut out);
             }
             Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); }
             Expr::Identifier(name) => {
+                if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
+                    if let Some(&idx) = self.field_index_map.get(name) {
+                        let ty = &self.field_types[idx];
+                        let ev = format!("%ev{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, idx).ok();
+                        match ty.as_str() {
+                            "i8" => {
+                                let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ev).ok();
+                                writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                            }
+                            "float" => {
+                                let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ev).ok();
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
+                            }
+                            "i8*" => {
+                                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
+                            }
+                            _ => {
+                                writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
+                            }
+                        }
+                        self.register_types.insert(v.clone(), Type::Int);
+                        return v;
+                    }
+                }
                 if let Some(reg) = self.let_bindings.get(name) {
                     writeln!(out, "{}{} = add i64 0, {}", indent, v, reg).ok();
                 } else if self.trigger_names.contains(name) {
@@ -2445,8 +2516,12 @@ self.emit_declares(&mut out);
     /// When `use_phi = true`, the counter lives in an SSA phi node (register)
     /// instead of being loaded/stored through @global_state every iteration.
     /// Only valid when the txn body is pure (just counter++).
+    ///
+    /// When `use_phi = false` and `body = Some(stmts)`, the txn body is emitted
+    /// inline with struct-SSA (load `%State` once, insertvalue chains, store once).
+    /// When `use_phi = false` and `body = None`, calls the txn function as before.
     fn emit_folded_loop(
-        &self,
+        &mut self,
         out: &mut String,
         txn_name: &str,
         counter_idx: usize,
@@ -2454,6 +2529,7 @@ self.emit_declares(&mut out);
         total_const_name: Option<&str>,
         label_prefix: &str,
         use_phi: bool,
+        body: Option<&[Statement]>,
     ) {
         let c0 = self.txn_counter;
         if use_phi {
@@ -2486,6 +2562,37 @@ self.emit_declares(&mut out);
             writeln!(out, "{}:", done_label).ok();
             // Store counter once after the loop
             writeln!(out, "  store i64 %cnt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+        } else if let Some(stmts) = body {
+            // SSA mode: load once, emit body inline with extract/insert, store once
+            if let Some(ti) = total_idx {
+                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
+                writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+            } else if let Some(cn) = total_const_name {
+                writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
+            } else {
+                writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c0).ok();
+            }
+            writeln!(out, "  br label %{}_hdr", label_prefix).ok();
+            writeln!(out, "{}_hdr:", label_prefix).ok();
+            writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
+            writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
+            writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
+            writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
+            writeln!(out, "{}_body:", label_prefix).ok();
+            let ssa_reg = format!("%ssa{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "  {} = load %State, %State* @global_state, align 8", ssa_reg).ok();
+            self.ssa_state_reg = Some(ssa_reg.clone());
+            self.let_bindings.clear();
+            self.terminated = false;
+            self.returns_i64 = false;
+            for stmt in stmts {
+                self.emit_stmt(out, stmt, "  ");
+            }
+            if let Some(final_ssa) = self.ssa_state_reg.take() {
+                writeln!(out, "  store %State {}, %State* @global_state, align 8", final_ssa).ok();
+            }
+            writeln!(out, "  br label %{}_hdr", label_prefix).ok();
+            writeln!(out, "{}_done:", label_prefix).ok();
         } else {
             if let Some(ti) = total_idx {
                 writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
@@ -2509,13 +2616,14 @@ self.emit_declares(&mut out);
     }
 
     fn emit_folded_main(
-        &self,
+        &mut self,
         out: &mut String,
         txn_name: &str,
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
         use_phi: bool,
+        body: Option<&[Statement]>,
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
@@ -2525,7 +2633,70 @@ self.emit_declares(&mut out);
         if use_phi {
             writeln!(out, "  br label %case_phi_entry").ok();
         }
-        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi);
+        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body);
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// Emit a `main()` that uses struct-SSA for all-convergent programs.
+    /// Loads %State once per tick, runs each reactive txn's precondition check
+    /// and body inline with extractvalue/insertvalue, stores %State once.
+    /// For multi-txn programs where ALL reactive txns have bounded_pre + increments
+    /// but are NOT foldable/precomputable/enum/async-pipeline (e.g. precompute_sum_runtime).
+    fn emit_ssa_main(
+        &mut self,
+        out: &mut String,
+        txns: &[(String, &crate::ast::Transaction)],
+    ) {
+        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  call void @init_state()").ok();
+        writeln!(out, "  br label %tick").ok();
+        writeln!(out, "  tick:").ok();
+        let ss0 = format!("%ss{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "  {} = load %State, %State* @global_state, align 8", ss0).ok();
+        self.ssa_state_reg = Some(ss0.clone());
+        for (name, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
+            let pre = &txn.contract.pre_condition;
+            if !matches!(pre, Expr::Bool(true)) {
+                let pre_ssa = self.ssa_state_reg.clone().unwrap_or_else(|| ss0.clone());
+                let cond = self.emit_expr(out, pre, "  ");
+                let i1 = format!("%pi{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+                let body_l = format!("b_{}", name);
+                let skip_l = format!("s_{}", name);
+                writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, skip_l).ok();
+                writeln!(out, "  {}:", body_l).ok();
+                self.let_bindings.clear();
+                self.terminated = false;
+                self.returns_i64 = false;
+                for s in &txn.body { self.emit_stmt(out, s, "  "); }
+                let after_body = self.ssa_state_reg.clone().unwrap_or_else(|| pre_ssa.clone());
+                writeln!(out, "  br label %{}", skip_l).ok();
+                writeln!(out, "  {}:", skip_l).ok();
+                let merge = format!("%me{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "  {} = phi %State [ {}, %{} ], [ {}, %{} ]",
+                    merge, after_body, body_l, pre_ssa, skip_l).ok();
+                self.ssa_state_reg = Some(merge);
+            } else {
+                self.let_bindings.clear();
+                self.terminated = false;
+                self.returns_i64 = false;
+                for s in &txn.body { self.emit_stmt(out, s, "  "); }
+            }
+        }
+        let final_reg = self.ssa_state_reg.take().unwrap_or(ss0);
+        writeln!(out, "  store %State {}, %State* @global_state, align 8", final_reg).ok();
+        if let Some(ref cond) = self.exit_condition.clone() {
+            let val = self.emit_exit_expr(out, cond, "  ");
+            let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
+            writeln!(out, "  br i1 {}, label %done, label %tick", tr).ok();
+            writeln!(out, "  done:").ok();
+        } else {
+            writeln!(out, "  br label %tick").ok();
+        }
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -2741,17 +2912,20 @@ self.emit_declares(&mut out);
                             } else {
                                 // Pure body + runtime-variable bound → phi-node pipeline
                                 let ptcn_ref = ptcn.as_deref();
-                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true);
+                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true, None);
                                 continue;
                             }
                         }
                     }
+                    // Non-pure body → SSA mode with inline body
                     let ptcn_ref = ptcn.as_deref();
-                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false);
+                    let body = txns.iter().find(|(n, _)| n == ptxn_name).map(|(_, t)| t.body.as_slice());
+                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false, body);
                 }
             } else {
                 // Single-txn (legacy): use the caller-provided params
-                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false);
+                let body = txns.iter().find(|(n, _)| n == fn_name).map(|(_, t)| t.body.as_slice());
+                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body);
             }
         };
 
@@ -4182,8 +4356,10 @@ mod tests {
         let output = LlvmBackend::new().with_optimize_budget(0).generate(&program);
         assert!(!output.contains("switch i64"),
             "No enum dispatch without triggers");
-        assert!(output.contains("@reactor_tick"),
-            "Falls back to reactor_tick when budget exceeded");
+        assert!(output.contains("load %State, %State* @global_state"),
+            "All-convergent program should use struct-SSA main");
+        assert!(!output.contains("@reactor_tick"),
+            "All-convergent program should not emit reactor_tick");
     }
 
     #[test]

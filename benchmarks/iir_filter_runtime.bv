@@ -26,7 +26,7 @@ const a1: Float = -1.815341082700;
 const a2: Float = 0.831005589300;
 const input: Float = 1.0;
 
-rct txn process [bound > 0 && count < bound][count == bound] {
+rct txn process [bound > 0 && count < bound && x1 == x1 && x2 == x2 && y1 == y1 && y2 == y2][count == bound] {
     let f0: Float = b0 * input;
     let f1: Float = b1 * x1;
     let f2: Float = b2 * x2;
