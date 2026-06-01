@@ -1,0 +1,101 @@
+// Kalman Filter — Runtime-variable bound via __get_env_int
+// Full 3x3 state vector + covariance propagation.
+// Matches kalman_filter_runtime_c.c exactly.
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/kalman_filter_runtime.bv \
+//       --out benchmarks --optimize-budget 256
+
+#!exit count == bound;
+
+import { __get_env_int } from "std/env.bv";
+import "link/brief_rt.o";
+
+let bound: Int = __get_env_int("BOUND");
+let count: Int = 0;
+
+// State vector (3 floats)
+let x0: Float = 0.0;
+let x1: Float = 0.0;
+let x2: Float = 0.0;
+
+// Covariance matrix P (9 floats, row-major: P[row*3 + col])
+let p00: Float = 0.1;
+let p01: Float = 0.0;
+let p02: Float = 0.0;
+let p10: Float = 0.0;
+let p11: Float = 0.1;
+let p12: Float = 0.0;
+let p20: Float = 0.0;
+let p21: Float = 0.0;
+let p22: Float = 0.1;
+
+// System transition matrix A (constant, row-major)
+const a00: Float = 1.0;
+const a01: Float = 0.01;
+const a02: Float = 0.00005;
+const a10: Float = 0.0;
+const a11: Float = 1.0;
+const a12: Float = 0.01;
+const a20: Float = 0.0;
+const a21: Float = 0.0;
+const a22: Float = 1.0;
+
+// Process noise Q (constant, row-major)
+const q00: Float = 0.001;
+const q01: Float = 0.0;
+const q02: Float = 0.0;
+const q10: Float = 0.0;
+const q11: Float = 0.001;
+const q12: Float = 0.0;
+const q20: Float = 0.0;
+const q21: Float = 0.0;
+const q22: Float = 0.001;
+
+rct txn propagate [
+    bound > 0 && count < bound &&
+    x0 == x0 && x1 == x1 && x2 == x2 &&
+    p00 == p00 && p01 == p01 && p02 == p02 &&
+    p10 == p10 && p11 == p11 && p12 == p12 &&
+    p20 == p20 && p21 == p21 && p22 == p22
+][count == bound] {
+    // State propagation: x_new = A * x
+    let nx0: Float = a00 * x0 + a01 * x1 + a02 * x2;
+    let nx1: Float = a10 * x0 + a11 * x1 + a12 * x2;
+    let nx2: Float = a20 * x0 + a21 * x1 + a22 * x2;
+
+    // Covariance propagation: P_new = A * P * A^T + Q
+    // Step 1: AP = A * P
+    let ap00: Float = a00 * p00 + a01 * p10 + a02 * p20;
+    let ap01: Float = a00 * p01 + a01 * p11 + a02 * p21;
+    let ap02: Float = a00 * p02 + a01 * p12 + a02 * p22;
+
+    let ap10: Float = a10 * p00 + a11 * p10 + a12 * p20;
+    let ap11: Float = a10 * p01 + a11 * p11 + a12 * p21;
+    let ap12: Float = a10 * p02 + a11 * p12 + a12 * p22;
+
+    let ap20: Float = a20 * p00 + a21 * p10 + a22 * p20;
+    let ap21: Float = a20 * p01 + a21 * p11 + a22 * p21;
+    let ap22: Float = a20 * p02 + a21 * p12 + a22 * p22;
+
+    // Step 2: P_new = AP * A^T + Q
+    &p00 = ap00 * a00 + ap01 * a10 + ap02 * a20 + q00;
+    &p01 = ap00 * a01 + ap01 * a11 + ap02 * a21 + q01;
+    &p02 = ap00 * a02 + ap01 * a12 + ap02 * a22 + q02;
+
+    &p10 = ap10 * a00 + ap11 * a10 + ap12 * a20 + q10;
+    &p11 = ap10 * a01 + ap11 * a11 + ap12 * a21 + q11;
+    &p12 = ap10 * a02 + ap11 * a12 + ap12 * a22 + q12;
+
+    &p20 = ap20 * a00 + ap21 * a10 + ap22 * a20 + q20;
+    &p21 = ap20 * a01 + ap21 * a11 + ap22 * a21 + q21;
+    &p22 = ap20 * a02 + ap21 * a12 + ap22 * a22 + q22;
+
+    // Update state vector
+    &x0 = nx0;
+    &x1 = nx1;
+    &x2 = nx2;
+
+    // Increment counter
+    &count = count + 1;
+};

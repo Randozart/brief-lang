@@ -115,5 +115,15 @@ benchmarks/precompute_c
 benchmarks/precompute_sum
 benchmarks/ring_buffer
 benchmarks/ring_buffer_c
+benchmarks/async_counters_runtime
+benchmarks/async_counters_runtime_c
+benchmarks/iir_filter_runtime
+benchmarks/iir_filter_runtime_c
+benchmarks/precompute_sum_runtime
+benchmarks/precompute_sum_runtime_c
+benchmarks/ring_buffer_runtime
+benchmarks/ring_buffer_runtime_c
+benchmarks/kalman_filter_runtime
+benchmarks/kalman_filter_runtime_c
 # Root-level generated C file (iir_filter.c for benchmarks)
 /iir_filter.c
