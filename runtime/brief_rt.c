@@ -167,6 +167,40 @@ void __rt_wait(void) {
     __io_pending = 1;
 }
 
+/* Non-blocking poll: drains any already-pending events without sleeping.
+   Called once at main() entry, before the first tick, to eliminate the
+   100ms wasted first tick on programs that already have events ready.
+   Also sets io_pending = 1 so the first reactor tick always runs
+   (same as __rt_wait signals on timeout). */
+void __rt_poll(void) {
+    if (ensure_epoll() == 0) {
+        struct epoll_event events[MAX_EPOLL_EVENTS];
+        int n = epoll_wait(g_epoll_fd, events, MAX_EPOLL_EVENTS, 0);
+        if (n > 0) {
+            for (int i = 0; i < n; i++) {
+                if (events[i].data.fd == STDIN_FILENO
+                    && (events[i].events & EPOLLIN)) {
+                    __stdin_ready = 1;
+                    __io_pending = 1;
+                }
+            }
+        }
+        __io_pending = 1;
+        return;
+    }
+    /* Fallback: try select with zero timeout */
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(STDIN_FILENO, &rfds);
+    struct timeval tv = {0, 0};
+    select(1, &rfds, NULL, NULL, &tv);
+    if (FD_ISSET(STDIN_FILENO, &rfds)) {
+        __stdin_ready = 1;
+        __io_pending = 1;
+    }
+    __io_pending = 1;
+}
+
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 #include <sys/types.h>
 #include <sys/event.h>
@@ -217,10 +251,46 @@ void __rt_wait(void) {
     }
 }
 
+void __rt_poll(void) {
+    if (ensure_kqueue() == 0) {
+        struct kevent events[MAX_KQUEUE_EVENTS];
+        struct timespec ts = {0, 0};
+        int n = kevent(g_kq, NULL, 0, events, MAX_KQUEUE_EVENTS, &ts);
+        if (n > 0) {
+            for (int i = 0; i < n; i++) {
+                if (events[i].ident == STDIN_FILENO
+                    && events[i].filter == EVFILT_READ) {
+                    __stdin_ready = 1;
+                    __io_pending = 1;
+                }
+            }
+        }
+        __io_pending = 1;
+        return;
+    }
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(STDIN_FILENO, &rfds);
+    struct timeval tv = {0, 0};
+    select(1, &rfds, NULL, NULL, &tv);
+    if (FD_ISSET(STDIN_FILENO, &rfds)) {
+        __stdin_ready = 1;
+        __io_pending = 1;
+    }
+    __io_pending = 1;
+}
+
 #elif defined(__arm__) || defined(__aarch64__) || defined(_ARM_) || defined(_M_ARM)
 void __rt_wait(void) {
     /* ARM Wait For Interrupt — CPU halts until interrupt/event */
     __asm__ volatile("wfi" ::: "memory");
+    __io_pending = 1;
+}
+
+void __rt_poll(void) {
+    /* ARM: no non-blocking equivalent. Just set io_pending so the
+       first tick runs instead of wasting 100ms in __rt_wait. */
+    __sync_synchronize();
     __io_pending = 1;
 }
 
@@ -231,11 +301,22 @@ void __rt_wait(void) {
     __io_pending = 1;
 }
 
+void __rt_poll(void) {
+    /* x86: no non-blocking equivalent. Just set io_pending so the
+       first tick runs instead of wasting 100ms in __rt_wait. */
+    __sync_synchronize();
+    __io_pending = 1;
+}
+
 #elif defined(__wasm__) || defined(__EMSCRIPTEN__)
 void __rt_wait(void) {
     /* WASM: yield to host event loop. Returns when re-entered. */
     __builtin_wasm_memory_grow(0, 0);
     __io_pending = 1;
+}
+
+void __rt_poll(void) {
+    /* WASM: no-op — events are delivered asynchronously. */
 }
 
 #else
@@ -244,6 +325,10 @@ void __rt_wait(void) {
     struct timespec ts = {0, 1000000}; /* 1ms */
     nanosleep(&ts, NULL);
     __io_pending = 1;
+}
+
+void __rt_poll(void) {
+    /* Fallback: no-op — events collected on next wait. */
 }
 #endif
 

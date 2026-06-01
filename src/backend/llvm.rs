@@ -1050,6 +1050,7 @@ self.emit_declares(&mut out);
         // __rt_init and __rt_wait are weak symbols provided by the C runtime.
         // If not linked, these resolve to a no-op stub or linker error.
         writeln!(out, "declare void @__rt_init() local_unnamed_addr").ok();
+        writeln!(out, "declare void @__rt_poll() local_unnamed_addr").ok();
         writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
         // Thread pool entry points — provided by brief_rt.c when BRIEF_THREAD_POOL is defined.
         // If not linked, the linker will error. The metadata section @llvm.thread_pool
@@ -2249,6 +2250,7 @@ self.emit_declares(&mut out);
         writeln!(out, "  call void @init_state()").ok();
         if has_wake_triggers {
             writeln!(out, "  call void @__rt_init()").ok();
+            writeln!(out, "  call void @__rt_poll()").ok();
         }
         if self.has_async_txns {
             let count = self.async_txn_names.len() as i32;
@@ -2366,6 +2368,7 @@ self.emit_declares(&mut out);
         writeln!(out, "  call void @init_state()").ok();
         if has_wake {
             writeln!(out, "  call void @__rt_init()").ok();
+            writeln!(out, "  call void @__rt_poll()").ok();
         }
         if self.has_async_txns {
             let count = self.async_txn_names.len() as i32;

@@ -117,15 +117,16 @@ brief-compiler selfhost <file.bv>
 ### Benchmark Timing Results (all self-terminating, exit 0)
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | 2 (folded while-loop) | 0.17s | 0.23s | **1.35× faster** |
+| iir_filter | 2 (folded while-loop) | 0.15s | 0.24s | **1.60× faster** |
 | precompute_sum | 3 (compile-time) | 0.00s | 0.00s | ~equal |
-| ring_buffer | 4 (enum dispatch) | 0.12s | 0.08s | 0.67× (C faster) |
+| ring_buffer | 4 (enum dispatch) | 0.11s | 0.08s | 0.73× (C faster) |
 | async_counters | 5 (thread pool) | 0.11s | 0.06s | 0.55× (C faster) |
 
 ### .gitignore / Infrastructure Cleanup
 - All benchmark build artifacts (`*.o`, `*.ll`, binaries, generated `brief_rt.c`) now ignored
 - 18 tracked artifacts removed from git with `git rm --cached`
 - `build_and_bench.sh`: removed `bench_timeout` (all self-terminate), uses release binary directly, no `cargo run` overhead
+- `__rt_poll()`: non-blocking event drain called once at main() entry, before the first tick. Eliminates the 100ms wasted first tick on programs with already-pending events. Implemented for all platforms (epoll, kqueue, ARM wfi, x86 hlt, WASM).
 
 ### Exit Safety Diagnostics
 - **Error**: Unknown identifier in `#!exit` — `check_exit_condition_idents()` recursively verifies all identifiers against `field_index_map` and `constants` before codegen; emits `error: #!exit references unknown variable 'X'` and exits 1
@@ -135,8 +136,8 @@ brief-compiler selfhost <file.bv>
 - **7 new tests** (identifier validation ×2, one-shot warning ×2, no-exit-path ×3)
 
 ### Next Up
-- Benchmark investigation: ring_buffer (0.12s) and async_counters (0.11s) are dominated by the 100ms `__rt_wait()` epoll tick. Both complete in ~1 tick. The C variants run straight through (no wait). Could reduce wake tick to 10ms or use a faster wake mechanism.
-- iir_filter stays 1.35× faster than C — folded loop avoids volatile memory stores.
+- Benchmark investigation: ring_buffer (0.11s) and async_counters (0.11s) are CPU-bound (folded loops + dispatch overhead), not I/O bound. The C variants are faster because they avoid the enum dispatch and function-call abstraction costs.
+- iir_filter stays 1.60× faster than C — folded loop avoids volatile memory stores.
 
 ## Key Plan Documents
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases
