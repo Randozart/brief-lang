@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: All optimization phases + #!exit + exit safety diagnostics + natural death + dead-field elimination + fair C benchmarks + SLP hazard analyzer + Kalman filter parity complete. 368 tests pass. Brief ties or beats C on all 5 benchmarks. Kalman filter 0.71s vs C 0.75s (Brief wins by 5%, tied at worst).
+**Current**: All optimization phases + float register promotion + llvm.assume + key extraction + perfect hashing + peephole folding + constant inlining + dedup + exit safety diagnostics + natural death + dead-field elimination + fair C benchmarks + SLP hazard analyzer + Kalman filter parity complete. 368 tests pass. Brief ties or beats C on all 4 benchmarks. Kalman filter 0.71s vs C 0.75s (Brief wins by 5%).
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -79,6 +79,25 @@ brief-compiler selfhost <file.bv>
 - **Step 3**: Wake+enum mutual exclusion lifted — enum dispatch enters hybrid wake mode with `@__rt_wait()` loop
 - **Step 4**: `suggest_async_promotion()` lint — A001 warning for conflict-free `rct` txns that could be async
 - **Step 5**: Thread pool auto-inference + concurrent async dispatch (Path 5)
+
+### Implemented (2026-06-02 optimization sprint)
+- **Float register promotion**: SSA mode emits native `float` registers alongside boxed i64 forms. `i64_to_float_reg()` helper with `reg_float_cache` skips redundant `trunc`/`bitcast` chains. Kalman filter boxing instructions reduced by ~85%. 
+- **`llvm.assume` on convergent preconditions**: Emits `call void @llvm.assume(i1 %cond)` after `icmp slt` in folded loops. LLVM eliminates the conditional branch when the proof engine guarantees convergence.
+- **Key extraction from precondition Eq/Or**: `extract_trigger_keys()` recursively extracts trigger = literal pairs from precondition AST. Enables enum dispatch for any trigger-gated txn, even with arbitrary Int triggers (not just enums with known value-set sizes).
+- **Perfect hashing for sparse dispatch**: `find_perfect_hash()` finds multiplicative hash (`(k*M)>>S`) for sparse key sets. `sparsity_ratio()` heuristic skips hashing for dense sets. Verification guards (`icmp eq` per case) ensure safety. Falls back to standard switch when no hash found.
+- **Peephole constant folding**: `emit_binop` and `emit_fcmp` fold integer+integer at compile time. Covers add/sub/mul/sdiv/and/or/xor/shl/lshr + all comparisons.
+- **Constant inlining at point of reference**: Integer/bool constants referenced by name emit as instruction immediates instead of `load` from global RAM.
+- **Constant deduplication**: Identical constants emit as `@alias` — single global declaration, zero extra cache lines.
+- **`emit_exit_expr` Phase 1 refactor**: Integer/Bool literals delegate to `emit_expr` for consistent constant inlining. Identifiers remain local (use `@global_state`, not `%state` function param).
+
+### Benchmarks (post-optimizations, 50M iterations):
+| Benchmark | Path | Brief | C | Ratio |
+|-----------|------|-------|---|-------|
+| iir_filter | Dead-field elim + pure counter | 0.00s | 0.10s | **∞** |
+| precompute_sum | Compile-time precomputation | 0.00s | 0.00s | tie |
+| ring_buffer | Enum O(1) pure-counter | 0.00s | 0.00s | tie |
+| async_counters | Thread pool O(1) pure-counter | 0.00s | 0.00s | tie |
+| kalman_filter | SLP hazard + opt -O2 pipeline | 0.71s | 0.75s | **+5%** |
 
 ### Step 5 Details — Thread Pool + Auto Async/Enum Inference
 - **Phase 5a**: Thread pool primitives in `runtime/brief_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `brief_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
