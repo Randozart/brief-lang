@@ -2068,28 +2068,40 @@ self.emit_declares(&mut out);
                     } else {
                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                     }
-                } else if let Some((ty, _)) = self.constants.get(name) {
-                    let ll_ty = match ty {
-                        Type::Float => "float",
-                        Type::Int | Type::UInt => "i64",
-                        Type::Bool => "i8",
-                        _ => "i64",
-                    };
-                    let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = load {}, {}* @{}, align {}", indent, ld, ll_ty, ll_ty, name, self.align_of(ll_ty)).ok();
-                    match ty {
-                        t if t == &Type::Float => {
-                            let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ld).ok();
-                            writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
+                } else if let Some((ty, expr)) = self.constants.get(name) {
+                    // Inline literal integer/bool constants as immediates
+                    // instead of loading from global RAM.
+                    match (ty, expr) {
+                        (Type::Int | Type::UInt, Expr::Integer(n)) => {
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
                         }
-                        Type::Bool => {
-                            let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ld).ok();
-                            writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                        (Type::Bool, Expr::Bool(b)) => {
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok();
                         }
                         _ => {
-                            writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok();
+                            let ll_ty = match ty {
+                                Type::Float => "float",
+                                Type::Int | Type::UInt => "i64",
+                                Type::Bool => "i8",
+                                _ => "i64",
+                            };
+                            let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load {}, {}* @{}, align {}", indent, ld, ll_ty, ll_ty, name, self.align_of(ll_ty)).ok();
+                            match ty {
+                                Type::Float => {
+                                    let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ld).ok();
+                                    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
+                                }
+                                Type::Bool => {
+                                    let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ld).ok();
+                                    writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                                }
+                                _ => {
+                                    writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok();
+                                }
+                            }
                         }
                     }
                 } else if let Some(&idx) = self.field_index_map.get(name) {
