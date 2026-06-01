@@ -179,6 +179,7 @@ pub struct LlvmBackend {
     async_txn_names: Vec<String>,
     async_thread_pool_size: u32,
     exit_condition: Option<Box<Expr>>,
+    warnings: Vec<String>,
 }
 
 impl LlvmBackend {
@@ -215,6 +216,7 @@ impl LlvmBackend {
             async_txn_names: Vec::new(),
             async_thread_pool_size: 0,
             exit_condition: None,
+            warnings: Vec::new(),
         }
     }
 
@@ -283,6 +285,17 @@ impl LlvmBackend {
                     self.frgn_map.insert(name.clone(), signature.clone());
                 }
                 _ => {}
+            }
+        }
+
+        // Verify all #!exit identifiers exist as state fields or constants.
+        if let Some(ref cond) = self.exit_condition {
+            let errors = self.check_exit_condition_idents(cond);
+            if !errors.is_empty() {
+                for err in &errors {
+                    eprintln!("{}", err);
+                }
+                std::process::exit(1);
             }
         }
 
@@ -763,6 +776,37 @@ self.emit_declares(&mut out);
             }
             }
         }
+
+        // ── EXIT CONDITION DIAGNOSTICS ───────────────────────
+
+        // Warning: #!exit on a one-shot program that never checks it.
+        // Folded and precomputed paths exit without a tick loop; enum dispatch without
+        // wake has no exit_check label. The standard reactor path (emit_main) always
+        // checks, so we warn only when we know the check is unreachable.
+        if self.exit_condition.is_some() {
+            let is_one_shot = folded
+                || precomputed_final_values.is_some()
+                || (enumerable.is_some() && !has_wake_triggers);
+            if is_one_shot {
+                self.warnings.push(format!(
+                    "warning: #!exit declared but program has no tick loop\n\
+                      note: the exit condition will never be checked\n\
+                      help: add an @link trigger to make the program reactive, or remove #!exit"
+                ));
+            }
+        }
+
+        // Warning: wake-triggered program without any exit path.
+        // Without #!exit or natural death, the program will idle forever after all
+        // reactive transactions converge.
+        if has_wake_triggers && self.exit_condition.is_none() {
+            self.warnings.push(format!(
+                "warning: program has wake triggers but no exit path\n\
+                  note: after all transactions converge, the program will spin forever\n\
+                  help: add `#!exit <condition>;` at the top of the file"
+            ));
+        }
+
         // Attributes
         writeln!(out).ok();
         writeln!(out, "attributes #0 = {{").ok();
@@ -936,6 +980,10 @@ self.emit_declares(&mut out);
     /// Return the optimization report lines collected during `generate()`.
     pub fn report(&self) -> &[String] {
         &self.report_lines
+    }
+
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
     }
 
     // ── Header ────────────────────────────────────────────────
@@ -2017,6 +2065,37 @@ self.emit_declares(&mut out);
     }
 
     // ── EXIT CONDITION EXPRESSION ────────────────────────────
+
+    /// Verify all identifiers in the exit condition refer to known state fields or constants.
+    /// Returns a list of error messages for unknown identifiers.
+    fn check_exit_condition_idents(&self, expr: &Expr) -> Vec<String> {
+        let mut errors = Vec::new();
+        self.check_exit_condition_idents_inner(expr, &mut errors);
+        errors
+    }
+
+    fn check_exit_condition_idents_inner(&self, expr: &Expr, errors: &mut Vec<String>) {
+        match expr {
+            Expr::Identifier(name) => {
+                if !self.field_index_map.contains_key(name)
+                    && !self.constants.contains_key(name)
+                {
+                    errors.push(format!(
+                        "error: #!exit references unknown variable '{}'\n  note: '{}' is not a state field or a constant",
+                        name, name
+                    ));
+                }
+            }
+            Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
+            | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+                self.check_exit_condition_idents_inner(l, errors);
+                self.check_exit_condition_idents_inner(r, errors);
+            }
+            Expr::Not(e) => self.check_exit_condition_idents_inner(e, errors),
+            _ => {}
+        }
+    }
+
     /// Recursively evaluate a boolean expression for the exit condition check.
     /// All values are emitted as `i64` for uniformity; comparisons are zext'd from `i1`.
     fn emit_exit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> String {
@@ -4063,5 +4142,118 @@ mod tests {
             "Hybrid mode should have __rt_wait");
         assert!(output.contains("ret i32 0"),
             "Should return 0 on exit");
+    }
+
+    // ── Exit diagnostic tests ──────────────────────────────────
+
+    #[test]
+    fn test_check_exit_condition_idents_valid() {
+        // Known identifiers (state field + constant) should produce no errors
+        let mut backend = LlvmBackend::new();
+        backend.field_index_map.insert("ops".to_string(), 0);
+        backend.constants.insert("N".to_string(), (Type::Int, Expr::Integer(100)));
+
+        let expr = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("N".to_string())),
+        );
+        let errors = backend.check_exit_condition_idents(&expr);
+        assert!(errors.is_empty(),
+            "No errors for known identifiers: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_exit_condition_idents_invalid() {
+        // Unknown identifier should produce an error
+        let mut backend = LlvmBackend::new();
+        backend.field_index_map.insert("ops".to_string(), 0);
+        backend.constants.insert("N".to_string(), (Type::Int, Expr::Integer(100)));
+
+        let expr = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("bogus_var".to_string())),
+        );
+        let errors = backend.check_exit_condition_idents(&expr);
+        assert!(!errors.is_empty(),
+            "Should report error for unknown identifier");
+        assert!(errors[0].contains("bogus_var"),
+            "Error should reference the unknown name: {}", errors[0]);
+    }
+
+    #[test]
+    fn test_one_shot_exit_warning_enum() {
+        // Bool trigger without wake → enum dispatch → one-shot → warning
+        let exit_cond = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("N".to_string())),
+        );
+        let program = make_exit_program(Some(exit_cond), Type::Bool, false);
+        let mut backend = LlvmBackend::new().with_optimize_budget(256);
+        let _output = backend.generate(&program);
+        let has_warning = backend.warnings().iter().any(|w| {
+            w.contains("#!exit declared but program has no tick loop")
+        });
+        assert!(has_warning,
+            "Expected one-shot warning for enum dispatch with #!exit");
+    }
+
+    #[test]
+    fn test_no_one_shot_warning_in_wake_main() {
+        // Int trigger with wake → standard reactor → checks exit → no warning
+        let exit_cond = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("N".to_string())),
+        );
+        let program = make_exit_program(Some(exit_cond), Type::Int, true);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        let has_warning = backend.warnings().iter().any(|w| {
+            w.contains("#!exit declared but program has no tick loop")
+        });
+        assert!(!has_warning,
+            "No one-shot warning for standard reactor wake main with #!exit");
+    }
+
+    #[test]
+    fn test_no_exit_path_warning_for_wake_program() {
+        // Wake program without #!exit should warn about missing exit path
+        let program = make_exit_program(None, Type::Int, true);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        let has_warning = backend.warnings().iter().any(|w| {
+            w.contains("has wake triggers but no exit path")
+        });
+        assert!(has_warning,
+            "Expected no-exit-path warning for wake program without #!exit");
+    }
+
+    #[test]
+    fn test_no_no_exit_path_warning_when_exit_present() {
+        // Wake program WITH #!exit should NOT warn about missing exit path
+        let exit_cond = Expr::Eq(
+            Box::new(Expr::Identifier("ops".to_string())),
+            Box::new(Expr::Identifier("N".to_string())),
+        );
+        let program = make_exit_program(Some(exit_cond), Type::Int, true);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        let has_warning = backend.warnings().iter().any(|w| {
+            w.contains("has wake triggers but no exit path")
+        });
+        assert!(!has_warning,
+            "No no-exit-path warning when #!exit is present");
+    }
+
+    #[test]
+    fn test_no_exit_path_warning_for_non_wake_program() {
+        // Non-wake program without #!exit should NOT warn (one-shot is fine)
+        let program = make_exit_program(None, Type::Int, false);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        let has_warning = backend.warnings().iter().any(|w| {
+            w.contains("has wake triggers but no exit path")
+        });
+        assert!(!has_warning,
+            "No no-exit-path warning for non-wake program");
     }
 }

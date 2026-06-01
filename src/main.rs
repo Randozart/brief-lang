@@ -1849,6 +1849,10 @@ fn run_llvm_compile(
     }
     let output = llvm_backend.generate(&program);
 
+    for warning in llvm_backend.warnings() {
+        eprintln!("{}", warning);
+    }
+
     if optimize_report {
         for line in llvm_backend.report() {
             println!("{}", line);

@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: All optimization phases complete. 347 tests pass. `#io`/`io_registry.rs` eliminated. Benchmarks next.
+**Current**: All optimization phases + #!exit + exit safety diagnostics complete. 359 tests pass. Benchmarks self-terminate.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -108,9 +108,17 @@ brief-compiler selfhost <file.bv>
 | Path 4 | Enum switch-dispatch (bounded trigger values) | Done — wake+enum hybrid |
 | Path 5 | Thread pool async dispatch (conflict-free txns) | Done — auto-inference |
 
+### Exit Safety Diagnostics
+- **Error**: Unknown identifier in `#!exit` — `check_exit_condition_idents()` recursively verifies all identifiers against `field_index_map` and `constants` before codegen; emits `error: #!exit references unknown variable 'X'` and exits 1
+- **Warning**: `#!exit` on one-shot program — fires for folded/precomputed/enum-no-wake paths where exit check is never emitted (`warning: #!exit declared but program has no tick loop`)
+- **Warning**: Wake program without exit path — fires when `has_wake_triggers && exit_condition.is_none()` (`warning: program has wake triggers but no exit path`)
+- **Architecture**: Warnings collected in `self.warnings: Vec<String>`, printed from `main.rs` after `generate()`, same pattern as optimization report
+- **7 new tests** (identifier validation ×2, one-shot warning ×2, no-exit-path ×3)
+
 ### Next Up
-- 3 new benchmarks (ring buffer / async counters / precompute sum) + IIR filter regression
-- Benchmark infrastructure: monotonic clock FFI, extended `build_and_bench.sh` (no `--link-rt` needed — source-declared)
+- Natural death (Step 12) — compiler-proven convergence → auto exit for fully-foldable programs
+- Benchmark timing: Brief vs C for all 4 paths
+- `build_and_bench.sh`: remove `timeout --signal=KILL`, use plain `/usr/bin/time`
 
 ## Key Plan Documents
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases
@@ -121,3 +129,4 @@ brief-compiler selfhost <file.bv>
 - **`plans/2026-05-31-benchmarks-plan.md`** — Benchmarks plan (3 new + regression)
 - **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual optimization architecture
 - **`docs/design/optimization-cost-model.md`** — Full cost model specification
+- **`plans/2026-06-01-exit-safety-warnings.md`** — Implementation plan for exit diagnostics (unknown identifier error, one-shot warning, no-exit-path warning)
