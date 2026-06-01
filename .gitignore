@@ -96,3 +96,24 @@ test_*
 test_cases/
 test_rstruct-build/
 test_schema/
+
+# ============================================
+# BENCHMARK BUILD ARTIFACTS
+# ============================================
+# Object files and generated LLVM IR
+benchmarks/*.o
+benchmarks/*.ll
+# Generated copy of brief_rt.c
+benchmarks/brief_rt.c
+# Compiled binary executables
+benchmarks/async_counters
+benchmarks/async_counters_c
+benchmarks/iir_filter
+benchmarks/iir_filter_c
+benchmarks/iir_filter_dbg
+benchmarks/precompute_c
+benchmarks/precompute_sum
+benchmarks/ring_buffer
+benchmarks/ring_buffer_c
+# Root-level generated C file (iir_filter.c for benchmarks)
+/iir_filter.c

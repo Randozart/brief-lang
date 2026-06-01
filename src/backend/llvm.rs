@@ -179,6 +179,7 @@ pub struct LlvmBackend {
     async_txn_names: Vec<String>,
     async_thread_pool_size: u32,
     exit_condition: Option<Box<Expr>>,
+    has_natural_exit: bool,
     warnings: Vec<String>,
 }
 
@@ -216,6 +217,7 @@ impl LlvmBackend {
             async_txn_names: Vec::new(),
             async_thread_pool_size: 0,
             exit_condition: None,
+            has_natural_exit: false,
             warnings: Vec::new(),
         }
     }
@@ -607,6 +609,49 @@ self.emit_declares(&mut out);
         // Reactor tick — use folded path when a single bounded-counter txn
         // with no triggers can be collapsed into a canonical while loop.
         let graph = &analysis.transition_graph;
+
+        // Natural death: auto-exit for wake-triggered programs where ALL reactive
+        // transactions have proven bounded convergence (bounded_pre + increments).
+        // When every reactive txn is foldable, the program is guaranteed to converge
+        // and can safely exit without an explicit #!exit pragma.
+        //
+        // We build a synthetic exit condition: for each foldable bounded-counter txn,
+        // check `counter >= bound`. When ALL counters reach their bounds, no txn can
+        // fire again, and main() returns 0.
+        self.has_natural_exit = false;
+        if self.exit_condition.is_none() && has_wake_triggers {
+            let has_persistent_txn = txns.iter().any(|(name, t)| {
+                t.is_reactive && !graph.nodes.iter()
+                    .filter(|n| n.name == *name)
+                    .any(|n| n.bounded_pre.is_some() && n.increments.is_some())
+            });
+            if !has_persistent_txn {
+                let mut checks: Vec<Expr> = Vec::new();
+                for (name, t) in &txns {
+                    if !t.is_reactive { continue; }
+                    if let Some(node) = graph.nodes.iter().find(|n| n.name == *name) {
+                        if let Some(ref bp) = node.bounded_pre {
+                            if let Some(ref inc) = node.increments {
+                                if bp.var == inc.var {
+                                    checks.push(Expr::Ge(
+                                        Box::new(Expr::Identifier(bp.var.clone())),
+                                        Box::new(Expr::Identifier(bp.bound_var.clone())),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                if !checks.is_empty() {
+                    let combined = checks.into_iter()
+                        .reduce(|a, b| Expr::And(Box::new(a), Box::new(b)))
+                        .unwrap();
+                    self.exit_condition = Some(Box::new(combined));
+                    self.has_natural_exit = true;
+                }
+            }
+        }
+
         let foldable = graph.nodes.len() == 1
             && !graph.has_triggers
             && txns.len() == 1
@@ -798,7 +843,9 @@ self.emit_declares(&mut out);
 
         // Warning: wake-triggered program without any exit path.
         // Without #!exit or natural death, the program will idle forever after all
-        // reactive transactions converge.
+        // reactive transactions converge. Natural death (auto-exit) is automatically
+        // applied when all reactive txns have bounded convergence, so this warning
+        // only fires for programs with persistent (non-foldable) reactive txns.
         if has_wake_triggers && self.exit_condition.is_none() {
             self.warnings.push(format!(
                 "warning: program has wake triggers but no exit path\n\
@@ -4097,12 +4144,12 @@ mod tests {
 
     #[test]
     fn test_no_exit_without_pragma() {
-        let program = make_exit_program(None, Type::Int, true);
+        // Non-foldable wake program without #!exit: no exit check, no natural death
+        let program = make_wake_trg_program("io", "__io_pending", Type::Bool, true);
         let output = LlvmBackend::new().generate(&program);
-        assert!(!output.contains("trunc i64"),
-            "No trunc without exit condition");
-        assert!(!output.contains("done:"),
-            "No done label without exit condition");
+        // Exit check pattern: `trunc` then `br i1 ..., label %done, ...`
+        assert!(!output.contains("label %done"),
+            "No branch-to-done without exit condition or natural death");
     }
 
     #[test]
@@ -4216,8 +4263,9 @@ mod tests {
 
     #[test]
     fn test_no_exit_path_warning_for_wake_program() {
-        // Wake program without #!exit should warn about missing exit path
-        let program = make_exit_program(None, Type::Int, true);
+        // Wake program without #!exit and without foldable txns should warn.
+        // Non-foldable reactive txns cannot converge, so natural death won't help.
+        let program = make_wake_trg_program("io", "__io_pending", Type::Bool, true);
         let mut backend = LlvmBackend::new();
         let _output = backend.generate(&program);
         let has_warning = backend.warnings().iter().any(|w| {
@@ -4255,5 +4303,56 @@ mod tests {
         });
         assert!(!has_warning,
             "No no-exit-path warning for non-wake program");
+    }
+
+    // ── Natural death tests ───────────────────────────────────
+
+    #[test]
+    fn test_natural_death_exits_foldable_program() {
+        // Wake program with foldable txn but no #!exit → natural death emits exit check
+        let program = make_exit_program(None, Type::Int, true);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        // Natural death should have set has_natural_exit
+        assert!(backend.has_natural_exit,
+            "Foldable wake program should have natural exit");
+        // Exit check should be emitted (trunc + branch to done)
+        assert!(_output.contains("label %done"),
+            "Natural death should emit exit check (branch to done)");
+        // No warning about missing exit path — natural death handles it
+        let has_warning = backend.warnings().iter().any(|w| {
+            w.contains("has wake triggers but no exit path")
+        });
+        assert!(!has_warning,
+            "No no-exit-path warning when natural death handles it");
+    }
+
+    #[test]
+    fn test_natural_death_skipped_for_persistent_txn() {
+        // Wake program with non-foldable txn → natural death should NOT apply
+        let program = make_wake_trg_program("io", "__io_pending", Type::Bool, true);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        assert!(!backend.has_natural_exit,
+            "Program with persistent txn should NOT have natural exit");
+        // Warning about missing exit path should fire
+        let has_warning = backend.warnings().iter().any(|w| {
+            w.contains("has wake triggers but no exit path")
+        });
+        assert!(has_warning,
+            "Persistent wake program without #!exit should warn");
+        // No exit check emitted
+        assert!(!_output.contains("label %done"),
+            "No exit check for persistent program");
+    }
+
+    #[test]
+    fn test_natural_death_skipped_for_non_wake() {
+        // Non-wake program with foldable txn → natural death not needed (one-shot)
+        let program = make_exit_program(None, Type::Int, false);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        assert!(!backend.has_natural_exit,
+            "Non-wake program should NOT use natural death");
     }
 }

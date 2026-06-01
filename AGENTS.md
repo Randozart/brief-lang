@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: All optimization phases + #!exit + exit safety diagnostics complete. 359 tests pass. Benchmarks self-terminate.
+**Current**: All optimization phases + #!exit + exit safety diagnostics + natural death complete. 362 tests pass. Benchmarks self-terminate and timed.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -108,6 +108,25 @@ brief-compiler selfhost <file.bv>
 | Path 4 | Enum switch-dispatch (bounded trigger values) | Done — wake+enum hybrid |
 | Path 5 | Thread pool async dispatch (conflict-free txns) | Done — auto-inference |
 
+### Natural Death (Step 12)
+- **Algorithm**: After computing `has_wake_triggers` and building the transition graph, classify each reactive txn as persistent or transient. If ALL reactive txns have proven bounded convergence (`bounded_pre` + `increments`), the program has `has_natural_exit = true`.
+- **Synthetic exit condition**: Builds `Expr::And(...Expr::Ge(counter, bound)...)` for each foldable txn and sets `self.exit_condition`. Reuses existing `emit_exit_expr` machinery.
+- **Warning suppression**: Natural death sets `self.exit_condition` before the no-exit-path warning check, so the warning correctly fires only for programs with persistent txns.
+- **3 new tests** (foldable exits, persistent skipped, non-wake skipped)
+
+### Benchmark Timing Results (all self-terminating, exit 0)
+| Benchmark | Path | Brief | C | Ratio |
+|-----------|------|-------|---|-------|
+| iir_filter | 2 (folded while-loop) | 0.17s | 0.23s | **1.35× faster** |
+| precompute_sum | 3 (compile-time) | 0.00s | 0.00s | ~equal |
+| ring_buffer | 4 (enum dispatch) | 0.12s | 0.08s | 0.67× (C faster) |
+| async_counters | 5 (thread pool) | 0.11s | 0.06s | 0.55× (C faster) |
+
+### .gitignore / Infrastructure Cleanup
+- All benchmark build artifacts (`*.o`, `*.ll`, binaries, generated `brief_rt.c`) now ignored
+- 18 tracked artifacts removed from git with `git rm --cached`
+- `build_and_bench.sh`: removed `bench_timeout` (all self-terminate), uses release binary directly, no `cargo run` overhead
+
 ### Exit Safety Diagnostics
 - **Error**: Unknown identifier in `#!exit` — `check_exit_condition_idents()` recursively verifies all identifiers against `field_index_map` and `constants` before codegen; emits `error: #!exit references unknown variable 'X'` and exits 1
 - **Warning**: `#!exit` on one-shot program — fires for folded/precomputed/enum-no-wake paths where exit check is never emitted (`warning: #!exit declared but program has no tick loop`)
@@ -116,9 +135,8 @@ brief-compiler selfhost <file.bv>
 - **7 new tests** (identifier validation ×2, one-shot warning ×2, no-exit-path ×3)
 
 ### Next Up
-- Natural death (Step 12) — compiler-proven convergence → auto exit for fully-foldable programs
-- Benchmark timing: Brief vs C for all 4 paths
-- `build_and_bench.sh`: remove `timeout --signal=KILL`, use plain `/usr/bin/time`
+- Benchmark investigation: ring_buffer (0.12s) and async_counters (0.11s) are dominated by the 100ms `__rt_wait()` epoll tick. Both complete in ~1 tick. The C variants run straight through (no wait). Could reduce wake tick to 10ms or use a faster wake mechanism.
+- iir_filter stays 1.35× faster than C — folded loop avoids volatile memory stores.
 
 ## Key Plan Documents
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases

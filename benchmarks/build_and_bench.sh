@@ -44,11 +44,11 @@ build_bench() {
     echo "  Building: $name"
     echo "================================================"
 
-    # Compile Brief → LLVM IR
-    cargo run --bin brief-compiler -- llvm "benchmarks/${name}.bv" \
-        --out benchmarks --optimize-budget 256 2>&1 | tail -5
+    # Compile Brief → LLVM IR using release binary (avoids cargo rerun)
+    ./target/release/brief-compiler llvm "benchmarks/${name}.bv" \
+        --out benchmarks --optimize-budget 256 2>&1
 
-    # The llvm command now auto-compiles/link when brief_rt.o is needed
+    # The llvm command auto-compiles/link when brief_rt.o is needed
     # (detected via import "link/brief_rt.o" in the source files of
     # ring_buffer and async_counters)
     echo "  Brief binary ready."
@@ -76,18 +76,8 @@ bench_self_term() {
     /usr/bin/time -f "  real %e  user %U  sys %S" "./benchmarks/${name}_c"
 }
 
-bench_timeout() {
-    local name="$1"
-    local timeout_sec="$2"
-    echo ""
-    echo "=== $name (Brief, ${timeout_sec}s timeout) ==="
-    /usr/bin/time -f "  real %e  user %U  sys %S" timeout "${timeout_sec}s" "./benchmarks/${name}" 2>&1 || true
-    echo "=== $name (C) ==="
-    /usr/bin/time -f "  real %e  user %U  sys %S" "./benchmarks/${name}_c"
-}
-
-echo "=== Building Brief compiler ==="
-cargo build --bin brief-compiler 2>&1
+echo "=== Building Brief compiler (release) ==="
+cargo build --release --bin brief-compiler 2>&1
 echo ""
 
 for name in "${BENCHMARKS[@]}"; do
@@ -108,17 +98,7 @@ for name in "${BENCHMARKS[@]}"; do
         continue
     fi
 
-    case "$name" in
-        iir_filter)
-            bench_timeout "$name" 15
-            ;;
-        async_counters)
-            bench_self_term "$name"
-            ;;
-        *)
-            bench_self_term "$name"
-            ;;
-    esac
+    bench_self_term "$name"
 done
 
 echo ""
