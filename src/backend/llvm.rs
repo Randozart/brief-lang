@@ -139,13 +139,48 @@ fn trg_llvm_storage_ty(ty: &Type) -> &str {
 fn is_trigger_gated(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> bool {
     match pre {
         Expr::Identifier(name) => trigger_names.contains(name.as_str()),
-        // And(trigger, bounded_pre) — the common pattern for
-        // trigger-gated counter transactions in benchmarks.
         Expr::And(l, r) => {
             is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names)
         }
         _ => false,
     }
+}
+
+fn extract_trigger_keys(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> Option<Vec<i64>> {
+    let mut keys = Vec::new();
+    match pre {
+        Expr::Eq(l, r) | Expr::Eq(r, l) => {
+            let (ident, val) = if let (Expr::Identifier(name), Expr::Integer(n)) = (l.as_ref(), r.as_ref()) {
+                (name.clone(), *n)
+            } else if let (Expr::Integer(n), Expr::Identifier(name)) = (l.as_ref(), r.as_ref()) {
+                (name.clone(), *n)
+            } else {
+                return None;
+            };
+            if trigger_names.contains(ident.as_str()) {
+                keys.push(val);
+            } else {
+                return None;
+            }
+        }
+        Expr::Or(l, r) => {
+            keys.extend(extract_trigger_keys(l, trigger_names)?);
+            keys.extend(extract_trigger_keys(r, trigger_names)?);
+        }
+        Expr::And(l, r) => {
+            if let Some(k) = extract_trigger_keys(l, trigger_names) {
+                keys.extend(k);
+            } else if let Some(k) = extract_trigger_keys(r, trigger_names) {
+                keys.extend(k);
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    if keys.len() < 2 { None } else { Some(keys) }
 }
 
 pub struct LlvmBackend {
@@ -185,6 +220,7 @@ pub struct LlvmBackend {
     warnings: Vec<String>,
     ssa_state_reg: Option<String>,
     llvm_extra_flags: Vec<String>,
+    reg_float_cache: HashMap<String, String>,
 }
 
 impl LlvmBackend {
@@ -226,6 +262,7 @@ impl LlvmBackend {
             warnings: Vec::new(),
             ssa_state_reg: None,
             llvm_extra_flags: Vec::new(),
+            reg_float_cache: HashMap::new(),
         }
     }
 
@@ -360,12 +397,16 @@ impl LlvmBackend {
         //   - sequential_txns: everything else → main-thread sequential
         // Priority: enum > async > sequential (enum is O(1) folded loops)
         let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
-        let enumerable: Option<Vec<(String, Option<u64>)>> = {
+        // Try region-analyzer first; fall back to key extraction for triggers
+        // whose value sets aren't known to the region analyzer but are used
+        // in precondition Eq/Or comparisons (e.g. `sensor == 101 || sensor == 204`).
+        let (enumerable, enum_keys): (Option<Vec<(String, Option<u64>)>>, HashMap<String, Vec<i64>>) = {
             let region = &analysis.region_analyzer;
             if !self.trigger_names.is_empty() {
                 let mut sizes = Vec::new();
                 let mut total: u64 = 1;
                 let mut ok = true;
+                let mut fallback_triggers = Vec::new();
                 for tn in &self.trigger_names {
                     let sz = region.value_set_size_of(tn);
                     if let Some(s) = sz {
@@ -373,12 +414,50 @@ impl LlvmBackend {
                         if total > self.optimize_budget { ok = false; break; }
                         sizes.push((tn.clone(), sz));
                     } else {
-                        ok = false;
-                        break;
+                        fallback_triggers.push(tn.clone());
                     }
                 }
-                if ok { Some(sizes) } else { None }
-            } else { None }
+                if ok && sizes.len() == self.trigger_names.len() {
+                    (Some(sizes), HashMap::new())
+                } else if !fallback_triggers.is_empty() {
+                    // Fallback: try key extraction from all reactive txns' preconditions
+                    let trigger_set: std::collections::HashSet<&str> =
+                        self.trigger_names.iter().map(|s| s.as_str()).collect();
+                    let mut keys_map = HashMap::new();
+                    for tn in &fallback_triggers {
+                        for (_, txn) in &txns {
+                            if !txn.is_reactive { continue; }
+                            if let Some(keys) = extract_trigger_keys(
+                                &txn.contract.pre_condition, &trigger_set
+                            ) {
+                                keys_map.insert(tn.clone(), keys);
+                                break;
+                            }
+                        }
+                    }
+                    if !keys_map.is_empty() {
+                        let mut combined_sizes = sizes;
+                        let mut combined_total = total;
+                        let mut all_ok = true;
+                        for tn in &self.trigger_names {
+                            if combined_sizes.iter().any(|(n, _)| n == tn) { continue; }
+                            if let Some(keys) = keys_map.get(tn) {
+                                let s = keys.len() as u64;
+                                combined_total = combined_total.saturating_mul(s);
+                                if combined_total > self.optimize_budget { all_ok = false; break; }
+                                combined_sizes.push((tn.clone(), Some(s)));
+                            } else {
+                                all_ok = false; break;
+                            }
+                        }
+                        if all_ok { (Some(combined_sizes), keys_map) } else { (None, HashMap::new()) }
+                    } else {
+                        (None, HashMap::new())
+                    }
+                } else {
+                    (None, HashMap::new())
+                }
+            } else { (None, HashMap::new()) }
         };
         // Determine which txns are enum candidates based on trigger data
         let enum_txn_names: std::collections::HashSet<String> = if let Some(ref en) = enumerable {
@@ -881,6 +960,7 @@ self.emit_declares(&mut out);
                     &mut out,
                     &txns,
                     enum_sizes,
+                    &enum_keys,
                     &enum_fold_params,
                     &enum_fold_pure,
                     enum_ci,
@@ -1918,9 +1998,13 @@ self.emit_declares(&mut out);
                                 writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
                             }
                             "float" => {
+                                let float_reg = format!("%flt_{}", name);
+                                writeln!(out, "{}{} = extractvalue %State {}, {}", indent, float_reg, ssa_reg, idx).ok();
                                 let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ev).ok();
+                                writeln!(out, "{}{} = bitcast float {} to i32", indent, i, float_reg).ok();
                                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
+                                self.register_types.insert(float_reg.clone(), Type::Float);
+                                self.reg_float_cache.insert(v.clone(), float_reg);
                             }
                             "i8*" => {
                                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
@@ -2705,6 +2789,7 @@ self.emit_declares(&mut out);
         label_prefix: &str,
         use_phi: bool,
         body: Option<&[Statement]>,
+        proven_convergent: bool,
     ) {
         let c0 = self.txn_counter;
         if use_phi {
@@ -2730,6 +2815,9 @@ self.emit_declares(&mut out);
             // Phi node: counter lives in register throughout the loop
             writeln!(out, "  %cnt_{}_{} = phi i64 [ %init_{}_{}, %{} ], [ %inc_{}_{}, %{} ]", label_prefix, c0, label_prefix, c0, entry_label, label_prefix, c0, body_label).ok();
             writeln!(out, "  %cp_{}_{} = icmp slt i64 %cnt_{}_{}, %lt_{}_{}", label_prefix, c0 + 1, label_prefix, c0, label_prefix, c0).ok();
+            if proven_convergent {
+                writeln!(out, "  call void @llvm.assume(i1 %cp_{}_{})", label_prefix, c0 + 1).ok();
+            }
             writeln!(out, "  br i1 %cp_{}_{}, label %{}, label %{}", label_prefix, c0 + 1, body_label, done_label).ok();
             writeln!(out, "{}:", body_label).ok();
             writeln!(out, "  %inc_{}_{} = add i64 %cnt_{}_{}, 1", label_prefix, c0, label_prefix, c0).ok();
@@ -2752,6 +2840,9 @@ self.emit_declares(&mut out);
             writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
             writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
             writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
+            if proven_convergent {
+                writeln!(out, "  call void @llvm.assume(i1 %cp{}_{})", label_prefix, c0 + 2).ok();
+            }
             writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
             writeln!(out, "{}_body:", label_prefix).ok();
             let ssa_reg = format!("%ssa{}", self.txn_counter); self.txn_counter += 1;
@@ -2782,6 +2873,9 @@ self.emit_declares(&mut out);
             writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
             writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
             writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
+            if proven_convergent {
+                writeln!(out, "  call void @llvm.assume(i1 %cp{}_{})", label_prefix, c0 + 2).ok();
+            }
             writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
             writeln!(out, "{}_body:", label_prefix).ok();
             writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
@@ -2808,7 +2902,7 @@ self.emit_declares(&mut out);
         if use_phi {
             writeln!(out, "  br label %case_phi_entry").ok();
         }
-        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body);
+        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body, true);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -2978,6 +3072,7 @@ self.emit_declares(&mut out);
         out: &mut String,
         txns: &[(String, &crate::ast::Transaction)],
         enum_sizes: &[(String, Option<u64>)],
+        enum_keys: &HashMap<String, Vec<i64>>,
         fold_params: &HashMap<String, (usize, Option<usize>, Option<String>)>,
         fold_pure: &HashMap<String, (bool, Option<i64>)>,
         counter_idx: usize,
@@ -3087,7 +3182,7 @@ self.emit_declares(&mut out);
                             } else {
                                 // Pure body + runtime-variable bound → phi-node pipeline
                                 let ptcn_ref = ptcn.as_deref();
-                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true, None);
+                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true, None, true);
                                 continue;
                             }
                         }
@@ -3095,12 +3190,12 @@ self.emit_declares(&mut out);
                     // Non-pure body → SSA mode with inline body
                     let ptcn_ref = ptcn.as_deref();
                     let body = txns.iter().find(|(n, _)| n == ptxn_name).map(|(_, t)| t.body.as_slice());
-                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false, body);
+                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false, body, true);
                 }
             } else {
                 // Single-txn (legacy): use the caller-provided params
                 let body = txns.iter().find(|(n, _)| n == fn_name).map(|(_, t)| t.body.as_slice());
-                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body);
+                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body, true);
             }
         };
 
@@ -3123,15 +3218,18 @@ self.emit_declares(&mut out);
             let tn = &enum_sizes[0].0;
             let n = enum_sizes[0].1.unwrap_or(2);
             let native_name = txn_name.to_string();
+            // Use extracted keys when available, otherwise fall back to dense 0..n
+            let keys: Vec<i64> = enum_keys.get(tn).cloned().unwrap_or_else(|| (0..n as i64).collect());
+            let key_count = keys.len();
             writeln!(out, "  switch i64 %sz_{}, label %{}_residual [", tn, tn).ok();
-            for val in 0..n as i64 {
-                writeln!(out, "    i64 {}, label %{}_case_{}", val, tn, val).ok();
+            for (idx, key) in keys.iter().enumerate() {
+                writeln!(out, "    i64 {}, label %{}_case_{}", key, tn, idx).ok();
             }
             writeln!(out, "  ]").ok();
-            for val in 0..n as i64 {
-                let prefix = format!("{}_{}", tn, val);
-                let fn_name = trig_to_fn.get(&val).map(|s| s.as_str()).unwrap_or(&native_name);
-                writeln!(out, "{}_case_{}:", tn, val).ok();
+            for (idx, key) in keys.iter().enumerate() {
+                let prefix = format!("{}_{}", tn, idx);
+                let fn_name = trig_to_fn.get(key).map(|s| s.as_str()).unwrap_or(&native_name);
+                writeln!(out, "{}_case_{}:", tn, idx).ok();
                 if let Some((ci, tv)) = all_internal_lookup(fn_name) {
                     writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", prefix, ci).ok();
                     writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, prefix).ok();
@@ -3442,19 +3540,28 @@ self.emit_declares(&mut out);
         }
     }
 
+    fn i64_to_float_reg(&mut self, out: &mut String, reg: &str, indent: &str) -> String {
+        if self.register_types.get(reg) == Some(&Type::Float) {
+            return reg.to_string();
+        }
+        if let Some(cached) = self.reg_float_cache.get(reg) {
+            return cached.clone();
+        }
+        let tr = format!("%ftr{}", self.txn_counter); self.txn_counter += 1;
+        let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, reg).ok();
+        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+        self.register_types.insert(fl.clone(), Type::Float);
+        fl
+    }
+
     fn emit_binop(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) {
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         if self.is_float_expr(l) || self.is_float_expr(r) {
-            let fa = format!("%bfa{}", self.txn_counter); self.txn_counter += 1;
-            let fb = format!("%bfb{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = trunc i64 {} to i32", indent, fa, a).ok();
-            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fb, fa).ok();
-            let fc = format!("%bfc{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = trunc i64 {} to i32", indent, fc, b).ok();
-            let fd = format!("%bfd{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fd, fc).ok();
+            let fa = self.i64_to_float_reg(out, &a, indent);
+            let fb = self.i64_to_float_reg(out, &b, indent);
             let fr = format!("%bfr{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = {} float {}, {}", indent, fr, float_op, fb, fd).ok();
+            writeln!(out, "{}{} = {} float {}, {}", indent, fr, float_op, fa, fb).ok();
             let fi = format!("%bfi{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
@@ -3468,15 +3575,9 @@ self.emit_declares(&mut out);
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
         if self.is_float_expr(l) || self.is_float_expr(r) {
-            let fa = format!("%cfa{}", self.txn_counter); self.txn_counter += 1;
-            let fb = format!("%cfb{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = trunc i64 {} to i32", indent, fa, a).ok();
-            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fb, fa).ok();
-            let fc = format!("%cfc{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = trunc i64 {} to i32", indent, fc, b).ok();
-            let fd = format!("%cfd{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fd, fc).ok();
-            writeln!(out, "{}{} = fcmp {} float {}, {}", indent, c, cond, fb, fd).ok();
+            let fa = self.i64_to_float_reg(out, &a, indent);
+            let fb = self.i64_to_float_reg(out, &b, indent);
+            writeln!(out, "{}{} = fcmp {} float {}, {}", indent, c, cond, fa, fb).ok();
         } else {
             let icmp_cond = match cond {
                 "oeq" => "eq",
