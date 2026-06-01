@@ -663,7 +663,7 @@ self.emit_declares(&mut out);
                     Type::Float => "float", Type::Int | Type::UInt => "i64",
                     Type::Bool => "i1", _ => "i64",
                 };
-                writeln!(out, "@{} = alias {} @{}", name, llvm_ty, canonical).ok();
+                writeln!(out, "@{} = alias {}, {}* @{}", name, llvm_ty, llvm_ty, canonical).ok();
                 continue;
             }
             let llvm_ty = match ty {
@@ -2070,13 +2070,13 @@ self.emit_declares(&mut out);
                                 writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
                             }
                             "float" => {
-                                let float_reg = format!("%flt_{}", name);
+                                let fc = self.txn_counter; self.txn_counter += 1;
+                                let float_reg = format!("%flt_{}_{}", name, fc);
                                 writeln!(out, "{}{} = extractvalue %State {}, {}", indent, float_reg, ssa_reg, idx).ok();
                                 let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = bitcast float {} to i32", indent, i, float_reg).ok();
                                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
                                 self.register_types.insert(float_reg.clone(), Type::Float);
-                                self.reg_float_cache.insert(v.clone(), float_reg);
                             }
                             "i8*" => {
                                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
@@ -2699,10 +2699,11 @@ self.emit_declares(&mut out);
     /// Recursively evaluate a boolean expression for the exit condition check.
     /// All values are emitted as `i64` for uniformity; comparisons are zext'd from `i1`.
     fn emit_exit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> String {
-        // Leaf expressions: delegate to emit_expr for consistent constant
-        // inlining, float promotion, and SSA field access.
+        // Leaf expressions: delegate integer/bool to emit_expr for constant
+        // inlining. Keep Identifier/OwnedRef local because exit conditions
+        // access @global_state directly (no %state function param available).
         match expr {
-            Expr::Integer(_) | Expr::Bool(_) | Expr::Identifier(_) | Expr::OwnedRef(_) => {
+            Expr::Integer(_) | Expr::Bool(_) => {
                 return self.emit_expr(out, expr, indent);
             }
             _ => {}
@@ -2710,6 +2711,33 @@ self.emit_declares(&mut out);
         let v = format!("%t{}", self.txn_counter);
         self.txn_counter += 1;
         match expr {
+            Expr::Identifier(name) => {
+                if let Some(&idx) = self.field_index_map.get(name) {
+                    let p = format!("%gep_exit_{}", self.txn_counter);
+                    self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", indent, p, idx).ok();
+                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok();
+                } else if self.constants.contains_key(name) {
+                    writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
+                } else if self.trigger_names.contains(name) {
+                    if let Some(t) = self.triggers.get(name).cloned() {
+                        let addr_str = match &t.address {
+                            crate::ast::LinkRef::Explicit(a) => a.to_string(),
+                            crate::ast::LinkRef::Linked(s) => format!("@{}", s),
+                        };
+                        let addr_is_ptr = matches!(t.address, crate::ast::LinkRef::Linked(_));
+                        self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);
+                    } else {
+                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                    }
+                } else {
+                    writeln!(out, "{}{} = add i64 0, 0 ; unknown id '{}'", indent, v, name).ok();
+                }
+                v
+            }
+            Expr::OwnedRef(name) => {
+                return self.emit_exit_expr(out, &Expr::Identifier(name.clone()), indent);
+            }
             Expr::Eq(l, r) => {
                 let lv = self.emit_exit_expr(out, l, indent);
                 let rv = self.emit_exit_expr(out, r, indent);
@@ -3624,9 +3652,9 @@ self.emit_declares(&mut out);
     }
 
     fn i64_to_float_reg(&mut self, out: &mut String, reg: &str, indent: &str) -> String {
-        if self.register_types.get(reg) == Some(&Type::Float) {
-            return reg.to_string();
-        }
+        // Check cache first: these are actual float registers from SSA extraction
+        // or float literal caching. Do NOT check register_types here — that map
+        // tracks Brief-level float semantics, not LLVM type (boxed as i64).
         if let Some(cached) = self.reg_float_cache.get(reg) {
             return cached.clone();
         }
