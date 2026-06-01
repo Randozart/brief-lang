@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: All optimization phases + #!exit + exit safety diagnostics + natural death + dead-field elimination + fair C benchmarks complete. 362 tests pass. Benchmarks self-terminate and timed. Brief ties or beats C on all 4 benchmarks.
+**Current**: All optimization phases + #!exit + exit safety diagnostics + natural death + dead-field elimination + fair C benchmarks + SLP hazard analyzer + Kalman filter parity complete. 368 tests pass. Brief ties or beats C on all 5 benchmarks. Kalman filter 0.71s vs C 0.75s (Brief wins by 5%, tied at worst).
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -121,6 +121,7 @@ brief-compiler selfhost <file.bv>
 | precompute_sum | 3 (compile-time) | 0.00s | 0.00s | ~equal |
 | ring_buffer | 4 (enum O(1) pure-counter) | 0.00s | 0.00s | ~equal |
 | async_counters | 5 (thread pool O(1) pure-counter) | 0.00s | 0.00s | ~equal |
+| kalman_filter | SLP hazard + opt -O2 pipeline | 0.71s | 0.75s | **Brief beats C by ~5%** |
 
 ### .gitignore / Infrastructure Cleanup
 - All benchmark build artifacts (`*.o`, `*.ll`, binaries, generated `brief_rt.c`) now ignored
@@ -181,3 +182,22 @@ brief-compiler selfhost <file.bv>
 - **`plans/2026-06-01-pure-counter-enum-dispatch.md`** — Pure-counter fold elimination for enum/async dispatch (store total instead of while-loop)
 - **`plans/2026-06-01-fair-c-benchmarks-fuzzing.md`** — Phase 1: fair C benchmarks + Phase 2: input fuzzing (compile-time and runtime modes)
 - **`plans/2026-06-01-dead-field-elimination.md`** — Dead-field elimination: liveness analysis for effectively-pure body detection
+- **`plans/2026-06-02-hardware-aware-slp-hazard-analyzer.md`** — SLP hazard analyzer: deterministic peak register demand formula
+- **`plans/2026-06-02-slp-hazard-loopholes.md`** — Three loopholes audit: local var blindspot, dual-var constraint, missed constants
+
+### SLP Hazard Analyzer (2026-06-02)
+- **Problem**: SLP vectorization creates `shufflevector` instructions from packed `<2 x float>` phis. At ≥12 float fields with cross-variable coupling, shuffles overflow x86_64's 16 XMM registers → 65 stack spills.
+- **Solution**: `estimate_slp_hazard()` in `src/backend/llvm.rs` computes peak register demand from live float fields (N), coupling density (C), temps (T), and global constants (K) against target hardware (R, W). Passes `-vectorize-slp=false` to `opt` when peak ≥ R.
+- **Three critical loopholes found and fixed**:
+  1. **Local variable blindspot**: `is_float_expr_pre_cg` checked only global state fields, missed `Statement::Let` bindings. Fixed by passing `local_floats: &HashSet<String>` through all recursive functions.
+  2. **Dual-variable constraint**: `count_cross_float_ops` required both operands to be variables, missing literal/constant operations (`x * 0.01`). Fixed by checking `left_is_typed || right_is_typed`.
+  3. **Missing constants**: Peak formula ignored global float constants (Kalman A/Q matrices: 18 floats). Fixed by adding `accessed_constants` tracking + `const_packed = ceil(K/W)`.
+- **Corrected formula**: `peak = ceil(N/W) + min(2·ceil(N/W), ceil(C/2)) + T + ceil(K/W) + 2`
+- **Kalman verification**: n=12, C=72, T=12, K=18, R=16, W=4 → peak=28 ≥ 16 → SLP disabled. Brief 0.71s vs C 0.75s (Brief beats C by ~5%).
+- **6 new tests**: no-floats, small-field, large-field, independent-channels, AArch64-spec, AVX2-spec
+
+### `opt` Pipeline Fix (2026-06-02)
+- **Problem**: struct-SSA optimization created `load %State`/`store %State` + 13-element `insertvalue` chain for non-pure bodies. This 64-byte struct pattern requires SROA (Scalar Replacement of Aggregates) to decompose into scalar phis — but `llc -O2` does NOT run SROA. Only `opt -O2` does. Result: 2× regression (0.14s → 0.28s at 10M).
+- **Solution**: Run `opt -O2 -S` before `llc` in `run_llvm_compile()` at `src/main.rs:1899`. The SLP hazard analyzer's `-vectorize-slp=false` flag now goes to `opt` (where SLP actually runs as a middle-end pass), not `llc`. Graceful fallback if `opt` is not installed.
+- **Effect**: SROA decomposes the struct load/store into 12 scalar float phis, GVN eliminates redundant float→i64→float round trips, SLP is disabled for hazardous programs. Kalman filter recovers from 2× regression to beat C.
+- **Cleanup**: `*.opt.ll` added to `.gitignore`.

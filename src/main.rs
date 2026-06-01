@@ -1895,18 +1895,46 @@ fn run_llvm_compile(
         }
         println!("  Runtime object: {}", rt_o_path.display());
 
-        // Compile .ll → .o
-        let llc_status = std::process::Command::new("llc")
-            .args(["-filetype=obj", "-O2"])
-            .arg("-o").arg(&ll_o_path).arg(&output_file)
+        // Optimize .ll with LLVM's middle-end (opt) then compile .ll → .o with llc.
+        // opt -O2 provides SROA (decomposes struct-SSA into scalar phis), GVN,
+        // and constant propagation. Without it, struct-SSA load/store patterns
+        // (from emit_folded_main for non-pure bodies) remain as 64-byte block
+        // operations that llc cannot decompose.
+        // The SLP vectorizer runs in opt, not llc. The hazard analyzer's
+        // -vectorize-slp=false flag is passed to opt when spills are predicted.
+        let opt_ll_path = out_base.join(format!("{}.opt.ll", stem));
+        let extra_flags = llvm_backend.llvm_extra_flags();
+        let mut opt_cmd = std::process::Command::new("opt");
+        opt_cmd.args(["-O2", "-S", "-o"]);
+        opt_cmd.arg(&opt_ll_path);
+        for flag in extra_flags {
+            opt_cmd.arg(flag);
+        }
+        opt_cmd.arg(&output_file);
+        let ll_source = match opt_cmd.status() {
+            Ok(status) if status.success() => {
+                println!("  Optimized: {}", opt_ll_path.display());
+                &opt_ll_path
+            }
+            _ => {
+                // opt not found or failed — fall back to unoptimized IR
+                &output_file
+            }
+        };
+
+        let mut llc_cmd = std::process::Command::new("llc");
+        llc_cmd.args(["-filetype=obj", "-O2"]);
+        let llc_status = llc_cmd
+            .arg("-o").arg(&ll_o_path).arg(ll_source)
             .status();
         match llc_status {
             Ok(status) if status.success() => {
                 println!("  Object: {}", ll_o_path.display());
             }
             _ => {
-                eprintln!("  Warning: llc not found or failed. Compile manually:");
-                eprintln!("    llc {} -filetype=obj -o {}", output_file.display(), ll_o_path.display());
+                eprintln!("  Warning: LLVM toolchain not found or failed. Compile manually:");
+                eprintln!("    opt -O2 -S {} -o {}.opt.ll", output_file.display(), stem);
+                eprintln!("    llc {}.opt.ll -filetype=obj -o {}", stem, ll_o_path.display());
                 print!("    ld {}.o {} -o {}", stem, rt_o_path.display(), stem);
                 if has_wake { print!(" -lrt -lpthread"); } else if has_thread_pool { print!(" -lpthread"); }
                 println!();

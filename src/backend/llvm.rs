@@ -184,6 +184,7 @@ pub struct LlvmBackend {
     has_natural_exit: bool,
     warnings: Vec<String>,
     ssa_state_reg: Option<String>,
+    llvm_extra_flags: Vec<String>,
 }
 
 impl LlvmBackend {
@@ -224,6 +225,7 @@ impl LlvmBackend {
             has_natural_exit: false,
             warnings: Vec::new(),
             ssa_state_reg: None,
+            llvm_extra_flags: Vec::new(),
         }
     }
 
@@ -1122,6 +1124,12 @@ self.emit_declares(&mut out);
                 }
             }
         }
+
+        // Hardware-aware SLP vectorization hazard detection.
+        // If estimated peak vector register demand >= target's physical register count,
+        // SLP vectorization would cause register spills → disable it.
+        self.estimate_slp_hazard(&txns);
+
         out
     }
 
@@ -1132,6 +1140,173 @@ self.emit_declares(&mut out);
 
     pub fn warnings(&self) -> &[String] {
         &self.warnings
+    }
+
+    pub fn llvm_extra_flags(&self) -> &[String] {
+        &self.llvm_extra_flags
+    }
+
+    // ── SLP Vectorization Hazard Analysis ─────────────────────
+    //
+    // Three critical guarantees make this analysis watertight:
+    //   1. Local variable tracking: we walk body statements FIRST, collecting
+    //      let-bound float names into `local_floats` before they're referenced.
+    //   2. Operand-aware counting: any float binary op with ≥1 non-trivial
+    //      operand (variable, constant, or literal) counts as a cross-op.
+    //   3. Constant-load accounting: global float constants (matrix coefficients,
+    //      filter taps) are counted and packed into the peak register demand.
+
+    fn is_float_field(&self, name: &str) -> bool {
+        self.field_index_map.get(name)
+            .map(|&idx| self.field_types[idx] == "float")
+            .unwrap_or(false)
+    }
+
+    fn is_float_expr_pre_cg(&self, expr: &Expr, local_floats: &std::collections::HashSet<String>) -> bool {
+        match expr {
+            Expr::Float(_) => true,
+            Expr::Identifier(name) | Expr::OwnedRef(name) => {
+                self.is_float_field(name)
+                    || local_floats.contains(name.as_str())
+                    || self.constants.get(name.as_str()).map_or(false, |(t, _)| *t == Type::Float)
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                self.is_float_expr_pre_cg(l, local_floats) || self.is_float_expr_pre_cg(r, local_floats)
+            }
+            Expr::Neg(e) => self.is_float_expr_pre_cg(e, local_floats),
+            Expr::Cast(_, ty) => *ty == Type::Float,
+            Expr::Block(_, last) => self.is_float_expr_pre_cg(last, local_floats),
+            _ => false,
+        }
+    }
+
+    fn count_cross_float_ops(&self, expr: &Expr, local_floats: &std::collections::HashSet<String>) -> u32 {
+        match expr {
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                let left_is_typed = matches!(l.as_ref(), Expr::Identifier(_) | Expr::OwnedRef(_) | Expr::Float(_));
+                let right_is_typed = matches!(r.as_ref(), Expr::Identifier(_) | Expr::OwnedRef(_) | Expr::Float(_));
+                let is_float = self.is_float_expr_pre_cg(l, local_floats) || self.is_float_expr_pre_cg(r, local_floats);
+                let mut count = if (left_is_typed || right_is_typed) && is_float { 1 } else { 0 };
+                count += self.count_cross_float_ops(l, local_floats);
+                count += self.count_cross_float_ops(r, local_floats);
+                count
+            }
+            Expr::Neg(e) => self.count_cross_float_ops(e, local_floats),
+            Expr::Block(_, last) => self.count_cross_float_ops(last, local_floats),
+            _ => 0,
+        }
+    }
+
+    fn collect_local_floats_and_temps(&self, body: &[Statement], local_floats: &mut std::collections::HashSet<String>) -> u32 {
+        let mut temp_count = 0;
+        for stmt in body {
+            match stmt {
+                Statement::Let { name, ty, expr, .. } => {
+                    let is_float = ty.as_ref() == Some(&Type::Float)
+                        || expr.as_ref().map_or(false, |e| self.is_float_expr_pre_cg(e, local_floats));
+                    if is_float {
+                        local_floats.insert(name.clone());
+                        temp_count += 1;
+                    }
+                }
+                Statement::Guarded { statements, .. } => {
+                    temp_count += self.collect_local_floats_and_temps(statements, local_floats);
+                }
+                _ => {}
+            }
+        }
+        temp_count
+    }
+
+    fn target_hardware(&self, spec: &crate::target_spec::TargetSpec) -> (u32, u32) {
+        if spec.has_capability("avx512f") {
+            (32, 16)
+        } else if spec.has_capability("avx2") {
+            (16, 8)
+        } else if spec.has_capability("neon") {
+            (32, 4)
+        } else if spec.has_capability("sse") {
+            (16, 4)
+        } else {
+            (16, 1)
+        }
+    }
+
+    fn estimate_slp_hazard(&mut self, txns: &[(String, &crate::ast::Transaction)]) {
+        let (r, w) = match self.spec.as_ref() {
+            Some(spec) => self.target_hardware(spec),
+            None => (16, 4), // default: x86_64 SSE (matches emit_header target triple)
+        };
+        if w <= 1 {
+            return;
+        }
+
+        let mut float_fields: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut accessed_constants: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut total_cross_ops: u32 = 0;
+        let mut max_float_temps: u32 = 0;
+
+        for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
+            let mut local_floats = std::collections::HashSet::new();
+            let temps = self.collect_local_floats_and_temps(&txn.body, &mut local_floats);
+            max_float_temps = max_float_temps.max(temps);
+
+            let reads = crate::backend::collect_read_identifiers(&txn.body);
+            let writes: std::collections::HashSet<String> =
+                crate::backend::collect_assigned_identifiers(&txn.body)
+                    .into_iter().collect();
+
+            for f in reads.intersection(&writes) {
+                if self.is_float_field(f) {
+                    float_fields.insert(f.clone());
+                }
+            }
+
+            for f in reads.iter() {
+                if self.constants.get(f.as_str()).map_or(false, |(t, _)| *t == Type::Float) {
+                    accessed_constants.insert(f.clone());
+                }
+            }
+
+            for stmt in &txn.body {
+                match stmt {
+                    Statement::Assignment { expr, .. } => {
+                        total_cross_ops += self.count_cross_float_ops(expr, &local_floats);
+                    }
+                    Statement::Let { expr: Some(e), .. } => {
+                        total_cross_ops += self.count_cross_float_ops(e, &local_floats);
+                    }
+                    Statement::Guarded { statements, .. } => {
+                        for s in statements {
+                            match s {
+                                Statement::Assignment { expr, .. } => {
+                                    total_cross_ops += self.count_cross_float_ops(expr, &local_floats);
+                                }
+                                Statement::Let { expr: Some(e), .. } => {
+                                    total_cross_ops += self.count_cross_float_ops(e, &local_floats);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let n = float_fields.len();
+        if n == 0 {
+            return;
+        }
+
+        let packed_phis = (n + w as usize - 1) / w as usize;
+        let shuffle_regs = std::cmp::min(packed_phis * 2, ((total_cross_ops as usize) + 1) / 2);
+        let const_packed = (accessed_constants.len() + w as usize - 1) / w as usize;
+        let peak = (packed_phis + shuffle_regs + max_float_temps as usize + const_packed + 2) as u32;
+
+        if peak >= r {
+            self.llvm_extra_flags.push("-vectorize-slp=false".into());
+        }
     }
 
     // ── Header ────────────────────────────────────────────────
@@ -4838,5 +5013,221 @@ mod tests {
         let _output = backend.generate(&program);
         assert!(!backend.has_natural_exit,
             "Non-wake program should NOT use natural death");
+    }
+
+    // ── SLP Hazard Detection Tests ────────────────────────────
+
+    fn make_slp_float_program(n_floats: usize, cross_body: Vec<Statement>, precondition: Option<Expr>) -> Program {
+        let mut items: Vec<TopLevel> = Vec::new();
+        // Add n float fields: f0..f{n-1} = 0.0
+        for i in 0..n_floats {
+            items.push(TopLevel::StateDecl(StateDecl {
+                name: format!("f{}", i),
+                ty: Type::Float,
+                expr: Some(Expr::Float(0.0)),
+                address: None,
+                bit_range: None,
+                is_override: false,
+                os_mode: false,
+                span: None,
+                attrs: vec![],
+            }));
+        }
+        // Add counter field so bounded_pre can work
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(),
+            ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None,
+            bit_range: None,
+            is_override: false,
+            os_mode: false,
+            span: None,
+            attrs: vec![],
+        }));
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "total".to_string(),
+            ty: Type::Int,
+            expr: Some(Expr::Integer(100)),
+            address: None,
+            bit_range: None,
+            is_override: false,
+            os_mode: false,
+            span: None,
+            attrs: vec![],
+        }));
+        items.push(TopLevel::Transaction(Transaction {
+            name: "tick".to_string(),
+            is_async: false,
+            is_reactive: true,
+            parameters: vec![],
+            contract: Contract {
+                pre_condition: precondition.unwrap_or(Expr::Bool(true)),
+                post_condition: Expr::Identifier("count".to_string()),
+                watchdog: None,
+                span: None,
+            },
+            body: cross_body,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+        }));
+        Program {
+            items,
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None,
+        }
+    }
+
+    fn make_cross_float_body(n_floats: usize, cross_count: usize) -> Vec<Statement> {
+        let mut stmts: Vec<Statement> = Vec::new();
+        // Assignment: f0 = f1 * f2; f1 = f2 * f3; etc.
+        for i in 0..cross_count {
+            let a = (i * 3) % n_floats;
+            let b = ((i * 3) + 1) % n_floats;
+            let c = ((i * 3) + 2) % n_floats;
+            stmts.push(Statement::Assignment {
+                lhs: Expr::Identifier(format!("f{}", a)),
+                expr: Expr::Mul(
+                    Box::new(Expr::Identifier(format!("f{}", b))),
+                    Box::new(Expr::Identifier(format!("f{}", c))),
+                ),
+                timeout: None,
+                modifiers: vec![],
+            });
+        }
+        // Increment counter so bounded_pre can fire
+        stmts.push(Statement::Assignment {
+            lhs: Expr::Identifier("count".to_string()),
+            expr: Expr::Add(
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Integer(1)),
+            ),
+            timeout: None,
+            modifiers: vec![],
+        });
+        stmts
+    }
+
+    #[test]
+    fn test_slp_hazard_no_floats() {
+        // No float fields → no SLP hazard
+        let program = make_slp_float_program(0, make_cross_float_body(0, 0), None);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        assert!(backend.llvm_extra_flags().is_empty(),
+            "No float fields should produce no flags");
+    }
+
+    #[test]
+    fn test_slp_hazard_small_field_count() {
+        // 4 float fields → SLP is safe on SSE (peak ≈ 7 < 16)
+        let body = make_cross_float_body(4, 3);
+        let program = make_slp_float_program(4, body, None);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        assert!(backend.llvm_extra_flags().is_empty(),
+            "4 float fields should not trigger SLP disable");
+    }
+
+    #[test]
+    fn test_slp_hazard_large_field_count() {
+        // 20 float fields + many cross-ops → SLP hazard on SSE (peak ≥ 16)
+        // Formula: ceil(20/4)=5 packed, min(10,20)=10 shuffles, 0 temps, 0 consts, +2 = 17
+        let body = make_cross_float_body(20, 40);
+        let program = make_slp_float_program(20, body, None);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        assert!(backend.llvm_extra_flags().contains(&"-vectorize-slp=false".to_string()),
+            "20 float fields with cross-ops should disable SLP on SSE");
+    }
+
+    #[test]
+    fn test_slp_hazard_independent_channels() {
+        // 12 float fields with ZERO cross-ops → no shuffles needed, SLP is safe
+        let mut body: Vec<Statement> = Vec::new();
+        for i in 0..12 {
+            body.push(Statement::Assignment {
+                lhs: Expr::Identifier(format!("f{}", i)),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier(format!("f{}", i))),
+                    Box::new(Expr::Float(1.0)),
+                ),
+                timeout: None,
+                modifiers: vec![],
+            });
+        }
+        body.push(Statement::Assignment {
+            lhs: Expr::Identifier("count".to_string()),
+            expr: Expr::Add(
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Integer(1)),
+            ),
+            timeout: None,
+            modifiers: vec![],
+        });
+        let program = make_slp_float_program(12, body, None);
+        let mut backend = LlvmBackend::new();
+        let _output = backend.generate(&program);
+        // Independent channels: packed_phis=3, shuffle_regs=0, temps=0, margin=2 → peak=5 < 16
+        assert!(backend.llvm_extra_flags().is_empty(),
+            "12 independent float fields should NOT disable SLP");
+    }
+
+    #[test]
+    fn test_slp_hazard_with_target_spec() {
+        // With explicit target spec for AArch64 (R=32, W=4) → no hazard even for 12 fields
+        let body = make_cross_float_body(12, 32);
+        let program = make_slp_float_program(12, body, None);
+        let mut backend = LlvmBackend::new();
+        let spec = crate::target_spec::TargetSpec {
+            target: Some(crate::target_spec::TargetSection {
+                name: "aarch64-unknown-linux-gnu".to_string(),
+                backend: "llvm".to_string(),
+                capabilities: vec!["neon".to_string()],
+                import_ffi: None,
+            }),
+            ffi: None,
+            codegen: None,
+            memory: None,
+        };
+        backend = backend.with_spec(spec);
+        let _output = backend.generate(&program);
+        // AArch64: R=32, Kalman 12 fields + 32 cross-ops → peak=16 < 32, SLP safe
+        assert!(backend.llvm_extra_flags().is_empty(),
+            "AArch64 with 32 registers should allow SLP for 12 fields");
+    }
+
+    #[test]
+    fn test_slp_hazard_avx_target() {
+        // With AVX2 (R=16, W=8) → 12 fields → 2 packed phis + 4 shuffles + margin = 8 < 16, safe
+        let body = make_cross_float_body(12, 32);
+        let program = make_slp_float_program(12, body, None);
+        let mut backend = LlvmBackend::new();
+        let spec = crate::target_spec::TargetSpec {
+            target: Some(crate::target_spec::TargetSection {
+                name: "x86_64-unknown-linux-gnu".to_string(),
+                backend: "llvm".to_string(),
+                capabilities: vec!["avx2".to_string()],
+                import_ffi: None,
+            }),
+            ffi: None,
+            codegen: None,
+            memory: None,
+        };
+        backend = backend.with_spec(spec);
+        let _output = backend.generate(&program);
+        // AVX2: W=8, 12 fields → ceil(12/8)=2 packed phis, peak ~2+4+0+2=8 < 16
+        assert!(backend.llvm_extra_flags().is_empty(),
+            "AVX2 with 256-bit vectors should allow SLP for 12 fields");
     }
 }

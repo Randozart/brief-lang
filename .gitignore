@@ -127,3 +127,18 @@ benchmarks/kalman_filter_runtime
 benchmarks/kalman_filter_runtime_c
 # Root-level generated C file (iir_filter.c for benchmarks)
 /iir_filter.c
+
+# Generated LLVM IR processed by opt
+*.opt.ll
+
+# Root-level runtime artifacts (compiled outside benchmarks/)
+brief_rt.c
+brief_rt.o
+
+# Leftover C comparison binaries not in benchmark list
+benchmarks/kalman_no_slp
+benchmarks/precompute_sum_c
+
+# Design doc (in review)
+/docs/design/safety-and-turing-completeness.md
+*.opt.ll

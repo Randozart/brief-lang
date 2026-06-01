@@ -281,6 +281,9 @@ pub fn collect_read_identifiers(body: &[Statement]) -> std::collections::HashSet
             Statement::Assignment { expr, .. } => {
                 collect_expr_identifiers(expr, &mut ids);
             }
+            Statement::Let { expr: Some(e), .. } => {
+                collect_expr_identifiers(e, &mut ids);
+            }
             Statement::Guarded { condition, statements, .. } => {
                 collect_expr_identifiers(condition, &mut ids);
                 ids.extend(collect_read_identifiers(statements));

@@ -315,3 +315,19 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 **Files**: `src/backend/llvm.rs:647-665` (enum_fold_params build), `src/backend/llvm.rs:2285-2315` (multi-txn case arm emission)
 
 **Lesson**: The enum dispatch path was designed for single-txn programs. Multi-txn programs with multiple bounded counters need per-txn folded loops. The `graph.nodes.len() == 1 && txns.len() == 1` guard was a premature optimization assumption that excluded valid multi-txn convergence programs. Always verify classification/path-selection logic handles N>1 inputs.
+
+## 2026-06-02 — Struct-SSA regression for non-pure bodies (Kalman filter 2× slowdown)
+
+**Issue**: Kalman filter benchmark ran 0.28s at 10M iterations while the old code ran 0.143s (scaled from 0.716s at 50M) — exactly 2× slower. C reference ran 0.14s. Brief went from beating C to trailing by 2×.
+
+**Root Cause**: `emit_folded_main` with `use_phi=false, body=Some(stmts)` emits a `load %State` (64 bytes), 13-element chained `extractvalue`/`insertvalue` sequence, then `store %State`. This struct-SSA pattern requires SROA (Scalar Replacement of Aggregates) to decompose into per-field scalar operations. But `llc -O2` does NOT run SROA — only `opt -O2` does. Without SROA, LLVM's backend materializes the entire 64-byte struct as a memory block, preventing per-field register promotion, phi node generation, and GVN across float operations.
+
+The old (pre-struct-SSA) codegen used per-field `GEP + load/store` throughout, which LLVM's backend handles naturally without SROA.
+
+**Why it affected Kalman specifically**: The Kalman filter's precondition references all 12 float fields (`x0 == x0 && x1 == x1 && ...` — a NaN-guard pattern). This makes all float fields live, so `is_effectively_pure = false`. The non-pure path takes `use_phi=false, body=Some(stmts)` which is the struct-SSA path. Pure/effectively-pure bodies (IIR, ring_buffer, async_counters) take the `use_phi=true` phi-node path and were unaffected.
+
+**Fix**: Run `opt -O2 -S` before `llc` in `run_llvm_compile()` at `src/main.rs:1899`. `opt -O2` runs SROA, mem2reg, GVN, and constant propagation. SROA decomposes the `load %State`/`store %State` into scalar phis; GVN eliminates redundant float→i64→float round trips. The SLP hazard analyzer's `-vectorize-slp=false` flag is passed to `opt` (where SLP runs as a middle-end pass), not `llc`. Graceful fallback if `opt` is not installed.
+
+**Result**: Kalman filter recovers from 2× regression to 0.71s at 50M vs C 0.75s (Brief beats C by ~5%, tied at worst).
+
+**Lesson**: `llc -O2` and `opt -O2` run different pass pipelines. `llc` is the codegen backend (instruction selection, regalloc, scheduling). `opt` is the middle-end optimizer (SROA, mem2reg, GVN, loop opts, vectorization). Struct-SSA (`load %State`/`store %State` + insertvalue chains) requires SROA to decompose — always run `opt -O2` before `llc` for programs with struct values.
