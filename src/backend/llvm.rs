@@ -183,6 +183,42 @@ fn extract_trigger_keys(pre: &Expr, trigger_names: &std::collections::HashSet<&s
     if keys.len() < 2 { None } else { Some(keys) }
 }
 
+/// Compute the sparsity ratio of a sorted key set.
+/// Dense sets (gap ratio < 4) don't need perfect hashing — standard
+/// switch dispatch with consecutive offsets works fine.
+fn sparsity_ratio(keys: &[i64]) -> f64 {
+    if keys.len() < 2 { return 0.0; }
+    let gaps: Vec<u64> = keys.windows(2).map(|w| (w[1] - w[0]) as u64).collect();
+    let min_gap = *gaps.iter().min().unwrap_or(&1);
+    let max_gap = *gaps.iter().max().unwrap_or(&0);
+    if min_gap == 0 { return f64::MAX; }
+    max_gap as f64 / min_gap as f64
+}
+
+/// Find a multiplicative perfect hash for a set of sparse keys.
+/// Returns (multiplier, shift) such that h(k) = (k * M) >> S maps
+/// each input key to a unique slot in [0, next_power_of_two(n)).
+/// Guaranteed termination: capped at 10,000 iterations.
+fn find_perfect_hash(keys: &[i64]) -> Option<(u64, u32)> {
+    let n = keys.len();
+    let num_slots = n.next_power_of_two();
+    let shift = 64 - num_slots.trailing_zeros();
+    let mut rng: u64 = 123456789;
+    for _ in 0..10000 {
+        rng = rng.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+        let multiplier = rng | 1;
+        let mut seen = vec![false; num_slots];
+        let mut ok = true;
+        for &k in keys {
+            let hash = (k.wrapping_mul(multiplier as i64) as u64) >> shift;
+            if seen[hash as usize] { ok = false; break; }
+            seen[hash as usize] = true;
+        }
+        if ok { return Some((multiplier, shift)); }
+    }
+    None
+}
+
 pub struct LlvmBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     field_index_map: HashMap<String, usize>,
@@ -3109,6 +3145,7 @@ self.emit_declares(&mut out);
     ) {
         // #0 = willreturn, mustprogress (one-shot). #3 = no willreturn, no mustprogress (wake loop).
         let attr = if has_wake { "#3" } else { "#0" };
+        let c0 = self.txn_counter;
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
@@ -3245,15 +3282,37 @@ self.emit_declares(&mut out);
             // Use extracted keys when available, otherwise fall back to dense 0..n
             let keys: Vec<i64> = enum_keys.get(tn).cloned().unwrap_or_else(|| (0..n as i64).collect());
             let key_count = keys.len();
-            writeln!(out, "  switch i64 %sz_{}, label %{}_residual [", tn, tn).ok();
-            for (idx, key) in keys.iter().enumerate() {
-                writeln!(out, "    i64 {}, label %{}_case_{}", key, tn, idx).ok();
+            // Try perfect hashing for sparse key sets (gap ratio > 4).
+            let (use_hash, multiplier, hash_shift): (bool, u64, u32) =
+                if sparsity_ratio(&keys) > 4.0 {
+                    if let Some((m, s)) = find_perfect_hash(&keys) {
+                        (true, m, s)
+                    } else { (false, 0, 0) }
+                } else { (false, 0, 0) };
+            let dispatch_val = if use_hash {
+                // Emit perfect hash: h(k) = (k * M) >> S
+                writeln!(out, "  %hm_{} = mul i64 %sz_{}, {}", c0, tn, multiplier).ok();
+                writeln!(out, "  %hs_{} = lshr i64 %hm_{}, {}", c0, c0, hash_shift).ok();
+                format!("%hs_{}", c0)
+            } else {
+                format!("%sz_{}", tn)
+            };
+            writeln!(out, "  switch i64 {}, label %{}_residual [", dispatch_val, tn).ok();
+            for (idx, _key) in keys.iter().enumerate() {
+                let label = format!("{}_{}", tn, idx);
+                writeln!(out, "    i64 {}, label %{}_case_{}", idx, tn, idx).ok();
             }
             writeln!(out, "  ]").ok();
             for (idx, key) in keys.iter().enumerate() {
                 let prefix = format!("{}_{}", tn, idx);
-                let fn_name = trig_to_fn.get(key).map(|s| s.as_str()).unwrap_or(&native_name);
                 writeln!(out, "{}_case_{}:", tn, idx).ok();
+                // For hashed dispatch, verify the original key matches (safety guard)
+                if use_hash {
+                    writeln!(out, "  %vg_{}_{} = icmp eq i64 %sz_{}, {}", c0, idx, tn, key).ok();
+                    writeln!(out, "  br i1 %vg_{}_{}, label %{}_safe_{}, label %{}_residual", c0, idx, tn, idx, tn).ok();
+                    writeln!(out, "{}_safe_{}:", tn, idx).ok();
+                }
+                let fn_name = trig_to_fn.get(key).map(|s| s.as_str()).unwrap_or(&native_name);
                 if let Some((ci, tv)) = all_internal_lookup(fn_name) {
                     writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", prefix, ci).ok();
                     writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, prefix).ok();
