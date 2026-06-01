@@ -716,12 +716,12 @@ self.emit_declares(&mut out);
                                 self.emit_folded_pure_counter(&mut out, counter_idx, tv);
                                 true
                             } else {
-                                // Total value unknown at compile time — emit while-loop
-                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name);
+                                // Pure body + runtime-variable bound → phi-node register pipeline
+                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, true);
                                 true
                             }
                         } else {
-                            self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name);
+                            self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false);
                             true
                         }
                     } else { false }
@@ -736,7 +736,41 @@ self.emit_declares(&mut out);
             } else { false };
 
             if !precomputed {
-                if let Some(ref enum_sizes) = enumerable {
+                // Multi-txn all-pure folding: when NO triggers exist and ALL
+                // reactive async txns have bounded_pre + increments with pure
+                // bodies, fold them into a single register-pipeline main loop.
+                let multi_foldable = enumerable.is_none()
+                    && !has_wake_triggers
+                    && !async_txn_names.is_empty()
+                    && async_txn_names.iter().all(|name| {
+                        graph.nodes.iter().find(|n| n.name == *name).map_or(false, |node| {
+                            (node.is_pure_body || node.is_effectively_pure)
+                            && node.bounded_pre.is_some()
+                            && node.increments.is_some()
+                        })
+                    });
+                let mut multi_fold_params: HashMap<String, (usize, Option<usize>, Option<String>)> = HashMap::new();
+                if multi_foldable {
+                    for txn_name in &async_txn_names {
+                        if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
+                            if let Some(ref bp) = node.bounded_pre {
+                                if let Some(&cidx) = self.field_index_map.get(&bp.var) {
+                                    let tidx = self.field_index_map.get(&bp.bound_var).copied();
+                                    let tcname = if tidx.is_none() {
+                                        if self.constants.contains_key(&bp.bound_var) {
+                                            Some(bp.bound_var.clone())
+                                        } else { None }
+                                    } else { None };
+                                    multi_fold_params.insert(txn_name.clone(), (cidx, tidx, tcname));
+                                }
+                            }
+                        }
+                    }
+                }
+                if !multi_fold_params.is_empty() {
+                    self.emit_folded_multi_main(&mut out, &multi_fold_params);
+                    self.emit_thread_pool_metadata(&mut out);
+                } else if let Some(ref enum_sizes) = enumerable {
                 // Enumerable triggers — emit switch-dispatch main
                 // This path handles triggers with small compile-time-known value sets.
                 // We emit a single @main that samples triggers once, then switch
@@ -2407,6 +2441,10 @@ self.emit_declares(&mut out);
 
     /// Emit the folded while-loop body (without `@init_state()` or the enclosing
     /// `define` / `ret`).  Used by both `emit_folded_main` and the enum dispatch path.
+    ///
+    /// When `use_phi = true`, the counter lives in an SSA phi node (register)
+    /// instead of being loaded/stored through @global_state every iteration.
+    /// Only valid when the txn body is pure (just counter++).
     fn emit_folded_loop(
         &self,
         out: &mut String,
@@ -2415,26 +2453,59 @@ self.emit_declares(&mut out);
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
         label_prefix: &str,
+        use_phi: bool,
     ) {
         let c0 = self.txn_counter;
-        if let Some(ti) = total_idx {
-            writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
-            writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
-        } else if let Some(cn) = total_const_name {
-            writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
+        if use_phi {
+            let entry_label = format!("{}_phi_entry", label_prefix);
+            let hdr_label = format!("{}_hdr", label_prefix);
+            let body_label = format!("{}_body", label_prefix);
+            let done_label = format!("{}_done", label_prefix);
+            writeln!(out, "{}:", entry_label).ok();
+            // Load bound once
+            if let Some(ti) = total_idx {
+                writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
+                writeln!(out, "  %lt_{}_{} = load i64, i64* %gt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+            } else if let Some(cn) = total_const_name {
+                writeln!(out, "  %lt_{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
+            } else {
+                writeln!(out, "  %lt_{}_{} = add i64 0, 0", label_prefix, c0).ok();
+            }
+            // Load counter once
+            writeln!(out, "  %gcnt_{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, counter_idx).ok();
+            writeln!(out, "  %init_{}_{} = load i64, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+            writeln!(out, "  br label %{}", hdr_label).ok();
+            writeln!(out, "{}:", hdr_label).ok();
+            // Phi node: counter lives in register throughout the loop
+            writeln!(out, "  %cnt_{}_{} = phi i64 [ %init_{}_{}, %{} ], [ %inc_{}_{}, %{} ]", label_prefix, c0, label_prefix, c0, entry_label, label_prefix, c0, body_label).ok();
+            writeln!(out, "  %cp_{}_{} = icmp slt i64 %cnt_{}_{}, %lt_{}_{}", label_prefix, c0 + 1, label_prefix, c0, label_prefix, c0).ok();
+            writeln!(out, "  br i1 %cp_{}_{}, label %{}, label %{}", label_prefix, c0 + 1, body_label, done_label).ok();
+            writeln!(out, "{}:", body_label).ok();
+            writeln!(out, "  %inc_{}_{} = add i64 %cnt_{}_{}, 1", label_prefix, c0, label_prefix, c0).ok();
+            writeln!(out, "  br label %{}", hdr_label).ok();
+            writeln!(out, "{}:", done_label).ok();
+            // Store counter once after the loop
+            writeln!(out, "  store i64 %cnt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
         } else {
-            writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c0).ok();
+            if let Some(ti) = total_idx {
+                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
+                writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+            } else if let Some(cn) = total_const_name {
+                writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
+            } else {
+                writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c0).ok();
+            }
+            writeln!(out, "  br label %{}_hdr", label_prefix).ok();
+            writeln!(out, "{}_hdr:", label_prefix).ok();
+            writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
+            writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
+            writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
+            writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
+            writeln!(out, "{}_body:", label_prefix).ok();
+            writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
+            writeln!(out, "  br label %{}_hdr", label_prefix).ok();
+            writeln!(out, "{}_done:", label_prefix).ok();
         }
-        writeln!(out, "  br label %{}_hdr", label_prefix).ok();
-        writeln!(out, "{}_hdr:", label_prefix).ok();
-        writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
-        writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
-        writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
-        writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
-        writeln!(out, "{}_body:", label_prefix).ok();
-        writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
-        writeln!(out, "  br label %{}_hdr", label_prefix).ok();
-        writeln!(out, "{}_done:", label_prefix).ok();
     }
 
     fn emit_folded_main(
@@ -2444,11 +2515,105 @@ self.emit_declares(&mut out);
         counter_idx: usize,
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
+        use_phi: bool,
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
-        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case");
+        // When use_phi is true, emit_folded_loop starts with a named label
+        // that becomes the first block after entry's br. No extra label needed.
+        if use_phi {
+            writeln!(out, "  br label %case_phi_entry").ok();
+        }
+        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi);
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// Emit a `main()` that folds ALL reactive transactions into a single
+    /// register-pipeline loop.  Each txn gets an SSA phi node for its counter;
+    /// the loop terminates when all counters reach their bounds.
+    /// Assumes all txns are pure/effectively-pure with bounded_pre + increments.
+    fn emit_folded_multi_main(
+        &self,
+        out: &mut String,
+        fold_params: &HashMap<String, (usize, Option<usize>, Option<String>)>,
+    ) {
+        let c0 = self.txn_counter;
+        // Deduplicate by counter index: multiple txns may share the same counter
+        let mut uniq: Vec<(usize, String)> = Vec::new();
+        let mut seen_idxs: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut first_tidx: Option<usize> = None;
+        for (_, &(cidx, tidx, _)) in fold_params.iter() {
+            if seen_idxs.insert(cidx) {
+                uniq.push((cidx, format!("c{}", cidx)));
+                if first_tidx.is_none() {
+                    first_tidx = tidx;
+                }
+            }
+        }
+        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  call void @init_state()").ok();
+        writeln!(out, "  br label %me_{}", c0).ok();
+        writeln!(out, "me_{}:", c0).ok();
+        // Emit GEP + load for bound (from first txn)
+        if let Some((_, &(_, tidx, ref tcn))) = fold_params.iter().next() {
+            if let Some(ti) = tidx {
+                writeln!(out, "  %gmb_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0, ti).ok();
+                writeln!(out, "  %lmb_{} = load i64, i64* %gmb_{}, align 8", c0, c0).ok();
+            } else if let Some(ref cn) = *tcn {
+                writeln!(out, "  %lmb_{} = load i64, i64* @{}, align 8", c0, cn).ok();
+            } else {
+                writeln!(out, "  %lmb_{} = add i64 0, 0", c0).ok();
+            }
+        }
+        // Emit GEP + initial load for each unique counter
+        let mut uniq_names: Vec<String> = Vec::new();
+        for &(cidx, ref _name) in &uniq {
+            let reg = format!("mu_{}", uniq_names.len());
+            uniq_names.push(reg.clone());
+            writeln!(out, "  %gm_{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0, reg, cidx).ok();
+            writeln!(out, "  %im_{}_{} = load i64, i64* %gm_{}_{}, align 8", c0, reg, c0, reg).ok();
+        }
+        writeln!(out, "  br label %mh_{}", c0).ok();
+        // Header: phi nodes + comparisons
+        writeln!(out, "mh_{}:", c0).ok();
+        for (i, reg) in uniq_names.iter().enumerate() {
+            writeln!(out, "  %pm_{}_{} = phi i64 [ %im_{}_{}, %me_{} ], [ %incm_{}_{}, %mb_{} ]", c0, reg, c0, reg, c0, c0, reg, c0).ok();
+        }
+        // Compare each counter against bound
+        let mut cmp_regs: Vec<String> = Vec::new();
+        for (i, reg) in uniq_names.iter().enumerate() {
+            let cmp_reg = format!("%cm_{}_{}", c0, reg);
+            writeln!(out, "  {} = icmp slt i64 %pm_{}_{}, %lmb_{}", cmp_reg, c0, reg, c0).ok();
+            cmp_regs.push(cmp_reg.trim_start_matches('%').to_string());
+        }
+        // Chain or of all comparisons
+        if cmp_regs.len() > 1 {
+            let mut prev = format!("%{}", cmp_regs[0]);
+            for cr in &cmp_regs[1..] {
+                let r = format!("%{}", cr);
+                let t = format!("%tm_{}_{}", c0, cr);
+                writeln!(out, "  {} = or i1 {}, {}", t, prev, r).ok();
+                prev = t;
+            }
+            writeln!(out, "  br i1 {}, label %mb_{}, label %md_{}", prev, c0, c0).ok();
+        } else {
+            writeln!(out, "  br i1 %{}, label %mb_{}, label %md_{}", cmp_regs[0], c0, c0).ok();
+        }
+        // Body: increment each counter
+        writeln!(out, "mb_{}:", c0).ok();
+        for (i, reg) in uniq_names.iter().enumerate() {
+            writeln!(out, "  %incm_{}_{} = add i64 %pm_{}_{}, 1", c0, reg, c0, reg).ok();
+        }
+        writeln!(out, "  br label %mh_{}", c0).ok();
+        // Done: store each counter once
+        writeln!(out, "md_{}:", c0).ok();
+        for (i, reg) in uniq_names.iter().enumerate() {
+            writeln!(out, "  store i64 %pm_{}_{}, i64* %gm_{}_{}, align 8", c0, reg, c0, reg).ok();
+        }
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -2566,21 +2731,27 @@ self.emit_declares(&mut out);
                     let sub_prefix = format!("{}_{}", prefix, ptxn_name);
                     // Pure-counter shortcut: if txn is pure and bound is a compile-time
                     // constant, store the total directly (O(1)) instead of looping (O(N)).
+                    // If bound is runtime-variable, use phi-node register pipeline.
                     if let Some(&(pure, tv)) = fold_pure.get(ptxn_name) {
                         if pure {
                             if let Some(tv) = tv {
                                 writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", sub_prefix, pci).ok();
                                 writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, sub_prefix).ok();
                                 continue;
+                            } else {
+                                // Pure body + runtime-variable bound → phi-node pipeline
+                                let ptcn_ref = ptcn.as_deref();
+                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true);
+                                continue;
                             }
                         }
                     }
                     let ptcn_ref = ptcn.as_deref();
-                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix);
+                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false);
                 }
             } else {
                 // Single-txn (legacy): use the caller-provided params
-                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix);
+                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false);
             }
         };
 
