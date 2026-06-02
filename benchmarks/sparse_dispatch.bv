@@ -1,0 +1,29 @@
+// Sparse Dispatch — Brief-native cyclic dispatch benchmark.
+//
+// Measures: enum dispatch path with 8 txns, each gated by
+// io_pending && (count % 8) == N. Exactly 1 txn fires per tick.
+// The io_pending Bool trigger enables enum switch-dispatch (Path 4).
+//
+// C reference: sparse_dispatch_c.c — equivalent switch (count % 8).
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/sparse_dispatch.bv \
+//       --out benchmarks --optimize-budget 256
+
+#!exit count == total;
+
+import { __get_env_int } from "std/env.bv";
+import { io_pending } from "std/brief_rt.bv";
+import "link/brief_rt.o";
+
+let count: Int = 0;
+let total: Int = __get_env_int("BOUND");
+
+rct txn ping [io_pending && count % 8 == 0][count == total] { &count = count + 1; };
+rct txn ack  [io_pending && count % 8 == 1][count == total] { &count = count + 1; };
+rct txn err  [io_pending && count % 8 == 2][count == total] { &count = count + 1; };
+rct txn debug[io_pending && count % 8 == 3][count == total] { &count = count + 1; };
+rct txn data [io_pending && count % 8 == 4][count == total] { &count = count + 1; };
+rct txn ctrl [io_pending && count % 8 == 5][count == total] { &count = count + 1; };
+rct txn sync [io_pending && count % 8 == 6][count == total] { &count = count + 1; };
+rct txn stat [io_pending && count % 8 == 7][count == total] { &count = count + 1; };

@@ -2624,13 +2624,17 @@ let span = self.current_span();
 
         let contract = self.parse_contract()?;
 
+        // Capture closing-brace span for better error messages on missing ';'
+        let closing_brace_span;
         // Lambda-style: allow ; termination (no body)
         let body = if let Some(Ok(Token::Semicolon)) = self.current_token() {
             // Lambda-style transaction: no body, just contract
+            closing_brace_span = Span::dummy();
             Vec::new()
         } else {
             self.expect(Token::LBrace)?;
             let body = self.parse_body()?;
+            closing_brace_span = self.current_span().unwrap_or_else(Span::dummy);
             self.expect(Token::RBrace)?;
             body
         };
@@ -2675,7 +2679,36 @@ let span = self.current_span();
             None
         };
 
-        self.expect(Token::Semicolon)?;
+        match self.current_token() {
+            Some(Ok(Token::Semicolon)) => { self.advance(); }
+            Some(Ok(tok)) => {
+                return Err(SyntaxError::UnexpectedToken {
+                    expected: format!(
+                        "';' after {} block — all {} declarations must end with '}};'",
+                        if is_reactive { "rct txn" } else { "transaction" },
+                        if is_reactive { "rct txn" } else { "txn" },
+                    ),
+                    found: Self::token_display(tok),
+                    span: self.current_span().unwrap_or_else(Span::dummy),
+                });
+            }
+            Some(Err(_)) => {
+                return Err(SyntaxError::InvalidStatement {
+                    reason: "Lexer error".to_string(),
+                    span: self.current_span().unwrap_or_else(Span::dummy),
+                });
+            }
+            None => {
+                return Err(SyntaxError::UnexpectedEOF {
+                    expected: format!(
+                        "';' after {} block — all {} declarations must end with '}};'",
+                        if is_reactive { "rct txn" } else { "transaction" },
+                        if is_reactive { "rct txn" } else { "txn" },
+                    ),
+                    span: closing_brace_span,
+                });
+            }
+        }
 
         let dependencies = contract
             .pre_condition

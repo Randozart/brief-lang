@@ -36,6 +36,9 @@ BENCHMARKS=(
     "precompute_sum"
     "ring_buffer"
     "async_counters"
+    "float_math"
+    "sparse_dispatch"
+    "const_heavy"
 )
 
 build_bench() {

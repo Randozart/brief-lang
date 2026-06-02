@@ -139,6 +139,10 @@ fn trg_llvm_storage_ty(ty: &Type) -> &str {
 fn is_trigger_gated(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> bool {
     match pre {
         Expr::Identifier(name) => trigger_names.contains(name.as_str()),
+        Expr::Eq(l, r) => {
+            matches!(l.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
+                || matches!(r.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
+        }
         Expr::And(l, r) => {
             is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names)
         }
@@ -2077,6 +2081,7 @@ self.emit_declares(&mut out);
                                 writeln!(out, "{}{} = bitcast float {} to i32", indent, i, float_reg).ok();
                                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
                                 self.register_types.insert(float_reg.clone(), Type::Float);
+                                self.reg_float_cache.insert(v.clone(), float_reg);
                             }
                             "i8*" => {
                                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
@@ -2877,7 +2882,6 @@ self.emit_declares(&mut out);
         label_prefix: &str,
         use_phi: bool,
         body: Option<&[Statement]>,
-        proven_convergent: bool,
     ) {
         let c0 = self.txn_counter;
         if use_phi {
@@ -2903,9 +2907,6 @@ self.emit_declares(&mut out);
             // Phi node: counter lives in register throughout the loop
             writeln!(out, "  %cnt_{}_{} = phi i64 [ %init_{}_{}, %{} ], [ %inc_{}_{}, %{} ]", label_prefix, c0, label_prefix, c0, entry_label, label_prefix, c0, body_label).ok();
             writeln!(out, "  %cp_{}_{} = icmp slt i64 %cnt_{}_{}, %lt_{}_{}", label_prefix, c0 + 1, label_prefix, c0, label_prefix, c0).ok();
-            if proven_convergent {
-                writeln!(out, "  call void @llvm.assume(i1 %cp_{}_{})", label_prefix, c0 + 1).ok();
-            }
             writeln!(out, "  br i1 %cp_{}_{}, label %{}, label %{}", label_prefix, c0 + 1, body_label, done_label).ok();
             writeln!(out, "{}:", body_label).ok();
             writeln!(out, "  %inc_{}_{} = add i64 %cnt_{}_{}, 1", label_prefix, c0, label_prefix, c0).ok();
@@ -2928,9 +2929,6 @@ self.emit_declares(&mut out);
             writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
             writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
             writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
-            if proven_convergent {
-                writeln!(out, "  call void @llvm.assume(i1 %cp{}_{})", label_prefix, c0 + 2).ok();
-            }
             writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
             writeln!(out, "{}_body:", label_prefix).ok();
             let ssa_reg = format!("%ssa{}", self.txn_counter); self.txn_counter += 1;
@@ -2961,9 +2959,6 @@ self.emit_declares(&mut out);
             writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
             writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
             writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
-            if proven_convergent {
-                writeln!(out, "  call void @llvm.assume(i1 %cp{}_{})", label_prefix, c0 + 2).ok();
-            }
             writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
             writeln!(out, "{}_body:", label_prefix).ok();
             writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
@@ -2990,7 +2985,7 @@ self.emit_declares(&mut out);
         if use_phi {
             writeln!(out, "  br label %case_phi_entry").ok();
         }
-        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body, true);
+        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -3271,7 +3266,7 @@ self.emit_declares(&mut out);
                             } else {
                                 // Pure body + runtime-variable bound → phi-node pipeline
                                 let ptcn_ref = ptcn.as_deref();
-                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true, None, true);
+                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true, None);
                                 continue;
                             }
                         }
@@ -3279,12 +3274,12 @@ self.emit_declares(&mut out);
                     // Non-pure body → SSA mode with inline body
                     let ptcn_ref = ptcn.as_deref();
                     let body = txns.iter().find(|(n, _)| n == ptxn_name).map(|(_, t)| t.body.as_slice());
-                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false, body, true);
+                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false, body);
                 }
             } else {
                 // Single-txn (legacy): use the caller-provided params
                 let body = txns.iter().find(|(n, _)| n == fn_name).map(|(_, t)| t.body.as_slice());
-                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body, true);
+                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body);
             }
         };
 

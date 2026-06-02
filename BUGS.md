@@ -331,3 +331,67 @@ The old (pre-struct-SSA) codegen used per-field `GEP + load/store` throughout, w
 **Result**: Kalman filter recovers from 2× regression to 0.71s at 50M vs C 0.75s (Brief beats C by ~5%, tied at worst).
 
 **Lesson**: `llc -O2` and `opt -O2` run different pass pipelines. `llc` is the codegen backend (instruction selection, regalloc, scheduling). `opt` is the middle-end optimizer (SROA, mem2reg, GVN, loop opts, vectorization). Struct-SSA (`load %State`/`store %State` + insertvalue chains) requires SROA to decompose — always run `opt -O2` before `llc` for programs with struct values.
+
+## 2026-06-02 — `is_trigger_gated` misses `Expr::Eq`, enum dispatch invisible for `trigger == literal` preconditions
+
+**Issue**: Sparse dispatch benchmark preconditions like `t == 101` (Eq(Identifier, Integer)) never entered the enum dispatch optimizer path. The enum dispatch path correctly extracted keys via `extract_trigger_keys` (line 149-183) but `is_trigger_gated` (line 139-147) returned `false` for all `Expr::Eq` patterns, so no reactive txn was classified as an enum candidate.
+
+**Root Cause**: `is_trigger_gated` at `src/backend/llvm.rs:139-147` matched only `Expr::Identifier(name)` and `Expr::And(l, r)`. An `Expr::Eq(Identifier(trigger), Integer(value))` node was never unwrapped. The function signature says it checks for "a direct reference to one of the given trigger names" — but this was too narrow: a _direct reference_ is `trigger == value` just as much as bare `trigger`, and `extract_trigger_keys` already recognized Eq patterns.
+
+```rust
+// Before (BUGGY):
+fn is_trigger_gated(pre: &Expr, trigger_names: &HashSet<&str>) -> bool {
+    match pre {
+        Expr::Identifier(name) => trigger_names.contains(name.as_str()),
+        Expr::And(l, r) => is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names),
+        _ => false,  // ← Expr::Eq falls through here
+    }
+}
+```
+
+This bug was introduced in the same commit that added `extract_trigger_keys` and `is_trigger_gated` (Step 7 / dead-field elimination). Whoever wrote `extract_trigger_keys` correctly handled `Expr::Eq` but the counterpart `is_trigger_gated` didn't get the same treatment.
+
+**How discovered**: Writing a sparse dispatch benchmark that used `t == 101 || t == 204 || ...` preconditions. Benchmark compiled but ran through the standard `reactor_tick()` path instead of enum switch dispatch. LLVM IR inspection showed `switch` was absent — the program used the generic tick loop.
+
+**Fix**: Added `Expr::Eq(l, r)` arm to `is_trigger_gated`:
+
+```rust
+Expr::Eq(l, r) => {
+    matches!(l.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
+        || matches!(r.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
+}
+```
+
+**Files**: `src/backend/llvm.rs:139-147`
+
+**Lesson**: Whenever a classification function (`is_trigger_gated`) and a data-extraction function (`extract_trigger_keys`) operate on the same AST nodes for the same purpose, they must recognize the same expression patterns. `extract_trigger_keys` correctly handles `Expr::Eq` — `is_trigger_gated` must too. They were written at the same time for the same optimization path; the divergence was an oversight.
+
+## 2026-06-02 — `llvm.assume` before `br` in folded loops makes `opt` believe exit branch is dead
+
+**Issue**: `const_heavy.bv` compiled to a binary that immediately segfaulted. The `main()` function was optimized to `unreachable` by `opt -O2`, causing LLVM to emit invalid code.
+
+**Root Cause**: `emit_folded_loop` at `src/backend/llvm.rs:2911-2912` emitted `call void @llvm.assume(i1 %cp)` on the loop entry comparison result, then `br i1 %cp, label %body, label %done`. The `llvm.assume` tells LLVM's optimizer that the comparison is ALWAYS true. `opt -O2` then eliminated the `done` branch (the loop exit) as dead code, making the loop infinite. The `noreturn` function attribute and `unreachable` terminator produced a segfault.
+
+```llvm
+; Before (optimized to infinite loop):
+%cp = icmp slt i64 %cnt, %total
+call void @llvm.assume(i1 %cp)    ; tells opt: %cp is ALWAYS true
+br i1 %cp, label %body, label %done  ; opt eliminates %done
+
+; Result (via opt -O2):
+define noundef i32 @main() {
+  %t9.i = tail call i64 @__get_env_int(ptr @str.0)
+  store volatile i64 %t9.i, ptr @global_state
+  unreachable  ; <-- SEGFAULT
+}
+```
+
+Three code paths in `emit_folded_loop` (phi mode, SSA mode, call mode) all emitted `llvm.assume` on the same `icmp slt` result.
+
+**How discovered**: `const_heavy.bv` benchmark segfaulted immediately. GDB showed PC at `0x5`. Inspection of `const_heavy.opt.ll` revealed `main()` ended with `unreachable`. The `llvm.assume` was traced to the optimization sprint commit that added "`llvm.assume` on convergent preconditions" (2026-06-02).
+
+**Fix**: Removed `llvm.assume` emission from all three code paths in `emit_folded_loop`. Removed the `proven_convergent: bool` parameter from the function signature and all callers.
+
+**Files**: `src/backend/llvm.rs:2911-2912`, `src/backend/llvm.rs:2936-2937`, `src/backend/llvm.rs:2969-2970`
+
+**Lesson**: `llvm.assume(i1 %cond)` tells the optimizer that `%cond` is unconditionally true. Placing it BEFORE a conditional branch (`br i1 %cond, label %exit, label %loop`) makes the optimizer eliminate the branch's continuation as dead code. If the branch controls loop convergence, the result is an infinite loop. `llvm.assume` is correct when placed after a runtime panicking branch (`br i1 %cond, label %panic, label %safe` followed by `unreachable` then `call @llvm.assume(i1 %cond)`) — never before a convergence check.
