@@ -93,29 +93,103 @@ impl QueryEngine {
             .cloned()
             .unwrap_or_default();
 
-        let mut results = records;
+        let mut state = QueryResult::Records(records);
 
         for op in &pipeline.operations {
-            results = self.apply_operation(results, op)?;
+            state = self.apply_operation(state, op)?;
         }
 
-        Ok(QueryResult::Records(results))
+        Ok(state)
     }
 
-    fn apply_operation(&self, records: Vec<DbriefRecord>, op: &QueryOp) -> Result<Vec<DbriefRecord>, String> {
+    fn apply_operation(&self, state: QueryResult, op: &QueryOp) -> Result<QueryResult, String> {
+        let records = match state {
+            QueryResult::Records(recs) => recs,
+            _ => return Err("Cannot apply further operations to a terminal query result".to_string()),
+        };
+
         match op {
             QueryOp::Filter(expr) => {
-                Ok(records.into_iter()
+                Ok(QueryResult::Records(records.into_iter()
                     .filter(|r| self.eval_filter(r, expr))
-                    .collect())
+                    .collect()))
             }
             QueryOp::Map(fields) => {
-                Ok(records.into_iter()
+                Ok(QueryResult::Records(records.into_iter()
                     .map(|r| self.project_fields(r, fields))
-                    .collect())
+                    .collect()))
             }
             QueryOp::Count => {
-                Ok(vec![])
+                Ok(QueryResult::Count(records.len()))
+            }
+            QueryOp::Sum(field) => {
+                let total: i64 = records.iter()
+                    .filter_map(|r| {
+                        if let Value::Int(v) = self.eval_field_access(r, &DbriefExpr::Ident(field.clone())) {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    })
+                    .sum();
+                Ok(QueryResult::Aggregated(AggregationResult::Sum(total)))
+            }
+            QueryOp::Avg(field) => {
+                let vals: Vec<f64> = records.iter()
+                    .filter_map(|r| {
+                        match self.eval_field_access(r, &DbriefExpr::Ident(field.clone())) {
+                            Value::Int(v) => Some(v as f64),
+                            Value::Float(v) => Some(v),
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                if vals.is_empty() {
+                    Ok(QueryResult::Aggregated(AggregationResult::Avg(0.0)))
+                } else {
+                    let avg = vals.iter().sum::<f64>() / vals.len() as f64;
+                    Ok(QueryResult::Aggregated(AggregationResult::Avg(avg)))
+                }
+            }
+            QueryOp::Min(field) => {
+                let min_val = records.iter()
+                    .filter_map(|r| {
+                        if let Value::Int(v) = self.eval_field_access(r, &DbriefExpr::Ident(field.clone())) {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    })
+                    .min()
+                    .unwrap_or(0);
+                Ok(QueryResult::Aggregated(AggregationResult::Min(min_val)))
+            }
+            QueryOp::Max(field) => {
+                let max_val = records.iter()
+                    .filter_map(|r| {
+                        if let Value::Int(v) = self.eval_field_access(r, &DbriefExpr::Ident(field.clone())) {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    })
+                    .max()
+                    .unwrap_or(0);
+                Ok(QueryResult::Aggregated(AggregationResult::Max(max_val)))
+            }
+            QueryOp::First => {
+                if let Some(first) = records.into_iter().next() {
+                    Ok(QueryResult::Aggregated(AggregationResult::First(first)))
+                } else {
+                    Err("First called on empty record set".to_string())
+                }
+            }
+            QueryOp::Last => {
+                if let Some(last) = records.into_iter().last() {
+                    Ok(QueryResult::Aggregated(AggregationResult::Last(last)))
+                } else {
+                    Err("Last called on empty record set".to_string())
+                }
             }
             QueryOp::Sort(field, ascending) => {
                 let mut sorted = records;
@@ -123,13 +197,13 @@ impl QueryEngine {
                     let cmp = self.compare_field(a, b, field);
                     if *ascending { cmp } else { cmp.reverse() }
                 });
-                Ok(sorted)
+                Ok(QueryResult::Records(sorted))
             }
             QueryOp::Limit(n) => {
-                Ok(records.into_iter().take(*n).collect())
+                Ok(QueryResult::Records(records.into_iter().take(*n).collect()))
             }
             QueryOp::Skip(n) => {
-                Ok(records.into_iter().skip(*n).collect())
+                Ok(QueryResult::Records(records.into_iter().skip(*n).collect()))
             }
             QueryOp::Unique => {
                 let mut unique: Vec<DbriefRecord> = Vec::new();
@@ -138,9 +212,11 @@ impl QueryEngine {
                         unique.push(r);
                     }
                 }
-                Ok(unique)
+                Ok(QueryResult::Records(unique))
             }
-            _ => Ok(records),
+            QueryOp::Join(_, _) | QueryOp::LeftJoin(_, _) => {
+                Err("Join operations are not yet implemented".to_string())
+            }
         }
     }
 

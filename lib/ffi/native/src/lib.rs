@@ -367,7 +367,7 @@ pub fn __find_from(s: String, needle: String, start: i64) -> Result<i64, String>
         return Ok(-1);
     }
     let start_idx = start as usize;
-    if start_idx > s.len() {
+    if start_idx > s.len() || !s.is_char_boundary(start_idx) {
         return Ok(-1);
     }
     match s[start_idx..].find(&needle) {

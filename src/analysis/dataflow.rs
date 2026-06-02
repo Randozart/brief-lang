@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, Statement, TopLevel, Transaction};
+use crate::ast::{Expr, Program, SliceCoordinate, Statement, TopLevel, Transaction};
 use std::collections::{HashMap, HashSet};
 
 pub struct DataflowAnalyzer<'a> {
@@ -94,7 +94,10 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::Identifier(name) => { ids.insert(name.clone()); }
             Expr::OwnedRef(name) => { ids.insert(name.clone()); }
             Expr::PriorState(name) => { ids.insert(name.clone()); }
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_)
+            | Expr::Bool(_) | Expr::Term => {}
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+            | Expr::Mod(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
                 self.extract_ids_recursive(l, ids);
                 self.extract_ids_recursive(r, ids);
             }
@@ -107,11 +110,121 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) => {
                 self.extract_ids_recursive(inner, ids);
             }
+            Expr::Cast(inner, _) | Expr::ListLen(inner) => {
+                self.extract_ids_recursive(inner, ids);
+            }
+            Expr::Call(_, args) | Expr::ListLiteral(args) | Expr::Tuple(args) => {
+                for arg in args {
+                    self.extract_ids_recursive(arg, ids);
+                }
+            }
             Expr::ListIndex(list, idx) => {
                 self.extract_ids_recursive(list, ids);
                 self.extract_ids_recursive(idx, ids);
             }
-            _ => {}
+            Expr::FieldAccess(obj, _) => {
+                self.extract_ids_recursive(obj, ids);
+            }
+            Expr::StructInstance(_, fields) | Expr::ObjectLiteral(fields) => {
+                for (_, field_expr) in fields {
+                    self.extract_ids_recursive(field_expr, ids);
+                }
+            }
+            Expr::Slice { value, start, end, stride, mask } => {
+                self.extract_ids_recursive(value, ids);
+                if let Some(s) = start { self.extract_ids_recursive(s, ids); }
+                if let Some(e) = end { self.extract_ids_recursive(e, ids); }
+                if let Some(st) = stride { self.extract_ids_recursive(st, ids); }
+                if let Some(m) = mask { self.extract_ids_recursive(m, ids); }
+            }
+            Expr::MultiSlice { value, coordinates, mask } => {
+                self.extract_ids_recursive(value, ids);
+                for coord in coordinates {
+                    self.extract_ids_from_slice_coord(coord, ids);
+                }
+                if let Some(m) = mask { self.extract_ids_recursive(m, ids); }
+            }
+            Expr::PatternMatch { value, .. } => {
+                self.extract_ids_recursive(value, ids);
+            }
+            Expr::Match { value, arms } => {
+                self.extract_ids_recursive(value, ids);
+                for arm in arms {
+                    self.extract_ids_recursive(&arm.body, ids);
+                    if let Some(ref g) = arm.guard {
+                        self.extract_ids_recursive(g, ids);
+                    }
+                }
+            }
+            Expr::ForAll { expr, .. } | Expr::Exists { expr, .. } => {
+                self.extract_ids_recursive(expr, ids);
+            }
+            Expr::Block(stmts, expr) => {
+                for stmt in stmts {
+                    self.extract_ids_from_statement(stmt, ids);
+                }
+                self.extract_ids_recursive(expr, ids);
+            }
+            Expr::TupleDestructure(_, inner) => {
+                self.extract_ids_recursive(inner, ids);
+            }
+        }
+    }
+
+    fn extract_ids_from_slice_coord(&self, coord: &SliceCoordinate, ids: &mut HashSet<String>) {
+        match coord {
+            SliceCoordinate::Index(expr) => {
+                self.extract_ids_recursive(expr, ids);
+            }
+            SliceCoordinate::Range { start, end } => {
+                if let Some(s) = start { self.extract_ids_recursive(s, ids); }
+                if let Some(e) = end { self.extract_ids_recursive(e, ids); }
+            }
+            SliceCoordinate::Named { coord, .. } => {
+                self.extract_ids_from_slice_coord(coord, ids);
+            }
+        }
+    }
+
+    fn extract_ids_from_statement(&self, stmt: &Statement, ids: &mut HashSet<String>) {
+        match stmt {
+            Statement::Assignment { lhs, expr, .. } => {
+                self.extract_ids_recursive(lhs, ids);
+                self.extract_ids_recursive(expr, ids);
+            }
+            Statement::Let { expr, address_expr, .. } => {
+                if let Some(e) = expr { self.extract_ids_recursive(e, ids); }
+                if let Some(a) = address_expr { self.extract_ids_recursive(a, ids); }
+            }
+            Statement::Unification { expr, .. } => {
+                self.extract_ids_recursive(expr, ids);
+            }
+            Statement::Guarded { condition, statements } => {
+                self.extract_ids_recursive(condition, ids);
+                for s in statements {
+                    self.extract_ids_from_statement(s, ids);
+                }
+            }
+            Statement::Expression(expr) => {
+                self.extract_ids_recursive(expr, ids);
+            }
+            Statement::Term { values, .. } => {
+                for v in values.iter().flatten() {
+                    self.extract_ids_recursive(v, ids);
+                }
+            }
+            Statement::Escape(expr) => {
+                if let Some(e) = expr { self.extract_ids_recursive(e, ids); }
+            }
+            Statement::LocalTrigger { expr, .. } => {
+                if let Some(e) = expr { self.extract_ids_recursive(e, ids); }
+            }
+            Statement::OnExit { body, .. } => {
+                for s in body {
+                    self.extract_ids_from_statement(s, ids);
+                }
+            }
+            Statement::InlineAsm { .. } | Statement::Alka(_) => {}
         }
     }
 

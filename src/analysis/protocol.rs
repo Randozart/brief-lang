@@ -9,6 +9,7 @@ impl ProtocolVerifier {
 
         // Build transaction dependency graph
         let mut txn_prerequisites: HashMap<String, Vec<Prerequisite>> = HashMap::new();
+        let mut txn_writes: HashMap<String, HashSet<String>> = HashMap::new();
         let mut all_preconditions: HashMap<String, Expr> = HashMap::new();
 
         for item in &program.items {
@@ -16,6 +17,9 @@ impl ProtocolVerifier {
                 let prereqs = Self::extract_prerequisites(&txn.contract.pre_condition);
                 txn_prerequisites.insert(txn.name.clone(), prereqs);
                 all_preconditions.insert(txn.name.clone(), txn.contract.pre_condition.clone());
+
+                let writes = Self::extract_postcondition_writes(&txn.contract.post_condition);
+                txn_writes.insert(txn.name.clone(), writes);
             }
         }
 
@@ -26,20 +30,16 @@ impl ProtocolVerifier {
                 let mut found_writer = false;
                 
                 // Find transactions that set this register
-                for (other_name, other_expr) in &all_preconditions {
+                for (other_name, _) in &all_preconditions {
                     if other_name == txn_name {
                         continue;
                     }
-                    
-                    // Simple check: does other transaction's postcondition set this register?
-                    // For full analysis, we'd need to check the actual body
-                    let other_prereqs = txn_prerequisites.get(other_name);
-                    if let Some(prs) = other_prereqs {
-                        for pr in prs {
-                            if pr.register == prereq.register && pr.value >= 0 {
-                                found_writer = true;
-                                break;
-                            }
+
+                    // Check if another transaction writes to this register
+                    if let Some(writes) = txn_writes.get(other_name) {
+                        if writes.contains(&prereq.register) {
+                            found_writer = true;
+                            break;
                         }
                     }
                 }
@@ -158,6 +158,28 @@ impl ProtocolVerifier {
             Expr::Or(lhs, rhs) => {
                 Self::extract_prerecs_recursive(lhs, prereqs);
                 Self::extract_prerecs_recursive(rhs, prereqs);
+            }
+            _ => {}
+        }
+    }
+
+    fn extract_postcondition_writes(post: &Expr) -> HashSet<String> {
+        let mut writes = HashSet::new();
+        Self::extract_writes_recursive(post, &mut writes);
+        writes
+    }
+
+    fn extract_writes_recursive(expr: &Expr, writes: &mut HashSet<String>) {
+        match expr {
+            Expr::Eq(lhs, _) | Expr::Ge(lhs, _) | Expr::Gt(lhs, _)
+            | Expr::Le(lhs, _) | Expr::Lt(lhs, _) | Expr::Ne(lhs, _) => {
+                if let Expr::Identifier(name) = lhs.as_ref() {
+                    writes.insert(name.clone());
+                }
+            }
+            Expr::And(lhs, rhs) | Expr::Or(lhs, rhs) => {
+                Self::extract_writes_recursive(lhs, writes);
+                Self::extract_writes_recursive(rhs, writes);
             }
             _ => {}
         }
