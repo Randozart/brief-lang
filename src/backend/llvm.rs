@@ -273,6 +273,7 @@ pub struct LlvmBackend {
     llvm_extra_flags: Vec<String>,
     slp_hazard_fns: HashSet<String>,
     reg_float_cache: HashMap<String, String>,
+    state_reg_name: String,
 }
 
 impl LlvmBackend {
@@ -315,6 +316,7 @@ impl LlvmBackend {
             llvm_extra_flags: Vec::new(),
             slp_hazard_fns: HashSet::new(),
             reg_float_cache: HashMap::new(),
+            state_reg_name: "%state".to_string(),
         }
     }
 
@@ -707,7 +709,12 @@ self.emit_declares(&mut out);
         if !self.constants.is_empty() { writeln!(out).ok(); }
 
         self.declare_state_type(&mut out);
-        writeln!(out, "@global_state = internal global %State zeroinitializer\n").ok();
+        // %State no longer has a module-level global. Instead, main()
+        // allocates it on the stack as an alloca and passes it to all
+        // internal functions as a noalias nocapture parameter. This
+        // guarantees SROA promotes all fields to scalar registers.
+        writeln!(out, "; %State is allocated on the stack in main() as %state = alloca %State").ok();
+        writeln!(out).ok();
 
         // Emit string constants
         for (si, s) in self.string_constants.iter().enumerate() {
@@ -1088,7 +1095,7 @@ self.emit_declares(&mut out);
                 }
                 self.emit_thread_pool_metadata(&mut out);
             } else {
-                writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define void @reactor_tick(%State* noalias nocapture %state) local_unnamed_addr #2 {{").ok();
                 writeln!(out, "  entry:").ok();
                 writeln!(out, "  ret void").ok();
                 writeln!(out, "}}").ok();
@@ -1742,7 +1749,7 @@ self.emit_declares(&mut out);
 
     // ── INIT STATE ────────────────────────────────────────────
     fn emit_init_state(&mut self, out: &mut String) {
-        writeln!(out, "define void @init_state() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define void @init_state(%State* noalias nocapture %state) local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         let mut reg = 0u32;
         let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
@@ -1751,7 +1758,7 @@ self.emit_declares(&mut out);
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, ty) in fields {
             let p = format!("%ip{}", reg); reg += 1;
-            writeln!(out, "  {} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", p, idx).ok();
+            writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", p, idx).ok();
             let init_clone = self.field_initializers.get(&name).and_then(|e| e.clone());
             match init_clone {
                 Some(Expr::Integer(n)) => {
@@ -2607,7 +2614,7 @@ self.emit_declares(&mut out);
         }
         for (n, _) in txns { if !fused_txns.contains(n) { dispatch.push(n.clone()); } }
 
-        writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define void @reactor_tick(%State* noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
         // Trigger sampling — load volatile into named registers
         self.sampled_triggers.clear();
@@ -2634,7 +2641,7 @@ self.emit_declares(&mut out);
             let check0 = format!("ck0");
             if has_pre {
                 let first_txn = self.resolve_dispatch_first_txn(first);
-                writeln!(out, "  %pr0 = call i1 @pre_{}(%State* @global_state)", first_txn).ok();
+                writeln!(out, "  %pr0 = call i1 @pre_{}(%State* %state)", first_txn).ok();
                 writeln!(out, "  br i1 %pr0, label %b0, label %{}", check0).ok();
             } else {
                 writeln!(out, "  br i1 true, label %b0, label %{}", check0).ok();
@@ -2644,7 +2651,7 @@ self.emit_declares(&mut out);
                 let b = format!("b{}", i);
                 let c = format!("ck{}", i);
                 writeln!(out, "{}:", b).ok();
-                writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
+                writeln!(out, "  call void @{}(%State* %state)", txn_name).ok();
                 // Fall through to this transaction's check label, which evaluates
                 // the NEXT transaction's precondition. Matches the interpreter model
                 // where all dirty transactions are evaluated sequentially in one tick.
@@ -2659,7 +2666,7 @@ self.emit_declares(&mut out);
                     let next_check = format!("ck{}", i + 1);
                     if has_next_pre {
                         let next_txn = self.resolve_dispatch_first_txn(next);
-                        writeln!(out, "  %pr{} = call i1 @pre_{}(%State* @global_state)", i + 1, next_txn).ok();
+                        writeln!(out, "  %pr{} = call i1 @pre_{}(%State* %state)", i + 1, next_txn).ok();
                         writeln!(out, "  br i1 %pr{}, label %b{}, label %{}", i + 1, i + 1, next_check).ok();
                     } else {
                         writeln!(out, "  br i1 true, label %b{}, label %{}", i + 1, next_check).ok();
@@ -2715,7 +2722,7 @@ self.emit_declares(&mut out);
         }
         for (n, _) in txns { if !fused_txns.contains(n) { dispatch.push(n.clone()); } }
 
-        writeln!(out, "define void @reactor_tick() local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define void @reactor_tick(%State* noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
         // Trigger sampling
         self.sampled_triggers.clear();
@@ -2746,7 +2753,7 @@ self.emit_declares(&mut out);
                 let has_pre = self.dispatch_has_pre(txns, txn_name);
                 if has_pre {
                     let first_txn = self.resolve_dispatch_first_txn(txn_name);
-                    writeln!(out, "  %pr{} = call i1 @pre_{}(%State* @global_state)", i, first_txn).ok();
+                    writeln!(out, "  %pr{} = call i1 @pre_{}(%State* %state)", i, first_txn).ok();
                 } else {
                     writeln!(out, "  %pr{} = add i1 0, 1", i).ok();
                 }
@@ -2788,7 +2795,7 @@ self.emit_declares(&mut out);
                 let next_c = format!("ck{}", i + 1);
                 let wm = self.txn_write_masks.get(txn_name).copied().unwrap_or(0);
                 writeln!(out, "{}:", b).ok();
-                writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
+                writeln!(out, "  call void @{}(%State* %state)", txn_name).ok();
                 if wm != 0 {
                     let fm = format!("%fm{}a", i);
                     let fmu = format!("%fm{}b", i);
@@ -2845,7 +2852,7 @@ self.emit_declares(&mut out);
     fn emit_exit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> String {
         // Leaf expressions: delegate integer/bool to emit_expr for constant
         // inlining. Keep Identifier/OwnedRef local because exit conditions
-        // access @global_state directly (no %state function param available).
+        // Access %state pointer (passed as parameter or via alloca in main)
         match expr {
             Expr::Integer(_) | Expr::Bool(_) => {
                 return self.emit_expr(out, expr, indent).name;
@@ -2859,7 +2866,7 @@ self.emit_declares(&mut out);
                 if let Some(&idx) = self.field_index_map.get(name) {
                     let p = format!("%gep_exit_{}", self.txn_counter);
                     self.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", indent, p, idx).ok();
+                    writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
                     writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok();
                 } else if self.constants.contains_key(name) {
                     writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
@@ -2958,7 +2965,8 @@ self.emit_declares(&mut out);
     fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#3")).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  call void @init_state()").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
         if has_wake_triggers {
             writeln!(out, "  call void @__rt_init()").ok();
             writeln!(out, "  call void @__rt_poll()").ok();
@@ -2973,7 +2981,7 @@ self.emit_declares(&mut out);
         if self.has_async_txns && !self.is_lightweight_async {
             self.emit_async_phase(out);
         } else {
-            writeln!(out, "  call void @reactor_tick()").ok();
+            writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
         }
         let has_exit = self.exit_condition.is_some();
         if has_exit {
@@ -3005,7 +3013,7 @@ self.emit_declares(&mut out);
     /// `define` / `ret`).  Used by both `emit_folded_main` and the enum dispatch path.
     ///
     /// When `use_phi = true`, the counter lives in an SSA phi node (register)
-    /// instead of being loaded/stored through @global_state every iteration.
+    /// instead of being loaded/stored through %state every iteration.
     /// Only valid when the txn body is pure (just counter++).
     ///
     /// When `use_phi = false` and `body = Some(stmts)`, the txn body is emitted
@@ -3032,7 +3040,7 @@ self.emit_declares(&mut out);
             writeln!(out, "{}:", entry_label).ok();
             // Load bound once
             if let Some(ti) = total_idx {
-                writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
+                writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, ti).ok();
                 writeln!(out, "  %lt_{}_{} = load i64, i64* %gt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
             } else if let Some(cn) = total_const_name {
                 writeln!(out, "  %lt_{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
@@ -3040,7 +3048,7 @@ self.emit_declares(&mut out);
                 writeln!(out, "  %lt_{}_{} = add i64 0, 0", label_prefix, c0).ok();
             }
             // Load counter once
-            writeln!(out, "  %gcnt_{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, counter_idx).ok();
+            writeln!(out, "  %gcnt_{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, counter_idx).ok();
             writeln!(out, "  %init_{}_{} = load i64, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
             writeln!(out, "  br label %{}", hdr_label).ok();
             writeln!(out, "{}:", hdr_label).ok();
@@ -3057,7 +3065,7 @@ self.emit_declares(&mut out);
         } else if let Some(stmts) = body {
             // SSA mode: load once, phi in header, inline unrolled body with extract/insert, store once
             if let Some(ti) = total_idx {
-                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
+                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, ti).ok();
                 writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
             } else if let Some(cn) = total_const_name {
                 writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
@@ -3163,7 +3171,7 @@ self.emit_declares(&mut out);
                     }
                     _ => {
                         let gep = format!("%gep{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "  {} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", gep, idx).ok();
+                        writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gep, idx).ok();
                         let ld = format!("%ld{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "  {} = load {}, {}* {}, align {}", ld, ty, ty, gep, self.align_of(ty)).ok();
                         let iv = format!("%liv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
@@ -3203,10 +3211,10 @@ self.emit_declares(&mut out);
             let final_reg = format!("%final_{}", label_prefix);
             writeln!(out, "{}_done:", label_prefix).ok();
             writeln!(out, "  {} = load %State, %State* %slot_{}, align 8", final_reg, label_prefix).ok();
-            writeln!(out, "  store %State {}, %State* @global_state, align 8", final_reg).ok();
+            writeln!(out, "  store %State {}, %State* %state, align 8", final_reg).ok();
         } else {
             if let Some(ti) = total_idx {
-                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
+                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, ti).ok();
                 writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
             } else if let Some(cn) = total_const_name {
                 writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
@@ -3215,12 +3223,12 @@ self.emit_declares(&mut out);
             }
             writeln!(out, "  br label %{}_hdr", label_prefix).ok();
             writeln!(out, "{}_hdr:", label_prefix).ok();
-            writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
+            writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
             writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
             writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
             writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
             writeln!(out, "{}_body:", label_prefix).ok();
-            writeln!(out, "  call void @{}(%State* @global_state)", txn_name).ok();
+            writeln!(out, "  call void @{}(%State* %state)", txn_name).ok();
             writeln!(out, "  br label %{}_hdr", label_prefix).ok();
             writeln!(out, "{}_done:", label_prefix).ok();
         }
@@ -3238,9 +3246,9 @@ self.emit_declares(&mut out);
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  call void @init_state()").ok();
-        // When use_phi is true, emit_folded_loop starts with a named label
-        // that becomes the first block after entry's br. No extra label needed.
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        // Legacy phi-mode: uses
         if use_phi {
             writeln!(out, "  br label %case_phi_entry").ok();
         }
@@ -3263,11 +3271,12 @@ self.emit_declares(&mut out);
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  call void @init_state()").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
-        let ss0 = format!("%ss{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "  {} = load %State, %State* @global_state, align 8", ss0).ok();
+        let ss0 = format!("%ss{}", self.txn_counter); self.txn_counter += 1; // line 3277 in ssa_main
+        writeln!(out, "  {} = load %State, %State* %state, align 8", ss0).ok();
         self.ssa_state_reg = Some(ss0.clone());
         for (name, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             let pre = &txn.contract.pre_condition;
@@ -3299,7 +3308,7 @@ self.emit_declares(&mut out);
             }
         }
         let final_reg = self.ssa_state_reg.take().unwrap_or(ss0);
-        writeln!(out, "  store %State {}, %State* @global_state, align 8", final_reg).ok();
+        writeln!(out, "  store %State {}, %State* %state, align 8", final_reg).ok();
         if let Some(ref cond) = self.exit_condition.clone() {
             let val = self.emit_exit_expr(out, cond, "  ");
             let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
@@ -3352,7 +3361,8 @@ self.emit_declares(&mut out);
         let main_attr = self.slp_attr("main", if has_wake { "#3" } else { "#0" });
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", main_attr).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  call void @init_state()").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
         if has_wake {
             writeln!(out, "  call void @__rt_init()").ok();
             writeln!(out, "  call void @__rt_poll()").ok();
@@ -3434,7 +3444,7 @@ self.emit_declares(&mut out);
                     if let Some(&(pure, tv)) = fold_pure.get(ptxn_name) {
                         if pure {
                             if let Some(tv) = tv {
-                                writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", sub_prefix, pci).ok();
+                                writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sub_prefix, pci).ok();
                                 writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, sub_prefix).ok();
                                 continue;
                             } else {
@@ -3461,7 +3471,7 @@ self.emit_declares(&mut out);
             // Single-value trigger: just fall through to the loop
             let fn_name = trig_to_fn.get(&0).map(|s| s.as_str()).unwrap_or(txn_name);
             if let Some((ci, tv)) = all_internal_lookup(fn_name) {
-                writeln!(out, "  %pc_sc = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", ci).ok();
+                writeln!(out, "  %pc_sc = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", ci).ok();
                 writeln!(out, "  store i64 {}, i64* %pc_sc, align 8", tv).ok();
             } else {
                 emit_case_folded_loops(self, out, "sc", fn_name, counter_idx, total_idx, total_const_name);
@@ -3511,7 +3521,7 @@ self.emit_declares(&mut out);
                 }
                 let fn_name = trig_to_fn.get(key).map(|s| s.as_str()).unwrap_or(&native_name);
                 if let Some((ci, tv)) = all_internal_lookup(fn_name) {
-                    writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", prefix, ci).ok();
+                    writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", prefix, ci).ok();
                     writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, prefix).ok();
                 } else {
                     emit_case_folded_loops(self, out, &prefix, fn_name, counter_idx, total_idx, total_const_name);
@@ -3523,27 +3533,27 @@ self.emit_declares(&mut out);
                 }
             }
             writeln!(out, "{}_residual:", tn).ok();
-            writeln!(out, "  call void @reactor_tick()").ok();
+            writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
             if has_wake {
                 writeln!(out, "  br label %{}", done_label).ok();
             } else {
                 writeln!(out, "  br label %{}_residual_loop", tn).ok();
                 writeln!(out, "{}_residual_loop:", tn).ok();
-                writeln!(out, "  call void @reactor_tick()").ok();
+                writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
                 writeln!(out, "  br label %{}_residual_loop", tn).ok();
             }
         } else {
             // Multi-trigger case: just fall through to standard reactor
             if has_wake {
-                writeln!(out, "  call void @reactor_tick()").ok();
+                writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
                 writeln!(out, "  br label %{}", done_label).ok();
             } else {
                 writeln!(out, "  br label %residual_entry").ok();
                 writeln!(out, "residual_entry:").ok();
-                writeln!(out, "  call void @init_state()").ok();
+                writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
                 writeln!(out, "  br label %residual_loop").ok();
                 writeln!(out, "residual_loop:").ok();
-                writeln!(out, "  call void @reactor_tick()").ok();
+                writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
                 writeln!(out, "  br label %residual_loop").ok();
             }
         }
@@ -3583,8 +3593,9 @@ self.emit_declares(&mut out);
     fn emit_folded_pure_counter(&self, out: &mut String, counter_idx: usize, total_value: i64) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  call void @init_state()").ok();
-        writeln!(out, "  %gp = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", counter_idx).ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        writeln!(out, "  %gp = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", counter_idx).ok();
         writeln!(out, "  store i64 {}, i64* %gp, align 8", total_value).ok();
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
@@ -3598,13 +3609,14 @@ self.emit_declares(&mut out);
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  call void @init_state()").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for (_, bindings) in final_values {
             for (var, val) in bindings {
                 if !seen.insert(var) { continue; }
                 if let Some(&idx) = self.field_index_map.get(var) {
-                    writeln!(out, "  %gp_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", var, idx).ok();
+                    writeln!(out, "  %gp_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", var, idx).ok();
                     writeln!(out, "  store i64 {}, i64* %gp_{}, align 8", val, var).ok();
                 }
             }
@@ -3660,7 +3672,7 @@ self.emit_declares(&mut out);
         if !self.has_async_txns || self.is_lightweight_async { return; }
         writeln!(out, "  call void @brief_barrier_release()").ok();
         // Sequential reactor runs in main thread concurrently with workers
-        writeln!(out, "  call void @reactor_tick()").ok();
+        writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
         writeln!(out, "  call void @brief_barrier_wait()").ok();
     }
 
@@ -3891,7 +3903,7 @@ mod tests {
         let output = backend.generate(&program);
         assert!(output.contains("%State"));
         assert!(output.contains("i64"));
-        assert!(output.contains("global_state"));
+        assert!(output.contains("%state"));
     }
 
     #[test]
@@ -4098,7 +4110,7 @@ mod tests {
 
         // Fall-through dispatch: body blocks don't end with ret void
         assert!(output.contains("reactor_tick"), "Should have reactor_tick");
-        assert!(output.contains("global_state"), "Should reference global state");
+        assert!(output.contains("%state"), "Should reference state pointer");
         assert!(output.contains("__io_pending"), "Should reference trigger");
 
         // Trigger sampling emits load volatile
@@ -4625,11 +4637,11 @@ mod tests {
             "main() should NOT use mustprogress attribute #2");
         assert!(output.contains("define i32 @main() local_unnamed_addr #3"),
             "main() should use non-mustprogress attribute #3");
-        assert!(output.contains("define void @reactor_tick() local_unnamed_addr #2"),
+        assert!(output.contains("define void @reactor_tick(%State* noalias nocapture %state) local_unnamed_addr #2"),
             "reactor_tick() should use non-willreturn attribute #2");
         assert!(output.contains("attributes #0"),
             "attributes #0 should still be present for terminating functions");
-        assert!(output.contains("define void @init_state() local_unnamed_addr #0"),
+        assert!(output.contains("define void @init_state(%State* noalias nocapture %state) local_unnamed_addr #0"),
             "init_state() should still use #0 with willreturn");
     }
 
@@ -4845,7 +4857,7 @@ mod tests {
             &[("count", 0), ("x", 0), ("y", 0)],
         );
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
-        assert!(output.contains("call void @init_state()"),
+        assert!(output.contains("call void @init_state(%State* noalias nocapture %state)"),
             "Should call init_state");
         assert!(!output.contains("switch i64"),
             "No enum dispatch for precomputed path");
@@ -4875,7 +4887,7 @@ mod tests {
         let output = LlvmBackend::new().with_optimize_budget(0).generate(&program);
         assert!(!output.contains("switch i64"),
             "No enum dispatch without triggers");
-        assert!(output.contains("load %State, %State* @global_state"),
+        assert!(output.contains("load %State, %State* %state"),
             "All-convergent program should use struct-SSA main");
         assert!(!output.contains("@reactor_tick"),
             "All-convergent program should not emit reactor_tick");
