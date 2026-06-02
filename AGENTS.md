@@ -71,7 +71,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: All optimization phases + float register promotion + llvm.assume + key extraction + perfect hashing + peephole folding + constant inlining + dedup + exit safety diagnostics + natural death + dead-field elimination + fair C benchmarks + SLP hazard analyzer + Kalman filter parity complete. 368 tests pass. Brief ties or beats C on all 4 benchmarks. Kalman filter 0.71s vs C 0.75s (Brief wins by 5%).
+**Current**: Calibration baseline complete. 7 benchmarks with 4-decimal precision timing. const_heavy now shows non-zero (0.0455s Brief vs 0.0360s C, 1.26× gap after SCEV-breaking `count/100` term). float_math shows 9.79× gap (0.4231s vs 0.0432s) — biggest optimization target. sparse_dispatch shows 32.9× gap but largely O(1) at machine level (SCEV-optimized). 368 tests pass.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -90,14 +90,16 @@ brief-compiler selfhost <file.bv>
 - **Constant deduplication**: Identical constants emit as `@alias` — single global declaration, zero extra cache lines.
 - **`emit_exit_expr` Phase 1 refactor**: Integer/Bool literals delegate to `emit_expr` for consistent constant inlining. Identifiers remain local (use `@global_state`, not `%state` function param).
 
-### Benchmarks (post-optimizations, 50M iterations):
+### Benchmarks (post-optimizations, 50M iterations, 4-decimal precision):
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | Dead-field elim + pure counter | 0.00s | 0.10s | **∞** |
-| precompute_sum | Compile-time precomputation | 0.00s | 0.00s | tie |
-| ring_buffer | Enum O(1) pure-counter | 0.00s | 0.00s | tie |
-| async_counters | Thread pool O(1) pure-counter | 0.00s | 0.00s | tie |
-| kalman_filter | SLP hazard + opt -O2 pipeline | 0.71s | 0.75s | **+5%** |
+| iir_filter | Dead-field elim + pure counter | 0.1524s | 0.1028s | 1.48× |
+| precompute_sum | Compile-time precomputation | 0.0020s | 0.0018s | ~tie (startup) |
+| ring_buffer | Enum O(1) pure-counter | 0.0019s | 0.0017s | ~tie (startup) |
+| async_counters | Thread pool O(1) pure-counter | 0.0018s | 0.0018s | ~tie (startup) |
+| float_math | SSA float boxing | 0.4231s | 0.0432s | **9.79×** |
+| sparse_dispatch | Call-chain dispatch (SCEV-opt) | 0.0559s | 0.0017s | **32.9×** |
+| const_heavy | Integer arithmetic (sdiv) | 0.0455s | 0.0360s | **1.26×** |
 
 ### Step 5 Details — Thread Pool + Auto Async/Enum Inference
 - **Phase 5a**: Thread pool primitives in `runtime/brief_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `brief_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
@@ -136,10 +138,10 @@ brief-compiler selfhost <file.bv>
 ### Benchmark Timing Results (fair — C references no longer hobbled by volatile)
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | 2 (dead-field elim + pure counter) | 0.00s | 0.10s | **∞ (Brief O(1), C volatile incq)** |
-| precompute_sum | 3 (compile-time) | 0.00s | 0.00s | ~equal |
-| ring_buffer | 4 (enum O(1) pure-counter) | 0.00s | 0.00s | ~equal |
-| async_counters | 5 (thread pool O(1) pure-counter) | 0.00s | 0.00s | ~equal |
+| iir_filter | 2 (dead-field elim + pure counter) | 0.1524s | 0.1028s | 1.48× |
+| precompute_sum | 3 (compile-time) | 0.0020s | 0.0018s | ~tie (startup) |
+| ring_buffer | 4 (enum O(1) pure-counter) | 0.0019s | 0.0017s | ~tie (startup) |
+| async_counters | 5 (thread pool O(1) pure-counter) | 0.0018s | 0.0018s | ~tie (startup) |
 | kalman_filter | SLP hazard + opt -O2 pipeline | 0.71s | 0.75s | **Brief beats C by ~5%** |
 
 ### .gitignore / Infrastructure Cleanup
@@ -184,8 +186,11 @@ brief-compiler selfhost <file.bv>
 - **Files**: 4 `.c` files, `build_and_bench.sh`
 
 ### Next Up
+- **float_math**: 9.79× gap — investigate residual float boxing overhead after register promotion
+- **sparse_dispatch**: 32.9× gap but O(1) SCEV-optimized; redesign with non-pure bodies to measure real dispatch overhead
+- **const_heavy**: 1.26× gap — integer arithmetic codegen improvement (sdiv vs C)
+- **iir_filter**: 1.48× gap — SSA float loop overhead vs native C loop
 - Input fuzzing — compile-time and runtime modes (Phase 2a/2b)
-- Investigate reducing `__rt_wait()` tick (100ms epoll timeout)
 - `build_and_bench.sh` integration test
 
 ## Key Plan Documents
@@ -203,6 +208,15 @@ brief-compiler selfhost <file.bv>
 - **`plans/2026-06-01-dead-field-elimination.md`** — Dead-field elimination: liveness analysis for effectively-pure body detection
 - **`plans/2026-06-02-hardware-aware-slp-hazard-analyzer.md`** — SLP hazard analyzer: deterministic peak register demand formula
 - **`plans/2026-06-02-slp-hazard-loopholes.md`** — Three loopholes audit: local var blindspot, dual-var constraint, missed constants
+- **`plans/2026-06-02-calibration-baseline-and-dispatch-fix.md`** — Calibration baseline, 4-decimal precision, SCEV break, alwaysinline audit
+
+### Calibration Baseline & SCEV Break (2026-06-02)
+- **Problem**: const_heavy showed 0.00s (SCEV eliminated linear recurrence). Baseline benchmarks ran 0.00s for 4/7 on O(1) pure-counter paths.
+- **Fix**: `+ count / 100` term in const_heavy body breaks SCEV (`sdiv` is non-linear). Both .bv and _c.c updated.
+- **Precision**: `build_and_bench.sh` now uses `date +%s.%N` + `bc` + `LC_NUMERIC=C` for 0.0000s precision.
+- **alwaysinline audit**: Data refutes the "alwaysinline bloat" hypothesis. `opt -O2` + SCEV handles the phi/select cascade — sparse_dispatch runs 0.0559s at 50M (not pathological). Plan A (noinline guard) skipped.
+- **Files**: `benchmarks/const_heavy.bv`, `benchmarks/const_heavy_c.c`, `build_and_bench.sh`
+- **Plan**: `plans/2026-06-02-calibration-baseline-and-dispatch-fix.md`
 
 ### SLP Hazard Analyzer (2026-06-02)
 - **Problem**: SLP vectorization creates `shufflevector` instructions from packed `<2 x float>` phis. At ≥12 float fields with cross-variable coupling, shuffles overflow x86_64's 16 XMM registers → 65 stack spills.
