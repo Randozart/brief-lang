@@ -114,23 +114,22 @@ impl CrossReferenceValidator {
                 // but we should verify bit ranges don't overlap
                 let addr_str = format!("0x{:08X}", addr);
                 
-                // For now, just note this - full overlap checking would require
-                // tracking actual bit ranges used
-                if let Some(first) = decls.first() {
-                    if first.1.is_none() {
-                        // No explicit bit range specified - could cause conflicts
-                        let addr_for_error = addr_str.clone();
-                        errors.push(CrossRefError {
-                            variable: decls.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>().join(", "),
-                            address: addr_str,
-                            error_type: CrossRefErrorType::ImplicitOverlap,
-                            message: format!(
-                                "Multiple variables at address {} without explicit bit ranges. \
-                                Specify /bit ranges to avoid conflicts.",
-                                addr_for_error
-                            ),
-                        });
-                    }
+                // Check if ANY declaration at this address lacks an explicit bit range.
+                // Only checking the first (as before) would miss cases where a later
+                // declaration has no bit range while an earlier one does.
+                let has_implicit_overlap = decls.iter().any(|(_, range)| range.is_none());
+                if has_implicit_overlap {
+                    let addr_for_error = addr_str.clone();
+                    errors.push(CrossRefError {
+                        variable: decls.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>().join(", "),
+                        address: addr_str,
+                        error_type: CrossRefErrorType::ImplicitOverlap,
+                        message: format!(
+                            "Multiple variables at address {} without explicit bit ranges. \
+                            Specify /bit ranges to avoid conflicts.",
+                            addr_for_error
+                        ),
+                    });
                 }
             }
         }

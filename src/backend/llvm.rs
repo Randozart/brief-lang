@@ -22,7 +22,7 @@ fn float_to_llvm_hex(f: f64) -> String {
 use crate::ast::{
     DispatchMode, Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 /// Collect all unique string literal values from the program for global emission.
@@ -260,6 +260,7 @@ pub struct LlvmBackend {
     warnings: Vec<String>,
     ssa_state_reg: Option<String>,
     llvm_extra_flags: Vec<String>,
+    slp_hazard_fns: HashSet<String>,
     reg_float_cache: HashMap<String, String>,
 }
 
@@ -302,6 +303,7 @@ impl LlvmBackend {
             warnings: Vec::new(),
             ssa_state_reg: None,
             llvm_extra_flags: Vec::new(),
+            slp_hazard_fns: HashSet::new(),
             reg_float_cache: HashMap::new(),
         }
     }
@@ -695,7 +697,7 @@ self.emit_declares(&mut out);
         if !self.constants.is_empty() { writeln!(out).ok(); }
 
         self.declare_state_type(&mut out);
-        writeln!(out, "@global_state = global %State zeroinitializer\n").ok();
+        writeln!(out, "@global_state = internal global %State zeroinitializer\n").ok();
 
         // Emit string constants
         for (si, s) in self.string_constants.iter().enumerate() {
@@ -703,6 +705,11 @@ self.emit_declares(&mut out);
             writeln!(out, "@str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1", si, s.len() + 1, escaped).ok();
         }
         if !self.string_constants.is_empty() { writeln!(out).ok(); }
+
+        // Run SLP hazard analysis before emitting function definitions and attributes.
+        // This populates slp_hazard_fns so that slp_attr() returns the correct attribute
+        // group (#4/#5) for hazardous functions, and the attributes section emits #4/#5.
+        self.estimate_slp_hazard(&txns);
 
         let mut range_meta: Vec<String> = Vec::new();
 
@@ -928,7 +935,8 @@ self.emit_declares(&mut out);
                     }
                 }
                 if !multi_fold_params.is_empty() {
-                    self.emit_folded_multi_main(&mut out, &multi_fold_params);
+                    self.emit_folded_multi_main(&mut out, &txns, &[], &HashMap::new(), &multi_fold_params,
+                        &HashMap::new(), 0, None, None, None, None, None, false);
                     self.emit_thread_pool_metadata(&mut out);
                 } else if dispatch_mode == DispatchMode::Sequential && !txns.is_empty()
                     && enumerable.is_none() && !has_wake_triggers
@@ -1032,7 +1040,7 @@ self.emit_declares(&mut out);
                 } else {
                     Some(&all_internal_counter)
                 };
-                self.emit_enum_main(
+                self.emit_folded_multi_main(
                     &mut out,
                     &txns,
                     enum_sizes,
@@ -1122,6 +1130,20 @@ self.emit_declares(&mut out);
         writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn memory(argmem: write) }}").ok();
         writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(readwrite) }}").ok();
         writeln!(out, "attributes #3 = {{ nofree norecurse nosync nounwind memory(readwrite) }}").ok();
+        // SLP-safe attribute variants: #4 = #0 + disable-slp, #5 = #3 + disable-slp.
+        // Dual attributes (disable-slp-vectorize + no-vectorize-slp) ensure LLVM
+        // compatibility across versions 15–22+. Emitted only when needed.
+        if !self.slp_hazard_fns.is_empty() {
+            writeln!(out, "attributes #4 = {{").ok();
+            writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn").ok();
+            writeln!(out, "    memory(argmem: readwrite)").ok();
+            writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
+            writeln!(out, "}}").ok();
+            writeln!(out, "attributes #5 = {{").ok();
+            writeln!(out, "    nofree norecurse nosync nounwind memory(readwrite)").ok();
+            writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
+            writeln!(out, "}}").ok();
+        }
         // Range metadata
         if !range_meta.is_empty() {
             writeln!(out).ok();
@@ -1281,11 +1303,6 @@ self.emit_declares(&mut out);
             }
         }
 
-        // Hardware-aware SLP vectorization hazard detection.
-        // If estimated peak vector register demand >= target's physical register count,
-        // SLP vectorization would cause register spills → disable it.
-        self.estimate_slp_hazard(&txns);
-
         out
     }
 
@@ -1300,6 +1317,20 @@ self.emit_declares(&mut out);
 
     pub fn llvm_extra_flags(&self) -> &[String] {
         &self.llvm_extra_flags
+    }
+
+    /// Return the attribute group for a function, using `#4` (SLP-disabled)
+    /// instead of `#0` if the function is hazardous, or `#5` instead of `#3`.
+    fn slp_attr(&self, fn_name: &str, default: &str) -> String {
+        if self.slp_hazard_fns.contains(fn_name) {
+            match default {
+                "#0" => "#4".to_string(),
+                "#3" => "#5".to_string(),
+                _ => default.to_string(),
+            }
+        } else {
+            default.to_string()
+        }
     }
 
     // ── SLP Vectorization Hazard Analysis ─────────────────────
@@ -1339,10 +1370,16 @@ self.emit_declares(&mut out);
     fn count_cross_float_ops(&self, expr: &Expr, local_floats: &std::collections::HashSet<String>) -> u32 {
         match expr {
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
-                let left_is_typed = matches!(l.as_ref(), Expr::Identifier(_) | Expr::OwnedRef(_) | Expr::Float(_));
-                let right_is_typed = matches!(r.as_ref(), Expr::Identifier(_) | Expr::OwnedRef(_) | Expr::Float(_));
                 let is_float = self.is_float_expr_pre_cg(l, local_floats) || self.is_float_expr_pre_cg(r, local_floats);
-                let mut count = if (left_is_typed || right_is_typed) && is_float { 1 } else { 0 };
+                // Count cross-field ops only when both operands reference distinctly
+                // named float fields/constants (not literals like Float(1.0)). In-lane
+                // operations (f[i] + 1.0, f[i] + f[i]) create no shuffle pressure.
+                let is_cross_field = match (l.as_ref(), r.as_ref()) {
+                    (Expr::Identifier(n1), Expr::Identifier(n2)) | (Expr::OwnedRef(n1), Expr::OwnedRef(n2)) => n1 != n2,
+                    (Expr::Identifier(_), Expr::OwnedRef(n)) | (Expr::OwnedRef(n), Expr::Identifier(_)) => true,
+                    _ => false,
+                };
+                let mut count = if is_cross_field && is_float { 1 } else { 0 };
                 count += self.count_cross_float_ops(l, local_floats);
                 count += self.count_cross_float_ops(r, local_floats);
                 count
@@ -1412,7 +1449,7 @@ self.emit_declares(&mut out);
                 crate::backend::collect_assigned_identifiers(&txn.body)
                     .into_iter().collect();
 
-            for f in reads.intersection(&writes) {
+            for f in reads.union(&writes) {
                 if self.is_float_field(f) {
                     float_fields.insert(f.clone());
                 }
@@ -1456,12 +1493,20 @@ self.emit_declares(&mut out);
         }
 
         let packed_phis = (n + w as usize - 1) / w as usize;
-        let shuffle_regs = std::cmp::min(packed_phis * 2, ((total_cross_ops as usize) + 1) / 2);
+        let c = total_cross_ops as usize;
+        let shuffle_pressure = std::cmp::min(c, n as usize * 2);
         let const_packed = (accessed_constants.len() + w as usize - 1) / w as usize;
-        let peak = (packed_phis + shuffle_regs + max_float_temps as usize + const_packed + 2) as u32;
+        let peak = (packed_phis + shuffle_pressure + max_float_temps as usize + const_packed + 2) as u32;
 
         if peak >= r {
-            self.llvm_extra_flags.push("-vectorize-slp=false".into());
+            // Mark affected functions — SLP is disabled per-function via
+            // attribute "disable-slp-vectorize" on #4 (derived from #0) or
+            // #5 (derived from #3). This keeps SLP enabled on all other
+            // functions, unlike the old global -vectorize-slp=false flag.
+            self.slp_hazard_fns.insert("main".to_string());
+            for (txn_name, _) in txns {
+                self.slp_hazard_fns.insert(txn_name.clone());
+            }
         }
     }
 
@@ -1621,13 +1666,13 @@ self.emit_declares(&mut out);
             let init_clone = self.field_initializers.get(&name).and_then(|e| e.clone());
             match init_clone {
                 Some(Expr::Integer(n)) => {
-                    writeln!(out, "  store volatile i64 {}, i64* {}, align {}", n, p, self.align_of("i64")).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align {}", n, p, self.align_of("i64")).ok();
                 }
                 Some(Expr::Float(f)) => {
                     let h = float_to_llvm_hex(f);
                     let bits_reg = format!("%ip{}b", reg - 1);
                     writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
-                    writeln!(out, "  store volatile float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
+                    writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
                 }
                 Some(Expr::Neg(ref inner)) => {
                     let s = match inner.as_ref() {
@@ -1635,18 +1680,18 @@ self.emit_declares(&mut out);
                         Expr::Integer(n) => format!("-{}", n),
                         _ => "0".to_string(),
                     };
-                    writeln!(out, "  store volatile i64 {}, i64* {}, align {}", s, p, self.align_of("i64")).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align {}", s, p, self.align_of("i64")).ok();
                 }
                 Some(Expr::Bool(b)) => {
                     let v = if b { "1" } else { "0" };
-                    writeln!(out, "  store volatile i8 {}, i8* {}, align {}", v, p, self.align_of("i8")).ok();
+                    writeln!(out, "  store i8 {}, i8* {}, align {}", v, p, self.align_of("i8")).ok();
                 }
                 Some(Expr::String(_)) => {
-                    writeln!(out, "  store volatile i8* null, i8** {}, align {}", p, self.align_of("i8*")).ok();
+                    writeln!(out, "  store i8* null, i8** {}, align {}", p, self.align_of("i8*")).ok();
                 }
                 Some(Expr::Char(c)) => {
                     let v = c as i32;
-                    writeln!(out, "  store volatile i32 {}, i32* {}, align {}", v, p, self.align_of("i32")).ok();
+                    writeln!(out, "  store i32 {}, i32* {}, align {}", v, p, self.align_of("i32")).ok();
                 }
                 Some(expr) => {
                     // Non-literal initializer — e.g. __get_env_int("BOUND").
@@ -1657,33 +1702,33 @@ self.emit_declares(&mut out);
                         "i8" => {
                             let t = format!("%ip{}t", reg); reg += 1;
                             writeln!(out, "  {} = trunc i64 {} to i8", t, val_reg).ok();
-                            writeln!(out, "  store volatile i8 {}, i8* {}, align {}", t, p, self.align_of("i8")).ok();
+                            writeln!(out, "  store i8 {}, i8* {}, align {}", t, p, self.align_of("i8")).ok();
                         }
                         "i32" => {
                             let t = format!("%ip{}t", reg); reg += 1;
                             writeln!(out, "  {} = trunc i64 {} to i32", t, val_reg).ok();
-                            writeln!(out, "  store volatile i32 {}, i32* {}, align {}", t, p, self.align_of("i32")).ok();
+                            writeln!(out, "  store i32 {}, i32* {}, align {}", t, p, self.align_of("i32")).ok();
                         }
                         "float" => {
                             let t = format!("%ip{}t", reg); reg += 1;
                             let b = format!("%ip{}b", reg); reg += 1;
                             writeln!(out, "  {} = trunc i64 {} to i32", t, val_reg).ok();
                             writeln!(out, "  {} = bitcast i32 {} to float", b, t).ok();
-                            writeln!(out, "  store volatile float {}, float* {}, align {}", b, p, self.align_of("float")).ok();
+                            writeln!(out, "  store float {}, float* {}, align {}", b, p, self.align_of("float")).ok();
                         }
                         "i8*" => {
                             let t = format!("%ip{}t", reg); reg += 1;
                             writeln!(out, "  {} = inttoptr i64 {} to i8*", t, val_reg).ok();
-                            writeln!(out, "  store volatile i8* {}, i8** {}, align {}", t, p, self.align_of("i8*")).ok();
+                            writeln!(out, "  store i8* {}, i8** {}, align {}", t, p, self.align_of("i8*")).ok();
                         }
                         _ => {
-                            writeln!(out, "  store volatile i64 {}, {}* {}, align {}", val_reg, ty, p, self.align_of(&ty)).ok();
+                            writeln!(out, "  store i64 {}, {}* {}, align {}", val_reg, ty, p, self.align_of(&ty)).ok();
                         }
                     }
                 }
                 None => {
                     let default = if ty == "i8*" { "null".to_string() } else { "0".to_string() };
-                    writeln!(out, "  store volatile {} {}, {}* {}, align {}", ty, default, ty, p, self.align_of(&ty)).ok();
+                    writeln!(out, "  store {} {}, {}* {}, align {}", ty, default, ty, p, self.align_of(&ty)).ok();
                 }
             }
         }
@@ -1745,7 +1790,8 @@ self.emit_declares(&mut out);
             }
         }
         let alwaysinline = if !self.has_cycles { " alwaysinline" } else { "" };
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0{} {{", name, alwaysinline).ok();
+        let txn_attr = self.slp_attr(name, "#0");
+        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear();
@@ -1796,7 +1842,8 @@ self.emit_declares(&mut out);
     /// (always returns from a single tick, called in a loop).
     fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         let async_name = format!("async_body_{}", name);
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", async_name).ok();
+        let async_attr = self.slp_attr(&async_name, "#0");
+        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear();
@@ -1823,7 +1870,8 @@ self.emit_declares(&mut out);
             .filter(|s| !matches!(s, Statement::Term { .. } | Statement::Escape(_)))
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", name).ok();
+        let fused_attr = self.slp_attr(name, "#0");
+        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined { self.emit_stmt(out, s, "  "); }
@@ -1832,7 +1880,8 @@ self.emit_declares(&mut out);
     }
 
     fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr #0 {{", name).ok();
+        let fused_attr = self.slp_attr(name, "#0");
+        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body { self.emit_stmt(out, s, "  "); }
@@ -2193,7 +2242,7 @@ self.emit_declares(&mut out);
                     let fi = format!("%nfi{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, inner).ok();
                     writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-                    writeln!(out, "{}{} = fsub float -0.0, {}", indent, fs, fl).ok();
+                    writeln!(out, "{}{} = fsub fast float -0.0, {}", indent, fs, fl).ok();
                     writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fs).ok();
                     writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
                     self.register_types.insert(v.to_string(), Type::Float);
@@ -2817,7 +2866,7 @@ self.emit_declares(&mut out);
 
     // ── MAIN FUNCTION ─────────────────────────────────────────
     fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
-        writeln!(out, "define i32 @main() local_unnamed_addr #3 {{").ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#3")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
         if has_wake_triggers {
@@ -2915,7 +2964,7 @@ self.emit_declares(&mut out);
             // Store counter once after the loop
             writeln!(out, "  store i64 %cnt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
         } else if let Some(stmts) = body {
-            // SSA mode: load once, emit body inline with extract/insert, store once
+            // SSA mode: load once, phi in header, inline body with extract/insert, store once
             if let Some(ti) = total_idx {
                 writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
                 writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
@@ -2924,27 +2973,107 @@ self.emit_declares(&mut out);
             } else {
                 writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c0).ok();
             }
-            writeln!(out, "  br label %{}_hdr", label_prefix).ok();
-            writeln!(out, "{}_hdr:", label_prefix).ok();
-            writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
-            writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
-            writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
-            writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
-            writeln!(out, "{}_body:", label_prefix).ok();
-            let ssa_reg = format!("%ssa{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "  {} = load %State, %State* @global_state, align 8", ssa_reg).ok();
-            self.ssa_state_reg = Some(ssa_reg.clone());
+            // Emit body first into a buffer to capture the final SSA register name
+            let phi_reg = format!("%ssa_phi_{}", label_prefix);
+            let mut body_buf = String::new();
+            writeln!(body_buf, "{}_body:", label_prefix).ok();
+            self.ssa_state_reg = Some(phi_reg.clone());
             self.let_bindings.clear();
             self.terminated = false;
             self.returns_i64 = false;
             for stmt in stmts {
-                self.emit_stmt(out, stmt, "  ");
+                self.emit_stmt(&mut body_buf, stmt, "  ");
             }
-            if let Some(final_ssa) = self.ssa_state_reg.take() {
-                writeln!(out, "  store %State {}, %State* @global_state, align 8", final_ssa).ok();
+            let backedge_val = self.ssa_state_reg.take().unwrap_or(phi_reg.clone());
+            writeln!(body_buf, "  store %State {}, %State* %slot_{}, align 8", backedge_val, label_prefix).ok();
+            writeln!(body_buf, "  br label %{}_hdr", label_prefix).ok();
+            // Now emit preheader, header with phi, body, done
+            // Build initial %State from known constants (not loads from global)
+            // so GVN can propagate zero values through the phi cycle.
+            writeln!(out, "  br label %{}_pre", label_prefix).ok();
+            writeln!(out, "{}_pre:", label_prefix).ok();
+            let mut cur_init = "zeroinitializer".to_string();
+            let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
+                .map(|(name, &idx)| (name.clone(), idx, self.field_types[idx].clone()))
+                .collect();
+            fields.sort_by_key(|&(_, idx, _)| idx);
+            for (name, idx, ty) in &fields {
+                let init = self.field_initializers.get(name).and_then(|e| e.as_ref());
+                match init {
+                    Some(Expr::Float(f)) => {
+                        let h = float_to_llvm_hex(*f);
+                        let bc = format!("%fbc{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = bitcast i32 {} to float", bc, h).ok();
+                        let iv = format!("%fiv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = insertvalue %State {}, float {}, {}", iv, cur_init, bc, idx).ok();
+                        cur_init = iv;
+                    }
+                    Some(Expr::Integer(n)) => {
+                        let iv = format!("%iiv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = insertvalue %State {}, i64 {}, {}", iv, cur_init, n, idx).ok();
+                        cur_init = iv;
+                    }
+                    Some(Expr::Bool(b)) => {
+                        let v = if *b { 1 } else { 0 };
+                        let iv = format!("%biv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = insertvalue %State {}, i8 {}, {}", iv, cur_init, v, idx).ok();
+                        cur_init = iv;
+                    }
+                    Some(Expr::Neg(inner)) => {
+                        let s = match inner.as_ref() {
+                            Expr::Float(f) => float_to_llvm_hex(-*f),
+                            Expr::Integer(n) => format!("-{}", n),
+                            _ => "0".to_string(),
+                        };
+                        if ty == "float" {
+                            let bc = format!("%nbc{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "  {} = bitcast i32 {} to float", bc, s).ok();
+                            let iv = format!("%niv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "  {} = insertvalue %State {}, float {}, {}", iv, cur_init, bc, idx).ok();
+                            cur_init = iv;
+                        } else {
+                            let iv = format!("%niv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "  {} = insertvalue %State {}, i64 {}, {}", iv, cur_init, s, idx).ok();
+                            cur_init = iv;
+                        }
+                    }
+                    Some(Expr::String(_)) => {
+                        let iv = format!("%siv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = insertvalue %State {}, i8* null, {}", iv, cur_init, idx).ok();
+                        cur_init = iv;
+                    }
+                    Some(Expr::Char(c)) => {
+                        let v = *c as i32;
+                        let iv = format!("%civ{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = insertvalue %State {}, i32 {}, {}", iv, cur_init, v, idx).ok();
+                        cur_init = iv;
+                    }
+                    _ => {
+                        // Runtime expression (non-constant) — load from global state
+                        let gep = format!("%gep{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", gep, idx).ok();
+                        let ld = format!("%ld{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = load {}, {}* {}, align {}", ld, ty, ty, gep, self.align_of(ty)).ok();
+                        let iv = format!("%liv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = insertvalue %State {}, {} {}, {}", iv, cur_init, ty, ld, idx).ok();
+                        cur_init = iv;
+                    }
+                }
             }
+            let slot = format!("%slot_{}", label_prefix);
+            writeln!(out, "  {} = alloca %State, align 8", slot).ok();
+            writeln!(out, "  store %State {}, %State* {}, align 8", cur_init, slot).ok();
             writeln!(out, "  br label %{}_hdr", label_prefix).ok();
+            writeln!(out, "{}_hdr:", label_prefix).ok();
+            writeln!(out, "  {} = load %State, %State* {}, align 8", phi_reg, slot).ok();
+            writeln!(out, "  %ex{}_{} = extractvalue %State {}, {}", label_prefix, c0 + 1, phi_reg, counter_idx).ok();
+            writeln!(out, "  %cp{}_{} = icmp slt i64 %ex{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
+            writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
+            out.push_str(&body_buf);
+            let final_reg = format!("%final_{}", label_prefix);
             writeln!(out, "{}_done:", label_prefix).ok();
+            writeln!(out, "  {} = load %State, %State* %slot_{}, align 8", final_reg, label_prefix).ok();
+            writeln!(out, "  store %State {}, %State* @global_state, align 8", final_reg).ok();
         } else {
             if let Some(ti) = total_idx {
                 writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
@@ -2977,7 +3106,7 @@ self.emit_declares(&mut out);
         use_phi: bool,
         body: Option<&[Statement]>,
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
         // When use_phi is true, emit_folded_loop starts with a named label
@@ -3001,7 +3130,7 @@ self.emit_declares(&mut out);
         out: &mut String,
         txns: &[(String, &crate::ast::Transaction)],
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
         writeln!(out, "  br label %tick").ok();
@@ -3058,99 +3187,9 @@ self.emit_declares(&mut out);
     /// register-pipeline loop.  Each txn gets an SSA phi node for its counter;
     /// the loop terminates when all counters reach their bounds.
     /// Assumes all txns are pure/effectively-pure with bounded_pre + increments.
+    /// After the entry setup, performs enum trigger dispatch and switch-based
+    /// execution (merged from the original emit_enum_main design).
     fn emit_folded_multi_main(
-        &self,
-        out: &mut String,
-        fold_params: &HashMap<String, (usize, Option<usize>, Option<String>)>,
-    ) {
-        let c0 = self.txn_counter;
-        // Deduplicate by counter index: multiple txns may share the same counter
-        let mut uniq: Vec<(usize, String)> = Vec::new();
-        let mut seen_idxs: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        let mut first_tidx: Option<usize> = None;
-        for (_, &(cidx, tidx, _)) in fold_params.iter() {
-            if seen_idxs.insert(cidx) {
-                uniq.push((cidx, format!("c{}", cidx)));
-                if first_tidx.is_none() {
-                    first_tidx = tidx;
-                }
-            }
-        }
-        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
-        writeln!(out, "  entry:").ok();
-        writeln!(out, "  call void @init_state()").ok();
-        writeln!(out, "  br label %me_{}", c0).ok();
-        writeln!(out, "me_{}:", c0).ok();
-        // Emit GEP + load for bound (from first txn)
-        if let Some((_, &(_, tidx, ref tcn))) = fold_params.iter().next() {
-            if let Some(ti) = tidx {
-                writeln!(out, "  %gmb_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0, ti).ok();
-                writeln!(out, "  %lmb_{} = load i64, i64* %gmb_{}, align 8", c0, c0).ok();
-            } else if let Some(ref cn) = *tcn {
-                writeln!(out, "  %lmb_{} = load i64, i64* @{}, align 8", c0, cn).ok();
-            } else {
-                writeln!(out, "  %lmb_{} = add i64 0, 0", c0).ok();
-            }
-        }
-        // Emit GEP + initial load for each unique counter
-        let mut uniq_names: Vec<String> = Vec::new();
-        for &(cidx, ref _name) in &uniq {
-            let reg = format!("mu_{}", uniq_names.len());
-            uniq_names.push(reg.clone());
-            writeln!(out, "  %gm_{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", c0, reg, cidx).ok();
-            writeln!(out, "  %im_{}_{} = load i64, i64* %gm_{}_{}, align 8", c0, reg, c0, reg).ok();
-        }
-        writeln!(out, "  br label %mh_{}", c0).ok();
-        // Header: phi nodes + comparisons
-        writeln!(out, "mh_{}:", c0).ok();
-        for (i, reg) in uniq_names.iter().enumerate() {
-            writeln!(out, "  %pm_{}_{} = phi i64 [ %im_{}_{}, %me_{} ], [ %incm_{}_{}, %mb_{} ]", c0, reg, c0, reg, c0, c0, reg, c0).ok();
-        }
-        // Compare each counter against bound
-        let mut cmp_regs: Vec<String> = Vec::new();
-        for (i, reg) in uniq_names.iter().enumerate() {
-            let cmp_reg = format!("%cm_{}_{}", c0, reg);
-            writeln!(out, "  {} = icmp slt i64 %pm_{}_{}, %lmb_{}", cmp_reg, c0, reg, c0).ok();
-            cmp_regs.push(cmp_reg.trim_start_matches('%').to_string());
-        }
-        // Chain or of all comparisons
-        if cmp_regs.len() > 1 {
-            let mut prev = format!("%{}", cmp_regs[0]);
-            for cr in &cmp_regs[1..] {
-                let r = format!("%{}", cr);
-                let t = format!("%tm_{}_{}", c0, cr);
-                writeln!(out, "  {} = or i1 {}, {}", t, prev, r).ok();
-                prev = t;
-            }
-            writeln!(out, "  br i1 {}, label %mb_{}, label %md_{}", prev, c0, c0).ok();
-        } else {
-            writeln!(out, "  br i1 %{}, label %mb_{}, label %md_{}", cmp_regs[0], c0, c0).ok();
-        }
-        // Body: increment each counter
-        writeln!(out, "mb_{}:", c0).ok();
-        for (i, reg) in uniq_names.iter().enumerate() {
-            writeln!(out, "  %incm_{}_{} = add i64 %pm_{}_{}, 1", c0, reg, c0, reg).ok();
-        }
-        writeln!(out, "  br label %mh_{}", c0).ok();
-        // Done: store each counter once
-        writeln!(out, "md_{}:", c0).ok();
-        for (i, reg) in uniq_names.iter().enumerate() {
-            writeln!(out, "  store i64 %pm_{}_{}, i64* %gm_{}_{}, align 8", c0, reg, c0, reg).ok();
-        }
-        writeln!(out, "  ret i32 0").ok();
-        writeln!(out, "}}").ok();
-        writeln!(out).ok();
-    }
-
-    /// Emit a `main()` that samples enumerable triggers once and switch-dispatches
-    /// to per-value folded loops.  Each trigger combination gets its own while-loop
-    /// that runs the folded transaction body.
-    ///
-    /// `fold_params` maps txn_name → (counter_idx, total_idx, total_const_name)
-    /// for all enum-candidate transactions that have proven bounded convergence.
-    /// Each case arm emits one folded loop per entry, allowing multi-txn programs
-    /// (e.g. `async_counters`) to converge all counters in a single tick.
-    fn emit_enum_main(
         &mut self,
         out: &mut String,
         txns: &[(String, &crate::ast::Transaction)],
@@ -3166,25 +3205,29 @@ self.emit_declares(&mut out);
         all_internal_map: Option<&HashMap<String, (usize, i64)>>,
         has_wake: bool,
     ) {
-        // #0 = willreturn, mustprogress (one-shot). #3 = no willreturn, no mustprogress (wake loop).
-        let attr = if has_wake { "#3" } else { "#0" };
         let c0 = self.txn_counter;
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
+        // Deduplicate by counter index: multiple txns may share the same counter
+        let mut uniq: Vec<(usize, String)> = Vec::new();
+        let mut seen_idxs: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut first_tidx: Option<usize> = None;
+        for (_, &(cidx, tidx, _)) in fold_params.iter() {
+            if seen_idxs.insert(cidx) {
+                uniq.push((cidx, format!("c{}", cidx)));
+                if first_tidx.is_none() {
+                    first_tidx = tidx;
+                }
+            }
+        }
+        let main_attr = self.slp_attr("main", if has_wake { "#3" } else { "#0" });
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", main_attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
         if has_wake {
             writeln!(out, "  call void @__rt_init()").ok();
             writeln!(out, "  call void @__rt_poll()").ok();
         }
-        if self.has_async_txns && !self.is_lightweight_async {
-            let count = self.async_txn_names.len() as i32;
-            writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
-            writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
-        }
-        if has_wake {
-            writeln!(out, "  br label %tick").ok();
-            writeln!(out, "tick:").ok();
-        }
+        writeln!(out, "  br label %tick").ok();
+        writeln!(out, "tick:").ok();
 
         // Sample triggers (clone trigger data to avoid borrow conflict)
         let trigger_data: Vec<(String, String, bool, crate::ast::Type)> = enum_sizes.iter()
@@ -3407,7 +3450,7 @@ self.emit_declares(&mut out);
     }
 
     fn emit_folded_pure_counter(&self, out: &mut String, counter_idx: usize, total_value: i64) {
-        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
         writeln!(out, "  %gp = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", counter_idx).ok();
@@ -3422,7 +3465,7 @@ self.emit_declares(&mut out);
         out: &mut String,
         final_values: &[(Vec<String>, std::collections::HashMap<String, i64>)],
     ) {
-        writeln!(out, "define i32 @main() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  call void @init_state()").ok();
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -3509,7 +3552,8 @@ self.emit_declares(&mut out);
         });
         pairs
     }
-        fn trg_in_pre(&self, pre: &Expr) -> bool {
+
+    fn trg_in_pre(&self, pre: &Expr) -> bool {
         let mut ids = std::collections::HashSet::new();
         crate::backend::collect_expr_identifiers(pre, &mut ids);
         ids.iter().any(|id| self.trigger_names.contains(id))
@@ -3593,7 +3637,7 @@ self.emit_declares(&mut out);
                 let ci = format!("%cfbci{}", self.txn_counter); self.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
                 let _ = writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr);
-                let _ = writeln!(out, "{}{} = fcmp une float {}, 0.0", indent, ci, fl);
+                let _ = writeln!(out, "{}{} = fcmp fast une float {}, 0.0", indent, ci, fl);
                 let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
             }
             (Type::Bool, Type::Float) => {
@@ -3686,7 +3730,7 @@ self.emit_declares(&mut out);
             let fa = self.i64_to_float_reg(out, &a, indent);
             let fb = self.i64_to_float_reg(out, &b, indent);
             let fr = format!("%bfr{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = {} float {}, {}", indent, fr, float_op, fa, fb).ok();
+            writeln!(out, "{}{} = {} fast float {}, {}", indent, fr, float_op, fa, fb).ok();
             let fi = format!("%bfi{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
@@ -3716,7 +3760,7 @@ self.emit_declares(&mut out);
         if self.is_float_expr(l) || self.is_float_expr(r) {
             let fa = self.i64_to_float_reg(out, &a, indent);
             let fb = self.i64_to_float_reg(out, &b, indent);
-            writeln!(out, "{}{} = fcmp {} float {}, {}", indent, c, cond, fa, fb).ok();
+            writeln!(out, "{}{} = fcmp fast {} float {}, {}", indent, c, cond, fa, fb).ok();
         } else {
             let icmp_cond = match cond {
                 "oeq" => "eq",
@@ -4505,8 +4549,8 @@ mod tests {
             exit_condition: None,
         };
         let output = backend.generate(&program);
-        assert!(output.contains("fadd float"),
-            "Float binary add should emit fadd float");
+        assert!(output.contains("fadd fast float"),
+            "Float binary add should emit fadd fast float");
     }
 
     #[test]
@@ -5363,9 +5407,9 @@ mod tests {
         // No float fields → no SLP hazard
         let program = make_slp_float_program(0, make_cross_float_body(0, 0), None);
         let mut backend = LlvmBackend::new();
-        let _output = backend.generate(&program);
-        assert!(backend.llvm_extra_flags().is_empty(),
-            "No float fields should produce no flags");
+        let output = backend.generate(&program);
+        assert!(!output.contains("disable-slp-vectorize"),
+            "No float fields should produce no SLP-disabled attributes");
     }
 
     #[test]
@@ -5374,8 +5418,8 @@ mod tests {
         let body = make_cross_float_body(4, 3);
         let program = make_slp_float_program(4, body, None);
         let mut backend = LlvmBackend::new();
-        let _output = backend.generate(&program);
-        assert!(backend.llvm_extra_flags().is_empty(),
+        let output = backend.generate(&program);
+        assert!(!output.contains("disable-slp-vectorize"),
             "4 float fields should not trigger SLP disable");
     }
 
@@ -5386,8 +5430,8 @@ mod tests {
         let body = make_cross_float_body(20, 40);
         let program = make_slp_float_program(20, body, None);
         let mut backend = LlvmBackend::new();
-        let _output = backend.generate(&program);
-        assert!(backend.llvm_extra_flags().contains(&"-vectorize-slp=false".to_string()),
+        let output = backend.generate(&program);
+        assert!(output.contains("disable-slp-vectorize"),
             "20 float fields with cross-ops should disable SLP on SSE");
     }
 
@@ -5417,9 +5461,9 @@ mod tests {
         });
         let program = make_slp_float_program(12, body, None);
         let mut backend = LlvmBackend::new();
-        let _output = backend.generate(&program);
+        let output = backend.generate(&program);
         // Independent channels: packed_phis=3, shuffle_regs=0, temps=0, margin=2 → peak=5 < 16
-        assert!(backend.llvm_extra_flags().is_empty(),
+        assert!(!output.contains("disable-slp-vectorize"),
             "12 independent float fields should NOT disable SLP");
     }
 
@@ -5441,15 +5485,16 @@ mod tests {
             memory: None,
         };
         backend = backend.with_spec(spec);
-        let _output = backend.generate(&program);
-        // AArch64: R=32, Kalman 12 fields + 32 cross-ops → peak=16 < 32, SLP safe
-        assert!(backend.llvm_extra_flags().is_empty(),
+        let output = backend.generate(&program);
+        // AArch64: R=32, Kalman 12 fields + 32 cross-ops → peak=29 < 32, SLP safe
+        assert!(!output.contains("disable-slp-vectorize"),
             "AArch64 with 32 registers should allow SLP for 12 fields");
     }
 
     #[test]
     fn test_slp_hazard_avx_target() {
-        // With AVX2 (R=16, W=8) → 12 fields → 2 packed phis + 4 shuffles + margin = 8 < 16, safe
+        // With AVX2 (R=16, W=8) → 12 fields, 32 cross-ops
+        // shuffle_pressure=min(32,24)=24, peak=2+24+0+0+2=28 >= 16 → SLP disabled
         let body = make_cross_float_body(12, 32);
         let program = make_slp_float_program(12, body, None);
         let mut backend = LlvmBackend::new();
@@ -5465,9 +5510,9 @@ mod tests {
             memory: None,
         };
         backend = backend.with_spec(spec);
-        let _output = backend.generate(&program);
-        // AVX2: W=8, 12 fields → ceil(12/8)=2 packed phis, peak ~2+4+0+2=8 < 16
-        assert!(backend.llvm_extra_flags().is_empty(),
-            "AVX2 with 256-bit vectors should allow SLP for 12 fields");
+        let output = backend.generate(&program);
+        // 32 cross-ops on 12 fields → peak 28 ≥ 16 → spills on AVX2 → disable
+        assert!(output.contains("disable-slp-vectorize"),
+            "AVX2: 12 fields with 32 cross-ops should disable SLP (peak=28 ≥ 16)");
     }
 }

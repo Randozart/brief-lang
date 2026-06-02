@@ -125,8 +125,9 @@ benchmarks/ring_buffer_runtime
 benchmarks/ring_buffer_runtime_c
 benchmarks/kalman_filter_runtime
 benchmarks/kalman_filter_runtime_c
-# Root-level generated C file (iir_filter.c for benchmarks)
+# Root-level generated C files
 /iir_filter.c
+/float_math.c
 
 # Generated LLVM IR processed by opt
 *.opt.ll
@@ -140,6 +141,8 @@ benchmarks/const_heavy
 benchmarks/const_heavy_c
 benchmarks/float_math
 benchmarks/float_math_c
+benchmarks/float_math_nonzero
+benchmarks/float_math_nonzero_c
 benchmarks/sparse_dispatch
 benchmarks/sparse_dispatch_c
 

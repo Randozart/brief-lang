@@ -37,6 +37,7 @@ BENCHMARKS=(
     "ring_buffer"
     "async_counters"
     "float_math"
+    "float_math_nonzero"
     "sparse_dispatch"
     "const_heavy"
 )
@@ -55,7 +56,7 @@ build_bench() {
 
     local bin="benchmarks/${name}"
     if [ ! -f "$bin" ]; then
-        clang -O3 -march=native "benchmarks/${name}.ll" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
+        clang -O3 -march=native -ffast-math "benchmarks/${name}.ll" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
     fi
     echo "  Brief binary ready."
 }
@@ -68,7 +69,7 @@ build_c() {
         iir_filter)      extra_flags="-lm" ;;
     esac
 
-    clang -O3 -march=native -o "benchmarks/${name}_c" "benchmarks/${name}_c.c" ${extra_flags} 2>&1
+    clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "benchmarks/${name}_c.c" ${extra_flags} 2>&1
     echo "  C binary ready."
 }
 
@@ -134,6 +135,6 @@ echo ""
 echo "================================================"
 echo "  SUMMARY"
 echo "================================================"
-echo "  All 7 benchmarks measured at BOUND=50000000, 4-decimal precision."
+  echo "  All 8 benchmarks measured at BOUND=50000000, 4-decimal precision."
 echo "  0.0000s = O(1) optimization eliminates the loop entirely."
 echo "================================================"

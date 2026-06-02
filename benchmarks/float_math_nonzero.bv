@@ -1,0 +1,42 @@
+#!exit count == total;
+
+import { __get_env_int } from "std/env.bv";
+import { io_pending } from "std/brief_rt.bv";
+import "link/brief_rt.o";
+
+let x0: Float = 1.0;
+let x1: Float = 0.5;
+let x2: Float = 0.2;
+let p00: Float = 0.0;
+let p11: Float = 0.0;
+let p22: Float = 0.0;
+let count: Int = 0;
+let total: Int = __get_env_int("BOUND");
+
+const A00: Float = 1.0;
+const A01: Float = 0.01;
+const A02: Float = 0.001;
+const A10: Float = 0.01;
+const A11: Float = 1.0;
+const A12: Float = 0.01;
+const A20: Float = 0.001;
+const A21: Float = 0.01;
+const A22: Float = 1.0;
+
+const Q00: Float = 0.1;
+const Q11: Float = 0.1;
+const Q22: Float = 0.1;
+
+rct txn tick [
+    io_pending && count < total &&
+    x0 == x0 && x1 == x1 && x2 == x2 &&
+    p00 == p00 && p11 == p11 && p22 == p22
+][count == total] {
+    &x0 = A00 * x0 + A01 * x1 + A02 * x2;
+    &x1 = A10 * x0 + A11 * x1 + A12 * x2;
+    &x2 = A20 * x0 + A21 * x1 + A22 * x2;
+    &p00 = p00 + Q00;
+    &p11 = p11 + Q11;
+    &p22 = p22 + Q22;
+    &count = count + 1;
+};

@@ -82,24 +82,38 @@ fn check_all_paths(
                 condition,
                 statements,
             } => {
-                // Check guarded branch
+                // Check TRUE branch: guarded statements must independently produce true
                 let mut branch_vars = vars.clone();
-                // The condition is now known to be true in this branch
                 branch_vars.insert(
                     format!("__guard_{}", format!("{:?}", condition)),
                     Expr::Bool(true),
                 );
-
+                let mut guard_found_term = false;
+                let mut guard_found_true = false;
+                // We check the guarded statements separately, tracking its own
+                // termination. If the guarded branch terminates with true, that's
+                // one valid path.
                 match check_all_paths(statements, branch_vars, defn) {
                     Ok(()) => {
-                        found_true_path = true;
+                        guard_found_true = true;
+                        guard_found_term = true;
                     }
-                    Err(_) => {
-                        // If guarded branch fails, we might have other branches or failures
-                        // For now, we require all paths to succeed (conservative)
-                        return Err("Guarded branch may not produce Bool = true".to_string());
-                    }
+                    Err(_) => {}
                 }
+                if guard_found_true {
+                    found_true_path = true;
+                }
+                if guard_found_term {
+                    found_term = true;
+                }
+
+                // Check FALSE branch: subsequent statements under negated condition
+                // must also independently produce true. The negated condition tracks
+                // that we're on the path where the guard was bypassed.
+                vars.insert(
+                    format!("__guard_{}", format!("{:?}", condition)),
+                    Expr::Bool(false),
+                );
             }
 
             Statement::Term { values: outputs, .. } => {

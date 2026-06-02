@@ -351,10 +351,14 @@ pub fn __is_numeric(s: String) -> Result<bool, String> {
 
 #[wasm_bindgen]
 pub fn __contains_at(haystack: String, needle: String, start: i64) -> Result<bool, String> {
-    if start < 0 || start as usize > haystack.len() {
+    if start < 0 || start as usize >= haystack.len() {
         return Ok(false);
     }
-    Ok(haystack[start as usize..].contains(&needle))
+    let start_usize = start as usize;
+    if !haystack.is_char_boundary(start_usize) {
+        return Ok(false);
+    }
+    Ok(haystack[start_usize..].contains(&needle))
 }
 
 #[wasm_bindgen]
@@ -387,7 +391,7 @@ pub fn __get_chars(s: String) -> Result<Vec<String>, String> {
 
 #[wasm_bindgen]
 pub fn __utf8_len(s: String) -> Result<i64, String> {
-    Ok(s.len() as i64)
+    Ok(s.chars().count() as i64)
 }
 
 #[wasm_bindgen]

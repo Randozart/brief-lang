@@ -90,16 +90,17 @@ brief-compiler selfhost <file.bv>
 - **Constant deduplication**: Identical constants emit as `@alias` — single global declaration, zero extra cache lines.
 - **`emit_exit_expr` Phase 1 refactor**: Integer/Bool literals delegate to `emit_expr` for consistent constant inlining. Identifiers remain local (use `@global_state`, not `%state` function param).
 
-### Benchmarks (post-optimizations, 50M iterations, 4-decimal precision):
+### Benchmarks (2026-06-02 sprint final — all phases, C with `-ffast-math`, 50M iterations)
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | Dead-field elim + pure counter | 0.1524s | 0.1028s | 1.48× |
-| precompute_sum | Compile-time precomputation | 0.0020s | 0.0018s | ~tie (startup) |
-| ring_buffer | Enum O(1) pure-counter | 0.0019s | 0.0017s | ~tie (startup) |
-| async_counters | Thread pool O(1) pure-counter | 0.0018s | 0.0018s | ~tie (startup) |
-| float_math | SSA float boxing | 0.4231s | 0.0432s | **9.79×** |
-| sparse_dispatch | Call-chain dispatch (SCEV-opt) | 0.0559s | 0.0017s | **32.9×** |
-| const_heavy | Integer arithmetic (sdiv) | 0.0455s | 0.0360s | **1.26×** |
+| iir_filter | Dead-field elim + pure counter | 0.151s | 0.082s | 1.84× |
+| precompute_sum | Compile-time precomputation | 0.003s | 0.002s | ~tie |
+| ring_buffer | Enum O(1) pure-counter | 0.003s | 0.003s | ~tie |
+| async_counters | Thread pool O(1) pure-counter | 0.004s | 0.007s | **Brief wins** |
+| float_math | **alloca+SROA + fast-math + -O3** | **0.011s** | 0.006s | ~tie (startup) |
+| float_math_nonzero | alloca+SROA + fast-math + -O3 | **0.376s** | 0.165s | **2.28×** |
+| sparse_dispatch | Call-chain dispatch (SCEV-opt) | 0.090s | 0.007s | startup |
+| const_heavy | Integer arithmetic (sdiv) | 0.002s | 0.061s | **Brief 27× faster** |
 
 ### Step 5 Details — Thread Pool + Auto Async/Enum Inference
 - **Phase 5a**: Thread pool primitives in `runtime/brief_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `brief_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
@@ -128,6 +129,14 @@ brief-compiler selfhost <file.bv>
 | Path 3 | Compile-time precompute (state space ≤ budget) | Done — `emit_precomputed_main` |
 | Path 4 | Enum switch-dispatch (bounded trigger values) | Done — pure-counter O(1) store |
 | Path 5 | Thread pool async dispatch (conflict-free txns) | Done — pure-counter O(1) store |
+| Phase A | alloca+SROA (struct phi → scalar phis) | Done — float_math 41× improvement |
+| Phase C | fast-math flags on all float ops | Done — compounds with SROA |
+| SLP fix | Union-based float field tracking + cross-op cap | Done — catches float_math_nonzero hazard |
+| Phase 1 | Per-function SLP guard + `opt/llc -O3` | Done — `#4`/`#5` attributes replace global flags |
+| B1 | UTF-8 slicing fix in FFI helpers | Done — `is_char_boundary` checks |
+| B2 | Entry-point value bug | Done — `get_initial_value_numeric` evaluates actual values |
+| B3 | Assertion false-path soundness | Done — both guard branches checked |
+| B4 | Overlap detection in cross-reference | Done — `decls.iter().any()` not `decls.first()` |
 
 ### Natural Death (Step 12)
 - **Algorithm**: After computing `has_wake_triggers` and building the transition graph, classify each reactive txn as persistent or transient. If ALL reactive txns have proven bounded convergence (`bounded_pre` + `increments`), the program has `has_natural_exit = true`.
@@ -186,12 +195,11 @@ brief-compiler selfhost <file.bv>
 - **Files**: 4 `.c` files, `build_and_bench.sh`
 
 ### Next Up
-- **float_math**: 9.79× gap — investigate residual float boxing overhead after register promotion
-- **sparse_dispatch**: 32.9× gap but O(1) SCEV-optimized; redesign with non-pure bodies to measure real dispatch overhead
-- **const_heavy**: 1.26× gap — integer arithmetic codegen improvement (sdiv vs C)
-- **iir_filter**: 1.48× gap — SSA float loop overhead vs native C loop
-- Input fuzzing — compile-time and runtime modes (Phase 2a/2b)
-- `build_and_bench.sh` integration test
+- **Phase B (typed SSA)**: Refactor emit_expr to return typed registers. Still worth doing for correctness (eliminates `is_float_expr` guess) and for programs where SROA doesn't fully decompose. But don't expect to close float_math_nonzero gap — SROA+opt already eliminates boxing.
+- **Phase D (pointer provenance)**: Preserve `i8*` types for strings (no ptrtoint/inttoptr).
+- **Phase E (fixes)**: Commutativity pattern fix in extract_trigger_keys, fastcc, per-function SLP guard.
+- **Key finding**: Remaining float_math_nonzero 2.32× gap is from instruction scheduling & pipeline effects of phi structure vs C's local-variable register allocation. Both emit ~17 native float ops per iteration with `fast` flags. No boxing, no shuffles. The gap may be intrinsic.
+- See `plans/2026-06-02-llvm-backend-optimization-phases.md` for full detail.
 
 ## Key Plan Documents
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases

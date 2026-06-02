@@ -1896,20 +1896,13 @@ fn run_llvm_compile(
         println!("  Runtime object: {}", rt_o_path.display());
 
         // Optimize .ll with LLVM's middle-end (opt) then compile .ll → .o with llc.
-        // opt -O2 provides SROA (decomposes struct-SSA into scalar phis), GVN,
-        // and constant propagation. Without it, struct-SSA load/store patterns
-        // (from emit_folded_main for non-pure bodies) remain as 64-byte block
-        // operations that llc cannot decompose.
-        // The SLP vectorizer runs in opt, not llc. The hazard analyzer's
-        // -vectorize-slp=false flag is passed to opt when spills are predicted.
+        // -O3 provides SROA, GVN, SLP vectorization, loop vectorization, and aggressive
+        // inlining. Per-function SLP control via IR attributes ("disable-slp-vectorize")
+        // replaces the old global -vectorize-slp=false flag.
         let opt_ll_path = out_base.join(format!("{}.opt.ll", stem));
-        let extra_flags = llvm_backend.llvm_extra_flags();
         let mut opt_cmd = std::process::Command::new("opt");
-        opt_cmd.args(["-O2", "-S", "-o"]);
+        opt_cmd.args(["-O3", "-S", "-o"]);
         opt_cmd.arg(&opt_ll_path);
-        for flag in extra_flags {
-            opt_cmd.arg(flag);
-        }
         opt_cmd.arg(&output_file);
         let ll_source = match opt_cmd.status() {
             Ok(status) if status.success() => {
@@ -1923,7 +1916,7 @@ fn run_llvm_compile(
         };
 
         let mut llc_cmd = std::process::Command::new("llc");
-        llc_cmd.args(["-filetype=obj", "-O2"]);
+        llc_cmd.args(["-filetype=obj", "-O3"]);
         let llc_status = llc_cmd
             .arg("-o").arg(&ll_o_path).arg(ll_source)
             .status();

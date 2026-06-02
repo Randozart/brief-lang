@@ -51,8 +51,8 @@ impl EntryPointAnalyzer {
             Expr::Bool(true) => true,
             Expr::Bool(false) => false,
             Expr::Identifier(name) => {
-                // Check if variable is initialized to truthy value
-                Self::get_initial_value(name, program) != Some(false)
+                // Check if variable is initialized to truthy/non-zero value
+                Self::get_initial_value_numeric(name, program) != Some(0)
             }
             Expr::Eq(lhs, rhs) => {
                 let l = Self::evaluate_to_constant(lhs, program);
@@ -96,11 +96,15 @@ impl EntryPointAnalyzer {
         }
     }
 
-    fn get_initial_value(name: &str, program: &Program) -> Option<bool> {
+    fn get_initial_value_numeric(name: &str, program: &Program) -> Option<i64> {
         for item in &program.items {
             if let TopLevel::StateDecl(decl) = item {
                 if decl.name == name {
-                    return Some(decl.expr.is_some());
+                    return match &decl.expr {
+                        Some(Expr::Integer(n)) => Some(*n),
+                        Some(Expr::Bool(b)) => Some(if *b { 1 } else { 0 }),
+                        _ => None,
+                    };
                 }
             }
         }
@@ -111,8 +115,8 @@ impl EntryPointAnalyzer {
         match expr {
             Expr::Integer(n) => *n,
             Expr::Identifier(name) => {
-                if let Some(val) = Self::get_initial_value(name, program) {
-                    if val { 1 } else { 0 }
+                if let Some(val) = Self::get_initial_value_numeric(name, program) {
+                    val
                 } else {
                     0
                 }
