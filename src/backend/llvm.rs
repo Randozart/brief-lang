@@ -3047,21 +3047,24 @@ self.emit_declares(&mut out);
             } else {
                 writeln!(out, "  %lt_{}_{} = add i64 0, 0", label_prefix, c0).ok();
             }
-            // Load counter once
+            // Load counter once, precompute remaining iterations
             writeln!(out, "  %gcnt_{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, counter_idx).ok();
             writeln!(out, "  %init_{}_{} = load i64, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+            // Counted-down loop: remaining = bound - initial, count down to 0.
+            // This eliminates the cmp instruction (sub sets ZF for jne) and
+            // matches what clang emits for C for-loops.
+            writeln!(out, "  %rem_{}_{} = sub i64 %lt_{}_{}, %init_{}_{}", label_prefix, c0 + 1, label_prefix, c0, label_prefix, c0).ok();
             writeln!(out, "  br label %{}", hdr_label).ok();
             writeln!(out, "{}:", hdr_label).ok();
-            // Phi node: counter lives in register throughout the loop
-            writeln!(out, "  %cnt_{}_{} = phi i64 [ %init_{}_{}, %{} ], [ %inc_{}_{}, %{} ]", label_prefix, c0, label_prefix, c0, entry_label, label_prefix, c0, body_label).ok();
-            writeln!(out, "  %cp_{}_{} = icmp slt i64 %cnt_{}_{}, %lt_{}_{}", label_prefix, c0 + 1, label_prefix, c0, label_prefix, c0).ok();
-            writeln!(out, "  br i1 %cp_{}_{}, label %{}, label %{}", label_prefix, c0 + 1, body_label, done_label).ok();
+            writeln!(out, "  %i_{}_{} = phi i64 [ %rem_{}_{}, %{} ], [ %dec_{}_{}, %{} ]", label_prefix, c0 + 2, label_prefix, c0 + 1, entry_label, label_prefix, c0 + 2, body_label).ok();
+            writeln!(out, "  %cp_{}_{} = icmp sgt i64 %i_{}_{}, 0", label_prefix, c0 + 3, label_prefix, c0 + 2).ok();
+            writeln!(out, "  br i1 %cp_{}_{}, label %{}, label %{}", label_prefix, c0 + 3, body_label, done_label).ok();
             writeln!(out, "{}:", body_label).ok();
-            writeln!(out, "  %inc_{}_{} = add i64 %cnt_{}_{}, 1", label_prefix, c0, label_prefix, c0).ok();
+            writeln!(out, "  %dec_{}_{} = sub i64 %i_{}_{}, 1", label_prefix, c0 + 2, label_prefix, c0 + 2).ok();
             writeln!(out, "  br label %{}", hdr_label).ok();
             writeln!(out, "{}:", done_label).ok();
-            // Store counter once after the loop
-            writeln!(out, "  store i64 %cnt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+            // Final counter value is always the bound after counted-down loop
+            writeln!(out, "  store i64 %lt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
         } else if let Some(stmts) = body {
             // SSA mode: load once, phi in header, inline unrolled body with extract/insert, store once
             if let Some(ti) = total_idx {
