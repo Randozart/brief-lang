@@ -1315,8 +1315,17 @@ self.emit_declares(&mut out);
         &self.warnings
     }
 
-    pub fn llvm_extra_flags(&self) -> &[String] {
-        &self.llvm_extra_flags
+    /// Return any extra flags needed for `opt`. Currently emits
+    /// `-slp-vectorize-hor=false` when SLP hazards exist, since LLVM 18's
+    /// per-function `"disable-slp-vectorize"` attribute is not always respected
+    /// by the new pass manager. This is a safeguard: the per-function attribute
+    /// works on LLVM 15-17 and 22+; the global flag covers LLVM 18-21.
+    pub fn llvm_extra_flags(&self) -> Vec<String> {
+        let mut flags = Vec::new();
+        if !self.slp_hazard_fns.is_empty() {
+            flags.push("-slp-vectorize-hor=false".to_string());
+        }
+        flags
     }
 
     /// Return the attribute group for a function, using `#4` (SLP-disabled)

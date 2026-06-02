@@ -93,12 +93,12 @@ brief-compiler selfhost <file.bv>
 ### Benchmarks (2026-06-02 sprint final — all phases, C with `-ffast-math`, 50M iterations)
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | Dead-field elim + pure counter | 0.151s | 0.082s | 1.84× |
+| iir_filter | **Dead-field elim + pure counter** | **0.000s** | 0.082s | **Brief wins** |
 | precompute_sum | Compile-time precomputation | 0.003s | 0.002s | ~tie |
 | ring_buffer | Enum O(1) pure-counter | 0.003s | 0.003s | ~tie |
 | async_counters | Thread pool O(1) pure-counter | 0.004s | 0.007s | **Brief wins** |
 | float_math | **alloca+SROA + fast-math + -O3** | **0.011s** | 0.006s | ~tie (startup) |
-| float_math_nonzero | alloca+SROA + fast-math + -O3 | **0.376s** | 0.165s | **2.28×** |
+| float_math_nonzero | alloca+SROA + fast-math + -O3 + AVX | **0.371s** | 0.165s | **2.25×** |
 | sparse_dispatch | Call-chain dispatch (SCEV-opt) | 0.090s | 0.007s | startup |
 | const_heavy | Integer arithmetic (sdiv) | 0.002s | 0.061s | **Brief 27× faster** |
 

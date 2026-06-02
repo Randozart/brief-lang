@@ -223,12 +223,23 @@ fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String
     }
 }
 
+fn is_self_identity(a: &Expr, b: &Expr) -> bool {
+    matches!((a, b),
+        (Expr::Identifier(n1), Expr::Identifier(n2)) if n1 == n2)
+}
+
 fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
     match expr {
         Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => {
             out.insert(name.clone());
         }
         Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term => {}
+        // Self-identity operations (x == x, x >= x, x <= x) are tautologies that
+        // don't actually observe the field's value. Skip them to avoid keeping
+        // fields artificially alive in dead-field analysis.
+        Expr::Eq(a, b) if is_self_identity(a, b) => {}
+        Expr::Ge(a, b) if is_self_identity(a, b) => {}
+        Expr::Le(a, b) if is_self_identity(a, b) => {}
         Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
         | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
         | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::Or(a, b)

@@ -1890,7 +1890,7 @@ fn run_llvm_compile(
         if !cc_status.success() {
             eprintln!("  Warning: cc compilation failed. Compile manually:");
             eprintln!("    cc -c {} -o {}", rt_c_path.display(), rt_o_path.display());
-            eprintln!("    llc {} -filetype=obj -o {}.o", output_file.display(), stem);
+            eprintln!("    llc {} -filetype=obj --mcpu=native -o {}.o", output_file.display(), stem);
             return Ok(output_file);
         }
         println!("  Runtime object: {}", rt_o_path.display());
@@ -1901,9 +1901,14 @@ fn run_llvm_compile(
         // replaces the old global -vectorize-slp=false flag.
         let opt_ll_path = out_base.join(format!("{}.opt.ll", stem));
         let mut opt_cmd = std::process::Command::new("opt");
-        opt_cmd.args(["-O3", "-S", "-o"]);
+        opt_cmd.args(["-O3", "-S", "-mtriple=x86_64-pc-linux-gnu", "-o"]);
         opt_cmd.arg(&opt_ll_path);
         opt_cmd.arg(&output_file);
+        if !llvm_backend.llvm_extra_flags().is_empty() {
+            for flag in llvm_backend.llvm_extra_flags() {
+                opt_cmd.arg(&flag);
+            }
+        }
         let ll_source = match opt_cmd.status() {
             Ok(status) if status.success() => {
                 println!("  Optimized: {}", opt_ll_path.display());
@@ -1916,7 +1921,7 @@ fn run_llvm_compile(
         };
 
         let mut llc_cmd = std::process::Command::new("llc");
-        llc_cmd.args(["-filetype=obj", "-O3"]);
+        llc_cmd.args(["-filetype=obj", "-O3", "--mcpu=native"]);
         let llc_status = llc_cmd
             .arg("-o").arg(&ll_o_path).arg(ll_source)
             .status();
