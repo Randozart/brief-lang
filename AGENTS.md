@@ -137,6 +137,9 @@ brief-compiler selfhost <file.bv>
 | B2 | Entry-point value bug | Done — `get_initial_value_numeric` evaluates actual values |
 | B3 | Assertion false-path soundness | Done — both guard branches checked |
 | B4 | Overlap detection in cross-reference | Done — `decls.iter().any()` not `decls.first()` |
+| A4 | Typed SSA — remove `is_float_expr` heuristic | Done — `TypedRegister`, 368 tests pass |
+| A6 | Commutativity pattern fix | Done — removed duplicate match arm |
+| Phase 3 | iir_filter `x==x` fix + `llc --mcpu=native` | Done — iir_filter O(1), AVX codegen |
 
 ### Natural Death (Step 12)
 - **Algorithm**: After computing `has_wake_triggers` and building the transition graph, classify each reactive txn as persistent or transient. If ALL reactive txns have proven bounded convergence (`bounded_pre` + `increments`), the program has `has_natural_exit = true`.
