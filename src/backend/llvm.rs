@@ -274,6 +274,7 @@ pub struct LlvmBackend {
     slp_hazard_fns: HashSet<String>,
     reg_float_cache: HashMap<String, String>,
     state_reg_name: String,
+    ssa_old_float_regs: HashMap<String, String>,
 }
 
 impl LlvmBackend {
@@ -317,6 +318,7 @@ impl LlvmBackend {
             slp_hazard_fns: HashSet::new(),
             reg_float_cache: HashMap::new(),
             state_reg_name: "%state".to_string(),
+            ssa_old_float_regs: HashMap::new(),
         }
     }
 
@@ -2207,6 +2209,15 @@ self.emit_declares(&mut out);
             }
             Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v, ty: Type::Int }; }
             Expr::Identifier(name) => {
+                // SSA body mode: prefer pre-extracted old-value register
+                // for float fields so all body ops are independent.
+                if let Some(old_reg) = self.ssa_old_float_regs.get(name) {
+                    let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = bitcast float {} to i32", indent, i, old_reg).ok();
+                    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
+                    self.reg_float_cache.insert(v.clone(), old_reg.clone());
+                    return TypedRegister { name: v, ty: Type::Float };
+                }
                 if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
                     if let Some(&idx) = self.field_index_map.get(name) {
                         let ll_ty = &self.field_types[idx];
@@ -3009,6 +3020,27 @@ self.emit_declares(&mut out);
         writeln!(out).ok();
     }
 
+    /// Pre-extract all float fields from the current SSA state register
+    /// into named old-value registers. Body statements that read float
+    /// fields will use these old-value registers, making all float
+    /// operations within the iteration independent — LLVM's scheduler can
+    /// then fill all CPU float execution ports simultaneously.
+    fn pre_extract_float_fields(&mut self, out: &mut String) {
+        let ssa_reg = match self.ssa_state_reg.clone() {
+            Some(r) => r,
+            None => return,
+        };
+        self.ssa_old_float_regs.clear();
+        for (field_name, &field_idx) in &self.field_index_map {
+            if self.field_types[field_idx] == "float" {
+                let old_reg = format!("%{}_old_{}", field_name, self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(out, "  {} = extractvalue %State {}, {}", old_reg, ssa_reg, field_idx).ok();
+                self.ssa_old_float_regs.insert(field_name.clone(), old_reg);
+            }
+        }
+    }
+
     /// Emit the folded while-loop body (without `@init_state()` or the enclosing
     /// `define` / `ret`).  Used by both `emit_folded_main` and the enum dispatch path.
     ///
@@ -3089,9 +3121,14 @@ self.emit_declares(&mut out);
                     self.terminated = false;
                     self.returns_i64 = false;
                     self.ssa_state_reg = Some(cur);
+                    // Pre-extract all float fields from the entering state
+                    // so body field reads use old values — all float ops
+                    // become independent, filling all CPU execution ports.
+                    self.pre_extract_float_fields(&mut body4_buf);
                     for stmt in stmts {
                         self.emit_stmt(&mut body4_buf, stmt, "  ");
                     }
+                    self.ssa_old_float_regs.clear();
                     cur = self.ssa_state_reg.take().unwrap_or(phi_reg.clone());
                 }
                 let backedge4 = cur;
@@ -3106,6 +3143,7 @@ self.emit_declares(&mut out);
             self.terminated = false;
             self.returns_i64 = false;
             self.ssa_state_reg = Some(phi_reg.clone());
+            self.pre_extract_float_fields(&mut body1_buf);
             for stmt in stmts {
                 self.emit_stmt(&mut body1_buf, stmt, "  ");
             }
@@ -3295,7 +3333,9 @@ self.emit_declares(&mut out);
                 self.let_bindings.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
+                self.pre_extract_float_fields(out);
                 for s in &txn.body { self.emit_stmt(out, s, "  "); }
+                self.ssa_old_float_regs.clear();
                 let after_body = self.ssa_state_reg.clone().unwrap_or_else(|| pre_ssa.clone());
                 writeln!(out, "  br label %{}", skip_l).ok();
                 writeln!(out, "  {}:", skip_l).ok();
@@ -3307,7 +3347,9 @@ self.emit_declares(&mut out);
                 self.let_bindings.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
+                self.pre_extract_float_fields(out);
                 for s in &txn.body { self.emit_stmt(out, s, "  "); }
+                self.ssa_old_float_regs.clear();
             }
         }
         let final_reg = self.ssa_state_reg.take().unwrap_or(ss0);
