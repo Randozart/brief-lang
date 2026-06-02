@@ -1526,6 +1526,76 @@ self.emit_declares(&mut out);
             for (txn_name, _) in txns {
                 self.slp_hazard_fns.insert(txn_name.clone());
             }
+        } else {
+            // Register pressure is fine — check ASR profitability.
+            // SLP vectorization only pays off when enough arithmetic ops exist
+            // per field to amortize the packing overhead. Below ~1.5 ops/field,
+            // the shuffle pipeline (Port 5) saturates before any throughput
+            // gain materializes.
+            //
+            // Skip the check when there are no cross-field ops (all in-lane):
+            // SLP benefits immediately with zero shuffle overhead.
+            if total_cross_ops > 0 {
+                let total_float_ops = self.count_all_float_ops(&txns);
+                if total_float_ops > 0 && n > 0 {
+                    let ops_per_field = total_float_ops as f64 / n as f64;
+                    if ops_per_field < 1.5 {
+                        self.slp_hazard_fns.insert("main".to_string());
+                        for (txn_name, _) in txns {
+                            self.slp_hazard_fns.insert(txn_name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn count_all_float_ops(&self, txns: &[(String, &crate::ast::Transaction)]) -> u32 {
+        let mut count = 0;
+        for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
+            let mut local_floats = std::collections::HashSet::new();
+            self.collect_local_floats_and_temps(&txn.body, &mut local_floats);
+            for stmt in &txn.body {
+                match stmt {
+                    Statement::Assignment { expr, .. } | Statement::Let { expr: Some(expr), .. } => {
+                        count += self.count_float_arith_ops(expr, &local_floats);
+                    }
+                    Statement::Guarded { statements, .. } => {
+                        for s in statements {
+                            match s {
+                                Statement::Assignment { expr, .. } | Statement::Let { expr: Some(expr), .. } => {
+                                    count += self.count_float_arith_ops(expr, &local_floats);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        count
+    }
+
+    fn count_float_arith_ops(&self, expr: &Expr, local_floats: &std::collections::HashSet<String>) -> u32 {
+        match expr {
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                let is_float = self.is_float_expr_pre_cg(l, local_floats)
+                    || self.is_float_expr_pre_cg(r, local_floats);
+                let mut c = if is_float { 1 } else { 0 };
+                c += self.count_float_arith_ops(l, local_floats);
+                c += self.count_float_arith_ops(r, local_floats);
+                c
+            }
+            Expr::Neg(e) => {
+                if self.is_float_expr_pre_cg(e, local_floats) {
+                    1 + self.count_float_arith_ops(e, local_floats)
+                } else {
+                    self.count_float_arith_ops(e, local_floats)
+                }
+            }
+            Expr::Block(_, last) => self.count_float_arith_ops(last, local_floats),
+            _ => 0,
         }
     }
 
@@ -5404,13 +5474,13 @@ mod tests {
 
     #[test]
     fn test_slp_hazard_small_field_count() {
-        // 4 float fields → SLP is safe on SSE (peak ≈ 7 < 16)
-        let body = make_cross_float_body(4, 3);
+        // 4 float fields, 6 float ops → 6/4=1.5 ops/field ≥ threshold, SLP is safe
+        let body = make_cross_float_body(4, 6);
         let program = make_slp_float_program(4, body, None);
         let mut backend = LlvmBackend::new();
         let output = backend.generate(&program);
         assert!(!output.contains("disable-slp-vectorize"),
-            "4 float fields should not trigger SLP disable");
+            "4 float fields with 6 ops should not trigger SLP disable");
     }
 
     #[test]
@@ -5459,8 +5529,8 @@ mod tests {
 
     #[test]
     fn test_slp_hazard_with_target_spec() {
-        // With explicit target spec for AArch64 (R=32, W=4) → no hazard even for 12 fields
-        let body = make_cross_float_body(12, 32);
+        // AArch64 (R=32, W=4), 12 fields, 18 float ops → 18/12=1.5 ops/field, SLP safe
+        let body = make_cross_float_body(12, 18);
         let program = make_slp_float_program(12, body, None);
         let mut backend = LlvmBackend::new();
         let spec = crate::target_spec::TargetSpec {
@@ -5476,9 +5546,8 @@ mod tests {
         };
         backend = backend.with_spec(spec);
         let output = backend.generate(&program);
-        // AArch64: R=32, Kalman 12 fields + 32 cross-ops → peak=29 < 32, SLP safe
         assert!(!output.contains("disable-slp-vectorize"),
-            "AArch64 with 32 registers should allow SLP for 12 fields");
+            "AArch64 with 32 registers and ASR 2.4 > 1.5 should allow SLP for 12 fields");
     }
 
     #[test]
