@@ -22,6 +22,18 @@ fn float_to_llvm_hex(f: f64) -> String {
 use crate::ast::{
     DispatchMode, Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
 };
+
+#[derive(Debug, Clone)]
+pub struct TypedRegister {
+    pub name: String,
+    pub ty: Type,
+}
+
+impl std::fmt::Display for TypedRegister {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
@@ -232,7 +244,6 @@ pub struct LlvmBackend {
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
-    register_types: HashMap<String, Type>,
     terminated: bool,
     returns_i64: bool,
     range_bounds: HashMap<String, (i64, i64)>,
@@ -275,7 +286,6 @@ impl LlvmBackend {
             has_cycles: false,
             pending_cleanup: Vec::new(),
             let_bindings: HashMap::new(),
-            register_types: HashMap::new(),
             terminated: false,
             returns_i64: false,
             range_bounds: HashMap::new(),
@@ -1928,7 +1938,7 @@ self.emit_declares(&mut out);
             Statement::Let { name, expr, address_expr, .. } => {
                 if let Some(e) = expr {
                     let r = self.emit_expr(out, e, indent);
-                    self.let_bindings.insert(name.clone(), r.clone());
+                    self.let_bindings.insert(name.clone(), r.name.clone());
                     writeln!(out, "{}; let {} = {}", indent, name, r).ok();
                 } else {
                     writeln!(out, "{}; let {} = undef", indent, name).ok();
@@ -2089,12 +2099,12 @@ self.emit_declares(&mut out);
     }
 
     // ── EXPRESSIONS ───────────────────────────────────────────
-    fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> String {
+    fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> TypedRegister {
         let v = format!("%t{}", self.txn_counter);
         self.txn_counter += 1;
         match expr {
-            Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); self.register_types.insert(v.clone(), Type::Int); }
-            Expr::Bool(b) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok(); self.register_types.insert(v.clone(), Type::Bool); }
+            Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+            Expr::Bool(b) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok(); return TypedRegister { name: v, ty: Type::Bool }; }
             Expr::Float(f) => {
                 let bits = float_to_llvm_hex(*f);
                 let fl = format!("%ff{}", self.txn_counter); self.txn_counter += 1;
@@ -2102,34 +2112,35 @@ self.emit_declares(&mut out);
                 let i32 = format!("%fi{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast float {} to i32", indent, i32, fl).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i32).ok();
-                self.register_types.insert(v.to_string(), Type::Float);
+                return TypedRegister { name: v, ty: Type::Float };
             }
             Expr::String(s) => {
-                // Find the index of this string in pre-collected constants
                 let si = self.string_constants.iter().position(|x| x == s).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let p = format!("%sp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr inbounds [{} x i8], [{} x i8]* {}, i64 0, i64 0", indent, p, s.len() + 1, s.len() + 1, g).ok();
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, p).ok();
-                self.register_types.insert(v.clone(), Type::String);
+                return TypedRegister { name: v, ty: Type::String };
             }
             Expr::Char(c) => {
                 let ci = format!("%cc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i32 0, {}", indent, ci, *c as i32).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ci).ok();
+                return TypedRegister { name: v, ty: Type::Char };
             }
-            Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); }
+            Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v, ty: Type::Int }; }
             Expr::Identifier(name) => {
                 if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
                     if let Some(&idx) = self.field_index_map.get(name) {
-                        let ty = &self.field_types[idx];
+                        let ll_ty = &self.field_types[idx];
                         let ev = format!("%ev{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, idx).ok();
-                        match ty.as_str() {
+                        let field_ty = match ll_ty.as_str() {
                             "i8" => {
                                 let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ev).ok();
                                 writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                                Type::Bool
                             }
                             "float" => {
                                 let fc = self.txn_counter; self.txn_counter += 1;
@@ -2138,18 +2149,19 @@ self.emit_declares(&mut out);
                                 let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = bitcast float {} to i32", indent, i, float_reg).ok();
                                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
-                                self.register_types.insert(float_reg.clone(), Type::Float);
                                 self.reg_float_cache.insert(v.clone(), float_reg);
+                                Type::Float
                             }
                             "i8*" => {
                                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
+                                Type::String
                             }
                             _ => {
                                 writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
+                                Type::Int
                             }
-                        }
-                        self.register_types.insert(v.clone(), Type::Int);
-                        return v;
+                        };
+                        return TypedRegister { name: v, ty: field_ty };
                     }
                 }
                 if let Some(reg) = self.let_bindings.get(name) {
@@ -2226,37 +2238,38 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = add i64 0, 0 ; @{}", indent, v, name).ok();
             }
             // Binary ops
-            Expr::Add(l, r) => { self.emit_binop(out, indent, &v, l, r, "add", "fadd"); }
-            Expr::Sub(l, r) => { self.emit_binop(out, indent, &v, l, r, "sub", "fsub"); }
-            Expr::Mul(l, r) => { self.emit_binop(out, indent, &v, l, r, "mul", "fmul"); }
-            Expr::Div(l, r) => { self.emit_binop(out, indent, &v, l, r, "sdiv", "fdiv"); }
+            Expr::Add(l, r) => { let ty = self.emit_binop(out, indent, &v, l, r, "add", "fadd"); return TypedRegister { name: v, ty }; }
+            Expr::Sub(l, r) => { let ty = self.emit_binop(out, indent, &v, l, r, "sub", "fsub"); return TypedRegister { name: v, ty }; }
+            Expr::Mul(l, r) => { let ty = self.emit_binop(out, indent, &v, l, r, "mul", "fmul"); return TypedRegister { name: v, ty }; }
+            Expr::Div(l, r) => { let ty = self.emit_binop(out, indent, &v, l, r, "sdiv", "fdiv"); return TypedRegister { name: v, ty }; }
             Expr::Mod(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = srem i64 {}, {}", indent, v, a, b).ok(); }
             // Comparisons
-            Expr::Eq(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "oeq"); }
-            Expr::Ne(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "one"); }
-            Expr::Lt(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "olt"); }
-            Expr::Le(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "ole"); }
-            Expr::Gt(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "ogt"); }
-            Expr::Ge(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "oge"); }
+            Expr::Eq(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "oeq"); return TypedRegister { name: v, ty: Type::Bool }; }
+            Expr::Ne(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "one"); return TypedRegister { name: v, ty: Type::Bool }; }
+            Expr::Lt(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "olt"); return TypedRegister { name: v, ty: Type::Bool }; }
+            Expr::Le(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "ole"); return TypedRegister { name: v, ty: Type::Bool }; }
+            Expr::Gt(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "ogt"); return TypedRegister { name: v, ty: Type::Bool }; }
+            Expr::Ge(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "oge"); return TypedRegister { name: v, ty: Type::Bool }; }
             // Logical
             Expr::And(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = and i64 {}, {}", indent, v, a, b).ok(); }
             Expr::Or(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = or i64 {}, {}", indent, v, a, b).ok(); }
             Expr::Not(e) => { let inner = self.emit_expr(out, e, indent); writeln!(out, "{}{} = xor i64 {}, 1", indent, v, inner).ok(); }
             Expr::Neg(e) => {
                 let inner = self.emit_expr(out, e, indent);
-                if self.is_float_expr(e) {
+                if inner.ty == Type::Float {
                     let tr = format!("%ntr{}", self.txn_counter); self.txn_counter += 1;
                     let fl = format!("%nfl{}", self.txn_counter); self.txn_counter += 1;
                     let fs = format!("%nfs{}", self.txn_counter); self.txn_counter += 1;
                     let fi = format!("%nfi{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, inner).ok();
+                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, inner.name).ok();
                     writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
                     writeln!(out, "{}{} = fsub fast float -0.0, {}", indent, fs, fl).ok();
                     writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fs).ok();
                     writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
-                    self.register_types.insert(v.to_string(), Type::Float);
+                    return TypedRegister { name: v, ty: Type::Float };
                 } else {
-                    writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner).ok();
+                    writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner.name).ok();
+                    return TypedRegister { name: v, ty: Type::Int };
                 }
             }
             // Bitwise
@@ -2399,9 +2412,9 @@ self.emit_declares(&mut out);
             // Cast
             Expr::Cast(inner, target_ty) => {
                 let src_reg = self.emit_expr(out, inner, indent);
-                let src_ty = self.resolve_source_type(inner, &src_reg);
-                self.emit_cast_convert(out, indent, &v, &src_reg, src_ty, target_ty);
-                self.register_types.insert(v.clone(), target_ty.clone());
+                let src_ty = Some(src_reg.ty.clone());
+                self.emit_cast_convert(out, indent, &v, &src_reg.name, src_ty, target_ty);
+                return TypedRegister { name: v, ty: target_ty.clone() };
             }
             // Block
             Expr::Block(stmts, last) => {
@@ -2431,7 +2444,7 @@ self.emit_declares(&mut out);
                     if let MatchPattern::Variant { .. } = &arm.pattern {
                         writeln!(out, "{}ma{}_{}:", indent, mid, vi).ok();
                         let av = self.emit_expr(out, &arm.body, indent);
-                        phi_v.push(av); phi_l.push(format!("%%ma{}_{}", mid, vi));
+                        phi_v.push(av.name); phi_l.push(format!("%%ma{}_{}", mid, vi));
                         writeln!(out, "{}br label %{}", indent, merge).ok();
                         vi += 1;
                     }
@@ -2440,7 +2453,7 @@ self.emit_declares(&mut out);
                     if let Some(wc) = arms.iter().find(|a| a.pattern == MatchPattern::Wildcard) {
                         writeln!(out, "{}:", def_l).ok();
                         let wv = self.emit_expr(out, &wc.body, indent);
-                        phi_v.push(wv); phi_l.push(format!("%%{}", def_l));
+                        phi_v.push(wv.name); phi_l.push(format!("%%{}", def_l));
                         writeln!(out, "{}br label %{}", indent, merge).ok();
                     }
                 } else {
@@ -2475,11 +2488,9 @@ self.emit_declares(&mut out);
             // Fallback
             _ => { writeln!(out, "{}{} = add i64 0, 0 ; expr", indent, v).ok(); }
         }
-        // Universal float type-propagation catch-all
-        if self.is_float_expr(expr) {
-            self.register_types.insert(v.to_string(), Type::Float);
-        }
-        v
+        // Default: treat as Int. Float operations are handled explicitly
+        // by emit_binop/emit_fcmp which return Type::Float/Bool respectively.
+        TypedRegister { name: v, ty: Type::Int }
     }
 
     // ── RANGE EXTRACTION ──────────────────────────────────────
@@ -2767,7 +2778,7 @@ self.emit_declares(&mut out);
         // access @global_state directly (no %state function param available).
         match expr {
             Expr::Integer(_) | Expr::Bool(_) => {
-                return self.emit_expr(out, expr, indent);
+                return self.emit_expr(out, expr, indent).name;
             }
             _ => {}
         }
@@ -3568,43 +3579,6 @@ self.emit_declares(&mut out);
         ids.iter().any(|id| self.trigger_names.contains(id))
     }
 
-    fn resolve_source_type(&self, expr: &Expr, reg: &str) -> Option<Type> {
-        if let Some(ty) = self.register_types.get(reg) {
-            return Some(ty.clone());
-        }
-        match expr {
-            Expr::Integer(_) => Some(Type::Int),
-            Expr::Float(_) => Some(Type::Float),
-            Expr::Bool(_) => Some(Type::Bool),
-            Expr::String(_) => Some(Type::String),
-            Expr::Char(_) => Some(Type::Char),
-            Expr::Identifier(name) | Expr::OwnedRef(name) => {
-                if let Some(&idx) = self.field_index_map.get(name.as_str()) {
-                    let ll_ty = &self.field_types[idx];
-                    Some(match ll_ty.as_str() {
-                        "i8" => Type::Bool,
-                        "float" => Type::Float,
-                        "i32" => Type::Char,
-                        "i8*" => Type::String,
-                        _ => Type::Int,
-                    })
-                } else if let Some(let_reg) = self.let_bindings.get(name.as_str()) {
-                    self.register_types.get(let_reg).cloned()
-                } else if let Some((ty, _)) = self.constants.get(name.as_str()) {
-                    Some(ty.clone())
-                } else {
-                    None
-                }
-            }
-            Expr::Cast(_, ty) => Some(ty.clone()),
-            Expr::Block(_, last) => self.resolve_source_type(last, reg),
-            _ => {
-                if self.is_float_expr(expr) { Some(Type::Float) }
-                else { Some(Type::Int) }
-            }
-        }
-    }
-
     fn emit_cast_convert(&mut self, out: &mut String, indent: &str, dst: &str, src: &str, src_ty: Option<Type>, target: &Type) {
         let src_ty = match src_ty {
             Some(t) => t,
@@ -3664,41 +3638,6 @@ self.emit_declares(&mut out);
         }
     }
 
-    fn is_float_expr(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::Float(_) => true,
-            Expr::Identifier(name) => {
-                if let Some(reg) = self.let_bindings.get(name) {
-                    self.register_types.get(reg) == Some(&Type::Float)
-                } else if let Some(&idx) = self.field_index_map.get(name) {
-                    self.field_types[idx] == "float"
-                } else if let Some((ty, _)) = self.constants.get(name) {
-                    *ty == Type::Float
-                } else {
-                    false
-                }
-            }
-            Expr::OwnedRef(name) => {
-                if let Some(reg) = self.let_bindings.get(name.as_str()) {
-                    self.register_types.get(reg) == Some(&Type::Float)
-                } else if let Some(&idx) = self.field_index_map.get(name.as_str()) {
-                    self.field_types[idx] == "float"
-                } else if let Some((ty, _)) = self.constants.get(name.as_str()) {
-                    *ty == Type::Float
-                } else {
-                    false
-                }
-            }
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
-                self.is_float_expr(l) || self.is_float_expr(r)
-            }
-            Expr::Neg(e) => self.is_float_expr(e),
-            Expr::Cast(_, ty) => ty == &Type::Float,
-            Expr::Block(_, last) => self.is_float_expr(last),
-            _ => false,
-        }
-    }
-
     fn i64_to_float_reg(&mut self, out: &mut String, reg: &str, indent: &str) -> String {
         // Check cache first: these are actual float registers from SSA extraction
         // or float literal caching. Do NOT check register_types here — that map
@@ -3710,11 +3649,10 @@ self.emit_declares(&mut out);
         let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, reg).ok();
         writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-        self.register_types.insert(fl.clone(), Type::Float);
         fl
     }
 
-    fn emit_binop(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) {
+    fn emit_binop(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) -> Type {
         // Peephole: constant-fold integer binops at compile time
         if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
             let result = match int_op {
@@ -3731,25 +3669,26 @@ self.emit_declares(&mut out);
             };
             if let Some(folded) = result {
                 writeln!(out, "{}{} = add i64 0, {}", indent, v, folded).ok();
-                return;
+                return Type::Int;
             }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
-        if self.is_float_expr(l) || self.is_float_expr(r) {
-            let fa = self.i64_to_float_reg(out, &a, indent);
-            let fb = self.i64_to_float_reg(out, &b, indent);
+        if a.ty == Type::Float || b.ty == Type::Float {
+            let fa = self.i64_to_float_reg(out, &a.name, indent);
+            let fb = self.i64_to_float_reg(out, &b.name, indent);
             let fr = format!("%bfr{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = {} fast float {}, {}", indent, fr, float_op, fa, fb).ok();
             let fi = format!("%bfi{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
-            self.register_types.insert(v.to_string(), Type::Float);
+            Type::Float
         } else {
-            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a, b).ok();
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a.name, b.name).ok();
+            Type::Int
         }
     }
 
-    fn emit_fcmp(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, cond: &str) {
+    fn emit_fcmp(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, cond: &str) -> Type {
         // Peephole: constant-fold integer comparisons at compile time
         if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
             let result = match cond {
@@ -3762,13 +3701,13 @@ self.emit_declares(&mut out);
                 _ => false,
             };
             writeln!(out, "{}{} = add i64 0, {}", indent, v, if result { 1 } else { 0 }).ok();
-            return;
+            return Type::Bool;
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
-        if self.is_float_expr(l) || self.is_float_expr(r) {
-            let fa = self.i64_to_float_reg(out, &a, indent);
-            let fb = self.i64_to_float_reg(out, &b, indent);
+        if a.ty == Type::Float || b.ty == Type::Float {
+            let fa = self.i64_to_float_reg(out, &a.name, indent);
+            let fb = self.i64_to_float_reg(out, &b.name, indent);
             writeln!(out, "{}{} = fcmp fast {} float {}, {}", indent, c, cond, fa, fb).ok();
         } else {
             let icmp_cond = match cond {
@@ -3780,9 +3719,10 @@ self.emit_declares(&mut out);
                 "oge" => "sge",
                 _ => cond,
             };
-            writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a, b).ok();
+            writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a.name, b.name).ok();
         }
         writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok();
+        Type::Bool
     }
 }
 
