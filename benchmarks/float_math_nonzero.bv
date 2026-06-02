@@ -1,4 +1,4 @@
-#!exit count == total;
+#!exit count == total && x0 >= 0.0;
 
 import { __get_env_int } from "std/env.bv";
 import { io_pending } from "std/brief_rt.bv";
