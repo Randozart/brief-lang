@@ -75,23 +75,73 @@ build_c() {
     echo "  C binary ready."
 }
 
+# Build nanosecond timing harness (compiled C fork+exec timer)
+TIMER_BIN="/tmp/brief_bench_timer"
+TIMER_SRC="/tmp/brief_bench_timer.c"
+if [ ! -f "$TIMER_BIN" ]; then
+    cat > "$TIMER_SRC" << 'CEOF'
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <sys/wait.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    if (argc < 2) { fprintf(stderr, "usage: %s <cmd...>\n", argv[0]); return 1; }
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    pid_t pid = fork();
+    if (pid == 0) { execvp(argv[1], &argv[1]); _exit(127); }
+    int status; waitpid(pid, &status, 0);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    printf("%.6f\n", elapsed); fflush(stdout);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+}
+CEOF
+    gcc -O2 -o "$TIMER_BIN" "$TIMER_SRC" 2>/dev/null
+fi
+
+NANOSECONDS=15 # 15-digit nanoseconds for bc precision
 bench_self_term() {
     local name="$1"
 
-    local brief_start=$(date +%s.%N)
-    BOUND=50000000 ./benchmarks/"${name}" >/dev/null 2>&1 || true
-    local brief_end=$(date +%s.%N)
-    local brief_time=$(LC_NUMERIC=C printf "%.4f" "$(echo "scale=10; $brief_end - $brief_start" | bc)")
+    local brief_sum=0; local brief_min=999999; local brief_max=0
+    local c_sum=0
 
-    local c_start=$(date +%s.%N)
-    BOUND=50000000 ./benchmarks/"${name}_c" >/dev/null 2>&1 || true
-    local c_end=$(date +%s.%N)
-    local c_time=$(LC_NUMERIC=C printf "%.4f" "$(echo "scale=10; $c_end - $c_start" | bc)")
+    for i in 1 2 3 4 5; do
+        local bt=$(env BOUND=50000000 "$TIMER_BIN" ./benchmarks/"$name")
+        local ct=$(env BOUND=50000000 "$TIMER_BIN" ./benchmarks/"${name}_c")
+        brief_sum=$(echo "$brief_sum + $bt" | bc)
+        c_sum=$(echo "$c_sum + $ct" | bc)
+        if (( $(echo "$bt < $brief_min" | bc -l) )); then brief_min=$bt; fi
+        if (( $(echo "$bt > $brief_max" | bc -l) )); then brief_max=$bt; fi
+    done
+
+    local brief_avg=$(echo "scale=4; $brief_sum / 5" | bc)
+    local c_avg=$(echo "scale=4; $c_sum / 5" | bc)
+
+    local winner="—"
+    local ratio="N/A"
+    if [ "$c_avg" != "0.0000" ] && [ "$brief_avg" != "0.0000" ]; then
+        ratio=$(echo "scale=2; $brief_avg / $c_avg" | bc)
+        if (( $(echo "$ratio < 1.0" | bc -l) )); then
+            winner="Brief"
+        elif (( $(echo "$ratio > 1.0" | bc -l) )); then
+            winner="C"
+        else
+            winner="~tie"
+        fi
+    elif [ "$brief_avg" = "0.0000" ] && [ "$c_avg" != "0.0000" ]; then
+        ratio="Brief wins (O(1) fold)"
+        winner="Brief"
+    fi
 
     echo ""
     echo "=== $name ==="
-    echo "  Brief: ${brief_time}s"
-    echo "  C:     ${c_time}s"
+    echo "  Brief: ${brief_avg}s  (min ${brief_min}s, max ${brief_max}s)"
+    echo "  C:     ${c_avg}s"
+    echo "  Ratio: ${ratio}x  →  ${winner} wins"
 }
 
 echo "=== Building Brief compiler (release) ==="
@@ -137,6 +187,6 @@ echo ""
 echo "================================================"
 echo "  SUMMARY"
 echo "================================================"
-  echo "  All 8 benchmarks measured at BOUND=50000000, 4-decimal precision."
-echo "  0.0000s = O(1) optimization eliminates the loop entirely."
+echo "  5 iterations per benchmark, avg wall clock via CLOCK_MONOTONIC."
+echo "  BOUND=50000000. Nanosecond-precision fork+exec timing harness."
 echo "================================================"
