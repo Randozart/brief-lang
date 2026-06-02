@@ -18,7 +18,7 @@ let total: Int = __get_env_int("BOUND");
 let count: Int = 0;
 let acc: Int = 0;
 
-rct txn tick [count < total][count == total] {
+rct txn tick [count < total && acc == acc][count == total] {
     &acc = acc + C00 + C01 + C02 + C03 + C04
           + C05 + C06 + C07 + C08 + C09
           + C10 + C11 + C12 + C13 + C14

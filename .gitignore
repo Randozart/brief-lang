@@ -135,6 +135,14 @@ benchmarks/kalman_filter_runtime_c
 brief_rt.c
 brief_rt.o
 
+# New calibration benchmarks (2026-06-02)
+benchmarks/const_heavy
+benchmarks/const_heavy_c
+benchmarks/float_math
+benchmarks/float_math_c
+benchmarks/sparse_dispatch
+benchmarks/sparse_dispatch_c
+
 # Leftover C comparison binaries not in benchmark list
 benchmarks/kalman_no_slp
 benchmarks/precompute_sum_c

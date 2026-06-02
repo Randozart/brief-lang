@@ -53,14 +53,8 @@ build_bench() {
     ./target/release/brief-compiler llvm "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget 256 2>&1
 
-    # The llvm command auto-compiles/link when brief_rt.o is needed
-    # (detected via import "link/brief_rt.o" in the source files of
-    # ring_buffer and async_counters). For benchmarks without runtime
-    # deps (iir_filter), compile the .ll to binary manually.
     local bin="benchmarks/${name}"
-    if [ ! -f "$bin" ]; then
-        clang -O3 -march=native "benchmarks/${name}.ll" -o "$bin" -lm 2>&1
-    fi
+    clang -O3 -march=native "benchmarks/${name}.ll" -o "$bin" -lm 2>&1
     echo "  Brief binary ready."
 }
 
@@ -79,10 +73,11 @@ build_c() {
 bench_self_term() {
     local name="$1"
     echo ""
-    echo "=== $name (Brief) ==="
-    /usr/bin/time -f "  real %e  user %U  sys %S" "./benchmarks/${name}"
-    echo "=== $name (C) ==="
-    /usr/bin/time -f "  real %e  user %U  sys %S" "./benchmarks/${name}_c"
+    echo "=== $name ==="
+    echo "  Brief: $(BOUND=50000000 /usr/bin/time -f "%e" ./benchmarks/"${name}" 2>&1 >/dev/null)s"
+    local c_exit=0
+    local c_time=$(BOUND=50000000 /usr/bin/time -f "%e" ./benchmarks/"${name}_c" 2>&1 >/dev/null) || c_exit=$?
+    echo "  C:     ${c_time}s${c_exit:+ (exit $c_exit)}"
 }
 
 echo "=== Building Brief compiler (release) ==="
