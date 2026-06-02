@@ -50,11 +50,13 @@ build_bench() {
     echo "  Building: $name"
     echo "================================================"
 
-    # Compile Brief → LLVM IR using release binary (avoids cargo rerun)
+    # Force rebuild: remove stale binary so we always get current source
+    local bin="benchmarks/${name}"
+    rm -f "$bin"
+
     ./target/release/brief-compiler llvm "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget 256 2>&1
 
-    local bin="benchmarks/${name}"
     if [ ! -f "$bin" ]; then
         clang -O3 -march=native -ffast-math "benchmarks/${name}.ll" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
     fi

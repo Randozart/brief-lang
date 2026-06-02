@@ -2951,6 +2951,7 @@ self.emit_declares(&mut out);
         label_prefix: &str,
         use_phi: bool,
         body: Option<&[Statement]>,
+        unroll_factor: usize,
     ) {
         let c0 = self.txn_counter;
         if use_phi {
@@ -2984,7 +2985,7 @@ self.emit_declares(&mut out);
             // Store counter once after the loop
             writeln!(out, "  store i64 %cnt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
         } else if let Some(stmts) = body {
-            // SSA mode: load once, phi in header, inline body with extract/insert, store once
+            // SSA mode: load once, phi in header, inline unrolled body with extract/insert, store once
             if let Some(ti) = total_idx {
                 writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", label_prefix, c0, ti).ok();
                 writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
@@ -2993,23 +2994,45 @@ self.emit_declares(&mut out);
             } else {
                 writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c0).ok();
             }
-            // Emit body first into a buffer to capture the final SSA register name
             let phi_reg = format!("%ssa_phi_{}", label_prefix);
-            let mut body_buf = String::new();
-            writeln!(body_buf, "{}_body:", label_prefix).ok();
-            self.ssa_state_reg = Some(phi_reg.clone());
+            let unroll = unroll_factor.max(1);
+            let unroll_minus_1 = unroll - 1;
+
+            // --- body4: unrolled loop body ---
+            let mut body4_buf = String::new();
+            if unroll > 1 {
+                writeln!(body4_buf, "{}_body4:", label_prefix).ok();
+                let mut cur = phi_reg.clone();
+                for _ in 0..unroll {
+                    self.let_bindings.clear();
+                    self.terminated = false;
+                    self.returns_i64 = false;
+                    self.ssa_state_reg = Some(cur);
+                    for stmt in stmts {
+                        self.emit_stmt(&mut body4_buf, stmt, "  ");
+                    }
+                    cur = self.ssa_state_reg.take().unwrap_or(phi_reg.clone());
+                }
+                let backedge4 = cur;
+                writeln!(body4_buf, "  store %State {}, %State* %slot_{}, align 8", backedge4, label_prefix).ok();
+                writeln!(body4_buf, "  br label %{}_hdr", label_prefix).ok();
+            }
+
+            // --- body1: remainder loop (single iteration) ---
+            let mut body1_buf = String::new();
+            writeln!(body1_buf, "{}_body1:", label_prefix).ok();
             self.let_bindings.clear();
             self.terminated = false;
             self.returns_i64 = false;
+            self.ssa_state_reg = Some(phi_reg.clone());
             for stmt in stmts {
-                self.emit_stmt(&mut body_buf, stmt, "  ");
+                self.emit_stmt(&mut body1_buf, stmt, "  ");
             }
             let backedge_val = self.ssa_state_reg.take().unwrap_or(phi_reg.clone());
-            writeln!(body_buf, "  store %State {}, %State* %slot_{}, align 8", backedge_val, label_prefix).ok();
-            writeln!(body_buf, "  br label %{}_hdr", label_prefix).ok();
-            // Now emit preheader, header with phi, body, done
-            // Build initial %State from known constants (not loads from global)
-            // so GVN can propagate zero values through the phi cycle.
+            writeln!(body1_buf, "  store %State {}, %State* %slot_{}, align 8", backedge_val, label_prefix).ok();
+            writeln!(body1_buf, "  br label %{}_hdr", label_prefix).ok();
+
+            // Build initial %State from known constants
             writeln!(out, "  br label %{}_pre", label_prefix).ok();
             writeln!(out, "{}_pre:", label_prefix).ok();
             let mut cur_init = "zeroinitializer".to_string();
@@ -3069,7 +3092,6 @@ self.emit_declares(&mut out);
                         cur_init = iv;
                     }
                     _ => {
-                        // Runtime expression (non-constant) — load from global state
                         let gep = format!("%gep{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "  {} = getelementptr inbounds %State, %State* @global_state, i32 0, i32 {}", gep, idx).ok();
                         let ld = format!("%ld{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
@@ -3084,12 +3106,30 @@ self.emit_declares(&mut out);
             writeln!(out, "  {} = alloca %State, align 8", slot).ok();
             writeln!(out, "  store %State {}, %State* {}, align 8", cur_init, slot).ok();
             writeln!(out, "  br label %{}_hdr", label_prefix).ok();
+
+            // Header: extract counter, compare with adjusted/un-adjusted bounds
             writeln!(out, "{}_hdr:", label_prefix).ok();
             writeln!(out, "  {} = load %State, %State* {}, align 8", phi_reg, slot).ok();
-            writeln!(out, "  %ex{}_{} = extractvalue %State {}, {}", label_prefix, c0 + 1, phi_reg, counter_idx).ok();
-            writeln!(out, "  %cp{}_{} = icmp slt i64 %ex{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
-            writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
-            out.push_str(&body_buf);
+            writeln!(out, "  %ex{}_{} = extractvalue %State {}, {}", label_prefix, self.txn_counter, phi_reg, counter_idx).ok();
+            let ex_reg = format!("%ex{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+
+            if unroll > 1 {
+                let adj = format!("%adj{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "  {} = add i64 %lt{}_{}, -{}", adj, label_prefix, c0, unroll_minus_1).ok();
+                let cp4 = format!("%cp{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "  {} = icmp slt i64 {}, {}", cp4, ex_reg, adj).ok();
+                writeln!(out, "  br i1 {}, label %{}_body4, label %{}_rem", cp4, label_prefix, label_prefix).ok();
+                writeln!(out, "{}_rem:", label_prefix).ok();
+            }
+            let cp1 = format!("%cp{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "  {} = icmp slt i64 {}, %lt{}_{}", cp1, ex_reg, label_prefix, c0).ok();
+            writeln!(out, "  br i1 {}, label %{}_body1, label %{}_done", cp1, label_prefix, label_prefix).ok();
+
+            if unroll > 1 {
+                out.push_str(&body4_buf);
+            }
+            out.push_str(&body1_buf);
+
             let final_reg = format!("%final_{}", label_prefix);
             writeln!(out, "{}_done:", label_prefix).ok();
             writeln!(out, "  {} = load %State, %State* %slot_{}, align 8", final_reg, label_prefix).ok();
@@ -3134,7 +3174,8 @@ self.emit_declares(&mut out);
         if use_phi {
             writeln!(out, "  br label %case_phi_entry").ok();
         }
-        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body);
+        let uf = if !use_phi && body.is_some() { 4 } else { 1 };
+        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body, uf);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -3329,7 +3370,7 @@ self.emit_declares(&mut out);
                             } else {
                                 // Pure body + runtime-variable bound → phi-node pipeline
                                 let ptcn_ref = ptcn.as_deref();
-                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true, None);
+                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true, None, 1);
                                 continue;
                             }
                         }
@@ -3337,12 +3378,12 @@ self.emit_declares(&mut out);
                     // Non-pure body → SSA mode with inline body
                     let ptcn_ref = ptcn.as_deref();
                     let body = txns.iter().find(|(n, _)| n == ptxn_name).map(|(_, t)| t.body.as_slice());
-                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false, body);
+                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false, body, 4);
                 }
             } else {
                 // Single-txn (legacy): use the caller-provided params
                 let body = txns.iter().find(|(n, _)| n == fn_name).map(|(_, t)| t.body.as_slice());
-                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body);
+                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body, 4);
             }
         };
 
