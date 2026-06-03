@@ -1788,6 +1788,127 @@ fn run_rust_compile(
 }
 
 /// Intent: run cobol compile.
+
+/// Attempt LTO compilation pipeline: compile brief_rt.c to LLVM bitcode,
+/// merge with program IR, run opt -O3 on the merged module, then llc.
+/// Returns Some(path_to_object) on success, None if any tool is missing.
+fn try_lto_pipeline(
+    out_base: &Path,
+    stem: &str,
+    ll_file: &Path,
+    rt_c_path: &Path,
+    llvm_extra_flags: &[String],
+    has_thread_pool: bool,
+) -> Option<PathBuf> {
+    // Check for required tools
+    let clang_ok = std::process::Command::new("clang")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let llvm_link_ok = std::process::Command::new("llvm-link")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let llvm_as_ok = std::process::Command::new("llvm-as")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if !clang_ok || !llvm_link_ok || !llvm_as_ok {
+        return None;
+    }
+
+    let rt_bc = out_base.join("brief_rt.bc");
+    let prog_bc = out_base.join(format!("{}.bc", stem));
+    let merged_bc = out_base.join(format!("{}_merged.bc", stem));
+    let merged_opt_bc = out_base.join(format!("{}_merged.opt.bc", stem));
+    let obj_path = out_base.join(format!("{}.o", stem));
+
+    // Step 1: compile brief_rt.c → LLVM bitcode
+    let clang_status = {
+        let mut cmd = std::process::Command::new("clang");
+        cmd.args(["-c", "-emit-llvm", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"]);
+        if has_thread_pool {
+            cmd.arg("-DBRIEF_THREAD_POOL");
+        }
+        cmd.arg("-o").arg(&rt_bc).arg(rt_c_path);
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+        cmd.status().ok()
+    };
+    if clang_status.map_or(true, |s| !s.success()) {
+        return None;
+    }
+
+    // Step 2: convert program .ll → .bc
+    let as_status = std::process::Command::new("llvm-as")
+        .args(["-o"])
+        .arg(&prog_bc)
+        .arg(ll_file)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok();
+    if as_status.map_or(true, |s| !s.success()) {
+        return None;
+    }
+
+    // Step 3: merge bitcode modules
+    let link_status = std::process::Command::new("llvm-link")
+        .args(["-o"])
+        .arg(&merged_bc)
+        .arg(&prog_bc)
+        .arg(&rt_bc)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok();
+    if link_status.map_or(true, |s| !s.success()) {
+        return None;
+    }
+
+    // Step 4: opt -O3 on merged module
+    let opt_status = {
+        let mut cmd = std::process::Command::new("opt");
+        cmd.args(["-O3", "-S", "-mtriple=x86_64-pc-linux-gnu", "-o"]);
+        cmd.arg(&merged_opt_bc);
+        cmd.arg(&merged_bc);
+        for flag in llvm_extra_flags {
+            cmd.arg(flag);
+        }
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+        cmd.status().ok()
+    };
+    if opt_status.map_or(true, |s| !s.success()) {
+        return None;
+    }
+
+    // Step 5: llc → object
+    let llc_status = std::process::Command::new("llc")
+        .args(["-filetype=obj", "-O3", "--mcpu=native", "-o"])
+        .arg(&obj_path)
+        .arg(&merged_opt_bc)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok();
+    if llc_status.map_or(true, |s| !s.success()) {
+        return None;
+    }
+
+    Some(obj_path)
+}
+
 fn run_llvm_compile(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -1871,8 +1992,6 @@ fn run_llvm_compile(
     if !link_deps.is_empty() {
         let out_base = out_dir.unwrap_or(std::path::Path::new("."));
         let rt_c_path = out_base.join("brief_rt.c");
-        let rt_o_path = out_base.join("brief_rt.o");
-        let ll_o_path = out_base.join(format!("{}.o", stem));
         let exe_path = out_base.join(stem);
         // Detect whether output has wake triggers
         let has_wake = output.contains("@llvm.wake_triggers");
@@ -1880,7 +1999,43 @@ fn run_llvm_compile(
         let has_thread_pool = output.contains("@llvm.thread_pool");
         // Write embedded C source to disk
         fs::write(&rt_c_path, BRIEF_RT_SOURCE)?;
-        // Compile runtime
+
+        let llvm_flags = llvm_backend.llvm_extra_flags();
+
+        // Try LTO pipeline first: compile brief_rt.c to bitcode, merge with program IR,
+        // run opt -O3 on the merged module, then llc. This enables inlining of __print_int,
+        // __wait_for_event, and thread pool barriers into the Brief loop body.
+        let lto_obj = try_lto_pipeline(&out_base, stem, &output_file, &rt_c_path, &llvm_flags, has_thread_pool);
+        if let Some(lto_obj_path) = lto_obj {
+            println!("  LTO-merged: {}.bc + {}.bc → optimized", stem, "brief_rt");
+
+            let mut link_cmd = std::process::Command::new("cc");
+            link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj_path);
+            if has_wake {
+                link_cmd.args(["-lrt", "-lpthread"]);
+            } else if has_thread_pool {
+                link_cmd.arg("-lpthread");
+            }
+            let link_status = link_cmd.status();
+            match link_status {
+                Ok(status) if status.success() => {
+                    println!("  Binary: {}", exe_path.display());
+                }
+                _ => {
+                    eprintln!("  Warning: linking failed. Link manually:");
+                    eprintln!("    cc -no-pie {} -o {}", lto_obj_path.display(), exe_path.display());
+                    if has_wake { eprintln!("    (add -lrt -lpthread)"); }
+                    if has_thread_pool && !has_wake { eprintln!("    (add -lpthread)"); }
+                }
+            }
+            return Ok(output_file);
+        }
+
+        // LTO not available — fall back to standard cc compilation and object linking
+        let rt_o_path = out_base.join("brief_rt.o");
+        let ll_o_path = out_base.join(format!("{}.o", stem));
+
+        // Compile runtime with cc
         let cc_status = {
             let mut cmd = std::process::Command::new("cc");
             cmd.args(["-c", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"]);
@@ -1899,29 +2054,21 @@ fn run_llvm_compile(
         }
         println!("  Runtime object: {}", rt_o_path.display());
 
-        // Optimize .ll with LLVM's middle-end (opt) then compile .ll → .o with llc.
-        // -O3 provides SROA, GVN, SLP vectorization, loop vectorization, and aggressive
-        // inlining. Per-function SLP control via IR attributes ("disable-slp-vectorize")
-        // replaces the old global -vectorize-slp=false flag.
+        // Opt + llc pipeline for standalone IR (backup path)
         let opt_ll_path = out_base.join(format!("{}.opt.ll", stem));
         let mut opt_cmd = std::process::Command::new("opt");
         opt_cmd.args(["-O3", "-S", "-mtriple=x86_64-pc-linux-gnu", "-o"]);
         opt_cmd.arg(&opt_ll_path);
         opt_cmd.arg(&output_file);
-        if !llvm_backend.llvm_extra_flags().is_empty() {
-            for flag in llvm_backend.llvm_extra_flags() {
-                opt_cmd.arg(&flag);
-            }
+        for flag in &llvm_flags {
+            opt_cmd.arg(flag);
         }
         let ll_source = match opt_cmd.status() {
             Ok(status) if status.success() => {
                 println!("  Optimized: {}", opt_ll_path.display());
                 &opt_ll_path
             }
-            _ => {
-                // opt not found or failed — fall back to unoptimized IR
-                &output_file
-            }
+            _ => &output_file,
         };
 
         let mut llc_cmd = std::process::Command::new("llc");
@@ -1944,7 +2091,6 @@ fn run_llvm_compile(
             }
         }
 
-        // Link into final executable
         let mut link_cmd = std::process::Command::new("cc");
         link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&ll_o_path).arg(&rt_o_path);
         if has_wake {

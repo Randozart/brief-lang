@@ -132,6 +132,10 @@ benchmarks/kalman_filter_runtime_c
 # Generated LLVM IR processed by opt
 *.opt.ll
 
+# LTO pipeline artifacts (bitcode)
+*.bc
+*_merged*
+
 # Root-level runtime artifacts (compiled outside benchmarks/)
 brief_rt.c
 brief_rt.o
