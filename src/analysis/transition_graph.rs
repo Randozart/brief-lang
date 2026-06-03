@@ -221,7 +221,56 @@ pub fn compute_live_fields(
     for node in nodes {
         collect_identifiers(&node.precondition, &mut live);
     }
+
+    // Transitive liveness: if a live field reads another field through an
+    // assignment or let binding, that field is also live.  Iterate to
+    // fixpoint through the txn bodies.
+    loop {
+        let mut changed = false;
+        for node in nodes {
+            // Recursively scan statements including Guarded blocks
+            let mut stmts: Vec<&Statement> = node.body.iter().collect();
+            let mut i = 0;
+            while i < stmts.len() {
+                if let Statement::Guarded { statements, .. } = stmts[i] {
+                    stmts.extend(statements);
+                }
+                i += 1;
+            }
+            for stmt in stmts {
+                let (target, expr) = match stmt {
+                    Statement::Assignment { lhs, expr, .. } => {
+                        (expr_name(lhs), expr)
+                    }
+                    Statement::Let { name, expr: Some(e), .. } => {
+                        (Some(name.clone()), e)
+                    }
+                    _ => continue,
+                };
+                if let Some(ref t) = target {
+                    if live.contains(t) {
+                        let mut idents = HashSet::new();
+                        collect_identifiers(expr, &mut idents);
+                        for ident in idents {
+                            if live.insert(ident) {
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !changed { break; }
+    }
+
     live
+}
+
+fn expr_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Identifier(n) | Expr::OwnedRef(n) => Some(n.clone()),
+        _ => None,
+    }
 }
 
 fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String>) {
