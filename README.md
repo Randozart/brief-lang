@@ -8,7 +8,7 @@
 
 **Status:** v0.14.0 - Multi-Backend, FFI-Connected, LLVM-Ready
 
-Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. Due to this, it transpiles well to many imperative languages by inferring what instructions must happen for each new state to become true, and writing that in the target code. Due to its declarative nature, this means it handles both software transpilation (C, Rust, Assembly, COBOL), hardware transpilation (SystemVerilog, VHDL), embedded transpilation, web transpilation (by combining WASM, HTML, CSS and SVG, and gluing these together with a thing layer of JS. Also TypeScript and TSX).
+Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. Due to this, it transpiles well to many imperative languages by inferring what instructions must happen for each new state to become true, and writing that in the target code. Due to its declarative nature, this means it handles both software transpilation (LLVM, COBOL), hardware transpilation (SystemVerilog, VHDL), embedded transpilation, web transpilation (by combining WASM, HTML, CSS and SVG, and gluing these together with a thing layer of JS. Also TypeScript and TSX).
 
 The main sources of inspiration are Rust (by Graydon Hoare and the Rust community) and Dialog (by Linus Åkesson). Specifically the fact that both have a very strict compiler, that catches bad code before it ever compiles, simply through smart conventions. Especially the declarative nature is inspired by Dialog, as a direct successor of Prolog, since Dialog showed that setting up a series of predicates could be sufficient to have a compiler figure out a complex runtime capable of simulating a world. And the reactor loop? That was inspired by, well... React. As such, everything in Brief is designed to, in some way, aid in predictable runtime cascades. You set up the first billiard ball, and based on the variables present describing the overall "state", the rest of the balls predictably scatter.
 
@@ -30,7 +30,24 @@ Most programming languages are built around _operations in sequence_. Brief desc
     *   **In Hardware:** The compiler builds the roads directly out of copper.
 *   **Variable Logic:** The logic remains invariant while the material changes. A square is a square whether it's drawn in the sand or forged in steel.
 
-**Deep Dive:** See [PRAXIS.md](PRAXIS.md) for the complete philosophical and technical framework behind *"Topology Over Timing,"* including Fixed-Point Synthesis, Transaction Chaining, and the Hyper-Optimization strategies that make Brief slightly different from most imperative languages.
+**Deep Dive:** There are several .md documents scattered across the repo with random ideas on optimizing the language. Some are outdated, some aren't, but they should show the development of the Brief philosophy over time, and ways in which the topological approach has allowed backend optimization not otherwise available.
+
+## The Philosophical Pillars
+
+*   **All operations are expressed in transactions, and only transactions can call operations. They either complete fully, or not at all.**
+    *   Transactions are inherently cyclical. If you properly define a postcondition a cyclically executed transaction will eventually reach, it automatically starts behaving like a loop, but one that can predictably halt.
+*   **Brief doesn't need you to be correct, it just needs you to be right.**
+    *   The contract logic often just requires you to declare either the precondition or postcondition, not both.
+    *   Contracts are simultaneously specification AND optimization input. In most languages, types/specs are safety rails that constrain what you can do. In Brief, they're also what the optimizer feeds on. The more you declare, the more the compiler can prove, and the faster your program runs.    
+    *   The file extension system (.bv → warnings, .sbv → hard errors) embodies the idea that you opt into strictness as your understanding deepens. Partial contracts compile with warnings. Full contracts with strict mode compile with proofs. This is a choice that distinguishes Brief from total languages (Coq, Agda) where you must prove everything upfront, and from mainstream languages where you prove nothing.
+*   **Execution is inferred, not prescribed.**
+    *   Programs are declared through a combination of variables, definitions and transactions.
+    *   The entire program runs on a non-polling reactor loop. It indexes which variable changes lead to which `rct txn` preconditions to be fulfilled, and fires them automatically when it's their time to act.
+    *   Because these paths are laid out predictably, the compiler has great leeway in folding these paths. If X through A, B and C will always lead to Y with side-effect Z, the compiler will simply draw a short route from X to YZ.
+*   **No magic.**
+    *   Every function and keyword in Brief must be traceable to a source following the same rules as every other definition.
+    *   The compiler is not allowed to have any baked in function calls. These must all trace to a library file.
+    *   Anything interacting with an external language or interrupt source must be declared explicitly through the Metropolitan FFI interface.
 
 ## Quick Start
 
@@ -106,11 +123,8 @@ txn main() [true][true] {
 
 | Type | File Extension | Description | Targets |
 |------|----------------|-------------|---------|
-| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Brief** | `.bv` | Pure declarative logic | Rust, C, AArch64, x86-64, WASM, LLVM |
-| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Strict Brief** | `.sbv` | Brief with full contract verification | Same + strict mode |
-| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Strict Embedded Brief** | `.sebv` | Embedded Brief with strict contracts | FPGA, ARM bare-metal |
-| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Strict Rendered Brief** | `.srbv` | Rendered Brief with strict contracts | Browser (WASM + JS) |
-| <img src="assets/r-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Rendered Brief** | `.rbv` | Brief + Web UI (HTML/CSS/SVG) | Browser (WASM + JS) |
+| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Brief** | `.bv` | Pure declarative logic | LLVM into native binary, COBOL |
+| <img src="assets/r-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Rendered Brief** | `.rbv` | Brief + Web UI (HTML/CSS/SVG) | Browser (WASM + JS + HTML + CSS) |
 | <img src="assets/e-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Embedded Brief** | `.ebv` | Brief + Hardware triggers | FPGA (VHDL/SystemVerilog), ARM bare-metal |
 | <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief** | `.dbv` | Configuration data | All targets |
 | <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief Schema** | `.dbvs` | Schema/FFI bindings | All targets |

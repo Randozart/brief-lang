@@ -242,6 +242,7 @@ pub struct LlvmBackend {
     field_initializers: HashMap<String, Option<Expr>>,
     mmio_fields: HashMap<String, u64>,
     mmio_initializers: HashMap<String, Option<Expr>>,
+    mmio_prepopulated: bool,
     txn_counter: usize,
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
@@ -289,6 +290,7 @@ impl LlvmBackend {
             field_initializers: HashMap::new(),
             mmio_fields: HashMap::new(),
             mmio_initializers: HashMap::new(),
+            mmio_prepopulated: false,
             txn_counter: 0,
             has_cycles: false,
             pending_cleanup: Vec::new(),
@@ -351,6 +353,14 @@ impl LlvmBackend {
 
     pub fn with_dead_info_disabled(mut self, disabled: bool) -> Self {
         self.dead_info_disabled = disabled;
+        self
+    }
+
+    /// Pre-populate MMIO address map from a resolved DBV target binding.
+    /// Each alias name maps to a physical u64 address for volatile MMIO access.
+    pub fn with_mmio_addresses(mut self, addresses: HashMap<String, u64>) -> Self {
+        self.mmio_fields = addresses;
+        self.mmio_prepopulated = true;
         self
     }
 
@@ -1709,12 +1719,17 @@ self.emit_declares(&mut out);
         self.field_index_map.clear();
         self.field_types.clear();
         self.field_initializers.clear();
-        self.mmio_fields.clear();
-        self.mmio_initializers.clear();
+        if !self.mmio_prepopulated {
+            self.mmio_fields.clear();
+            self.mmio_initializers.clear();
+        }
         for item in &program.items {
             if let TopLevel::StateDecl(s) = item {
                 if let Some(addr) = s.address {
                     self.mmio_fields.insert(s.name.clone(), addr);
+                    self.mmio_initializers.insert(s.name.clone(), s.expr.clone());
+                } else if self.mmio_prepopulated && self.mmio_fields.contains_key(&s.name) {
+                    // DBV-targeted MMIO field — address comes from external target binding
                     self.mmio_initializers.insert(s.name.clone(), s.expr.clone());
                 } else {
                     self.field_index_map

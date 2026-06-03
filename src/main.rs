@@ -1683,7 +1683,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             }
         },
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1835,9 +1835,9 @@ fn process_hardware_handoff(
     Ok(())
 }
 
-/// Validate and note a pre-existing DBV target binding file.
-/// In Phase 4, this will feed addresses into the LLVM backend's mmio_fields map.
-fn process_target_dbv(_dbv_path: &str) -> Result<(), String> {
+/// Parse a DBV target binding file and extract alias → address mappings.
+/// Returns a map of alias name to physical u64 address for MMIO codegen.
+fn process_target_dbv(_dbv_path: &str) -> Result<HashMap<String, u64>, String> {
     let dbv_path = Path::new(_dbv_path);
     if !dbv_path.exists() {
         return Err(format!("Target DBV file not found: {}", _dbv_path));
@@ -1845,9 +1845,15 @@ fn process_target_dbv(_dbv_path: &str) -> Result<(), String> {
     if !dbv_path.extension().map_or(false, |e| e == "dbv") {
         return Err(format!("Target DBV file must have .dbv extension: {}", _dbv_path));
     }
-    // Phase 4: parse the DBV file and feed resolved addresses into the backend
-    println!("  Target DBV: {} (binding addresses for compilation)", dbv_path.display());
-    Ok(())
+
+    let content = std::fs::read_to_string(dbv_path)
+        .map_err(|e| format!("Failed to read {}: {}", _dbv_path, e))?;
+
+    let addresses = hardware::handoff::extract_target_addresses(&content)?;
+
+    println!("  Target DBV: {} ({} address bindings)", dbv_path.display(), addresses.len());
+
+    Ok(addresses)
 }
 
 /// Attempt LTO compilation pipeline: compile brief_rt.c to LLVM bitcode,
@@ -1979,6 +1985,7 @@ fn run_llvm_compile(
     optimize_report: bool,
     optimize_size: Option<u64>,
     dead_info_disabled: bool,
+    mmio_addresses: Option<HashMap<String, u64>>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -2032,6 +2039,9 @@ fn run_llvm_compile(
     }
     if let Some(spec) = target.cloned() {
         llvm_backend = llvm_backend.with_spec(spec);
+    }
+    if let Some(addrs) = mmio_addresses {
+        llvm_backend = llvm_backend.with_mmio_addresses(addrs);
     }
     let output = llvm_backend.generate(&program);
 
@@ -3656,17 +3666,19 @@ fn main() {
                     .unwrap_or_else(|e| { eprintln!("Warning: handoff processing failed: {}", e); });
             }
 
-            // If target DBV is provided, pre-process it for address extraction
+            // If target DBV is provided, parse it for address extraction
+            let mut mmio_addresses: Option<HashMap<String, u64>> = None;
             if let Some(ref dbv_path) = target_dbv {
-                if let Err(e) = process_target_dbv(dbv_path) {
-                    eprintln!("Warning: could not process target DBV: {}", e);
+                match process_target_dbv(dbv_path) {
+                    Ok(map) => { mmio_addresses = Some(map); }
+                    Err(e) => { eprintln!("Warning: could not process target DBV: {}", e); }
                 }
             }
 
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);

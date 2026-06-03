@@ -253,14 +253,14 @@ fn extract_xml_attr<'a>(line: &'a str, element: &str, attr: &str) -> Option<&'a 
 
 /// Generate a `.dbvs` schema from extracted hardware peripherals.
 ///
-/// Each peripheral becomes a named register with an alias.
-/// The user writes `import "chip.dbvs"` in their Brief program
-/// and references peripherals by their cleaned name.
+/// Each peripheral becomes a named register with its physical address,
+/// plus a type-only alias for schema import. Users reference via the alias.
+/// Addresses are resolved at compile time from the target .dbv file.
 pub fn generate_dbvs(peripherals: &HashMap<String, HardwarePeripheral>) -> String {
     let mut out = String::new();
     out.push_str("// Auto-generated from Vivado hardware handoff\n");
     out.push_str("// Schema: peripheral registers and their types\n");
-    out.push_str("// Compound with --target <board>.dbv to resolve addresses\n\n");
+    out.push_str("// Compound with --target-dbv <board>.dbv to resolve addresses\n\n");
 
     let mut names: Vec<&String> = peripherals.keys().collect();
     names.sort();
@@ -271,9 +271,10 @@ pub fn generate_dbvs(peripherals: &HashMap<String, HardwarePeripheral>) -> Strin
             "register @{:#010X} as \"{}\" {{\n    type: UInt;\n    description: \"{} memory-mapped peripheral\";\n}};\n\n",
             p.base_address, p.name, p.interface_type
         ));
+        // Schema alias: type only, no address. Addresses come from target .dbv.
         out.push_str(&format!(
-            "alias {}: UInt @{:#010X};\n\n",
-            p.name, p.base_address
+            "alias {}: UInt;\n\n",
+            p.name
         ));
     }
 
@@ -285,6 +286,7 @@ pub fn generate_dbvs(peripherals: &HashMap<String, HardwarePeripheral>) -> Strin
 /// Generate a `.dbv` target binding from extracted hardware peripherals.
 ///
 /// Maps each schema alias to its physical address for this specific target.
+/// Uses proper DBrief alias syntax: `alias name: Type = @0x...;`
 pub fn generate_dbv(
     peripherals: &HashMap<String, HardwarePeripheral>,
     target_name: &str,
@@ -306,7 +308,7 @@ pub fn generate_dbv(
     for name in names {
         let p = &peripherals[name];
         out.push_str(&format!(
-            "binding {}: UInt @{:#010X};  // {} [{}..{}], size={}\n",
+            "alias {}: UInt = @{:#010X};  // {} [{}..{}], size={}\n",
             p.name,
             p.base_address,
             p.interface_type,
@@ -317,6 +319,51 @@ pub fn generate_dbv(
     }
 
     out
+}
+
+/// Extract alias → address mappings from a .dbv target binding file.
+///
+/// Parses the DBrief file and extracts every `ALIAS name: Type = @0x...` entry,
+/// returning a map of alias name to its physical u64 address.
+/// Named addresses and non-numeric addresses are skipped with a warning.
+pub fn extract_target_addresses(dbv_content: &str) -> Result<HashMap<String, u64>, String> {
+    use crate::dbrief::ast::DbriefAddress;
+
+    let program = crate::dbrief::parse_dbrief(dbv_content)
+        .map_err(|e| format!("Failed to parse .dbv file: {}", e))?;
+
+    let mut addresses = HashMap::new();
+
+    for alias in &program.aliases {
+        if let Some(addr) = &alias.address {
+            match addr {
+                DbriefAddress::Numeric(n) | DbriefAddress::Hex(n) => {
+                    addresses.insert(alias.name.clone(), *n);
+                }
+                DbriefAddress::Auto => {
+                    // Skip auto-allocated — not a known physical address
+                }
+                DbriefAddress::Named(name) => {
+                    eprintln!(
+                        "  Warning: alias '{}' references named address '{}' — not yet resolved",
+                        alias.name, name
+                    );
+                }
+                DbriefAddress::Remote(_) => {
+                    eprintln!(
+                        "  Warning: alias '{}' uses remote address — skipping",
+                        alias.name
+                    );
+                }
+            }
+        }
+    }
+
+    if addresses.is_empty() {
+        return Err("No numeric addresses found in .dbv file — does it use `alias = @0x...` syntax?".to_string());
+    }
+
+    Ok(addresses)
 }
 
 #[cfg(test)]
@@ -405,8 +452,14 @@ mod tests {
         let dbvs = generate_dbvs(&peripherals);
         assert!(dbvs.contains("axi_gpio_0"));
         assert!(dbvs.contains("axi_uart_1"));
-        assert!(dbvs.contains("register @"));
-        assert!(dbvs.contains("alias "));
+        // Register has @ address (required by DBrief parser), alias does not
+        assert!(dbvs.contains("register @0x8000A000 as \"axi_gpio_0\""));
+        assert!(dbvs.contains("register @0x8000B000 as \"axi_uart_1\""));
+        // Schema aliases are type-only, no address
+        assert!(dbvs.contains("alias axi_gpio_0: UInt;"));
+        assert!(dbvs.contains("alias axi_uart_1: UInt;"));
+        // No = @ address in aliases
+        assert!(!dbvs.contains("alias axi_gpio_0: UInt = @"));
     }
 
     #[test]
@@ -416,8 +469,21 @@ mod tests {
         assert!(dbv.contains("zcu4ev"));
         assert!(dbv.contains("axi_gpio_0"));
         assert!(dbv.contains("axi_uart_1"));
-        assert!(dbv.contains("binding "));
-        assert!(dbv.contains("@0x8000A000"));
+        assert!(dbv.contains("alias "));
+        assert!(dbv.contains("= @0x8000A000"));
+        assert!(dbv.contains("= @0x8000B000"));
+    }
+
+    #[test]
+    fn test_extract_target_addresses() {
+        let dbv_content = "alias axi_gpio_0: UInt = @0x8000A000;\n\
+                          alias axi_uart_1: UInt = @0x8000B000;\n\
+                          alias axi_dma_0: UInt = @0x80004000;\n";
+        let addresses = extract_target_addresses(dbv_content).unwrap();
+        assert_eq!(addresses.len(), 3);
+        assert_eq!(addresses.get("axi_gpio_0"), Some(&0x8000A000));
+        assert_eq!(addresses.get("axi_uart_1"), Some(&0x8000B000));
+        assert_eq!(addresses.get("axi_dma_0"), Some(&0x80004000));
     }
 
     #[test]

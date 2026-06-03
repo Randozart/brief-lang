@@ -74,7 +74,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: 372 tests pass. print_loop structurally-live benchmark at 0.61× of C (0.030s vs 0.049s) — FFI __print_int call survives opt/O2, proves compiler doesn't pure-fold FFI gated bodies. All 9 benchmarks pass; Brief wins or ties on 8 of 9.
+**Current**: 380 tests pass. Phases 1-4 complete — LTO closure, MMIO address plumbing, Vivado hardware handoff generator, and DBVS→LLVM alias resolution. Brief wins or ties on 8 of 9 benchmarks. print_loop at 0.64× of C.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -202,12 +202,40 @@ brief-compiler selfhost <file.bv>
 - **Files**: 4 `.c` files, `build_and_bench.sh`
 
 ### Next Up
+- **Phase 5 (DBVS import + schema validation)**: Parse imported `.dbvs` schemas from Brief programs, validate against target `.dbv` bindings, report missing/failed-mapped registers as compiler errors.
 - **N3 (Compile-Time PGO via interpreter)**: Branch-weight metadata for improved instruction layout.
 - **N2 (Equality Saturation / egg)**: Collapse composed chains to minimal algebraic forms.
-- **Proper structurally-live benchmarks**: Build Kalman-style benchmarks where computation feeds back naturally (no `#!exit` hacks, no `x == x` guards). `print_loop` is the first structurally-live benchmark using `frgn __print_int`.
-- **`#!exit` philosophy**: The pragma tells the compiler "if this condition holds, the program is done." It is NOT an observation mechanism. Variables not referenced in `#!exit` are dead and correctly eliminated.
-- **Benchmarking philosophy**: Every asymmetry between Brief and C is a signal of a missing Brief optimization. Never hobble C. Fix Brief.
-- See `plans/2026-06-03-dispatch-optimization-and-benchmark-fairness.md` for full plan.
+- **Chimera target-switching**: Compile same `.ebv` program for `--target zcu4ev.dbv` (MMIO), `--target sim.dbv` (struct members), `--target metro.dbv` (shared memory channels).
+- See `plans/2026-06-03-1335-lto-mmio-hardware-handoff.md` for full plan.
+
+### LTO Closure (2026-06-03)
+- **`try_lto_pipeline()`** in `src/main.rs`: Compiles `brief_rt.c` to LLVM bitcode via `clang -c -emit-llvm`, merges with program IR via `llvm-link`, runs `opt -O3` on the merged module. Enables inlining of `__print_int`, `__wait_for_event`, and thread pool barriers into Brief loops.
+- Graceful fallback: if `clang`/`llvm-link`/`llvm-as` not installed, falls back to existing `cc -c` + `opt` + `llc` + link path.
+
+### MMIO Address Plumbing (2026-06-03)
+- **`mmio_fields: HashMap<String, u64>`** in `LlvmBackend` — fields declared with `@ address` are excluded from `%State` struct.
+- **Reads**: `Expr::Identifier` emits `inttoptr` + `load volatile` instead of GEP + `load`.
+- **Writes**: `Statement::Assignment` emits `inttoptr` + `store volatile` instead of GEP + `store`.
+- **Init**: `emit_init_state()` writes initial value via `inttoptr` + `store volatile`.
+- **Exit/precompute**: `emit_exit_expr()` and `emit_precomputed_main()` use `mmio_fields` for address-based access.
+- Parser fix: `&` and `@` in expressions now use `expect_identifier()` allowing keyword tokens as valid variable names.
+
+### Hardware Handoff Generator (2026-06-03)
+- **`src/hardware/handoff.rs`** — extracts peripheral addresses from Vivado handoff files:
+  - `extract_from_xparameters()`: parses `#define XPAR_*_BASEADDR/HIGHADDR` from `xparameters.h`
+  - `extract_from_xsa()`: opens `.xsa` as zip archive, reads `system.hwh` XML, extracts MEMRANGE entries
+  - `extract_from_hwh_xml()`: lightweight string-level XML scanner — no XML crate needed
+- **`generate_dbvs()`**: emits `.dbvs` schema with `register @0x... as "name" { type: UInt; }` + type-only `alias name: UInt;`
+- **`generate_dbv()`**: emits `.dbv` target binding with `alias name: UInt = @0x...;` per board
+- CLI: `--hw-handoff <system.xsa|xparameters.h>`, `--hw-target <board>`, `--target-dbv <target.dbv>`
+- 8 new tests covering xparameters, HWH XML, DBVS/DBV generation, address extraction from DBV files
+
+### DBVS→LLVM Alias Resolution (2026-06-03)
+- **`extract_target_addresses()`**: parses `.dbv` alias declarations, returns `HashMap<name, u64>`
+- **`process_target_dbv()`**: reads + parses `.dbv` file, extracts alias→address map
+- **`LlvmBackend::with_mmio_addresses()`**: pre-populates `mmio_fields` from resolved DBV bindings
+- **`build_field_index()` resolution**: when `mmio_prepopulated`, state fields matching DBV alias names are automatically routed to MMIO (no source-level `@ address` needed)
+- Flow: `--target-dbv zcu4ev.dbv` → parse aliases → `millio_fields` → `inttoptr` + `load/store volatile` in emitted IR
 
 ### FFI Output & Structurally-Live Benchmark (2026-06-03)
 - **`__print`/`__exit` magic removed from `llvm.rs`**: Deleted `has_print`/`has_exit` declare block, replaced `__print`/`__exit` match arms with generic FFI catch-all. `frgn` calls now go through standard `frgn_map` loop.
