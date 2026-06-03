@@ -1,7 +1,7 @@
 # LLVM Backend Completion Plan
 
 **Date:** 2026-06-03
-**Status:** In progress — Phase 1 complete, nbody benchmark added
+**Status:** In progress — Phases 1, 1b complete; Phase 2 starting
 
 ## Overview
 

@@ -310,6 +310,14 @@ pub struct LlvmBackend {
     /// User-defined struct types: name → Vec<(field_name, field_type)>.
     /// Used by StructInstance to emit field layout and FieldAccess to GEP into instances.
     struct_types: HashMap<String, Vec<(String, Type)>>,
+    /// User-defined enum types: name → EnumDefinition.
+    /// Used to resolve discriminant values and variant field counts for constructors,
+    /// PatternMatch guards, and Match arm dispatch.
+    enum_types: HashMap<String, crate::ast::EnumDefinition>,
+    /// Reverse mapping: variant name → (enum_name, discriminant_index, field_count).
+    /// Built during generate() from enum_types. Used by Expr::Call to look up
+    /// discriminant values without scanning all enums.
+    variant_disc: HashMap<String, (String, u64, usize)>,
 }
 
 impl LlvmBackend {
@@ -363,6 +371,8 @@ impl LlvmBackend {
             state_reg_name: "%state".to_string(),
             ssa_old_float_regs: HashMap::new(),
             struct_types: HashMap::new(),
+            enum_types: HashMap::new(),
+            variant_disc: HashMap::new(),
         }
     }
 
@@ -460,7 +470,27 @@ impl LlvmBackend {
                         .collect();
                     self.struct_types.insert(s.name.clone(), fields);
                 }
+                TopLevel::Enum(e) => {
+                    self.enum_types.insert(e.name.clone(), e.clone());
+                }
                 _ => {}
+            }
+        }
+
+        // Build variant → (enum_name, discriminant, field_count) mapping.
+        for (enum_name, edef) in &self.enum_types {
+            let mut next_disc: u64 = 1;
+            for v in &edef.variants {
+                let (vname, field_count) = match v {
+                    crate::ast::EnumVariant::Unit(n) => (n.clone(), 0),
+                    crate::ast::EnumVariant::Tuple(n, fields) => (n.clone(), fields.len()),
+                    crate::ast::EnumVariant::Struct(n, fields) => (n.clone(), fields.len()),
+                };
+                let disc = match vname.as_str() {
+                    "None" | "Err" => 0,
+                    _ => { let d = next_disc; next_disc += 1; d }
+                };
+                self.variant_disc.insert(vname, (enum_name.clone(), disc, field_count));
             }
         }
 
@@ -2397,7 +2427,9 @@ self.emit_declares(&mut out);
                 let arm_l = format!("ua{}", self.txn_counter); self.txn_counter += 1;
                 let def_l = format!("ud{}", self.txn_counter); self.txn_counter += 1;
                 let merge_l = format!("um{}", self.txn_counter); self.txn_counter += 1;
-                let target = if name == "None" || name == "Err" { 0u64 } else { 1u64 };
+                let target = self.variant_disc.get(name.as_str())
+                    .map(|(_, d, _)| *d)
+                    .unwrap_or(if name == "None" || name == "Err" { 0 } else { 1 });
                 writeln!(out, "{}switch i64 {}, label %{} [ i64 {}, label %{} ]", indent, disc, def_l, target, arm_l).ok();
                 writeln!(out, "{}{}:", indent, arm_l).ok();
                 let pay = format!("%up{}", self.txn_counter); self.txn_counter += 1;
@@ -2699,9 +2731,11 @@ self.emit_declares(&mut out);
                         }
                     }
                     if name.starts_with(|c: char| c.is_uppercase()) && !self.program_txns.contains(name) {
+                        let disc_val = self.variant_disc.get(name)
+                            .map(|(_, d, _)| *d)
+                            .unwrap_or_else(|| if name == "None" || name == "Err" { 0u64 } else { 1u64 });
                         let n_slots = a_strs.len() + 1;
                         let p = format!("%cop{}", self.txn_counter); self.txn_counter += 1;
-                        let disc_val = if name == "None" || name == "Err" { 0u64 } else { 1u64 };
                         writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, n_slots).ok();
                         let disc_gep = format!("%cdg{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, disc_gep, p).ok();
@@ -2832,14 +2866,37 @@ self.emit_declares(&mut out);
                 self.txn_counter += 1;
                 writeln!(out, "{}switch i64 {}, label %{} [", indent, disc, def_l).ok();
                 let mut vi = 0u64;
-                for arm in arms { if let MatchPattern::Variant { .. } = &arm.pattern { writeln!(out, "{}  i64 {}, label %ma{}_{}", indent, vi, mid, vi).ok(); vi += 1; } }
+                let mut disc_to_vi: HashMap<u64, String> = HashMap::new();
+                for arm in arms {
+                    if let MatchPattern::Variant { name: vname, .. } = &arm.pattern {
+                        let d = self.variant_disc.get(vname).map(|(_, d, _)| *d).unwrap_or(vi);
+                        let label = format!("%ma{}_{}", mid, vi);
+                        disc_to_vi.insert(d, label.clone());
+                        writeln!(out, "{}  i64 {}, label {}", indent, d, label).ok();
+                        vi += 1;
+                    }
+                }
                 writeln!(out, "{}]", indent).ok();
                 let mut phi_v: Vec<String> = Vec::new();
                 let mut phi_l: Vec<String> = Vec::new();
                 vi = 0;
                 for arm in arms {
-                    if let MatchPattern::Variant { .. } = &arm.pattern {
-                        writeln!(out, "{}ma{}_{}:", indent, mid, vi).ok();
+                    if let MatchPattern::Variant { name: vname, fields } = &arm.pattern {
+                        let d = self.variant_disc.get(vname).map(|(_, d, _)| *d).unwrap_or(vi);
+                        let label = disc_to_vi.get(&d).cloned().unwrap_or_else(|| format!("%ma{}_{}", mid, vi));
+                        writeln!(out, "{}:", label).ok();
+                        // Bind variant fields: GEP into payload slots and register as let bindings
+                        let inner_ptr = format!("%mei{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, inner_ptr, inner).ok();
+                        for (fi, fname) in fields.iter().enumerate() {
+                            let gep = format!("%mfg{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, gep, inner_ptr, fi + 1).ok();
+                            let ld = format!("%mfl{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, gep).ok();
+                            let reg = format!("%mfr{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = add i64 0, {}", indent, reg, ld).ok();
+                            self.let_bindings.insert(fname.clone(), reg);
+                        }
                         let av = self.emit_expr(out, &arm.body, indent);
                         phi_v.push(av.name); phi_l.push(format!("%%ma{}_{}", mid, vi));
                         writeln!(out, "{}br label %{}", indent, merge).ok();
@@ -2869,7 +2926,9 @@ self.emit_declares(&mut out);
                 let inner = self.emit_expr(out, value, indent);
                 let disc = format!("%pd{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = and i64 {}, 255", indent, disc, inner).ok();
-                let target = if variant == "None" || variant == "Err" { 0u64 } else { 1u64 };
+                let target = self.variant_disc.get(variant.as_str())
+                    .map(|(_, d, _)| *d)
+                    .unwrap_or(if variant == "None" || variant == "Err" { 0 } else { 1 });
                 let cmp = format!("%pc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, disc, target).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
@@ -6369,5 +6428,229 @@ mod tests {
             "ObjectLiteral should alloca for fields. Got: {}", output);
         assert!(output.contains("ptrtoint i64*"),
             "ObjectLiteral should return ptrtoint. Got: {}", output);
+    }
+
+    // ── Enum codegen tests ────────────────────────────────────
+
+    #[test]
+    fn test_enum_type_registered_and_variant_disc() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Enum(EnumDefinition {
+                    name: "Option".to_string(),
+                    type_params: vec![],
+                    variants: vec![
+                        EnumVariant::Unit("None".to_string()),
+                        EnumVariant::Tuple("Some".to_string(), vec![Type::Int]),
+                    ],
+                    span: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let _ = backend.generate(&program);
+        assert!(backend.enum_types.contains_key("Option"));
+        assert!(backend.variant_disc.contains_key("None"));
+        assert!(backend.variant_disc.contains_key("Some"));
+        assert_eq!(backend.variant_disc.get("None").map(|(_, d, _)| *d), Some(0));
+        assert_eq!(backend.variant_disc.get("Some").map(|(_, d, _)| *d), Some(1));
+        assert_eq!(backend.variant_disc.get("Some").map(|(_, _, f)| *f), Some(1));
+    }
+
+    #[test]
+    fn test_enum_constructor_uses_registered_discriminant() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Enum(EnumDefinition {
+                    name: "Result".to_string(),
+                    type_params: vec![],
+                    variants: vec![
+                        EnumVariant::Unit("Err".to_string()),
+                        EnumVariant::Tuple("Ok".to_string(), vec![Type::Int]),
+                    ],
+                    span: None,
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "r".to_string(), ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "wrap".to_string(), is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body: vec![
+                        Statement::Let {
+                            name: "x".to_string(), ty: None,
+                            expr: Some(Expr::Call("Ok".to_string(), vec![Expr::Integer(42)])),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![],
+                    is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("store i64 1"), "Ok should have disc 1. Got: {}", output);
+        assert!(output.contains("store i64 %t"), "Ok should store payload register. Got: {}", output);
+    }
+
+    #[test]
+    fn test_pattern_match_uses_registered_discriminant() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Enum(EnumDefinition {
+                    name: "Status".to_string(),
+                    type_params: vec![],
+                    variants: vec![
+                        EnumVariant::Unit("Off".to_string()),
+                        EnumVariant::Unit("On".to_string()),
+                        EnumVariant::Unit("Error".to_string()),
+                    ],
+                    span: None,
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "check".to_string(), ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "test".to_string(), is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body: vec![
+                        Statement::Let {
+                            name: "s".to_string(), ty: None,
+                            expr: Some(Expr::Call("Error".to_string(), vec![])),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                        },
+                        Statement::Let {
+                            name: "matched".to_string(), ty: None,
+                            expr: Some(Expr::PatternMatch {
+                                value: Box::new(Expr::Identifier("s".to_string())),
+                                variant: "Error".to_string(),
+                                fields: vec![],
+                            }),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![],
+                    is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("icmp eq i64"), "PatternMatch should compare discriminant. Got: {}", output);
+    }
+
+    #[test]
+    fn test_match_arm_field_binding() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Enum(EnumDefinition {
+                    name: "Option".to_string(),
+                    type_params: vec![],
+                    variants: vec![
+                        EnumVariant::Unit("None".to_string()),
+                        EnumVariant::Tuple("Some".to_string(), vec![Type::Int]),
+                    ],
+                    span: None,
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "inner".to_string(), ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "unwrap".to_string(), is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("inner".to_string()),
+                            expr: Expr::Match {
+                                value: Box::new(Expr::Call("Some".to_string(), vec![Expr::Integer(7)])),
+                                arms: vec![
+                                    MatchArm {
+                                        pattern: MatchPattern::Variant {
+                                            name: "Some".to_string(),
+                                            fields: vec!["val".to_string()],
+                                        },
+                                        guard: None,
+                                        body: Box::new(Expr::Identifier("val".to_string())),
+                                    },
+                                    MatchArm {
+                                        pattern: MatchPattern::Wildcard,
+                                        guard: None,
+                                        body: Box::new(Expr::Integer(-1)),
+                                    },
+                                ],
+                            },
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![],
+                    is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("switch i64"), "Match should emit switch. Got: {}", output);
+        assert!(output.contains("getelementptr i64, i64*"), "Field binding should GEP. Got: {}", output);
+    }
+
+    #[test]
+    fn test_enum_multi_variant_discriminants() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Enum(EnumDefinition {
+                    name: "Tree".to_string(),
+                    type_params: vec![],
+                    variants: vec![
+                        EnumVariant::Unit("Leaf".to_string()),
+                        EnumVariant::Tuple("Node".to_string(), vec![Type::Int, Type::Int]),
+                    ],
+                    span: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let _ = backend.generate(&program);
+        assert_eq!(backend.variant_disc.get("Leaf").map(|(_, d, _)| *d), Some(1));
+        assert_eq!(backend.variant_disc.get("Node").map(|(_, d, _)| *d), Some(2));
+        assert_eq!(backend.variant_disc.get("Node").map(|(_, _, f)| *f), Some(2));
     }
 }
