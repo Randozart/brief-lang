@@ -196,6 +196,19 @@ fn references_triggers_or_ffi(expr: &Expr) -> bool {
     }
 }
 
+/// Detect whether a list of transaction pairs all have structurally
+/// identical bodies. When all bodies are the same, the dispatch is uniform
+/// — it doesn't matter which txn fires, because the effect is identical.
+/// This enables skipping the entire precondition chain in emit_reactor.
+pub fn is_uniform_body_group(txns: &[(String, &crate::ast::Transaction)]) -> bool {
+    if txns.len() < 2 { return false; }
+    let first_body = &txns[0].1.body;
+    for (_, txn) in &txns[1..] {
+        if txn.body != *first_body { return false; }
+    }
+    true
+}
+
 pub fn compute_live_fields(
     exit_condition: &Option<Box<Expr>>,
     nodes: &[ReactorNode],
@@ -432,6 +445,122 @@ mod tests {
         ];
         let inc = detect_increments(&body);
         assert!(!is_pure_body(&body, &fields, &inc));
+    }
+
+    #[test]
+    #[test]
+    fn test_is_uniform_body_group_identical() {
+        let body = vec![Statement::Assignment {
+            lhs: Expr::Identifier("count".to_string()),
+            expr: Expr::Add(
+                Box::new(Expr::Identifier("count".to_string())),
+                Box::new(Expr::Integer(1)),
+            ),
+            timeout: None,
+            modifiers: vec![],
+        }];
+        let txn1 = Transaction {
+            name: "txn_a".to_string(),
+            is_reactive: true,
+            is_async: false,
+            parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+                watchdog: None,
+            },
+            body: body.clone(),
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+        };
+        let txn2 = Transaction {
+            name: "txn_b".to_string(),
+            .. txn1.clone()
+        };
+        let pairs: Vec<(String, &Transaction)> = vec![
+            ("txn_a".to_string(), &txn1),
+            ("txn_b".to_string(), &txn2),
+        ];
+        assert!(is_uniform_body_group(&pairs));
+    }
+
+    #[test]
+    fn test_is_uniform_body_group_different() {
+        let body_a = vec![Statement::Assignment {
+            lhs: Expr::Identifier("a".to_string()),
+            expr: Expr::Integer(1),
+            timeout: None,
+            modifiers: vec![],
+        }];
+        let body_b = vec![Statement::Assignment {
+            lhs: Expr::Identifier("b".to_string()),
+            expr: Expr::Integer(2),
+            timeout: None,
+            modifiers: vec![],
+        }];
+        let txn_a = Transaction {
+            name: "txn_a".to_string(),
+            is_reactive: true,
+            is_async: false,
+            parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+                watchdog: None,
+            },
+            body: body_a,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+        };
+        let txn_b = Transaction {
+            body: body_b,
+            name: "txn_b".to_string(),
+            .. txn_a.clone()
+        };
+        let pairs: Vec<(String, &Transaction)> = vec![
+            ("txn_a".to_string(), &txn_a),
+            ("txn_b".to_string(), &txn_b),
+        ];
+        assert!(!is_uniform_body_group(&pairs));
+    }
+
+    #[test]
+    fn test_is_uniform_body_group_single() {
+        let body = vec![];
+        let txn = Transaction {
+            name: "only".to_string(),
+            is_reactive: true,
+            is_async: false,
+            parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+                watchdog: None,
+            },
+            body,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+        };
+        let pairs: Vec<(String, &Transaction)> = vec![("only".to_string(), &txn)];
+        assert!(!is_uniform_body_group(&pairs));
     }
 
     #[test]

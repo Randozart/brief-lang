@@ -56,6 +56,7 @@ This project uses OpenCode. When making changes:
 5. Document bugs and root causes in BUGS.md
 6. Never add Rust built-ins for things the standard library should provide
 7. **No prototyping — build clean**: Every optimization is a first-class pass in its proper module (`src/analysis/` for analysis, `src/backend/` for codegen). Never inline new analysis into codegen as a shortcut. Dispatch-chain switch detection belongs in `transition_graph.rs`, not `llvm.rs`.
+8. **Never weaken C benchmarks**: Every asymmetry between Brief and C is a signal of a missing Brief optimization. Never hobble C with `volatile`, unused `break;` cases, or artificial liveness hacks to make Brief look better. Fix Brief to match or beat C's optimization — that's the science. Duct-taping benchmarks teaches nothing.
 
 ## Self-Hosting Pipeline
 

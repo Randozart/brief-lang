@@ -2645,47 +2645,47 @@ self.emit_declares(&mut out);
 
         if dispatch.is_empty() {
             writeln!(out, "  ret void").ok();
+        } else if fusable.is_empty()
+            && dispatch.len() >= 2
+            && crate::analysis::transition_graph::is_uniform_body_group(txns)
+        {
+            // Uniform dispatch: all bodies are structurally identical.
+            // Skip precondition evaluation entirely — the body is the same
+            // regardless of which txn fires. Emit the first body directly.
+            // The main loop's exit check handles termination.
+            writeln!(out, "  call void @{}(%State* %state)", dispatch[0]).ok();
+            writeln!(out, "  ret void").ok();
         } else {
-            // First dispatch branch
-            let first = &dispatch[0];
-            let has_pre = self.dispatch_has_pre(txns, first);
-            let check0 = format!("ck0");
-            if has_pre {
-                let first_txn = self.resolve_dispatch_first_txn(first);
-                writeln!(out, "  %pr0 = call i1 @pre_{}(%State* %state)", first_txn).ok();
-                writeln!(out, "  br i1 %pr0, label %b0, label %{}", check0).ok();
-            } else {
-                writeln!(out, "  br i1 true, label %b0, label %{}", check0).ok();
+            // Phase 1: Evaluate ALL preconditions in the entry block against the
+            // pre-tick state. This prevents the cascade bug where txn N+1's
+            // precondition reads state mutated by txn N's body.
+            // Phase 3a: After switch-dispatch detection (transition_graph.rs),
+            // this serial precondition evaluation may be replaced by a switch.
+            let mut pre_regs: Vec<String> = Vec::with_capacity(dispatch.len());
+            for (i, txn_name) in dispatch.iter().enumerate() {
+                let has_pre = self.dispatch_has_pre(txns, txn_name);
+                if has_pre {
+                    let reg = format!("%pr{}", i);
+                    let txn = self.resolve_dispatch_first_txn(txn_name);
+                    writeln!(out, "  {} = call i1 @pre_{}(%State* %state)", reg, txn).ok();
+                    pre_regs.push(reg);
+                } else {
+                    pre_regs.push("true".to_string());
+                }
             }
 
+            // Phase 2: Chain through body execution using saved precondition results.
+            // Each body fires iff its precondition was true on the pre-tick state.
             for (i, txn_name) in dispatch.iter().enumerate() {
                 let b = format!("b{}", i);
                 let c = format!("ck{}", i);
+                let pr = &pre_regs[i];
+                writeln!(out, "  br i1 {}, label %{}, label %{}", pr, b, c).ok();
                 writeln!(out, "{}:", b).ok();
                 writeln!(out, "  call void @{}(%State* %state)", txn_name).ok();
-                // Fall through to this transaction's check label, which evaluates
-                // the NEXT transaction's precondition. Matches the interpreter model
-                // where all dirty transactions are evaluated sequentially in one tick.
-                // NOTE: this br is dead LLVM IR when the body ends in `term` (always true).
-                //       LLVM -O3 eliminates it. We emit it for correct uni-cyclic IR.
                 writeln!(out, "  br label %{}", c).ok();
-
-                if i + 1 < dispatch.len() {
-                    let next = &dispatch[i + 1];
-                    writeln!(out, "{}:", c).ok();
-                    let has_next_pre = self.dispatch_has_pre(txns, next);
-                    let next_check = format!("ck{}", i + 1);
-                    if has_next_pre {
-                        let next_txn = self.resolve_dispatch_first_txn(next);
-                        writeln!(out, "  %pr{} = call i1 @pre_{}(%State* %state)", i + 1, next_txn).ok();
-                        writeln!(out, "  br i1 %pr{}, label %b{}, label %{}", i + 1, i + 1, next_check).ok();
-                    } else {
-                        writeln!(out, "  br i1 true, label %b{}, label %{}", i + 1, next_check).ok();
-                    }
-                }
+                writeln!(out, "{}:", c).ok();
             }
-            let last_check = format!("ck{}", dispatch.len() - 1);
-            writeln!(out, "{}:", last_check).ok();
             writeln!(out, "  ret void").ok();
         }
         writeln!(out, "}}").ok();
