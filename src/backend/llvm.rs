@@ -892,6 +892,7 @@ self.emit_declares(&mut out);
             }
         }
         // Init
+        self.txn_counter = 0;
         self.emit_init_state(&mut out);
         writeln!(out).ok();
         // Reactor — sequential or parallel
@@ -1865,6 +1866,25 @@ self.emit_declares(&mut out);
         }
     }
 
+    /// Return a native float register for `val_reg` if one exists in the
+    /// float cache. If not, emit the trunc+bitcast boxing chain and return
+    /// the resulting float register name.
+    fn native_float_or_box(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        val_reg: &str,
+    ) -> String {
+        if let Some(cached) = self.reg_float_cache.get(val_reg) {
+            return cached.clone();
+        }
+        let tr = format!("%nftr{}", self.txn_counter); self.txn_counter += 1;
+        let fl = format!("%nffl{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val_reg).ok();
+        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+        fl
+    }
+
     /// LLVM storage type for an `@ link` trigger global.
     /// The C runtime provides `char` (Bool→i8), `int64_t` (Int→i64),
     /// and `char*` (String→i8*).
@@ -2048,7 +2068,7 @@ self.emit_declares(&mut out);
     // ── DEFINITION ────────────────────────────────────────────
     fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.pending_cleanup.clear();
-        self.let_bindings.clear(); self.let_binding_types.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
         write!(out, "define i64 @{}(", d.name).ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
@@ -2103,7 +2123,7 @@ self.emit_declares(&mut out);
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
         self.terminated = false;
         self.returns_i64 = false;
         // Precondition
@@ -2136,7 +2156,7 @@ self.emit_declares(&mut out);
         writeln!(out, "define internal i1 @pre_{}(%State* noalias nocapture %state) #0 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
@@ -2155,7 +2175,7 @@ self.emit_declares(&mut out);
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
         // Evaluate precondition
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
@@ -2182,7 +2202,7 @@ self.emit_declares(&mut out);
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
@@ -2192,7 +2212,7 @@ self.emit_declares(&mut out);
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
@@ -2246,7 +2266,7 @@ self.emit_declares(&mut out);
                 if let Some(ssa_reg) = self.ssa_state_reg.clone() {
                     if let Some(&idx) = self.field_index_map.get(&fname) {
                         if !is_volatile {
-                            let ty = &self.field_types[idx];
+                            let ty = self.field_types[idx].clone();
                             let new_reg = format!("%in{}", self.txn_counter); self.txn_counter += 1;
                             match ty.as_str() {
                                 "i8" => {
@@ -2255,10 +2275,7 @@ self.emit_declares(&mut out);
                                     writeln!(out, "{}{} = insertvalue %State {}, i8 {}, {}", indent, new_reg, ssa_reg, tr, idx).ok();
                                 }
                                 "float" => {
-                                    let tr = format!("%ftr{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val).ok();
-                                    let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                                    let fl = self.native_float_or_box(out, indent, &val.to_string());
                                     writeln!(out, "{}{} = insertvalue %State {}, float {}, {}", indent, new_reg, ssa_reg, fl, idx).ok();
                                 }
                                 "i8*" => {
@@ -2282,7 +2299,7 @@ self.emit_declares(&mut out);
                     return;
                 }
                 if let Some(&idx) = self.field_index_map.get(&fname) {
-                    let ty = &self.field_types[idx];
+                    let ty = self.field_types[idx].clone();
                     let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
                     let vol_str = if is_volatile { " volatile" } else { "" };
@@ -2290,17 +2307,14 @@ self.emit_declares(&mut out);
                         "i8" => {
                             let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val).ok();
-                            writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, vol_str, tr, p, self.align_of(ty)).ok();
+                            writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, vol_str, tr, p, self.align_of(&ty)).ok();
                         }
                         "float" => {
-                            let tr = format!("%ftr{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val).ok();
-                            let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
-                            writeln!(out, "{}store{} float {}, float* {}, align {}", indent, vol_str, fl, p, self.align_of(ty)).ok();
+                            let fl = self.native_float_or_box(out, indent, &val.to_string());
+                            writeln!(out, "{}store{} float {}, float* {}, align {}", indent, vol_str, fl, p, self.align_of(&ty)).ok();
                         }
                         _ => {
-                            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val, ty, p, self.align_of(ty)).ok();
+                            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val, ty, p, self.align_of(&ty)).ok();
                         }
                     }
                 } else {
@@ -2321,33 +2335,30 @@ self.emit_declares(&mut out);
                                 let gvol = if g_is_volatile { " volatile" } else { "" };
                                 let p = format!("%gp{}", self.txn_counter); self.txn_counter += 1;
                                 let av = self.emit_expr(out, expr, indent);
-                                let ty = &self.field_types[idx];
+                                let ty = self.field_types[idx].clone();
                                 writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
                                 let se = format!("%gs{}", self.txn_counter); self.txn_counter += 1;
                                 match ty.as_str() {
                                     "i8" => {
                                         let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
-                                        writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, ld, p, self.align_of(ty)).ok();
+                                        writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, ld, p, self.align_of(&ty)).ok();
                                         let av_tr = format!("%gatr{}", self.txn_counter); self.txn_counter += 1;
                                         writeln!(out, "{}{} = trunc i64 {} to i8", indent, av_tr, av).ok();
                                         writeln!(out, "{}{} = select i1 {}, i8 {}, i8 {}", indent, se, i1, av_tr, ld).ok();
-                                        writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, gvol, se, p, self.align_of(ty)).ok();
+                                        writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }
                                     "float" => {
                                         let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
-                                        writeln!(out, "{}{} = load float, float* {}, align {}", indent, ld, p, self.align_of(ty)).ok();
-                                        let av_tr = format!("%gatr{}", self.txn_counter); self.txn_counter += 1;
-                                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, av_tr, av).ok();
-                                        let av_fl = format!("%gafl{}", self.txn_counter); self.txn_counter += 1;
-                                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, av_fl, av_tr).ok();
+                                        writeln!(out, "{}{} = load float, float* {}, align {}", indent, ld, p, self.align_of(&ty)).ok();
+                                        let av_fl = self.native_float_or_box(out, indent, &av.to_string());
                                         writeln!(out, "{}{} = select i1 {}, float {}, float {}", indent, se, i1, av_fl, ld).ok();
-                                        writeln!(out, "{}store{} float {}, float* {}, align {}", indent, gvol, se, p, self.align_of(ty)).ok();
+                                        writeln!(out, "{}store{} float {}, float* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }
                                     _ => {
                                         let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
                                         writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
                                         writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, se, i1, av, ld).ok();
-                                        writeln!(out, "{}store{} i64 {}, i64* {}, align {}", indent, gvol, se, p, self.align_of(ty)).ok();
+                                        writeln!(out, "{}store{} i64 {}, i64* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }
                                 }
                                 return;
@@ -2424,6 +2435,7 @@ self.emit_declares(&mut out);
                 let i32 = format!("%fi{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast float {} to i32", indent, i32, fl).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i32).ok();
+                self.reg_float_cache.insert(v.clone(), fl.clone());
                 return TypedRegister { name: v, ty: Type::Float };
             }
             Expr::String(s) => {
@@ -2563,10 +2575,10 @@ self.emit_declares(&mut out);
                     writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
                     let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
                     let rng = self.field_to_meta_idx.get(name).map(|m| format!(", !range !{}", m)).unwrap_or_default();
-                    writeln!(out, "{}{} = load {}, {}* {}, align {}{}", indent, ld, ty, ty, p, self.align_of(ty), rng).ok();
+                    writeln!(out, "{}{} = load {}, {}* {}, align {}{}", indent, ld, ty, ty, p, self.align_of(&ty), rng).ok();
                     match ty {
                         s if s == "i8" => { let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ld).ok(); writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok(); }
-                        s if s == "float" => { let i = format!("%if{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ld).ok(); writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok(); }
+                        s if s == "float" => { let i = format!("%if{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ld).ok(); writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok(); self.reg_float_cache.insert(v.clone(), ld.clone()); }
                         s if s == "i8*" => { writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ld).ok(); }
                         _ => { writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok(); }
                     }
@@ -2599,15 +2611,13 @@ self.emit_declares(&mut out);
             Expr::Neg(e) => {
                 let inner = self.emit_expr(out, e, indent);
                 if inner.ty == Type::Float {
-                    let tr = format!("%ntr{}", self.txn_counter); self.txn_counter += 1;
-                    let fl = format!("%nfl{}", self.txn_counter); self.txn_counter += 1;
+                    let fl = self.native_float_or_box(out, indent, &inner.to_string());
                     let fs = format!("%nfs{}", self.txn_counter); self.txn_counter += 1;
                     let fi = format!("%nfi{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, inner.name).ok();
-                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
                     writeln!(out, "{}{} = fsub fast float -0.0, {}", indent, fs, fl).ok();
                     writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fs).ok();
                     writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
+                    self.reg_float_cache.insert(v.clone(), fs.clone());
                     return TypedRegister { name: v, ty: Type::Float };
                 } else {
                     writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner.name).ok();
@@ -2636,10 +2646,7 @@ self.emit_declares(&mut out);
                                 Type::Bool => { let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = trunc i64 {} to i32", indent, z, raw).ok(); marshaled.push(format!("i32 {}", z)); }
                                 Type::Char => { let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = trunc i64 {} to i32", indent, z, raw).ok(); marshaled.push(format!("i32 {}", z)); }
                                 Type::Float => {
-                                    let tr = format!("%fftr{}", self.txn_counter); self.txn_counter += 1;
-                                    let fl = format!("%ffl{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, raw).ok();
-                                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                                    let fl = self.native_float_or_box(out, indent, &raw.to_string());
                                     marshaled.push(format!("float {}", fl));
                                 }
                                 Type::String | Type::Data => { let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, raw).ok(); marshaled.push(format!("i8* {}", p)); }
@@ -2660,6 +2667,7 @@ self.emit_declares(&mut out);
                         let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, v).ok();
                         writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                        self.reg_float_cache.insert(ze.clone(), v.clone());
                         return TypedRegister { name: ze, ty: Type::Float };
                     }
                 } else {
@@ -3418,7 +3426,7 @@ self.emit_declares(&mut out);
                 writeln!(body4_buf, "{}_body4:", label_prefix).ok();
                 let mut cur = phi_reg.clone();
                 for _ in 0..unroll {
-                    self.let_bindings.clear(); self.let_binding_types.clear();
+                    self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
                     self.terminated = false;
                     self.returns_i64 = false;
                     self.ssa_state_reg = Some(cur);
@@ -3440,7 +3448,7 @@ self.emit_declares(&mut out);
             // --- body1: remainder loop (single iteration) ---
             let mut body1_buf = String::new();
             writeln!(body1_buf, "{}_body1:", label_prefix).ok();
-            self.let_bindings.clear(); self.let_binding_types.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
             self.terminated = false;
             self.returns_i64 = false;
             self.ssa_state_reg = Some(phi_reg.clone());
@@ -3515,7 +3523,7 @@ self.emit_declares(&mut out);
                         let gep = format!("%gep{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gep, idx).ok();
                         let ld = format!("%ld{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "  {} = load {}, {}* {}, align {}", ld, ty, ty, gep, self.align_of(ty)).ok();
+                        writeln!(out, "  {} = load {}, {}* {}, align {}", ld, ty, ty, gep, self.align_of(&ty)).ok();
                         let iv = format!("%liv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "  {} = insertvalue %State {}, {} {}, {}", iv, cur_init, ty, ld, idx).ok();
                         cur_init = iv;
@@ -3631,7 +3639,7 @@ self.emit_declares(&mut out);
                 let skip_l = format!("s_{}", name);
                 writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, skip_l).ok();
                 writeln!(out, "  {}:", body_l).ok();
-                self.let_bindings.clear(); self.let_binding_types.clear();
+                self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
@@ -3645,7 +3653,7 @@ self.emit_declares(&mut out);
                     merge, after_body, body_l, pre_ssa, skip_l).ok();
                 self.ssa_state_reg = Some(merge);
             } else {
-                self.let_bindings.clear(); self.let_binding_types.clear();
+                self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
@@ -4193,6 +4201,7 @@ self.emit_declares(&mut out);
             let fi = format!("%bfi{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
+            self.reg_float_cache.insert(v.to_string(), fr.clone());
             Type::Float
         } else {
             writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a.name, b.name).ok();
