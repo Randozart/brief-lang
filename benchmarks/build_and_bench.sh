@@ -41,6 +41,7 @@ BENCHMARKS=(
     "sparse_dispatch"
     "const_heavy"
     "print_loop"
+    "nbody"
 )
 
 build_bench() {
@@ -70,6 +71,7 @@ build_c() {
 
     case "$name" in
         iir_filter)      extra_flags="-lm" ;;
+        nbody)           extra_flags="-lm" ;;
     esac
 
     clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "benchmarks/${name}_c.c" ${extra_flags} 2>&1

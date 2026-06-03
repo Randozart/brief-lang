@@ -383,6 +383,11 @@ int64_t __print_int(int64_t n) {
     return 1;
 }
 
+int64_t __print_float(float d) {
+    fprintf(stderr, "%.9f\n", (double)d);
+    return 1;
+}
+
 void __exit(void) {
     exit(0);
 }

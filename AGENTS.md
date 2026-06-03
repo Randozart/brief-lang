@@ -39,6 +39,23 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 - Adding postconditions that don't guarantee specific outcomes
 - Adding Rust string-match built-ins when the standard library or import system should be used
 - Pre-populating interpreter state with enum constants (None, Some, Ok, Err) — let stdlib handle it
+- Adding `x == x` self-references in preconditions to force liveness
+- Adding synthetic exit-condition fields solely to prevent dead-field elimination
+
+### Observability as Liveness
+
+A program that produces no observable effect IS dead code. The compiler is correct to eliminate it.
+
+Brief's liveness model follows from one principle: **a value is live if an FFI call consumes it.** Every program must eventually interact with the world — print to stdout, write to a file, send a network packet. These are all `frgn` calls.
+
+When benchmarking:
+- If the compiler folded your entire hot loop to `store i64 N`, **the compiler is right.** Your program produced no observable output, so the computation served no purpose.
+- The fix is NOT `x == x` in the precondition or `#!exit count == bound && bx0 == bx0`. Those are liveness hacks that work around the compiler instead of writing a real program.
+- The fix IS to make the computation observable: compute the result and pass it to a `frgn` function (e.g., `frgn __print_int(result)` or `frgn __print_float(energy)`).
+- `statement_contains_ffi` in `compute_effectively_pure` already prevents pure-counter fold for bodies containing FFI calls. The entire dependency chain becomes live naturally.
+- The C reference must use the SAME observable (e.g., `printf("%f", energy)` not `return (int)(count + energy)`). Symmetric benchmarks, symmetric optimizations.
+
+**In short: if the compiler eliminated your work, your program produced nothing. Add a `frgn` write that consumes the result. The system works as designed.**
 
 ### Correct Approach
 - Keep contract `[product > 0]` 

@@ -1,7 +1,7 @@
 # LLVM Backend Completion Plan
 
 **Date:** 2026-06-03
-**Status:** Design
+**Status:** In progress — Phase 1 complete, nbody benchmark added
 
 ## Overview
 
@@ -30,7 +30,39 @@ Every existing optimization path MUST continue to work unchanged:
 
 ---
 
-## Priority 1: Struct Codegen
+### Phase 1 Completion (2026-06-03)
+
+**Status: Done.** 5 new tests, all 405 existing tests pass, 0 regressions in all 10 benchmarks.
+
+**Changes:**
+- `struct_types: HashMap<String, Vec<(String, Type)>>` added to `LlvmBackend`
+- `TopLevel::Struct` handled in `generate()` — registers field layouts
+- `Expr::StructInstance(typename, fields)` → `alloca i64, i64 <N>` + store per field + `ptrtoint`, returns `Type::Custom(name)`
+- `Expr::ObjectLiteral(fields)` → same alloca+store+ptrtoint pattern
+- `Expr::FieldAccess(obj, field_name)` → `inttoptr` + `GEP` + `load` at resolved field offset
+- `let_binding_types: HashMap<String, Type>` — type propagation through `Statement::Let` so `FieldAccess(Identifier("p"), "x")` works through variable references
+
+**Tests:**
+- `test_struct_type_registered` — verifies `struct_types` populated correctly
+- `test_struct_instance_emits_alloca_store_ptrtoint` — checks IR for 2-field struct construction
+- `test_field_access_resolves_correct_offset` — GEP into let-bound struct instance
+- `test_field_access_unknown_struct_falls_back` — fallback `add i64 0, 0` for non-struct types
+- `test_object_literal_emits_alloca_store_ptrtoint` — ObjectLiteral follows same pattern
+
+SROA/mem2reg handles scalarization — the `alloca i64` + `GEP` + `store` + `load` chain is decomposed into flat scalar registers by `opt -O2`. Zero runtime cost for the struct abstraction.
+
+### nbody Benchmark (2026-06-03)
+
+**Status: Added.** CLBG n-body gravity simulation, 5 bodies, 50M timesteps.
+
+- 32 state fields (15 positions, 15 velocities, count, bound)
+- 5 Newton iterations per sqrt (pure Brief Float math — no FFI)
+- 10 unrolled pair interactions per tick
+- C reference uses `sqrt()` from libm
+
+---
+
+## Priority 1: Struct Codegen (DONE)
 
 ### What the Interpreter Does
 - `Expr::StructInstance(typename, fields)` → `Value::Instance { typename, fields: HashMap<String, Value> }` (line 1662)

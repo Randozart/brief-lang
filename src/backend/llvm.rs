@@ -19,6 +19,28 @@ fn float_to_llvm_hex(f: f64) -> String {
     let bits = f32_val.to_bits();
     format!("{}", bits)
 }
+
+/// Recursively evaluate a constant expression tree to a concrete f64.
+/// Used to fold `const m0: Float = 4.0 * pi * pi` into a literal before
+/// global emission, avoiding the `constant float 0` bug.
+fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Option<f64> {
+    match expr {
+        Expr::Float(f) => Some(*f),
+        Expr::Identifier(name) => {
+            if let Some((Type::Float, inner)) = constants.get(name) {
+                try_eval_cfloat(inner, constants)
+            } else {
+                None
+            }
+        }
+        Expr::Add(l, r) => Some(try_eval_cfloat(l, constants)? + try_eval_cfloat(r, constants)?),
+        Expr::Sub(l, r) => Some(try_eval_cfloat(l, constants)? - try_eval_cfloat(r, constants)?),
+        Expr::Mul(l, r) => Some(try_eval_cfloat(l, constants)? * try_eval_cfloat(r, constants)?),
+        Expr::Div(l, r) => Some(try_eval_cfloat(l, constants)? / try_eval_cfloat(r, constants)?),
+        Expr::Neg(inner) => Some(-try_eval_cfloat(inner, constants)?),
+        _ => None,
+    }
+}
 use crate::ast::{
     DispatchMode, Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
 };
@@ -250,6 +272,9 @@ pub struct LlvmBackend {
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
+    /// Types of let-bound expressions — needed so FieldAccess can GEP into
+    /// struct instances held in local variables.
+    let_binding_types: HashMap<String, Type>,
     terminated: bool,
     returns_i64: bool,
     range_bounds: HashMap<String, (i64, i64)>,
@@ -282,6 +307,9 @@ pub struct LlvmBackend {
     reg_float_cache: HashMap<String, String>,
     state_reg_name: String,
     ssa_old_float_regs: HashMap<String, String>,
+    /// User-defined struct types: name → Vec<(field_name, field_type)>.
+    /// Used by StructInstance to emit field layout and FieldAccess to GEP into instances.
+    struct_types: HashMap<String, Vec<(String, Type)>>,
 }
 
 impl LlvmBackend {
@@ -301,6 +329,7 @@ impl LlvmBackend {
             has_cycles: false,
             pending_cleanup: Vec::new(),
             let_bindings: HashMap::new(),
+            let_binding_types: HashMap::new(),
             terminated: false,
             returns_i64: false,
             range_bounds: HashMap::new(),
@@ -333,6 +362,7 @@ impl LlvmBackend {
             reg_float_cache: HashMap::new(),
             state_reg_name: "%state".to_string(),
             ssa_old_float_regs: HashMap::new(),
+            struct_types: HashMap::new(),
         }
     }
 
@@ -424,7 +454,26 @@ impl LlvmBackend {
                 TopLevel::ForeignBinding { name, signature, .. } => {
                     self.frgn_map.insert(name.clone(), signature.clone());
                 }
+                TopLevel::Struct(s) => {
+                    let fields: Vec<(String, Type)> = s.fields.iter()
+                        .map(|f| (f.name.clone(), f.ty.clone()))
+                        .collect();
+                    self.struct_types.insert(s.name.clone(), fields);
+                }
                 _ => {}
+            }
+        }
+
+        // Fold complex float constant expressions (e.g. const m0: Float = 4.0 * pi * pi)
+        // into simple Expr::Float(f64) literals so the global emission path
+        // produces valid LLVM IR instead of `constant float 0`.
+        let consts_snapshot: Vec<(String, (Type, Expr))> = self.constants.iter()
+            .map(|(k, v)| (k.clone(), v.clone())).collect();
+        for (name, (ty, expr)) in consts_snapshot {
+            if ty == Type::Float {
+                if let Some(val) = try_eval_cfloat(&expr, &self.constants) {
+                    self.constants.insert(name, (Type::Float, Expr::Float(val)));
+                }
             }
         }
 
@@ -638,6 +687,7 @@ self.emit_declares(&mut out);
                 Type::Int | Type::UInt => "i64",
                 Type::Bool => "i32",
                 Type::Char => "i32",
+                Type::Float => "float",
                 Type::String | Type::Data => "i8*",
                 _ => "i64",
             }).collect();
@@ -1994,7 +2044,7 @@ self.emit_declares(&mut out);
     // ── DEFINITION ────────────────────────────────────────────
     fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.pending_cleanup.clear();
-        self.let_bindings.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear();
         write!(out, "define i64 @{}(", d.name).ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
@@ -2049,7 +2099,7 @@ self.emit_declares(&mut out);
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear();
         self.terminated = false;
         self.returns_i64 = false;
         // Precondition
@@ -2082,7 +2132,7 @@ self.emit_declares(&mut out);
         writeln!(out, "define internal i1 @pre_{}(%State* noalias nocapture %state) #0 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
@@ -2101,7 +2151,7 @@ self.emit_declares(&mut out);
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear();
         // Evaluate precondition
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
@@ -2128,7 +2178,7 @@ self.emit_declares(&mut out);
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
@@ -2138,7 +2188,7 @@ self.emit_declares(&mut out);
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
@@ -2175,6 +2225,7 @@ self.emit_declares(&mut out);
                 if let Some(e) = expr {
                     let r = self.emit_expr(out, e, indent);
                     self.let_bindings.insert(name.clone(), r.name.clone());
+                    self.let_binding_types.insert(name.clone(), r.ty.clone());
                     writeln!(out, "{}; let {} = {}", indent, name, r).ok();
                 } else {
                     writeln!(out, "{}; let {} = undef", indent, name).ok();
@@ -2437,7 +2488,11 @@ self.emit_declares(&mut out);
                 }
                 if let Some(reg) = self.let_bindings.get(name) {
                     writeln!(out, "{}{} = add i64 0, {}", indent, v, reg).ok();
-                } else if self.trigger_names.contains(name) {
+                    if let Some(ty) = self.let_binding_types.get(name) {
+                        return TypedRegister { name: v, ty: ty.clone() };
+                    }
+                }
+                if self.trigger_names.contains(name) {
                     if let Some(sampled) = self.sampled_triggers.get(name) {
                         writeln!(out, "{}{} = add i64 0, {}", indent, v, sampled).ok();
                     } else if let Some(t) = self.triggers.get(name).cloned() {
@@ -2456,9 +2511,11 @@ self.emit_declares(&mut out);
                     match (ty, expr) {
                         (Type::Int | Type::UInt, Expr::Integer(n)) => {
                             writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
+                            return TypedRegister { name: v, ty: Type::Int };
                         }
                         (Type::Bool, Expr::Bool(b)) => {
                             writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok();
+                            return TypedRegister { name: v, ty: Type::Bool };
                         }
                         _ => {
                             let ll_ty = match ty {
@@ -2469,21 +2526,25 @@ self.emit_declares(&mut out);
                             };
                             let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load {}, {}* @{}, align {}", indent, ld, ll_ty, ll_ty, name, self.align_of(ll_ty)).ok();
-                            match ty {
+                            let ret_ty = match ty {
                                 Type::Float => {
                                     let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
                                     writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ld).ok();
                                     writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
+                                    Type::Float
                                 }
                                 Type::Bool => {
                                     let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1;
                                     writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ld).ok();
                                     writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                                    Type::Bool
                                 }
                                 _ => {
                                     writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok();
+                                    ty.clone()
                                 }
-                            }
+                            };
+                            return TypedRegister { name: v, ty: ret_ty };
                         }
                     }
                 } else if let Some(&addr) = self.mmio_fields.get(name) {
@@ -2671,9 +2732,56 @@ self.emit_declares(&mut out);
             // Containers
             Expr::Tuple(elems) => { for e in elems { let _ = self.emit_expr(out, e, indent); } writeln!(out, "{}{} = add i64 0, 0 ; tuple", indent, v).ok(); }
             Expr::TupleDestructure(_, expr) => { let inner = self.emit_expr(out, expr, indent); writeln!(out, "{}{} = add i64 0, {} ; destructure", indent, v, inner).ok(); }
-            Expr::StructInstance(_, fields) => { for (_, e) in fields { let _ = self.emit_expr(out, e, indent); } writeln!(out, "{}{} = add i64 0, 0 ; struct", indent, v).ok(); }
-            Expr::ObjectLiteral(fields) => { for (_, e) in fields { let _ = self.emit_expr(out, e, indent); } writeln!(out, "{}{} = add i64 0, 0 ; object", indent, v).ok(); }
-            Expr::FieldAccess(obj, f) => { let o = self.emit_expr(out, obj, indent); writeln!(out, "{}{} = add i64 0, {} ; field", indent, v, o).ok(); }
+            Expr::StructInstance(typename, fields) => {
+                let n = fields.len();
+                let p = format!("%sp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, n).ok();
+                let mut fvs: Vec<String> = Vec::new();
+                for (_, expr) in fields.iter() {
+                    let ev = self.emit_expr(out, expr, indent);
+                    fvs.push(ev.name);
+                }
+                for (fi, fv) in fvs.iter().enumerate() {
+                    let ep = format!("%sep{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, p, fi).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, fv, ep).ok();
+                }
+                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
+                let ret_ty = Type::Custom(typename.clone());
+                return TypedRegister { name: v, ty: ret_ty };
+            }
+            Expr::ObjectLiteral(fields) => {
+                let n = fields.len();
+                let p = format!("%op{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, n).ok();
+                let mut fvs: Vec<String> = Vec::new();
+                for (_, expr) in fields.iter() {
+                    let ev = self.emit_expr(out, expr, indent);
+                    fvs.push(ev.name);
+                }
+                for (fi, fv) in fvs.iter().enumerate() {
+                    let ep = format!("%oep{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, p, fi).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, fv, ep).ok();
+                }
+                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
+            }
+            Expr::FieldAccess(obj, field_name) => {
+                let obj_reg = self.emit_expr(out, obj, indent);
+                let f_ptr = format!("%fap{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, f_ptr, obj_reg).ok();
+                if let Type::Custom(out_ty) = &obj_reg.ty {
+                    if let Some(struct_fields) = self.struct_types.get(out_ty) {
+                        if let Some(fi) = struct_fields.iter().position(|(n, _)| n == field_name) {
+                            let gep = format!("%fag{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, gep, f_ptr, fi).ok();
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, gep).ok();
+                            return TypedRegister { name: v, ty: struct_fields[fi].1.clone() };
+                        }
+                    }
+                }
+                writeln!(out, "{}{} = add i64 0, 0 ; field", indent, v).ok();
+            }
             // Cast
             Expr::Cast(inner, target_ty) => {
                 let src_reg = self.emit_expr(out, inner, indent);
@@ -3294,7 +3402,7 @@ self.emit_declares(&mut out);
                 writeln!(body4_buf, "{}_body4:", label_prefix).ok();
                 let mut cur = phi_reg.clone();
                 for _ in 0..unroll {
-                    self.let_bindings.clear();
+                    self.let_bindings.clear(); self.let_binding_types.clear();
                     self.terminated = false;
                     self.returns_i64 = false;
                     self.ssa_state_reg = Some(cur);
@@ -3316,7 +3424,7 @@ self.emit_declares(&mut out);
             // --- body1: remainder loop (single iteration) ---
             let mut body1_buf = String::new();
             writeln!(body1_buf, "{}_body1:", label_prefix).ok();
-            self.let_bindings.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear();
             self.terminated = false;
             self.returns_i64 = false;
             self.ssa_state_reg = Some(phi_reg.clone());
@@ -3507,7 +3615,7 @@ self.emit_declares(&mut out);
                 let skip_l = format!("s_{}", name);
                 writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, skip_l).ok();
                 writeln!(out, "  {}:", body_l).ok();
-                self.let_bindings.clear();
+                self.let_bindings.clear(); self.let_binding_types.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
@@ -3521,7 +3629,7 @@ self.emit_declares(&mut out);
                     merge, after_body, body_l, pre_ssa, skip_l).ok();
                 self.ssa_state_reg = Some(merge);
             } else {
-                self.let_bindings.clear();
+                self.let_bindings.clear(); self.let_binding_types.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
@@ -6021,5 +6129,220 @@ mod tests {
             "led_0 NOT in schema should NOT be MMIO (no inttoptr for 0x40000000). Got: {}", output);
         assert!(output.contains("getelementptr inbounds %State"),
             "led_0 NOT in schema should use struct GEP. Got: {}", output);
+    }
+
+    // ── Struct codegen tests ───────────────────────────────────
+
+    #[test]
+    fn test_struct_type_registered() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Point".to_string(),
+                    type_params: vec![],
+                    fields: vec![
+                        StructField { name: "x".to_string(), ty: Type::Int, default: None },
+                        StructField { name: "y".to_string(), ty: Type::Int, default: None },
+                    ],
+                    transactions: vec![],
+                    view_html: None,
+                    span: None,
+                    modifiers: vec![],
+                    variants: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("ModuleID"), "Output should be valid IR");
+        assert!(backend.struct_types.contains_key("Point"),
+            "Struct 'Point' should be registered");
+        assert_eq!(backend.struct_types["Point"].len(), 2);
+    }
+
+    fn make_point_program(body: Vec<Statement>) -> Program {
+        Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Point".to_string(),
+                    type_params: vec![],
+                    fields: vec![
+                        StructField { name: "x".to_string(), ty: Type::Int, default: None },
+                        StructField { name: "y".to_string(), ty: Type::Int, default: None },
+                    ],
+                    transactions: vec![],
+                    view_html: None,
+                    span: None,
+                    modifiers: vec![],
+                    variants: vec![],
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "pt".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "main".to_string(),
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body,
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![],
+                    is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        }
+    }
+
+    #[test]
+    fn test_struct_instance_emits_alloca_store_ptrtoint() {
+        let mut backend = LlvmBackend::new();
+        let body = vec![
+            Statement::Let {
+                name: "p".to_string(),
+                ty: Some(Type::Custom("Point".to_string())),
+                expr: Some(Expr::StructInstance("Point".to_string(), vec![
+                    ("x".to_string(), Expr::Integer(10)),
+                    ("y".to_string(), Expr::Integer(20)),
+                ])),
+                address: None, address_expr: None, bit_range: None,
+                is_override: false, modifiers: vec![],
+            },
+        ];
+        let output = backend.generate(&make_point_program(body));
+        assert!(output.contains("alloca i64, i64 2"),
+            "StructInstance should alloca for 2 fields. Got: {}", output);
+        assert!(output.contains("add i64 0, 10"),
+            "StructInstance should load field value 10. Got: {}", output);
+        assert!(output.contains("add i64 0, 20"),
+            "StructInstance should load field value 20. Got: {}", output);
+        assert!(output.contains("ptrtoint i64*"),
+            "StructInstance should return ptrtoint. Got: {}", output);
+    }
+
+    #[test]
+    fn test_field_access_resolves_correct_offset() {
+        let mut backend = LlvmBackend::new();
+        let body = vec![
+            Statement::Let {
+                name: "p".to_string(),
+                ty: Some(Type::Custom("Point".to_string())),
+                expr: Some(Expr::StructInstance("Point".to_string(), vec![
+                    ("x".to_string(), Expr::Integer(10)),
+                    ("y".to_string(), Expr::Integer(20)),
+                ])),
+                address: None, address_expr: None, bit_range: None,
+                is_override: false, modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::Identifier("pt".to_string()),
+                expr: Expr::FieldAccess(
+                    Box::new(Expr::Identifier("p".to_string())),
+                    "y".to_string(),
+                ),
+                timeout: None, modifiers: vec![],
+            },
+        ];
+        let output = backend.generate(&make_point_program(body));
+        assert!(output.contains("getelementptr i64, i64*"),
+            "FieldAccess should emit GEP. Got: {}", output);
+    }
+
+    #[test]
+    fn test_field_access_unknown_struct_falls_back() {
+        let mut backend = LlvmBackend::new();
+        fn empty_contract() -> Contract {
+            Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None }
+        }
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "raw".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "bad".to_string(),
+                    is_reactive: false, parameters: vec![],
+                    contract: empty_contract(),
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("raw".to_string()),
+                            expr: Expr::FieldAccess(
+                                Box::new(Expr::Identifier("raw".to_string())),
+                                "nonexistent".to_string(),
+                            ),
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![],
+                    is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("add i64 0, 0 ; field"),
+            "Unknown struct FieldAccess should emit fallback. Got: {}", output);
+    }
+
+    #[test]
+    fn test_object_literal_emits_alloca_store_ptrtoint() {
+        let mut backend = LlvmBackend::new();
+        fn empty_contract() -> Contract {
+            Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None }
+        }
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "obj".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "make_obj".to_string(),
+                    is_reactive: false, parameters: vec![],
+                    contract: empty_contract(),
+                    body: vec![
+                        Statement::Let {
+                            name: "o".to_string(),
+                            ty: None,
+                            expr: Some(Expr::ObjectLiteral(vec![
+                                ("name".to_string(), Expr::String("test".to_string())),
+                                ("value".to_string(), Expr::Integer(42)),
+                            ])),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![],
+                    is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("alloca i64, i64 2"),
+            "ObjectLiteral should alloca for fields. Got: {}", output);
+        assert!(output.contains("ptrtoint i64*"),
+            "ObjectLiteral should return ptrtoint. Got: {}", output);
     }
 }
