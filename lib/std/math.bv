@@ -62,7 +62,7 @@ defn abs(n: Int) [true][term >= 0] -> Int {
 };
 
 // Absolute value (Float) - simple version
-defn abs_float(n: Float) [term >= 0.0] -> Float {
+defn abs_float(n: Float) [[term >= 0.0] -> Float {
   [n < 0.0] {
     term -n;
   };
@@ -175,7 +175,7 @@ defn half(n: Int) [true][term == n / 2] -> Int {
 };
 
 // Absolute difference
-defn abs_diff(a: Int, b: Int) [term >= 0] -> Int {
+defn abs_diff(a: Int, b: Int) [[term >= 0] -> Int {
   [a > b] {
     term a - b;
   };

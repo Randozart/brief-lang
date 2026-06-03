@@ -32,23 +32,23 @@ frgn __parse_datetime(s: String) -> Result<Int, TimeError>;
 // ===== NATIVE DEFINITIONS =====
 
 // Duration helpers - native arithmetic
-defn duration_seconds(secs: Int) [term == secs] -> Int {
+defn duration_seconds(secs: Int) [[term == secs] -> Int {
   term secs;
 };
 
-defn duration_millis(ms: Int) [term == ms] -> Int {
+defn duration_millis(ms: Int) [[term == ms] -> Int {
   term ms;
 };
 
-defn duration_minutes(mins: Int) [term == mins * 60] -> Int {
+defn duration_minutes(mins: Int) [[term == mins * 60] -> Int {
   term mins * 60;
 };
 
-defn duration_hours(hours: Int) [term == hours * 3600] -> Int {
+defn duration_hours(hours: Int) [[term == hours * 3600] -> Int {
   term hours * 3600;
 };
 
-defn duration_days(days: Int) [term == days * 86400] -> Int {
+defn duration_days(days: Int) [[term == days * 86400] -> Int {
   term days * 86400;
 };
 
@@ -74,7 +74,7 @@ defn diff_seconds(t1: Int, t2: Int) [true][term == t1 - t2] -> Int {
   term t1 - t2;
 };
 
-defn diff_days(t1: Int, t2: Int) [term == (t1 - t2) / 86400] -> Int {
+defn diff_days(t1: Int, t2: Int) [[term == (t1 - t2) / 86400] -> Int {
   term (t1 - t2) / 86400;
 };
 

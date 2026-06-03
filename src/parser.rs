@@ -3056,18 +3056,29 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         while let Some(Ok(Token::LBracket)) = self.current_token() {
             self.advance(); // consume [
 
-            // Check for ~/ syntax - this is a shorthand for [~identifier][identifier]
+            // Check for ~/ syntax - [~/expr] is shorthand for [!expr][expr]
+            // [~/!var] → pre=var, post=!var (inverted toggle)
             if let Some(Ok(Token::TildeSlash)) = self.current_token() {
                 self.advance(); // Consume ~/
-                let identifier = self.expect_identifier()?;
-                pre_condition = Expr::Not(Box::new(Expr::Identifier(identifier.clone())));
-                post_condition = Expr::Identifier(identifier);
+                let expr = self.parse_expression()?;
+                pre_condition = Expr::Not(Box::new(expr.clone()));
+                post_condition = expr;
                 self.expect(Token::RBracket)?;
                 count = 2; // ~/ provides both pre and post
                 break;
             }
 
-            // [[post] shorthand: empty brackets mean [true] for pre
+            // [[post] shorthand: second [ means pre is omitted
+            if count == 0 && matches!(self.current_token(), Some(Ok(Token::LBracket))) {
+                self.advance(); // consume inner [
+                pre_condition = Expr::Bool(true);
+                post_condition = self.parse_expression()?;
+                self.expect(Token::RBracket)?;
+                count = 2;
+                continue;
+            }
+
+            // [pre]] shorthand: empty brackets mean [true] for post
             if count == 0 && matches!(self.current_token(), Some(Ok(Token::RBracket))) {
                 self.advance(); // consume ]
                 pre_condition = Expr::Bool(true);
@@ -3095,6 +3106,14 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             }
         }
 
+        // Single-bracket contracts are ambiguous: is it a precondition or postcondition?
+        // Use [pre]] to omit postcondition or [[post] to omit precondition.
+        if count == 1 {
+            return self.spanned_err(
+                "single-bracket contract is ambiguous — use [pre]] to omit postcondition or [[post] to omit precondition".to_string()
+            );
+        }
+
         // External watchdog: ?[cond] or ?![cond] (after all bracket pairs)
         if let Some(Ok(Token::Question)) = self.current_token() {
             self.advance();
@@ -3116,8 +3135,9 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             });
         }
 
-        // [true][true] is always an error — defeats contract-first programming
-        if matches!(&pre_condition, Expr::Bool(true)) && matches!(&post_condition, Expr::Bool(true)) {
+        // [true][true] is always an error when the user wrote brackets — defeats contract-first
+        // Bracketless (count == 0) is deliberate omission, not a contract claim.
+        if count > 0 && matches!(&pre_condition, Expr::Bool(true)) && matches!(&post_condition, Expr::Bool(true)) {
             return self.spanned_err(
                 "both precondition and postcondition are [true] — at least one side must specify meaningful constraints".to_string()
             );
@@ -5868,7 +5888,7 @@ mod parser_tests {
 
     #[test]
     fn test_hashbang_dispatch_parallel() {
-        let s = "#!dispatch(parallel)\ntrg x: Bool @ link __x;\nrct txn t [x] { term; };";
+        let s = "#!dispatch(parallel)\ntrg x: Bool @ link __x;\nrct txn t [x]] { term; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "#!dispatch(parallel) should parse: {:?}", result.err());
@@ -5961,7 +5981,7 @@ mod parser_tests {
 
     #[test]
     fn test_pragmabang_without_bracket() {
-        let s = "#!pragma dispatch(parallel)\ntrg x: Bool @ link __x;\nrct txn t [x] { term; };";
+        let s = "#!pragma dispatch(parallel)\ntrg x: Bool @ link __x;\nrct txn t [x]] { term; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "#!pragma without ] should parse: {:?}", result.err());

@@ -11,12 +11,14 @@
 //
 // Usage:
 //   import io from "std/io.bv";
-//   rct txn my_handler [io.io_ready] {
-//       if io.key_pressed("Space") { ... };
-//       &io.io_ready = false;
-//       term;
+//   import { char_at } from "std/string.bv";
+//   rct txn my_handler [io.io_ready]] {
+//       [char_at(io.__io_buffer, 0) == 'a'] { ... };
+//       io.consume();
 //   };
 //
+import "link/brief_rt.o";
+
 // ===== FFI DECLARATIONS =====
 //
 // __raw_poll: non-blocking read of all pending events from the OS.
@@ -31,13 +33,22 @@ frgn __raw_poll() -> String from "libruntime";
 frgn __wait_for_event() -> Void from "libruntime";
 
 // ===== CONSOLE IO (Native) =====
+// Uses transparent FFI — no compiler magic.
+// __print and __print_int are provided by brief_rt.c (linked via "link/brief_rt.o").
+
+frgn __print(msg: String) -> Bool from "libruntime";
+frgn __print_int(n: Int) -> Bool from "libruntime";
 
 defn print(msg: String) -> Bool [msg != ""][term == true] {
-    term true;
+    term __print(msg);
 };
 
 defn println(msg: String) -> Bool [msg != ""][term == true] {
-    term print(msg + "\n");
+    term __print(msg + "\n");
+};
+
+defn print_int(n: Int) -> Bool [[term == true] {
+    term __print_int(n);
 };
 
 defn input() -> String [true][term.len() >= 0] {
@@ -53,11 +64,11 @@ trg __io_pending: Bool @ link __io_pending;
 
 // Internal buffer populated by the pump transaction on each tick
 // that has pending events.
-let __io_buffer: Vector<u8> = [];
+let __io_buffer: String = "";
 
 // Public flag: set to true by the pump when new data is available.
 // User transactions gate on this:
-//   rct txn my_handler [io.io_ready] { ... &io.io_ready = false; term; };
+//   rct txn my_handler [io.io_ready]] { ... &io.io_ready = false; term; };
 let io_ready: Bool = false;
 
 // ── PUMP TRANSACTION ──
@@ -67,7 +78,7 @@ let io_ready: Bool = false;
 //
 // Calls the non-blocking FFI poll to drain all pending events into
 // the buffer, then signals io_ready for downstream consumers.
-rct txn __io_pump [__io_pending == true] {
+rct txn __io_pump [__io_pending == true]] {
     &__io_buffer = __raw_poll();
     &io_ready = true;
     term;
@@ -82,46 +93,22 @@ rct txn __io_pump [__io_pending == true] {
 // Because rct txn uses first-true-wins dispatch, and this transaction
 // has precondition [true], it will only fire if all earlier transactions
 // had false preconditions. This is the "equilibrium sleep" pattern.
-rct txn __io_sleep [true] {
+rct txn __io_sleep [true][term == true] {
     __wait_for_event();
     term;
 };
-
-// ── ACCESSOR DEFNS ──
-//
-// Pure functions on the cached __io_buffer. Zero FFI calls.
-// The buffer was already populated by __io_pump in the same tick.
 
 // ── CONVENIENCE ──
 //
 // Resets io_ready after consuming the event data.
 // Call at the end of your handler:
-//   rct txn my_handler [io.io_ready] {
-//       let c = io.get_char();
+//   rct txn my_handler [io.io_ready]] {
+//       let c = char_at(io.__io_buffer, 0);
 //       io.consume();
-//       term;
 //   };
 defn consume() -> Bool {
     &io_ready = false;
     term true;
-};
-
-defn key_pressed(key: String) -> Bool {
-    let i: Int = 0;
-    guard [i < len(__io_buffer)] {
-        if __io_buffer[i] == key {
-            term true;
-        };
-        &i = i + 1;
-    };
-    term false;
-};
-
-defn get_char() -> String {
-    if len(__io_buffer) > 0 {
-        term __io_buffer[0];
-    };
-    term "";
 };
 
 // ===== FILE IO (FFI Signatures) =====

@@ -34,12 +34,12 @@ txn test4 [true][term == 8.0] {
 };
 
 // Test 5: string length - directly returns Int
-txn test5 [result == 5] {
+txn test5 [result == 5]] {
     term string_length("hello");
 };
 
 // Test 6: string concat - directly returns String
-txn test6 [result == "helloworld"] {
+txn test6 [result == "helloworld"]] {
     term string_concat("hello", "world");
 };
 

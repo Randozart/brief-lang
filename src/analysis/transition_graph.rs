@@ -169,6 +169,14 @@ fn is_pure_body(
             Statement::Term { .. } => {}
             Statement::Escape(_) => return false,
             Statement::OnExit { .. } => return false,
+            Statement::Guarded { condition, statements } => {
+                if references_triggers_or_ffi(condition) {
+                    return false;
+                }
+                if statements.iter().any(|s| statement_contains_ffi(s)) {
+                    return false;
+                }
+            }
             _ => {}
         }
     }
@@ -274,6 +282,10 @@ fn expr_name(expr: &Expr) -> Option<String> {
 }
 
 fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String>) {
+    // FFI calls have side effects — cannot fold to pure counter
+    if node.body.iter().any(|s| statement_contains_ffi(s)) {
+        return;
+    }
     if let (Some(bp), Some(inc)) = (&node.bounded_pre, &node.increments) {
         if inc.var == bp.var && inc.delta > 0 && live_fields.contains(&inc.var) {
             let non_counter_writes: Vec<&String> = node.write_set.iter()
@@ -283,6 +295,20 @@ fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String
                 node.is_effectively_pure = true;
             }
         }
+    }
+}
+
+fn statement_contains_ffi(stmt: &Statement) -> bool {
+    match stmt {
+        Statement::Assignment { expr, .. } => references_triggers_or_ffi(expr),
+        Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| references_triggers_or_ffi(e)),
+        Statement::Expression(e) => references_triggers_or_ffi(e),
+        Statement::Term { values, .. } => values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi(e))),
+        Statement::Guarded { condition, statements } => {
+            references_triggers_or_ffi(condition)
+                || statements.iter().any(|s| statement_contains_ffi(s))
+        }
+        _ => false,
     }
 }
 

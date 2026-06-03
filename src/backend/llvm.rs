@@ -127,7 +127,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// - All Expr/Statement/TopLevel variants emit valid IR
 /// - Contracts: `!range`, `@llvm.assume` (debug panic / release assume)
 /// - Match→switch with phi merge, unification, pattern match
-/// - FFI declare+call with C ABI, bootstrap intrinsics (`__print`, `__exit`)
+/// - FFI declare+call with C ABI (transparent, no compiler magic)
 /// - Transition fusing, trigger sampling by MMIO/linked address
 /// - Precondition extraction → internal `i1` functions, dispatch chain
 /// - User-provided `frgn __wait_for_event` + `rct txn [true]` for sleep
@@ -639,18 +639,6 @@ self.emit_declares(&mut out);
         if self.triggers.iter().any(|(_, t)| matches!(t.address, crate::ast::LinkRef::Linked(_))) {
             writeln!(out).ok();
         }
-
-        // Declare C stdlib functions for bootstrap intrinsics
-        let has_print = self.frgn_map.contains_key("__print");
-        let has_exit = self.frgn_map.contains_key("__exit");
-        if has_print {
-            writeln!(out, "declare i64 @write(i32, i8*, i64) #1").ok();
-            writeln!(out, "declare i64 @strlen(i8*) #1").ok();
-        }
-        if has_exit {
-            writeln!(out, "declare void @exit(i32) #1").ok();
-        }
-        writeln!(out).ok();
 
         // Emit constant globals for TopLevel::Constant declarations.
         // Deduplicate identical constants to avoid redundant cache lines.
@@ -2462,21 +2450,9 @@ self.emit_declares(&mut out);
                             }
                         }
                     }
-                    // Bootstrap intrinsics
-                    match name.as_str() {
-                        "__print" => {
-                            // First arg is already marshaled to i8* by the String/Data path
-                            let p = marshaled[0].clone(); // "i8* %fp14"
-                            let l = format!("%bl{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = call i64 @strlen({})", indent, l, p).ok();
-                            writeln!(out, "{}{} = call i64 @write(i32 1, {}, i64 {})", indent, v, p, l).ok();
-                        }
-                        "__exit" => { writeln!(out, "{}{} = call void @exit(i32 0)", indent, v).ok(); writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); }
-                        _ => {
-                            let args_str = marshaled.join(", ");
-                            writeln!(out, "{}{} = call i64 @{}({})", indent, v, name, args_str).ok();
-                        }
-                    }
+                    // Generic FFI call — no special-case magic
+                    let args_str = marshaled.join(", ");
+                    writeln!(out, "{}{} = call i64 @{}({})", indent, v, name, args_str).ok();
                 } else {
                     // Internal call — marshal i64 back to real types per definition
                     let def_tys: Option<Vec<Type>> = self.defn_params.get(name).cloned();
@@ -3194,7 +3170,7 @@ self.emit_declares(&mut out);
                     // so body field reads use old values — all float ops
                     // become independent, filling all CPU execution ports.
                     self.pre_extract_float_fields(&mut body4_buf);
-                    for stmt in stmts {
+                    for stmt in stmts.iter().filter(|s| !matches!(s, Statement::Term { .. })) {
                         self.emit_stmt(&mut body4_buf, stmt, "  ");
                     }
                     self.ssa_old_float_regs.clear();
@@ -3213,7 +3189,7 @@ self.emit_declares(&mut out);
             self.returns_i64 = false;
             self.ssa_state_reg = Some(phi_reg.clone());
             self.pre_extract_float_fields(&mut body1_buf);
-            for stmt in stmts {
+            for stmt in stmts.iter().filter(|s| !matches!(s, Statement::Term { .. })) {
                 self.emit_stmt(&mut body1_buf, stmt, "  ");
             }
             let backedge_val = self.ssa_state_reg.take().unwrap_or(phi_reg.clone());
@@ -3403,7 +3379,7 @@ self.emit_declares(&mut out);
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
-                for s in &txn.body { self.emit_stmt(out, s, "  "); }
+                for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. })) { self.emit_stmt(out, s, "  "); }
                 self.ssa_old_float_regs.clear();
                 let after_body = self.ssa_state_reg.clone().unwrap_or_else(|| pre_ssa.clone());
                 writeln!(out, "  br label %{}", skip_l).ok();
@@ -3417,7 +3393,7 @@ self.emit_declares(&mut out);
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
-                for s in &txn.body { self.emit_stmt(out, s, "  "); }
+                for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. })) { self.emit_stmt(out, s, "  "); }
                 self.ssa_old_float_regs.clear();
             }
         }

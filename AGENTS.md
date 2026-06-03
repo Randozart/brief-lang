@@ -74,7 +74,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: 372 tests pass. float_math_nonzero at parity with C (0.16s each). sparse_dispatch dispatch-chain collapse eliminates 50M-tick loop via uniform-body detection (0.0006s = C-level O(1)). Two asymmetries remain in elimination frontier: iir_filter (Brief dead-field eliminates float state, C volatile prevents it) and const_heavy (C observes `acc` via return, Brief correctly eliminates dead `acc`). These are useful diagnostics of the optimization frontier, not targets for benchmark hacking.
+**Current**: 372 tests pass. print_loop structurally-live benchmark at 0.61× of C (0.030s vs 0.049s) — FFI __print_int call survives opt/O2, proves compiler doesn't pure-fold FFI gated bodies. All 9 benchmarks pass; Brief wins or ties on 8 of 9.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -93,17 +93,18 @@ brief-compiler selfhost <file.bv>
 - **Constant deduplication**: Identical constants emit as `@alias` — single global declaration, zero extra cache lines.
 - **`emit_exit_expr` Phase 1 refactor**: Integer/Bool literals delegate to `emit_expr` for consistent constant inlining. Identifiers remain local (use `@global_state`, not `%state` function param).
 
-### Benchmarks (2026-06-03 — all phases, C with `-ffast-math`, 50M iterations)
+### Benchmarks (2026-06-03 — all phases, C with `-O3 -ffast-math`, 50M iterations)
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
-| iir_filter | **Dead-field elim + pure counter** | **0.000s** | 0.082s | **Brief wins** |
+| iir_filter | Dead-field elim + pure counter | **0.001s** | 0.084s | **Brief wins** |
 | precompute_sum | Compile-time precomputation | 0.001s | 0.001s | ~tie |
 | ring_buffer | Enum O(1) pure-counter | 0.001s | 0.001s | ~tie |
 | async_counters | Thread pool O(1) pure-counter | 0.001s | 0.001s | ~tie |
-| float_math | **alloca+SROA + fast-math + -O3** | **0.004s** | 0.006s | **Brief ~1.4×** |
-| float_math_nonzero | alloca+SROA + fast-math + -O3 + AVX | **0.161s** | 0.164s | **~tie** |
-| sparse_dispatch | **Dispatch-chain collapse** | **0.001s** | 0.076s | **Brief wins** |
+| float_math | alloca+SROA + fast-math + -O3 | **0.004s** | 0.006s | **Brief ~1.5×** |
+| float_math_nonzero | alloca+SROA + fast-math + -O3 + AVX | **0.162s** | 0.165s | **Brief ~1.02×** |
+| sparse_dispatch | Dispatch-chain collapse | 0.001s | 0.001s | ~tie |
 | const_heavy | Integer arithmetic (sdiv) | 0.001s | 0.034s | **Brief wins** |
+| print_loop | **FFI-based structurally-live** | **0.030s** | 0.049s | **Brief 1.63×** |
 
 ### Step 5 Details — Thread Pool + Auto Async/Enum Inference
 - **Phase 5a**: Thread pool primitives in `runtime/brief_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `brief_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
@@ -201,11 +202,23 @@ brief-compiler selfhost <file.bv>
 - **Files**: 4 `.c` files, `build_and_bench.sh`
 
 ### Next Up
-- **Enum dispatch path**: Apply uniform-body detection to `emit_case_folded_loops` for the enum dispatch path.
-- **Proper structurally-live benchmarks**: Build Kalman-style benchmarks where computation feeds back naturally (no `#!exit` hacks, no `x == x` guards). Requires `frgn` output mechanism first.
+- **N3 (Compile-Time PGO via interpreter)**: Branch-weight metadata for improved instruction layout.
+- **N2 (Equality Saturation / egg)**: Collapse composed chains to minimal algebraic forms.
+- **Proper structurally-live benchmarks**: Build Kalman-style benchmarks where computation feeds back naturally (no `#!exit` hacks, no `x == x` guards). `print_loop` is the first structurally-live benchmark using `frgn __print_int`.
 - **`#!exit` philosophy**: The pragma tells the compiler "if this condition holds, the program is done." It is NOT an observation mechanism. Variables not referenced in `#!exit` are dead and correctly eliminated.
 - **Benchmarking philosophy**: Every asymmetry between Brief and C is a signal of a missing Brief optimization. Never hobble C. Fix Brief.
 - See `plans/2026-06-03-dispatch-optimization-and-benchmark-fairness.md` for full plan.
+
+### FFI Output & Structurally-Live Benchmark (2026-06-03)
+- **`__print`/`__exit` magic removed from `llvm.rs`**: Deleted `has_print`/`has_exit` declare block, replaced `__print`/`__exit` match arms with generic FFI catch-all. `frgn` calls now go through standard `frgn_map` loop.
+- **`__print_int` + `__print` added to `runtime/brief_rt.c`**: Plain C functions (`int64_t __print(const char*)`, `int64_t __print_int(int64_t)`, `void __exit(void)`). `fputs` to stdout, `fprintf(stderr, "%lld\n")`, `exit(0)`.
+- **`benchmarks/print_loop.bv`**: Structurally-live benchmark using `frgn __print_int` directly with `io_pending` wake trigger. 50M iterations, prints every 100K. Calls `__print_int` inside guard `[ops % print_interval == 0]`.
+- **`benchmarks/print_loop_c.c`**: C reference (symmetric). `if (ops % 100000 == 0) printf("%lld\n", ops);`.
+- **Fold prevention fixes**:
+  - `is_pure_body` now recurses into `Statement::Guarded` — checks condition and nested statements for FFI references. Without this, FFI calls inside guards were invisible to the pure-body check.
+  - `statement_contains_ffi` guard in `compute_effectively_pure` — prevents pure-counter fold for bodies containing any `Expr::Call`.
+- **`Statement::Term` filtering in SSA loop bodies**: `emit_folded_loop` and `emit_ssa_main` now filter `Statement::Term` from inline body processing. Previously, `Statement::Term` emitted `ret void` inside `main()` (which returns `i32`), causing LLVM verification failure. `term;` in txn bodies is implicit — the SSA loop already handles continuation via `store %State` + `br`.
+- **Tests**: All 372 pass.
 
 ### Dispatch-Chain Collapse (2026-06-03)
 - **Problem**: `emit_reactor` evaluated each txn's precondition on the post-update state from the previous txn (cascade bug). This caused all 8 txns in sparse_dispatch to fire every tick, with each precondition cascading from the previous update.

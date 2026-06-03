@@ -10,7 +10,7 @@
 //   import system from "std/system.bv";
 //
 // Then use in reactive transactions:
-//   rct txn handle_sigint [sigint] { ... term; };
+//   rct txn handle_sigint [sigint]] { ... term; };
 
 import {
     sigint, sigterm, sighup,
@@ -23,7 +23,7 @@ import {
 // Reactive stdin reader — accumulates lines from stdin
 let stdin_buffer: List<String> = [];
 
-rct txn read_stdin_line [sigint == false && stdin_ready == true] {
+rct txn read_stdin_line [sigint == false && stdin_ready == true]] {
     &stdin_buffer = stdin_buffer + [stdin_line];
     term;
 };
@@ -31,7 +31,7 @@ rct txn read_stdin_line [sigint == false && stdin_ready == true] {
 // Reactive signal handler — sets state on signals
 let shutting_down: Bool = false;
 
-rct txn handle_sigint [sigint == true] {
+rct txn handle_sigint [sigint == true]] {
     &shutting_down = true;
     term;
 };
@@ -39,7 +39,7 @@ rct txn handle_sigint [sigint == true] {
 // Reactive timer counter
 let tick_count: Int = 0;
 
-rct txn count_ticks [clock_tick_1hz > 0] {
+rct txn count_ticks [clock_tick_1hz > 0]] {
     &tick_count = tick_count + 1;
     term;
 };

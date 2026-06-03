@@ -48,7 +48,7 @@ frgn __merge(a: Data, b: Data) -> Result<Data, JsonError>;
 // ===== NATIVE DEFINITIONS =====
 
 // Pretty Print - simple version
-defn pretty_print(data: Data) [term.len() >= 0] -> String {
+defn pretty_print(data: Data) [[term.len() >= 0] -> String {
   term __stringify(data);
 };
 

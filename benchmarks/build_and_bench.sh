@@ -40,6 +40,7 @@ BENCHMARKS=(
     "float_math_nonzero"
     "sparse_dispatch"
     "const_heavy"
+    "print_loop"
 )
 
 build_bench() {

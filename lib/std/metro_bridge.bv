@@ -6,7 +6,7 @@
 // Usage:
 //   import "std/metro_bridge.bv";
 //
-//   txn example [true] {
+//   txn example [true]] {
 //       let fd = __shm_open("my_shm", 0x0202, 420);
 //       [fd.is_ok()] { term fd.value; };
 //       term 0;

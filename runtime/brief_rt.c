@@ -360,6 +360,34 @@ void __wait_for_event(void) {
 }
 
 /* ===================================================================
+ * 4c. FFI I/O Functions — Transparent, no compiler magic
+ *
+ * These are called through the generic FFI path in the LLVM backend.
+ * No hardcoded Rust string matches.
+ *
+ * Signatures:
+ *   frgn __print(msg: String) -> Bool    — prints to stdout
+ *   frgn __print_int(n: Int) -> Bool     — prints int to stderr
+ *   frgn __exit() -> Void                — terminates the program
+ *
+ * The LLVM backend marshals String as i8*, Int as i64, Bool as i64.
+ * =================================================================== */
+
+int64_t __print(const char* msg) {
+    fputs(msg, stdout);
+    return 1;
+}
+
+int64_t __print_int(int64_t n) {
+    fprintf(stderr, "%lld\n", (long long)n);
+    return 1;
+}
+
+void __exit(void) {
+    exit(0);
+}
+
+/* ===================================================================
  * 5. Initialization — __rt_init() and constructor wrapper
  *
  * __rt_init() is called by the LLVM backend at the start of main()

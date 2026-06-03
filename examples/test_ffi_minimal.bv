@@ -2,6 +2,6 @@
 frgn println(msg: String) -> Result<void, IoError> from "std/bindings/io.toml";
 frgn sqrt(x: Float) -> Result<Float, MathError> from "std/bindings/math.toml";
 
-rct txn test_ff [true] {
+rct txn test_ff [true]] {
     term println("Hello from FFI!");
 };

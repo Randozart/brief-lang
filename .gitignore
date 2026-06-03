@@ -150,6 +150,10 @@ benchmarks/sparse_dispatch_c
 benchmarks/kalman_no_slp
 benchmarks/precompute_sum_c
 
+# print_loop benchmark
+benchmarks/print_loop
+benchmarks/print_loop_c
+
 # Design doc (in review)
 /docs/design/safety-and-turing-completeness.md
 *.opt.ll
