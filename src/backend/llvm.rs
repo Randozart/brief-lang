@@ -3602,6 +3602,45 @@ self.emit_declares(&mut out);
             let native_name = txn_name.to_string();
             // Use extracted keys when available, otherwise fall back to dense 0..n
             let keys: Vec<i64> = enum_keys.get(tn).cloned().unwrap_or_else(|| (0..n as i64).collect());
+
+            // Check if all case arms produce identical code (uniform-body skip).
+            // When trig_to_fn maps all keys to the same function and all have
+            // the same all-internal status, the switch dispatch is redundant.
+            let uniform_body = keys.len() > 1 && {
+                let first_fn = trig_to_fn.get(&keys[0]).map(|s| s.as_str()).unwrap_or(&native_name);
+                let first_ai = all_internal_lookup(first_fn);
+                keys[1..].iter().all(|k| {
+                    let fn_name = trig_to_fn.get(k).map(|s| s.as_str()).unwrap_or(&native_name);
+                    fn_name == first_fn && all_internal_lookup(fn_name) == first_ai
+                })
+            };
+
+            if uniform_body {
+                // All case arms identical — skip the switch, emit one body
+                let fn_name = trig_to_fn.get(&keys[0]).map(|s| s.as_str()).unwrap_or(&native_name);
+                if let Some((ci, tv)) = all_internal_lookup(fn_name) {
+                    writeln!(out, "  %pc_uni = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", ci).ok();
+                    writeln!(out, "  store i64 {}, i64* %pc_uni, align 8", tv).ok();
+                } else {
+                    emit_case_folded_loops(self, out, "uni", fn_name, counter_idx, total_idx, total_const_name);
+                }
+                if has_wake {
+                    writeln!(out, "  br label %{}", done_label).ok();
+                } else {
+                    writeln!(out, "  ret i32 0").ok();
+                }
+                // Residual label for safety (unreachable for fully-covered enums)
+                writeln!(out, "{}_residual:", tn).ok();
+                writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
+                if has_wake {
+                    writeln!(out, "  br label %{}", done_label).ok();
+                } else {
+                    writeln!(out, "  br label %{}_residual_loop", tn).ok();
+                    writeln!(out, "{}_residual_loop:", tn).ok();
+                    writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
+                    writeln!(out, "  br label %{}_residual_loop", tn).ok();
+                }
+            } else {
             let key_count = keys.len();
             // Try perfect hashing for sparse key sets (gap ratio > 4).
             let (use_hash, multiplier, hash_shift): (bool, u64, u32) =
@@ -3655,6 +3694,7 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}_residual_loop:", tn).ok();
                 writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
                 writeln!(out, "  br label %{}_residual_loop", tn).ok();
+            }
             }
         } else {
             // Multi-trigger case: just fall through to standard reactor
@@ -4560,14 +4600,15 @@ mod tests {
         // Bool trigger with is_wake → enters enum dispatch in hybrid wake mode.
         // Previously this bypassed enum entirely (Phase A gate). Now enum dispatch
         // is active, with @__rt_init()/__rt_wait() wrapping the switch arms.
+        // With uniform-body detection: identical case arms skip the switch dispatch.
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
         let output = LlvmBackend::new().generate(&program);
         assert!(output.contains("call void @__rt_wait()"),
             "Wake triggers get __rt_wait between ticks");
         assert!(output.contains("call void @__rt_init()"),
             "Wake triggers get __rt_init at startup");
-        assert!(output.contains("switch i64"),
-            "Enum dispatch IS used with wake triggers (hybrid mode — switch arms loop back via __rt_wait)");
+        assert!(!output.contains("switch i64"),
+            "Uniform enum bodies skip the switch dispatch");
         assert!(output.contains("load volatile"),
             "Triggers are volatile-loaded for sampling");
         assert!(output.contains("define i32 @main() local_unnamed_addr #3"),
@@ -5283,7 +5324,8 @@ mod tests {
 
     #[test]
     fn test_exit_in_enum_main() {
-        // Bool trigger → enum dispatch path, no wake → one-shot: exit check not applicable
+        // Bool trigger → enum dispatch path, no wake → one-shot.
+        // Uniform-body detection skips the switch when all case arms are identical.
         let exit_cond = Expr::Eq(
             Box::new(Expr::Identifier("ops".to_string())),
             Box::new(Expr::Identifier("N".to_string())),
@@ -5291,8 +5333,8 @@ mod tests {
         let program = make_exit_program(Some(exit_cond), Type::Bool, false);
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
         // One-shot enum dispatch: no tick loop, no exit check needed
-        assert!(output.contains("switch i64"),
-            "Bool trigger should use enum dispatch");
+        assert!(!output.contains("switch i64"),
+            "Uniform enum bodies skip the switch dispatch");
         assert!(output.contains("ret i32 0"),
             "One-shot path returns 0 at each case arm");
         assert!(!output.contains("exit_check:"),
@@ -5301,15 +5343,16 @@ mod tests {
 
     #[test]
     fn test_exit_in_enum_hybrid_wake() {
-        // Bool trigger with is_wake → hybrid path (enum + wake)
+        // Bool trigger with is_wake → hybrid path (enum + wake).
+        // Uniform-body detection skips the switch when all case arms are identical.
         let exit_cond = Expr::Eq(
             Box::new(Expr::Identifier("ops".to_string())),
             Box::new(Expr::Identifier("N".to_string())),
         );
         let program = make_exit_program(Some(exit_cond), Type::Bool, true);
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
-        assert!(output.contains("switch i64"),
-            "Bool trigger should use enum dispatch in hybrid mode");
+        assert!(!output.contains("switch i64"),
+            "Uniform enum bodies skip the switch dispatch");
         assert!(output.contains("exit_check:"),
             "Hybrid mode should emit exit_check label");
         assert!(output.contains("do_wait:"),
