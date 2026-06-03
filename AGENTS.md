@@ -74,7 +74,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: 380 tests pass. Phases 1-4 complete — LTO closure, MMIO address plumbing, Vivado hardware handoff generator, and DBVS→LLVM alias resolution. Brief wins or ties on 8 of 9 benchmarks. print_loop at 0.64× of C.
+**Current**: 400 tests pass. Phases 1-4 complete plus Phase 5 (DBVS import pipeline), N3 (PGO), and N2 (equality saturation). Brief wins or ties on 8 of 9 benchmarks. print_loop at 1.63× of C.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -202,11 +202,29 @@ brief-compiler selfhost <file.bv>
 - **Files**: 4 `.c` files, `build_and_bench.sh`
 
 ### Next Up
-- **Phase 5 (DBVS import + schema validation)**: Parse imported `.dbvs` schemas from Brief programs, validate against target `.dbv` bindings, report missing/failed-mapped registers as compiler errors.
-- **N3 (Compile-Time PGO via interpreter)**: Branch-weight metadata for improved instruction layout.
-- **N2 (Equality Saturation / egg)**: Collapse composed chains to minimal algebraic forms.
 - **Chimera target-switching**: Compile same `.ebv` program for `--target zcu4ev.dbv` (MMIO), `--target sim.dbv` (struct members), `--target metro.dbv` (shared memory channels).
-- See `plans/2026-06-03-1335-lto-mmio-hardware-handoff.md` for full plan.
+- **DBVS schema quality**: Extract clock domains, interrupt lines, DMA channel info from Vivado HWH XML for richer hardware profiles.
+- See `plans/2026-06-03-1511-phase5-dbvs-import-pgo-egg.md` for full plan.
+
+### Phase 5: DBVS Import Pipeline (2026-06-03)
+- **5a — DBVS import parsing + schema type validation**: `run_llvm_compile()` scans `.dbvs` imports, parses via `crate::dbrief::parse_dbvs()`, collects alias→type map. `LlvmBackend::with_schema_aliases()` stores schema aliases. `validate_schema_types()` cross-checks StateDecl types against schema (Vector/Option/Result → error, UInt→Int → warning).
+- **5b — Auto-target resolution**: When schema imports exist and no explicit `--target-dbv`, searches `lib/targets/` and source dir for `.dbv` files whose `IMPORT` matches. Auto-selects if exactly one match.
+- **5c — Schema ↔ target cross-validation**: New `src/analysis/schema_validator.rs`. Checks HW008 (missing target binding), HW009 (unreferenced target alias), HW010 (address overlap). Wired in `run_llvm_compile()` before codegen.
+- **5d — Scoped MMIO injection**: `build_field_index()` only routes field to MMIO if its name is in `schema_aliases` (prevents accidental MMIO from address-name collisions). Non-schema fields removed from `mmio_fields` to prevent read/write path confusion.
+- **7 new tests**: alias loading, unsigned warning, vector rejection, no-validation, multi-merge, scoped MMIO (imported vs unimported).
+
+### N3: Compile-Time PGO via Interpreter (2026-06-03)
+- **`Interpreter.profile_mode` + `branch_counts`**: Tracks guard outcome counts via `guard_counter` global identifier. Records `(true_count, false_count)` per guard.
+- **`src/analysis/pgo.rs`**: `run_profile()` runs interpreter bounded to `max_ticks` ticks. `has_pgo_candidate()` checks skew ratio (default 100:1). `emit_branch_weights()` formats LLVM `!prof !{!"branch_weights", i32 T, i32 F}` metadata.
+- **LLVM emission**: `LlvmBackend.pgo_guard_idx` increments per guard; `emit_stmt` appends `!prof` metadata to `br i1` instructions when profile attached.
+- **CLI**: `--pgo-generate` flag on `llvm` command. Skip if no guards or all branches balanced.
+- **3 new tests**: skew rejection, skew acceptance, branch weight formatting.
+
+### N2: Equality Saturation (2026-06-03)
+- **Lightweight recursive simplification**: No `egg` crate dependency. `simplify()` applies bottom-up rewrite rules with fixpoint iteration (max 5 passes).
+- **Rules**: Identity elimination (x+0, x*1, x/1), zero propagation (x*0, x&0), negation (!!x, -(-x)), boolean (x&&true, x||false, x&&x), cancellation ((a+b)-b, (a-b)+b), bitwise (x|0, x^0, x<<0, x>>0).
+- **Gate**: Applied in `emit_expr` when `optimize_budget > 0`. No overhead when budget=0.
+- **6 new tests**: cancel-add-sub, identity+0, identity*1, zero-mul, double-neg, no-candidates.
 
 ### LTO Closure (2026-06-03)
 - **`try_lto_pipeline()`** in `src/main.rs`: Compiles `brief_rt.c` to LLVM bitcode via `clang -c -emit-llvm`, merges with program IR via `llvm-link`, runs `opt -O3` on the merged module. Enables inlining of `__print_int`, `__wait_for_event`, and thread pool barriers into Brief loops.

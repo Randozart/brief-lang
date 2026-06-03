@@ -177,6 +177,9 @@ pub struct Interpreter {
     pub metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub,
     pub return_value: Option<Value>,
     pub frgn_registry: crate::ffi::dynamic::FrgnRegistry,
+    pub profile_mode: bool,
+    pub branch_counts: HashMap<String, (u64, u64)>,
+    guard_counter: usize,
 }
 
 impl Interpreter {
@@ -193,6 +196,9 @@ impl Interpreter {
             metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub::new(),
             return_value: None,
             frgn_registry: crate::ffi::dynamic::FrgnRegistry::new(),
+            profile_mode: false,
+            branch_counts: HashMap::new(),
+            guard_counter: 0,
         }
     }
 
@@ -554,6 +560,16 @@ impl Interpreter {
                 statements,
             } => {
                 let cond_val = self.eval_expr(condition)?;
+                if self.profile_mode {
+                    let guard_id = format!("guard_{}", self.guard_counter);
+                    self.guard_counter += 1;
+                    let entry = self.branch_counts.entry(guard_id).or_insert((0, 0));
+                    if cond_val == Value::Bool(true) {
+                        entry.0 += 1;
+                    } else {
+                        entry.1 += 1;
+                    }
+                }
                 if cond_val == Value::Bool(true) {
                     for stmt in statements {
                         self.exec_stmt(stmt)?;

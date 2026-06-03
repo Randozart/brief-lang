@@ -1683,7 +1683,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             }
         },
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1986,6 +1986,7 @@ fn run_llvm_compile(
     optimize_size: Option<u64>,
     dead_info_disabled: bool,
     mmio_addresses: Option<HashMap<String, u64>>,
+    pgo_generate: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -2002,6 +2003,122 @@ fn run_llvm_compile(
     let mut program = import_resolver
         .resolve_imports(&program, file_path)
         .map_err(|e| format!("Import error: {}", e))?;
+
+    let mut schema_aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
+    let mut schema_imports: Vec<String> = Vec::new();
+    for item in &program.items {
+        if let crate::ast::TopLevel::Import(import) = item {
+            let path_str = import.path.join("/");
+            if path_str.ends_with(".dbvs") {
+                schema_imports.push(path_str.clone());
+                let source_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+                let full_path = source_dir.join(&path_str);
+                match std::fs::read_to_string(&full_path) {
+                    Ok(content) => {
+                        match crate::dbrief::parse_dbvs(&content) {
+                            Ok(dbvs) => {
+                                for alias in &dbvs.aliases {
+                                    schema_aliases.insert(alias.name.clone(), alias.alias_type.clone());
+                                }
+                                for reg in &dbvs.registers {
+                                    if let Some(ref name) = reg.name {
+                                        if !schema_aliases.contains_key(name) {
+                                            schema_aliases.insert(name.clone(), reg.register_type.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                return Err(format!("HW005: failed to parse schema {}: {}", path_str, e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(format!("HW006: schema file not found {}: {}", path_str, e).into());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut mmio_addresses = mmio_addresses;
+    if mmio_addresses.is_none() && !schema_imports.is_empty() {
+        let source_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+        let mut search_dirs = vec![source_dir.to_path_buf()];
+        if let Some(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR").ok() {
+            search_dirs.push(std::path::PathBuf::from(&manifest_dir).join("lib").join("targets"));
+        }
+        // Also check repo root relative to source
+        if let Ok(cargo) = std::env::current_dir() {
+            search_dirs.push(cargo.join("lib").join("targets"));
+        }
+        let mut candidates: Vec<(String, String)> = Vec::new();
+        for search_dir in &search_dirs {
+            if let Ok(entries) = std::fs::read_dir(search_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |e| e == "dbv") {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            if let Ok(dbv_prog) = crate::dbrief::parse_dbrief(&content) {
+                                for imp in &dbv_prog.imports {
+                                    let imp_path = imp.path.clone();
+                                    if schema_imports.iter().any(|s| {
+                                        s.ends_with(&imp_path) || imp_path.ends_with(s.as_str())
+                                            || s == &imp_path
+                                    }) {
+                                        candidates.push((path.display().to_string(), imp_path));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        candidates.dedup_by(|a, b| a.0 == b.0);
+        match candidates.len() {
+            1 => {
+                let (path, _) = &candidates[0];
+                eprintln!("info: auto-detected target binding: {}", path);
+                match process_target_dbv(path) {
+                    Ok(map) => { mmio_addresses = Some(map); }
+                    Err(e) => { eprintln!("Warning: auto-detected target DBV could not be processed: {}", e); }
+                }
+            }
+            0 if !schema_imports.is_empty() => {
+                eprintln!("info: no target binding found for schema imports {:?}. Use --target-dbv <file.dbv>", schema_imports);
+            }
+            n if n > 1 => {
+                let mut paths: Vec<String> = candidates.iter().map(|(p, _)| p.clone()).collect();
+                paths.dedup();
+                eprintln!("info: multiple target bindings found for schema imports: {}", paths.join(", "));
+                eprintln!("info: use --target-dbv to select one explicitly");
+            }
+            _ => {}
+        }
+    }
+
+    if !schema_aliases.is_empty() {
+        if let Some(ref addr_map) = mmio_addresses {
+            let cross_diags = brief_compiler::analysis::schema_validator::cross_validate(&schema_aliases, addr_map);
+            for diag in &cross_diags {
+                let sev = match diag.severity {
+                    crate::errors::Severity::Error => "error",
+                    crate::errors::Severity::Warning => "warning",
+                    _ => "info",
+                };
+                eprintln!("{}: {}: {}", sev, diag.code, diag.title);
+                for exp in &diag.explanation {
+                    eprintln!("  {}", exp);
+                }
+            }
+            let has_errors = cross_diags.iter().any(|d| d.severity == crate::errors::Severity::Error);
+            if has_errors {
+                return Err("cross-validation errors in schema ↔ target bindings".into());
+            }
+        }
+    }
 
     let mut desug = desugarer::Desugarer::new();
     let program = desug.desugar(&program);
@@ -2030,7 +2147,8 @@ fn run_llvm_compile(
 
     let mut llvm_backend = crate::backend::llvm::LlvmBackend::new()
         .with_optimize_budget(optimize_budget)
-        .with_optimize_report(optimize_report);
+        .with_optimize_report(optimize_report)
+        .with_schema_aliases(schema_aliases);
     if dead_info_disabled {
         llvm_backend = llvm_backend.with_dead_info_disabled(true);
     }
@@ -2043,6 +2161,31 @@ fn run_llvm_compile(
     if let Some(addrs) = mmio_addresses {
         llvm_backend = llvm_backend.with_mmio_addresses(addrs);
     }
+
+    if pgo_generate {
+        let has_guarded = program.items.iter().any(|item| {
+            if let crate::ast::TopLevel::Transaction(txn) = item {
+                txn.body.iter().any(|stmt| matches!(stmt, crate::ast::Statement::Guarded { .. }))
+            } else {
+                false
+            }
+        });
+        if has_guarded {
+            let profile = brief_compiler::analysis::pgo::run_profile(&program, 10);
+            if brief_compiler::analysis::pgo::has_pgo_candidate(&profile, 100) {
+                let skewed = profile.branch_counts.iter()
+                    .filter(|(_, (t, f))| *t > 0 || *f > 0)
+                    .count();
+                eprintln!("info: PGO profile attached: {} skewed branches", skewed);
+                llvm_backend = llvm_backend.with_pgo_profile(profile);
+            } else {
+                eprintln!("info: PGO skipped: all branches balanced (no layout benefit)");
+            }
+        } else {
+            eprintln!("info: PGO skipped: no guarded statements in program");
+        }
+    }
+
     let output = llvm_backend.generate(&program);
 
     for warning in llvm_backend.warnings() {
@@ -3623,6 +3766,7 @@ fn main() {
             let mut hw_handoff: Option<String> = None;
             let mut hw_target: Option<String> = None;
             let mut target_dbv: Option<String> = None;
+            let mut pgo_generate = false;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
@@ -3640,6 +3784,9 @@ fn main() {
                 } else if arg == "--target-dbv" && i + 1 < args.len() {
                     target_dbv = Some(args[i + 1].clone());
                     i += 2;
+                } else if arg == "--pgo-generate" {
+                    pgo_generate = true;
+                    i += 1;
                 } else if arg == "--optimize-budget" && i + 1 < args.len() {
                     optimize_budget = Some(args[i + 1].parse::<u64>().unwrap_or(256));
                     i += 2;
@@ -3678,7 +3825,7 @@ fn main() {
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);

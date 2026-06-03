@@ -82,6 +82,44 @@ pub enum DbriefType {
     Enum(Vec<String>),
 }
 
+impl DbriefType {
+    pub fn to_brief_type_name(&self) -> Result<&str, String> {
+        match self {
+            DbriefType::Int(_) | DbriefType::UInt(_) | DbriefType::Addr | DbriefType::RegOffset => {
+                Ok("Int")
+            }
+            DbriefType::Float => Ok("Float"),
+            DbriefType::Bool => Ok("Bool"),
+            DbriefType::String => Ok("String"),
+            DbriefType::Data => Ok("Data"),
+            DbriefType::Trigger(_) => Ok("Bool"),
+            DbriefType::Named(_) => Ok("Int"),
+            DbriefType::Vector(..) => {
+                Err("Vector types are not supported as Brief state fields. Use individual fields.".into())
+            }
+            DbriefType::Option(..) => {
+                Err("Option types are not supported as Brief state fields. Use std/option.bv.".into())
+            }
+            DbriefType::Result(..) => {
+                Err("Result types are not supported as Brief state fields. Use std/result.bv.".into())
+            }
+            DbriefType::Fn(..) => {
+                Err("Function types are not supported as Brief state fields.".into())
+            }
+            DbriefType::Struct(..) => {
+                Err("Struct types are not supported as Brief state fields. Use individual fields.".into())
+            }
+            DbriefType::Enum(..) => {
+                Err("Enum types are not supported as Brief state fields.".into())
+            }
+        }
+    }
+
+    pub fn is_unsigned_int(&self) -> bool {
+        matches!(self, DbriefType::UInt(_) | DbriefType::Addr)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DbriefAlias {
     pub name: String,

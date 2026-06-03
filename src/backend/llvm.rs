@@ -243,6 +243,9 @@ pub struct LlvmBackend {
     mmio_fields: HashMap<String, u64>,
     mmio_initializers: HashMap<String, Option<Expr>>,
     mmio_prepopulated: bool,
+    schema_aliases: HashMap<String, crate::dbrief::DbriefType>,
+    pgo_profile: Option<crate::analysis::pgo::PgoProfile>,
+    pgo_guard_idx: usize,
     txn_counter: usize,
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
@@ -291,6 +294,9 @@ impl LlvmBackend {
             mmio_fields: HashMap::new(),
             mmio_initializers: HashMap::new(),
             mmio_prepopulated: false,
+            schema_aliases: HashMap::new(),
+            pgo_profile: None,
+            pgo_guard_idx: 0,
             txn_counter: 0,
             has_cycles: false,
             pending_cleanup: Vec::new(),
@@ -364,6 +370,16 @@ impl LlvmBackend {
         self
     }
 
+    pub fn with_schema_aliases(mut self, aliases: HashMap<String, crate::dbrief::DbriefType>) -> Self {
+        self.schema_aliases = aliases;
+        self
+    }
+
+    pub fn with_pgo_profile(mut self, profile: crate::analysis::pgo::PgoProfile) -> Self {
+        self.pgo_profile = Some(profile);
+        self
+    }
+
     pub fn generate(&mut self, program: &Program) -> String {
         let mut analysis = crate::backend::analyze_program(program, false);
 
@@ -379,6 +395,7 @@ impl LlvmBackend {
 
         self.exit_condition = program.exit_condition.clone();
         self.build_field_index(program);
+        self.validate_schema_types();
         self.triggers.clear();
         self.trigger_names.clear();
         self.program_txns.clear();
@@ -1729,13 +1746,54 @@ self.emit_declares(&mut out);
                     self.mmio_fields.insert(s.name.clone(), addr);
                     self.mmio_initializers.insert(s.name.clone(), s.expr.clone());
                 } else if self.mmio_prepopulated && self.mmio_fields.contains_key(&s.name) {
-                    // DBV-targeted MMIO field — address comes from external target binding
-                    self.mmio_initializers.insert(s.name.clone(), s.expr.clone());
+                    if self.schema_aliases.is_empty() || self.schema_aliases.contains_key(&s.name) {
+                        self.mmio_initializers.insert(s.name.clone(), s.expr.clone());
+                    } else {
+                        // Not in any imported schema — remove from mmio_fields to prevent
+                        // accidental MMIO routing in reads/writes.
+                        self.mmio_fields.remove(&s.name);
+                        self.field_index_map
+                            .insert(s.name.clone(), self.field_types.len());
+                        self.field_types.push(self.llvm_type(&s.ty).to_string());
+                        self.field_initializers.insert(s.name.clone(), s.expr.clone());
+                    }
                 } else {
                     self.field_index_map
                         .insert(s.name.clone(), self.field_types.len());
                     self.field_types.push(self.llvm_type(&s.ty).to_string());
                     self.field_initializers.insert(s.name.clone(), s.expr.clone());
+                }
+            }
+        }
+    }
+
+    fn validate_schema_types(&mut self) {
+        if self.schema_aliases.is_empty() {
+            return;
+        }
+        for (name, schema_type) in &self.schema_aliases.clone() {
+            let brief_type = match schema_type.to_brief_type_name() {
+                Ok(t) => t,
+                Err(e) => {
+                    self.warnings.push(format!(
+                        "warning: schema type incompatibility for '{}': {}. Field will NOT be treated as MMIO.",
+                        name, e
+                    ));
+                    continue;
+                }
+            };
+            let name_clone = name.clone();
+            for item_name in self.field_index_map.keys().chain(self.mmio_initializers.keys()) {
+                if item_name == &name_clone {
+                    if brief_type == "Int" {
+                        if brief_type == "Int" && schema_type.is_unsigned_int() {
+                            self.warnings.push(format!(
+                                "warning: schema declares '{}' as unsigned but Brief uses Int. 64-bit target makes this safe.",
+                                name
+                            ));
+                        }
+                    }
+                    break;
                 }
             }
         }
@@ -2249,7 +2307,17 @@ self.emit_declares(&mut out);
                 let end_l = format!("{}_e", gid);
                 let prev_terminated = self.terminated;
                 self.terminated = false;
-                writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, then_l, end_l).ok();
+                let guard_id = format!("guard_{}", self.pgo_guard_idx);
+                self.pgo_guard_idx += 1;
+                if let Some(ref profile) = self.pgo_profile {
+                    if let Some(prof) = crate::analysis::pgo::emit_branch_weights(profile, &guard_id) {
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}, {}", indent, i1, then_l, end_l, prof).ok();
+                    } else {
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, then_l, end_l).ok();
+                    }
+                } else {
+                    writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, then_l, end_l).ok();
+                }
                 writeln!(out, "{}{}:", indent, then_l).ok();
                 for s in statements { self.emit_stmt(out, s, &format!("{}  ", indent)); }
                 if !self.terminated { writeln!(out, "{}  br label %{}", indent, end_l).ok(); }
@@ -2284,9 +2352,14 @@ self.emit_declares(&mut out);
 
     // ── EXPRESSIONS ───────────────────────────────────────────
     fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> TypedRegister {
+        let expr = if self.optimize_budget > 0 {
+            crate::analysis::equality_saturation::simplify(expr)
+        } else {
+            expr.clone()
+        };
         let v = format!("%t{}", self.txn_counter);
         self.txn_counter += 1;
-        match expr {
+        match &expr {
             Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); return TypedRegister { name: v, ty: Type::Int }; }
             Expr::Bool(b) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, if *b { 1 } else { 0 }).ok(); return TypedRegister { name: v, ty: Type::Bool }; }
             Expr::Float(f) => {
@@ -5780,5 +5853,173 @@ mod tests {
         // 32 cross-ops on 12 fields → peak 28 ≥ 16 → spills on AVX2 → disable
         assert!(output.contains("disable-slp-vectorize"),
             "AVX2: 12 fields with 32 cross-ops should disable SLP (peak=28 ≥ 16)");
+    }
+
+    #[test]
+    fn test_dbvs_import_aliases_loaded() {
+        let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
+        aliases.insert("uart_debug".to_string(), crate::dbrief::DbriefType::Data);
+        let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
+        assert_eq!(backend.schema_aliases.len(), 1);
+        assert!(backend.schema_aliases.contains_key("uart_debug"));
+        let output = backend.generate(&empty_program());
+        assert!(output.contains("ModuleID"));
+    }
+
+    #[test]
+    fn test_schema_type_unsigned_warning() {
+        let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
+        aliases.insert("count".to_string(), crate::dbrief::DbriefType::UInt(64));
+        let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "count".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: Vec::new(),
+                }),
+            ],
+            ..empty_program()
+        };
+        let _output = backend.generate(&program);
+        let warnings = backend.warnings();
+        let has_unsigned_warning = warnings.iter().any(|w| w.contains("unsigned") && w.contains("count"));
+        assert!(has_unsigned_warning,
+            "UInt(64) schema type with Int Brief type should produce unsigned warning, got: {:?}", warnings);
+    }
+
+    #[test]
+    fn test_schema_vector_rejected() {
+        let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
+        aliases.insert("buf".to_string(), crate::dbrief::DbriefType::Vector(
+            Box::new(crate::dbrief::DbriefType::UInt(8)), Some(256)));
+        let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "buf".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: Vec::new(),
+                }),
+            ],
+            ..empty_program()
+        };
+        let _output = backend.generate(&program);
+        let warnings = backend.warnings();
+        let has_vector_warning = warnings.iter().any(|w| w.contains("Vector") && w.contains("buf"));
+        assert!(has_vector_warning,
+            "Vector schema type should produce incompatibility warning, got: {:?}", warnings);
+    }
+
+    #[test]
+    fn test_no_schema_import_no_validation() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "count".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: Vec::new(),
+                }),
+            ],
+            ..empty_program()
+        };
+        let _output = backend.generate(&program);
+        assert!(backend.warnings().is_empty(),
+            "No schema import should produce no warnings");
+    }
+
+    #[test]
+    fn test_multiple_schema_imports_merged() {
+        let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
+        aliases.insert("gpio0".to_string(), crate::dbrief::DbriefType::UInt(32));
+        aliases.insert("gpio1".to_string(), crate::dbrief::DbriefType::UInt(32));
+        let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
+        assert_eq!(backend.schema_aliases.len(), 2);
+        let output = backend.generate(&empty_program());
+        assert!(output.contains("ModuleID"));
+    }
+
+    #[test]
+    fn test_imported_alias_is_mmio() {
+        let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
+        aliases.insert("led_0".to_string(), crate::dbrief::DbriefType::UInt(32));
+        let mut mmio: HashMap<String, u64> = HashMap::new();
+        mmio.insert("led_0".to_string(), 0x40000000);
+        let mut backend = LlvmBackend::new()
+            .with_schema_aliases(aliases)
+            .with_mmio_addresses(mmio);
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "led_0".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: Vec::new(),
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("inttoptr i64 1073741824"),
+            "led_0 with schema import should be MMIO (inttoptr). Got: {}", output);
+        assert!(output.contains("store volatile i64"),
+            "led_0 with schema import should use volatile store. Got: {}", output);
+    }
+
+    #[test]
+    fn test_unimported_alias_not_mmio() {
+        let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
+        aliases.insert("uart_debug".to_string(), crate::dbrief::DbriefType::Data);
+        let mut mmio: HashMap<String, u64> = HashMap::new();
+        mmio.insert("led_0".to_string(), 0x40000000);
+        mmio.insert("uart_debug".to_string(), 0xFF010000);
+        let mut backend = LlvmBackend::new()
+            .with_schema_aliases(aliases)
+            .with_mmio_addresses(mmio);
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "led_0".to_string(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: Vec::new(),
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(!output.contains("inttoptr i64 1073741824"),
+            "led_0 NOT in schema should NOT be MMIO (no inttoptr for 0x40000000). Got: {}", output);
+        assert!(output.contains("getelementptr inbounds %State"),
+            "led_0 NOT in schema should use struct GEP. Got: {}", output);
     }
 }
