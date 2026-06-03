@@ -46,6 +46,143 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 - If interpreter raises `UndefinedForeignFunction("is_digit")`, add `import char from "std/char.bv"` to the calling .bv file
 - If import resolver can't find a standard library file, fix the search path, not the interpreter
 
+## Language Architecture
+
+Brief is a **general-purpose programming language**. The interpreter proves this — it already supports the full expression language including lists, strings, structs, enums, pattern matching, hash maps, and FFI. The standard library (`lib/std/`) has 26 modules covering strings, collections, math, I/O, JSON, HTTP, encoding, shared memory, and more.
+
+### How Brief Works (Correct Model)
+
+Brief's computational primitive is the **reactive transaction** (`rct txn`). A transaction has:
+- A **precondition** (guard): `[x > 0 && y < N]`
+- A **postcondition** (contract): `[x == N]`
+- A **body**: `{ &x = x + 1; &y = y * 2; }`
+
+The compiler's job is to analyze the transaction graph and emit code for the most efficient execution path. This is NOT a niche reactive DSL — it IS how Brief expresses computation. Loops are transactions with bounded convergence (`[count < N][count == N]`). Recursion is a transaction chain with proved termination. Every optimization (purity folding, dead-field elimination, SROA, SLP vectorization) applies because the compiler has enough information from contracts to prove correctness.
+
+### Misconceptions to Avoid
+
+| Wrong | Correct |
+|-------|---------|
+| "Brief is a reactive state machine DSL" | Brief is a general-purpose language. Transactions are the computational primitive — they ARE loops, iteration, and recursion. |
+| "Brief has no arrays/strings/collections" | The interpreter supports `List<T>`, `String`, `HashMap<K,V>`, `HashSet<T>`, `Stack<T>`, `Queue<T>`, `StringBuilder`. The stdlib has 26 modules including `collections.bv`, `string.bv` (876 lines), `char.bv`, `json.bv`, etc. |
+| "Brief can't do tree/heap benchmarks" | The interpreter supports recursive enum types (e.g., `enum Tree { Node(Tree, Tree), Leaf }`), struct instances, field access, and match expressions. |
+| "Brief needs malloc/FFI for buffers" | No. The compiler proves bounds from contracts at compile time and allocates accordingly. The programmer writes proofs, the compiler handles memory. |
+| "The interpreter has known gaps" | The "known gaps" in older AGENTS.md were stale. All listed Expr/Statement variants are implemented in the interpreter. See "Interpreter Completeness" below. |
+| "The LLVM backend is the language" | The interpreter IS the reference implementation. The LLVM backend is an optimization pass over it. If the interpreter runs it, the backend should eventually compile it. |
+
+### Two-Layer Architecture
+
+1. **Interpreter** (`src/interpreter.rs`) — the reference implementation. 2327 lines. Validates EVERYTHING before any codegen work. If something isn't in the interpreter, it doesn't belong in codegen.
+2. **LLVM Backend** (`src/backend/llvm.rs`) — 6024 lines. Compiles state/transactions/expressions to LLVM IR. Applies optimizations (purity folding, SROA, SLP, dead-field elimination, etc.). Must never weaken existing optimization paths for new features.
+
+## Interpreter Completeness (Reference Implementation)
+
+The interpreter at `src/interpreter.rs` is the **full reference implementation**. Here is the exact status of every Expr/Statement variant:
+
+### Expressions — Fully Implemented
+| Expr | Line | Status |
+|------|------|--------|
+| Integer, Float, String, Char, Bool, Term, Identifier, OwnedRef, PriorState | 727-751 | ✅ |
+| Add, Sub, Mul, Div, Mod | 752-816 | ✅ |
+| Eq, Ne, Lt, Le, Gt, Ge | 817-882 | ✅ |
+| Or, And, Not | 883-898 | ✅ |
+| Neg, BitNot, BitAnd, BitOr, BitXor, Shl, Shr | 899-938 | ✅ |
+| Call, ListLiteral, ListIndex, ListLen | 939-1647 | ✅ |
+| FieldAccess | 1648 | ✅ — `Value::Instance` field lookup |
+| StructInstance | 1662 | ✅ — creates `Value::Instance` |
+| ObjectLiteral | 1672 | ✅ — creates `Value::Instance` with typename "ObjectLiteral" |
+| PatternMatch | 1682 | ✅ — enum variant matching with field binding |
+| Concat | 1716 | ✅ — string/list concatenation |
+| Slice | 1727 | ✅ — full start/end/stride/mask support for List and String |
+| Block | 1806 | ✅ — saves/restores state, executes stmts, returns last expr |
+| Tuple | 1815 | ✅ — evaluates elements into `Value::List` |
+| TupleDestructure | 1822 | ✅ — destructures `Value::List` into state bindings |
+| MultiSlice | 1848 | ✅ — delegates to Slice or Index per coordinate |
+| Cast | 1896 | ✅ — passes through (type erasure) |
+| Match | 1897 | ✅ — full pattern matching with Wildcard and Variant arms |
+| ForAll | 1838 | ⚠️ stub — always returns `Bool(true)`. Quantification not yet implemented. |
+| Exists | 1839 | ⚠️ partial — checks if list is non-empty. Full quantification not yet implemented. |
+
+### Statements — Fully Implemented
+| Statement | Line | Status |
+|-----------|------|--------|
+| Assignment (list index writes included) | 498-531 | ✅ |
+| Let | 536 | ✅ |
+| InlineAsm | 542 | ✅ |
+| Expression | 543 | ✅ |
+| Term | 546 | ✅ |
+| Escape | 554 | ✅ |
+| Guarded | 558 | ✅ |
+| **Unification** | 579 | ✅ — matches enum variant, binds fields, executes body |
+| LocalTrigger | 620 | ✅ |
+| Alka, OnExit | 629 | ✅ |
+
+### Top-Level — Fully Handled
+| TopLevel | Status |
+|----------|--------|
+| Transactions (including reactive), StateDecl, Trigger, Constant, Import, LinkDependency | ✅ |
+| ForeignBinding (dynamic .so/.dylib loading) | ✅ |
+| Struct (instance creation, field access) | ✅ |
+| Enum (constructor calls, variant dispatch, unification) | ✅ |
+| Definition (defn) — including calls | ✅ |
+
+### Bug: Recursive defn calls
+`defn` functions CAN call themselves (the definition is in scope during execution), but there is **no recursion guard or stack depth limit**. A deeply-recursive `defn` will stack-overflow the Rust interpreter. The self-hosted compiler (`lib/compiler/call_graph.bv:138`) has `collect_call_names` calling itself, which would overflow on non-trivial inputs. This is a correctness gap — recursive defn should be bounded or rewritten.
+
+**Conclusion**: The interpreter supports Brief as a general-purpose language. ForAll/Exists quantification and recursive-defn safety are the only known gaps in the reference implementation.
+
+## LLVM Backend Gaps (Codegen Completeness)
+
+The LLVM backend at `src/backend/llvm.rs` (6024 lines) lags behind the interpreter. Here is the exact status:
+
+### Expressions — Fully Emitted
+| Expr | Line | Status |
+|------|------|--------|
+| Arithmetic, comparisons, logic, bitwise | 2500-2558 | ✅ |
+| Cast | 2678 | ✅ — type conversion via emit_cast_convert |
+| Block | 2685 | ✅ — inline stmts, return last |
+| Match | 2691 | ✅ — switch dispatch with phi merge at merge block |
+| PatternMatch | 2736 | ✅ — discriminant extraction + icmp eq |
+| Call | 2561 | ✅ — FFI marshaling (i64/float/i8*/i32), defn calls, enum constructors (stack alloca + GEP + store + ptrtoint) |
+| ListLiteral | 2638 | ✅ — alloca + GEP + store per element + ptrtoint |
+| ListIndex | 2650 | ✅ — inttoptr + GEP |
+| Exists | 2747 | ✅ — icmp ne 0 |
+
+### Expressions — Stub (Returns 0 or Degraded)
+| Expr | Line | What's Missing |
+|------|------|----------------|
+| **ListLen** | 2657 | Returns `0` always. Needs: track list length (store it alongside the pointer, e.g., as a 2-slot pair: [ptr, len]). |
+| **Slice** | 2658 | Only handles `start` offset into the same buffer. Missing: `end` bound, `stride`, `mask`. Needs: allocate new buffer, compute length, copy elements. |
+| **MultiSlice** | 2667 | Returns base pointer unchanged. Missing: coordinate-based indexing, new buffer construction. |
+| **Tuple** | 2672 | Returns `0`. Missing: allocate struct or flatten to registers. Blocked by: no LLVM struct type generation for user types. |
+| **TupleDestructure** | 2673 | Passes inner value through. Missing: extract elements from tuple representation. |
+| **StructInstance** | 2674 | Returns `0`. Missing: allocate struct in %State or on stack, GEP + store fields. |
+| **ObjectLiteral** | 2675 | Returns `0`. Same gap as StructInstance. |
+| **FieldAccess** | 2676 | Returns object pointer as-is. Missing: GEP into struct at known field offset. |
+| **ForAll** | 2746 | Returns `1` always. Missing: bounded loop over value range. Matches interpreter stub. |
+
+### Top-Level — Silently Skipped
+| TopLevel | Line | Impact |
+|----------|------|--------|
+| **Struct** | 427 (`_ => {}`) | No LLVM struct type generated. `StructInstance` and `FieldAccess` stubs above are the symptoms. |
+| **Enum** | 427 (`_ => {}`) | No tagged union layout emitted. However, enum `Call` constructors work (line 2616) via ad-hoc stack alloca + discriminant prefix. Move this into proper `TopLevel::Enum` codegen. |
+| Signature, Import, LinkDependency | 427 | Correctly skipped — these are frontend-only or consumed by the compiler driver. |
+| ResourceDecl, RStruct, RenderBlock, Stylesheet, SvgComponent | 427 | Correctly skipped — .rbv frontend concepts. |
+
+### Collection Method Calls
+Collection method dispatch (`list_append`, `hashmap_insert`, `string_builder_append`, etc.) in the interpreter uses method-name string matching in `Expr::Call`. The LLVM backend handles `Expr::Call` via FFI marshal/decode/defn-call/constructor paths (line 2561-2636). Some stdlib collection methods may hit the `UndefinedForeignFunction` path if the function name isn't in `frgn_map` or `defn_params`. Verify per benchmark.
+
+## Key Philosophy for Backend Work
+
+### Never Weaken Optimizations for New Features
+Existing optimization paths (purity folding, dead-field elimination, SROA, SLP, switch dispatch, thread pool) MUST NOT regress when adding new codegen. Struct/enum/collection codegen is additive — new match arms that don't touch the existing fold/precompute/dispatch paths.
+
+### The Interpreter is the Source of Truth
+If the interpreter produces the correct result for a program, the LLVM backend is expected to eventually compile that program correctly. If there's a conflict between "what's easy to codegen" and "what the interpreter does," fix the codegen. Never change the interpreter to match a weak codegen path.
+
+### Contracts Enable Optimizations — Don't Skip Them
+The more contract information the LLVM backend has, the more aggressively it can optimize. Struct and collection codegen should preserve contract information (field types, bounds, pre/post conditions) so the optimizer can reason about them. A `List<T>` with a known fixed bound from a precondition can be stack-allocated at compile time.
+
 ## For OpenCode
 
 This project uses OpenCode. When making changes:
@@ -55,8 +192,10 @@ This project uses OpenCode. When making changes:
 4. Test with `cargo test --lib` before committing
 5. Document bugs and root causes in BUGS.md
 6. Never add Rust built-ins for things the standard library should provide
-7. **No prototyping — build clean**: Every optimization is a first-class pass in its proper module (`src/analysis/` for analysis, `src/backend/` for codegen). Never inline new analysis into codegen as a shortcut. Dispatch-chain switch detection belongs in `transition_graph.rs`, not `llvm.rs`.
-8. **Never weaken C benchmarks**: Every asymmetry between Brief and C is a signal of a missing Brief optimization. Never hobble C with `volatile`, unused `break;` cases, or artificial liveness hacks to make Brief look better. Fix Brief to match or beat C's optimization — that's the science. Duct-taping benchmarks teaches nothing.
+7. **No prototyping — build clean**: Every optimization is a first-class pass in its proper module (`src/analysis/` for analysis, `src/backend/` for codegen). Never inline new analysis into codegen as a shortcut.
+8. **Never weaken C benchmarks**: Every asymmetry between Brief and C is a signal of a missing Brief optimization. Never hobble C with `volatile`, unused `break;` cases, or artificial liveness hacks to make Brief look better. Fix Brief to match or beat C's optimization.
+9. **The interpreter IS the reference**: If the interpreter runs it correctly, the backend should eventually compile it. If the interpreter doesn't support something, add it to the interpreter first, then add codegen.
+10. **Benchmarks on our own terms**: Brief benchmarks compare end-to-end results (Input X → Output Y). The compiler chooses the optimal execution path. Adding features for benchmarks is fine IF they add value to the language. Never add features solely to run benchmarks.
 
 ## Self-Hosting Pipeline
 
@@ -64,11 +203,6 @@ The Brief-in-Brief compiler lives in `lib/compiler/`. The Rust interpreter runs 
 ```
 brief-compiler selfhost <file.bv>
 ```
-
-**Known gaps in interpreter** (add these legitimately, not as magic):
-- `Expr::Block`, `Expr::Tuple`, `Expr::TupleDestructure` — properly implemented in eval_expr
-- `Expr::ForAll`, `Expr::Exists`, `Expr::MultiSlice` — properly implemented in eval_expr
-- `Statement::Unification` — properly implemented (looks up state, matches variant, executes block)
 
 **Do NOT add as built-ins**: `is_digit`, `is_alpha`, `is_alphanumeric`, `is_upper`, `is_lower`, `is_space`, `char_to_string`, `None`, `Some`, `Ok`, `Err`. These are in `lib/std/` and should be imported.
 
@@ -204,7 +338,7 @@ brief-compiler selfhost <file.bv>
 ### Next Up
 - **Chimera target-switching**: Compile same `.ebv` program for `--target zcu4ev.dbv` (MMIO), `--target sim.dbv` (struct members), `--target metro.dbv` (shared memory channels).
 - **DBVS schema quality**: Extract clock domains, interrupt lines, DMA channel info from Vivado HWH XML for richer hardware profiles.
-- See `plans/2026-06-03-1511-phase5-dbvs-import-pgo-egg.md` for full plan.
+- **LLVM backend completion**: Structs, enums, collections, runtime-sized allocation. See `plans/2026-06-03-llvm-backend-completion.md`.
 
 ### Phase 5: DBVS Import Pipeline (2026-06-03)
 - **5a — DBVS import parsing + schema type validation**: `run_llvm_compile()` scans `.dbvs` imports, parses via `crate::dbrief::parse_dbvs()`, collects alias→type map. `LlvmBackend::with_schema_aliases()` stores schema aliases. `validate_schema_types()` cross-checks StateDecl types against schema (Vector/Option/Result → error, UInt→Int → warning).
@@ -275,6 +409,7 @@ brief-compiler selfhost <file.bv>
 - **Result**: sparse_dispatch drops from 0.0758s to 0.0006s (matches C's O(1) elimination). 4 new tests, 372 pass.
 
 ## Key Plan Documents
+- **`plans/2026-06-03-llvm-backend-completion.md`** — LLVM backend completion plan (structs, enums, collections, runtime buffers)
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases
 - **`plans/2026-06-01-optimization-completion.md`** — Phases A/B/C (wake fix, precompute, regression)
 - **`plans/2026-06-01-eliminate-redundant-pragmas.md`** — Steps 1-5 (auto-wake, auto-parallel, async inference, thread pool)
@@ -283,14 +418,14 @@ brief-compiler selfhost <file.bv>
 - **`plans/2026-05-31-benchmarks-plan.md`** — Benchmarks plan (3 new + regression)
 - **`docs/design/determinism-and-optimization-frontier.md`** — Conceptual optimization architecture
 - **`docs/design/optimization-cost-model.md`** — Full cost model specification
-- **`plans/2026-06-01-exit-safety-warnings.md`** — Implementation plan for exit diagnostics (unknown identifier error, one-shot warning, no-exit-path warning)
-- **`plans/2026-06-01-pure-counter-enum-dispatch.md`** — Pure-counter fold elimination for enum/async dispatch (store total instead of while-loop)
-- **`plans/2026-06-01-fair-c-benchmarks-fuzzing.md`** — Phase 1: fair C benchmarks + Phase 2: input fuzzing (compile-time and runtime modes)
-- **`plans/2026-06-01-dead-field-elimination.md`** — Dead-field elimination: liveness analysis for effectively-pure body detection
-- **`plans/2026-06-02-hardware-aware-slp-hazard-analyzer.md`** — SLP hazard analyzer: deterministic peak register demand formula
-- **`plans/2026-06-02-slp-hazard-loopholes.md`** — Three loopholes audit: local var blindspot, dual-var constraint, missed constants
-- **`plans/2026-06-02-calibration-baseline-and-dispatch-fix.md`** — Calibration baseline, 4-decimal precision, SCEV break, alwaysinline audit
-- **`plans/2026-06-03-dispatch-optimization-and-benchmark-fairness.md`** — Dispatch collapse + benchmark fairness + structurally-live benchmark design
+- **`plans/2026-06-01-exit-safety-warnings.md`** — Implementation plan for exit diagnostics
+- **`plans/2026-06-01-pure-counter-enum-dispatch.md`** — Pure-counter fold elimination for enum/async dispatch
+- **`plans/2026-06-01-fair-c-benchmarks-fuzzing.md`** — Fair C benchmarks + input fuzzing
+- **`plans/2026-06-01-dead-field-elimination.md`** — Dead-field elimination: liveness analysis
+- **`plans/2026-06-02-hardware-aware-slp-hazard-analyzer.md`** — SLP hazard analyzer
+- **`plans/2026-06-02-slp-hazard-loopholes.md`** — Three SLP loopholes audit
+- **`plans/2026-06-02-calibration-baseline-and-dispatch-fix.md`** — Calibration baseline + SCEV break
+- **`plans/2026-06-03-dispatch-optimization-and-benchmark-fairness.md`** — Dispatch collapse + benchmark fairness
 
 ### Calibration Baseline & SCEV Break (2026-06-02)
 - **Problem**: const_heavy showed 0.00s (SCEV eliminated linear recurrence). Baseline benchmarks ran 0.00s for 4/7 on O(1) pure-counter paths.
@@ -298,7 +433,6 @@ brief-compiler selfhost <file.bv>
 - **Precision**: `build_and_bench.sh` now uses `date +%s.%N` + `bc` + `LC_NUMERIC=C` for 0.0000s precision.
 - **alwaysinline audit**: Data refutes the "alwaysinline bloat" hypothesis. `opt -O2` + SCEV handles the phi/select cascade — sparse_dispatch runs 0.0559s at 50M (not pathological). Plan A (noinline guard) skipped.
 - **Files**: `benchmarks/const_heavy.bv`, `benchmarks/const_heavy_c.c`, `build_and_bench.sh`
-- **Plan**: `plans/2026-06-02-calibration-baseline-and-dispatch-fix.md`
 
 ### SLP Hazard Analyzer (2026-06-02)
 - **Problem**: SLP vectorization creates `shufflevector` instructions from packed `<2 x float>` phis. At ≥12 float fields with cross-variable coupling, shuffles overflow x86_64's 16 XMM registers → 65 stack spills.
