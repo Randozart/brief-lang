@@ -10,6 +10,7 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 - **Test backend registry**: `cargo test --lib -- backend::tests`
 - **Compile RBV**: `./target/release/brief-compiler rbv <file.rbv>`
 - **Selfhost**: `cargo run --bin brief-compiler -- selfhost <file.bv>`
+- **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness, never ad-hoc `/usr/bin/time` or other external timers. The harness rebuilds all binaries, uses nanosecond CLOCK_MONOTONIC timing, and averages 5 iterations. Ad-hoc timing produces false hangs (SIGTERM handler traps timeout) and imprecise numbers.
 
 ### File Types
 - **.bv** - Brief (standard Brief file)
@@ -54,6 +55,7 @@ This project uses OpenCode. When making changes:
 4. Test with `cargo test --lib` before committing
 5. Document bugs and root causes in BUGS.md
 6. Never add Rust built-ins for things the standard library should provide
+7. **No prototyping — build clean**: Every optimization is a first-class pass in its proper module (`src/analysis/` for analysis, `src/backend/` for codegen). Never inline new analysis into codegen as a shortcut. Dispatch-chain switch detection belongs in `transition_graph.rs`, not `llvm.rs`.
 
 ## Self-Hosting Pipeline
 
