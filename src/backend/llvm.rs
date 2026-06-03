@@ -2053,11 +2053,8 @@ self.emit_declares(&mut out);
                             writeln!(out, "  store i32 {}, i32* {}, align {}", t, p, self.align_of("i32")).ok();
                         }
                         "float" => {
-                            let t = format!("%ip{}t", reg); reg += 1;
-                            let b = format!("%ip{}b", reg); reg += 1;
-                            writeln!(out, "  {} = trunc i64 {} to i32", t, val_reg).ok();
-                            writeln!(out, "  {} = bitcast i32 {} to float", b, t).ok();
-                            writeln!(out, "  store float {}, float* {}, align {}", b, p, self.align_of("float")).ok();
+                            let fl = self.native_float_or_box(out, "  ", &val_reg.to_string());
+                            writeln!(out, "  store float {}, float* {}, align {}", fl, p, self.align_of("float")).ok();
                         }
                         "i8*" => {
                             let t = format!("%ip{}t", reg); reg += 1;
@@ -4069,8 +4066,20 @@ self.emit_declares(&mut out);
             for (var, val) in bindings {
                 if !seen.insert(var) { continue; }
                 if let Some(&idx) = self.field_index_map.get(var) {
+                    let ty = &self.field_types[idx];
                     writeln!(out, "  %gp_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", var, idx).ok();
-                    writeln!(out, "  store i64 {}, i64* %gp_{}, align 8", val, var).ok();
+                    match ty.as_str() {
+                        "float" => {
+                            let bits = *val as i32 as u32;
+                            writeln!(out, "  store float bitcast (i32 {} to float), float* %gp_{}, align 4", bits, var).ok();
+                        }
+                        "i8" => {
+                            writeln!(out, "  store i8 {}, i8* %gp_{}, align 1", val, var).ok();
+                        }
+                        _ => {
+                            writeln!(out, "  store i64 {}, i64* %gp_{}, align 8", val, var).ok();
+                        }
+                    }
                 } else if let Some(&addr) = self.mmio_fields.get(var) {
                     writeln!(out, "  %gp_{} = inttoptr i64 {} to i64*", var, addr).ok();
                     writeln!(out, "  store volatile i64 {}, i64* %gp_{}, align 1", val, var).ok();

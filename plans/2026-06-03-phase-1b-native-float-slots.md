@@ -1,7 +1,7 @@
 # Phase 1b: Native Float State Slots
 
 **Date:** 2026-06-03
-**Status:** In progress
+**Status:** Complete — all 8 implementation steps done
 
 ## Problem
 
@@ -209,3 +209,47 @@ FFI return marshaling: after `call float @__sqrtf(...)`, cache the result as a n
 - Phase 1 (struct codegen) — complete. `struct_types` and `let_binding_types` already exist.
 - No dependency on Phase 2 (enum codegen) or Phase 3 (collections).
 - Can be implemented independently and in parallel with Phase 2.
+
+---
+
+## Completion Summary (2026-06-03)
+
+**Status: Done.** 410 tests pass, 11 benchmarks zero regression.
+
+### What Was Implemented
+
+| Step | Description | Result |
+|------|-------------|--------|
+| `declare_state_type` | Already correct — uses `field_types` which has `"float"` for float slots | No change |
+| `emit_identifier` (non-SSA) | Cache native float register after field load (line 2581) | Boxing skipped on re-read |
+| `emit_stmt → Assignment` (SSA + non-SSA) | `native_float_or_box` at 3 store sites | 405/412 insertvalue ops use native `float` |
+| `emit_init_state` | `native_float_or_box` for non-literal float init | Eliminates ~2000 trunc+bitcast ops |
+| `emit_precomputed_main` | Per-slot type-aware store (float/i8/i64) | Correct for typed `%State` |
+| SSA insertvalue chains | Cache hit via `native_float_or_box` | Already working via cache propagation |
+| FFI fast path | `native_float_or_box` for FFI float args + return cache | 0.5s improvement on nbody_sqrt |
+| Float literal emission | Cache native float in `Expr::Float` | Eliminates re-boxing for literals |
+
+### Key Design
+
+The `native_float_or_box` helper checks `reg_float_cache` before emitting the `trunc i64 → i32 → bitcast i32 → float` chain. The cache is populated by:
+- `Expr::Float` literal emission
+- `emit_binop` float result
+- `emit_identifier` float field load
+- `Expr::Neg` float result
+- FFI float return demarshal
+- SSA float extract from `pre_extract_float_fields`
+
+The cache is cleared at every function/body boundary alongside `let_bindings`.
+
+### Audit Results (nbody_newton IR)
+- `%State = type { i64, i64, float×30 }` — typed slots working
+- 405/412 insertvalue ops use `float` (98.3%)
+- Remaining boxing: ONLY in `native_float_or_box` fallback (cache-miss path) and `emit_cast_convert` type conversions
+
+### Benchmark Progression
+| Benchmark | Before Phase 1b | After Cache | After L2 init_state fix |
+|-----------|----------------|-------------|------------------------|
+| nbody_newton | 3.18s | 3.05s (-4%) | **2.99s** (-6%) |
+| nbody_sqrt | 6.81s | 6.33s (-7%) | **6.19s** (-9%) |
+| float_math_nonzero | 0.1619s | 0.1605s | **0.1589s** (-2%) |
+
