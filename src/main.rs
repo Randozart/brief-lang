@@ -1683,7 +1683,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             }
         },
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1796,6 +1796,7 @@ fn run_llvm_compile(
     optimize_budget: u64,
     optimize_report: bool,
     optimize_size: Option<u64>,
+    dead_info_disabled: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -1841,6 +1842,9 @@ fn run_llvm_compile(
     let mut llvm_backend = crate::backend::llvm::LlvmBackend::new()
         .with_optimize_budget(optimize_budget)
         .with_optimize_report(optimize_report);
+    if dead_info_disabled {
+        llvm_backend = llvm_backend.with_dead_info_disabled(true);
+    }
     if let Some(byte_limit) = optimize_size {
         llvm_backend = llvm_backend.with_optimize_size(byte_limit);
     }
@@ -3398,6 +3402,7 @@ fn main() {
             let mut optimize_budget: Option<u64> = None;
             let mut optimize_report = false;
             let mut optimize_size: Option<u64> = None;
+            let mut dead_info_disabled = false;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
@@ -3415,6 +3420,9 @@ fn main() {
                 } else if arg == "--optimize-size" && i + 1 < args.len() {
                     optimize_size = Some(args[i + 1].parse::<u64>().unwrap_or(0));
                     i += 2;
+                } else if arg == "--no-dead-info" {
+                    dead_info_disabled = true;
+                    i += 1;
                 } else if !arg.starts_with('-') {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -3426,14 +3434,14 @@ fn main() {
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
             } else {
                 eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>]", args[0]);
+                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info]", args[0]);
                 std::process::exit(1);
             }
         }

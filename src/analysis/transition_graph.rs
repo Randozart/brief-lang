@@ -29,6 +29,7 @@ pub struct ReactorNode {
 pub struct ReactorTransitionGraph {
     pub nodes: Vec<ReactorNode>,
     pub has_triggers: bool,
+    pub live_fields: HashSet<String>,
 }
 
 impl ReactorTransitionGraph {
@@ -79,7 +80,7 @@ impl ReactorTransitionGraph {
             compute_effectively_pure(node, &live_fields);
         }
 
-        ReactorTransitionGraph { nodes, has_triggers }
+        ReactorTransitionGraph { nodes, has_triggers, live_fields }
     }
 }
 

@@ -268,6 +268,7 @@ pub struct LlvmBackend {
     is_lightweight_async: bool,
     exit_condition: Option<Box<Expr>>,
     has_natural_exit: bool,
+    dead_info_disabled: bool,
     warnings: Vec<String>,
     ssa_state_reg: Option<String>,
     llvm_extra_flags: Vec<String>,
@@ -312,6 +313,7 @@ impl LlvmBackend {
             is_lightweight_async: false,
             exit_condition: None,
             has_natural_exit: false,
+            dead_info_disabled: false,
             warnings: Vec::new(),
             ssa_state_reg: None,
             llvm_extra_flags: Vec::new(),
@@ -340,6 +342,11 @@ impl LlvmBackend {
     pub fn with_optimize_size(mut self, byte_limit: u64) -> Self {
         self.optimize_size = Some(byte_limit);
         self.optimize_report = true;
+        self
+    }
+
+    pub fn with_dead_info_disabled(mut self, disabled: bool) -> Self {
+        self.dead_info_disabled = disabled;
         self
     }
 
@@ -1105,6 +1112,68 @@ self.emit_declares(&mut out);
                 // Main
                 self.emit_main(&mut out, false);
             }
+            }
+        }
+
+        // ── DEAD-FIELD INFO DIAGNOSTICS (A002/A003) ─────────
+        if !self.dead_info_disabled {
+            for node in &graph.nodes {
+                let dead_fields: Vec<&String> = node.write_set.iter()
+                    .filter(|f| !graph.live_fields.contains(*f))
+                    .collect();
+
+                if !dead_fields.is_empty() {
+                    let dead_list: Vec<String> = dead_fields.iter()
+                        .map(|f| format!("'{}'", f))
+                        .collect();
+                    if node.is_effectively_pure {
+                        // Folded txn — these stores are genuinely eliminated
+                        self.warnings.push(format!(
+                            "info: field(s) {} written by txn '{}' are never read — stores eliminated\n\
+                              note: not referenced by any precondition or #!exit condition",
+                            dead_list.join(", "),
+                            node.name,
+                        ));
+                    } else {
+                        // Non-folded txn — stores still execute but value is wasted
+                        self.warnings.push(format!(
+                            "info: field(s) {} written by txn '{}' are never read — wasted work\n\
+                              note: not referenced by any precondition or #!exit; values computed but have no effect",
+                            dead_list.join(", "),
+                            node.name,
+                        ));
+                    }
+                }
+
+                // A003: pure-counter fold info
+                if node.is_effectively_pure {
+                    let inc = node.increments.as_ref().unwrap();
+                    let bp = node.bounded_pre.as_ref().unwrap();
+                    let total_str = self.constants.get(&bp.bound_var)
+                        .and_then(|(_, e)| if let Expr::Integer(n) = e { Some(n.to_string()) } else { None })
+                        .or_else(|| self.field_initializers.get(&bp.bound_var)
+                            .and_then(|e| e.as_ref())
+                            .and_then(|e| if let Expr::Integer(n) = e { Some(n.to_string()) } else { None }));
+                    let iterations_msg = match &total_str {
+                        Some(s) => format!(" — {} iterations replaced by single store", s),
+                        None => String::new(),
+                    };
+                    let dead_list: Vec<String> = dead_fields.iter()
+                        .map(|f| format!("'{}'", f))
+                        .collect();
+                    let mut msg = format!(
+                        "info: txn '{}' folded to O(1){}",
+                        node.name, iterations_msg,
+                    );
+                    msg.push_str(&format!(
+                        "\n  info: counter '{}' retains its store (the only live write)",
+                        inc.var,
+                    ));
+                    if !dead_list.is_empty() {
+                        msg.push_str(&format!("\n  info: dead fields: {}", dead_list.join(", ")));
+                    }
+                    self.warnings.push(msg);
+                }
             }
         }
 
