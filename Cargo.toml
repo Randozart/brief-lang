@@ -34,6 +34,7 @@ wasm-bindgen = "0.2.117"
 js-sys = "0.3.94"
 regex = "1.12.3"
 libloading = "0.8"
+zip = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

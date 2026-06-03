@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+pub mod handoff;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct HardwareLib {
     pub targets: HashMap<String, TargetProfile>,

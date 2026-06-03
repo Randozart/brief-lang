@@ -23,7 +23,7 @@
 // or embeds the Work.
 
 use brief_compiler::{
-    annotator, ast, backend, dbrief, desugarer, errors, hardware_validator, import_resolver, interpreter,
+    annotator, ast, backend, dbrief, desugarer, errors, hardware, hardware_validator, import_resolver, interpreter,
     linkage, lsp, manifest, memory_spec, parser, proof_engine, rbv, typechecker, view_compiler,
     target_spec::{self, TargetSpec},
 };
@@ -1789,6 +1789,67 @@ fn run_rust_compile(
 
 /// Intent: run cobol compile.
 
+/// Process a Vivado hardware handoff file (.xsa or xparameters.h) and
+/// generate a DBVS schema + DBV target binding.
+fn process_hardware_handoff(
+    handoff_path: &str,
+    target_name: Option<&str>,
+    out_dir: Option<&Path>,
+) -> Result<(), String> {
+    let hw_path = Path::new(handoff_path);
+    let out_base = out_dir.unwrap_or_else(|| Path::new("."));
+
+    let ext = hw_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    let peripherals = if ext == "xsa" {
+        hardware::handoff::extract_from_xsa(hw_path)?
+    } else {
+        let content = std::fs::read_to_string(hw_path)
+            .map_err(|e| format!("Failed to read {}: {}", handoff_path, e))?;
+        hardware::handoff::extract_from_xparameters(&content)
+    };
+
+    if peripherals.is_empty() {
+        return Err("No peripherals found in handoff file".to_string());
+    }
+
+    let target = target_name.unwrap_or_else(|| {
+        hw_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unnamed")
+    });
+
+    let dbvs_path = out_base.join("hw.dbvs");
+    let dbv_path = out_base.join(format!("{}.dbv", target));
+
+    let dbvs_content = hardware::handoff::generate_dbvs(&peripherals);
+    let dbv_content = hardware::handoff::generate_dbv(&peripherals, target);
+
+    std::fs::write(&dbvs_path, &dbvs_content)
+        .map_err(|e| format!("Failed to write {}: {}", dbvs_path.display(), e))?;
+    std::fs::write(&dbv_path, &dbv_content)
+        .map_err(|e| format!("Failed to write {}: {}", dbv_path.display(), e))?;
+
+    println!("  Schema: {} ({} registers)", dbvs_path.display(), peripherals.len());
+    println!("  Target binding: {} ({} bindings)", dbv_path.display(), peripherals.len());
+    println!("  Use: brief llvm program.bv --target-dbv {}", dbv_path.display());
+
+    Ok(())
+}
+
+/// Validate and note a pre-existing DBV target binding file.
+/// In Phase 4, this will feed addresses into the LLVM backend's mmio_fields map.
+fn process_target_dbv(_dbv_path: &str) -> Result<(), String> {
+    let dbv_path = Path::new(_dbv_path);
+    if !dbv_path.exists() {
+        return Err(format!("Target DBV file not found: {}", _dbv_path));
+    }
+    if !dbv_path.extension().map_or(false, |e| e == "dbv") {
+        return Err(format!("Target DBV file must have .dbv extension: {}", _dbv_path));
+    }
+    // Phase 4: parse the DBV file and feed resolved addresses into the backend
+    println!("  Target DBV: {} (binding addresses for compilation)", dbv_path.display());
+    Ok(())
+}
+
 /// Attempt LTO compilation pipeline: compile brief_rt.c to LLVM bitcode,
 /// merge with program IR, run opt -O3 on the merged module, then llc.
 /// Returns Some(path_to_object) on success, None if any tool is missing.
@@ -3549,6 +3610,9 @@ fn main() {
             let mut optimize_report = false;
             let mut optimize_size: Option<u64> = None;
             let mut dead_info_disabled = false;
+            let mut hw_handoff: Option<String> = None;
+            let mut hw_target: Option<String> = None;
+            let mut target_dbv: Option<String> = None;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
@@ -3556,6 +3620,15 @@ fn main() {
                     i += 2;
                 } else if arg == "--target" && i + 1 < args.len() {
                     target = Some(args[i + 1].as_str());
+                    i += 2;
+                } else if arg == "--hw-handoff" && i + 1 < args.len() {
+                    hw_handoff = Some(args[i + 1].clone());
+                    i += 2;
+                } else if arg == "--hw-target" && i + 1 < args.len() {
+                    hw_target = Some(args[i + 1].clone());
+                    i += 2;
+                } else if arg == "--target-dbv" && i + 1 < args.len() {
+                    target_dbv = Some(args[i + 1].clone());
                     i += 2;
                 } else if arg == "--optimize-budget" && i + 1 < args.len() {
                     optimize_budget = Some(args[i + 1].parse::<u64>().unwrap_or(256));
@@ -3577,6 +3650,19 @@ fn main() {
                 }
             }
 
+            // Process hardware handoff before compilation
+            if let Some(ref handoff_path) = hw_handoff {
+                process_hardware_handoff(handoff_path, hw_target.as_deref(), out_dir.as_deref())
+                    .unwrap_or_else(|e| { eprintln!("Warning: handoff processing failed: {}", e); });
+            }
+
+            // If target DBV is provided, pre-process it for address extraction
+            if let Some(ref dbv_path) = target_dbv {
+                if let Err(e) = process_target_dbv(dbv_path) {
+                    eprintln!("Warning: could not process target DBV: {}", e);
+                }
+            }
+
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
@@ -3587,7 +3673,7 @@ fn main() {
                 }
             } else {
                 eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info]", args[0]);
+                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--hw-handoff <system.xsa|xparameters.h>] [--hw-target <board>] [--target-dbv <target.dbv>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info]", args[0]);
                 std::process::exit(1);
             }
         }
