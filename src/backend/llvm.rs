@@ -240,6 +240,8 @@ pub struct LlvmBackend {
     field_index_map: HashMap<String, usize>,
     field_types: Vec<String>,
     field_initializers: HashMap<String, Option<Expr>>,
+    mmio_fields: HashMap<String, u64>,
+    mmio_initializers: HashMap<String, Option<Expr>>,
     txn_counter: usize,
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
@@ -285,6 +287,8 @@ impl LlvmBackend {
             field_index_map: HashMap::new(),
             field_types: Vec::new(),
             field_initializers: HashMap::new(),
+            mmio_fields: HashMap::new(),
+            mmio_initializers: HashMap::new(),
             txn_counter: 0,
             has_cycles: false,
             pending_cleanup: Vec::new(),
@@ -1705,12 +1709,19 @@ self.emit_declares(&mut out);
         self.field_index_map.clear();
         self.field_types.clear();
         self.field_initializers.clear();
+        self.mmio_fields.clear();
+        self.mmio_initializers.clear();
         for item in &program.items {
             if let TopLevel::StateDecl(s) = item {
-                self.field_index_map
-                    .insert(s.name.clone(), self.field_types.len());
-                self.field_types.push(self.llvm_type(&s.ty).to_string());
-                self.field_initializers.insert(s.name.clone(), s.expr.clone());
+                if let Some(addr) = s.address {
+                    self.mmio_fields.insert(s.name.clone(), addr);
+                    self.mmio_initializers.insert(s.name.clone(), s.expr.clone());
+                } else {
+                    self.field_index_map
+                        .insert(s.name.clone(), self.field_types.len());
+                    self.field_types.push(self.llvm_type(&s.ty).to_string());
+                    self.field_initializers.insert(s.name.clone(), s.expr.clone());
+                }
             }
         }
     }
@@ -1886,6 +1897,22 @@ self.emit_declares(&mut out);
                     writeln!(out, "  store {} {}, {}* {}, align {}", ty, default, ty, p, self.align_of(&ty)).ok();
                 }
             }
+        }
+        // Initialize MMIO fields — only if an explicit initial value was given
+        let mmio_inits: Vec<(u64, Expr)> = {
+            let mut v = Vec::new();
+            for (name, &addr) in &self.mmio_fields {
+                if let Some(Some(expr)) = self.mmio_initializers.get(name).cloned() {
+                    v.push((addr, expr.clone()));
+                }
+            }
+            v
+        };
+        for (addr, expr) in mmio_inits {
+            let p = format!("%mio{}", reg); reg += 1;
+            writeln!(out, "  {} = inttoptr i64 {} to i64*", p, addr).ok();
+            let val_reg = self.emit_expr(out, &expr, "  ");
+            writeln!(out, "  store volatile i64 {}, i64* {}, align 1", val_reg, p).ok();
         }
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
@@ -2120,6 +2147,12 @@ self.emit_declares(&mut out);
                         }
                     }
                 }
+                if let Some(&addr) = self.mmio_fields.get(&fname) {
+                    let p = format!("%mio{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
+                    writeln!(out, "{}store volatile i64 {}, i64* {}, align 1", indent, val, p).ok();
+                    return;
+                }
                 if let Some(&idx) = self.field_index_map.get(&fname) {
                     let ty = &self.field_types[idx];
                     let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
@@ -2276,7 +2309,12 @@ self.emit_declares(&mut out);
                     return TypedRegister { name: v, ty: Type::Float };
                 }
                 if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
-                    if let Some(&idx) = self.field_index_map.get(name) {
+                if let Some(&addr) = self.mmio_fields.get(name) {
+                    let p = format!("%gep_exit_{}", self.txn_counter);
+                    self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
+                    writeln!(out, "{}{} = load volatile i64, i64* {}, align 1", indent, v, p).ok();
+                } else if let Some(&idx) = self.field_index_map.get(name) {
                         let ll_ty = &self.field_types[idx];
                         let ev = format!("%ev{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, idx).ok();
@@ -2360,6 +2398,12 @@ self.emit_declares(&mut out);
                             }
                         }
                     }
+                } else if let Some(&addr) = self.mmio_fields.get(name) {
+                    let p = format!("%mio{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
+                    let ld = format!("%mil{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = load volatile i64, i64* {}, align 1", indent, ld, p).ok();
+                    writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok();
                 } else if let Some(&idx) = self.field_index_map.get(name) {
                     let ty = &self.field_types[idx];
                     let p = format!("%fdp{}", self.txn_counter); self.txn_counter += 1;
@@ -3748,6 +3792,9 @@ self.emit_declares(&mut out);
                 if let Some(&idx) = self.field_index_map.get(var) {
                     writeln!(out, "  %gp_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", var, idx).ok();
                     writeln!(out, "  store i64 {}, i64* %gp_{}, align 8", val, var).ok();
+                } else if let Some(&addr) = self.mmio_fields.get(var) {
+                    writeln!(out, "  %gp_{} = inttoptr i64 {} to i64*", var, addr).ok();
+                    writeln!(out, "  store volatile i64 {}, i64* %gp_{}, align 1", val, var).ok();
                 }
             }
         }

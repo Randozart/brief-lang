@@ -4380,22 +4380,16 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
                 Ok(Token::Ampersand) => {
                     self.advance();
-                    if let Some(Ok(Token::Identifier(name))) = self.current_token() {
-                        let name = name.clone();
-                        self.advance();
-                        self.parse_postfix_expr(Expr::OwnedRef(name))
-                    } else {
-                        self.spanned_err("Expected identifier after &".to_string())
+                    match self.expect_identifier() {
+                        Ok(name) => self.parse_postfix_expr(Expr::OwnedRef(name)),
+                        Err(e) => return Err(e),
                     }
                 }
                 Ok(Token::At) => {
                     self.advance();
-                    if let Some(Ok(Token::Identifier(name))) = self.current_token() {
-                        let name = name.clone();
-                        self.advance();
-                        self.parse_postfix_expr(Expr::PriorState(name))
-                    } else {
-                        self.spanned_err("Expected identifier after @".to_string())
+                    match self.expect_identifier() {
+                        Ok(name) => self.parse_postfix_expr(Expr::PriorState(name)),
+                        Err(e) => return Err(e),
                     }
                 }
                 _ => self.parse_postfix(),
