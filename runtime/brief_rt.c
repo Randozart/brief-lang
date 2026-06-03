@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 /* ===================================================================
  * 1. @ link Global Definitions
@@ -386,6 +387,10 @@ int64_t __print_int(int64_t n) {
 int64_t __print_float(float d) {
     fprintf(stderr, "%.9f\n", (double)d);
     return 1;
+}
+
+float __sqrtf(float x) {
+    return sqrtf(x);
 }
 
 void __exit(void) {

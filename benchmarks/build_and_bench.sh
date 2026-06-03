@@ -41,7 +41,8 @@ BENCHMARKS=(
     "sparse_dispatch"
     "const_heavy"
     "print_loop"
-    "nbody"
+    "nbody_newton"
+    "nbody_sqrt"
 )
 
 build_bench() {
@@ -56,11 +57,21 @@ build_bench() {
     local bin="benchmarks/${name}"
     rm -f "$bin"
 
+    local budget=256
+    case "$name" in
+        nbody_newton) budget=2048 ;;
+        nbody_sqrt)   budget=2048 ;;
+    esac
+
     ./target/release/brief-compiler llvm "benchmarks/${name}.bv" \
-        --out benchmarks --optimize-budget 256 2>&1
+        --out benchmarks --optimize-budget "$budget" 2>&1
 
     if [ ! -f "$bin" ]; then
-        clang -O3 -march=native -ffast-math "benchmarks/${name}.ll" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
+        if [ -f "benchmarks/${name}.o" ]; then
+            cc -O2 -no-pie -o "$bin" "benchmarks/${name}.o" -lm 2>&1 || echo "  (link failed — try manual link)"
+        else
+            clang -O3 -march=native -ffast-math "benchmarks/${name}.ll" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
+        fi
     fi
     echo "  Brief binary ready."
 }
@@ -71,7 +82,7 @@ build_c() {
 
     case "$name" in
         iir_filter)      extra_flags="-lm" ;;
-        nbody)           extra_flags="-lm" ;;
+        nbody_sqrt)      extra_flags="-lm" ;;
     esac
 
     clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "benchmarks/${name}_c.c" ${extra_flags} 2>&1

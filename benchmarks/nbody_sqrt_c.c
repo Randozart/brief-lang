@@ -1,9 +1,8 @@
-// nbody — 5-body Newtonian gravity simulation from CLBG
-// Full pairwise N^2 computation, 50M timesteps.
-// Uses f32 (float) to match Brief's Float type.
-// Observable: prints final energy via fprintf(stderr).
+// nbody_sqrt_c — 5-body gravity sim with libm sqrtf (C reference)
+// Mirrors nbody_sqrt.bv exactly: libm sqrtf, 10 unrolled pairs, f32.
+// Fair test: both sides use same algorithm, same sqrt implementation.
 //
-// clang -O3 -march=native -ffast-math -o benchmarks/nbody_c benchmarks/nbody_c.c -lm
+// clang -O3 -march=native -ffast-math -o benchmarks/nbody_sqrt_c benchmarks/nbody_sqrt_c.c -lm
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,11 +19,11 @@ int main(void) {
 
     float bx[5], by[5], bz[5];
     float vx[5], vy[5], vz[5];
-    float mass[5];
+    float m[5];
 
     bx[0] = 0.0f; by[0] = 0.0f; bz[0] = 0.0f;
     vx[0] = 0.0f; vy[0] = 0.0f; vz[0] = 0.0f;
-    mass[0] = solar_mass;
+    m[0] = solar_mass;
 
     bx[1] = 4.84143144246472090f;
     by[1] = -1.16032004402742839f;
@@ -32,7 +31,7 @@ int main(void) {
     vx[1] = (float)(1.66007664274403694e-03 * days_per_year);
     vy[1] = (float)(7.69901118419740425e-03 * days_per_year);
     vz[1] = (float)(-6.90460016972063023e-05 * days_per_year);
-    mass[1] = (float)(9.54791938424326609e-04 * solar_mass);
+    m[1] = (float)(9.54791938424326609e-04 * solar_mass);
 
     bx[2] = 8.34336671824457987f;
     by[2] = 4.12479856412430479f;
@@ -40,7 +39,7 @@ int main(void) {
     vx[2] = (float)(-2.76742510726862411e-03 * days_per_year);
     vy[2] = (float)(4.99852801234917238e-03 * days_per_year);
     vz[2] = (float)(2.30417297573763929e-05 * days_per_year);
-    mass[2] = (float)(2.85885980666130812e-04 * solar_mass);
+    m[2] = (float)(2.85885980666130812e-04 * solar_mass);
 
     bx[3] = 1.28943695621309110e+01f;
     by[3] = -1.51111514016986312e+01f;
@@ -48,7 +47,7 @@ int main(void) {
     vx[3] = (float)(2.96460137564761618e-03 * days_per_year);
     vy[3] = (float)(2.37847173959480950e-03 * days_per_year);
     vz[3] = (float)(-2.96589568540237556e-05 * days_per_year);
-    mass[3] = (float)(4.36624404335156298e-05 * solar_mass);
+    m[3] = (float)(4.36624404335156298e-05 * solar_mass);
 
     bx[4] = 1.53796971148509165e+01f;
     by[4] = -2.59193146099879641e+01f;
@@ -56,26 +55,31 @@ int main(void) {
     vx[4] = (float)(2.68067772490389322e-03 * days_per_year);
     vy[4] = (float)(1.62824170038242295e-03 * days_per_year);
     vz[4] = (float)(-9.51592254519715870e-05 * days_per_year);
-    mass[4] = (float)(5.15138902046611451e-05 * solar_mass);
+    m[4] = (float)(5.15138902046611451e-05 * solar_mass);
 
     long count = 0;
     for (; count < total; count++) {
-        for (int i = 0; i < 5; i++) {
-            for (int j = i + 1; j < 5; j++) {
-                float dx = bx[i] - bx[j];
-                float dy = by[i] - by[j];
-                float dz = bz[i] - bz[j];
-                float dsq = dx*dx + dy*dy + dz*dz;
-                float dist = sqrtf(dsq);
-                float mag = dt / (dsq * dist);
-                vx[i] -= dx * mass[j] * mag;
-                vy[i] -= dy * mass[j] * mag;
-                vz[i] -= dz * mass[j] * mag;
-                vx[j] += dx * mass[i] * mag;
-                vy[j] += dy * mass[i] * mag;
-                vz[j] += dz * mass[i] * mag;
-            }
+        #define PAIR(ia, ib) { \
+            float dx = bx[ia] - bx[ib]; \
+            float dy = by[ia] - by[ib]; \
+            float dz = bz[ia] - bz[ib]; \
+            float dsq = dx*dx + dy*dy + dz*dz; \
+            float dist = sqrtf(dsq); \
+            float mag = dt / (dsq * dist); \
+            vx[ia] -= dx * m[ib] * mag; \
+            vy[ia] -= dy * m[ib] * mag; \
+            vz[ia] -= dz * m[ib] * mag; \
+            vx[ib] += dx * m[ia] * mag; \
+            vy[ib] += dy * m[ia] * mag; \
+            vz[ib] += dz * m[ia] * mag; \
         }
+
+        PAIR(0,1) PAIR(0,2) PAIR(0,3) PAIR(0,4)
+        PAIR(1,2) PAIR(1,3) PAIR(1,4)
+        PAIR(2,3) PAIR(2,4)
+        PAIR(3,4)
+        #undef PAIR
+
         for (int i = 0; i < 5; i++) {
             bx[i] += dt * vx[i];
             by[i] += dt * vy[i];
@@ -84,17 +88,22 @@ int main(void) {
     }
 
     float energy = 0.0f;
-    for (int i = 0; i < 5; i++) {
-        for (int j = i + 1; j < 5; j++) {
-            float dx = bx[i] - bx[j];
-            float dy = by[i] - by[j];
-            float dz = bz[i] - bz[j];
-            float dsq = dx*dx + dy*dy + dz*dz;
-            energy -= mass[i] * mass[j] / sqrtf(dsq);
-        }
+    #define EPAIR(ia, ib) { \
+        float dx = bx[ia] - bx[ib]; \
+        float dy = by[ia] - by[ib]; \
+        float dz = bz[ia] - bz[ib]; \
+        float dsq = dx*dx + dy*dy + dz*dz; \
+        energy -= m[ia] * m[ib] / sqrtf(dsq); \
     }
+
+    EPAIR(0,1) EPAIR(0,2) EPAIR(0,3) EPAIR(0,4)
+    EPAIR(1,2) EPAIR(1,3) EPAIR(1,4)
+    EPAIR(2,3) EPAIR(2,4)
+    EPAIR(3,4)
+    #undef EPAIR
+
     for (int i = 0; i < 5; i++) {
-        energy += 0.5f * mass[i] * (vx[i]*vx[i] + vy[i]*vy[i] + vz[i]*vz[i]);
+        energy += 0.5f * m[i] * (vx[i]*vx[i] + vy[i]*vy[i] + vz[i]*vz[i]);
     }
     fprintf(stderr, "%.6f\n", energy);
 }

@@ -1,11 +1,10 @@
-// nbody — 5-body Newtonian gravity simulation (CLBG classic benchmark)
-// 50M timesteps, full pairwise N^2 computation.
-// Uses Newton's method (5 iterations) for sqrt — pure Brief Float math.
-// Observable: prints final energy via frgn __print_float (prints to stdout).
+// nbody_newton — 5-body gravity sim with Newton's method sqrt
+// Compares Brief vs C on identical algorithm: inline Newton iterations, unrolled pairs.
+// Fair test: both sides use same sqrt implementation (Newton), same loop structure.
 //
 // Build:
-//   ./target/release/brief-compiler llvm benchmarks/nbody.bv \
-//       --out benchmarks --optimize-budget 256
+//   ./target/release/brief-compiler llvm benchmarks/nbody_newton.bv \
+//       --out benchmarks --optimize-budget 2048
 
 #!exit count == bound;
 

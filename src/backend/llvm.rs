@@ -681,7 +681,11 @@ self.emit_declares(&mut out);
         for (name, sig) in &self.frgn_map {
             let ret_ty = match sig.result_type {
                 crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
-                crate::ast::ResultType::Projection(ref ts) => if ts.is_empty() { "void" } else { "i64" },
+                crate::ast::ResultType::Projection(ref ts) => {
+                    if ts.is_empty() { "void" }
+                    else if ts.iter().any(|t| matches!(t, Type::Float)) { "float" }
+                    else { "i64" }
+                }
             };
             let param_tys: Vec<&str> = sig.inputs.iter().map(|(_, t)| match t {
                 Type::Int | Type::UInt => "i64",
@@ -2621,8 +2625,8 @@ self.emit_declares(&mut out);
             // Call
             Expr::Call(name, args) => {
                 // Clone foreign info upfront to avoid borrow conflict with emit_expr
-                let frgn_sig: Option<Vec<(String, Type)>> = self.frgn_map.get(name).map(|s| s.inputs.clone());
-                if let Some(inputs) = frgn_sig {
+                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType)> = self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone()));
+                if let Some((inputs, ret_type)) = frgn_sig {
                     let mut marshaled: Vec<String> = Vec::new();
                     for (i, (_, arg_ty)) in inputs.iter().enumerate() {
                         if i < args.len() {
@@ -2644,8 +2648,20 @@ self.emit_declares(&mut out);
                         }
                     }
                     // Generic FFI call — no special-case magic
+                    let is_float_ret = match &ret_type {
+                        crate::ast::ResultType::Projection(ts) => ts.iter().any(|t| matches!(t, Type::Float)),
+                        _ => false,
+                    };
+                    let call_ret = if is_float_ret { "float" } else { "i64" };
                     let args_str = marshaled.join(", ");
-                    writeln!(out, "{}{} = call i64 @{}({})", indent, v, name, args_str).ok();
+                    writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, name, args_str).ok();
+                    if is_float_ret {
+                        let bi = format!("%fbi{}", self.txn_counter); self.txn_counter += 1;
+                        let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, v).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                        return TypedRegister { name: ze, ty: Type::Float };
+                    }
                 } else {
                     // Internal call — marshal i64 back to real types per definition
                     let def_tys: Option<Vec<Type>> = self.defn_params.get(name).cloned();
