@@ -74,7 +74,7 @@ brief-compiler selfhost <file.bv>
 
 ## Anchored Summary
 
-**Current**: Calibration baseline complete. 7 benchmarks with 4-decimal precision timing. const_heavy now shows non-zero (0.0455s Brief vs 0.0360s C, 1.26× gap after SCEV-breaking `count/100` term). float_math shows 9.79× gap (0.4231s vs 0.0432s) — biggest optimization target. sparse_dispatch shows 32.9× gap but largely O(1) at machine level (SCEV-optimized). 368 tests pass.
+**Current**: 372 tests pass. float_math_nonzero at parity with C (0.16s each). sparse_dispatch dispatch-chain collapse eliminates 50M-tick loop via uniform-body detection (0.0006s = C-level O(1)). Two asymmetries remain in elimination frontier: iir_filter (Brief dead-field eliminates float state, C volatile prevents it) and const_heavy (C observes `acc` via return, Brief correctly eliminates dead `acc`). These are useful diagnostics of the optimization frontier, not targets for benchmark hacking.
 
 ### Done — Eliminate Redundant Pragmas (Steps 1-6, complete)
 - **Step 1**: Auto-select `Parallel` dispatch when all reactive txns are conflict-free (no `#pragma dispatch(parallel)` needed)
@@ -93,17 +93,17 @@ brief-compiler selfhost <file.bv>
 - **Constant deduplication**: Identical constants emit as `@alias` — single global declaration, zero extra cache lines.
 - **`emit_exit_expr` Phase 1 refactor**: Integer/Bool literals delegate to `emit_expr` for consistent constant inlining. Identifiers remain local (use `@global_state`, not `%state` function param).
 
-### Benchmarks (2026-06-02 sprint final — all phases, C with `-ffast-math`, 50M iterations)
+### Benchmarks (2026-06-03 — all phases, C with `-ffast-math`, 50M iterations)
 | Benchmark | Path | Brief | C | Ratio |
 |-----------|------|-------|---|-------|
 | iir_filter | **Dead-field elim + pure counter** | **0.000s** | 0.082s | **Brief wins** |
-| precompute_sum | Compile-time precomputation | 0.003s | 0.002s | ~tie |
-| ring_buffer | Enum O(1) pure-counter | 0.003s | 0.003s | ~tie |
-| async_counters | Thread pool O(1) pure-counter | 0.004s | 0.007s | **Brief wins** |
-| float_math | **alloca+SROA + fast-math + -O3** | **0.011s** | 0.006s | ~tie (startup) |
-| float_math_nonzero | alloca+SROA + fast-math + -O3 + AVX | **0.371s** | 0.165s | **2.25×** |
-| sparse_dispatch | Call-chain dispatch (SCEV-opt) | 0.090s | 0.007s | startup |
-| const_heavy | Integer arithmetic (sdiv) | 0.002s | 0.061s | **Brief 27× faster** |
+| precompute_sum | Compile-time precomputation | 0.001s | 0.001s | ~tie |
+| ring_buffer | Enum O(1) pure-counter | 0.001s | 0.001s | ~tie |
+| async_counters | Thread pool O(1) pure-counter | 0.001s | 0.001s | ~tie |
+| float_math | **alloca+SROA + fast-math + -O3** | **0.004s** | 0.006s | **Brief ~1.4×** |
+| float_math_nonzero | alloca+SROA + fast-math + -O3 + AVX | **0.161s** | 0.164s | **~tie** |
+| sparse_dispatch | **Dispatch-chain collapse** | **0.001s** | 0.076s | **Brief wins** |
+| const_heavy | Integer arithmetic (sdiv) | 0.001s | 0.034s | **Brief wins** |
 
 ### Step 5 Details — Thread Pool + Auto Async/Enum Inference
 - **Phase 5a**: Thread pool primitives in `runtime/brief_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `brief_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`
@@ -201,11 +201,19 @@ brief-compiler selfhost <file.bv>
 - **Files**: 4 `.c` files, `build_and_bench.sh`
 
 ### Next Up
-- **Phase B (typed SSA)**: Refactor emit_expr to return typed registers. Still worth doing for correctness (eliminates `is_float_expr` guess) and for programs where SROA doesn't fully decompose. But don't expect to close float_math_nonzero gap — SROA+opt already eliminates boxing.
-- **Phase D (pointer provenance)**: Preserve `i8*` types for strings (no ptrtoint/inttoptr).
-- **Phase E (fixes)**: Commutativity pattern fix in extract_trigger_keys, fastcc, per-function SLP guard.
-- **Key finding**: Remaining float_math_nonzero 2.32× gap is from instruction scheduling & pipeline effects of phi structure vs C's local-variable register allocation. Both emit ~17 native float ops per iteration with `fast` flags. No boxing, no shuffles. The gap may be intrinsic.
-- See `plans/2026-06-02-llvm-backend-optimization-phases.md` for full detail.
+- **Enum dispatch path**: Apply uniform-body detection to `emit_case_folded_loops` for the enum dispatch path.
+- **Proper structurally-live benchmarks**: Build Kalman-style benchmarks where computation feeds back naturally (no `#!exit` hacks, no `x == x` guards). Requires `frgn` output mechanism first.
+- **`#!exit` philosophy**: The pragma tells the compiler "if this condition holds, the program is done." It is NOT an observation mechanism. Variables not referenced in `#!exit` are dead and correctly eliminated.
+- **Benchmarking philosophy**: Every asymmetry between Brief and C is a signal of a missing Brief optimization. Never hobble C. Fix Brief.
+- See `plans/2026-06-03-dispatch-optimization-and-benchmark-fairness.md` for full plan.
+
+### Dispatch-Chain Collapse (2026-06-03)
+- **Problem**: `emit_reactor` evaluated each txn's precondition on the post-update state from the previous txn (cascade bug). This caused all 8 txns in sparse_dispatch to fire every tick, with each precondition cascading from the previous update.
+- **Phase 1 — Cascade fix**: All preconditions now evaluate in the entry block against the pre-tick state. Results are saved in SSA registers. The body chain uses saved results. See `src/backend/llvm.rs:2648-2680`.
+- **Phase 2 — Uniform-body detection**: `is_uniform_body_group()` in `transition_graph.rs:198` checks if all reactive txns have structurally identical bodies. When true, the entire precondition chain is skipped — just the first body is called.
+- **Phase 3a — LLVM switch optimization**: After the cascade fix, LLVM's optimizer converted the precondition chain into a `switch i64` dispatch automatically.
+- **Phase 3b — O(1) collapse**: After inlining the uniform body, LLVM's SCEV pass proves the loop is just a counter and eliminates it entirely.
+- **Result**: sparse_dispatch drops from 0.0758s to 0.0006s (matches C's O(1) elimination). 4 new tests, 372 pass.
 
 ## Key Plan Documents
 - **`plans/2026-06-01-optimization-framework.md`** — Implementation plan for optimization phases
@@ -223,6 +231,7 @@ brief-compiler selfhost <file.bv>
 - **`plans/2026-06-02-hardware-aware-slp-hazard-analyzer.md`** — SLP hazard analyzer: deterministic peak register demand formula
 - **`plans/2026-06-02-slp-hazard-loopholes.md`** — Three loopholes audit: local var blindspot, dual-var constraint, missed constants
 - **`plans/2026-06-02-calibration-baseline-and-dispatch-fix.md`** — Calibration baseline, 4-decimal precision, SCEV break, alwaysinline audit
+- **`plans/2026-06-03-dispatch-optimization-and-benchmark-fairness.md`** — Dispatch collapse + benchmark fairness + structurally-live benchmark design
 
 ### Calibration Baseline & SCEV Break (2026-06-02)
 - **Problem**: const_heavy showed 0.00s (SCEV eliminated linear recurrence). Baseline benchmarks ran 0.00s for 4/7 on O(1) pure-counter paths.
