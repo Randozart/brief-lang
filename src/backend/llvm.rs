@@ -2941,8 +2941,46 @@ self.emit_declares(&mut out);
                     writeln!(out, "{}{} = add i64 0, {} ; multi-slice", indent, v, l).ok();
                 }
             }
-            Expr::Tuple(elems) => { for e in elems { let _ = self.emit_expr(out, e, indent); } writeln!(out, "{}{} = add i64 0, 0 ; tuple", indent, v).ok(); }
-            Expr::TupleDestructure(_, expr) => { let inner = self.emit_expr(out, expr, indent); writeln!(out, "{}{} = add i64 0, {} ; destructure", indent, v, inner).ok(); }
+            Expr::Tuple(elems) => {
+                let n = elems.len();
+                let n_slots = n + 2;
+                let p = format!("%tp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, n_slots).ok();
+                let dp = format!("%tpd{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp, p).ok();
+                let di = format!("%tpi{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, di, dp).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, di, p).ok();
+                let lp = format!("%tpl{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, p).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, lp).ok();
+                for (ei, e) in elems.iter().enumerate() {
+                    let ev = self.emit_expr(out, e, indent);
+                    let ep = format!("%tpe{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, p, ei + 2).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, ev, ep).ok();
+                }
+                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
+            }
+            Expr::TupleDestructure(names, expr) => {
+                let inner = self.emit_expr(out, expr, indent);
+                let hp = format!("%tdh{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, inner).ok();
+                let dp = format!("%tdd{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                for (ei, name) in names.iter().enumerate() {
+                    let de = format!("%tde{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                    let ep = format!("%tdg{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, ei).ok();
+                    let ld = format!("%tdl{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, ep).ok();
+                    let reg = format!("%tdr{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = add i64 0, {}", indent, reg, ld).ok();
+                    self.let_bindings.insert(name.clone(), reg);
+                }
+                writeln!(out, "{}{} = add i64 0, {} ; destructure", indent, v, inner).ok();
+            }
             Expr::StructInstance(typename, fields) => {
                 let n = fields.len();
                 let p = format!("%sp{}", self.txn_counter); self.txn_counter += 1;
@@ -6997,5 +7035,79 @@ mod tests {
         let output = backend.generate(&program);
         // MultiSlice with single Index should load data_ptr and GEP
         assert!(output.contains("getelementptr i64, i64*"), "Should GEP. Got: {}", output);
+    }
+
+    // ── Tuple tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_tuple_emits_2slot_header() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "t".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "mktup".to_string(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("t".to_string()),
+                            expr: Expr::Tuple(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)]),
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("alloca i64, i64 5"), "3-elem tuple = 5 slots. Got: {}", output);
+        assert!(output.contains("store i64 3, i64*"), "Length should be 3. Got: {}", output);
+    }
+
+    #[test]
+    fn test_tuple_destructure_binds_variables() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "val".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "destr".to_string(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "$a_b".to_string(), ty: None,
+                            expr: Some(Expr::TupleDestructure(
+                                vec!["a".to_string(), "b".to_string()],
+                                Box::new(Expr::Tuple(vec![Expr::Integer(5), Expr::Integer(6)])),
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                        },
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("val".to_string()),
+                            expr: Expr::Identifier("b".to_string()),
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("add i64 0, %tdr"), "Should bind destructured vars. Got: {}", output);
     }
 }
