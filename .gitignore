@@ -190,3 +190,5 @@ benchmarks/knucleotide
 trophies/**/*.bc
 trophies/**/*.o
 trophies/**/*.s
+benchmarks/mandelbrot
+benchmarks/mandelbrot_c

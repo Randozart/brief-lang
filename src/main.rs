@@ -1903,7 +1903,7 @@ fn try_lto_pipeline(
     // Step 1: compile brief_rt.c → LLVM bitcode
     let clang_status = {
         let mut cmd = std::process::Command::new("clang");
-        cmd.args(["-c", "-emit-llvm", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"]);
+        cmd.args(["-c", "-emit-llvm", "-O2", "-fno-stack-protector"]);
         if has_thread_pool {
             cmd.arg("-DBRIEF_THREAD_POOL");
         }
@@ -1946,7 +1946,7 @@ fn try_lto_pipeline(
     // Step 4: opt -O3 on merged module
     let opt_status = {
         let mut cmd = std::process::Command::new("opt");
-        cmd.args(["-O3", "-S", "-mtriple=x86_64-pc-linux-gnu", "-o"]);
+        cmd.args(["-O3", "-S", "-mtriple=x86_64-pc-linux-gnu", "-ffast-math", "-o"]);
         cmd.arg(&merged_opt_bc);
         cmd.arg(&merged_bc);
         for flag in llvm_extra_flags {
