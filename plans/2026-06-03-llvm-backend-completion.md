@@ -1,7 +1,7 @@
 # LLVM Backend Completion Plan
 
 **Date:** 2026-06-03
-**Status:** In progress — Phases 1, 1b complete; Phase 2 starting
+**Status:** In progress — Phases 1-4 complete; Phase 5 superseded by [Collection Mutation Plan](./2026-06-04-collection-mutation-language-design.md)
 
 ## Overview
 
@@ -399,6 +399,19 @@ This is the same model as the current `ListLiteral` representation — pointers 
 | fasta | RNG via existing `frgn __random` + String output via `frgn __print` + StringBuilder |
 
 nbody and fasta can be written and added to the benchmark suite immediately. They exercise the existing optimization pipeline and provide baselines before the backend improvements.
+
+### Phase Status Update (2026-06-04)
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 1 | ✅ Complete | Struct codegen |
+| 1b | ✅ Complete | Native float cache |
+| 2 | ✅ Complete | Enum codegen |
+| 3 | ✅ Complete | Collection ops (list header, Slice, MultiSlice) |
+| 4 | ✅ Complete | Tuple + TupleDestructure |
+| 5 | **Superseded** | Replaced by [Collection Mutation Plan](./2026-06-04-collection-mutation-language-design.md). Arrow mutation + contract-proven bounds replaces the original runtime-sized-allocation approach. |
+| 6 | **Dropped** | ForAll/Exists — stubs in both interpreter and backend. No benchmarks use them. No plans to revive. |
+| 7 | **Deferred** | Nested recursive types — remains as a future item. Arrow mutation on `List<List<Int>>` covers practical nesting. Deferred until concrete use case emerges. |
 
 ---
 
