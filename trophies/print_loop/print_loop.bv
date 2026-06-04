@@ -1,0 +1,29 @@
+// Print Loop — structurally-live benchmark using transparent FFI
+//
+// Tests:
+//   - FFI output via __print_int (transparent, no compiler magic)
+//   - Pure-counter fold prevention (FFI call blocks fold via statement_contains_ffi)
+//   - Structural liveness: every __print_int output is naturally observable
+//   - Native loop execution with guarded conditional print
+//
+// import "link/brief_rt.o": tells compiler driver to compile and link brief_rt.c.
+// __print_int: provided by brief_rt.c as a plain C function — no compiler magic.
+
+#!exit ops == N;
+
+import "link/brief_rt.o";
+import { io_pending } from "std/brief_rt.bv";
+
+frgn __print_int(n: Int) -> Bool from "libruntime";
+
+let ops: Int = 0;
+const N: Int = 50000000;
+const print_interval: Int = 100000;
+
+rct txn work [io_pending && ops < N][ops == N] {
+    &ops = ops + 1;
+    [ops % print_interval == 0] {
+        __print_int(ops);
+    };
+    term;
+};
