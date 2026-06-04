@@ -47,6 +47,7 @@ BENCHMARKS=(
     "fannkuch_redux"
     "mandelbrot"
     "kalman_filter_runtime"
+    "knucleotide"
 )
 
 build_bench() {
@@ -91,6 +92,7 @@ build_c() {
         fannkuch_redux)  extra_flags="-lm" ;;
         mandelbrot)      extra_flags="-lm" ;;
         kalman_filter_runtime) extra_flags="-lm" ;;
+        knucleotide)      extra_flags="-lm" ;;
     esac
 
     clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "benchmarks/${name}_c.c" ${extra_flags} 2>&1

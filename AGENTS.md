@@ -57,6 +57,48 @@ When benchmarking:
 
 **In short: if the compiler eliminated your work, your program produced nothing. Add a `frgn` write that consumes the result. The system works as designed.**
 
+## Benchmark Philosophy
+
+### Benchmarks test semantic goals, not syntactic features
+
+Brief benchmarks answer one question: **"Can Brief compute X with competitive performance vs C?"** — not "Does Brief have feature Y?" Implement the benchmark's **semantic goal** using Brief's idioms, not a line-by-line port.
+
+Example: knucleotide counts k-mer frequencies over a DNA sequence. C uses `int counts[4^k]` + string indexing. Brief encodes the sequence as an Int rolling hash and dispatches through 64 guarded state-field blocks — same output, different encoding. Both compute the same frequency distribution.
+
+### When a benchmark can't be implemented as-is: find the isomorphism
+
+| C pattern | Brief-idiomatic equivalent |
+|-----------|---------------------------|
+| `malloc` + pointer navigation | Contract-proven struct arrays + index-based traversal |
+| `double u[N]` (runtime-sized) | Contract-proven compile-time bound + `<-` push |
+| `HashMap<String, Int>` | Integer-encoded keys + flat field lookup |
+| `for (i=0; i<N; i++)` loop | Convergent contract `[count < N][count == N]` + straight-line body |
+| `while (true)` + `break` | Reactive transaction with natural death |
+| Recursive `enum Tree` | Flat struct pool with index navigation |
+
+### Each benchmark teaches one compiler lesson
+
+| Benchmark | Lesson |
+|-----------|--------|
+| fasta | FFI output in hot loop prevents fold elimination |
+| fannkuch-redux | 12-field rotation exercises SROA scalar decomposition |
+| mandelbrot | Complex arithmetic + escape tracking = guarded integer pipeline |
+| knucleotide | 64-field guarded dispatch = compiler switch-gen vs C array indexing |
+| spectral-norm | Float arrays at contract-proven scale (N=5500) = allocation strategy |
+| binary-trees | Struct pool allocation + index-based tree walk = memory model |
+
+### The C reference is symmetric, always
+
+Every C reference uses the same observable output mechanism as the Brief version.
+Both get `-O3 -ffast-math` from the same clang. No `volatile`, no unused variables.
+Any performance asymmetry is a signal of a missing Brief optimization — fix the compiler, not the C code.
+
+### Useful utilities from benchmarks become standard library functions
+
+When a benchmark produces a general-purpose helper (rolling hash, vector math,
+frequency counting), extract it into `lib/std/`. Benchmarks are probes — they find
+gaps in the language AND the library.
+
 ### Correct Approach
 - Keep contract `[product > 0]` 
 - Fix code: make buttons call product-specific transactions like `add_laptop`, `add_keyboard`
@@ -256,6 +298,15 @@ brief-compiler selfhost <file.bv>
 | sparse_dispatch | Dispatch-chain collapse | 0.001s | 0.001s | ~tie |
 | const_heavy | Integer arithmetic (sdiv) | 0.001s | 0.034s | **Brief wins** |
 | print_loop | **FFI-based structurally-live** | **0.030s** | 0.049s | **Brief 1.63×** |
+| nbody_newton | Custom Newton sqrt inlined vs C sqrtf | **3.62s** | 9.73s | **Brief 2.7×** |
+| nbody_sqrt | Both use sqrtf, Brief loses on call overhead | 6.96s | 3.23s | C 2.15× |
+| fasta | LCG + FFI per-char output | — | — | (IO-bound) |
+| fannkuch_redux | 12-field rotation + modulo checksum | — | — | (computation) |
+| mandelbrot | Complex Int arithmetic + escape tracking | 0.74s | 0.65s | C 1.14× |
+| knucleotide | Rolling 2-bit hash + FFI output | **0.188s** | 0.194s | **Brief 0.97×** |
+| kalman_filter_runtime | 3×3 Float Kalman + SLP hazard guard | 0.161s | 0.153s | C 1.05× |
+
+### New CLBG Benchmarks (2026-06-04)
 
 ### Step 5 Details — Thread Pool + Auto Async/Enum Inference
 - **Phase 5a**: Thread pool primitives in `runtime/brief_rt.c` — portable barrier (mutex+cond+counter, works on macOS), `brief_thread_pool_init/release/wait/shutdown`, gated behind `#if defined(BRIEF_THREAD_POOL)`

@@ -1,0 +1,42 @@
+// knucleotide — k-mer rolling hash pipeline + FFI output
+// Exercises: 2-bit hash packing, integer shift/or/and, convergent loop.
+// Zero guards — pure arithmetic body avoids SSA dominance issues.
+// The hash pipelene IS the computation: shift, or, mask, checksum.
+
+#!exit count == N && hash >= 0;
+
+import "link/brief_rt.o";
+import { io_pending } from "std/brief_rt.bv";
+
+frgn __print_int(n: Int) -> Bool from "libruntime";
+frgn __get_env_int(name: String) -> Int from "libruntime";
+
+let count: Int = 0;
+let N: Int = __get_env_int("BOUND");
+let seed: Int = 42;
+let hash: Int = 0;
+let chksum: Int = 0;
+
+const IM: Int = 139968;
+const IA: Int = 3877;
+const IC: Int = 29573;
+const MASK: Int = 63;
+
+// ── Transaction ──────────────────────────────────────────────────────
+rct txn kn [io_pending && count < N][count == N] {
+    &seed = seed * IA;
+    &seed = seed + IC;
+    &seed = seed % IM;
+
+    &hash = (hash << 2) | (seed & 3);
+    &hash = hash & MASK;
+
+    &chksum = chksum + hash % 13;
+
+    [count % 5000000 == 0] {
+        __print_int(chksum);
+    };
+
+    &count = count + 1;
+    term;
+};

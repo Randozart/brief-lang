@@ -244,3 +244,13 @@ defn lcm_native(a: Int, b: Int) [a >= 0 && b >= 0][term >= 0] -> Int {
   };
   term (a / gcd_native(a, b)) * b;
 };
+
+// Rolling 2-bit hash — pack k consecutive 2-bit characters into one Int.
+// Used by knucleotide benchmark for k-mer frequency counting.
+// k: number of characters in the window (1-6)
+// hash: current hash value
+// c: new character (0-3, treated as 2-bit value)
+// Returns: new hash = ((hash << 2) | (c & 3)) & ((1 << (2*k)) - 1)
+defn roll_hash(k: Int, hash: Int, c: Int) -> Int {
+  term ((hash << 2) | (c & 3)) & ((1 << (k * 2)) - 1);
+};
