@@ -486,6 +486,122 @@ impl Interpreter {
         }
     }
 
+    fn list_nesting_depth(value: &Value) -> usize {
+        match value {
+            Value::List(items) => match items.first() {
+                Some(inner) => 1 + Self::list_nesting_depth(inner),
+                None => 1,
+            },
+            _ => 0,
+        }
+    }
+
+    fn expand_coordinates(
+        coords: &[SliceCoordinate],
+        total_dims: usize,
+    ) -> Result<Vec<SliceCoordinate>, RuntimeError> {
+        let ellipsis_count = coords.iter().filter(|c| matches!(c, SliceCoordinate::Ellipsis)).count();
+        if ellipsis_count > 1 {
+            return Err(RuntimeError::TypeMismatch(
+                "Multiple ellipsis (...) in a single slice is ambiguous".to_string()
+            ));
+        }
+        let explicit_count = coords.len() - ellipsis_count;
+        if explicit_count > total_dims {
+            return Err(RuntimeError::TypeMismatch(format!(
+                "Too many slice coordinates: {} dimensions but {} coordinates",
+                total_dims, explicit_count
+            )));
+        }
+        let fill_count = total_dims - explicit_count;
+        let wildcard = SliceCoordinate::Range { start: None, end: None };
+        let mut expanded = Vec::with_capacity(total_dims);
+        for c in coords {
+            match c {
+                SliceCoordinate::Ellipsis => {
+                    for _ in 0..fill_count {
+                        expanded.push(wildcard.clone());
+                    }
+                }
+                other => expanded.push(other.clone()),
+            }
+        }
+        Ok(expanded)
+    }
+
+    fn apply_multi_slice_coords(
+        &mut self,
+        value: &Value,
+        coords: &[SliceCoordinate],
+    ) -> Result<Value, RuntimeError> {
+        if coords.is_empty() {
+            return Ok(value.clone());
+        }
+        let first = &coords[0];
+        let rest = &coords[1..];
+        match first {
+            SliceCoordinate::Index(idx_expr) => {
+                let list = match value {
+                    Value::List(items) => items,
+                    _ => return Err(RuntimeError::TypeMismatch("Cannot index non-list in multi-slice".to_string())),
+                };
+                let idx_val = self.eval_expr(idx_expr)?;
+                let n = match idx_val {
+                    Value::Int(i) => if i < 0 { (list.len() as i64 + i).max(0) as usize } else { i as usize },
+                    _ => return Err(RuntimeError::TypeMismatch("Index must be integer".to_string())),
+                };
+                if n >= list.len() {
+                    return Err(RuntimeError::TypeMismatch("Index out of bounds".to_string()));
+                }
+                let extracted = list[n].clone();
+                if rest.is_empty() { Ok(extracted) } else { self.apply_multi_slice_coords(&extracted, rest) }
+            }
+            SliceCoordinate::Range { start, end } => {
+                let list = match value {
+                    Value::List(items) => items,
+                    _ => return Err(RuntimeError::TypeMismatch("Cannot slice non-list in multi-slice".to_string())),
+                };
+                let len = list.len();
+                let start_idx = match start {
+                    Some(s) => {
+                        let sv = self.eval_expr(s)?;
+                        match sv {
+                            Value::Int(i) => if i < 0 { (len as i64 + i).max(0) as usize } else { i as usize },
+                            _ => return Err(RuntimeError::TypeMismatch("Range start must be integer".to_string())),
+                        }
+                    }
+                    None => 0,
+                };
+                let end_idx = match end {
+                    Some(e) => {
+                        let ev = self.eval_expr(e)?;
+                        match ev {
+                            Value::Int(i) => if i < 0 { (len as i64 + i).max(0) as usize } else { i as usize },
+                            _ => return Err(RuntimeError::TypeMismatch("Range end must be integer".to_string())),
+                        }
+                    }
+                    None => len,
+                };
+                let lo = start_idx.min(len);
+                let hi = end_idx.min(len);
+                let sublist: Vec<Value> = if lo < hi { list[lo..hi].to_vec() } else { vec![] };
+                if rest.is_empty() {
+                    Ok(Value::List(sublist))
+                } else {
+                    let results: Result<Vec<Value>, RuntimeError> = sublist.iter()
+                        .map(|item| self.apply_multi_slice_coords(item, rest))
+                        .collect();
+                    Ok(Value::List(results?))
+                }
+            }
+            SliceCoordinate::Named { coord, .. } => self.apply_multi_slice_coords(value, &[coord.as_ref().clone()]),
+            SliceCoordinate::AtDimension { coord, .. } => self.apply_multi_slice_coords(value, &[coord.as_ref().clone()]),
+            SliceCoordinate::Ellipsis => Err(RuntimeError::TypeMismatch(
+                "Ellipsis must be expanded before coordinate application".to_string()
+            )),
+        }
+    }
+
     fn handle_result_method(&mut self, fn_name: &str, arg_values: &[Value]) -> Result<Value, RuntimeError> {
         if arg_values.is_empty() {
             return Err(RuntimeError::TypeMismatch("Result method requires a value".to_string()));
@@ -1977,60 +2093,17 @@ let s_val = self.eval_expr(s)?;
                 }
             }
             Expr::MultiSlice { value, coordinates, mask: _ } => {
-                if let Some(first) = coordinates.first() {
-                    match first {
-                        SliceCoordinate::Range { start, end } => {
-                            self.eval_expr(&Expr::Slice {
-                                value: value.clone(),
-                                start: start.clone(),
-                                end: end.clone(),
-                                stride: None,
-                                mask: None,
-                            })
-                        }
-                        SliceCoordinate::Index(idx) => {
-                            let list_val = self.eval_expr(value)?;
-                            match list_val {
-                                Value::List(items) => {
-                                    let idx_val = self.eval_expr(idx)?;
-                                    match idx_val {
-                                        Value::Int(n) => {
-                                            let n = if n < 0 {
-                                                (items.len() as i64 + n) as usize
-                                            } else {
-                                                n as usize
-                                            };
-                                            if n < items.len() {
-                                                Ok(items[n].clone())
-                                            } else {
-                                                Err(RuntimeError::TypeMismatch(
-                                                    "Index out of bounds".to_string(),
-                                                ))
-                                            }
-                                        }
-                                        _ => Err(RuntimeError::TypeMismatch(
-                                            "Index must be integer".to_string(),
-                                        )),
-                                    }
-                                }
-                                _ => Err(RuntimeError::TypeMismatch(
-                                    "Cannot index non-list".to_string(),
-                                )),
-                            }
-                        }
-                        SliceCoordinate::Named { .. } => self.eval_expr(value),
-                        SliceCoordinate::AtDimension { .. } => {
-                            // AtDimension delegates to eval_expr; dimension targeting is
-                            // a compile-time concept resolved during expansion
-                            self.eval_expr(value)
-                        }
-                        SliceCoordinate::Ellipsis => {
-                            // Ellipsis matches all remaining dimensions; evaluate base value
-                            self.eval_expr(value)
-                        }
-                    }
+                let base = self.eval_expr(value)?;
+                if coordinates.is_empty() {
+                    return Ok(base);
+                }
+                let has_ellipsis = coordinates.iter().any(|c| matches!(c, SliceCoordinate::Ellipsis));
+                if has_ellipsis {
+                    let dims = Self::list_nesting_depth(&base);
+                    let expanded = Self::expand_coordinates(coordinates, dims)?;
+                    self.apply_multi_slice_coords(&base, &expanded)
                 } else {
-                    self.eval_expr(value)
+                    self.apply_multi_slice_coords(&base, coordinates)
                 }
             }
             Expr::Cast(inner, _) => self.eval_expr(inner),
@@ -2634,6 +2707,110 @@ mod tests {
                 }
             }
             _ => panic!("queue is not an Instance"),
+        }
+    }
+
+    #[test]
+    fn test_list_nesting_depth() {
+        assert_eq!(Interpreter::list_nesting_depth(&Value::Int(5)), 0);
+        assert_eq!(Interpreter::list_nesting_depth(&Value::List(vec![Value::Int(1)])), 1);
+        let inner = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        assert_eq!(Interpreter::list_nesting_depth(&Value::List(vec![inner.clone(), inner.clone()])), 2);
+        let innermost = Value::List(vec![Value::Int(1)]);
+        let mid = Value::List(vec![innermost.clone(), innermost.clone()]);
+        assert_eq!(Interpreter::list_nesting_depth(&Value::List(vec![mid.clone(), mid.clone()])), 3);
+    }
+
+    #[test]
+    fn test_expand_coordinates() {
+        let coords = vec![SliceCoordinate::Ellipsis, SliceCoordinate::Index(Box::new(Expr::Integer(0)))];
+        let expanded = Interpreter::expand_coordinates(&coords, 2).unwrap();
+        assert_eq!(expanded.len(), 2);
+        assert!(matches!(expanded[0], SliceCoordinate::Range { start: None, end: None }));
+        // [..., 0] on 3D → [:, :, 0]
+        let expanded = Interpreter::expand_coordinates(&coords, 3).unwrap();
+        assert_eq!(expanded.len(), 3);
+        assert!(matches!(expanded[2], SliceCoordinate::Index(_)));
+        // [0, ...] on 3D → [0, :, :]
+        let coords2 = vec![SliceCoordinate::Index(Box::new(Expr::Integer(0))), SliceCoordinate::Ellipsis];
+        let expanded = Interpreter::expand_coordinates(&coords2, 3).unwrap();
+        assert_eq!(expanded.len(), 3);
+        assert!(matches!(expanded[0], SliceCoordinate::Index(_)));
+        // Multiple ellipses — error
+        assert!(Interpreter::expand_coordinates(
+            &vec![SliceCoordinate::Ellipsis, SliceCoordinate::Ellipsis], 3
+        ).is_err());
+        // Too many explicit coords — error
+        let coords3 = vec![SliceCoordinate::Index(Box::new(Expr::Integer(0))), SliceCoordinate::Index(Box::new(Expr::Integer(1)))];
+        assert!(Interpreter::expand_coordinates(&coords3, 1).is_err());
+    }
+
+    #[test]
+    fn test_multislice_basic() {
+        let mut i = Interpreter::new();
+        let inner1 = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        let inner2 = Value::List(vec![Value::Int(3), Value::Int(4)]);
+        let matrix = Value::List(vec![inner1, inner2]);
+        let coords = vec![
+            SliceCoordinate::Index(Box::new(Expr::Integer(0))),
+            SliceCoordinate::Index(Box::new(Expr::Integer(1))),
+        ];
+        assert_eq!(i.apply_multi_slice_coords(&matrix, &coords).unwrap(), Value::Int(2));
+    }
+
+    #[test]
+    fn test_multislice_ellipsis_trailing() {
+        let mut i = Interpreter::new();
+        let inner1 = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        let inner2 = Value::List(vec![Value::Int(3), Value::Int(4)]);
+        let matrix = Value::List(vec![inner1, inner2]);
+        let coords = vec![
+            SliceCoordinate::Range { start: None, end: None },
+            SliceCoordinate::Index(Box::new(Expr::Integer(0))),
+        ];
+        let result = i.apply_multi_slice_coords(&matrix, &coords).unwrap();
+        match result {
+            Value::List(items) => assert_eq!(items, vec![Value::Int(1), Value::Int(3)]),
+            _ => panic!("Expected list result"),
+        }
+    }
+
+    #[test]
+    fn test_multislice_ellipsis_leading() {
+        let mut i = Interpreter::new();
+        let inner1 = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        let inner2 = Value::List(vec![Value::Int(3), Value::Int(4)]);
+        let matrix = Value::List(vec![inner1, inner2]);
+        let coords = vec![
+            SliceCoordinate::Index(Box::new(Expr::Integer(0))),
+            SliceCoordinate::Range { start: None, end: None },
+        ];
+        let result = i.apply_multi_slice_coords(&matrix, &coords).unwrap();
+        match result {
+            Value::List(items) => assert_eq!(items, vec![Value::Int(1), Value::Int(2)]),
+            _ => panic!("Expected list result"),
+        }
+    }
+
+    #[test]
+    fn test_multislice_range_chain() {
+        let mut i = Interpreter::new();
+        let inner1 = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let inner2 = Value::List(vec![Value::Int(4), Value::Int(5), Value::Int(6)]);
+        let inner3 = Value::List(vec![Value::Int(7), Value::Int(8), Value::Int(9)]);
+        let matrix = Value::List(vec![inner1, inner2, inner3]);
+        let coords = vec![
+            SliceCoordinate::Range { start: Some(Box::new(Expr::Integer(0))), end: Some(Box::new(Expr::Integer(2))) },
+            SliceCoordinate::Range { start: Some(Box::new(Expr::Integer(1))), end: Some(Box::new(Expr::Integer(3))) },
+        ];
+        let result = i.apply_multi_slice_coords(&matrix, &coords).unwrap();
+        match result {
+            Value::List(rows) => {
+                assert_eq!(rows.len(), 2);
+                match &rows[0] { Value::List(r) => assert_eq!(*r, vec![Value::Int(2), Value::Int(3)]), _ => panic!() }
+                match &rows[1] { Value::List(r) => assert_eq!(*r, vec![Value::Int(5), Value::Int(6)]), _ => panic!() }
+            }
+            _ => panic!("Expected nested list result"),
         }
     }
 }

@@ -395,3 +395,42 @@ Three code paths in `emit_folded_loop` (phi mode, SSA mode, call mode) all emitt
 **Files**: `src/backend/llvm.rs:2911-2912`, `src/backend/llvm.rs:2936-2937`, `src/backend/llvm.rs:2969-2970`
 
 **Lesson**: `llvm.assume(i1 %cond)` tells the optimizer that `%cond` is unconditionally true. Placing it BEFORE a conditional branch (`br i1 %cond, label %exit, label %loop`) makes the optimizer eliminate the branch's continuation as dead code. If the branch controls loop convergence, the result is an infinite loop. `llvm.assume` is correct when placed after a runtime panicking branch (`br i1 %cond, label %panic, label %safe` followed by `unreachable` then `call @llvm.assume(i1 %cond)`) — never before a convergence check.
+## 2026-06-04 — Exit expression Neg(Integer) not handled in emit_exit_expr
+
+**Issue**: Program with `#!exit cr >= -200` hung — exit condition never satisfied. The LLVM IR showed `%t599 = add i64 0, 0 ; unsupported exit expr` instead of `%t599 = sub i64 0, 200`.
+
+**Root Cause**: `emit_exit_expr` at `src/backend/llvm.rs:3558` had an early-return filter for `Expr::Integer`, `Expr::Bool`, and `Expr::Float` that delegated to `emit_expr` for constant inlining. But negative integers like `-200` are parsed as `Expr::Neg(Box::new(Expr::Integer(200)))` — the `Neg` wrapper wasn't in the filter. The expression fell through to the `_ =>` catch-all at line 3658 which returned `add i64 0, 0`.
+
+**Fix**: Added `Expr::Neg(_)` to the early-return filter:
+```diff
+- Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) => {
++ Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Neg(_) => {
+```
+
+**Lesson**: Negative literals in Brief are `Neg(Integer(n))`, not `Integer(-n)`. Any code path that pattern-matches on `Expr::Integer` for constants must also handle `Expr::Neg(Expr::Integer(_))`. The `emit_expr` function already handles `Neg` correctly — the fix delegates to it.
+
+## 2026-06-04 — Universal loop hangs with decreasing counter contract
+
+**Issue**: Programs with `rct txn ... [count > 0][count == 0]` (decreasing counter) hang. Switching to `[count < N][count == N]` (increasing counter) works.
+
+**Root Cause**: The universal loop in `emit_folded_multi_main` emits `count < N - stride` for the unrolled body4 path, computed as `adj = add i64 N, <negated_stride>`. This comparison `icmp slt count, adj` only makes sense when count increases. A decreasing counter like `count > 0` has an INVERTED direction — count starts high and decreases, so `count > 0` should become `count > stride` not `count < bound - stride`.
+
+**Lesson**: The universal loop (unrolled fold) assumes strictly increasing counters. The `transition_graph` should detect decreasing counters and either invert the comparison in the codegen or fall back to the non-unrolled default path.
+
+
+## 2026-06-04 — Decreasing counter contracts hang or fall to O(N)
+
+**Issue**: Programs with `rct txn [count > 0][count == 0]` either hung (universal loop path) or ran O(N) tick-per-iteration (fallback path). Only `[count < N][count == N]` was fast.
+
+**Root cause**: Three separate gaps:
+1. `extract_bounded_pre` only matched `Expr::Lt`/`Expr::Le` (increasing). `Expr::Gt`/`Expr::Ge` (decreasing) fell through to `None`.
+2. `detect_increments` only matched `Expr::Add` (count = count + 1). `Expr::Sub` (count = count - 1) returned `None`.
+3. `emit_folded_loop` unconditionally emitted `icmp slt` (signed-less-than) for all comparisons. No branch for `icmp sgt`.
+
+**Fix** (3 files, additive):
+1. `transition_graph.rs`: Added `ConvergeDirection { Increasing, Decreasing }` enum; added `direction` + `bound_literal` fields to `BoundedPre`. Extended `extract_bounded_pre` to match `Gt`/`Ge` (set `direction: Decreasing`). Extended `detect_increments` to match `Expr::Sub` for decrementing counters.
+2. `llvm.rs`: Added `FoldParam` struct carrying `counter_idx`, `bound_field_idx`, `bound_const_name`, `is_decreasing`, `bound_literal`. Threaded through `multi_fold_params` → `enum_fold_params` → `emit_folded_multi_main` → `emit_folded_loop`.
+3. `emit_folded_loop` header: branched on `is_decreasing` to emit `icmp sgt` instead of `icmp slt`, and `bound + (unroll-1)` instead of `bound - (unroll-1)` for the body4 path. Added `bound_literal` priority to bound loading for literal bounds like `count > 0`.
+
+**Tests**: Decreasing counter program (`[count > 0][count == 0]` with `count = count - 1`) compiles, emits `icmp sgt`, completes 50M iterations in <10s.
+

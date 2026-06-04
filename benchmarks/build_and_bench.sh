@@ -43,6 +43,10 @@ BENCHMARKS=(
     "print_loop"
     "nbody_newton"
     "nbody_sqrt"
+    "fasta"
+    "fannkuch_redux"
+    "mandelbrot"
+    "kalman_filter_runtime"
 )
 
 build_bench() {
@@ -83,6 +87,10 @@ build_c() {
     case "$name" in
         iir_filter)      extra_flags="-lm" ;;
         nbody_sqrt)      extra_flags="-lm" ;;
+        fasta)           extra_flags="-lm" ;;
+        fannkuch_redux)  extra_flags="-lm" ;;
+        mandelbrot)      extra_flags="-lm" ;;
+        kalman_filter_runtime) extra_flags="-lm" ;;
     esac
 
     clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "benchmarks/${name}_c.c" ${extra_flags} 2>&1

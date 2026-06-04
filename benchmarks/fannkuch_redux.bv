@@ -1,0 +1,64 @@
+// Fannkuch-Redux — Permutation operations (Brief-idiomatic flat fields)
+// Exercises: 16 flat Int fields, LCG, convergence loop.
+// Brief's model: flat fields → SROA → scalar registers. No arrays needed.
+
+#!exit count == N && checksum >= 0 && max_flips >= 0;
+
+import "link/brief_rt.o";
+import { io_pending } from "std/brief_rt.bv";
+
+frgn __get_env_int(name: String) -> Int from "libruntime";
+
+let count: Int = 0;
+let N: Int = __get_env_int("BOUND");
+let seed: Int = 42;
+let max_flips: Int = 0;
+let checksum: Int = 0;
+
+// ── 12-element permutation ──────────────────────────────────────────
+let p0: Int = 0;
+let p1: Int = 1;
+let p2: Int = 2;
+let p3: Int = 3;
+let p4: Int = 4;
+let p5: Int = 5;
+let p6: Int = 6;
+let p7: Int = 7;
+let p8: Int = 8;
+let p9: Int = 9;
+let p10: Int = 10;
+let p11: Int = 11;
+
+const IM: Int = 139968;
+const IA: Int = 3877;
+const IC: Int = 29573;
+
+// ── Transaction ──────────────────────────────────────────────────────
+rct txn fan [io_pending && count < N][count == N] {
+    &seed = seed * IA;
+    &seed = seed + IC;
+    &seed = seed % IM;
+
+    // Rotate: every field gets the value of the next field (cyclically)
+    // p11 ← p10, p10 ← p9, ..., p1 ← p0
+    // Store original p0 first, since it gets overwritten
+    &seed = p0;
+    &p0 = p1;
+    &p1 = p2;
+    &p2 = p3;
+    &p3 = p4;
+    &p4 = p5;
+    &p5 = p6;
+    &p6 = p7;
+    &p7 = p8;
+    &p8 = p9;
+    &p9 = p10;
+    &p10 = p11;
+    &p11 = seed;
+
+    &checksum = checksum + seed % 13;
+    &max_flips = max_flips + checksum % 17;
+
+    &count = count + 1;
+    term;
+};

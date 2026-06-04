@@ -1,0 +1,27 @@
+// Fasta — DNA sequence generation benchmark
+// Exercises: frgn output in hot loop, convergent loop.
+
+#!exit count == N;
+
+import "link/brief_rt.o";
+import { io_pending } from "std/brief_rt.bv";
+
+frgn __putchar(c: Int) -> Int from "libruntime";
+frgn __get_env_int(name: String) -> Int from "libruntime";
+
+let count: Int = 0;
+let N: Int = __get_env_int("BOUND");
+let seed: Int = 42;
+const IM: Int = 139968;
+const IA: Int = 3877;
+const IC: Int = 29573;
+
+// ── Transaction ──────────────────────────────────────────────────────
+rct txn fasta [io_pending && count < N][count == N] {
+    &seed = seed * IA;
+    &seed = seed + IC;
+    &seed = seed % IM;
+    __putchar(seed % 26 + 97);
+    &count = count + 1;
+    term;
+};

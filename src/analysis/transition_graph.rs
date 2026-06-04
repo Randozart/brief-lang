@@ -1,10 +1,20 @@
 use crate::ast::{Expr, Hashtag, Program, SliceCoordinate, Statement, TopLevel};
 use std::collections::HashSet;
 
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum ConvergeDirection {
+    Increasing,
+    Decreasing,
+}
+
 #[derive(Debug, Clone)]
 pub struct BoundedPre {
     pub var: String,
     pub bound_var: String,
+    pub direction: ConvergeDirection,
+    /// If the bound is a literal integer (e.g., `count > 0`), this holds the value.
+    /// None means bound_var is a named field or constant.
+    pub bound_literal: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,7 +101,50 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                 (Expr::Identifier(var), Expr::Identifier(bound)) => Some(BoundedPre {
                     var: var.clone(),
                     bound_var: bound.clone(),
+                    direction: ConvergeDirection::Increasing,
+                    bound_literal: None,
                 }),
+                (Expr::Identifier(var), Expr::Integer(n)) => Some(BoundedPre {
+                    var: var.clone(),
+                    bound_var: format!("__lit__{}", var),
+                    direction: ConvergeDirection::Increasing,
+                    bound_literal: Some(*n),
+                }),
+                (Expr::Identifier(var), Expr::Neg(bn)) if matches!(bn.as_ref(), Expr::Integer(_)) => {
+                    let n = match bn.as_ref() { Expr::Integer(n) => -n, _ => 0 };
+                    Some(BoundedPre {
+                        var: var.clone(),
+                        bound_var: format!("__lit__{}", var),
+                        direction: ConvergeDirection::Increasing,
+                        bound_literal: Some(n),
+                    })
+                }
+                _ => None,
+            }
+        }
+        Expr::Gt(l, r) | Expr::Ge(l, r) => {
+            match (l.as_ref(), r.as_ref()) {
+                (Expr::Identifier(var), Expr::Identifier(bound)) => Some(BoundedPre {
+                    var: var.clone(),
+                    bound_var: bound.clone(),
+                    direction: ConvergeDirection::Decreasing,
+                    bound_literal: None,
+                }),
+                (Expr::Identifier(var), Expr::Integer(n)) => Some(BoundedPre {
+                    var: var.clone(),
+                    bound_var: format!("__lit__{}", var),
+                    direction: ConvergeDirection::Decreasing,
+                    bound_literal: Some(*n),
+                }),
+                (Expr::Identifier(var), Expr::Neg(bn)) if matches!(bn.as_ref(), Expr::Integer(_)) => {
+                    let n = match bn.as_ref() { Expr::Integer(n) => -n, _ => 0 };
+                    Some(BoundedPre {
+                        var: var.clone(),
+                        bound_var: format!("__lit__{}", var),
+                        direction: ConvergeDirection::Decreasing,
+                        bound_literal: Some(n),
+                    })
+                }
                 _ => None,
             }
         }
@@ -116,6 +169,14 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
                     }
                 }
                 if let (Expr::Identifier(var), Expr::Integer(delta)) = (b.as_ref(), a.as_ref()) {
+                    if *var == name && *delta > 0 {
+                        return Some(IncrementInfo { var: name.clone(), delta: *delta });
+                    }
+                }
+            }
+            // Decreasing counter: count = count - delta or count = count - 1
+            if let Expr::Sub(a, b) = expr {
+                if let (Expr::Identifier(var), Expr::Integer(delta)) = (a.as_ref(), b.as_ref()) {
                     if *var == name && *delta > 0 {
                         return Some(IncrementInfo { var: name.clone(), delta: *delta });
                     }
@@ -230,13 +291,22 @@ pub fn compute_live_fields(
         collect_identifiers(&node.precondition, &mut live);
     }
 
+    // Pre-pass: FFI calls make their argument expressions observable.
+    // Seed the live set with all identifiers reachable from FFI arguments,
+    // including local let-bound intermediates. The fixpoint loop below
+    // then traces them backward through Let/Assignment to state fields.
+    for node in nodes {
+        for stmt in &node.body {
+            scan_for_ffi_args(stmt, &mut live);
+        }
+    }
+
     // Transitive liveness: if a live field reads another field through an
     // assignment or let binding, that field is also live.  Iterate to
     // fixpoint through the txn bodies.
     loop {
         let mut changed = false;
         for node in nodes {
-            // Recursively scan statements including Guarded blocks
             let mut stmts: Vec<&Statement> = node.body.iter().collect();
             let mut i = 0;
             while i < stmts.len() {
@@ -272,6 +342,44 @@ pub fn compute_live_fields(
     }
 
     live
+}
+
+/// Recursively scan a statement for FFI calls and collect identifiers from
+/// their arguments into the live set. This is the liveness seed that makes
+/// `frgn __print_float(energy)` keep `energy` (and transitively `x0`, `p00`, ...) alive.
+fn scan_for_ffi_args(stmt: &Statement, out: &mut HashSet<String>) {
+    match stmt {
+        Statement::Expression(expr) => {
+            collect_ffi_identifiers(expr, out);
+        }
+        Statement::Guarded { condition: _, statements } => {
+            for s in statements {
+                scan_for_ffi_args(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Recursively collect all identifiers reachable through FFI argument expressions.
+/// The catch-all `_ => collect_identifiers(expr, out)` is critical: it picks up
+/// leaf identifiers like `energy`, `ei`, `ej` from `__print_float(energy + ei + ej)`
+/// that would otherwise be invisible to DFE's name-based fixpoint loop.
+fn collect_ffi_identifiers(expr: &Expr, out: &mut HashSet<String>) {
+    match expr {
+        Expr::Call(_, args) => {
+            for arg in args {
+                collect_identifiers(arg, out);
+            }
+        }
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
+        | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+            collect_ffi_identifiers(l, out);
+            collect_ffi_identifiers(r, out);
+        }
+        _ => collect_identifiers(expr, out),
+    }
 }
 
 fn expr_name(expr: &Expr) -> Option<String> {

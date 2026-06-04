@@ -397,6 +397,26 @@ void __exit(void) {
     exit(0);
 }
 
+int64_t __print_str_len(const char* buf, int64_t len) {
+    fwrite(buf, 1, (size_t)len, stdout);
+    return len;
+}
+
+int64_t __write_bytes(const char* buf, int64_t len) {
+    fwrite(buf, 1, (size_t)len, stdout);
+    return len;
+}
+
+int64_t __read_stdin(char* buf, int64_t max_len) {
+    size_t n = fread(buf, 1, (size_t)max_len, stdin);
+    return (int64_t)n;
+}
+
+int64_t __putchar(int64_t c) {
+    putchar((int)c);
+    return c;
+}
+
 /* ===================================================================
  * 5. Initialization — __rt_init() and constructor wrapper
  *

@@ -51,6 +51,14 @@ pub struct TypedRegister {
     pub ty: Type,
 }
 
+pub struct FoldParam {
+    pub counter_idx: usize,
+    pub bound_field_idx: Option<usize>,
+    pub bound_const_name: Option<String>,
+    pub is_decreasing: bool,
+    pub bound_literal: Option<i64>,
+}
+
 impl std::fmt::Display for TypedRegister {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
@@ -1046,7 +1054,7 @@ self.emit_declares(&mut out);
                             && node.increments.is_some()
                         })
                     });
-                let mut multi_fold_params: HashMap<String, (usize, Option<usize>, Option<String>)> = HashMap::new();
+                let mut multi_fold_params: HashMap<String, FoldParam> = HashMap::new();
                 if multi_foldable {
                     for txn_name in &async_txn_names {
                         if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
@@ -1058,7 +1066,13 @@ self.emit_declares(&mut out);
                                             Some(bp.bound_var.clone())
                                         } else { None }
                                     } else { None };
-                                    multi_fold_params.insert(txn_name.clone(), (cidx, tidx, tcname));
+                                    multi_fold_params.insert(txn_name.clone(), FoldParam {
+                                        counter_idx: cidx,
+                                        bound_field_idx: tidx,
+                                        bound_const_name: tcname,
+                                        is_decreasing: bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing,
+                                        bound_literal: bp.bound_literal,
+                                    });
                                 }
                             }
                         }
@@ -1087,7 +1101,7 @@ self.emit_declares(&mut out);
                 // loop in the case arm.  Multi-txn programs (e.g. async_counters)
                 // need this to converge in O(1) ticks instead of one increment
                 // per tick via reactor_tick.
-                let enum_fold_params: HashMap<String, (usize, Option<usize>, Option<String>)> = {
+                let enum_fold_params: HashMap<String, FoldParam> = {
                     let mut m = HashMap::new();
                     for txn_name in &enum_txn_names {
                         if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
@@ -1101,7 +1115,13 @@ self.emit_declares(&mut out);
                                     } else { None };
                                     let inc = node.increments.as_ref();
                                     if inc.map_or(false, |i| i.var == bp.var && i.delta > 0) {
-                                        m.insert(txn_name.clone(), (cidx, tidx, tcname));
+                                        m.insert(txn_name.clone(), FoldParam {
+                                            counter_idx: cidx,
+                                            bound_field_idx: tidx,
+                                            bound_const_name: tcname,
+                                            is_decreasing: bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing,
+                                            bound_literal: bp.bound_literal,
+                                        });
                                     }
                                 }
                             }
@@ -2286,6 +2306,51 @@ self.emit_declares(&mut out);
                 let val = self.emit_expr(out, expr, indent);
                 let fname = match lhs {
                     Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                    Expr::ListIndex(list_expr, index_expr) => {
+                        let val_reg = val.name.clone();
+                        let list_name = match &**list_expr {
+                            Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                            _ => { writeln!(out, "{}; assign list[idx] = {}", indent, val_reg).ok(); return; }
+                        };
+                        let idx_val = self.emit_expr(out, index_expr, indent);
+                        // Resolve the list pointer from state (SSA or non-SSA) or let bindings
+                        let list_ptr: Option<String> =
+                            if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
+                                if let Some(&field_idx) = self.field_index_map.get(&list_name) {
+                                    let ev = format!("%lev{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, field_idx).ok();
+                                    Some(ev)
+                                } else if let Some(reg) = self.let_bindings.get(&list_name).cloned() {
+                                    Some(reg)
+                                } else {
+                                    None
+                                }
+                            } else if let Some(reg) = self.let_bindings.get(&list_name).cloned() {
+                                Some(reg)
+                            } else if let Some(&field_idx) = self.field_index_map.get(&list_name) {
+                                let p = format!("%lgp{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, field_idx).ok();
+                                let ld = format!("%lld{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
+                                Some(ld)
+                            } else {
+                                None
+                            };
+                        let Some(list_ptr) = list_ptr else {
+                            writeln!(out, "{}; assign list[idx] = {} (unknown list '{}')", indent, val_reg, list_name).ok();
+                            return;
+                        };
+                        let hp = format!("%lhp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_ptr).ok();
+                        let dp = format!("%ldp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                        let de = format!("%lde{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                        let ep = format!("%lep{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, idx_val.name).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val_reg, ep).ok();
+                        return;
+                    }
                     _ => { writeln!(out, "{}; assign {}", indent, val).ok(); return; }
                 };
                 let is_volatile = modifiers.iter().any(|h| h.name == "volatile");
@@ -3510,7 +3575,7 @@ self.emit_declares(&mut out);
         // inlining. Keep Identifier/OwnedRef local because exit conditions
         // Access %state pointer (passed as parameter or via alloca in main)
         match expr {
-            Expr::Integer(_) | Expr::Bool(_) => {
+            Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Neg(_) => {
                 return self.emit_expr(out, expr, indent).name;
             }
             _ => {}
@@ -3707,6 +3772,8 @@ self.emit_declares(&mut out);
         use_phi: bool,
         body: Option<&[Statement]>,
         unroll_factor: usize,
+        is_decreasing: bool,
+        bound_literal: Option<i64>,
     ) {
         let c0 = self.txn_counter;
         if use_phi {
@@ -3744,7 +3811,9 @@ self.emit_declares(&mut out);
             writeln!(out, "  store i64 %lt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
         } else if let Some(stmts) = body {
             // SSA mode: load once, phi in header, inline unrolled body with extract/insert, store once
-            if let Some(ti) = total_idx {
+            if let Some(bl) = bound_literal {
+                writeln!(out, "  %lt{}_{} = add i64 0, {}", label_prefix, c0, bl).ok();
+            } else if let Some(ti) = total_idx {
                 writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, ti).ok();
                 writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
             } else if let Some(cn) = total_const_name {
@@ -3879,14 +3948,26 @@ self.emit_declares(&mut out);
 
             if unroll > 1 {
                 let adj = format!("%adj{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "  {} = add i64 %lt{}_{}, -{}", adj, label_prefix, c0, unroll_minus_1).ok();
+                if is_decreasing {
+                    writeln!(out, "  {} = add i64 %lt{}_{}, {}", adj, label_prefix, c0, unroll_minus_1).ok();
+                } else {
+                    writeln!(out, "  {} = add i64 %lt{}_{}, -{}", adj, label_prefix, c0, unroll_minus_1).ok();
+                }
                 let cp4 = format!("%cp{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "  {} = icmp slt i64 {}, {}", cp4, ex_reg, adj).ok();
+                if is_decreasing {
+                    writeln!(out, "  {} = icmp sgt i64 {}, {}", cp4, ex_reg, adj).ok();
+                } else {
+                    writeln!(out, "  {} = icmp slt i64 {}, {}", cp4, ex_reg, adj).ok();
+                }
                 writeln!(out, "  br i1 {}, label %{}_body4, label %{}_rem", cp4, label_prefix, label_prefix).ok();
                 writeln!(out, "{}_rem:", label_prefix).ok();
             }
             let cp1 = format!("%cp{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "  {} = icmp slt i64 {}, %lt{}_{}", cp1, ex_reg, label_prefix, c0).ok();
+            if is_decreasing {
+                writeln!(out, "  {} = icmp sgt i64 {}, %lt{}_{}", cp1, ex_reg, label_prefix, c0).ok();
+            } else {
+                writeln!(out, "  {} = icmp slt i64 {}, %lt{}_{}", cp1, ex_reg, label_prefix, c0).ok();
+            }
             writeln!(out, "  br i1 {}, label %{}_body1, label %{}_done", cp1, label_prefix, label_prefix).ok();
 
             if unroll > 1 {
@@ -3899,7 +3980,9 @@ self.emit_declares(&mut out);
             writeln!(out, "  {} = load %State, %State* %slot_{}, align 8", final_reg, label_prefix).ok();
             writeln!(out, "  store %State {}, %State* %state, align 8", final_reg).ok();
         } else {
-            if let Some(ti) = total_idx {
+            if let Some(bl) = bound_literal {
+                writeln!(out, "  %lt{}_{} = add i64 0, {}", label_prefix, c0, bl).ok();
+            } else if let Some(ti) = total_idx {
                 writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, ti).ok();
                 writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
             } else if let Some(cn) = total_const_name {
@@ -3911,8 +3994,13 @@ self.emit_declares(&mut out);
             writeln!(out, "{}_hdr:", label_prefix).ok();
             writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
             writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
-            writeln!(out, "  %cp{}_{} = icmp slt i64 %lp{}_{}, %lt{}_{}", label_prefix, c0 + 2, label_prefix, c0 + 1, label_prefix, c0).ok();
-            writeln!(out, "  br i1 %cp{}_{}, label %{}_body, label %{}_done", label_prefix, c0 + 2, label_prefix, label_prefix).ok();
+            let cmp_reg = format!("%cp{}_{}", label_prefix, c0 + 2);
+            if is_decreasing {
+                writeln!(out, "  {} = icmp sgt i64 %lp{}_{}, %lt{}_{}", cmp_reg, label_prefix, c0 + 1, label_prefix, c0).ok();
+            } else {
+                writeln!(out, "  {} = icmp slt i64 %lp{}_{}, %lt{}_{}", cmp_reg, label_prefix, c0 + 1, label_prefix, c0).ok();
+            }
+            writeln!(out, "  br i1 {}, label %{}_body, label %{}_done", cmp_reg, label_prefix, label_prefix).ok();
             writeln!(out, "{}_body:", label_prefix).ok();
             writeln!(out, "  call void @{}(%State* %state)", txn_name).ok();
             writeln!(out, "  br label %{}_hdr", label_prefix).ok();
@@ -3939,7 +4027,7 @@ self.emit_declares(&mut out);
             writeln!(out, "  br label %case_phi_entry").ok();
         }
         let uf = if !use_phi && body.is_some() { 4 } else { 1 };
-        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body, uf);
+        self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body, uf, false, None);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -4025,7 +4113,7 @@ self.emit_declares(&mut out);
         txns: &[(String, &crate::ast::Transaction)],
         enum_sizes: &[(String, Option<u64>)],
         enum_keys: &HashMap<String, Vec<i64>>,
-        fold_params: &HashMap<String, (usize, Option<usize>, Option<String>)>,
+        fold_params: &HashMap<String, FoldParam>,
         fold_pure: &HashMap<String, (bool, Option<i64>)>,
         counter_idx: usize,
         total_idx: Option<usize>,
@@ -4040,11 +4128,11 @@ self.emit_declares(&mut out);
         let mut uniq: Vec<(usize, String)> = Vec::new();
         let mut seen_idxs: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut first_tidx: Option<usize> = None;
-        for (_, &(cidx, tidx, _)) in fold_params.iter() {
-            if seen_idxs.insert(cidx) {
-                uniq.push((cidx, format!("c{}", cidx)));
+        for (_, fp) in fold_params.iter() {
+            if seen_idxs.insert(fp.counter_idx) {
+                uniq.push((fp.counter_idx, format!("c{}", fp.counter_idx)));
                 if first_tidx.is_none() {
-                    first_tidx = tidx;
+                    first_tidx = fp.bound_field_idx;
                 }
             }
         }
@@ -4126,34 +4214,28 @@ self.emit_declares(&mut out);
         {
             if !fold_params.is_empty() {
                 // Multi-txn: emit one folded loop per bounded-counter txn
-                for (ptxn_name, &(pci, pti, ref ptcn)) in fold_params.iter() {
+                for (ptxn_name, fp) in fold_params.iter() {
                     let sub_prefix = format!("{}_{}", prefix, ptxn_name);
-                    // Pure-counter shortcut: if txn is pure and bound is a compile-time
-                    // constant, store the total directly (O(1)) instead of looping (O(N)).
-                    // If bound is runtime-variable, use phi-node register pipeline.
                     if let Some(&(pure, tv)) = fold_pure.get(ptxn_name) {
                         if pure {
                             if let Some(tv) = tv {
-                                writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sub_prefix, pci).ok();
+                                writeln!(out, "  %pc_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sub_prefix, fp.counter_idx).ok();
                                 writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, sub_prefix).ok();
                                 continue;
                             } else {
-                                // Pure body + runtime-variable bound → phi-node pipeline
-                                let ptcn_ref = ptcn.as_deref();
-                                this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, true, None, 1);
+                                let ptcn_ref = fp.bound_const_name.as_deref();
+                                this.emit_folded_loop(out, ptxn_name, fp.counter_idx, fp.bound_field_idx, ptcn_ref, &sub_prefix, true, None, 1, fp.is_decreasing, fp.bound_literal);
                                 continue;
                             }
                         }
                     }
-                    // Non-pure body → SSA mode with inline body
-                    let ptcn_ref = ptcn.as_deref();
+                    let ptcn_ref = fp.bound_const_name.as_deref();
                     let body = txns.iter().find(|(n, _)| n == ptxn_name).map(|(_, t)| t.body.as_slice());
-                    this.emit_folded_loop(out, ptxn_name, pci, pti, ptcn_ref, &sub_prefix, false, body, 4);
+                    this.emit_folded_loop(out, ptxn_name, fp.counter_idx, fp.bound_field_idx, ptcn_ref, &sub_prefix, false, body, 4, fp.is_decreasing, fp.bound_literal);
                 }
             } else {
-                // Single-txn (legacy): use the caller-provided params
                 let body = txns.iter().find(|(n, _)| n == fn_name).map(|(_, t)| t.body.as_slice());
-                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body, 4);
+                this.emit_folded_loop(out, fn_name, ci, ti, tcn, prefix, false, body, 4, false, None);
             }
         };
 
@@ -7195,5 +7277,39 @@ mod tests {
         };
         let output = backend.generate(&program);
         assert!(output.contains("add i64 0, %tdr"), "Should bind destructured vars. Got: {}", output);
+    }
+
+    #[test]
+    fn test_list_index_assign_non_ssa() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "xs".to_string(), ty: Type::Int,
+                    expr: Some(Expr::ListLiteral(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "update".to_string(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::ListIndex(Box::new(Expr::Identifier("xs".to_string())), Box::new(Expr::Integer(1))),
+                            expr: Expr::Integer(99),
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("inttoptr i64"), "Should inttoptr list ptr. Output:\n{}", output);
+        // store into list element: store i64 %t..., i64* %lep...
+        assert!(output.contains("%lep") && output.contains("store i64"), "Should store at list element ptr. Output:\n{}", output);
     }
 }
