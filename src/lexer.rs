@@ -259,6 +259,8 @@ pub enum Token {
     BitXor,
     #[token("->")]
     Arrow,
+    #[token("<-")]
+    ArrowLeft,
     #[token("_")]
     Underscore,
 
@@ -297,6 +299,8 @@ pub enum Token {
     Comma,
     #[token("%")]
     Percent,
+    #[token("...")]
+    Ellipsis,
     #[token("..")]
     DotDot,
     #[token(".")]

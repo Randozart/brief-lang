@@ -497,6 +497,20 @@ impl Annotator {
                 }).collect::<Vec<_>>().join(", ");
                 format!("match {} {{ {} }}", self.format_expr(value), arms_str)
             }
+            Expr::ArrowMut { target, index, value, .. } => {
+                let t = self.format_expr(target);
+                let i = self.format_expr(index);
+                let vs = value.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
+                let idx_str = if matches!(index.as_ref(), Expr::Term) { String::new() } else { format!("[{}]", i) };
+                format!("{}{} <- {}", t, idx_str, vs)
+            }
+            Expr::ArrowDiscard { target, index } => {
+                let t = self.format_expr(target);
+                let i = self.format_expr(index);
+                let idx_str = if matches!(index.as_ref(), Expr::Term) { String::new() } else { format!("[{}]", i) };
+                format!("<- {}{}", t, idx_str)
+            }
+            Expr::Ellipsis => "...".to_string(),
         }
     }
 
@@ -511,6 +525,10 @@ impl Annotator {
             crate::ast::SliceCoordinate::Named { name, coord } => {
                 format!("{}:{}", name, self.format_slice_coordinate(coord))
             }
+            crate::ast::SliceCoordinate::AtDimension { dimension, coord } => {
+                format!("@{}:{}", dimension, self.format_slice_coordinate(coord))
+            }
+            crate::ast::SliceCoordinate::Ellipsis => "...".to_string(),
         }
     }
 }

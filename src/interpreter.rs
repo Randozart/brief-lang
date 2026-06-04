@@ -382,6 +382,110 @@ impl Interpreter {
         Ok(result)
     }
 
+    /// Extract (root_variable_name, field_path) from an arrow mutation target.
+    /// Supports: `&name`, `&name[i]`, `&name.field`, `&name.field[i]`
+    fn extract_arrow_root(&self, target: &Expr) -> Result<(String, Vec<String>), RuntimeError> {
+        match target {
+            Expr::OwnedRef(n) => Ok((n.clone(), vec![])),
+            Expr::FieldAccess(inner, field) => {
+                let (root, mut path) = self.extract_arrow_root(inner)?;
+                path.push(field.clone());
+                Ok((root, path))
+            }
+            Expr::ListIndex(inner, _) => {
+                // For indexed targets, the inner expr determines the root
+                self.extract_arrow_root(inner)
+            }
+            _ => Err(RuntimeError::TypeMismatch(
+                "Arrow target must be &name, &name.field, or &name[...]".to_string()
+            )),
+        }
+    }
+
+    /// Resolve the list Value from state using root name and optional field path.
+    fn resolve_arrow_list(&self, root: &str, field_path: &[String]) -> Result<Vec<Value>, RuntimeError> {
+        let mut val = self.state.get(root)
+            .ok_or_else(|| RuntimeError::UndefinedVariable(root.to_string()))?
+            .clone();
+        for field in field_path {
+            val = match val {
+                Value::Instance { typename: _, ref fields } => {
+                    fields.get(field)
+                        .ok_or_else(|| RuntimeError::TypeMismatch(
+                            format!("Instance has no field '{}'", field)
+                        ))?
+                        .clone()
+                }
+                _ => return Err(RuntimeError::TypeMismatch(
+                    format!("Cannot access field '{}' on non-instance value", field)
+                )),
+            };
+        }
+        match val {
+            Value::List(l) => Ok(l),
+            _ => Err(RuntimeError::TypeMismatch(
+                "Arrow target must resolve to a List".to_string()
+            )),
+        }
+    }
+
+    /// Store a list value back into state through the root and field path.
+    fn store_arrow_list(&mut self, root: &str, field_path: &[String], list_val: Value) {
+        if field_path.is_empty() {
+            self.state.insert(root.to_string(), list_val);
+        } else {
+            // Walk the field path to reconstruct nested instances
+            let mut val = self.state.get(root)
+                .expect("Root must exist")
+                .clone();
+            let mut stack: Vec<(String, Value)> = Vec::new();
+            for field in field_path.iter().rev() {
+                stack.push((field.clone(), val.clone()));
+                val = match &val {
+                    Value::Instance { fields, .. } => {
+                        fields.get(field)
+                            .expect("Field must exist")
+                            .clone()
+                    }
+                    _ => return,
+                };
+            }
+            // Now `val` is the innermost value (the old list). Replace with new one.
+            let mut current = list_val;
+            for (field, parent_val) in stack {
+                let (typename, mut fields) = match parent_val {
+                    Value::Instance { typename, fields } => {
+                        (typename.clone(), fields.clone())
+                    }
+                    _ => return,
+                };
+                fields.insert(field, current);
+                current = Value::Instance { typename, fields };
+            }
+            self.state.insert(root.to_string(), current);
+        }
+    }
+
+    /// Evaluate the index expression for an arrow operation.
+    /// Returns None for Term (end operations) or Some(position) for specific index.
+    fn eval_arrow_pos(&mut self, list: &[Value], index: &Expr) -> Result<Option<usize>, RuntimeError> {
+        match index {
+            Expr::Term => Ok(None),
+            idx_expr => {
+                let idx_val = self.eval_expr(idx_expr)?;
+                match idx_val {
+                    Value::Int(i) => {
+                        let p = if i < 0 { (list.len() as i64 + i).max(0) as usize } else { i as usize };
+                        Ok(Some(p))
+                    }
+                    _ => Err(RuntimeError::TypeMismatch(
+                        "Arrow index must be an integer".to_string()
+                    )),
+                }
+            }
+        }
+    }
+
     fn handle_result_method(&mut self, fn_name: &str, arg_values: &[Value]) -> Result<Value, RuntimeError> {
         if arg_values.is_empty() {
             return Err(RuntimeError::TypeMismatch("Result method requires a value".to_string()));
@@ -958,6 +1062,53 @@ Expr::Ge(l, r) => {
                     _ => Err(RuntimeError::TypeMismatch("Bitwise NOT".to_string())),
                 }
             }
+            Expr::ArrowMut { dir, target, index, value } => {
+                let (root_name, field_path) = self.extract_arrow_root(target)?;
+                let mut list = self.resolve_arrow_list(&root_name, &field_path)?;
+                let pos = self.eval_arrow_pos(&list, index)?;
+                match dir {
+                    ArrowDir::Push => {
+                        let val = match value {
+                            Some(v) => self.eval_expr(v)?,
+                            None => return Err(RuntimeError::TypeMismatch(
+                                "ArrowMut Push requires a value".to_string()
+                            )),
+                        };
+                        match pos {
+                            Some(p) if p < list.len() => list.insert(p, val),
+                            _ => list.push(val),
+                        }
+                        self.store_arrow_list(&root_name, &field_path, Value::List(list.clone()));
+                        Ok(Value::List(list))
+                    }
+                    ArrowDir::Pop => {
+                        let removed = match pos {
+                            Some(p) if p < list.len() => list.remove(p),
+                            _ => list.pop().ok_or_else(|| RuntimeError::TypeMismatch(
+                                "Cannot pop from empty list".to_string()
+                            ))?,
+                        };
+                        self.store_arrow_list(&root_name, &field_path, Value::List(list));
+                        Ok(removed)
+                    }
+                }
+            }
+            Expr::ArrowDiscard { target, index } => {
+                let (root_name, field_path) = self.extract_arrow_root(target)?;
+                let mut list = self.resolve_arrow_list(&root_name, &field_path)?;
+                let pos = self.eval_arrow_pos(&list, index)?;
+                match pos {
+                    Some(p) if p < list.len() => { list.remove(p); }
+                    _ => { list.pop(); }
+                }
+                self.store_arrow_list(&root_name, &field_path, Value::List(list));
+                Ok(Value::Void)
+            }
+            Expr::Ellipsis => {
+                Err(RuntimeError::TypeMismatch(
+                    "Ellipsis (...) must be resolved at parse time in bracket context".to_string(),
+                ))
+            }
             Expr::Call(name, args) => {
                 let fn_name = name.clone();
 
@@ -1034,31 +1185,11 @@ let enum_state = self.state.get(&fn_name).cloned();
 if fn_name == "clone" && !arg_values.is_empty() {
                     return Ok(arg_values[0].clone());
                 }
-                if fn_name == "list_append" && arg_values.len() == 2 {
-                    if let Value::List(list) = &arg_values[0] {
-                        let mut new_list = list.clone();
-                        new_list.push(arg_values[1].clone());
-                        return Ok(Value::List(new_list));
-                    }
-                }
                 if fn_name == "char_at" && arg_values.len() == 2 {
                     if let Value::String(s) = &arg_values[0] {
                         if let Value::Int(idx) = &arg_values[1] {
                             let i = *idx as usize;
                             return Ok(s.chars().nth(i).map(Value::Char).unwrap_or(Value::Char('\0')));
-                        }
-                    }
-                }
-                if fn_name == "get" && arg_values.len() >= 2 {
-                    if let Value::List(list) = &arg_values[0] {
-                        if let Value::Int(idx) = &arg_values[1] {
-                            let i = if *idx < 0 { (list.len() as i64 + idx).max(0) as usize } else { *idx as usize };
-                            return Ok(if i < list.len() {
-                                Value::Enum("Option".to_string(), "Some".to_string(),
-                                    HashMap::from([("value".to_string(), list[i].clone())]))
-                            } else {
-                                Value::Enum("Option".to_string(), "None".to_string(), HashMap::new())
-                            });
                         }
                     }
                 }
@@ -1888,6 +2019,15 @@ let s_val = self.eval_expr(s)?;
                             }
                         }
                         SliceCoordinate::Named { .. } => self.eval_expr(value),
+                        SliceCoordinate::AtDimension { .. } => {
+                            // AtDimension delegates to eval_expr; dimension targeting is
+                            // a compile-time concept resolved during expansion
+                            self.eval_expr(value)
+                        }
+                        SliceCoordinate::Ellipsis => {
+                            // Ellipsis matches all remaining dimensions; evaluate base value
+                            self.eval_expr(value)
+                        }
                     }
                 } else {
                     self.eval_expr(value)
@@ -2323,5 +2463,177 @@ pub(crate) fn delete_dir_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
         Err(RuntimeError::TypeMismatch(
             "delete_dir expects String".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_interpreter_with_list() -> Interpreter {
+        let mut interp = Interpreter::new();
+        interp.state.insert("list".to_string(), Value::List(vec![]));
+        interp.state.insert("x".to_string(), Value::Int(0));
+        interp
+    }
+
+    #[test]
+    fn test_arrow_push_append() {
+        let mut i = make_interpreter_with_list();
+        let expr = Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::Integer(42))),
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::List(vec![Value::Int(42)]));
+        assert_eq!(i.state.get("list"), Some(&Value::List(vec![Value::Int(42)])));
+    }
+
+    #[test]
+    fn test_arrow_push_multiple() {
+        let mut i = make_interpreter_with_list();
+        let push = |v: i64| Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::Integer(v))),
+        };
+        i.eval_expr(&push(1)).unwrap();
+        i.eval_expr(&push(2)).unwrap();
+        i.eval_expr(&push(3)).unwrap();
+        assert_eq!(i.state.get("list"), Some(&Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3)
+        ])));
+    }
+
+    #[test]
+    fn test_arrow_pop() {
+        let mut i = make_interpreter_with_list();
+        // First push a value
+        i.eval_expr(&Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::Integer(99))),
+        }).unwrap();
+        // Then pop it
+        let popped = i.eval_expr(&Expr::ArrowMut {
+            dir: ArrowDir::Pop,
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Term),
+            value: None,
+        }).unwrap();
+        assert_eq!(popped, Value::Int(99));
+        assert_eq!(i.state.get("list"), Some(&Value::List(vec![])));
+    }
+
+    #[test]
+    fn test_arrow_discard() {
+        let mut i = make_interpreter_with_list();
+        // Push 2 values
+        i.eval_expr(&Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::Integer(10))),
+        }).unwrap();
+        i.eval_expr(&Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::Integer(20))),
+        }).unwrap();
+        // Discard last
+        let discard = Expr::ArrowDiscard {
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Term),
+        };
+        i.eval_expr(&discard).unwrap();
+        assert_eq!(i.state.get("list"), Some(&Value::List(vec![Value::Int(10)])));
+    }
+
+    #[test]
+    fn test_arrow_push_indexed() {
+        let mut i = make_interpreter_with_list();
+        // Push 3 items: [10, 20, 30]
+        for v in &[10, 20, 30] {
+            i.eval_expr(&Expr::ArrowMut {
+                dir: ArrowDir::Push,
+                target: Box::new(Expr::OwnedRef("list".to_string())),
+                index: Box::new(Expr::Term),
+                value: Some(Box::new(Expr::Integer(*v))),
+            }).unwrap();
+        }
+        // Insert 15 at index 1: [10, 15, 20, 30]
+        i.eval_expr(&Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Integer(1)),
+            value: Some(Box::new(Expr::Integer(15))),
+        }).unwrap();
+        assert_eq!(i.state.get("list"), Some(&Value::List(vec![
+            Value::Int(10), Value::Int(15), Value::Int(20), Value::Int(30)
+        ])));
+    }
+
+    #[test]
+    fn test_arrow_pop_indexed() {
+        let mut i = make_interpreter_with_list();
+        for v in &[10, 20, 30, 40] {
+            i.eval_expr(&Expr::ArrowMut {
+                dir: ArrowDir::Push,
+                target: Box::new(Expr::OwnedRef("list".to_string())),
+                index: Box::new(Expr::Term),
+                value: Some(Box::new(Expr::Integer(*v))),
+            }).unwrap();
+        }
+        // Pop at index 1 → removes 20
+        let popped = i.eval_expr(&Expr::ArrowMut {
+            dir: ArrowDir::Pop,
+            target: Box::new(Expr::OwnedRef("list".to_string())),
+            index: Box::new(Expr::Integer(1)),
+            value: None,
+        }).unwrap();
+        assert_eq!(popped, Value::Int(20));
+        assert_eq!(i.state.get("list"), Some(&Value::List(vec![
+            Value::Int(10), Value::Int(30), Value::Int(40)
+        ])));
+    }
+
+    #[test]
+    fn test_arrow_discard_field_indexed() {
+        use std::collections::HashMap;
+        let mut i = Interpreter::new();
+        let items = vec![Value::Int(100), Value::Int(200), Value::Int(300)];
+        i.state.insert("queue".to_string(), Value::Instance {
+            typename: "Queue".to_string(),
+            fields: HashMap::from([("items".to_string(), Value::List(items))]),
+        });
+        // <- &queue.items[0] — discard first element (dequeue)
+        let discard = Expr::ArrowDiscard {
+            target: Box::new(Expr::FieldAccess(
+                Box::new(Expr::OwnedRef("queue".to_string())),
+                "items".to_string(),
+            )),
+            index: Box::new(Expr::Integer(0)),
+        };
+        i.eval_expr(&discard).unwrap();
+        let queue = i.state.get("queue").unwrap();
+        match queue {
+            Value::Instance { fields, .. } => {
+                match fields.get("items").unwrap() {
+                    Value::List(items) => {
+                        assert_eq!(items.len(), 2);
+                        assert_eq!(items[0], Value::Int(200));
+                        assert_eq!(items[1], Value::Int(300));
+                    }
+                    _ => panic!("items field is not a List"),
+                }
+            }
+            _ => panic!("queue is not an Instance"),
+        }
     }
 }

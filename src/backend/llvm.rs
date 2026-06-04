@@ -42,7 +42,7 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
     }
 }
 use crate::ast::{
-    DispatchMode, Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
+    ArrowDir, DispatchMode, Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
 };
 
 #[derive(Debug, Clone)]
@@ -2936,6 +2936,25 @@ self.emit_declares(&mut out);
                                 _ => { writeln!(out, "{}{} = add i64 0, {} ; multi-slice", indent, v, l).ok(); }
                             }
                         }
+                        crate::ast::SliceCoordinate::AtDimension { coord, .. } => {
+                            // Delegate to inner coordinate
+                            match coord.as_ref() {
+                                crate::ast::SliceCoordinate::Index(idx) => {
+                                    let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
+                                    let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                                    let de = format!("%mde{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                                    let idx_val = self.emit_expr(out, idx, indent);
+                                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, v, de, idx_val).ok();
+                                }
+                                _ => { writeln!(out, "{}{} = add i64 0, {} ; multi-slice", indent, v, l).ok(); }
+                            }
+                        }
+                        crate::ast::SliceCoordinate::Ellipsis => {
+                            writeln!(out, "{}{} = add i64 0, {} ; multi-slice", indent, v, l).ok();
+                        }
                     }
                 } else {
                     writeln!(out, "{}{} = add i64 0, {} ; multi-slice", indent, v, l).ok();
@@ -3124,6 +3143,70 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, disc, target).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
             }
+            // Arrow mutation — uses 2-slot list header [data_ptr, length, elem0, elem1, ...]
+            // List pointer is a ptrtoint i64* → i64. Elements start at slot 2.
+            Expr::ArrowMut { dir, target, index, value } => {
+                let list = self.emit_expr(out, target, indent);
+                let is_full_range = matches!(index.as_ref(), Expr::Term);
+                let hp = format!("%ahp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list).ok();
+                let lp = format!("%alp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                let len = format!("%alen{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, len, lp).ok();
+                match dir {
+                    ArrowDir::Push => {
+                        let val = self.emit_expr(out, value.as_ref().unwrap(), indent);
+                        let pos_name = if is_full_range {
+                            // Append at end: position = len (0-indexed), element slot = len + 2
+                            let p = format!("%apos{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = add i64 {}, 2", indent, p, len).ok();
+                            p
+                        } else {
+                            // Insert at index: index value
+                            let idx = self.emit_expr(out, index, indent);
+                            idx.name
+                        };
+                        let ep = format!("%aep{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, pos_name).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val.name, ep).ok();
+                        let new_len = format!("%anl{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = add i64 {}, 1", indent, new_len, len).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_len, lp).ok();
+                        writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, hp).ok();
+                    }
+                    ArrowDir::Pop => {
+                        let pos_name = if is_full_range {
+                            // Pop from end: last element slot = len + 1
+                            let p = format!("%apos{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = add i64 {}, 1", indent, p, len).ok();
+                            p
+                        } else {
+                            let idx = self.emit_expr(out, index, indent);
+                            idx.name
+                        };
+                        let ep = format!("%aep{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, pos_name).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, ep).ok();
+                        let new_len = format!("%anl{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = sub i64 {}, 1", indent, new_len, len).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_len, lp).ok();
+                    }
+                }
+            }
+            Expr::ArrowDiscard { target, index } => {
+                let list = self.emit_expr(out, target, indent);
+                let hp = format!("%dhp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list).ok();
+                let lp = format!("%dlp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                let len = format!("%dlen{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, len, lp).ok();
+                let new_len = format!("%dnl{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = sub i64 {}, 1", indent, new_len, len).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_len, lp).ok();
+                writeln!(out, "{}{} = add i64 0, 0 ; discard", indent, v).ok();
+            }
             // Quantifiers
             Expr::ForAll { .. } => { writeln!(out, "{}{} = add i64 0, 1 ; forall", indent, v).ok(); }
             Expr::Exists { expr, .. } => {
@@ -3131,6 +3214,9 @@ self.emit_declares(&mut out);
                 let cmp = format!("%ec{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, cmp, inner).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+            }
+            Expr::Ellipsis => {
+                writeln!(out, "{}{} = add i64 0, 0 ; ellipsis", indent, v).ok();
             }
             // Fallback
             _ => { writeln!(out, "{}{} = add i64 0, 0 ; expr", indent, v).ok(); }

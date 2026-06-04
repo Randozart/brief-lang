@@ -9,7 +9,7 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 - **Test**: `cargo test --lib`
 - **Test backend registry**: `cargo test --lib -- backend::tests`
 - **Compile RBV**: `./target/release/brief-compiler rbv <file.rbv>`
-- **Selfhost**: `cargo run --bin brief-compiler -- selfhost <file.bv>`
+- **Selfhost** (deferred): `cargo run --bin brief-compiler -- selfhost <file.bv>` — self-hosting compiler relies on `list_append`/`get` magic; to be migrated to `<-` arrow syntax in Part C. Currently broken — magic handlers removed.
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness, never ad-hoc `/usr/bin/time` or other external timers. The harness rebuilds all binaries, uses nanosecond CLOCK_MONOTONIC timing, and averages 5 iterations. Ad-hoc timing produces false hangs (SIGTERM handler traps timeout) and imprecise numbers.
 
 ### File Types

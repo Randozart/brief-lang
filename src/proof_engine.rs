@@ -2338,6 +2338,18 @@ impl ProofEngine {
             Expr::Match { value, .. } => {
                 self.collect_identifiers(value, vars);
             }
+            Expr::ArrowMut { target, index, value, .. } => {
+                self.collect_identifiers(target, vars);
+                self.collect_identifiers(index, vars);
+                if let Some(v) = value {
+                    self.collect_identifiers(v, vars);
+                }
+            }
+            Expr::ArrowDiscard { target, index } => {
+                self.collect_identifiers(target, vars);
+                self.collect_identifiers(index, vars);
+            }
+            Expr::Ellipsis => {}
         }
     }
 

@@ -168,6 +168,18 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::TupleDestructure(_, inner) => {
                 self.extract_ids_recursive(inner, ids);
             }
+            Expr::ArrowMut { target, index, value, .. } => {
+                self.extract_ids_recursive(target, ids);
+                self.extract_ids_recursive(index, ids);
+                if let Some(v) = value {
+                    self.extract_ids_recursive(v, ids);
+                }
+            }
+            Expr::ArrowDiscard { target, index } => {
+                self.extract_ids_recursive(target, ids);
+                self.extract_ids_recursive(index, ids);
+            }
+            Expr::Ellipsis => {}
         }
     }
 
@@ -183,6 +195,10 @@ impl<'a> DataflowAnalyzer<'a> {
             SliceCoordinate::Named { coord, .. } => {
                 self.extract_ids_from_slice_coord(coord, ids);
             }
+            SliceCoordinate::AtDimension { coord, .. } => {
+                self.extract_ids_from_slice_coord(coord, ids);
+            }
+            SliceCoordinate::Ellipsis => {}
         }
     }
 

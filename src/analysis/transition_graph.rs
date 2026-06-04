@@ -405,8 +405,20 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                 collect_identifiers(elem, out);
             }
         }
+        Expr::ArrowMut { target, index, value, .. } => {
+            collect_identifiers(target, out);
+            collect_identifiers(index, out);
+            if let Some(v) = value {
+                collect_identifiers(v, out);
+            }
+        }
+            Expr::ArrowDiscard { target, index } => {
+                collect_identifiers(target, out);
+                collect_identifiers(index, out);
+            }
+            Expr::Ellipsis => {}
+        }
     }
-}
 
 fn collect_identifiers_in_coord(coord: &SliceCoordinate, out: &mut HashSet<String>) {
     match coord {
@@ -415,11 +427,15 @@ fn collect_identifiers_in_coord(coord: &SliceCoordinate, out: &mut HashSet<Strin
             if let Some(s) = start { collect_identifiers(s, out); }
             if let Some(e) = end { collect_identifiers(e, out); }
         }
-        SliceCoordinate::Named { coord, .. } => {
-            collect_identifiers_in_coord(coord, out);
+            SliceCoordinate::Named { coord, .. } => {
+                collect_identifiers_in_coord(coord, out);
+            }
+            SliceCoordinate::AtDimension { coord, .. } => {
+                collect_identifiers_in_coord(coord, out);
+            }
+            SliceCoordinate::Ellipsis => {}
         }
     }
-}
 
 fn extract_write_set(body: &[Statement], state_fields: &HashSet<String>) -> HashSet<String> {
     let mut writes = HashSet::new();

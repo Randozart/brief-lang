@@ -297,6 +297,19 @@ pub enum SliceCoordinate {
     Range { start: Option<Box<Expr>>, end: Option<Box<Expr>> },
     /// Named dimension: `time:5` or `time:0..10`
     Named { name: String, coord: Box<SliceCoordinate> },
+    /// `@dim: coord` — positional dimension targeting
+    AtDimension { dimension: usize, coord: Box<SliceCoordinate> },
+    /// `...` — ellipsis, expands to fill all unspecified dimensions
+    Ellipsis,
+}
+
+/// Direction of arrow mutation
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArrowDir {
+    /// `&list <- x` — value flows into the list
+    Push,
+    /// `x <- &list` — value flows out of the list
+    Pop,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -310,6 +323,21 @@ pub enum Expr {
     Identifier(String),
     OwnedRef(String),
     PriorState(String),
+    /// `...` — ellipsis, expands to fill unspecified dimensions in bracket context
+    Ellipsis,
+    /// Collection structural mutation: `&list <- x`, `x <- &list`, or `&list[i] <- x`
+    /// `index` is `Expr::Term` for full-range (end operations)
+    ArrowMut {
+        dir: ArrowDir,
+        target: Box<Expr>,
+        index: Box<Expr>,
+        value: Option<Box<Expr>>,
+    },
+    /// Discard pop/remove: `<- &list` or `<- &list[i]`
+    ArrowDiscard {
+        target: Box<Expr>,
+        index: Box<Expr>,
+    },
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
     Mul(Box<Expr>, Box<Expr>),

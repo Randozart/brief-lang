@@ -422,19 +422,6 @@ impl TypeChecker {
             },
         );
 
-        // List append
-        self.signatures.insert(
-            "list_append".to_string(),
-            Signature {
-                name: "list_append".to_string(),
-                input_types: vec![Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())]), Type::TypeVar("T".to_string())],
-                result_type: ResultType::Projection(vec![Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
         // Result<T, E> methods
         self.signatures.insert(
             "is_ok".to_string(),
@@ -493,21 +480,6 @@ impl TypeChecker {
                     Type::TypeVar("T".to_string()),
                 ],
                 result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
-        self.signatures.insert(
-            "get".to_string(),
-            Signature {
-                name: "get".to_string(),
-                input_types: vec![
-                    Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())]),
-                    Type::Int,
-                ],
-                result_type: ResultType::Projection(vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])]),
                 source: None,
                 alias: None,
                 bound_defn: None,

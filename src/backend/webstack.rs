@@ -1780,6 +1780,11 @@ impl WebstackGenerator {
                 let inner = self.expr_to_js_slice_coord(coord);
                 format!("{}:{}", name, inner)
             }
+            crate::ast::SliceCoordinate::AtDimension { dimension, coord } => {
+                let inner = self.expr_to_js_slice_coord(coord);
+                format!("@{}:{}", dimension, inner)
+            }
+            crate::ast::SliceCoordinate::Ellipsis => "...".to_string(),
         }
     }
 

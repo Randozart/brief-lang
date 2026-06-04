@@ -498,7 +498,7 @@ defn tokenize(source: String) -> Result<List<Token>, String> {
         let result = next_token(state);
         [is_ok(result)] {
             let (tok, new_state) = unwrap(result);
-            &tokens = list_append(tokens, tok);
+            &tokens <- tok;
             &state = new_state;
             [tok != TokenEof] {
                 term tokenize_continue(source, tokens, state);
@@ -516,7 +516,7 @@ defn tokenize_continue(source: String, tokens: List<Token>, state: LexerState) -
     let result = next_token(state);
     [is_ok(result)] {
         let (tok, new_state) = unwrap(result);
-        let tokens = list_append(tokens, tok);
+        &tokens <- tok;
         [tok != TokenEof] {
             term tokenize_continue(source, tokens, new_state);
         };

@@ -20,15 +20,16 @@ defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][term.is_empty()]
 // ===== OPERATIONS =====
 
 defn push<T>(stack: Stack<T>, item: T) [true][term.len() == stack.len() + 1] -> Stack<T> {
-    term Stack { items: stack.items + [item] };
+    &stack.items <- item;
+    term stack;
 };
 
 defn pop<T>(stack: Stack<T>) [!stack.is_empty()][term.len() == stack.len() - 1] -> Stack<T> {
     [stack.is_empty()] {
         term stack;
     };
-    let items: List<T> = stack.items[0..stack.len()-1];
-    term Stack { items: items };
+    <- &stack.items;
+    term stack;
 };
 
 defn peek<T>(stack: Stack<T>) [!stack.is_empty()][true] -> Option<T> {

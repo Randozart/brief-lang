@@ -632,6 +632,10 @@ impl RustBackend {
                         crate::ast::SliceCoordinate::Named { name, coord } => {
                             format!("{}:{}", name, self.expr_to_rust_slice_coord(coord))
                         }
+                        crate::ast::SliceCoordinate::AtDimension { dimension, coord } => {
+                            format!("@{}:{}", dimension, self.expr_to_rust_slice_coord(coord))
+                        }
+                        crate::ast::SliceCoordinate::Ellipsis => "...".to_string(),
                     }
                 }).collect();
                 format!("{}[{}]", val, coords.join(", "))
@@ -736,6 +740,10 @@ impl RustBackend {
             crate::ast::SliceCoordinate::Named { name, coord } => {
                 format!("{}:{}", name, self.expr_to_rust_slice_coord(coord))
             }
+            crate::ast::SliceCoordinate::AtDimension { dimension, coord } => {
+                format!("@{}:{}", dimension, self.expr_to_rust_slice_coord(coord))
+            }
+            crate::ast::SliceCoordinate::Ellipsis => "...".to_string(),
         }
     }
 

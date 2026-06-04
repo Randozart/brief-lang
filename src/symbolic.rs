@@ -260,8 +260,10 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             SymbolicValue::Unknown
         }
         Expr::Term | Expr::Slice { .. } | Expr::MultiSlice { .. } | Expr::ForAll { .. } | Expr::Exists { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) | Expr::Concat(_, _) | Expr::Cast(_, _) | Expr::Match { .. } => SymbolicValue::Unknown,
+            Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } => SymbolicValue::Unknown,
+            Expr::Ellipsis => SymbolicValue::Unknown,
+        }
     }
-}
 
 /// Try to simplify a binary operation on symbolic values
 fn simplify_binary(op: &str, left: &SymbolicValue, right: &SymbolicValue) -> Option<SymbolicValue> {

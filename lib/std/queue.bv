@@ -20,15 +20,16 @@ defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][term.is_empty()]
 // ===== OPERATIONS =====
 
 defn enqueue<T>(queue: Queue<T>, item: T) [true][term.len() == queue.len() + 1] -> Queue<T> {
-    term Queue { items: queue.items + [item] };
+    &queue.items <- item;
+    term queue;
 };
 
 defn dequeue<T>(queue: Queue<T>) [!queue.is_empty()][term.len() == queue.len() - 1] -> Queue<T> {
     [queue.is_empty()] {
         term queue;
     };
-    let items: List<T> = queue.items[1..queue.len()];
-    term Queue { items: items };
+    <- &queue.items[0];
+    term queue;
 };
 
 defn front<T>(queue: Queue<T>) [!queue.is_empty()][true] -> Option<T> {

@@ -161,3 +161,12 @@ benchmarks/print_loop_c
 # Design doc (in review)
 /docs/design/safety-and-turing-completeness.md
 *.opt.ll
+
+# Build artifacts
+benchmarks/nbody_newton
+benchmarks/nbody_newton_c
+benchmarks/nbody_sqrt
+benchmarks/nbody_sqrt_c
+
+# Scratch
+scratch/
