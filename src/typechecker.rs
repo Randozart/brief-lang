@@ -25,7 +25,7 @@ use crate::errors::{Diagnostic, Severity, Span};
 use crate::ffi;
 use crate::symbolic;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub use crate::errors::TypeError;
@@ -628,6 +628,127 @@ impl TypeChecker {
                     self.struct_fields.insert(struct_def.name.clone(), fields);
                 }
                 _ => {}
+            }
+        }
+
+        // UFCS: resolve len(list) and list.len() to native Expr::ListLen
+        {
+            use crate::ast::*;
+            let list_state_fields: HashSet<String> = program.items.iter().filter_map(|item| {
+                if let TopLevel::StateDecl(s) = item {
+                    if matches!(&s.ty, Type::Applied(name, _) if name == "List") {
+                        return Some(s.name.clone());
+                    }
+                }
+                None
+            }).collect();
+
+            fn resolve_expr(expr: &mut Expr, list_fields: &HashSet<String>) {
+                match expr {
+                    Expr::Call(name, args) if name == "len" && args.len() == 1 => {
+                        if let Expr::Identifier(var) = &args[0] {
+                            if list_fields.contains(var) {
+                                *expr = Expr::ListLen(Box::new(args.remove(0)));
+                                return;
+                            }
+                        }
+                    }
+                    Expr::FieldAccess(obj, field) if field == "len" => {
+                        if let Expr::Identifier(var) = obj.as_ref() {
+                            if list_fields.contains(var) {
+                                *expr = Expr::ListLen(obj.clone());
+                                return;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                // Recurse into children
+                walk_expr_mut(expr, list_fields);
+            }
+
+            fn walk_expr_mut(expr: &mut Expr, list_fields: &HashSet<String>) {
+                match expr {
+                    Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+                    | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
+                    | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
+                    | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b)
+                    | Expr::BitXor(a, b) | Expr::Shl(a, b) | Expr::Shr(a, b)
+                    | Expr::Concat(a, b) => {
+                        resolve_expr(a, list_fields);
+                        resolve_expr(b, list_fields);
+                    }
+                    Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::ListLen(a)
+                    | Expr::Cast(a, _) => resolve_expr(a, list_fields),
+                    Expr::Call(_, args) => {
+                        for arg in args.iter_mut() {
+                            resolve_expr(arg, list_fields);
+                        }
+                    }
+                    Expr::ListLiteral(elems) => {
+                        for elem in elems.iter_mut() {
+                            resolve_expr(elem, list_fields);
+                        }
+                    }
+                    Expr::ListIndex(list, idx) => {
+                        resolve_expr(list, list_fields);
+                        resolve_expr(idx, list_fields);
+                    }
+                    Expr::FieldAccess(obj, _) => resolve_expr(obj, list_fields),
+                    Expr::ArrowMut { target, index, value, .. } => {
+                        resolve_expr(target, list_fields);
+                        resolve_expr(index, list_fields);
+                        if let Some(v) = value {
+                            resolve_expr(v, list_fields);
+                        }
+                    }
+                    Expr::ArrowDiscard { target, index } => {
+                        resolve_expr(target, list_fields);
+                        resolve_expr(index, list_fields);
+                    }
+                    Expr::Tuple(elems) => {
+                        for elem in elems.iter_mut() {
+                            resolve_expr(elem, list_fields);
+                        }
+                    }
+                    Expr::Block(stmts, last) => {
+                        for stmt in stmts.iter_mut() {
+                            resolve_stmt(stmt, list_fields);
+                        }
+                        resolve_expr(last, list_fields);
+                    }
+                    _ => {}
+                }
+            }
+
+            fn resolve_stmt(stmt: &mut Statement, list_fields: &HashSet<String>) {
+                match stmt {
+                    Statement::Assignment { lhs, expr, .. } => {
+                        resolve_expr(lhs, list_fields);
+                        resolve_expr(expr, list_fields);
+                    }
+                    Statement::Let { expr: Some(e), .. } => resolve_expr(e, list_fields),
+                    Statement::Expression(e) => resolve_expr(e, list_fields),
+                    Statement::Guarded { condition, statements } => {
+                        resolve_expr(condition, list_fields);
+                        for s in statements.iter_mut() {
+                            resolve_stmt(s, list_fields);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            for item in &mut program.items {
+                match item {
+                    TopLevel::Transaction(txn) => {
+                        resolve_expr(&mut txn.contract.pre_condition, &list_state_fields);
+                        for stmt in txn.body.iter_mut() {
+                            resolve_stmt(stmt, &list_state_fields);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
 

@@ -3411,6 +3411,7 @@ mod tests {
 
             rct txn process [true][count == total] {
                 &count = count + 1;
+                term;
             };
         "#;
 
@@ -3433,6 +3434,7 @@ mod tests {
 
             rct txn process [count <= total][count == total] {
                 &count = count + 1;
+                term;
             };
         "#;
 
@@ -3456,6 +3458,7 @@ mod tests {
 
             rct txn process [count < total][count >= total] {
                 &count = count + 1;
+                term;
             };
         "#;
 
@@ -3480,6 +3483,7 @@ mod tests {
 
             rct txn process [count < total][count == total] {
                 &count = count + 5;
+                term;
             };
         "#;
 
@@ -3504,6 +3508,7 @@ mod tests {
 
             rct txn process [count < total][count == total] {
                 &count = count + 5;
+                term;
             };
         "#;
 
@@ -3526,6 +3531,7 @@ mod tests {
 
             rct txn process [count > 0][count == 0] {
                 &count = count - 1;
+                term;
             };
         "#;
 
@@ -3549,6 +3555,7 @@ mod tests {
 
             rct txn process [count != total][count == total] {
                 &count = count + 1;
+                term;
             };
         "#;
 
@@ -3572,6 +3579,7 @@ mod tests {
 
             rct txn process [count == total][count != total] {
                 &count = count + 1;
+                term;
             };
         "#;
 

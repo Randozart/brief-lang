@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Hashtag, Program, SliceCoordinate, Statement, TopLevel};
+use crate::ast::{ArrowDir, Expr, Hashtag, Program, SliceCoordinate, Statement, TopLevel};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -34,6 +34,11 @@ pub struct ReactorNode {
     pub is_pure_body: bool,
     pub write_set: HashSet<String>,
     pub is_effectively_pure: bool,
+    /// Lexicographic tuple ranking: multiple variables that together form
+    /// a well-founded multi-variable ranking function. Each variable has
+    /// an independent decrement path, and the loop exits when ALL reach zero.
+    /// Example: `[x > 0 || y > 0][x == 0 && y == 0]` with guarded decrements.
+    pub lexicographic_vars: Vec<String>,
 }
 
 pub struct ReactorTransitionGraph {
@@ -50,8 +55,11 @@ impl ReactorTransitionGraph {
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
-                    let bounded_pre = extract_bounded_pre(&txn.contract.pre_condition);
-                    let increments = detect_increments(&txn.body);
+                    let simplified_body = simplify_body(&txn.body);
+                    let increments = detect_increments(&simplified_body)
+                        .or_else(|| detect_popcount_decay(&simplified_body))
+                        .or_else(|| detect_collection_drain(&simplified_body));
+                    let bounded_pre = extract_valid_bounded_pre(&txn.contract.pre_condition, &increments);
                     let state_field_names: HashSet<String> = program
                         .items
                         .iter()
@@ -63,19 +71,21 @@ impl ReactorTransitionGraph {
                             }
                         })
                         .collect();
-                    let is_pure = is_pure_body(&txn.body, &state_field_names, &increments);
-                    let write_set = extract_write_set(&txn.body, &state_field_names);
+                    let is_pure = is_pure_body(&simplified_body, &state_field_names, &increments);
+                    let write_set = extract_write_set(&simplified_body, &state_field_names);
+                    let lexicographic_vars = detect_lexicographic_ranking(&txn.contract.pre_condition, &simplified_body);
 
                     nodes.push(ReactorNode {
                         name: txn.name.clone(),
                         is_reactive: txn.is_reactive,
                         precondition: txn.contract.pre_condition.clone(),
-                        body: txn.body.clone(),
+                        body: simplified_body,
                         bounded_pre,
                         increments,
                         is_pure_body: is_pure,
                         write_set,
                         is_effectively_pure: false,
+                        lexicographic_vars,
                     });
                 }
                 TopLevel::Trigger(_) => {
@@ -119,6 +129,17 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                         bound_literal: Some(n),
                     })
                 }
+                // len(list) < N — list drains toward full
+                (Expr::ListLen(list), _) => {
+                    if let Some(name) = expr_name(list) {
+                        Some(BoundedPre {
+                            var: name,
+                            bound_var: format!("__len_bound"),
+                            direction: ConvergeDirection::Increasing,
+                            bound_literal: None,
+                        })
+                    } else { None }
+                }
                 _ => None,
             }
         }
@@ -145,6 +166,28 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                         bound_literal: Some(n),
                     })
                 }
+                // len(list) > 0 — list drains to empty (bound=0)
+                (Expr::ListLen(list), Expr::Integer(0)) => {
+                    if let Some(name) = expr_name(list) {
+                        Some(BoundedPre {
+                            var: name.clone(),
+                            bound_var: format!("__lit__{}", name),
+                            direction: ConvergeDirection::Decreasing,
+                            bound_literal: Some(0),
+                        })
+                    } else { None }
+                }
+                // len(list) > N — list drains to N
+                (Expr::ListLen(list), Expr::Integer(n)) if *n > 0 => {
+                    if let Some(name) = expr_name(list) {
+                        Some(BoundedPre {
+                            var: name.clone(),
+                            bound_var: format!("__lit__{}", name),
+                            direction: ConvergeDirection::Decreasing,
+                            bound_literal: Some(*n),
+                        })
+                    } else { None }
+                }
                 _ => None,
             }
         }
@@ -153,6 +196,267 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
         }
         _ => None,
     }
+}
+
+/// Wraps `extract_bounded_pre` with mutation validation:
+/// Only accept a `BoundedPre` candidate if its variable is actually
+/// mutated in the transaction body (i.e., appears in `IncrementInfo`).
+/// Without this check, `extract_bounded_pre` can pick an immutable
+/// bound variable (e.g., `bound > 0 && count < bound` picks `bound`)
+/// and produce a universal loop condition that never enters the body.
+fn extract_valid_bounded_pre(pre: &Expr, inc: &Option<IncrementInfo>) -> Option<BoundedPre> {
+    let bp = extract_bounded_pre(pre)?;
+    let is_mutated = inc.as_ref().map_or(false, |i| i.var == bp.var);
+    if is_mutated { Some(bp) } else { None }
+}
+
+/// Recursively simplify an expression using algebraic cancellation rules.
+/// Applied bottom-up with fixpoint iteration (max 5 passes) to handle
+/// chains like `((x + R) - R) + 1` → `x + 1`.
+fn simplify_expr(expr: &Expr) -> Expr {
+    let expr = match expr {
+        // Recurse first: simplify children bottom-up
+        Expr::Add(a, b) => Expr::Add(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Sub(a, b) => Expr::Sub(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Mul(a, b) => Expr::Mul(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        // Recurse into all other compound expressions unchanged
+        Expr::Div(a, b) => Expr::Div(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Mod(a, b) => Expr::Mod(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Eq(a, b) => Expr::Eq(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Ne(a, b) => Expr::Ne(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Lt(a, b) => Expr::Lt(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Le(a, b) => Expr::Le(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Gt(a, b) => Expr::Gt(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Ge(a, b) => Expr::Ge(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::And(a, b) => Expr::And(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Or(a, b) => Expr::Or(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::BitAnd(a, b) => Expr::BitAnd(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::BitOr(a, b) => Expr::BitOr(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::BitXor(a, b) => Expr::BitXor(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Shl(a, b) => Expr::Shl(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Shr(a, b) => Expr::Shr(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Concat(a, b) => Expr::Concat(
+            Box::new(simplify_expr(a)),
+            Box::new(simplify_expr(b)),
+        ),
+        Expr::Not(a) => Expr::Not(Box::new(simplify_expr(a))),
+        Expr::Neg(a) => Expr::Neg(Box::new(simplify_expr(a))),
+        Expr::BitNot(a) => Expr::BitNot(Box::new(simplify_expr(a))),
+        Expr::Cast(a, t) => Expr::Cast(Box::new(simplify_expr(a)), t.clone()),
+        Expr::ListLen(a) => Expr::ListLen(Box::new(simplify_expr(a))),
+        Expr::ListIndex(list, idx) => Expr::ListIndex(
+            Box::new(simplify_expr(list)),
+            Box::new(simplify_expr(idx)),
+        ),
+        Expr::FieldAccess(obj, f) => Expr::FieldAccess(
+            Box::new(simplify_expr(obj)),
+            f.clone(),
+        ),
+        Expr::ListLiteral(elems) => Expr::ListLiteral(
+            elems.iter().map(|e| simplify_expr(e)).collect(),
+        ),
+        Expr::Tuple(elems) => Expr::Tuple(
+            elems.iter().map(|e| simplify_expr(e)).collect(),
+        ),
+        Expr::Block(stmts, last) => Expr::Block(
+            stmts.iter().map(|s| simplify_stmt(s)).collect(),
+            Box::new(simplify_expr(last)),
+        ),
+        other => other.clone(),
+    };
+
+    // Now apply algebraic rules to the simplified children.
+    // Use `if let` with `.as_ref()` to match through Box<Expr> wrappers.
+    match &expr {
+        Expr::Sub(sub_lhs, sub_rhs) => {
+            // R1: (a + b) - a → b  and  (a + b) - b → a
+            if let Expr::Add(add_lhs, add_rhs) = sub_lhs.as_ref() {
+                if vars_match(add_lhs, sub_rhs) {
+                    return add_rhs.as_ref().clone();
+                }
+                if vars_match(add_rhs, sub_rhs) {
+                    return add_lhs.as_ref().clone();
+                }
+            }
+            // R2: a - (a - b) → b
+            if let Expr::Sub(inner_a, inner_b) = sub_rhs.as_ref() {
+                if vars_match(sub_lhs, inner_a) {
+                    return inner_b.as_ref().clone();
+                }
+            }
+            // R3: (a + b) - (a + c) → b - c
+            if let (Expr::Add(a1, b1), Expr::Add(a2, b2)) = (sub_lhs.as_ref(), sub_rhs.as_ref()) {
+                if vars_match(a1, a2) && !vars_match(b1, b2) {
+                    return Expr::Sub(
+                        Box::new(b1.as_ref().clone()),
+                        Box::new(b2.as_ref().clone()),
+                    );
+                }
+            }
+            // R5: (a - b) - (c - b) → a - c
+            if let (Expr::Sub(sa, sb1), Expr::Sub(sc, sb2)) = (sub_lhs.as_ref(), sub_rhs.as_ref()) {
+                if vars_match(sb1, sb2) {
+                    return Expr::Sub(
+                        Box::new(sa.as_ref().clone()),
+                        Box::new(sc.as_ref().clone()),
+                    );
+                }
+            }
+            // R7: a - 0 → a
+            if let Expr::Integer(0) = sub_rhs.as_ref() {
+                return sub_lhs.as_ref().clone();
+            }
+            expr
+        }
+
+        Expr::Add(add_lhs, add_rhs) => {
+            // R4: (a - b) + b → a
+            if let Expr::Sub(sub_a, sub_b) = add_lhs.as_ref() {
+                if vars_match(sub_b, add_rhs) {
+                    return sub_a.as_ref().clone();
+                }
+            }
+            // R6: a + 0 → a
+            if let Expr::Integer(0) = add_rhs.as_ref() {
+                return add_lhs.as_ref().clone();
+            }
+            // R6b: 0 + a → a
+            if let Expr::Integer(0) = add_lhs.as_ref() {
+                return add_rhs.as_ref().clone();
+            }
+            expr
+        }
+
+        Expr::Mul(mul_lhs, mul_rhs) => {
+            // R8: a * 1 → a
+            if let Expr::Integer(1) = mul_rhs.as_ref() {
+                return mul_lhs.as_ref().clone();
+            }
+            // R8b: 1 * a → a
+            if let Expr::Integer(1) = mul_lhs.as_ref() {
+                return mul_rhs.as_ref().clone();
+            }
+            // R10: a * 0 → 0
+            if let Expr::Integer(0) = mul_rhs.as_ref() {
+                return Expr::Integer(0);
+            }
+            // R10b: 0 * a → 0
+            if let Expr::Integer(0) = mul_lhs.as_ref() {
+                return Expr::Integer(0);
+            }
+            expr
+        }
+
+        Expr::Div(div_lhs, div_rhs) => {
+            // R9: a / 1 → a
+            if let Expr::Integer(1) = div_rhs.as_ref() {
+                return div_lhs.as_ref().clone();
+            }
+            expr
+        }
+
+        _ => expr,
+    }
+}
+
+fn vars_match(a: &Expr, b: &Expr) -> bool {
+    matches!((a, b), (Expr::Identifier(an), Expr::Identifier(bn)) if an == bn)
+}
+
+/// Simplify a statement by simplifying its expression parts.
+fn simplify_stmt(stmt: &Statement) -> Statement {
+    match stmt {
+        Statement::Assignment { lhs, expr, timeout, modifiers } => Statement::Assignment {
+            lhs: lhs.clone(),
+            expr: simplify_expr(expr),
+            timeout: timeout.clone(),
+            modifiers: modifiers.clone(),
+        },
+        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers } => Statement::Let {
+            name: name.clone(),
+            ty: ty.clone(),
+            expr: expr.as_ref().map(|e| simplify_expr(e)),
+            address: *address,
+            address_expr: address_expr.clone(),
+            bit_range: bit_range.clone(),
+            is_override: *is_override,
+            modifiers: modifiers.clone(),
+        },
+        Statement::Expression(e) => Statement::Expression(simplify_expr(e)),
+        Statement::Guarded { condition, statements } => Statement::Guarded {
+            condition: simplify_expr(condition),
+            statements: statements.iter().map(|s| simplify_stmt(s)).collect(),
+        },
+        other => other.clone(),
+    }
+}
+
+/// Simplify a transaction body using algebraic cancellation rules.
+/// Applies fixpoint iteration (max 5 passes) to handle chained reductions.
+pub fn simplify_body(body: &[Statement]) -> Vec<Statement> {
+    let mut current = body.to_vec();
+    for _ in 0..5 {
+        let next: Vec<Statement> = current.iter().map(|s| simplify_stmt(s)).collect();
+        if next == current {
+            break;
+        }
+        current = next;
+    }
+    current
 }
 
 fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
@@ -182,9 +486,159 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
                     }
                 }
             }
+            // Interval bounds: (x + R1) - R2 where net step R1 - R2 ≥ 1
+            if let Expr::Sub(inner, rhs) = expr {
+                if let Expr::Add(lhs, rhs2) = inner.as_ref() {
+                    let is_self_add = matches!(lhs.as_ref(), Expr::Identifier(v) if *v == name);
+                    if is_self_add {
+                        // Try r1 - r2 with both as constants
+                        let r1 = if let Expr::Integer(n) = rhs2.as_ref() { Some(*n) } else { None };
+                        let r2 = if let Expr::Integer(n) = rhs.as_ref() { Some(*n) } else { None };
+                        if let (Some(r1_val), Some(r2_val)) = (r1, r2) {
+                            let net = r1_val - r2_val;
+                            if net > 0 {
+                                return Some(IncrementInfo { var: name.clone(), delta: net });
+                            }
+                        }
+                        // If only one side is a constant and positive, assume at least 1
+                        if r1.map_or(false, |v| v >= 1) && r2.is_none() {
+                            return Some(IncrementInfo { var: name.clone(), delta: 1 });
+                        }
+                    }
+                }
+            }
         }
     }
     None
+}
+
+/// Detect popcount decay: `reg = reg & (reg - 1)` clears one bit per iteration.
+/// The ranking function `popcount(reg) → 0` is bounded at 64 bits.
+fn detect_popcount_decay(body: &[Statement]) -> Option<IncrementInfo> {
+    for stmt in body {
+        if let Statement::Assignment { lhs, expr, .. } = stmt {
+            let name = match lhs {
+                Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                _ => continue,
+            };
+            // reg & (reg - 1)
+            if let Expr::BitAnd(a, b) = expr {
+                let a_is_self = matches!(a.as_ref(), Expr::Identifier(v) if *v == name);
+                let b_is_self_minus = if let Expr::Sub(inner, val) = b.as_ref() {
+                    matches!(inner.as_ref(), Expr::Identifier(v) if *v == name)
+                        && matches!(val.as_ref(), Expr::Integer(1))
+                } else {
+                    false
+                };
+                if a_is_self && b_is_self_minus {
+                    return Some(IncrementInfo { var: name.clone(), delta: 1 });
+                }
+                // (reg - 1) & reg
+                let b_is_self = matches!(b.as_ref(), Expr::Identifier(v) if *v == name);
+                let a_is_self_minus = if let Expr::Sub(inner, val) = a.as_ref() {
+                    matches!(inner.as_ref(), Expr::Identifier(v) if *v == name)
+                        && matches!(val.as_ref(), Expr::Integer(1))
+                } else {
+                    false
+                };
+                if b_is_self && a_is_self_minus {
+                    return Some(IncrementInfo { var: name.clone(), delta: 1 });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Detect collection drain: `<- &list` or `x <- &list` pops from the list,
+/// decreasing its length by exactly 1 per iteration.
+/// Ranking function: `τ = len(list) → 0`, decreases by exactly 1 per pop.
+fn detect_collection_drain(body: &[Statement]) -> Option<IncrementInfo> {
+    for stmt in body {
+        match stmt {
+            // Pattern 1: x <- &list  — ArrowMut(Pop, target, index, Some(value))
+            Statement::Let { expr: Some(e), .. } => {
+                if let Expr::ArrowMut { dir: ArrowDir::Pop, target, index, .. } = e {
+                    if let Expr::Term = index.as_ref() {
+                        if let Some(name) = expr_name(target.as_ref()) {
+                            return Some(IncrementInfo { var: name, delta: 1 });
+                        }
+                    }
+                }
+            }
+            // Pattern 2: <- &list — ArrowDiscard(target, index)
+            Statement::Expression(Expr::ArrowDiscard { target, index }) => {
+                if let Expr::Term = index.as_ref() {
+                    if let Some(name) = expr_name(target.as_ref()) {
+                        return Some(IncrementInfo { var: name, delta: 1 });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Detect a lexicographic tuple ranking: precondition is a disjunction (Or)
+/// of decreasing bounds on different variables, and each variable has a
+/// corresponding decrement in the body. This is a multi-variable ranking
+/// function where the loop exits when ALL variables reach zero.
+///
+/// Example: `[x > 0 || y > 0][x == 0 && y == 0]` with body
+/// `&x = x - 1; &y = y - 1;` (each decremented in its own guard).
+fn detect_lexicographic_ranking(pre: &Expr, body: &[Statement]) -> Vec<String> {
+    /// Collect decreasing-bound variable names from an Or chain
+    fn collect_or_vars(expr: &Expr, out: &mut Vec<String>) {
+        match expr {
+            Expr::Or(l, r) => {
+                collect_or_vars(l, out);
+                collect_or_vars(r, out);
+            }
+            _ => {
+                // Check for Gt(var, N) where N >= 0
+                if let Expr::Gt(inner, val) = expr {
+                    if let (Expr::Identifier(var), Expr::Integer(n)) = (inner.as_ref(), val.as_ref()) {
+                        if *n >= 0 && !out.contains(var) {
+                            out.push(var.clone());
+                        }
+                    }
+                }
+                // Check for Ge(var, N) where N > 0
+                if let Expr::Ge(inner, val) = expr {
+                    if let (Expr::Identifier(var), Expr::Integer(n)) = (inner.as_ref(), val.as_ref()) {
+                        if *n > 0 && !out.contains(var) {
+                            out.push(var.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut vars = Vec::new();
+    collect_or_vars(pre, &mut vars);
+    if vars.len() < 2 {
+        return Vec::new();
+    }
+
+    // Verify each variable has a decrement in the body
+    let decremented: HashSet<String> = body.iter().filter_map(|stmt| {
+        if let Statement::Assignment { lhs, expr, .. } = stmt {
+            let name = match lhs {
+                Expr::Identifier(n) | Expr::OwnedRef(n) => Some(n.clone()),
+                _ => None,
+            }?;
+            let is_decrement = if let Expr::Sub(a, d) = expr {
+                            matches!(a.as_ref(), Expr::Identifier(v) if *v == name)
+                                && matches!(d.as_ref(), Expr::Integer(val) if *val >= 1)
+                        } else { false };
+            if is_decrement { Some(name) } else { None }
+        } else { None }
+    }).collect();
+
+    vars.retain(|v| decremented.contains(v));
+    if vars.len() < 2 { vec![] } else { vars }
 }
 
 fn is_pure_body(
@@ -201,7 +655,7 @@ fn is_pure_body(
                     _ => return false,
                 };
                 if Some(&name) == inc_var {
-                    if !matches!(expr, Expr::Add(_, _)) {
+                    if !matches!(expr, Expr::Add(_, _) | Expr::BitAnd(_, _)) {
                         return false;
                     }
                     continue;
@@ -349,7 +803,7 @@ pub fn compute_live_fields(
 /// `frgn __print_float(energy)` keep `energy` (and transitively `x0`, `p00`, ...) alive.
 fn scan_for_ffi_args(stmt: &Statement, out: &mut HashSet<String>) {
     match stmt {
-        Statement::Expression(expr) => {
+        Statement::Expression(expr) | Statement::Let { expr: Some(expr), .. } => {
             collect_ffi_identifiers(expr, out);
         }
         Statement::Guarded { condition: _, statements } => {

@@ -18,8 +18,9 @@ let b: Int = 0;
 
 rct txn inc_a [bound > 0 && a < bound][a == bound] {
     &a = a + 1;
+    term;
 };
-
 rct txn inc_b [bound > 0 && b < bound][b == bound] {
     &b = b + 1;
+    term;
 };

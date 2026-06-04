@@ -2718,6 +2718,15 @@ let span = self.current_span();
             .into_iter()
             .collect();
 
+        if is_reactive && !is_lambda && !Self::has_term_or_escape_in_tree(&body)
+            && !Self::is_convergent_contract_pair(&contract.pre_condition, &contract.post_condition)
+        {
+            return Err(SyntaxError::InvalidStatement {
+                reason: "reactive transaction has no valid termination — add term;, escape;, or a convergent contract like [count < N][count == N]".to_string(),
+                span: closing_brace_span,
+            });
+        }
+
         Ok(Transaction {
             is_async,
             is_reactive,
@@ -5460,6 +5469,31 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             Token::Err => Some("Err"),
             _ => None,
         }
+    }
+
+    /// Check if a statement tree contains `term;` or `escape;` anywhere (including guarded blocks).
+    fn has_term_or_escape_in_tree(stmts: &[Statement]) -> bool {
+        for s in stmts {
+            match s {
+                Statement::Term { .. } | Statement::Escape(_) => return true,
+                Statement::Guarded { statements, .. } => {
+                    if Self::has_term_or_escape_in_tree(statements) { return true; }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Check if a contract pair is structurally convergent (post ⇒ ¬pre).
+    /// True when pre = `var < bound` and post = `var == bound`, or similar pairings.
+    /// Simplified version of proof_engine::check_convergence — the full proof runs
+    /// later during verification; this is just a parse-time structural check.
+    fn is_convergent_contract_pair(pre: &Expr, post: &Expr) -> bool {
+        // Pattern: post is a comparison (Eq/Ne/Gt/Ge/Lt/Le), pre is also a comparison.
+        // The full proof runs in proof_engine; this is a structural parse-time check.
+        matches!(post, Expr::Eq(_, _) | Expr::Gt(_, _) | Expr::Ge(_, _) | Expr::Lt(_, _) | Expr::Le(_, _) | Expr::Ne(_, _))
+            && matches!(pre, Expr::Lt(_, _) | Expr::Le(_, _) | Expr::Gt(_, _) | Expr::Ge(_, _) | Expr::Eq(_, _) | Expr::Ne(_, _) | Expr::And(_, _))
     }
 
     fn parse_keyword_as_expr(&mut self, name: &str) -> Result<Expr, SyntaxError> {

@@ -44,4 +44,5 @@ rct txn process [bound > 0 && count < bound && x1 == x1 && x2 == x2 && y1 == y1 
     &y1 = out;
 
     &count = count + 1;
+    term;
 };

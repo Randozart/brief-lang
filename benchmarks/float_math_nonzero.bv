@@ -39,4 +39,5 @@ rct txn tick [
     &p11 = p11 + Q11;
     &p22 = p22 + Q22;
     &count = count + 1;
+    term;
 };

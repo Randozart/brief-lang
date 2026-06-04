@@ -11,8 +11,10 @@
 
 import { __get_env_int } from "std/env.bv";
 import "link/brief_rt.o";
+import { io_pending } from "std/brief_rt.bv";
 
 frgn __sqrtf(val: Float) -> Float;
+frgn __print_float(d: Float) -> Bool from "libruntime";
 frgn __print_float(val: Float) -> Bool;
 
 let bound: Int = __get_env_int("BOUND");
@@ -244,7 +246,8 @@ rct txn simulate [
     let ek4: Float = 0.5 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
     let energy: Float = ep + ek0 + ek1 + ek2 + ek3 + ek4;
 
-    [count == bound] {
+    [count % 5000000 == 0] {
         let __printed: Bool = __print_float(energy);
     };
+    term;
 };

@@ -398,4 +398,5 @@ rct txn simulate [
     [count == bound] {
         let __printed: Bool = __print_float(energy);
     };
+    term;
 };

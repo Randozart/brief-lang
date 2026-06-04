@@ -26,9 +26,16 @@ let acc_b: Int = 0;
 rct txn step_a [count < total][count == total] {
     &acc_a = acc_a + count;
     &count = count + 1;
+    term;
+};
+rct txn step_b [count < total][count == total] {
+    &acc_b = acc_b + count;
+    &count = count + 1;
+    term;
 };
 
 rct txn step_b [count < total][count == total] {
     &acc_b = acc_b + count;
     &count = count + 1;
+    term;
 };
