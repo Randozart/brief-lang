@@ -1,0 +1,39 @@
+// cancel_math — Algebraic simplification benchmark
+//
+// Tests: compiler proves convergence for `x = x + (R + 1) - R` by
+// simplifying to `x = x + 1` via algebraic cancellation (simplify_body).
+// Without the simplification, detect_increments returns None (not a
+// bare `x = x + N` pattern) and the loop cannot prove termination.
+//
+// The simplification pass rewrites `(R + 1) - R` → `1`, then
+// `detect_increments` picks up `count = count + 1` as delta=1.
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/cancel_math.bv \
+//       --out benchmarks --optimize-budget 256
+//
+// C reference: cancel_math_c.c
+
+#!exit count == N && acc >= 0;
+
+import { __get_env_int } from "std/env.bv";
+import "link/brief_rt.o";
+
+frgn __print_int(n: Int) -> Bool from "libruntime";
+
+let N: Int = __get_env_int("BOUND");
+let count: Int = 0;
+let acc: Int = 0;
+
+const R: Int = 100;
+
+rct txn step [count < N][count == N] {
+    &acc = acc + count;
+    &count = count + (R + 1 - R);
+
+    [count % 5000000 == 0] {
+        __print_int(acc);
+    };
+
+    term;
+};

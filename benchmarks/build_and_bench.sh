@@ -48,6 +48,10 @@ BENCHMARKS=(
     "mandelbrot"
     "kalman_filter_runtime"
     "knucleotide"
+    "cancel_math"
+    "bit_clear"
+    "queue_drain"
+    "interval_step"
 )
 
 build_bench() {

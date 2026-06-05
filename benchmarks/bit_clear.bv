@@ -1,0 +1,35 @@
+// bit_clear — Popcount decay benchmark
+//
+// Tests: compiler proves convergence for `reg = reg & (reg - 1)` via
+// `detect_popcount_decay`. Each iteration clears exactly one bit,
+// so the ranking function `popcount(reg) → 0` converges in at most
+// 63 iterations (for a 63-bit positive integer).
+//
+// Unlike other benchmarks, this is inherently bounded by the integer
+// width — it runs exactly popcount(initial_reg) = 63 iterations for
+// i64::MAX. No BOUND env var needed.
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/bit_clear.bv \
+//       --out benchmarks --optimize-budget 256
+//
+// C reference: bit_clear_c.c
+
+#!exit reg == 0;
+
+import "link/brief_rt.o";
+
+frgn __print_int(n: Int) -> Bool from "libruntime";
+
+const initial_reg: Int = 0x7FFFFFFFFFFFFFFF;
+let reg: Int = initial_reg;
+
+rct txn clear [reg != 0][reg == 0] {
+    &reg = reg & (reg - 1);
+
+    [reg % 100000 == 0] {
+        __print_int(reg);
+    };
+
+    term;
+};
