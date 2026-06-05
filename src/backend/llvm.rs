@@ -1341,7 +1341,7 @@ self.emit_declares(&mut out);
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn").ok();
         writeln!(out, "    memory(argmem: readwrite)").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn memory(argmem: write) }}").ok();
+        writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn }}").ok();
         writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(readwrite) }}").ok();
         writeln!(out, "attributes #3 = {{ nofree norecurse nosync nounwind memory(readwrite) }}").ok();
         // SLP-safe attribute variants: #4 = #0 + disable-slp, #5 = #3 + disable-slp.
