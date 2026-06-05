@@ -1950,6 +1950,73 @@ if fn_name == "clone" && !arg_values.is_empty() {
                             Value::Int(i64::MAX),
                         ]))
                     }
+                    ProjectionTarget::Popcount => {
+                        match source_val {
+                            Value::Int(n) => Ok(Value::Int(n.count_ones() as i64)),
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "Popcount projection requires Int".to_string(),
+                            )),
+                        }
+                    }
+                    ProjectionTarget::LeadingZeros => {
+                        match source_val {
+                            Value::Int(n) => Ok(Value::Int(n.leading_zeros() as i64)),
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "LeadingZeros projection requires Int".to_string(),
+                            )),
+                        }
+                    }
+                    ProjectionTarget::TrailingZeros => {
+                        match source_val {
+                            Value::Int(n) => Ok(Value::Int(n.trailing_zeros() as i64)),
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "TrailingZeros projection requires Int".to_string(),
+                            )),
+                        }
+                    }
+                    ProjectionTarget::Absolute => {
+                        match source_val {
+                            Value::Int(n) => Ok(Value::Int(n.abs())),
+                            Value::Float(f) => Ok(Value::Float(f.abs())),
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "Absolute projection requires Int or Float".to_string(),
+                            )),
+                        }
+                    }
+                    ProjectionTarget::BitReverse => {
+                        match source_val {
+                            Value::Int(n) => Ok(Value::Int(n.reverse_bits())),
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "BitReverse projection requires Int".to_string(),
+                            )),
+                        }
+                    }
+                    ProjectionTarget::Type => {
+                        // Return type discriminant as Int
+                        let discriminant = match &source_val {
+                            Value::Int(_) => 1i64,
+                            Value::Float(_) => 2,
+                            Value::Bool(_) => 3,
+                            Value::Char(_) => 4,
+                            Value::String(_) => 5,
+                            Value::List(_) => 6,
+                            Value::Data(_) => 7,
+                            Value::HashMap(_) => 8,
+                            Value::HashSet(_) => 9,
+                            Value::StringBuilder(_) => 10,
+                            Value::Stack(_) => 11,
+                            Value::Queue(_) => 12,
+                            Value::Instance { .. } => 13,
+                            Value::Enum { .. } => 14,
+                            Value::Defn(_) => 15,
+                            Value::Void => 0,
+                        };
+                        Ok(Value::Int(discriminant))
+                    }
+                    ProjectionTarget::PtrBang => {
+                        // Raw pointer — same as Ptr, returns simulated address
+                        Ok(Value::Int(0))
+                    }
                 }
             }
             Expr::FieldAccess(obj_expr, field_name) => {

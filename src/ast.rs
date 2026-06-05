@@ -320,6 +320,13 @@ pub enum ProjectionTarget {
     Ptr,
     Alignment,
     Range,
+    Popcount,
+    LeadingZeros,
+    TrailingZeros,
+    Absolute,
+    BitReverse,
+    Type,
+    PtrBang,
 }
 
 #[derive(Debug, Clone, PartialEq)]

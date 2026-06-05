@@ -187,8 +187,6 @@ benchmarks/fannkuch_redux_merged.opt.bc
 knucleotide_c
 benchmarks/knucleotide
 # Binaries igignore
-trophies/**/*.bc
-trophies/**/*.o
-trophies/**/*.s
 benchmarks/mandelbrot
 benchmarks/mandelbrot_c
+!trophies/**/*

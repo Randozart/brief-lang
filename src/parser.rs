@@ -241,6 +241,7 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Within)) => { self.advance(); Ok("within".to_string()) }
             Some(Ok(Token::Bank)) => { self.advance(); Ok("bank".to_string()) }
             Some(Ok(Token::Match)) => { self.advance(); Ok("match".to_string()) }
+            Some(Ok(Token::PtrBang)) => { self.advance(); Ok("Ptr!".to_string()) }
             Some(Ok(Token::FrgnBang)) => { self.advance(); Ok("frgn!".to_string()) }
             Some(Ok(Token::Syscall)) => { self.advance(); Ok("syscall".to_string()) }
             Some(Ok(Token::SyscallBang)) => { self.advance(); Ok("syscall!".to_string()) }
@@ -4533,9 +4534,18 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             "Ptr" => Ok(ProjectionTarget::Ptr),
             "Alignment" => Ok(ProjectionTarget::Alignment),
             "Range" => Ok(ProjectionTarget::Range),
+            "Popcount" => Ok(ProjectionTarget::Popcount),
+            "LeadingZeros" => Ok(ProjectionTarget::LeadingZeros),
+            "TrailingZeros" => Ok(ProjectionTarget::TrailingZeros),
+            "Absolute" => Ok(ProjectionTarget::Absolute),
+            "BitReverse" => Ok(ProjectionTarget::BitReverse),
+            "Type" => Ok(ProjectionTarget::Type),
+            "Ptr!" => Ok(ProjectionTarget::PtrBang),
             _ => Err(SyntaxError::InvalidExpression {
                 reason: format!(
-                    "expected projection target (Size, Bytes, Ptr, Alignment, Range), found '{}'",
+                    "expected projection target (Size, Bytes, Ptr, Alignment, Range, \
+                     Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!), \
+                     found '{}'",
                     name
                 ),
                 span: self.current_span().unwrap_or_else(Span::dummy),

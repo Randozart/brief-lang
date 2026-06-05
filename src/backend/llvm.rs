@@ -313,6 +313,8 @@ pub struct LlvmBackend {
     llvm_extra_flags: Vec<String>,
     slp_hazard_fns: HashSet<String>,
     reg_float_cache: HashMap<String, String>,
+    /// Type of each emitted register — used for pointer-vs-list dispatch, etc.
+    reg_type_cache: HashMap<String, Type>,
     state_reg_name: String,
     ssa_old_float_regs: HashMap<String, String>,
     ssa_old_int_regs: HashMap<String, String>,
@@ -377,6 +379,7 @@ impl LlvmBackend {
             llvm_extra_flags: Vec::new(),
             slp_hazard_fns: HashSet::new(),
             reg_float_cache: HashMap::new(),
+            reg_type_cache: HashMap::new(),
             state_reg_name: "%state".to_string(),
             ssa_old_float_regs: HashMap::new(),
             ssa_old_int_regs: HashMap::new(),
@@ -1803,6 +1806,25 @@ self.emit_declares(&mut out);
         }
     }
 
+    /// Check if an expression produces a `Ptr<T>` value.
+    /// Used by `ListIndex` to decide between direct pointer GEP vs 2-slot header load.
+    fn is_ptr_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Projection { target, .. } => matches!(target, ProjectionTarget::Ptr),
+            Expr::Identifier(name) => {
+                self.let_binding_types.get(name)
+                    .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr"))
+                    .unwrap_or(false)
+            }
+            Expr::OwnedRef(name) => {
+                self.let_binding_types.get(name)
+                    .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr"))
+                    .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
     // ── Header ────────────────────────────────────────────────
     fn emit_header(&self, out: &mut String) {
         writeln!(out, "; ModuleID = 'program.ll'").ok();
@@ -1814,6 +1836,13 @@ self.emit_declares(&mut out);
     fn emit_declares(&self, out: &mut String) {
         writeln!(out).ok();
         writeln!(out, "declare void @llvm.assume(i1) #1").ok();
+        // LLVM bit manipulation intrinsics
+        writeln!(out, "declare i64 @llvm.ctpop.i64(i64) #1").ok();
+        writeln!(out, "declare i64 @llvm.ctlz.i64(i64, i1) #1").ok();
+        writeln!(out, "declare i64 @llvm.cttz.i64(i64, i1) #1").ok();
+        writeln!(out, "declare i64 @llvm.abs.i64(i64, i1) #1").ok();
+        writeln!(out, "declare double @llvm.fabs.f64(double) #1").ok();
+        writeln!(out, "declare i64 @llvm.bitreverse.i64(i64) #1").ok();
         // __wait_for_event is no longer a built-in intrinsic.
         // Users declare it via frgn __wait_for_event() -> Void from "libruntime";
         // and the normal FFI path handles the declare emission.
@@ -2118,7 +2147,7 @@ self.emit_declares(&mut out);
     // ── DEFINITION ────────────────────────────────────────────
     fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.pending_cleanup.clear();
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         write!(out, "define i64 @{}(", d.name).ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
@@ -2191,7 +2220,7 @@ self.emit_declares(&mut out);
             writeln!(out, "  br i1 true, label %body, label %rollback").ok();
             writeln!(out, "  body:").ok();
             self.txn_counter = 0;
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             self.returns_i64 = false;
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
@@ -2217,7 +2246,7 @@ self.emit_declares(&mut out);
             writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             self.txn_counter = 0;
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             self.returns_i64 = false;
             // Precondition
@@ -2251,7 +2280,7 @@ self.emit_declares(&mut out);
         writeln!(out, "define internal i1 @pre_{}(%State* noalias nocapture %state) #0 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
@@ -2270,7 +2299,7 @@ self.emit_declares(&mut out);
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         // Evaluate precondition
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
@@ -2297,7 +2326,7 @@ self.emit_declares(&mut out);
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
@@ -2312,7 +2341,7 @@ self.emit_declares(&mut out);
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "  rollback:").ok();
@@ -2335,7 +2364,7 @@ self.emit_declares(&mut out);
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
@@ -2387,11 +2416,13 @@ self.emit_declares(&mut out);
                 }
                 self.terminated = true;
             }
-            Statement::Let { name, expr, address_expr, .. } => {
+            Statement::Let { name, expr, ty, address_expr, .. } => {
                 if let Some(e) = expr {
                     let r = self.emit_expr(out, e, indent);
                     self.let_bindings.insert(name.clone(), r.name.clone());
-                    self.let_binding_types.insert(name.clone(), r.ty.clone());
+                    // Use type annotation if available (preserves Ptr<T> etc), otherwise fall back to emitted type
+                    let resolved_ty = ty.clone().unwrap_or_else(|| r.ty.clone());
+                    self.let_binding_types.insert(name.clone(), resolved_ty);
                     writeln!(out, "{}; let {} = {}", indent, name, r).ok();
                 } else {
                     writeln!(out, "{}; let {} = undef", indent, name).ok();
@@ -2947,14 +2978,21 @@ self.emit_declares(&mut out);
             Expr::ListIndex(list, idx) => {
                 let l = self.emit_expr(out, list, indent);
                 let i = self.emit_expr(out, idx, indent);
-                let hp = format!("%lhp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
-                // Load data pointer from slot 0
-                let dp = format!("%ldp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
-                let de = format!("%lde{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, v, de, i).ok();
+                // Check if the source is a Ptr<T> — if so, emit direct GEP instead of header load
+                if self.is_ptr_expr(list) {
+                    let dp = format!("%pdp{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, dp, l).ok();
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, v, dp, i).ok();
+                } else {
+                    let hp = format!("%lhp{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
+                    // Load data pointer from slot 0
+                    let dp = format!("%ldp{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                    let de = format!("%lde{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, v, de, i).ok();
+                }
             }
             Expr::Projection { source, target } => {
                 let l = self.emit_expr(out, source, indent);
@@ -2984,6 +3022,31 @@ self.emit_declares(&mut out);
                     ProjectionTarget::Range => {
                         // Range returns (min, max) — for LLVM, just return i64 range
                         writeln!(out, "{}{} = add i64 0, {}", indent, v, i64::MIN).ok();
+                    }
+                    ProjectionTarget::Popcount => {
+                        writeln!(out, "{}{} = call i64 @llvm.ctpop.i64(i64 {})", indent, v, l).ok();
+                    }
+                    ProjectionTarget::LeadingZeros => {
+                        writeln!(out, "{}{} = call i64 @llvm.ctlz.i64(i64 {}, i1 false)", indent, v, l).ok();
+                    }
+                    ProjectionTarget::TrailingZeros => {
+                        writeln!(out, "{}{} = call i64 @llvm.cttz.i64(i64 {}, i1 false)", indent, v, l).ok();
+                    }
+                    ProjectionTarget::Absolute => {
+                        writeln!(out, "{}{} = call i64 @llvm.abs.i64(i64 {}, i1 false)", indent, v, l).ok();
+                    }
+                    ProjectionTarget::BitReverse => {
+                        writeln!(out, "{}{} = call i64 @llvm.bitreverse.i64(i64 {})", indent, v, l).ok();
+                    }
+                    ProjectionTarget::Type => {
+                        // Type projection — compile-time constant, 0 for runtime
+                        writeln!(out, "{}{} = add i64 0, 0 ; type", indent, v).ok();
+                    }
+                    ProjectionTarget::PtrBang => {
+                        // Raw pointer — same as Ptr, load data pointer from slot 0
+                        let hp = format!("%ppb{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, hp).ok();
                     }
                 }
             }
@@ -3975,7 +4038,7 @@ self.emit_declares(&mut out);
                 writeln!(body4_buf, "{}_body4:", label_prefix).ok();
                 let mut cur = phi_reg.clone();
                 for _ in 0..unroll {
-                    self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+                    self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                     self.terminated = false;
                     self.returns_i64 = false;
                     self.ssa_state_reg = Some(cur);
@@ -3999,7 +4062,7 @@ self.emit_declares(&mut out);
             // --- body1: remainder loop (single iteration) ---
             let mut body1_buf = String::new();
             writeln!(body1_buf, "{}_body1:", label_prefix).ok();
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             self.returns_i64 = false;
             self.ssa_state_reg = Some(phi_reg.clone());
@@ -4210,7 +4273,7 @@ self.emit_declares(&mut out);
                 let skip_l = format!("s_{}", name);
                 writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, skip_l).ok();
                 writeln!(out, "  {}:", body_l).ok();
-                self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+                self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
@@ -4226,7 +4289,7 @@ self.emit_declares(&mut out);
                     merge, after_body, body_l, pre_ssa, skip_l).ok();
                 self.ssa_state_reg = Some(merge);
             } else {
-                self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+                self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);

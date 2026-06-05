@@ -166,6 +166,8 @@ pub enum Token {
     #[token("bank")]
     #[token("BANK")]
     Bank,
+    #[token("Ptr!")]
+    PtrBang,
     #[token("Ok")]
     #[token("OK")]
     Ok,

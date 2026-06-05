@@ -1352,9 +1352,69 @@ impl TypeChecker {
                         Type::Int
                     }
                     ProjectionTarget::Bytes => Type::Int,
-                    ProjectionTarget::Ptr => Type::Int,
+                    ProjectionTarget::Ptr => {
+                        // &x :> Ptr → Ptr<typeof(x)>
+                        // list :> Ptr → Ptr<element_type>
+                        // ptr :> Ptr on Ptr<T> → Int (escape hatch to raw address)
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "Ptr" => {
+                                // ptr :> Ptr on a Ptr<T> → raw Int address
+                                Type::Int
+                            }
+                            Type::Applied(name, inner) if name == "List" || name == "Vector" => {
+                                // list :> Ptr → Ptr<element_type>
+                                let elem_ty = inner.first().cloned().unwrap_or(Type::Int);
+                                Type::Applied("Ptr".to_string(), vec![elem_ty])
+                            }
+                            Type::Custom(n) if n == "String" || n == "str" => {
+                                // string :> Ptr → Ptr<Char>
+                                Type::Applied("Ptr".to_string(), vec![Type::Char])
+                            }
+                            _ => {
+                                // &x :> Ptr → Ptr<typeof(x)>
+                                Type::Applied("Ptr".to_string(), vec![src_ty.clone()])
+                            }
+                        }
+                    }
                     ProjectionTarget::Alignment => Type::Int,
                     ProjectionTarget::Range => Type::Int,
+                    ProjectionTarget::Popcount |
+                    ProjectionTarget::LeadingZeros |
+                    ProjectionTarget::TrailingZeros |
+                    ProjectionTarget::BitReverse => {
+                        match &src_ty {
+                            Type::Int | Type::UInt => {}
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Int or UInt".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: format!("{:?} projection", target),
+                                });
+                            }
+                        }
+                        Type::Int
+                    }
+                    ProjectionTarget::Absolute => {
+                        match &src_ty {
+                            Type::Int | Type::UInt | Type::Float => {}
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Int, UInt, or Float".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Absolute projection".to_string(),
+                                });
+                            }
+                        }
+                        Type::Int
+                    }
+                    ProjectionTarget::Type => {
+                        // Type projection returns the type itself as a value
+                        Type::Int
+                    }
+                    ProjectionTarget::PtrBang => {
+                        // Raw pointer — returns Int address
+                        Type::Int
+                    }
                 }
             }
             Expr::PatternMatch { .. } => Type::Bool,
