@@ -97,6 +97,29 @@ When a benchmark produces a general-purpose helper (rolling hash, vector math, f
 - `UndefinedForeignFunction("is_digit")` → `import char from "std/char.bv"`
 - Import resolver can't find file → fix search path, not interpreter
 
+### Precomputation is Correct, Not a Bug
+
+If the compiler folds your entire hot loop to `store i64 N, main` is `ret`, **the compiler is right.** It had all information at compile time and correctly precomputed the result.
+
+This happens when the loop bound is compile-time known (e.g., `const N: Int = 10` or a fixed-size list literal `[1..10]`). The compiler proves the bound within the `--optimize-budget` and precomputes all iterations.
+
+**Fighting precomputation is wrong.** Do not:
+- Add `x == x` self-references to force liveness
+- Add synthetic exit-condition fields
+- Add `#!exit` conditions referencing dead fields
+- Complain that `main` is just `ret`
+
+**If a benchmark must run at runtime**, make the bound runtime-determined:
+
+```
+let N: Int = __get_env_int("BOUND");      // ✓ runtime — not precomputable
+const N: Int = 50000000;                   // ✗ compile-time — precomputable
+```
+
+The `--optimize-budget` flag controls how many transactions the compiler will simulate. Default is 256. Bounds below the budget are precomputed; bounds above emit a runtime loop.
+
+If the compiler precomputes your benchmark, **increase the budget or make the bound runtime-determined.** Never weaken the contract or add hacks. The system works as designed.
+
 ## Language Architecture
 
 Brief is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`rct txn`):
