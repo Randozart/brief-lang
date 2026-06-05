@@ -1415,6 +1415,26 @@ impl TypeChecker {
                         // Raw pointer — returns Int address
                         Type::Int
                     }
+                    ProjectionTarget::Match(pattern) => {
+                        // Match projection — source must be String
+                        match &src_ty {
+                            Type::String => {}
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "String".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Match projection".to_string(),
+                                });
+                            }
+                        }
+                        // Determine return type based on capture group count
+                        match crate::analysis::dfa::compile_to_dfa(pattern) {
+                            Ok(re) if re.num_groups == 0 => Type::Bool,
+                            Ok(re) if re.num_groups == 1 => Type::String,
+                            Ok(re) => Type::Tuple(vec![Type::String; re.num_groups]),
+                            Err(_) => Type::Bool,
+                        }
+                    }
                 }
             }
             Expr::PatternMatch { .. } => Type::Bool,

@@ -327,6 +327,8 @@ pub enum ProjectionTarget {
     BitReverse,
     Type,
     PtrBang,
+    /// Compile-time DFA regex: `input :> Match("pattern")`
+    Match(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

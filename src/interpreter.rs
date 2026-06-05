@@ -2017,6 +2017,50 @@ if fn_name == "clone" && !arg_values.is_empty() {
                         // Raw pointer — same as Ptr, returns simulated address
                         Ok(Value::Int(0))
                     }
+                    ProjectionTarget::Match(pattern) => {
+                        let input = match &source_val {
+                            Value::String(s) => s.clone(),
+                            _ => return Err(RuntimeError::TypeMismatch(
+                                "Match projection requires String".to_string(),
+                            )),
+                        };
+                        match crate::analysis::dfa::compile_to_dfa(pattern) {
+                            Ok(re) => {
+                                match crate::analysis::dfa::execute_dfa(&re, &input) {
+                                    Some((_, _, groups)) if re.num_groups == 0 => {
+                                        Ok(Value::Bool(true))
+                                    }
+                                    Some((_, _, groups)) if re.num_groups == 1 => {
+                                        // Single capture: return the captured string
+                                        let cap = &input[groups[0].0..groups[0].1];
+                                        Ok(Value::String(cap.to_string()))
+                                    }
+                                    Some((_, _, groups)) => {
+                                        // Multiple captures: return tuple
+                                        let captured: Vec<Value> = groups.iter()
+                                            .map(|(s, e)| Value::String(input[*s..*e].to_string()))
+                                            .collect();
+                                        // Wrap in a list (tuples are represented as lists in interpreter)
+                                        Ok(Value::List(captured))
+                                    }
+                                    None => {
+                                        if re.num_groups == 0 {
+                                            Ok(Value::Bool(false))
+                                        } else {
+                                            // No match: empty strings
+                                            let empty: Vec<Value> = (0..re.num_groups)
+                                                .map(|_| Value::String(String::new()))
+                                                .collect();
+                                            Ok(Value::List(empty))
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => Err(RuntimeError::TypeMismatch(
+                                format!("Invalid regex pattern: {}", e),
+                            )),
+                        }
+                    }
                 }
             }
             Expr::FieldAccess(obj_expr, field_name) => {

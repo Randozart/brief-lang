@@ -4541,10 +4541,30 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             "BitReverse" => Ok(ProjectionTarget::BitReverse),
             "Type" => Ok(ProjectionTarget::Type),
             "Ptr!" => Ok(ProjectionTarget::PtrBang),
+            "Match" => {
+                // Match("pattern") — compile-time DFA regex
+                self.expect(Token::LParen)?;
+                let pattern = match self.current_token() {
+                    Some(Ok(Token::String(s))) => {
+                        let pat = s.clone();
+                        self.advance();
+                        pat
+                    }
+                    _ => return self.spanned_err("Expected string literal for Match pattern".to_string()),
+                };
+                self.expect(Token::RParen)?;
+                // Compile the regex at parse time
+                let _ = crate::analysis::dfa::compile_to_dfa(&pattern)
+                    .map_err(|e| SyntaxError::InvalidExpression {
+                        reason: format!("Invalid regex pattern '{}': {}", pattern, e),
+                        span: self.current_span().unwrap_or_else(Span::dummy),
+                    })?;
+                Ok(ProjectionTarget::Match(pattern))
+            }
             _ => Err(SyntaxError::InvalidExpression {
                 reason: format!(
                     "expected projection target (Size, Bytes, Ptr, Alignment, Range, \
-                     Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!), \
+                     Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match), \
                      found '{}'",
                     name
                 ),

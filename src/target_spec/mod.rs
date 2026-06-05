@@ -35,6 +35,8 @@ pub struct TargetSpec {
     pub codegen: Option<CodegenSection>,
     #[serde(default)]
     pub memory: Option<MemorySection>,
+    #[serde(default)]
+    pub bottlenecks: Option<BottleneckSection>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -44,6 +46,33 @@ pub struct MemorySection {
     #[serde(default)]
     pub sections: HashMap<String, MemorySectionDef>,
 }
+
+/// Hardware bottleneck configuration for roofline analysis.
+/// Can be loaded from a bottlenecks.dbvs schema file.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct BottleneckSection {
+    #[serde(default = "default_pcie_bw")]
+    pub pcie_bandwidth_gbs: f64,
+    #[serde(default = "default_ram_bw")]
+    pub system_ram_bandwidth_gbs: f64,
+    #[serde(default = "default_l1")]
+    pub l1_cache_size_kb: u64,
+    #[serde(default = "default_l2")]
+    pub l2_cache_size_kb: u64,
+    #[serde(default = "default_l3")]
+    pub l3_cache_size_kb: u64,
+    #[serde(default = "default_port_width")]
+    pub memory_port_width: u64,
+    #[serde(default)]
+    pub fpga_clock_mhz: f64,
+}
+
+fn default_pcie_bw() -> f64 { 15.75 }
+fn default_ram_bw() -> f64 { 40.0 }
+fn default_l1() -> u64 { 32 }
+fn default_l2() -> u64 { 256 }
+fn default_l3() -> u64 { 8192 }
+fn default_port_width() -> u64 { 1 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MemoryBank {

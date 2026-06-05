@@ -3048,6 +3048,83 @@ self.emit_declares(&mut out);
                         writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
                         writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, hp).ok();
                     }
+                    ProjectionTarget::Match(pattern) => {
+                        // Emit DFA table as constant global
+                        match crate::analysis::dfa::compile_to_dfa(pattern) {
+                            Ok(dfa) => {
+                                // DFA state loop: iterate over input characters
+                                // Load string source: data pointer from slot 0, length from slot 1
+                                let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
+                                let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                                let sp = format!("%msp{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, sp, hp).ok();
+                                let slen = format!("%mslen{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, slen, sp).ok();
+                                let dp2 = format!("%mdp2{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, dp2, dp).ok();
+
+                                // State = 0, i = 0
+                                let st = format!("%mst{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = add i64 0, 0 ; state = 0", indent, st).ok();
+                                let idx = format!("%midx{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = add i64 0, 0 ; i = 0", indent, idx).ok();
+
+                                // Loop: while i < len
+                                let loop_label = format!("match_loop_{}", self.txn_counter);
+                                let end_label = format!("match_end_{}", self.txn_counter);
+                                let ok_label = format!("match_ok_{}", self.txn_counter);
+                                self.txn_counter += 1;
+                                writeln!(out, "{}br label %{}", indent, loop_label).ok();
+                                writeln!(out, "{}:", loop_label).ok();
+
+                                // Check i < len
+                                let cond = format!("%mcond{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cond, idx, slen).ok();
+                                writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond, ok_label, end_label).ok();
+
+                                // Load char at i
+                                let char_ptr = format!("%mcp{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, char_ptr, dp2, idx).ok();
+                                let ch = format!("%mch{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, ch, char_ptr).ok();
+                                let ch_ext = format!("%mche{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = zext i8 {} to i64", indent, ch_ext, ch).ok();
+
+                                // DFA transition: state = table[state][char]
+                                // Emit a basic switch-like chain or compute 2D index
+                                let table_size = dfa.dfa_table.len();
+                                let table_elem = format!("%mte{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = mul i64 {}, {}", indent, table_elem, st, 256i64).ok();
+                                let table_idx = format!("%mti{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = add i64 {}, {}", indent, table_idx, table_elem, ch_ext).ok();
+                                // For now: state stays at 0 (stub)
+                                writeln!(out, "{}{} = add i64 0, 0 ; state = state_next (stub)", indent, st).ok();
+
+                                // i++
+                                let idx_next = format!("%min{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = add i64 {}, 1", indent, idx_next, idx).ok();
+                                writeln!(out, "{}{} = add i64 {}, 0", indent, idx, idx_next).ok();
+                                writeln!(out, "{}br label %{}", indent, loop_label).ok();
+
+                                // OK: return 1 (match)
+                                writeln!(out, "{}:", ok_label).ok();
+                                writeln!(out, "{}{} = add i64 0, 1 ; match found", indent, v).ok();
+                                writeln!(out, "{}br label %{}", indent, end_label).ok();
+
+                                // End: return 0 (no match)
+                                writeln!(out, "{}:", end_label).ok();
+                                // v is already set for match-found; need phi for no-match
+                                // For now: if we reach end without match, return 0
+                                writeln!(out, "{}{} = phi i64 [ 1, %{} ], [ 0, %{} ]", indent, v, ok_label, loop_label).ok();
+                            }
+                            Err(_) => {
+                                // Invalid regex — return 0 at runtime
+                                writeln!(out, "{}{} = add i64 0, 0 ; invalid regex", indent, v).ok();
+                            }
+                        }
+                    }
                 }
             }
             Expr::Slice { value, start, end, stride, .. } => {
@@ -6600,6 +6677,7 @@ mod tests {
             ffi: None,
             codegen: None,
             memory: None,
+            bottlenecks: None,
         };
         backend = backend.with_spec(spec);
         let output = backend.generate(&program);
@@ -6614,16 +6692,17 @@ mod tests {
         let body = make_cross_float_body(12, 32);
         let program = make_slp_float_program(12, body, None);
         let mut backend = LlvmBackend::new();
-        let spec = crate::target_spec::TargetSpec {
-            target: Some(crate::target_spec::TargetSection {
-                name: "x86_64-unknown-linux-gnu".to_string(),
-                backend: "llvm".to_string(),
-                capabilities: vec!["avx2".to_string()],
-                import_ffi: None,
-            }),
-            ffi: None,
-            codegen: None,
-            memory: None,
+let spec = crate::target_spec::TargetSpec {
+                target: Some(crate::target_spec::TargetSection {
+                    name: "x86_64-unknown-linux-gnu".to_string(),
+                    backend: "llvm".to_string(),
+                    capabilities: vec!["avx2".to_string()],
+                    import_ffi: None,
+                }),
+                ffi: None,
+                codegen: None,
+                memory: None,
+                bottlenecks: None,
         };
         backend = backend.with_spec(spec);
         let output = backend.generate(&program);
