@@ -170,9 +170,9 @@ rstruct TodoList {
         completed: Bool
     };
     
-    txn add_todo(text: String) [text.len() > 0][todos.len() == @todos.len() + 1] {
+    txn add_todo(text: String) [text :> Size > 0][todos :> Size == @todos :> Size + 1] {
         let new_todo = Todo {
-            id: todos.len(),
+            id: todos :> Size,
             text: text,
             completed: false
         };
@@ -180,7 +180,7 @@ rstruct TodoList {
         term;
     };
     
-    txn toggle_todo(id: Int) [id >= 0 && id < todos.len()][true] {
+    txn toggle_todo(id: Int) [id >= 0 && id < todos :> Size][true] {
         let todo = todos[id];
         &todos = todos.set(id, Todo {
             id: todo.id,
@@ -190,7 +190,7 @@ rstruct TodoList {
         term;
     };
     
-    txn remove_todo(id: Int) [id >= 0 && id < todos.len()][todos.len() == @todos.len() - 1] {
+    txn remove_todo(id: Int) [id >= 0 && id < todos :> Size][todos :> Size == @todos :> Size - 1] {
         &todos = todos.remove(id);
         term;
     };
@@ -198,7 +198,7 @@ rstruct TodoList {
     txn clear_completed() [true][true] {
         let mut filtered: List<Todo> = [];
         let i: Int = 0;
-        [i < todos.len()] {
+        [i < todos :> Size] {
             [!todos[i].completed] {
                 filtered = filtered.append(todos[i]);
             };
@@ -284,8 +284,8 @@ let produced: Int = 0;
 let consumed: Int = 0;
 
 rct async txn produce() 
-    [buffer.len() < buffer_size && produced < 100]
-    [produced == @produced + 1 && buffer.len() == @buffer.len() + 1]
+    [buffer :> Size < buffer_size && produced < 100]
+    [produced == @produced + 1 && buffer :> Size == @buffer :> Size + 1]
 {
     &produced = produced + 1;
     &buffer = buffer.append(produced);
@@ -293,8 +293,8 @@ rct async txn produce()
 };
 
 rct async txn consume() 
-    [buffer.len() > 0]
-    [consumed == @consumed + 1 && buffer.len() == @buffer.len() - 1]
+    [buffer :> Size > 0]
+    [consumed == @consumed + 1 && buffer :> Size == @buffer :> Size - 1]
 {
     let item = buffer[0];
     &buffer = buffer.drop(1);
@@ -428,7 +428,7 @@ rstruct Dashboard {
         term;
     };
     
-    rct txn clear_old_alerts() [alerts.len() > 10][alerts.len() <= 10] {
+    rct txn clear_old_alerts() [alerts :> Size > 10][alerts :> Size <= 10] {
         &alerts = alerts.drop(1);
         term;
     };
@@ -447,7 +447,7 @@ rstruct Dashboard {
                 <p b-text="humidity + '%'"></p>
             </div>
             
-            <div class="alerts" b-show="alerts.len() > 0">
+            <div class="alerts" b-show="alerts :> Size > 0">
                 <h2>Alerts</h2>
                 <ul>
                     <li b-for="alert in alerts" b-text="alert"></li>

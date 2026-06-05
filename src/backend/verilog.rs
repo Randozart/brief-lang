@@ -1777,7 +1777,7 @@ impl VerilogGenerator {
                     .join(", ");
                 format!("{{ {}}} ", items_str)
             }
-            Expr::ListLen(list) => {
+            Expr::Projection { source: list, .. } => {
                 format!("$size({})", self.expr_to_verilog(list))
             }
             Expr::FieldAccess(obj, field) => {

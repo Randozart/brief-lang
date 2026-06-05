@@ -42,7 +42,7 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
     }
 }
 use crate::ast::{
-    ArrowDir, DispatchMode, Expr, ForeignSignature, MatchPattern, Program, Statement, TopLevel, Type,
+    ArrowDir, DispatchMode, Expr, ForeignSignature, MatchPattern, Program, ProjectionTarget, Statement, TopLevel, Type,
 };
 
 #[derive(Debug, Clone)]
@@ -2863,13 +2863,36 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, v, de, i).ok();
             }
-            Expr::ListLen(list) => {
-                let l = self.emit_expr(out, list, indent);
-                let hp = format!("%lhp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
-                let lp = format!("%llp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, lp).ok();
+            Expr::Projection { source, target } => {
+                let l = self.emit_expr(out, source, indent);
+                match target {
+                    ProjectionTarget::Size => {
+                        // Load length from slot 1 of the 2-slot header
+                        let hp = format!("%lhp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
+                        let lp = format!("%llp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, lp).ok();
+                    }
+                    ProjectionTarget::Bytes => {
+                        // Compile-time type size — default to 8 for all types
+                        writeln!(out, "{}{} = add i64 0, 8", indent, v).ok();
+                    }
+                    ProjectionTarget::Ptr => {
+                        // Load data pointer from slot 0 of the 2-slot header
+                        let hp = format!("%php{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, hp).ok();
+                    }
+                    ProjectionTarget::Alignment => {
+                        // Default alignment is 8 bytes
+                        writeln!(out, "{}{} = add i64 0, 8", indent, v).ok();
+                    }
+                    ProjectionTarget::Range => {
+                        // Range returns (min, max) — for LLVM, just return i64 range
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, i64::MIN).ok();
+                    }
+                }
             }
             Expr::Slice { value, start, end, stride, .. } => {
                 let l = self.emit_expr(out, value, indent);
@@ -7148,7 +7171,7 @@ mod tests {
                     body: vec![
                         Statement::Assignment {
                             lhs: Expr::Identifier("len".to_string()),
-                            expr: Expr::ListLen(Box::new(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)]))),
+                            expr: Expr::Projection { source: Box::new(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)])), target: ProjectionTarget::Size },
                             timeout: None, modifiers: vec![],
                         },
                     ],
@@ -7160,8 +7183,8 @@ mod tests {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        // ListLen must load length from slot 1, NOT return constant 0
-        assert!(output.contains("load i64, i64*"), "ListLen should load from memory. Got: {}", output);
+        // Size projection must load length from slot 1, NOT return constant 0
+        assert!(output.contains("load i64, i64*"), "Size projection should load from memory. Got: {}", output);
     }
 
     #[test]

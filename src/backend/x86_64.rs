@@ -737,7 +737,7 @@ impl X86_64Backend {
                 self.generate_expr(output, idx);
                 output.push_str("]\n");
             }
-            Expr::ListLen(list) => {
+            Expr::Projection { source: list, .. } => {
                 self.generate_expr(output, list);
                 output.push_str(".length\n");
             }
@@ -940,7 +940,7 @@ impl X86_64Backend {
                 self.generate_expr_branchless(output, idx);
                 output.push_str("]\n");
             }
-            Expr::ListLen(list) => {
+            Expr::Projection { source: list, .. } => {
                 self.generate_expr_branchless(output, list);
                 output.push_str(".length\n");
             }

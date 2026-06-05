@@ -107,7 +107,7 @@ impl Annotator {
                 self.collect_calls_from_expr(list, calls);
                 self.collect_calls_from_expr(index, calls);
             }
-            Expr::ListLen(list) => self.collect_calls_from_expr(list, calls),
+            Expr::Projection { source: list, .. } => self.collect_calls_from_expr(list, calls),
             Expr::FieldAccess(obj, _) => self.collect_calls_from_expr(obj, calls),
             Expr::StructInstance(_, fields) => {
                 for (_, v) in fields {
@@ -410,8 +410,8 @@ impl Annotator {
             Expr::ListIndex(list, index) => {
                 format!("{}[{}]", self.format_expr(list), self.format_expr(index))
             }
-            Expr::ListLen(list) => {
-                format!("{}.len()", self.format_expr(list))
+            Expr::Projection { source, target } => {
+                format!("{} :> {:?}", self.format_expr(source), target)
             }
             Expr::FieldAccess(obj, field) => {
                 format!("{}.{}", self.format_expr(obj), field)

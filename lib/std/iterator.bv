@@ -10,10 +10,10 @@
 // ===== ITERATOR ADAPTERS =====
 
 // Map over iterator
-defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> [true][term.len() == list.len()] {
+defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> [true][term :> Size == list :> Size] {
     let result: List<U> = [];
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         result = result.append(f(list[i]));
         &i = i + 1;
     };
@@ -21,10 +21,10 @@ defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> [true][term.len() == li
 };
 
 // Filter iterator
-defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][term.len() <= list.len()] {
+defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][term :> Size <= list :> Size] {
     let result: List<T> = [];
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         [pred(list[i])] {
             result = result.append(list[i]);
         };
@@ -37,7 +37,7 @@ defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][term.len()
 defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [f != null][true] {
     let acc = initial;
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         &acc = f(acc, list[i]);
         &i = i + 1;
     };
@@ -45,10 +45,10 @@ defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [f != null]
 };
 
 // Take first n items
-defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term.len() == n.min(list.len())] {
+defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term :> Size == n.min(list :> Size)] {
     let result: List<T> = [];
     let i: Int = 0;
-    [i < n && i < list.len()] {
+    [i < n && i < list :> Size] {
         result = result.append(list[i]);
         &i = i + 1;
     };
@@ -56,10 +56,10 @@ defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term.len() == n.min
 };
 
 // Skip first n items
-defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term.len() == (list.len() - n).max(0)] {
+defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term :> Size == (list :> Size - n).max(0)] {
     let result: List<T> = [];
     let i: Int = n;
-    [i < list.len()] {
+    [i < list :> Size] {
         result = result.append(list[i]);
         &i = i + 1;
     };
@@ -67,10 +67,10 @@ defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term.len() == (list
 };
 
 // Enumerate (index, value)
-defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term.len() == list.len()] {
+defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term :> Size == list :> Size] {
     let result: List<(Int, T)> = [];
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         result = result.append((i, list[i]));
         &i = i + 1;
     };
@@ -80,7 +80,7 @@ defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term.len() == lis
 // Find first matching
 defn iter_find<T>(list: List<T>, pred: T -> Bool) -> Option<T> [pred != null][term.is_some() -> pred(unwrap(term))] {
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         [pred(list[i])] {
             term Some(list[i]);
         };
@@ -92,7 +92,7 @@ defn iter_find<T>(list: List<T>, pred: T -> Bool) -> Option<T> [pred != null][te
 // Check if any match
 defn iter_any<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || term == false] {
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         [pred(list[i])] {
             term true;
         };
@@ -104,7 +104,7 @@ defn iter_any<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || 
 // Check if all match
 defn iter_all<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || term == false] {
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         [!pred(list[i])] {
             term false;
         };
@@ -114,23 +114,23 @@ defn iter_all<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || 
 };
 
 // Collect into list (identity for List)
-defn iter_collect<T>(list: List<T>) -> List<T> [true][term.len() == list.len()] {
+defn iter_collect<T>(list: List<T>) -> List<T> [true][term :> Size == list :> Size] {
     term list;
 };
 
 // Chain two iterators
-defn iter_chain<T>(a: List<T>, b: List<T>) -> List<T> [true][term.len() == a.len() + b.len()] {
+defn iter_chain<T>(a: List<T>, b: List<T>) -> List<T> [true][term :> Size == a :> Size + b :> Size] {
     term a + b;
 };
 
 // Flat map (map then flatten)
-defn iter_flatmap<T, U>(list: List<T>, f: T -> List<U>) -> List<U> [f != null][term.len() >= 0] {
+defn iter_flatmap<T, U>(list: List<T>, f: T -> List<U>) -> List<U> [f != null][term :> Size >= 0] {
     let result: List<U> = [];
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         let mapped = f(list[i]);
         let j: Int = 0;
-        [j < mapped.len()] {
+        [j < mapped :> Size] {
             result = result.append(mapped[j]);
             &j = j + 1;
         };
@@ -144,7 +144,7 @@ defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [pr
     let trues: List<T> = [];
     let falses: List<T> = [];
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         [pred(list[i])] {
             trues = trues.append(list[i]);
         };
@@ -157,10 +157,10 @@ defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [pr
 };
 
 // Zip two iterators
-defn iter_zip<T, U>(a: List<T>, b: List<U>) -> List<(T, U)> [true][term.len() == a.len().min(b.len())] {
+defn iter_zip<T, U>(a: List<T>, b: List<U>) -> List<(T, U)> [true][term :> Size == a :> Size.min(b :> Size)] {
     let result: List<(T, U)> = [];
     let i: Int = 0;
-    [i < a.len() && i < b.len()] {
+    [i < a :> Size && i < b :> Size] {
         result = result.append((a[i], b[i]));
         &i = i + 1;
     };
@@ -178,13 +178,13 @@ defn iter_product(list: List<Int>) -> Int [true][term >= 0] {
 };
 
 // Maximum element
-defn iter_max<T>(list: List<T>) -> Option<T> [list.len() > 0][true] {
-    [list.len() == 0] {
+defn iter_max<T>(list: List<T>) -> Option<T> [list :> Size > 0][true] {
+    [list :> Size == 0] {
         term None;
     };
     let max_val = list[0];
     let i: Int = 1;
-    [i < list.len()] {
+    [i < list :> Size] {
         [list[i] > max_val] {
             &max_val = list[i];
         };
@@ -194,13 +194,13 @@ defn iter_max<T>(list: List<T>) -> Option<T> [list.len() > 0][true] {
 };
 
 // Minimum element
-defn iter_min<T>(list: List<T>) -> Option<T> [list.len() > 0][true] {
-    [list.len() == 0] {
+defn iter_min<T>(list: List<T>) -> Option<T> [list :> Size > 0][true] {
+    [list :> Size == 0] {
         term None;
     };
     let min_val = list[0];
     let i: Int = 1;
-    [i < list.len()] {
+    [i < list :> Size] {
         [list[i] < min_val] {
             &min_val = list[i];
         };

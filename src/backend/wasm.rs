@@ -268,7 +268,7 @@ impl WasmBackend {
                 self.generate_expr(output, idx);
                 writeln!(output, "    ;; list[index]").ok();
             }
-            Expr::ListLen(list) => {
+            Expr::Projection { source: list, .. } => {
                 self.generate_expr(output, list);
                 writeln!(output, "    ;; list.length").ok();
             }

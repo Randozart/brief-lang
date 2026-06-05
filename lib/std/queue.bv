@@ -19,12 +19,12 @@ defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][term.is_empty()]
 
 // ===== OPERATIONS =====
 
-defn enqueue<T>(queue: Queue<T>, item: T) [true][term.len() == queue.len() + 1] -> Queue<T> {
+defn enqueue<T>(queue: Queue<T>, item: T) [true][term :> Size == queue :> Size + 1] -> Queue<T> {
     &queue.items <- item;
     term queue;
 };
 
-defn dequeue<T>(queue: Queue<T>) [!queue.is_empty()][term.len() == queue.len() - 1] -> Queue<T> {
+defn dequeue<T>(queue: Queue<T>) [!queue.is_empty()][term :> Size == queue :> Size - 1] -> Queue<T> {
     [queue.is_empty()] {
         term queue;
     };
@@ -46,19 +46,19 @@ defn head<T>(queue: Queue<T>) [!queue.is_empty()][true] -> T {
 // ===== METADATA =====
 
 defn len<T>(queue: Queue<T>) [true][term >= 0] -> Int {
-    term queue.items.len();
+    term queue.items :> Size;
 };
 
 defn is_empty<T>(queue: Queue<T>) [true][term == true || term == false] -> Bool {
-    term queue.items.len() == 0;
+    term queue.items :> Size == 0;
 };
 
 // ===== CONVERSION =====
 
-defn to_list<T>(queue: Queue<T>) [true][term.len() == queue.len()] -> List<T> {
+defn to_list<T>(queue: Queue<T>) [true][term :> Size == queue :> Size] -> List<T> {
     term queue.items;
 };
 
-defn from_list<T>(items: List<T>) [true][term.len() == items.len()] -> Queue<T> {
+defn from_list<T>(items: List<T>) [true][term :> Size == items :> Size] -> Queue<T> {
     term Queue { items: items };
 };

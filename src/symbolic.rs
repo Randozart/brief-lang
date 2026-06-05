@@ -241,7 +241,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::Neg(_) | Expr::Not(_) | Expr::BitNot(_) => SymbolicValue::Unknown,
         Expr::ListLiteral(_)
         | Expr::ListIndex(_, _)
-        | Expr::ListLen(_)
+        | Expr::Projection { .. }
         | Expr::FieldAccess(_, _)
         | Expr::StructInstance(_, _) => SymbolicValue::Unknown,
         Expr::ObjectLiteral(_) => SymbolicValue::Unknown,

@@ -1,4 +1,4 @@
-use crate::ast::{ArrowDir, Expr, Hashtag, Program, SliceCoordinate, Statement, TopLevel};
+use crate::ast::{ArrowDir, Expr, Hashtag, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -130,7 +130,7 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                     })
                 }
                 // len(list) < N — list drains toward full
-                (Expr::ListLen(list), _) => {
+                (Expr::Projection { source: list, target: ProjectionTarget::Size }, _) => {
                     if let Some(name) = expr_name(list) {
                         Some(BoundedPre {
                             var: name,
@@ -167,7 +167,7 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                     })
                 }
                 // len(list) > 0 — list drains to empty (bound=0)
-                (Expr::ListLen(list), Expr::Integer(0)) => {
+                (Expr::Projection { source: list, target: ProjectionTarget::Size }, Expr::Integer(0)) => {
                     if let Some(name) = expr_name(list) {
                         Some(BoundedPre {
                             var: name.clone(),
@@ -178,7 +178,7 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                     } else { None }
                 }
                 // len(list) > N — list drains to N
-                (Expr::ListLen(list), Expr::Integer(n)) if *n > 0 => {
+                (Expr::Projection { source: list, target: ProjectionTarget::Size }, Expr::Integer(n)) if *n > 0 => {
                     if let Some(name) = expr_name(list) {
                         Some(BoundedPre {
                             var: name.clone(),
@@ -297,7 +297,10 @@ fn simplify_expr(expr: &Expr) -> Expr {
         Expr::Neg(a) => Expr::Neg(Box::new(simplify_expr(a))),
         Expr::BitNot(a) => Expr::BitNot(Box::new(simplify_expr(a))),
         Expr::Cast(a, t) => Expr::Cast(Box::new(simplify_expr(a)), t.clone()),
-        Expr::ListLen(a) => Expr::ListLen(Box::new(simplify_expr(a))),
+        Expr::Projection { source, target } => Expr::Projection {
+            source: Box::new(simplify_expr(source)),
+            target: target.clone(),
+        },
         Expr::ListIndex(list, idx) => Expr::ListIndex(
             Box::new(simplify_expr(list)),
             Box::new(simplify_expr(idx)),
@@ -713,7 +716,7 @@ fn references_triggers_or_ffi(expr: &Expr) -> bool {
         Expr::Block(_, last) | Expr::TupleDestructure(_, last) => references_triggers_or_ffi(last),
         Expr::ListLiteral(elems) => elems.iter().any(|e| references_triggers_or_ffi(e)),
         Expr::ListIndex(list, idx) => references_triggers_or_ffi(list) || references_triggers_or_ffi(idx),
-        Expr::ListLen(inner) => references_triggers_or_ffi(inner),
+        Expr::Projection { source: inner, .. } => references_triggers_or_ffi(inner),
         Expr::Tuple(elems) => elems.iter().any(|e| references_triggers_or_ffi(e)),
         Expr::FieldAccess(obj, _) => references_triggers_or_ffi(obj),
         _ => false,
@@ -899,7 +902,7 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
             collect_identifiers(a, out);
             collect_identifiers(b, out);
         }
-        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::ListLen(a) => {
+        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Projection { source: a, .. } => {
             collect_identifiers(a, out);
         }
         Expr::Cast(a, _) => collect_identifiers(a, out),

@@ -536,7 +536,7 @@ impl WebstackGenerator {
                 self.extract_identifiers(e, deps);
                 self.extract_identifiers(i, deps);
             }
-            Expr::ListLen(e) => self.extract_identifiers(e, deps),
+            Expr::Projection { source: e, .. } => self.extract_identifiers(e, deps),
             _ => {}
         }
     }
@@ -1633,7 +1633,7 @@ impl WebstackGenerator {
                 let index_val = self.expr_to_js_value(index_expr);
                 format!("(if {}.is_array() {{ js_sys::Array::from(&{}).get({}) }} else {{ JsValue::NULL }})", list_val, list_val, index_val)
             }
-            Expr::ListLen(list_expr) => {
+            Expr::Projection { source: list_expr, .. } => {
                 let list_val = self.expr_to_js_value(list_expr);
                 format!(
                     "(if {}.is_array() {{ js_sys::Array::from(&{}).length() }} else {{ 0.0 }})",
@@ -1861,7 +1861,7 @@ impl WebstackGenerator {
                 let b_val = self.js_value_to_f64(b);
                 format!("({} >= {})", a_val, b_val)
             }
-            Expr::ListLen(list_expr) => {
+            Expr::Projection { source: list_expr, .. } => {
                 let list_val = self.expr_to_js_value(list_expr);
                 format!(
                     "JsValue::from(if {}.is_array() {{ js_sys::Array::from(&{}).length() as f64 }} else {{ 0.0 }})",
@@ -1894,7 +1894,7 @@ impl WebstackGenerator {
     /// Intent: js value to f64.
     fn js_value_to_f64(&self, expr: &Expr) -> String {
         match expr {
-            Expr::ListLen(list_expr) => self.expr_to_js_value(expr),
+            Expr::Projection { source: list_expr, .. } => self.expr_to_js_value(expr),
             Expr::Call(name, args) if name == "len" && args.len() == 1 => {
                 self.expr_to_js_value(expr)
             }

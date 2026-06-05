@@ -81,6 +81,9 @@ top_level ::= definition
             | signature
             | resource_decl
             | render_block
+            | exit_condition
+
+exit_condition ::= "#!exit" expression
 
 definition ::= ("defn" | "def" | "definition") identifier type_params? parameters? "->" output_types contract body
 
@@ -212,6 +215,10 @@ expression ::= literal
              | range
              | cast
              | prior_state
+             | owned_ref
+             | projection
+             | arrow_mut
+             | arrow_discard
              | block
 
 literal ::= Int | Float | Bool | String | Char | "true" | "false"
@@ -223,7 +230,7 @@ operator ::= "+" | "-" | "*" | "/" | "%"
            | "&&" | "||"
            | "&" | "|" | "^" | "<<" | ">>"
 
-unary_op ::= "-" expression | "!" expression | "~" expression
+unary_op ::= "-" expression | "!" expression | "~" expression | "&" identifier
 
 call ::= expression "(" (expression ("," expression)*)? ")"
 
@@ -237,6 +244,20 @@ coordinate ::= expression                    // Single index: 5
              | expression? ".." expression?  // Range: 0..10, ..10, 5..
              | "::" expression               // Stride: ::2
              | identifier ":" coordinate     // Named dimension: time:5
+             | "..."                         // Ellipsis: fill unspecified dimensions
+             | "@" integer ":" coordinate    // Dimension specifier: @3:0..10
+
+owned_ref ::= "&" identifier ("." identifier | "[" expression "]")*
+
+projection ::= expression ":>" projection_target
+projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
+
+arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
+            | expression "<-" owned_ref              // Insert (prepend): x <- &list
+            | owned_ref "[" expression "]" "<-" expression  // Indexed write: &list[i] <- x
+
+arrow_discard ::= "<-" owned_ref                     // Pop/remove: <- &list
+                | "<-" owned_ref "[" expression "]"  // Indexed remove: <- &list[i]
 
 tuple ::= "(" (expression ("," expression)*)? ")"
 
@@ -338,6 +359,10 @@ expression ::= literal
              | range
              | cast
              | prior_state
+             | owned_ref
+             | projection
+             | arrow_mut
+             | arrow_discard
              | block
 
 literal ::= Int | Float | Bool | String | Char | "true" | "false"
@@ -349,7 +374,7 @@ operator ::= "+" | "-" | "*" | "/" | "%"
            | "&&" | "||"
            | "&" | "|" | "^" | "<<" | ">>"
 
-unary_op ::= "-" expression | "!" expression | "~" expression
+unary_op ::= "-" expression | "!" expression | "~" expression | "&" identifier
 
 call ::= expression "(" (expression ("," expression)*)? ")"
 
@@ -363,6 +388,20 @@ coordinate ::= expression                    // Single index: 5
              | expression? ".." expression?  // Range: 0..10, ..10, 5..
              | "::" expression               // Stride: ::2
              | identifier ":" coordinate     // Named dimension: time:5
+             | "..."                         // Ellipsis: fill unspecified dimensions
+             | "@" integer ":" coordinate    // Dimension specifier: @3:0..10
+
+owned_ref ::= "&" identifier ("." identifier | "[" expression "]")*
+
+projection ::= expression ":>" projection_target
+projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
+
+arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
+            | expression "<-" owned_ref              // Insert (prepend): x <- &list
+            | owned_ref "[" expression "]" "<-" expression  // Indexed write: &list[i] <- x
+
+arrow_discard ::= "<-" owned_ref                     // Pop/remove: <- &list
+                | "<-" owned_ref "[" expression "]"  // Indexed remove: <- &list[i]
 
 tuple ::= "(" (expression ("," expression)*)? ")"
 
@@ -1025,6 +1064,68 @@ term match status {
 
 **Compiler support:** Supported in Rust parser + interpreter; self-hosted (Brief-in-Brief) support pending (requires `KeywordMatch` token in `token.bv` and `parse_match_expr` in `parser.bv`).
 
+### 3.14 Collection Mutation
+
+Collection mutation is expressed through the `<-` arrow syntax, with the `&`
+sigil marking the target collection. Three operations are supported:
+
+**Push (append):**
+```brief
+&list <- item;        // Append item to list
+```
+
+**Pop (remove and return):**
+```brief
+let item = <- &list;  // Pop item from list (removes last element)
+```
+
+**Indexed write:**
+```brief
+&list[i] <- value;    // Write value at index i
+```
+
+**Indexed remove:**
+```brief
+<- &list[i];          // Remove element at index i
+```
+
+**Prepend (insert at front):**
+```brief
+item <- &list;        // Insert item at front of list
+```
+
+**Semantics:**
+1. `target <- value` — the arrow always points toward the collection. The
+   collection must be prefixed with `&`.
+2. Push/Pop are `O(1)` amortized operations on the underlying 2-slot header
+   `[pointer, length]`.
+3. The `<-` operator is the ONLY mutation mechanism. There are no method
+   calls, no `.append()`, no `.pop()` — collection mutation is a first-class
+   syntactic operation.
+4. The `<-` syntax also serves as a halting signal for the dead-field
+   elimination pass: a collection targeted by `<-` is never dead, because
+   the mutation is an observable side effect on state.
+
+**Discard form:**
+```brief
+<- &list;             // Pop and discard last element
+<- &list[i];          // Remove and discard element at i
+```
+
+The discard form (no receiver for the popped value) is equivalent to a pop
+followed immediately by dropping the value. It is useful when only the
+length effect is needed (e.g., drain-until-empty halting patterns).
+
+**Arrow direction rules:**
+| Form | Meaning |
+|------|---------|
+| `&list <- value` | Push: add value to list (append) |
+| `value <- &list` | Unshift: add value to front of list (prepend) |
+| `&list[i] <- value` | Write: set element at index |
+| `<- &list` | Pop: remove and discard last element |
+| `<- &list[i]` | Remove: remove and discard element at index |
+| `let x = <- &list` | Pop and bind: remove last element to `x` |
+
 ---
 
 ## 4. Type System
@@ -1063,7 +1164,7 @@ let list: List<Int> = [1, 2, 3];
 let empty: List<String> = [];
 
 // Operations
-list.len();           // Length
+list :> Size;           // Length
 list[i];              // Index access
 list[i..j];           // Slice
 list + [4];           // Concatenation
@@ -1077,7 +1178,7 @@ let matrix: Float[3][3];  // 3x3 matrix
 
 // Operations
 vec[i];             // Index access (bounds-checked)
-vec.len();          // Size (compile-time constant)
+vec :> Size;          // Size (compile-time constant)
 ```
 
 **Options (nullable types):**
@@ -1104,7 +1205,7 @@ result.is_err();    // true if Err
 result.unwrap();    // Extract Ok value
 result.unwrap_err(); // Extract Err value
 result.map(|x| x * 2);  // Transform Ok
-result.map_err(|e| e.len()); // Transform Err
+result.map_err(|e| e :> Size); // Transform Err
 result.and_then(|x| Ok(x * 2)); // Chain operations
 ```
 
@@ -1125,7 +1226,7 @@ let value: Int Union String Union Bool = 42;
 
 // Pattern matching
 unification value(Int(n)) = n;
-unification value(String(s)) = s.len();
+unification value(String(s)) = s :> Size;
 unification value(Bool(b)) = if b { 1 } else { 0 };
 ```
 
@@ -1376,6 +1477,26 @@ frgn sig custom_func(x: Int) -> Result<Int, Error> from "custom.toml";
 - `import("lib.a")` - Link library
 - `map("brief_type", "foreign_type")` - Type mapping
 
+#### 5.4.3 `#!exit` — Program Termination Condition
+
+The `#!exit` directive declares a condition under which the program should
+terminate. It appears at the top level of a program:
+
+```brief
+#!exit count >= 1000000;
+```
+
+When the exit condition is proven to converge (e.g., a monotonic counter
+reaching a bound), the compiler may fold the entire tick loop to a single
+store (`O(1)`). If convergence cannot be proven, the program falls back to
+`O(N)` reactor ticks with the exit check on each iteration.
+
+The exit condition is also used by **dead-field elimination**: fields that
+are not referenced by the exit condition or any transaction precondition are
+considered dead and their stores are eliminated.
+
+If a program has wake triggers but no `#!exit` condition, a warning is emitted.
+
 ### 5.5 Resource Lifecycle
 
 Resources are declared and managed:
@@ -1385,7 +1506,7 @@ Resources are declared and managed:
 rsrc file: File("data.txt", "read");
 
 // Use in transaction
-txn read_data() [file.exists()][data.len() > 0] {
+txn read_data() [file.exists()][data :> Size > 0] {
     let result = file.read();
     [result.is_ok()] {
         &data = result.value;
@@ -1519,7 +1640,7 @@ import "std/collections";
 
 // Lists
 let list = [1, 2, 3];
-let len = list.len();                  // 3
+let len = list :> Size;                  // 3
 let appended = list + [4];             // [1, 2, 3, 4]
 let contains = list.contains(2);       // true
 let idx = list.find(2);                // 1

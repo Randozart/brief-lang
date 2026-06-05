@@ -146,7 +146,8 @@ The interpreter at `src/interpreter.rs` is the **full reference implementation**
 | Eq, Ne, Lt, Le, Gt, Ge | 817-882 | ✅ |
 | Or, And, Not | 883-898 | ✅ |
 | Neg, BitNot, BitAnd, BitOr, BitXor, Shl, Shr | 899-938 | ✅ |
-| Call, ListLiteral, ListIndex, ListLen | 939-1647 | ✅ |
+| Call, ListLiteral, ListIndex | 939-1647 | ✅ |
+| Projection | 1888 | ✅ — full Size/Bytes/Ptr/Alignment/Range support |
 | FieldAccess | 1648 | ✅ — `Value::Instance` field lookup |
 | StructInstance | 1662 | ✅ — creates `Value::Instance` |
 | ObjectLiteral | 1672 | ✅ — creates `Value::Instance` with typename "ObjectLiteral" |
@@ -210,7 +211,6 @@ The LLVM backend at `src/backend/llvm.rs` (6024 lines) lags behind the interpret
 ### Expressions — Stub (Returns 0 or Degraded)
 | Expr | Line | What's Missing |
 |------|------|----------------|
-| **ListLen** | 2657 | Returns `0` always. Needs: track list length (store it alongside the pointer, e.g., as a 2-slot pair: [ptr, len]). |
 | **Slice** | 2658 | Only handles `start` offset into the same buffer. Missing: `end` bound, `stride`, `mask`. Needs: allocate new buffer, compute length, copy elements. |
 | **MultiSlice** | 2667 | Returns base pointer unchanged. Missing: coordinate-based indexing, new buffer construction. |
 | **Tuple** | 2672 | Returns `0`. Missing: allocate struct or flatten to registers. Blocked by: no LLVM struct type generation for user types. |

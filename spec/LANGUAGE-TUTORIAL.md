@@ -332,22 +332,50 @@ account.withdraw(50);
 ### Render Struct
 
 ```brief
-rstruct Counter {
-    count: Int;
-    
-    rct txn increment [count < 100][count == @count + 1] {
-        &count = count + 1;
-        term;
-    };
-} -> "
-<div class='counter'>
-    <span>{count}</span>
-    <button onclick='increment()'>+</button>
-</div>
-";
+rstruct Person {  
+    name: String = "Alice";  
+    age: Int = 30;  
+
+    render {  
+        <div>  
+            <h1 text={name}/>  
+            <p>Age: {age}</p>  
+        </div>  
+    }  
+};  
+
+// Render produces a String  
+let html = Person.render();
 ```
 
----
+### Collection Mutation
+
+Collections (lists, strings) are mutated with the `<-` arrow syntax. The
+arrow always points toward the collection:
+
+```brief
+// Push/append
+&items <- "hello";
+
+// Pop (remove last, bind to variable)
+let last = <- &items;
+
+// Pop and discard
+<- &items;
+
+// Indexed write
+&items[0] <- "world";
+
+// Indexed remove
+<- &items[2];
+```
+
+The `&` prefix marks the target collection. Without `&`, the expression
+is a read — with `&`, it is a mutation. This rule also applies to state
+fields: `&x = expr` writes to `x`, `x = expr` shadows it locally.
+
+Length queries use the `:>` operator — `items :> Size` returns the element
+count. `len()` is available as a stdlib convenience function.
 
 ## Part 7: Foreign Functions (FFI)
 
@@ -399,7 +427,7 @@ frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 ```brief
 frgn read_file(path: String) -> Result<String, IoError> from "lib/std/io.toml";
 
-defn load_config() -> String [true][result.len() >= 0] {
+defn load_config() -> String [true][result :> Size >= 0] {
     let result = read_file("config.txt");
     term "default";
 };
@@ -1195,10 +1223,12 @@ brief compile main.ebv --target hardware.dbv
 
 **Special:**
 - `@` - Prior state / Address
-- `&` - Mutation
+- `&` - Mutation / Owned reference
 - `.` - Field access
 - `[]` - Index/slice
 - `()` - Call
+- `:>` - Projection (Size, Bytes, Ptr, Alignment, Range)
+- `<-` - Collection mutation (push, pop, write)
 
 ### Standard Library
 
@@ -1215,7 +1245,8 @@ math.cos(n)
 
 **String:**
 ```brief
-string.len(s)
+s :> Size                // Length via projection operator
+string.len(s)            // Convenience wrapper for s :> Size
 string.concat(a, b)
 string.find(s, needle)
 string.split(s, delim)
@@ -1225,7 +1256,7 @@ string.trim(s)
 
 **Collections:**
 ```brief
-list.len()
+list :> Size
 list.contains(x)
 list.find(x)
 list[i]
@@ -1316,7 +1347,7 @@ let subject_value: Int = 0;
 
 defn notify_observers() -> Bool {
     let i: Int = 0;
-    [i < observers.len()] {
+    [i < observers :> Size] {
         notify(observers[i], subject_value);
         &i = i + 1;
     };

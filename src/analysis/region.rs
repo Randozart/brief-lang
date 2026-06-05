@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{Expr, Program, ProjectionTarget, Statement, TopLevel, Type};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Classification of a transaction body by computational weight.
@@ -270,7 +270,7 @@ impl RegionAnalyzer {
                 self.collect_identifiers(b, reader_for);
             }
             Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-            | Expr::ListLen(a) => {
+            | Expr::Projection { source: a, .. } => {
                 self.collect_identifiers(a, reader_for);
             }
             Expr::Call(_, args) => {
@@ -1275,7 +1275,7 @@ fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
             collect_var_ids(b, vars);
         }
         Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-        | Expr::ListLen(a) => collect_var_ids(a, vars),
+        | Expr::Projection { source: a, .. } => collect_var_ids(a, vars),
         Expr::Call(_, args) => { for a in args { collect_var_ids(a, vars); } }
         Expr::ListLiteral(elems) => { for e in elems { collect_var_ids(e, vars); } }
         Expr::Tuple(elems) => { for e in elems { collect_var_ids(e, vars); } }
@@ -1354,7 +1354,7 @@ fn expr_has_call(expr: &Expr) -> bool {
             expr_has_call(a) || expr_has_call(b)
         }
         Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-        | Expr::ListLen(a) => expr_has_call(a),
+        | Expr::Projection { source: a, .. } => expr_has_call(a),
         Expr::ListLiteral(elems) => elems.iter().any(|e| expr_has_call(e)),
         Expr::Tuple(elems) => elems.iter().any(|e| expr_has_call(e)),
         Expr::ListIndex(l, i) => expr_has_call(l) || expr_has_call(i),
@@ -1591,7 +1591,7 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
             Box::new(substitute_expr(l, old_var, new_expr)),
             Box::new(substitute_expr(i, old_var, new_expr)),
         ),
-        Expr::ListLen(a) => Expr::ListLen(Box::new(substitute_expr(a, old_var, new_expr))),
+        Expr::Projection { source: a, .. } => Expr::Projection { source: Box::new(substitute_expr(a, old_var, new_expr)), target: ProjectionTarget::Size },
         Expr::FieldAccess(o, f) => Expr::FieldAccess(
             Box::new(substitute_expr(o, old_var, new_expr)),
             f.clone(),

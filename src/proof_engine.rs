@@ -1718,7 +1718,7 @@ impl ProofEngine {
                 self.find_ffi_calls_in_expr(list, calls, ffi_bindings);
                 self.find_ffi_calls_in_expr(index, calls, ffi_bindings);
             }
-            Expr::ListLen(list) => self.find_ffi_calls_in_expr(list, calls, ffi_bindings),
+            Expr::Projection { source: list, .. } => self.find_ffi_calls_in_expr(list, calls, ffi_bindings),
             _ => {}
         }
     }
@@ -1920,8 +1920,14 @@ impl ProofEngine {
                 if left_name != right_name {
                     // Different lists - check if length equality is provable from precondition
                     let len_expr = Expr::Eq(
-                        Box::new(Expr::ListLen(Box::new(Expr::Identifier(left_name.clone())))),
-                        Box::new(Expr::ListLen(Box::new(Expr::Identifier(right_name.clone())))),
+                        Box::new(Expr::Projection {
+                            source: Box::new(Expr::Identifier(left_name.clone())),
+                            target: ProjectionTarget::Size,
+                        }),
+                        Box::new(Expr::Projection {
+                            source: Box::new(Expr::Identifier(right_name.clone())),
+                            target: ProjectionTarget::Size,
+                        }),
                     );
 
                     // Check if precondition implies length equality
@@ -1975,7 +1981,7 @@ impl ProofEngine {
             (Expr::Eq(l1, r1), Expr::Eq(l2, r2)) => {
                 self.exprs_equal(l1, l2) && self.exprs_equal(r1, r2)
             }
-            (Expr::ListLen(l1), Expr::ListLen(l2)) => self.exprs_equal(l1, l2),
+            (Expr::Projection { source: l1, target: ProjectionTarget::Size }, Expr::Projection { source: l2, target: ProjectionTarget::Size }) => self.exprs_equal(l1, l2),
             (Expr::Identifier(n1), Expr::Identifier(n2)) => n1 == n2,
             _ => false,
         }
@@ -2315,7 +2321,7 @@ impl ProofEngine {
                 self.collect_identifiers(list_expr, vars);
                 self.collect_identifiers(index_expr, vars);
             }
-            Expr::ListLen(inner) => {
+            Expr::Projection { source: inner, .. } => {
                 self.collect_identifiers(inner, vars);
             }
             Expr::FieldAccess(obj, _) => {

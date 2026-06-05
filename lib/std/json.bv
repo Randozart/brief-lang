@@ -48,7 +48,7 @@ frgn __merge(a: Data, b: Data) -> Result<Data, JsonError>;
 // ===== NATIVE DEFINITIONS =====
 
 // Pretty Print - simple version
-defn pretty_print(data: Data) [[term.len() >= 0] -> String {
+defn pretty_print(data: Data) [[term :> Size >= 0] -> String {
   term __stringify(data);
 };
 
@@ -58,7 +58,7 @@ defn exists(data: Data) [true][term == true || term == false] -> Bool {
 };
 
 // Helper: Get value with default
-defn get_or_default(data: Data, key: String, default: String) [true][term.len() >= 0] -> String {
+defn get_or_default(data: Data, key: String, default: String) [true][term :> Size >= 0] -> String {
   [__has_key(data, key)] {
     term __get_string(data, key);
   };
@@ -99,7 +99,7 @@ defn array_get(data: Data, index: Int) [index >= 0][term.is_null() || true] -> D
 };
 
 // Helper: Array to list of strings (if strings)
-defn array_to_strings(data: Data) [__is_array(data)][term.len() == __array_len(data)] -> List<String> {
+defn array_to_strings(data: Data) [__is_array(data)][term :> Size == __array_len(data)] -> List<String> {
   let len: Int = __array_len(data);
   [len == 0] {
     term [];
@@ -129,11 +129,11 @@ defn array_empty(data: Data) [__is_array(data)][term == true || term == false] -
 // Helper: Object to list count
 defn object_count(data: Data) [__is_object(data)][term >= 0] -> Int {
   let k: List<String> = __keys(data);
-  term k.len();
+  term k :> Size;
 };
 
 // Helper: Object is empty
 defn object_empty(data: Data) [__is_object(data)][term == true || term == false] -> Bool {
   let k: List<String> = __keys(data);
-  term k.len() == 0;
+  term k :> Size == 0;
 };

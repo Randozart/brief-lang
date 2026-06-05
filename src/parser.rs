@@ -1998,59 +1998,61 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_alka_block(&mut self) -> Result<Statement, SyntaxError> {
-        self.advance();
-        let dangerous = if let Some(Ok(Token::Not)) = self.current_token() {
-            self.advance();
-            true
-        } else {
-            false
-        };
-        let lbrace_pos = if let Some((_, span)) = &self.current {
-            if let Some(Ok(Token::LBrace)) = self.current_token() {
-                span.start
-            } else {
-                return self.spanned_err("Expected { after alka".to_string());
-            }
-        } else {
-            return self.spanned_err("Unexpected EOF".to_string());
-        };
-        self.advance();
-        let mut brace_depth = 1;
-        let mut end_pos = lbrace_pos;
-        while let Some((_, span)) = &self.current {
-            if let Some(Ok(Token::LBrace)) = self.current_token() {
-                brace_depth += 1;
-            } else if let Some(Ok(Token::RBrace)) = self.current_token() {
-                brace_depth -= 1;
-                if brace_depth == 0 {
-                    end_pos = span.start;
-                    self.advance();
-                    break;
-                }
-            }
-            self.advance();
-        }
-        if brace_depth != 0 {
-            return self.spanned_err("Unterminated alka block".to_string());
-        }
-        let content = self.source[lbrace_pos + 1..end_pos].trim().to_string();
-        self.expect(Token::Semicolon)?;
-        let span = self.current_span();
-        Ok(Statement::Alka(AlkaBlock { dangerous, content, span }))
-    }
+    // DISABLED: alka/on_exit — not ready for use; keep parser disabled until revisited.
+    // fn parse_alka_block(&mut self) -> Result<Statement, SyntaxError> {
+    //     self.advance();
+    //     let dangerous = if let Some(Ok(Token::Not)) = self.current_token() {
+    //         self.advance();
+    //         true
+    //     } else {
+    //         false
+    //     };
+    //     let lbrace_pos = if let Some((_, span)) = &self.current {
+    //         if let Some(Ok(Token::LBrace)) = self.current_token() {
+    //             span.start
+    //         } else {
+    //             return self.spanned_err("Expected { after alka".to_string());
+    //         }
+    //     } else {
+    //         return self.spanned_err("Unexpected EOF".to_string());
+    //     };
+    //     self.advance();
+    //     let mut brace_depth = 1;
+    //     let mut end_pos = lbrace_pos;
+    //     while let Some((_, span)) = &self.current {
+    //         if let Some(Ok(Token::LBrace)) = self.current_token() {
+    //             brace_depth += 1;
+    //         } else if let Some(Ok(Token::RBrace)) = self.current_token() {
+    //             brace_depth -= 1;
+    //             if brace_depth == 0 {
+    //                 end_pos = span.start;
+    //                 self.advance();
+    //                 break;
+    //             }
+    //         }
+    //         self.advance();
+    //     }
+    //     if brace_depth != 0 {
+    //         return self.spanned_err("Unterminated alka block".to_string());
+    //     }
+    //     let content = self.source[lbrace_pos + 1..end_pos].trim().to_string();
+    //     self.expect(Token::Semicolon)?;
+    //     let span = self.current_span();
+    //     Ok(Statement::Alka(AlkaBlock { dangerous, content, span }))
+    // }
 
-    fn parse_block_pragma(&mut self) -> Result<Statement, SyntaxError> {
-        // #identifier { body };
-        self.advance();
-        let name = self.expect_identifier()?;
-        self.expect(Token::LBrace)?;
-        let body = self.parse_body()?;
-        self.expect(Token::RBrace)?;
-        self.expect(Token::Semicolon)?;
-        let span = self.current_span();
-        Ok(Statement::OnExit { body, span })
-    }
+    // DISABLED: alka/on_exit — not ready for use; keep parser disabled until revisited.
+    // fn parse_block_pragma(&mut self) -> Result<Statement, SyntaxError> {
+    //     // #identifier { body };
+    //     self.advance();
+    //     let name = self.expect_identifier()?;
+    //     self.expect(Token::LBrace)?;
+    //     let body = self.parse_body()?;
+    //     self.expect(Token::RBrace)?;
+    //     self.expect(Token::Semicolon)?;
+    //     let span = self.current_span();
+    //     Ok(Statement::OnExit { body, span })
+    // }
 
     fn parse_state_decl(&mut self) -> Result<StateDecl, SyntaxError> {
         self.expect(Token::Let)?;
@@ -3793,10 +3795,11 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                      (Top-level trigger declarations use 'trg' without '!')".to_string(),
                 )
             }
-            Some(Ok(Token::Hash)) => {
-                // Block pragma: #on_exit { ... };
-                return self.parse_block_pragma();
-            }
+            // DISABLED: alka/on_exit — not ready for use; keep parser disabled until revisited.
+            // Some(Ok(Token::Hash)) => {
+            //     // Block pragma: #on_exit { ... };
+            //     return self.parse_block_pragma();
+            // }
             _ => {
                 // Check for discard form: <- &list or <- &list[i]
                 if let Some(Ok(Token::ArrowLeft)) = self.current_token() {
@@ -3814,12 +3817,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         index: Box::new(index),
                     }));
                 }
-                // Check for alka block before parsing as expression
-                if let Some(Ok(Token::Identifier(name))) = self.current_token() {
-                    if name == "alka" || name == "ALKA" {
-                        return self.parse_alka_block();
-                    }
-                }
+                // DISABLED: alka/on_exit — not ready for use; keep parser disabled until revisited.
+                // if let Some(Ok(Token::Identifier(name))) = self.current_token() {
+                //     if name == "alka" || name == "ALKA" {
+                //         return self.parse_alka_block();
+                //     }
+                // }
                 // Expression statement or Assignment/Unification/Arrow
                 let expr = self.parse_expression()?;
 
@@ -4497,6 +4500,24 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         }
     }
 
+    fn parse_projection_target(&mut self) -> Result<ProjectionTarget, SyntaxError> {
+        let name = self.expect_identifier()?;
+        match name.as_str() {
+            "Size" => Ok(ProjectionTarget::Size),
+            "Bytes" => Ok(ProjectionTarget::Bytes),
+            "Ptr" => Ok(ProjectionTarget::Ptr),
+            "Alignment" => Ok(ProjectionTarget::Alignment),
+            "Range" => Ok(ProjectionTarget::Range),
+            _ => Err(SyntaxError::InvalidExpression {
+                reason: format!(
+                    "expected projection target (Size, Bytes, Ptr, Alignment, Range), found '{}'",
+                    name
+                ),
+                span: self.current_span().unwrap_or_else(Span::dummy),
+            }),
+        }
+    }
+
     fn parse_postfix_expr(&mut self, expr: Expr) -> Result<Expr, SyntaxError> {
         let mut expr = expr;
         loop {
@@ -4546,6 +4567,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 } else {
                     expr = Expr::FieldAccess(Box::new(expr), member_name);
                 }
+            } else if let Some(Ok(Token::ColonGreaterThan)) = self.current_token() {
+                self.advance();
+                let target = self.parse_projection_target()?;
+                expr = Expr::Projection {
+                    source: Box::new(expr),
+                    target,
+                };
             } else {
                 break;
             }
@@ -4633,6 +4661,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 self.advance();
                 let cast_type = self.parse_type()?;
                 expr = Expr::Cast(Box::new(expr), cast_type);
+            } else if let Some(Ok(Token::ColonGreaterThan)) = self.current_token() {
+                self.advance();
+                let target = self.parse_projection_target()?;
+                expr = Expr::Projection {
+                    source: Box::new(expr),
+                    target,
+                };
             } else {
                 break;
             }
@@ -5770,47 +5805,46 @@ mod parser_tests {
         }
     }
 
-    #[test]
-    fn test_parse_alka_block_safe() {
-        let s = r#"txn Foo [true][n >= 0] { alka { FENCE GPU_MAIN.METAPAGE == 1; }; term; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse alka block: {:?}", result.err());
-        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
-            match &txn.body[0] {
-                Statement::Alka(block) => {
-                    assert!(!block.dangerous, "Safe alka");
-                    assert!(block.content.contains("FENCE GPU_MAIN"));
-                }
-                _ => panic!("Expected Alka statement"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_alka_block_dangerous() {
-        let s = r#"txn Foo [true][n >= 0] { alka! { PULSE DOORBELL @ 0x90; }; term; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse alka! block: {:?}", result.err());
-        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
-            match &txn.body[0] {
-                Statement::Alka(block) => {
-                    assert!(block.dangerous, "Dangerous alka");
-                    assert!(block.content.contains("PULSE DOORBELL"));
-                }
-                _ => panic!("Expected Alka statement"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_alka_multi_line() {
-        let s = "txn Foo [true][n >= 0] { alka {\n  FENCE GPU_MAIN.METAPAGE == 1;\n  SIGNAL EXPERT_READY;\n}; term; };";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse multi-line alka: {:?}", result.err());
-    }
+    // DISABLED: alka/on_exit — not ready for use.
+    // #[test]
+    // fn test_parse_alka_block_safe() {
+    //     let s = r#"txn Foo [true][n >= 0] { alka { FENCE GPU_MAIN.METAPAGE == 1; }; term; };"#;
+    //     let mut parser = Parser::new(s);
+    //     let result = parser.parse();
+    //     assert!(result.is_ok(), "Should parse alka block: {:?}", result.err());
+    //     if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+    //         match &txn.body[0] {
+    //             Statement::Alka(block) => {
+    //                 assert!(!block.dangerous, "Safe alka");
+    //                 assert!(block.content.contains("FENCE GPU_MAIN"));
+    //             }
+    //             _ => panic!("Expected Alka statement"),
+    //         }
+    //     }
+    // }
+    // #[test]
+    // fn test_parse_alka_block_dangerous() {
+    //     let s = r#"txn Foo [true][n >= 0] { alka! { PULSE DOORBELL @ 0x90; }; term; };"#;
+    //     let mut parser = Parser::new(s);
+    //     let result = parser.parse();
+    //     assert!(result.is_ok(), "Should parse alka! block: {:?}", result.err());
+    //     if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+    //         match &txn.body[0] {
+    //             Statement::Alka(block) => {
+    //                 assert!(block.dangerous, "Dangerous alka");
+    //                 assert!(block.content.contains("PULSE DOORBELL"));
+    //             }
+    //             _ => panic!("Expected Alka statement"),
+    //         }
+    //     }
+    // }
+    // #[test]
+    // fn test_parse_alka_multi_line() {
+    //     let s = "txn Foo [true][n >= 0] { alka {\n  FENCE GPU_MAIN.METAPAGE == 1;\n  SIGNAL EXPERT_READY;\n}; term; };";
+    //     let mut parser = Parser::new(s);
+    //     let result = parser.parse();
+    //     assert!(result.is_ok(), "Should parse multi-line alka: {:?}", result.err());
+    // }
 
     #[test]
     fn test_parse_hashtag_on_let() {
@@ -5963,38 +5997,38 @@ mod parser_tests {
         }
     }
 
-    #[test]
-    fn test_on_exit_block_pragma() {
-        let s = r#"txn Foo [true][n >= 0] {
-            &CLAIMED = true;
-            #on_exit {
-                &CLAIMED = false;
-            };
-            dma_work();
-        };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse #on_exit block: {:?}", result.err());
-        if let Ok(program) = result {
-            if let TopLevel::Transaction(txn) = &program.items[0] {
-                let has_on_exit = txn.body.iter().any(|s| matches!(s, Statement::OnExit { .. }));
-                assert!(has_on_exit, "Should contain OnExit statement");
-            } else {
-                panic!("Expected Transaction");
-            }
-        }
-    }
-
-    #[test]
-    fn test_on_exit_no_precondition() {
-        let s = r#"txn Foo [true][n >= 0] {
-            #on_exit { &x = 0; };
-            term;
-        };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse on_exit without pre: {:?}", result.err());
-    }
+    // DISABLED: alka/on_exit — not ready for use.
+    // #[test]
+    // fn test_on_exit_block_pragma() {
+    //     let s = r#"txn Foo [true][n >= 0] {
+    //         &CLAIMED = true;
+    //         #on_exit {
+    //             &CLAIMED = false;
+    //         };
+    //         dma_work();
+    //     };"#;
+    //     let mut parser = Parser::new(s);
+    //     let result = parser.parse();
+    //     assert!(result.is_ok(), "Should parse #on_exit block: {:?}", result.err());
+    //     if let Ok(program) = result {
+    //         if let TopLevel::Transaction(txn) = &program.items[0] {
+    //             let has_on_exit = txn.body.iter().any(|s| matches!(s, Statement::OnExit { .. }));
+    //             assert!(has_on_exit, "Should contain OnExit statement");
+    //         } else {
+    //             panic!("Expected Transaction");
+    //         }
+    //     }
+    // }
+    // #[test]
+    // fn test_on_exit_no_precondition() {
+    //     let s = r#"txn Foo [true][n >= 0] {
+    //         #on_exit { &x = 0; };
+    //         term;
+    //     };"#;
+    //     let mut parser = Parser::new(s);
+    //     let result = parser.parse();
+    //     assert!(result.is_ok(), "Should parse on_exit without pre: {:?}", result.err());
+    // }
 
     #[test]
     fn test_parse_struct_variant_with_add() {
@@ -6223,6 +6257,39 @@ mod parser_tests {
             }
             _ => panic!("Expected MultiSlice, got {:?}", expr),
         }
+    }
+
+    #[test]
+    fn test_parse_projection_size() {
+        let mut parser = Parser::new("x :> Size");
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            crate::ast::Expr::Projection { source, target } => {
+                assert!(matches!(source.as_ref(), crate::ast::Expr::Identifier(name) if name == "x"));
+                assert!(matches!(target, crate::ast::ProjectionTarget::Size));
+            }
+            _ => panic!("Expected Projection, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_projection_ptr() {
+        let mut parser = Parser::new("my_list :> Ptr");
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            crate::ast::Expr::Projection { source, target } => {
+                assert!(matches!(source.as_ref(), crate::ast::Expr::Identifier(name) if name == "my_list"));
+                assert!(matches!(target, crate::ast::ProjectionTarget::Ptr));
+            }
+            _ => panic!("Expected Projection, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_projection_invalid_target() {
+        let mut parser = Parser::new("x :> Invalid");
+        let result = parser.parse_expression();
+        assert!(result.is_err());
     }
 }
 

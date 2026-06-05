@@ -328,7 +328,7 @@ And `escape` means "Rollback everything - pretend this never happened." Not "bre
 `rct txn` can self-verify when to end:
 
 ```brief
-rct txn fill_buffer() [buffer.len() < 100][buffer.len() == 100] {
+rct txn fill_buffer() [buffer :> Size < 100][buffer :> Size == 100] {
     &buffer = buffer + [new_item];
     term;
 };

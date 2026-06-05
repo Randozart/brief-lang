@@ -34,7 +34,7 @@ defn count_words(text: String) -> HashMap<String, Int> {
     let words = text.split(" ");
     
     let i: Int = 0;
-    [i < words.len()] {
+    [i < words :> Size] {
         let word = words[i];
         let current = counts.get(word);
         [current.is_some()] {
@@ -72,7 +72,7 @@ set = set.insert("cherry");
 set = set.remove("banana");
 
 // Metadata
-let len = set.len();
+let len = set :> Size;
 [set.is_empty()] {
     println("Set is empty");
 };
@@ -89,7 +89,7 @@ defn unique_items(list: List<String>) -> List<String> {
     let result: List<String> = [];
     
     let i: Int = 0;
-    [i < list.len()] {
+    [i < list :> Size] {
         let item = list[i];
         [!seen.contains(item)] {
             seen = seen.insert(item);
@@ -126,7 +126,7 @@ let result = stack.pop();
 let top = stack.peek();
 
 // Metadata
-let len = stack.len();
+let len = stack :> Size;
 [stack.is_empty()] {
     println("Stack is empty");
 };
@@ -142,7 +142,7 @@ defn evaluate_rpn(expr: List<String>) -> Int {
     let stack: Stack<Int> = new_stack();
     
     let i: Int = 0;
-    [i < expr.len()] {
+    [i < expr :> Size] {
         let token = expr[i];
         [token == "+"] {
             let (b, s) = stack.pop().unwrap();
@@ -189,7 +189,7 @@ let result = queue.dequeue();
 let front = queue.front();
 
 // Metadata
-let len = queue.len();
+let len = queue :> Size;
 [queue.is_empty()] {
     println("Queue is empty");
 };
@@ -216,7 +216,7 @@ defn bfs(start: Node) -> List<Node> {
         
         let neighbors = node.get_neighbors();
         let i: Int = 0;
-        [i < neighbors.len()] {
+        [i < neighbors :> Size] {
             let neighbor = neighbors[i];
             [!visited.contains(neighbor)] {
                 visited = visited.insert(neighbor);
@@ -250,7 +250,7 @@ sb = sb.append_float(3.14);
 let result = sb.to_string();  // "Hello42true3.14"
 
 // Metadata
-let len = sb.len();
+let len = sb :> Size;
 [sb.is_empty()] {
     println("Builder is empty");
 };
@@ -266,10 +266,10 @@ defn build_csv(rows: List<List<String>>) -> String {
     let sb = new_builder();
     
     let i: Int = 0;
-    [i < rows.len()] {
+    [i < rows :> Size] {
         let row = rows[i];
         let j: Int = 0;
-        [j < row.len()] {
+        [j < row :> Size] {
             [j > 0] {
                 sb = sb.append_char(',');
             };
@@ -335,7 +335,7 @@ txn lookup(name: String) [true][true] {
 txn list_all() [true][true] {
     let names = contacts.keys();
     let i: Int = 0;
-    [i < names.len()] {
+    [i < names :> Size] {
         println(names[i]);
         &i = i + 1;
     };

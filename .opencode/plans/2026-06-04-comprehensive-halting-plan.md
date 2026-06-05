@@ -19,21 +19,26 @@ subsequent iterations converge. This verification pass is what the 5 patterns im
 
 ---
 
-## UFCS Resolution Pipeline (No Magic Strings)
+## Projection Operator (`:>`)
 
-The parser is type-agnostic. It parses uniformly:
+Length queries use unique syntax — no magic strings, no UFCS, no hardcoded
+properties. The `:>` operator is a first-class postfix expression:
 
-| Syntax | Parsed as | Resolved to (by typechecker) |
-|--------|-----------|------------------------------|
-| `x.len()` | `Expr::FieldAccess(x, "len")` | `Expr::ListLen(x)` if x : List |
-| `len(x)` | `Expr::Call("len", [x])` | `Expr::ListLen(x)` if x : List |
-| `x.field` | `Expr::FieldAccess(x, "field")` | Stays as FieldAccess (struct) |
-| Any other Call | `Expr::Call(name, args)` | Stays as Call (defn/FFI) |
+| Syntax | Parsed as | Description |
+|--------|-----------|-------------|
+| `x :> Size` | `Expr::Projection { source: x, target: Size }` | Element count (lists/strings) |
+| `x :> Bytes` | `Expr::Projection { source: x, target: Bytes }` | Byte size (constant 8) |
+| `x :> Ptr` | `Expr::Projection { source: x, target: Ptr }` | Raw data pointer |
+| `x :> Alignment` | `Expr::Projection { source: x, target: Alignment }` | Alignment (constant 8) |
+| `x :> Range` | `Expr::Projection { source: x, target: Range }` | Min value constant |
 
-The typechecker/resolver pass unifies both `len(list)` and `list.len()` into
-`Expr::ListLen(list)` when the subject type is `List`. Zero magic strings in the
-backend or analyzer. The `extract_bounded_pre` function then matches against the
-native `Expr::ListLen` node.
+`len()` is a stdlib convenience function only:
+```
+defn len(x) { term x :> Size }
+```
+
+The `extract_bounded_pre` function matches `Projection(Size)` for collection
+drain halting proofs.
 
 ---
 
@@ -128,22 +133,21 @@ Add `detect_popcount_decay(body) -> Option<IncrementInfo>` matching
 
 ### Step 4: Collection Drain Detection
 
-**Pattern**: `[len(list) > 0][len(list) == 0]` with body `x <- &list` or `<- &list`.
-**Ranking function**: `τ = len(list) → 0`, decreases by exactly 1 per pop.
+**Pattern**: `[list :> Size > 0][list :> Size == 0]` with body `x <- &list` or `<- &list`.
+**Ranking function**: `τ = list :> Size → 0`, decreases by exactly 1 per pop.
 
-**Files**: `src/analysis/transition_graph.rs` + typechecker/resolver (UFCS)
+**Files**: `src/analysis/transition_graph.rs`
 
 **Changes**:
 
-1. Extend `extract_bounded_pre` to handle `Expr::ListLen(list_expr)` in `Gt`/`Ge` arms.
-2. Add `detect_collection_drain(body) -> Option<IncrementInfo>` matching `ArrowDir::Pop`
-   with `Expr::Term` index on the target list.
-3. Typechecker: rewrite `Expr::Call("len", [list])` and
-   `Expr::FieldAccess(list, "len")` to `Expr::ListLen(list)` when list type is `List`.
+1. `extract_bounded_pre` matches `Projection(Size)` in `Gt`/`Ge` arms (already done).
+2. `detect_collection_drain(body) -> Option<IncrementInfo>` matching `ArrowDir::Pop`
+   with `Expr::Term` index on the target list (already done).
+3. No UFCS or typechecker changes needed — `:>` is parsed directly to `Projection`.
 
-**Test**: `queue_drain.bv` — `[len(queue) > 0][len(queue) == 0]` with `x <- &queue`.
-**Lines**: ~60 (20 analyzer + 40 resolver/UFCS)
-**Risk**: 🟡 Medium — UFCS resolution needs type data from typechecker.
+**Test**: `queue_drain.bv` — `[queue :> Size > 0][queue :> Size == 0]` with `x <- &queue`.
+**Lines**: ~40 (analyzer only)
+**Risk**: 🟢 Low — no type-data dependency.
 
 ---
 

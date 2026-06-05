@@ -1150,7 +1150,7 @@ impl VhdlGenerator {
             Expr::ListIndex(list, idx) => {
                 format!("{}(to_integer(unsigned({})))", self.expr_to_string(list), self.expr_to_string(idx))
             }
-            Expr::ListLen(list) => format!("{}.length", self.expr_to_string(list)),
+            Expr::Projection { source: list, target: ProjectionTarget::Size } => format!("{}.length", self.expr_to_string(list)),
             Expr::Slice { value, start, end, stride, mask } => {
                 let v = self.expr_to_string(value);
                 let s = start.as_ref().map(|e| self.expr_to_string(e)).unwrap_or("0".to_string());

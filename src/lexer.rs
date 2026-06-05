@@ -279,6 +279,8 @@ pub enum Token {
     HashBang,
     #[token(";")]
     Semicolon,
+    #[token(":>")]
+    ColonGreaterThan,
     #[token(":")]
     Colon,
     #[token("::")]

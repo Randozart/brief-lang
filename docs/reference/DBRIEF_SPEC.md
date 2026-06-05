@@ -340,7 +340,7 @@ CHECK age > 18
 CHECK [
     age > 0;
     age < 150;
-    name.len() > 0
+    name :> Size > 0
 ]
 
 // Cross-field validation

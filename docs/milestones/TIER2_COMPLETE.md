@@ -97,7 +97,7 @@ defn is_identifier_continue(c: Char) -> Bool {
 
 // Hex literal detection
 defn is_hex_literal_start(s: String) -> Bool {
-    [s.len() >= 2] {
+    [s :> Size >= 2] {
         term s[0..1] == "0x" || s[0..1] == "0X";
     };
     term false;
@@ -234,7 +234,7 @@ All string-building operations use StringBuilder for O(1) append:
 defn to_lower_str(s: String) -> String {
     let sb = new_builder();
     let i: Int = 0;
-    [i < s.len()] {
+    [i < s :> Size] {
         let c = s[i..i+1];
         sb = sb.append_char(c.to_lower());
         &i = i + 1;
@@ -290,11 +290,11 @@ With Tier 2 complete, the lexer can now:
 3. **Parse numeric literals:**
    ```brief
    defn is_hex_literal(s: String) -> Bool {
-       [s.len() >= 2] {
+       [s :> Size >= 2] {
            [s[0..2] == "0x" || s[0..2] == "0X"] {
                // Check remaining chars are hex
                let i: Int = 2;
-               [i < s.len()] {
+               [i < s :> Size] {
                    [!is_hex_digit(s[i..i+1])] {
                        term false;
                    };
@@ -314,7 +314,7 @@ With Tier 2 complete, the lexer can now:
    defn unescape_string(s: String) -> String {
        let sb = new_builder();
        let i: Int = 1;  // Skip opening quote
-       [i < s.len() - 1] {  // Skip closing quote
+       [i < s :> Size - 1] {  // Skip closing quote
            let c = s[i..i+1];
            [c == "\\"] {
                let next = s[i+1..i+2];

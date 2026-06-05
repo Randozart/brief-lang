@@ -110,7 +110,7 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) => {
                 self.extract_ids_recursive(inner, ids);
             }
-            Expr::Cast(inner, _) | Expr::ListLen(inner) => {
+            Expr::Cast(inner, _) | Expr::Projection { source: inner, .. } => {
                 self.extract_ids_recursive(inner, ids);
             }
             Expr::Call(_, args) | Expr::ListLiteral(args) | Expr::Tuple(args) => {

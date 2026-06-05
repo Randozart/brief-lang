@@ -635,7 +635,7 @@ impl CobolBackend {
                 let index_str = self.translate_expr(index);
                 format!("{} ({})", list_str, index_str)
             }
-            Expr::ListLen(list) => {
+            Expr::Projection { source: list, .. } => {
                 format!("FUNCTION LENGTH({})", self.translate_expr(list))
             }
             Expr::FieldAccess(obj, field) => {

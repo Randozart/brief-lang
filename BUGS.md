@@ -219,6 +219,8 @@ Since `std.result` is imported, `Ok` IS in state, so path 1 always applies. But 
 
 **Lesson**: User definitions must never shadow built-in handlers for primitive type operations. The ordering of checks in `Expr::Call` must be: (1) built-in Result methods, (2) built-in primitives like `len`, (3) user definitions, (4) FFI, (5) enum constructors.
 
+**2026-06-05 Update**: Fully resolved by `:>` projection operator migration. The `Expr::ListLen` magic node and the UFCS `resolve_len_calls` hack are both deleted. All length queries use `x :> Size` — unique syntax, first-class `Expr::Projection` node, zero shadowing risk. `defn len(x) { term x :> Size }` is now a pure stdlib convenience wrapper that cannot recurse because `:>` is parsed directly to `Projection`, not to a `Call`.
+
 ## 2026-05-30 — Float result registers not tracked, causing compound float math to emit integer ops
 
 **Issue**: Compound float arithmetic — `let x = 1.0 + 2.0; let z = x + y;` — silently corrupted results. The second addition emitted `add i64` instead of `fadd float` because `is_float_expr(x)` returned `false`.

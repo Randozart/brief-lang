@@ -1885,11 +1885,45 @@ if fn_name == "clone" && !arg_values.is_empty() {
                     )),
                 }
             }
-            Expr::ListLen(list_expr) => {
-                let list_val = self.eval_expr(list_expr)?;
-                match list_val {
-                    Value::List(items) => Ok(Value::Int(items.len() as i64)),
-                    _ => Err(RuntimeError::TypeMismatch("len requires List".to_string())),
+                        Expr::Projection { source, target } => {
+                let source_val = self.eval_expr(source)?;
+                match target {
+                    ProjectionTarget::Size => match source_val {
+                        Value::List(items) => Ok(Value::Int(items.len() as i64)),
+                        Value::String(s) => Ok(Value::Int(s.len() as i64)),
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "Size projection requires List or String".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::Bytes => {
+                        let size = match &source_val {
+                            Value::Int(_) => 8,
+                            Value::Float(_) => 8,
+                            Value::Bool(_) => 1,
+                            Value::Char(_) => 4,
+                            Value::String(s) => s.len() as i64,
+                            Value::List(items) => items.len() as i64 * 8,
+                            Value::Instance { fields, .. } => fields.len() as i64 * 8,
+                            _ => 0,
+                        };
+                        Ok(Value::Int(size))
+                    }
+                    ProjectionTarget::Ptr => {
+                        // In the interpreter, pointer addresses are simulated
+                        Ok(Value::Int(0))
+                    }
+                    ProjectionTarget::Alignment => {
+                        // Default alignment is 8 bytes
+                        Ok(Value::Int(8))
+                    }
+                    ProjectionTarget::Range => {
+                        // Range projection requires compile-time analysis;
+                        // in the interpreter, return full i64 range
+                        Ok(Value::List(vec![
+                            Value::Int(i64::MIN),
+                            Value::Int(i64::MAX),
+                        ]))
+                    }
                 }
             }
             Expr::FieldAccess(obj_expr, field_name) => {

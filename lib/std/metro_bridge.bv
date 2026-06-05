@@ -74,7 +74,7 @@ defn metropolitan_rpc(
         let layout = __metro_get_channel_layout(ch_id);
         [layout.is_ok()] {
             let layout_addr = layout.value;
-            let written = __mmap_write(layout_addr, 32, request, request.len());
+            let written = __mmap_write(layout_addr, 32, request, request :> Size);
             [written.is_ok()] {
                 let signaled = __atomic_store_u32(layout_addr, 0, 1);
                 [signaled.is_ok()] {

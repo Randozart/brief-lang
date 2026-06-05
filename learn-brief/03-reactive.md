@@ -54,7 +54,7 @@ rct txn bad_increment() [counter < 100][counter == @counter + 1] {
 Once termination is proven, the compiler optimizes:
 
 ```brief
-rct txn fill_buffer() [buffer.len() < 100][buffer.len() == 100] {
+rct txn fill_buffer() [buffer :> Size < 100][buffer :> Size == 100] {
     &buffer = buffer.append(read_item());
     term;
 };
@@ -63,7 +63,7 @@ rct txn fill_buffer() [buffer.len() < 100][buffer.len() == 100] {
 **Compilation:**
 ```rust
 // Optimized loop (no repeated precondition checks needed)
-while buffer.len() < 100 {
+while buffer :> Size < 100 {
     buffer.append(read_item());
     // Compiler knows this WILL reach 100
 }
@@ -162,7 +162,7 @@ let subject_value: Int = 0;
 
 rct txn notify_observers() [subject_value != @notified_value][true] {
     let i: Int = 0;
-    [i < observers.len()] {
+    [i < observers :> Size] {
         notify(observers[i], subject_value);
         i = i + 1;
     };

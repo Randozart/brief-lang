@@ -51,7 +51,7 @@ defn print_int(n: Int) -> Bool [[term == true] {
     term __print_int(n);
 };
 
-defn input() -> String [true][term.len() >= 0] {
+defn input() -> String [true][term :> Size >= 0] {
     term "";
 };
 
@@ -122,7 +122,7 @@ frgn __create_dir(path: String) -> Result<Void, String> from "std::fs::create_di
 
 // ===== NATIVE WRAPPERS =====
 
-defn read_file(path: String) -> String [path != ""][term.len() >= 0] {
+defn read_file(path: String) -> String [path != ""][term :> Size >= 0] {
     let result = __read_file(path);
     [result.is_ok()] {
         term result.value;
@@ -154,7 +154,7 @@ defn delete_file(path: String) -> Bool [path != ""][term == true || term == fals
     term false;
 };
 
-defn list_directory(path: String) -> String [path != ""][term.len() >= 0] {
+defn list_directory(path: String) -> String [path != ""][term :> Size >= 0] {
     let result = __list_directory(path);
     [result.is_ok()] {
         term result.value;
@@ -172,10 +172,10 @@ defn create_dir(path: String) -> Bool [path != ""][term == true || term == false
 
 // ===== PATH OPERATIONS (Native) =====
 
-defn join_path(parts: List<String>) -> String [parts.len() > 0][term.len() >= 0] {
+defn join_path(parts: List<String>) -> String [parts :> Size > 0][term :> Size >= 0] {
     let result = new_builder();
     let i: Int = 0;
-    [i < parts.len()] {
+    [i < parts :> Size] {
         [i > 0] {
             result = result.append_char('/');
         };
@@ -185,27 +185,27 @@ defn join_path(parts: List<String>) -> String [parts.len() > 0][term.len() >= 0]
     term result.to_string();
 };
 
-defn split_path(path: String) -> String [path != ""][term.len() >= 0] {
+defn split_path(path: String) -> String [path != ""][term :> Size >= 0] {
     term path;
 };
 
-defn file_extension(path: String) -> String [path != ""][term.len() >= 0] {
+defn file_extension(path: String) -> String [path != ""][term :> Size >= 0] {
     term "";
 };
 
-defn file_stem(path: String) -> String [path != ""][term.len() >= 0] {
+defn file_stem(path: String) -> String [path != ""][term :> Size >= 0] {
     term path;
 };
 
-defn directory(path: String) -> String [path != ""][term.len() >= 0] {
+defn directory(path: String) -> String [path != ""][term :> Size >= 0] {
     term ".";
 };
 
-defn absolute_path(path: String) -> String [path != ""][term.len() >= 0] {
+defn absolute_path(path: String) -> String [path != ""][term :> Size >= 0] {
     term path;
 };
 
-defn normalize_path(path: String) -> String [path != ""][term.len() >= 0] {
+defn normalize_path(path: String) -> String [path != ""][term :> Size >= 0] {
     term path;
 };
 

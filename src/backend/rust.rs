@@ -580,7 +580,7 @@ impl RustBackend {
             Expr::BitXor(a, b) => format!("({} ^ {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Shl(a, b) => format!("({} << {})", self.expr_to_rust(a), self.expr_to_rust(b)),
             Expr::Shr(a, b) => format!("({} >> {})", self.expr_to_rust(a), self.expr_to_rust(b)),
-            Expr::ListLen(inner) => format!("{}.len()", self.expr_to_rust(inner)),
+            Expr::Projection { source: inner, .. } => format!("{}.len()", self.expr_to_rust(inner)),
             Expr::ListIndex(list, idx) => format!("{}[{}]", self.expr_to_rust(list), self.expr_to_rust(idx)),
             Expr::ListLiteral(elems) => {
                 let items: Vec<String> = elems.iter().map(|e| self.expr_to_rust(e)).collect();

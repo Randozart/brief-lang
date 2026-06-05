@@ -250,7 +250,7 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
             collect_expr_identifiers(list, ids);
             collect_expr_identifiers(idx, ids);
         }
-        Expr::ListLen(inner) => collect_expr_identifiers(inner, ids),
+        Expr::Projection { source: inner, .. } => collect_expr_identifiers(inner, ids),
         Expr::Tuple(elems) => {
             for elem in elems {
                 collect_expr_identifiers(elem, ids);

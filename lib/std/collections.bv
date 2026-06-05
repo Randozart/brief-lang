@@ -1,12 +1,12 @@
 // Standard List/Collection Library
 
 // Append item to list
-defn append(list: List<Int>, item: Int) [true][term.len() == list.len() + 1] -> List<Int> {
+defn append(list: List<Int>, item: Int) [true][term :> Size == list :> Size + 1] -> List<Int> {
     &list <- item;
     term list;
 }
 
 // Get list length
 defn len(list: List<Int>) [true][term >= 0] -> Int {
-    term list.len();
+    term list :> Size;
 }

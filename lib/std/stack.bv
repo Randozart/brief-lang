@@ -19,12 +19,12 @@ defn with_capacity<T>(capacity: Int) -> Stack<T> [capacity > 0][term.is_empty()]
 
 // ===== OPERATIONS =====
 
-defn push<T>(stack: Stack<T>, item: T) [true][term.len() == stack.len() + 1] -> Stack<T> {
+defn push<T>(stack: Stack<T>, item: T) [true][term :> Size == stack :> Size + 1] -> Stack<T> {
     &stack.items <- item;
     term stack;
 };
 
-defn pop<T>(stack: Stack<T>) [!stack.is_empty()][term.len() == stack.len() - 1] -> Stack<T> {
+defn pop<T>(stack: Stack<T>) [!stack.is_empty()][term :> Size == stack :> Size - 1] -> Stack<T> {
     [stack.is_empty()] {
         term stack;
     };
@@ -36,29 +36,29 @@ defn peek<T>(stack: Stack<T>) [!stack.is_empty()][true] -> Option<T> {
     [stack.is_empty()] {
         term None;
     };
-    term Some(stack.items[stack.len()-1]);
+    term Some(stack.items[stack :> Size-1]);
 };
 
 defn top<T>(stack: Stack<T>) [!stack.is_empty()][true] -> T {
-    term stack.items[stack.len()-1];
+    term stack.items[stack :> Size-1];
 };
 
 // ===== METADATA =====
 
 defn len<T>(stack: Stack<T>) [true][term >= 0] -> Int {
-    term stack.items.len();
+    term stack.items :> Size;
 };
 
 defn is_empty<T>(stack: Stack<T>) [true][term == true || term == false] -> Bool {
-    term stack.items.len() == 0;
+    term stack.items :> Size == 0;
 };
 
 // ===== CONVERSION =====
 
-defn to_list<T>(stack: Stack<T>) [true][term.len() == stack.len()] -> List<T> {
+defn to_list<T>(stack: Stack<T>) [true][term :> Size == stack :> Size] -> List<T> {
     term stack.items;
 };
 
-defn from_list<T>(items: List<T>) [true][term.len() == items.len()] -> Stack<T> {
+defn from_list<T>(items: List<T>) [true][term :> Size == items :> Size] -> Stack<T> {
     term Stack { items: items };
 };

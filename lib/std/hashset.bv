@@ -10,11 +10,11 @@ struct HashSet<T> {
 
 // ===== CONSTRUCTION =====
 
-defn new_set<T>() -> HashSet<T> [true][term.len() == 0] {
+defn new_set<T>() -> HashSet<T> [true][term :> Size == 0] {
     term HashSet { items: [] };
 };
 
-defn with_capacity<T>(capacity: Int) -> HashSet<T> [capacity > 0][term.len() == 0] {
+defn with_capacity<T>(capacity: Int) -> HashSet<T> [capacity > 0][term :> Size == 0] {
     term HashSet { items: [] };
 };
 
@@ -36,7 +36,7 @@ defn remove<T>(set: HashSet<T>, item: T)
 {
     let new_items: List<T> = [];
     let i: Int = 0;
-    [i < set.items.len()] {
+    [i < set.items :> Size] {
         [set.items[i] != item] {
             &new_items = new_items + [set.items[i]];
         };
@@ -50,7 +50,7 @@ defn contains<T>(set: HashSet<T>, item: T)
     -> Bool 
 {
     let i: Int = 0;
-    [i < set.items.len()] {
+    [i < set.items :> Size] {
         [set.items[i] == item] {
             term true;
         };
@@ -62,12 +62,12 @@ defn contains<T>(set: HashSet<T>, item: T)
 // ===== SET OPERATIONS =====
 
 defn union<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][term.len() >= a.len() && term.len() >= b.len()] 
+    [true][term :> Size >= a :> Size && term :> Size >= b :> Size] 
     -> HashSet<T> 
 {
     let result: HashSet<T> = a;
     let i: Int = 0;
-    [i < b.items.len()] {
+    [i < b.items :> Size] {
         &result = result.insert(b.items[i]);
         &i = i + 1;
     };
@@ -75,12 +75,12 @@ defn union<T>(a: HashSet<T>, b: HashSet<T>)
 };
 
 defn intersection<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][term.len() <= a.len() && term.len() <= b.len()] 
+    [true][term :> Size <= a :> Size && term :> Size <= b :> Size] 
     -> HashSet<T> 
 {
     let result: HashSet<T> = new_set();
     let i: Int = 0;
-    [i < a.items.len()] {
+    [i < a.items :> Size] {
         [b.contains(a.items[i])] {
             &result = result.insert(a.items[i]);
         };
@@ -90,12 +90,12 @@ defn intersection<T>(a: HashSet<T>, b: HashSet<T>)
 };
 
 defn difference<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][term.len() <= a.len()] 
+    [true][term :> Size <= a :> Size] 
     -> HashSet<T> 
 {
     let result: HashSet<T> = new_set();
     let i: Int = 0;
-    [i < a.items.len()] {
+    [i < a.items :> Size] {
         [!b.contains(a.items[i])] {
             &result = result.insert(a.items[i]);
         };
@@ -110,39 +110,39 @@ defn len<T>(set: HashSet<T>)
     [true][term >= 0] 
     -> Int 
 {
-    term set.items.len();
+    term set.items :> Size;
 };
 
 defn is_empty<T>(set: HashSet<T>) 
     [true][term == true || term == false] 
     -> Bool 
 {
-    term set.items.len() == 0;
+    term set.items :> Size == 0;
 };
 
 // ===== ITERATION =====
 
 defn iter<T>(set: HashSet<T>) 
-    [true][term.len() == set.len()] 
+    [true][term :> Size == set :> Size] 
     -> List<T> 
 {
     term set.items;
 };
 
 defn to_list<T>(set: HashSet<T>) 
-    [true][term.len() == set.len()] 
+    [true][term :> Size == set :> Size] 
     -> List<T> 
 {
     term set.items;
 };
 
 defn from_list<T>(items: List<T>) 
-    [true][term.len() <= items.len()] 
+    [true][term :> Size <= items :> Size] 
     -> HashSet<T> 
 {
     let result: HashSet<T> = new_set();
     let i: Int = 0;
-    [i < items.len()] {
+    [i < items :> Size] {
         &result = result.insert(items[i]);
         &i = i + 1;
     };
@@ -150,7 +150,7 @@ defn from_list<T>(items: List<T>)
 };
 
 defn clear<T>(set: HashSet<T>) 
-    [true][term.len() == 0] 
+    [true][term :> Size == 0] 
     -> HashSet<T> 
 {
     term HashSet { items: [] };

@@ -312,6 +312,16 @@ pub enum ArrowDir {
     Pop,
 }
 
+/// Target of a `:>` projection: `expr :> Size`
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProjectionTarget {
+    Size,
+    Bytes,
+    Ptr,
+    Alignment,
+    Range,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Integer(i64),
@@ -362,10 +372,14 @@ pub enum Expr {
     Concat(Box<Expr>, Box<Expr>),
     /// Type cast: expr as Type
     Cast(Box<Expr>, Type),
+    /// Compile-time metadata projection: `expr :> Size`
+    Projection {
+        source: Box<Expr>,
+        target: ProjectionTarget,
+    },
     Call(String, Vec<Expr>),
     ListLiteral(Vec<Expr>),
     ListIndex(Box<Expr>, Box<Expr>),
-    ListLen(Box<Expr>),
     Slice {
         value: Box<Expr>,
         start: Option<Box<Expr>>,
@@ -466,7 +480,7 @@ impl Expr {
                 r.extract_deps_recursive(deps);
             }
 
-            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::ListLen(e) => {
+            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Projection { source: e, .. } => {
                 e.extract_deps_recursive(deps);
             }
             Expr::Call(_, args) | Expr::ListLiteral(args) => {

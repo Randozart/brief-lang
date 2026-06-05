@@ -338,7 +338,7 @@ defn enter_scope(ctx: TypeContext) -> TypeContext {
 defn lookup_type(ctx: TypeContext, name: String) -> Option<Type> {
     // Search from innermost to outermost
     let i: Int = 0;
-    [i < ctx.scopes.len()] {
+    [i < ctx.scopes :> Size] {
         [ctx.scopes[i].contains_key(name)] {
             term ctx.scopes[i].get(name);
         };
@@ -370,7 +370,7 @@ defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool {
         };
         // Check all type arguments
         let i: Int = 0;
-        [i < args.len()] {
+        [i < args :> Size] {
             [occurs_check(name, args[i], subst)] {
                 term true;
             };
