@@ -49,6 +49,11 @@
 | Bit Packing | SPEC.md §4.2 | (advanced examples) |
 | Async Transactions | SPEC.md §3 | (see examples) |
 | Pattern Matching | SPEC.md §3 | (see language tutorial) |
+| Projection Operator (`:>`) | SPEC.md §3.15 | learn-brief/13-projections.md |
+| Ptr\<T\> Types | SPEC.md §3.16 | learn-brief/05-data-types.md §7 |
+| Bit Manipulation Intrinsics | SPEC.md §3.15 | std/bits.bv, learn-brief/13-projections.md |
+| Safe Pointer Ops | SPEC.md §6.9 | std/ptr.bv |
+| Collection Mutation (`<-`) | SPEC.md §3.14 | 05-data-types.md |
 
 ---
 

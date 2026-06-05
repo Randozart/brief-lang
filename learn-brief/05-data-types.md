@@ -492,4 +492,73 @@ frame[width::4, height::4].r = frame[width::4, height::4].r / 2;
 
 ---
 
+## 7. Pointer Types (`Ptr<T>`)
+
+`Ptr<T>` is a verified pointer whose safety is proven at compile time.
+Creation requires the `:>` projection operator — there is no way to forge a
+`Ptr<T>` without the compiler knowing its provenance.
+
+### Creating Pointers
+
+```brief
+// Verified pointer (compiler tracks bounds, guarantees non-null)
+let p: Ptr<Int> = &x :> Ptr;
+
+// Raw unchecked address (no safety envelope)
+let raw: Int = x :> Ptr!;
+
+// From collections
+let list_ptr: Ptr<Int> = my_list :> Ptr;
+
+// Get raw address from a verified pointer
+let addr: Int = p :> Ptr;
+```
+
+### Dereferencing
+
+Use bracket indexing — `ptr[i]` — just like array access:
+
+```brief
+let val: Int = p[0];          // Read element 0 — bounds-checked at compile time
+&p[0] = 42;                   // Write element 0 — bounds-checked
+```
+
+The compiler emits the same raw `load`/`store` instructions as C, but only
+after proving the access is within bounds.
+
+### Safety Guarantees
+
+| Property | Guaranteed by |
+|----------|---------------|
+| Bounds | `i * sizeof(T) < ptr :> Bytes` is proven by the SMT solver |
+| Non-null | `Ptr<T>` from `&x` or `list :> Ptr` is always valid |
+| Alignment | Address is always aligned to `T :> Alignment` |
+| No use-after-free | Brief has no `free` — global state lives forever |
+
+### Standard Library
+
+`std/ptr.bv` provides convenient wrappers with explicit contracts:
+
+```brief
+import { read_i64, write_i64, copy, address } from "std/ptr.bv";
+
+// Safe read — precondition: i >= 0 && (i+1)*8 <= p :> Bytes
+let v = read_i64(p, 0);
+
+// Safe write — same precondition
+write_i64(p, 0, 99);
+
+// Block copy — precondition: non-overlapping ranges → @llvm.memcpy
+copy(dest, src, count);
+
+// Get raw address
+let addr = address(p);
+```
+
+Every function has a contract that the `PointerVerifier` pass checks at
+compile time. If the caller cannot prove the precondition, compilation fails
+with a `ProofError`.
+
+---
+
 *Next: [06-string.md](06-string.md) - String manipulation and operations*

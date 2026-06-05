@@ -1,8 +1,8 @@
 # Brief Language Specification
 
-**Version:** v0.14.0  
-**Date:** 2026-05-29  
-**Status:** Development (stable core, experimental backends, **new: Strict Brief variants, LLVM backend, match expression**)  
+**Version:** v0.15.0  
+**Date:** 2026-06-05  
+**Status:** Development (stable core, experimental backends, **new: LLVM intrinsic projections, Ptr\<T\> types, std/bits.bv, std/ptr.bv**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -157,6 +157,7 @@ type ::= "Int" | "UInt" | "Float" | "String" | "Bool" | "Void" | "Data" | "Char"
        | "Option" "[" type "]"  // Optional type
        | "Result" "[" type "," type "]"  // Result type (for FFI)
        | "List" "[" type "]"  // Dynamic list
+       | "Ptr" "[" type "]"  // Verified pointer
        | "Sig" "[" identifier "]"  // Signature type
        | type "Union" "[" type ("," type)* "]"  // Union type
        | "(" type ("," type)* ")"  // Tuple type
@@ -254,6 +255,8 @@ owned_ref ::= "&" identifier ("." identifier | "[" expression "]")*
 
 projection ::= expression ":>" projection_target
 projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
+                    | "Popcount" | "LeadingZeros" | "TrailingZeros"
+                    | "Absolute" | "BitReverse" | "Type" | "Ptr!"
 
 arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
             | expression "<-" owned_ref              // Insert (prepend): x <- &list
@@ -401,6 +404,8 @@ owned_ref ::= "&" identifier ("." identifier | "[" expression "]")*
 
 projection ::= expression ":>" projection_target
 projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
+                    | "Popcount" | "LeadingZeros" | "TrailingZeros"
+                    | "Absolute" | "BitReverse" | "Type" | "Ptr!"
 
 arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
             | expression "<-" owned_ref              // Insert (prepend): x <- &list
@@ -1126,11 +1131,96 @@ length effect is needed (e.g., drain-until-empty halting patterns).
 | Form | Meaning |
 |------|---------|
 | `&list <- value` | Push: add value to list (append) |
-| `value <- &list` | Unshift: add value to front of list (prepend) |
-| `&list[i] <- value` | Write: set element at index |
-| `<- &list` | Pop: remove and discard last element |
-| `<- &list[i]` | Remove: remove and discard element at index |
-| `let x = <- &list` | Pop and bind: remove last element to `x` |
+
+---
+
+### 3.15 Projection Operator (`:>`)
+
+The `:>` (metadata lens) operator projects compile-time-known properties from
+values without runtime overhead. All operations map directly to LLVM intrinsics
+or constant evaluation.
+
+**Syntax:** `expression :> projection_target`
+
+**Metadata projections:**
+
+| Target | Source type | Result | LLVM emission |
+|--------|-------------|--------|---------------|
+| `Size` | List, String | Length (elements) | Load from 2-slot header slot 1 |
+| `Bytes` | Any | Byte size of value | Compile-time constant |
+| `Ptr` | Variable, List | Verified pointer `Ptr<T>` | Load data pointer from 2-slot header slot 0 |
+| `Alignment` | Any | Memory alignment | Compile-time constant |
+| `Range` | Any | `(min, max)` tuple | Compile-time constant |
+
+**Bit manipulation projections (LLVM intrinsics):**
+
+| Target | Source type | Result | LLVM intrinsic |
+|--------|-------------|--------|----------------|
+| `Popcount` | Int | Number of set bits | `@llvm.ctpop.i64` |
+| `LeadingZeros` | Int | Leading zero count | `@llvm.ctlz.i64` |
+| `TrailingZeros` | Int | Trailing zero count | `@llvm.cttz.i64` |
+| `Absolute` | Int, Float | Absolute value | `@llvm.abs.i64`, `@llvm.fabs.f64` |
+| `BitReverse` | Int | Bit-reversed value | `@llvm.bitreverse.i64` |
+
+**Reflection projection:**
+
+| Target | Source type | Result | Notes |
+|--------|-------------|--------|-------|
+| `Type` | Any | Type discriminant (Int) | Compile-time constant |
+| `Ptr!` | Any | Raw address (Int) | No safety envelope — use with care |
+
+**Example:**
+
+```brief
+let v: Int = 0x0F0F0F0F0F0F0F0F;
+let ones   = v :> Popcount;       // 32 — single @llvm.ctpop call
+let lz     = v :> LeadingZeros;   // 4 — single @llvm.ctlz call
+let abs_v  = (-42) :> Absolute;   // 42 — single @llvm.abs call
+let rev    = v :> BitReverse;     // bit-reversed — single @llvm.bitreverse call
+let len    = list :> Size;        // list length — header load
+let addr   = &x :> Ptr;           // Ptr<Int> — verified pointer
+let raw    = x :> Ptr!;           // Int — raw unchecked address
+```
+
+### 3.16 Ptr\<T\> Type and Safe Pointer Operations
+
+The `Ptr<T>` type represents a verified pointer to a value of type `T`.
+Creation is restricted to the `:>` projection operator, ensuring the compiler
+tracks provenance.
+
+**Creating a pointer:**
+
+| Expression | Result type | Provenance |
+|------------|-------------|------------|
+| `&x :> Ptr` | `Ptr<Int>` | Bound = sizeof(x), non-null guaranteed |
+| `list :> Ptr` | `Ptr<T>` | Bound = list :> Bytes, non-null guaranteed |
+| `ptr :> Ptr` (on Ptr\<T\>) | `Int` | Escape hatch — raw address |
+| `x :> Ptr!` | `Int` | Raw unchecked address (no safety envelope) |
+
+**Dereferencing:**
+
+When a `Ptr<T>` variable is indexed with `ptr[i]`, the compiler emits a direct
+`getelementptr + load` (or `store`) instruction — identical to raw C pointer
+access — but only after verifying the access is within bounds.
+
+```brief
+let p: Ptr<Int> = &x :> Ptr;
+let val = p[0];                   // Read — compiler verifies 0 < sizeof(x)
+&p[0] = 42;                       // Write — compiler verifies bounds
+```
+
+**Safety verification:**
+
+The `PointerVerifier` pass checks every `ptr[i]` access at compile time:
+1. `i >= 0` — must be proven or specified as a precondition
+2. `(i + 1) * sizeof(T) <= ptr :> Bytes` — must be proven
+3. Unprovable → `ProofError(P200)` "out of bounds access"
+
+For raw unchecked access, use `x :> Ptr!` (returns `Int`) — no compiler
+verification, no safety envelope, full programmer control.
+
+**Standard library:** `std/ptr.bv` provides `read_i64`, `write_i64`,
+`address`, `read_byte`, and `copy` with contract-proven safety. See §6.9.
 
 ---
 
@@ -1633,6 +1723,8 @@ frgn sqrt(x: Float) -> Float from "libm.so.6";
 | `std/encoding` | Data encoding | `base64_encode`, `base64_decode`, `hex_encode`, `hex_decode` |
 | `std/option` | Option type methods | `is_some`, `is_none`, `unwrap`, `map`, `and_then` |
 | `std/result` | Result type methods | `is_ok`, `is_err`, `unwrap`, `map`, `map_err` |
+| `std/bits` | Bit manipulation \[2026-06-05\] | `popcount`, `leading_zeros`, `trailing_zeros`, `abs`, `bit_reverse`, `ffs`, `is_power_of_two`, `rotate_left`, `rotate_right` |
+| `std/ptr` | Safe pointer operations \[2026-06-05\] | `read_i64`, `write_i64`, `address`, `read_byte`, `copy` |
 
 ### 6.2 Math Module
 
@@ -1780,6 +1872,55 @@ let diff = time.diff_seconds(later, now);  // 60
 // Sleeping
 time.sleep(time.duration_millis(100));
 ```
+
+---
+
+### 6.8 Bits Module
+
+```brief
+import { popcount, leading_zeros, trailing_zeros, abs, bit_reverse, ffs } from "std/bits.bv";
+
+// Counting operations
+let ones = popcount(0x0F0F0F0F0F0F0F0F);      // 32
+let lz   = leading_zeros(0x0F0F0F0F0F0F0F0F);  // 4
+let tz   = trailing_zeros(0x0F0F0F0F0F0F0F0F); // 4
+let f    = ffs(0x08);                           // 4 (1-indexed)
+
+// Transforms
+let rev  = bit_reverse(0x0F0F0F0F0F0F0F0F);
+let pos  = abs(-42);                            // 42
+
+// Classification
+let p2   = is_power_of_two(1024);               // true
+let not  = is_power_of_two(1025);               // false
+
+// Rotation
+let rol  = rotate_left(0x0F0F0F0F0F0F0F0F, 8);
+let ror  = rotate_right(0x0F0F0F0F0F0F0F0F, 8);
+```
+
+All functions map directly to LLVM intrinsics via the `:>` projection operator
+(§3.x). Zero runtime overhead — each call compiles to a single CPU instruction.
+
+### 6.9 Pointer Module
+
+```brief
+import { read_i64, write_i64, address, copy } from "std/ptr.bv";
+
+let p: Ptr<Int> = &x :> Ptr;       // Create verified pointer
+let v = read_i64(p, 0);            // Read element — bounds-checked at compile time
+write_i64(p, 0, 42);               // Write element — bounds-checked
+
+let raw: Int = address(p);         // Escape: raw Int address
+let byte = read_byte(p, 4);        // Byte-level read with masking
+
+// Block copy — proven non-overlapping → @llvm.memcpy
+copy(dest, src, count);
+```
+
+All pointer operations are checked by the `PointerVerifier` pass (§3.y).
+Preconditions must be provable at compile time; unprovable accesses produce a
+compile-time `ProofError`.
 
 ---
 
@@ -2084,6 +2225,10 @@ reset = "RESETn"
 | Rstructs | ✅ Complete | Rendered structs with UI |
 | Generics | ⚠️ Partial | Syntax works, trait bounds pending |
 | Traits | ❌ Planned | For generic constraints |
+| `Ptr<T>` types | ✅ Complete | Verified pointer with compile-time bounds tracking \[2026-06-05\] |
+| `:>` projections | ✅ Complete | 12 targets: Size, Bytes, Ptr, Alignment, Range, Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr! \[2026-06-05\] |
+| LLVM intrinsic projections | ✅ Complete | ctpop, ctlz, cttz, abs, bitreverse via `:>` operator \[2026-06-05\] |
+| Pointer dereference (`ptr[i]`) | ✅ Complete | Direct GEP for Ptr\<T\>; checked by PointerVerifier \[2026-06-05\] |
 | **FFI** | | |
 | Foreign signatures | ✅ Complete | `frgn`, `frgn!`, `syscall`, `syscall!` |
 | Resource declarations | ✅ Complete | `rsrc` keyword |
@@ -2095,6 +2240,9 @@ reset = "RESETn"
 | Data (`.dbv`) | ✅ Complete | |
 | Lines (`.dbvl`) | ✅ Complete | |
 | Validation | ✅ Complete | Compile-time |
+| **Standard Library** | | |
+| `std/bits.bv` | ✅ Complete | Bit manipulation: popcount, leading_zeros, trailing_zeros, abs, bit_reverse, ffs, rotate \[2026-06-05\] |
+| `std/ptr.bv` | ✅ Complete | Safe pointer ops: read_i64, write_i64, address, read_byte, copy \[2026-06-05\] |
 | **Backends** | | |
 | Rust | ✅ Complete | Native executables |
 | C | ✅ Complete | Hosted and bare-metal |

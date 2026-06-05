@@ -98,6 +98,14 @@
     - Security best practices
     - Common pitfalls
 
+### Reference
+
+13. **[13-projections.md](13-projections.md)** - The `:>` Projection Operator
+    - Metadata projections (Size, Bytes, Ptr, Alignment, Range)
+    - Bit manipulation projections (Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse)
+    - Reflection (Type, Ptr!)
+    - Standard library wrappers
+
 ---
 
 ## Quick Reference
@@ -148,6 +156,7 @@ frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 | `List<T>` | Dynamic array | `[1, 2, 3]` |
 | `Option<T>` | Nullable | `Some(42)`, `None` |
 | `Result<T,E>` | Error handling | `Ok(42)`, `Err(e)` |
+| `Ptr<T>` | Verified pointer | `&x :> Ptr` |
 
 ### Collections
 

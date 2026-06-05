@@ -105,6 +105,30 @@ result.value         // Result unwrapping
 
 ---
 
+### `:>` - The Metadata Lens
+
+`:>` reads compile-time-known metadata from a value. Think of it as "ask the
+compiler for a property of this thing":
+
+```brief
+list :> Size;       // How many elements?
+str :> Bytes;       // How many bytes does this occupy?
+&x :> Ptr;          // Get a verified pointer to x
+val :> Popcount;    // How many set bits (via @llvm.ctpop)?
+val :> Absolute;    // Absolute value (via @llvm.fabs)
+val :> Type;        // What type is this at compile time?
+x :> Ptr!;          // Raw address — dangerous, no safety envelope
+```
+
+`:>` is the "cheat code" — it lets the compiler handle operations it can
+prove or optimize, rather than requiring the programmer to write them in
+user-space. Every `:>` target maps to either a compile-time constant or a
+zero-cost LLVM intrinsic.
+
+See `learn-brief/13-projections.md` for the complete reference.
+
+---
+
 ### `@` - The Prior State
 
 `@` always means "value at the **start** of this transaction":
