@@ -185,6 +185,33 @@ compiler to verify safety.
 
 ---
 
+## Regex Projection
+
+### `:> Match("pattern")`
+
+Compiles a regular expression to a Deterministic Finite Automaton (DFA) at
+compile time. The DFA processes input in O(n) linear time with zero
+backtracking — no ReDoS risk.
+
+```brief
+// Bool result (no capture groups)
+let matched = "hello@example.com" :> Match("^[a-z@.]+$");
+
+// String result (single capture group)
+let domain = input :> Match("@([a-z]+)\\.");
+
+// Tuple result (multiple capture groups)
+let (user, domain) = input :> Match("^([a-z]+)@([a-z]+)\\.com$");
+```
+
+**Return types:** 0 groups → Bool, 1 group → String, N groups → Tuple.
+
+The regex is parsed and compiled to an NFA (Thompson construction) then
+converted to a DFA (subset construction) at parse time. Invalid patterns
+produce a compile-time error.
+
+---
+
 ## Standard Library Wrappers
 
 The standard library provides thin `defn` wrappers for all bit manipulation
@@ -217,3 +244,4 @@ let v = read_i64(p, 0);            // Bounds-checked by contract
 | `BitReverse` | Int | Int | `@llvm.bitreverse` | `std/bits` |
 | `Type` | Any | Int | Constant | — |
 | `Ptr!` | Any | Int | Header load | — |
+| `Match` | String | Bool / String / Tuple | DFA scan loop | — |

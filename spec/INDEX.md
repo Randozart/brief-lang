@@ -53,6 +53,8 @@
 | Ptr\<T\> Types | SPEC.md §3.16 | learn-brief/05-data-types.md §7 |
 | Bit Manipulation Intrinsics | SPEC.md §3.15 | std/bits.bv, learn-brief/13-projections.md |
 | Safe Pointer Ops | SPEC.md §6.9 | std/ptr.bv |
+| DFA Regex (`:> Match`) | SPEC.md §3.17 | learn-brief/13-projections.md |
+| Roofline / Bottlenecks | SPEC.md §3.18 | lib/targets/bottlenecks.dbvs |
 | Collection Mutation (`<-`) | SPEC.md §3.14 | 05-data-types.md |
 
 ---

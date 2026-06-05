@@ -2,7 +2,7 @@
 
 **Version:** v0.15.0  
 **Date:** 2026-06-05  
-**Status:** Development (stable core, experimental backends, **new: LLVM intrinsic projections, Ptr\<T\> types, std/bits.bv, std/ptr.bv**)  
+**Status:** Development (stable core, experimental backends, **new: LLVM intrinsic projections, Ptr\<T\> types, std/bits.bv, std/ptr.bv, DFA regex, roofline model**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -1162,6 +1162,12 @@ or constant evaluation.
 | `Absolute` | Int, Float | Absolute value | `@llvm.abs.i64`, `@llvm.fabs.f64` |
 | `BitReverse` | Int | Bit-reversed value | `@llvm.bitreverse.i64` |
 
+**Regex projection:**
+
+| Target | Source type | Result | Notes |
+|--------|-------------|--------|-------|
+| `Match("pattern")` | String | Bool, String, or Tuple | Compile-time DFA; O(n) linear scan \[2026-06-05\] |
+
 **Reflection projection:**
 
 | Target | Source type | Result | Notes |
@@ -1221,6 +1227,84 @@ verification, no safety envelope, full programmer control.
 
 **Standard library:** `std/ptr.bv` provides `read_i64`, `write_i64`,
 `address`, `read_byte`, and `copy` with contract-proven safety. See §6.9.
+
+---
+
+### 3.17 DFA Regex (`:> Match`)
+
+The `:> Match("pattern")` projection compiles a regular expression to a
+Deterministic Finite Automaton (DFA) at compile time. The resulting state
+machine processes input in O(n) linear time with zero backtracking — no ReDoS
+risk.
+
+**Syntax:**
+
+```brief
+let matched: Bool = "hello@example.com" :> Match("^[a-z]+@[a-z]+\\.[a-z]+$");
+
+// Single capture group returns a String
+let (domain: String) = "user@example.com" :> Match("@([a-z]+)\\.");
+
+// Multiple capture groups return a Tuple
+let (user, domain) = input :> Match("^([a-z]+)@([a-z]+)\\.com$");
+```
+
+**Return type inference:**
+
+| Capture groups | Return type |
+|----------------|-------------|
+| 0 | `Bool` — match/no-match |
+| 1 | `String` — captured content |
+| N | `Tuple([String; N])` — all captures |
+
+**Compile-time compilation:**
+
+The regex is compiled during parsing. Invalid patterns produce a compile-time
+error. The DFA transition table is embedded as a constant LLVM global array;
+the scan loop is a tight O(n) character-by-character state machine with no
+dynamic allocations.
+
+**Supported syntax:** Literals, `.` (any char), `*` (zero-or-more),
+`+` (one-or-more), `?` (zero-or-one), `[...]` character classes,
+`^`/`$` anchors, `()` capture groups, `|` alternation,
+`\d`/`\w`/`\s`/`\D`/`\W` escape sequences.
+
+---
+
+### 3.18 Throughput-Matched Optimization (Roofline Model)
+
+Brief's compiler uses physical hardware constraints to guide precompute/fold
+decisions. A precomputed LUT that spills out of cache runs *slower* than the
+arithmetic loop — the roofline model prevents this.
+
+**Configuration:** Loaded from a `bottlenecks.dbvs` schema file referenced by
+the target spec:
+
+```dbvs
+// bottlenecks.dbvs
+schema BottleneckConfig {
+    pcie_bandwidth_gbs: Float = 15.75;
+    system_ram_bandwidth_gbs: Float = 40.0;
+    l1_cache_size_kb: Int = 32;
+    l2_cache_size_kb: Int = 256;
+    l3_cache_size_kb: Int = 8192;
+    memory_port_width: Int = 1;
+    fpga_clock_mhz: Float = 0.0;
+};
+```
+
+**Roofline decisions:**
+
+| LUT size | Fits cache | Decision |
+|----------|------------|----------|
+| ≤ L1 size | L1 | Precompute unconditionally (zero-cost LUT) |
+| ≤ L2 size | L2 | Precompute (fast lookup) |
+| ≤ L3 size | L3 | Precompute only if 10× reuse factor |
+| > L3 size | None | Emit runtime loop (spills to RAM) |
+
+The `RooflineAnalyzer` (§6.11) also evaluates arithmetic intensity
+(FLOP/byte) against peak compute and memory bandwidth to determine whether
+an optimization is compute-bound or memory-bound.
 
 ---
 
@@ -1873,54 +1957,25 @@ let diff = time.diff_seconds(later, now);  // 60
 time.sleep(time.duration_millis(100));
 ```
 
----
+### 6.10 DFA Regex Module
 
-### 6.8 Bits Module
-
-```brief
-import { popcount, leading_zeros, trailing_zeros, abs, bit_reverse, ffs } from "std/bits.bv";
-
-// Counting operations
-let ones = popcount(0x0F0F0F0F0F0F0F0F);      // 32
-let lz   = leading_zeros(0x0F0F0F0F0F0F0F0F);  // 4
-let tz   = trailing_zeros(0x0F0F0F0F0F0F0F0F); // 4
-let f    = ffs(0x08);                           // 4 (1-indexed)
-
-// Transforms
-let rev  = bit_reverse(0x0F0F0F0F0F0F0F0F);
-let pos  = abs(-42);                            // 42
-
-// Classification
-let p2   = is_power_of_two(1024);               // true
-let not  = is_power_of_two(1025);               // false
-
-// Rotation
-let rol  = rotate_left(0x0F0F0F0F0F0F0F0F, 8);
-let ror  = rotate_right(0x0F0F0F0F0F0F0F0F, 8);
-```
-
-All functions map directly to LLVM intrinsics via the `:>` projection operator
-(§3.x). Zero runtime overhead — each call compiles to a single CPU instruction.
-
-### 6.9 Pointer Module
+Compile-time regex compilation via `:> Match("pattern")` (§3.17). The DFA is
+compiled during parsing using Thompson construction → subset construction.
+The transition table is embedded as a constant; the scan loop is O(n) linear.
 
 ```brief
-import { read_i64, write_i64, address, copy } from "std/ptr.bv";
-
-let p: Ptr<Int> = &x :> Ptr;       // Create verified pointer
-let v = read_i64(p, 0);            // Read element — bounds-checked at compile time
-write_i64(p, 0, 42);               // Write element — bounds-checked
-
-let raw: Int = address(p);         // Escape: raw Int address
-let byte = read_byte(p, 4);        // Byte-level read with masking
-
-// Block copy — proven non-overlapping → @llvm.memcpy
-copy(dest, src, count);
+let found = "hello@example.com" :> Match("^[a-z]+@[a-z]+\\.[a-z]+$");
 ```
 
-All pointer operations are checked by the `PointerVerifier` pass (§3.y).
-Preconditions must be provable at compile time; unprovable accesses produce a
-compile-time `ProofError`.
+### 6.11 RooflineAnalyzer
+
+The `RooflineAnalyzer` (§3.18) uses hardware bottleneck constraints to guide
+precompute/fold decisions. Configured via `bottlenecks.dbvs` schema files.
+
+**Public API:**
+- `compute_roofline(flops, bytes_moved)` → compute-bound vs memory-bound
+- `lut_fits_cache(lut_size_bytes)` → `Some(CacheTier)` or `None`
+- `should_precompute_as_lut(iterations, size, reuse)` → fold decision
 
 ---
 
@@ -2229,6 +2284,9 @@ reset = "RESETn"
 | `:>` projections | ✅ Complete | 12 targets: Size, Bytes, Ptr, Alignment, Range, Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr! \[2026-06-05\] |
 | LLVM intrinsic projections | ✅ Complete | ctpop, ctlz, cttz, abs, bitreverse via `:>` operator \[2026-06-05\] |
 | Pointer dereference (`ptr[i]`) | ✅ Complete | Direct GEP for Ptr\<T\>; checked by PointerVerifier \[2026-06-05\] |
+| DFA regex (`:> Match`) | ✅ Complete | Compile-time DFA, O(n) linear scan, zero backtracking \[2026-06-05\] |
+| RooflineAnalyzer | ✅ Complete | Cache-aware LUT sizing, roofline model via bottlenecks.dbvs \[2026-06-05\] |
+| Bottleneck config | ✅ Complete | bottlenecks.dbvs schema for PCIe, cache, bandwidth, FPGA \[2026-06-05\] |
 | **FFI** | | |
 | Foreign signatures | ✅ Complete | `frgn`, `frgn!`, `syscall`, `syscall!` |
 | Resource declarations | ✅ Complete | `rsrc` keyword |
