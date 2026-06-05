@@ -1,0 +1,39 @@
+// interval_step — Interval bounds progress benchmark
+//
+// Tests: compiler proves convergence for `x = (x + R1) - R2` where
+// R1 - R2 >= 1. The `detect_increments` function's interval arm
+// computes the net step = R1 - R2 and uses it as the delta.
+//
+// Without the interval arm, `(x + R1) - R2` doesn't match any known
+// increment pattern (not bare `x = x + N` or `x = x - N`).
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/interval_step.bv \
+//       --out benchmarks --optimize-budget 256
+//
+// C reference: interval_step_c.c
+
+#!exit count == N && acc >= 0;
+
+import { __get_env_int } from "std/env.bv";
+import "link/brief_rt.o";
+
+frgn __print_int(n: Int) -> Bool from "libruntime";
+
+let N: Int = __get_env_int("BOUND");
+let count: Int = 0;
+let acc: Int = 0;
+
+const R1: Int = 200;
+const R2: Int = 199;
+
+rct txn step [count < N][count == N] {
+    &acc = acc + count;
+    &count = (count + R1) - R2;
+
+    [count % 5000000 == 0] {
+        __print_int(acc);
+    };
+
+    term;
+};

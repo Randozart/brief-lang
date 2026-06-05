@@ -436,3 +436,51 @@ Three code paths in `emit_folded_loop` (phi mode, SSA mode, call mode) all emitt
 
 **Tests**: Decreasing counter program (`[count > 0][count == 0]` with `count = count - 1`) compiles, emits `icmp sgt`, completes 50M iterations in <10s.
 
+## 2026-06-05 — Unused `io_pending` import forces reactive runtime on pure-state benchmarks
+
+**Issue**: `benchmarks/bit_clear.bv` and `benchmarks/queue_drain.bv` both imported `io_pending` from `std/brief_rt.bv` but never used it in any precondition. The import was dead weight but still triggered the reactive runtime path (`has_wake_triggers = true` → reactor with `__rt_wait()` 100ms blocking per tick), turning a 63-iteration burn (bit_clear) into a 6.3-second slog and a 10-iteration burn (queue_drain) into a 1-second slog.
+
+**Root Cause**: The compiler treats any import of `io_pending` as evidence the program needs wake triggers, even if no precondition references it. The presence of `io_pending` in the import set sets `has_triggers = true` in the transition graph, which in turn selects the reactor codegen path instead of the pure SSA while-loop path.
+
+**Fix**: Removed `import { io_pending } from "std/brief_rt.bv"` from both files. Neither benchmark needs external event wakeup — both converge purely on state (`reg != 0 → reg == 0`, `queue:>Size > 0 → queue:>Size == 0`).
+
+**Lesson**: Never import `io_pending` unless the program genuinely waits for external IO. Pure-state convergence benchmarks must use the SSA while-loop path (no reactor). The `io_pending` import is a foot-gun: it looks harmless but silently activates the full reactive machinery.
+
+**Also**: `queue_drain.bv` declared `const queue: List<Int> = [...]` but then tried to mutate it via `<- &queue`. `const` values are compile-time immutable. Changed to `let queue`.
+
+## 2026-06-05 — Low print modulo doesn't fire on short benchmarks
+
+**Issue**: `bit_clear.bv` used `[reg % 1000000 == 0]` as the print guard, but the benchmark only runs 63 iterations (popcount of i64::MAX). No value of `reg` is divisible by 1,000,000 in that range, so the liveness `__print_int` never fires. The program compiled and ran correctly (no fold), but produced zero observable output.
+
+**Root Cause**: The print threshold was copy-pasted from 50M-iteration benchmarks without adjusting for bit_clear's inherently bounded iteration count (63 max).
+
+**Fix**: Lowered threshold to `[reg % 100000 == 0]`. The values that generate output: `reg = 0` (the last iteration, always fires since `0 % 100000 == 0`). This ensures at least one observable side-effect fires.
+
+**Lesson**: When adapting benchmark patterns to bounded-iteration designs (integer-width-bound patterns like popcount decay), verify the print guard threshold will actually fire within the available iteration space. A silent benchmark is a dead-code-elimination risk.
+
+## 2026-06-05 — `memory(argmem: write)` on FFI declarations lets LLVM eliminate IO calls
+
+**Issue**: `__print_int(i64)` calls inside small loops (10-iteration queue_drain) were eliminated by `opt -O3` during LTO. The binary contained a dead `__print_int` function that was never called.
+
+**Root Cause**: `src/backend/llvm.rs:1344` declared ALL foreign functions with `attributes #1 = { ... memory(argmem: write) }`. This tells LLVM the function only writes through pointer arguments. For `__print_int(i64)`, there are no pointer arguments, so LLVM concluded the function writes NO memory. Combined with `willreturn` and the unused return value, `opt -O3` eliminated the entire call.
+
+**Fix**: Removed `memory(argmem: write)` from attribute #1:
+```
+attributes #1 = { nocallback nofree nosync nounwind willreturn }
+```
+Without any `memory(...)` restriction, LLVM conservatively assumes the function can read/write arbitrary memory. During LTO, `opt -O3`'s FunctionAttrs pass examines `__print_int`'s actual body (merged from `brief_rt.c`), sees `fprintf(stderr, ...)` as a real global side effect, and correctly preserves the call. For `__sqrtf`, FunctionAttrs infers `readnone` from the `sqrtf` call and restores CSE/hoisting.
+
+**Lesson**: Never assert `memory(argmem: write)` on FFI functions — the Brief compiler cannot verify this. The mathematically correct default is no memory restriction. LTO reveals actual function bodies and LLVM's FunctionAttrs pass infers correct attributes deterministically.
+
+## 2026-06-05 — Compile-time-known list size causes precomputation (correct behavior)
+
+**Issue**: `queue_drain.bv` used a compile-time list literal `[1..10]`. The compiler correctly precomputed all 10 iterations within the default budget (256) and emitted `main` as `xor eax; ret`. The benchmark produced zero output and ran trivially.
+
+**Root Cause**: Not a bug — the system works as designed. When all information is known at compile time, the compiler precomputes the result. The benchmark author must make the bound runtime-determined to prevent precomputation.
+
+**Fix**: Replaced the compile-time list with a runtime counter:
+- Before: `let queue: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];` + drain convergence
+- After: `let N: Int = __get_env_int("BOUND");` + counter convergence + push/pop side ops
+
+**Lesson**: If a benchmark must execute at runtime, use `__get_env_int("BOUND")` for the bound. A compile-time-known bound WILL be precomputed. This is correct, not a bug. See AGENTS.md §"Precomputation is Correct, Not a Bug".
+

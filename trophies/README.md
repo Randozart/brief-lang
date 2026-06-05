@@ -2,7 +2,7 @@
 
 ## What is this?
 
-Three benchmarks where Brief's compiler produces code **faster than C** compiled with
+Six benchmarks where Brief's compiler produces code **faster than C** compiled with
 `clang -O3 -march=native -ffast-math`. Each subfolder contains:
 
 - `.bv` — Brief source
@@ -35,18 +35,22 @@ All benchmarks use the harness at `benchmarks/build_and_bench.sh`:
 - C compiled with `clang -O3 -march=native -ffast-math`
 - Brief compiled with LTO (`clang -c -emit-llvm brief_rt.c` → `llvm-link` → `opt -O3` → `llc`)
 
-## The three wins
+## The six wins
 
 | Benchmark | Brief | C | Ratio | Lesson |
 |-----------|-------|---|-------|--------|
 | [float_math](./float_math/) | 0.0044s | 0.0059s | **0.77×** | SROA + native float registers + fast-math |
 | [print_loop](./print_loop/) | 0.0399s | 0.0606s | **0.65×** | LTO inlines FFI calls into hot loop |
 | [float_math_nonzero](./float_math_nonzero/) | 0.1623s | 0.1660s | **0.97×** | SLP hazard suppression prevents register spill |
+| [cancel_math](./cancel_math/) | 0.0410s | 0.0555s | **0.73×** | Algebraic simplification + LTO FFI inlining |
+| [queue_drain](./queue_drain/) | 0.0423s | 0.0491s | **0.86×** | Inline collection ops + unified folded loop |
+| [interval_step](./interval_step/) | 0.0583s | 0.0591s | **0.98×** | Interval bounds detection at parity with C |
 
 ## What was NOT included
 
-- **O(1) fold wins** (iir_filter 0.001s vs 0.084s, const_heavy 0.001s vs 0.034s) — these are the compiler *proving* the loop is a pure counter and replacing it with a single store. Impressive, but not a "fair" comparison of generated code quality.
-- **nbody_newton** — Brief wins 2.7× but uses custom Newton sqrt while C uses `sqrtf()`. Algorithm difference, not compiler difference. The symmetric version (nbody_sqrt, both using `sqrtf()`) shows C winning 2.15×.
+- **O(1) fold wins** (iir_filter 0.001s vs 0.084s, const_heavy 0.001s vs 0.034s, bit_clear 0.0008s vs 0.0006s) — these are the compiler *proving* the loop is a pure counter and replacing it with a single store. Impressive, but not a "fair" comparison of generated code quality.
+- **nbody_sqrt** — C wins 2.15×. Brief wraps `sqrtf` through `__sqrtf` in `brief_rt.c` which lacks `always_inline`, so LTO doesn't inline it. The extra call overhead adds up across 500M calls. Same mechanism as nbody_newton.
+- **nbody_newton** — C wins 2.30×. Same sqrtf wrapper overhead as nbody_sqrt. The Newton sqrt approach (no sqrtf) would be faster but uses a different algorithm, so it's excluded.
 - **kalman_filter_runtime** — C wins by 5%. Marginal and context-dependent.
 
 ## Key to Brief's speed
