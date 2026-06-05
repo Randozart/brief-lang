@@ -361,9 +361,21 @@ impl Interpreter {
         let mut result = Value::Void;
         for stmt in &defn.body {
             match stmt {
-                Statement::Term { values: outputs, .. } => {
+                Statement::Term { values: outputs, swan_song, .. } => {
                     if let Some(Some(expr)) = outputs.first() {
                         result = self.eval_expr(expr)?;
+                        if let Some(swan) = swan_song {
+                            self.exec_stmt(swan)?;
+                        }
+                        self.return_value = Some(result.clone());
+                    }
+                }
+                Statement::TermBang { values: outputs, swan_song, .. } => {
+                    if let Some(Some(expr)) = outputs.first() {
+                        result = self.eval_expr(expr)?;
+                        if let Some(swan) = swan_song {
+                            self.exec_stmt(swan)?;
+                        }
                         self.return_value = Some(result.clone());
                     }
                 }
@@ -763,10 +775,24 @@ impl Interpreter {
             Statement::Expression(expr) => {
                 self.eval_expr(expr)?;
             }
-            Statement::Term { values: outputs, .. } => {
+            Statement::Term { values: outputs, swan_song, .. } => {
                 if let Some(first) = outputs.first() {
                     if let Some(expr) = first {
                         let value = self.eval_expr(expr)?;
+                        if let Some(swan) = swan_song {
+                            self.exec_stmt(swan)?;
+                        }
+                        self.return_value = Some(value);
+                    }
+                }
+            }
+            Statement::TermBang { values: outputs, swan_song, .. } => {
+                if let Some(first) = outputs.first() {
+                    if let Some(expr) = first {
+                        let value = self.eval_expr(expr)?;
+                        if let Some(swan) = swan_song {
+                            self.exec_stmt(swan)?;
+                        }
                         self.return_value = Some(value);
                     }
                 }

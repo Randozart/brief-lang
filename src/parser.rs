@@ -620,6 +620,13 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
+        // Parse hashtag modifiers (#assume_event, #assume_shape, etc.)
+        let modifiers = if matches!(self.current_token(), Some(Ok(Token::Hash))) {
+            self.parse_hashtag_modifiers()?
+        } else {
+            Vec::new()
+        };
+
         match self.current_token() {
             Some(Ok(Token::Import)) => {
                 return self.parse_import();
@@ -640,6 +647,7 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Async)) => {
                 let mut txn = self.parse_transaction()?;
                 txn.attrs = attrs;
+                txn.modifiers = modifiers;
                 Ok(TopLevel::Transaction(txn))
             }
 
@@ -3486,9 +3494,26 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             Some(Ok(Token::Term)) => {
                 self.advance();
                 let outputs = self.parse_term_outputs()?;
+                let mut swan_song = None;
+                if let Some(Ok(Token::Arrow)) = self.current_token() {
+                    self.advance();
+                    swan_song = Some(Box::new(self.parse_statement()?));
+                }
                 let modifiers = self.parse_hashtag_modifiers()?;
                 self.expect(Token::Semicolon)?;
-                Ok(Statement::Term { values: outputs, modifiers })
+                Ok(Statement::Term { values: outputs, swan_song, modifiers })
+            }
+            Some(Ok(Token::TermBang)) => {
+                self.advance();
+                let outputs = self.parse_term_outputs()?;
+                let mut swan_song = None;
+                if let Some(Ok(Token::Arrow)) = self.current_token() {
+                    self.advance();
+                    swan_song = Some(Box::new(self.parse_statement()?));
+                }
+                let modifiers = self.parse_hashtag_modifiers()?;
+                self.expect(Token::Semicolon)?;
+                Ok(Statement::TermBang { values: outputs, swan_song, modifiers })
             }
             Some(Ok(Token::Escape)) => {
                 self.advance();
@@ -5510,7 +5535,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
     fn has_term_or_escape_in_tree(stmts: &[Statement]) -> bool {
         for s in stmts {
             match s {
-                Statement::Term { .. } | Statement::Escape(_) => return true,
+                Statement::Term { .. } | Statement::TermBang { .. } | Statement::Escape(_) => return true,
                 Statement::Guarded { statements, .. } => {
                     if Self::has_term_or_escape_in_tree(statements) { return true; }
                 }

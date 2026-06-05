@@ -556,8 +556,18 @@ pub enum Statement {
     },
 
     // Term statement: term expr?, expr?, ...
+    // Optional -> swan_song executes only on postcondition acceptance (commit action)
     Term {
         values: Vec<Option<Expr>>,
+        swan_song: Option<Box<Statement>>,
+        modifiers: Vec<Hashtag>,
+    },
+
+    // TermBang statement: term! expr?, expr?, ...
+    // Program exit with centralized exit block; optional -> cleanup
+    TermBang {
+        values: Vec<Option<Expr>>,
+        swan_song: Option<Box<Statement>>,
         modifiers: Vec<Hashtag>,
     },
 

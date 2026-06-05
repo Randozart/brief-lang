@@ -256,7 +256,7 @@ impl Reactor {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::Term { values: outputs, .. } => {
+            Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } => {
                 if let Some(first) = outputs.first() {
                     if let Some(expr) = first {
                         let value = interp.eval_expr(expr)?;

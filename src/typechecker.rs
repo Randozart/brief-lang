@@ -798,7 +798,7 @@ impl TypeChecker {
         expected_outputs: &[Type],
     ) {
         match stmt {
-            Statement::Term { values: outputs, .. } => {
+            Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } => {
                 let actual_count = outputs.len();
                 let expected_count = expected_outputs.len();
 

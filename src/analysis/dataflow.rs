@@ -224,9 +224,20 @@ impl<'a> DataflowAnalyzer<'a> {
             Statement::Expression(expr) => {
                 self.extract_ids_recursive(expr, ids);
             }
-            Statement::Term { values, .. } => {
+            Statement::Term { values, swan_song, .. } => {
                 for v in values.iter().flatten() {
                     self.extract_ids_recursive(v, ids);
+                }
+                if let Some(swan) = swan_song {
+                    self.extract_ids_from_statement(swan, ids);
+                }
+            }
+            Statement::TermBang { values, swan_song, .. } => {
+                for v in values.iter().flatten() {
+                    self.extract_ids_recursive(v, ids);
+                }
+                if let Some(swan) = swan_song {
+                    self.extract_ids_from_statement(swan, ids);
                 }
             }
             Statement::Escape(expr) => {

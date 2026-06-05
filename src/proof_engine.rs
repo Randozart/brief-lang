@@ -880,6 +880,10 @@ impl SymbolicExecutor {
                     terminated = true;
                     path_kind = PathKind::Term(outputs.clone());
                 }
+                Statement::TermBang { values: outputs, .. } => {
+                    terminated = true;
+                    path_kind = PathKind::Term(outputs.clone());
+                }
                 Statement::Escape(_) => {
                     terminated = true;
                     path_kind = PathKind::Escape;
@@ -1628,7 +1632,7 @@ impl ProofEngine {
     fn check_branch_terminates(&self, statements: &[Statement], terminates: &mut bool) {
         for stmt in statements {
             match stmt {
-                Statement::Term { .. } => {
+                Statement::Term { .. } | Statement::TermBang { .. } => {
                     *terminates = true;
                     return;
                 }
@@ -2782,11 +2786,24 @@ impl ProofEngine {
                     self.collect_read_vars(stmt, vars);
                 }
             }
-            Statement::Term { values: outputs, .. } => {
+            Statement::Term { values: outputs, swan_song, .. } => {
                 for out in outputs {
                     if let Some(expr) = out {
                         self.collect_read_vars_from_expr(expr, vars);
                     }
+                }
+                if let Some(swan) = swan_song {
+                    self.collect_read_vars(swan, vars);
+                }
+            }
+            Statement::TermBang { values: outputs, swan_song, .. } => {
+                for out in outputs {
+                    if let Some(expr) = out {
+                        self.collect_read_vars_from_expr(expr, vars);
+                    }
+                }
+                if let Some(swan) = swan_song {
+                    self.collect_read_vars(swan, vars);
                 }
             }
             _ => {}
@@ -2815,7 +2832,11 @@ impl ProofEngine {
             Statement::Let { .. } => {}
             Statement::InlineAsm { .. } => {}
             Statement::Expression(_) => {}
-            Statement::Term { .. } => {}
+            Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => {
+                if let Some(swan) = swan_song {
+                    self.collect_write_vars(swan, vars);
+                }
+            }
             Statement::Escape(_) => {}
             Statement::Guarded { statements, .. } => {
                 for stmt in statements {
@@ -2891,7 +2912,7 @@ impl ProofEngine {
     fn has_term_statement(&self, statements: &[Statement]) -> bool {
         for stmt in statements {
             match stmt {
-                Statement::Term { values: outputs, .. } => {
+                Statement::Term { .. } | Statement::TermBang { .. } => {
                     return true;
                 }
                 Statement::Guarded { statements, .. } => {
@@ -3030,7 +3051,7 @@ impl ProofEngine {
     fn collect_term_values(&self, statements: &[Statement], results: &mut Vec<Vec<Option<Expr>>>) {
         for stmt in statements {
             match stmt {
-                Statement::Term { values: outputs, .. } => {
+                Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } => {
                     results.push(outputs.clone());
                 }
                 Statement::Guarded {

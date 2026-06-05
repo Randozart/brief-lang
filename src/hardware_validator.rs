@@ -553,7 +553,7 @@ impl ReadGraph {
                     read.extend(condition.extract_dependencies());
                     Self::collect_reads_stmts(statements, read);
                 }
-                Statement::Term { values: exprs, .. } => {
+                Statement::Term { values: exprs, .. } | Statement::TermBang { values: exprs, .. } => {
                     for opt_expr in exprs {
                         if let Some(expr) = opt_expr {
                             read.extend(expr.extract_dependencies());

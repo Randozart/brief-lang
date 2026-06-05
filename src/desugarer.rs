@@ -363,7 +363,7 @@ impl Desugarer {
 
     fn has_term_with_expression(&self, body: &[Statement]) -> bool {
         for stmt in body {
-            if let Statement::Term { values: outputs, .. } = stmt {
+            if let Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } = stmt {
                 if let Some(Some(_)) = outputs.first() {
                     return true;
                 }
@@ -405,7 +405,7 @@ impl Desugarer {
                         timeout: None,
                         modifiers: vec![],
                     });
-                    new_body_items.push(Statement::Term { values: vec![], modifiers: vec![] });
+                    new_body_items.push(Statement::Term { values: vec![], modifiers: vec![], swan_song: None });
                     continue;
                 }
             }
@@ -481,9 +481,9 @@ impl Desugarer {
             .body
             .iter()
             .map(|stmt| {
-                if let Statement::Term { values: outputs, .. } = stmt {
+            if let Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } = stmt {
                     if outputs.is_empty() && postcond_is_bool {
-                        return Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![] }
+                        return Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None }
                     }
                 }
                 stmt.clone()
@@ -585,7 +585,7 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+            body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             modifiers: vec![],
             variant_bodies: vec![],
@@ -614,7 +614,7 @@ mod tests {
             name: "test".to_string(),
             parameters: vec![],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+            body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
             reactor_speed: None,
             span: None,
             is_lambda: false,
@@ -649,7 +649,7 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Integer(1))], modifiers: vec![] }],
+            body: vec![Statement::Term { values: vec![Some(Expr::Integer(1))], modifiers: vec![], swan_song: None }],
             is_lambda: true,
             modifiers: vec![],
             variant_bodies: vec![],

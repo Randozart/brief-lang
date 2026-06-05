@@ -1335,7 +1335,7 @@ impl WebstackGenerator {
                     _ => {}
                 }
             }
-            Statement::Term { .. } => {
+            Statement::Term { .. } | Statement::TermBang { .. } => {
                 let cleanup = std::mem::take(&mut *self.pending_cleanup.borrow_mut());
                 for stmt in &cleanup {
                     self.statement_to_rust(output, stmt);

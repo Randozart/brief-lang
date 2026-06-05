@@ -116,7 +116,7 @@ fn check_all_paths(
                 );
             }
 
-            Statement::Term { values: outputs, .. } => {
+            Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } => {
                 found_term = true;
                 // Check if this term produces true
                 if let Some(Some(expr)) = outputs.first() {
@@ -221,7 +221,7 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![] }],
+            body: vec![Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             modifiers: vec![],
             variant_bodies: vec![],
@@ -254,7 +254,7 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![] }],
+            body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             modifiers: vec![],
             variant_bodies: vec![],
@@ -294,7 +294,7 @@ mod tests {
                     timeout: None,
                     modifiers: vec![],
                 },
-                Statement::Term { values: vec![Some(Expr::Identifier("result".to_string()))], modifiers: vec![] },
+                Statement::Term { values: vec![Some(Expr::Identifier("result".to_string()))], modifiers: vec![], swan_song: None },
             ],
             is_lambda: false,
             modifiers: vec![],
@@ -330,7 +330,7 @@ mod tests {
             },
             body: vec![Statement::Term { values: vec![Some(Expr::String(
                 "not bool".to_string(),
-            ))], modifiers: vec![] }],
+            ))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             modifiers: vec![],
             variant_bodies: vec![],
@@ -363,7 +363,7 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![] }],
+            body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             modifiers: vec![],
             variant_bodies: vec![],

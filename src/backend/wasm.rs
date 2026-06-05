@@ -58,7 +58,7 @@ impl WasmBackend {
     /// Intent: Generate WAT statement text, handling cleanup, let, expression, trigger, on_exit, escape, alka, and inline_asm.
     fn generate_statement(&mut self, output: &mut String, stmt: &Statement) {
         match stmt {
-            Statement::Term { .. } => {
+            Statement::Term { .. } | Statement::TermBang { .. } => {
                 let cleanup = std::mem::take(&mut self.pending_cleanup);
                 for s in &cleanup {
                     self.generate_statement(output, s);
@@ -797,7 +797,7 @@ fn compile_body(body: &[Statement], builder: &mut WasmModuleBuilder) -> Vec<u8> 
                 code.push(0x0B);
                 code.push(0x1B);
             }
-            Statement::Term { values, .. } => {
+            Statement::Term { values, .. } | Statement::TermBang { values, .. } => {
                 if let Some(first) = values.first().and_then(|v| v.as_ref()) {
                     code.extend_from_slice(&expression_to_wasm(first, builder));
                 } else {
@@ -905,6 +905,7 @@ mod tests {
             &Statement::Term {
                 values: vec![],
                 modifiers: vec![],
+                swan_song: None,
             },
         );
         assert!(output.contains(";; term"));

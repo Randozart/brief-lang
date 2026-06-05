@@ -449,7 +449,7 @@ impl X86_64Backend {
                     self.generate_guarded_with_branch(output, condition, statements);
                 }
             }
-            Statement::Term { .. } => {
+            Statement::Term { .. } | Statement::TermBang { .. } => {
                 let cleanup = std::mem::take(&mut self.pending_cleanup);
                 for stmt in &cleanup {
                     self.generate_statement(output, stmt);

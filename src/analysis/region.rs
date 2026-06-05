@@ -991,7 +991,7 @@ impl RegionAnalyzer {
                     true
                 } else { false }
             }
-            Statement::Term { .. } | Statement::InlineAsm { .. }
+            Statement::Term { .. } | Statement::TermBang { .. } | Statement::InlineAsm { .. }
             | Statement::Alka(_) => false,
             _ => true,
         }
@@ -1292,7 +1292,7 @@ fn count_statements_recursive(body: &[Statement]) -> usize {
             Statement::Assignment { .. } | Statement::Let { .. } | Statement::Expression(_) => 1,
             Statement::Guarded { statements, .. } => 1 + count_statements_recursive(statements),
             Statement::OnExit { body, .. } => 1 + count_statements_recursive(body),
-            Statement::Term { .. } | Statement::Unification { .. }
+            Statement::Term { .. } | Statement::TermBang { .. } | Statement::Unification { .. }
             | Statement::InlineAsm { .. } | Statement::Alka(_)
             | Statement::LocalTrigger { .. } | Statement::Escape(_) => 1,
         }
@@ -1301,7 +1301,7 @@ fn count_statements_recursive(body: &[Statement]) -> usize {
 
 fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
     match stmt {
-        Statement::Term { .. } | Statement::InlineAsm { .. } | Statement::Alka(_) => true,
+        Statement::Term { .. } | Statement::TermBang { .. } | Statement::InlineAsm { .. } | Statement::Alka(_) => true,
         Statement::Assignment { expr, .. } => expr_has_call(expr),
         Statement::Let { expr, .. } => {
             expr.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
@@ -1324,7 +1324,7 @@ fn has_ffi_or_trigger_stmt_in_chain(body: &[Statement]) -> bool {
 
 fn has_ffi_or_trigger_stmt(stmt: &Statement, _trigger_vars: &HashSet<String>) -> bool {
     match stmt {
-        Statement::Term { .. } | Statement::InlineAsm { .. } | Statement::Alka(_) => true,
+        Statement::Term { .. } | Statement::TermBang { .. } | Statement::InlineAsm { .. } | Statement::Alka(_) => true,
         Statement::Assignment { lhs: _, expr, .. } => {
             expr_has_call(expr)
         }
@@ -1385,7 +1385,7 @@ fn expr_has_call(expr: &Expr) -> bool {
 
 fn has_term_or_unify_escape(body: &[Statement]) -> bool {
     body.iter().any(|s| matches!(s,
-        Statement::Term { .. } | Statement::Unification { .. }
+        Statement::Term { .. } | Statement::TermBang { .. } | Statement::Unification { .. }
         | Statement::Escape(_) | Statement::InlineAsm { .. }
         | Statement::Alka(_)
     ))
@@ -1470,9 +1470,23 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
             }
         }
         Statement::Expression(e) => Statement::Expression(substitute_expr(e, old_var, new_expr)),
-        Statement::Term { values, modifiers } => {
+        Statement::Term { values, modifiers, swan_song } => {
             Statement::Term {
                 values: values.iter().map(|v| v.as_ref().map(|x| substitute_expr(x, old_var, new_expr))).collect(),
+                swan_song: swan_song.as_ref().map(|s| {
+                    let mut v = substitute_var(std::slice::from_ref(s.as_ref()), old_var, new_expr);
+                    Box::new(v.pop().unwrap_or(Statement::Escape(None)))
+                }),
+                modifiers: modifiers.clone(),
+            }
+        }
+        Statement::TermBang { values, modifiers, swan_song } => {
+            Statement::TermBang {
+                values: values.iter().map(|v| v.as_ref().map(|x| substitute_expr(x, old_var, new_expr))).collect(),
+                swan_song: swan_song.as_ref().map(|s| {
+                    let mut v = substitute_var(std::slice::from_ref(s.as_ref()), old_var, new_expr);
+                    Box::new(v.pop().unwrap_or(Statement::Escape(None)))
+                }),
                 modifiers: modifiers.clone(),
             }
         }
@@ -1937,7 +1951,7 @@ mod tests {
             make_state("x", int(0)),
             make_txn_with_body("exit", vec![
                 assign("x", ident("btn")),
-                Statement::Term { values: vec![Some(int(0))], modifiers: vec![] },
+                Statement::Term { values: vec![Some(int(0))], modifiers: vec![], swan_song: None },
             ]),
         ]);
         let ra = RegionAnalyzer::analyze(&program);
@@ -2130,7 +2144,7 @@ mod tests {
                     assign("a", int(4)),
                     assign("a", int(5)),
                     assign("a", int(6)),
-                    Statement::Term { values: vec![Some(int(0))], modifiers: vec![] },
+                    Statement::Term { values: vec![Some(int(0))], modifiers: vec![], swan_song: None },
                     assign("count", add(ident("count"), int(1))),
                 ],
             ),
@@ -2196,7 +2210,7 @@ mod tests {
                 Expr::Bool(true),
                 vec![
                     assign("x", int(1)),
-                    Statement::Term { values: vec![Some(int(0))], modifiers: vec![] },
+                    Statement::Term { values: vec![Some(int(0))], modifiers: vec![], swan_song: None },
                     assign("count", add(ident("count"), int(1))),
                 ],
             ),

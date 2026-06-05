@@ -757,7 +757,7 @@ impl VerilogGenerator {
     fn emit_function_body(&mut self, fn_name: &str, body: &[Statement]) {
         for stmt in body {
             match stmt {
-                Statement::Term { values: outputs, .. } => {
+                Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } => {
                     if let Some(Some(expr)) = outputs.first() {
                         self.output
                             .push_str(&format!("        return {};\n", self.expr_to_verilog(expr)));
@@ -1540,7 +1540,7 @@ impl VerilogGenerator {
     fn statement_to_verilog(&mut self, stmt: &Statement) -> String {
         let mut out = String::new();
         match stmt {
-            Statement::Term { .. } => {
+            Statement::Term { .. } | Statement::TermBang { .. } => {
                 let cleanup = std::mem::take(&mut self.pending_cleanup);
                 for s in &cleanup {
                     out.push_str(&self.statement_to_verilog(s));

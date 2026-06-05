@@ -175,6 +175,7 @@ statement ::= assignment
             | unification
             | guarded
             | term
+            | termbang
             | escape
             | expression_stmt
             | let_binding
@@ -188,7 +189,9 @@ unification ::= identifier "(" pattern ")" "=" expression ";"
 
 guarded ::= "[" condition "]" ("{" statement* "}" | statement)
 
-term ::= "term" (expression ("," expression)*)? ";"
+term ::= "term" (expression ("," expression)*)? ("->" statement)? ";"
+
+termbang ::= "term!" (expression ("," expression)*)? ("->" statement)? ";"
 
 escape ::= "escape" expression? ";"
 
@@ -319,6 +322,7 @@ statement ::= assignment
             | unification
             | guarded
             | term
+            | termbang
             | escape
             | expression_stmt
             | let_binding
@@ -332,7 +336,9 @@ unification ::= identifier "(" pattern ")" "=" expression ";"
 
 guarded ::= "[" condition "]" ("{" statement* "}" | statement)
 
-term ::= "term" (expression ("," expression)*)? ";"
+term ::= "term" (expression ("," expression)*)? ("->" statement)? ";"
+
+termbang ::= "term!" (expression ("," expression)*)? ("->" statement)? ";"
 
 escape ::= "escape" expression? ";"
 
@@ -1496,6 +1502,50 @@ are not referenced by the exit condition or any transaction precondition are
 considered dead and their stores are eliminated.
 
 If a program has wake triggers but no `#!exit` condition, a warning is emitted.
+
+#### 5.4.4 `#assume_event(trigger_name)` — Liveness Fairness Assumption
+
+Declares that the named trigger **will** fire eventually. This enables the proof
+engine to prove termination for reactive transactions with wake triggers:
+
+```brief
+#assume_event(stdin_ready)
+rct txn [count < total][count == total] {
+    &count = count + 1;
+    term;
+}
+```
+
+Without `#assume_event`, the compiler cannot prove that an external-trigger loop
+will terminate, because it has no knowledge of trigger scheduling. With it, the
+compiler assumes the trigger fires and can prove convergence through the
+bounded precondition + increments.
+
+**Effect on optimization:** Enables pure-counter fold elimination for reactive
+transactions that would otherwise be skipped due to wake triggers. No LLVM IR
+is emitted for the pragma — it is purely a proof-engine constraint.
+
+#### 5.4.5 `#assume_shape(guard_expr, action)` — Shape Guard with Fast-Path
+
+Declares that `guard_expr` is expected to be true at runtime. The compiler
+generates a runtime guard check and splits execution into fast/slow paths:
+
+```brief
+#assume_shape(packet :> PaymentTxn, escape)
+rct txn [*][*] {
+    &processed = processed + 1;
+    term;
+}
+```
+
+**Action** (rollback on guard failure):
+- `escape` — silently skip the transaction (default)
+- `run` — execute the full body with all safety checks
+- `exit` — call `__exit(1)` and unreachable
+
+**Future work:** The fast path will eventually strip runtime type checks
+when the guard is proven to hold. Currently the guard is a constant `true`
+and only the rollback action infrastructure is emitted.
 
 ### 5.5 Resource Lifecycle
 

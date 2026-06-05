@@ -1399,6 +1399,68 @@ defn backoff(attempt: Int) -> Int {
 
 ---
 
+### Pattern 5: Commit Actions and Program Exit
+
+**Commit action** — `term -> swan_song;` executes `swan_song` only when the
+postcondition is accepted. The swan song is a commit action, not a loop
+increment — it fires once on acceptance:
+
+```brief
+let tx_log: List<String> = [];
+state committed: Int = 0;
+
+rct txn transfer(amount: Int) [balance >= amount][balance == @balance - amount] {
+    &balance = balance - amount;
+    term -> &committed = committed + 1;
+};
+```
+
+**Program exit** — `term!` terminates the program with a centralized exit block:
+
+```brief
+rct txn shutdown() [cmd == "exit"][true] {
+    term!;  // Exit program
+};
+
+rct txn fail() [error][true] {
+    term! -> io.log("fatal: " + error);  // Log before exit
+};
+```
+
+`term!` always compiles to a branch to the program's single `exit_block`,
+enabling centralized cleanup. The swan song on `term!` executes before the
+exit branch.
+
+### Pattern 6: Assume Pragma
+
+**`#assume_event(trigger_name)`** tells the compiler that a trigger WILL fire
+eventually, enabling termination proofs for external-trigger loops:
+
+```brief
+#assume_event(data_ready)
+rct txn process() [data_ready][processed == @processed + 1] {
+    &processed = processed + 1;
+    term;
+};
+```
+
+**`#assume_shape(guard_expr, action)`** declares that `guard_expr` is expected
+true at runtime. The action specifies what happens on mismatch:
+
+- `escape` — skip the transaction silently
+- `run` — execute body with full safety checks
+- `exit` — terminate program
+
+```brief
+#assume_shape(packet :> PaymentTxn, escape)
+rct txn process_payment() [packet.active][processed == @processed + 1] {
+    &processed = processed + 1;
+    term;
+};
+```
+
+---
+
 ## Appendix G: Debugging Tips
 
 ### 1. Use Contracts for Debugging

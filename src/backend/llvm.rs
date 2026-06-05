@@ -90,7 +90,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         Statement::Let { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
         Statement::Assignment { expr, .. } => { collect_strings_expr(expr, seen, out); }
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
-        Statement::Term { values, .. } => { for v in values.iter().flatten() { collect_strings_expr(v, seen, out); } }
+        Statement::Term { values, .. } | Statement::TermBang { values, .. } => { for v in values.iter().flatten() { collect_strings_expr(v, seen, out); } }
         Statement::Guarded { condition, statements, .. } => {
             collect_strings_expr(condition, seen, out);
             for s in statements { collect_strings_stmt(s, seen, out); }
@@ -1828,6 +1828,7 @@ self.emit_declares(&mut out);
         writeln!(out, "declare void @brief_thread_pool_init(i32, i8**) local_unnamed_addr").ok();
         writeln!(out, "declare void @brief_barrier_release() local_unnamed_addr").ok();
         writeln!(out, "declare void @brief_barrier_wait() local_unnamed_addr").ok();
+        writeln!(out, "declare void @__exit(i64) local_unnamed_addr").ok();
     }
 
     fn emit_foreign_declares(&mut self, out: &mut String) {
@@ -2169,19 +2170,64 @@ self.emit_declares(&mut out);
         }
         let alwaysinline = if !self.has_cycles { " alwaysinline" } else { "" };
         let txn_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
-        writeln!(out, "  entry:").ok();
-        self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
-        self.terminated = false;
-        self.returns_i64 = false;
-        // Precondition
-        if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
-            self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
+
+        // Check for #assume_shape pragma — extract rollback action
+        let assume_action: Option<&str> = txn.modifiers.iter()
+            .find(|m| m.name == "assume_shape")
+            .and_then(|m| m.value.as_ref())
+            .and_then(|v| {
+                let parts: Vec<&str> = v.splitn(2, ", ").collect();
+                if parts.len() == 2 {
+                    let action = parts[1].trim();
+                    if action == "run" || action == "exit" { Some(action) } else { Some("escape") }
+                } else {
+                    Some("escape") // default
+                }
+            });
+
+        if let Some(action) = assume_action {
+            writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            writeln!(out, "  entry:").ok();
+            writeln!(out, "  br i1 true, label %body, label %rollback").ok();
+            writeln!(out, "  body:").ok();
+            self.txn_counter = 0;
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+            self.terminated = false;
+            self.returns_i64 = false;
+            if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
+                self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
+            }
+            for s in &txn.body { self.emit_stmt(out, s, "  "); }
+            if !self.terminated { writeln!(out, "  ret void").ok(); }
+            writeln!(out, "  rollback:").ok();
+            match action {
+                "exit" => {
+                    writeln!(out, "    call void @__exit(i64 1)").ok();
+                    writeln!(out, "    unreachable").ok();
+                }
+                "run" => {
+                    writeln!(out, "    br label %body").ok();
+                }
+                _ => {
+                    writeln!(out, "    ret void").ok();
+                }
+            }
+            writeln!(out, "}}").ok();
+        } else {
+            writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            writeln!(out, "  entry:").ok();
+            self.txn_counter = 0;
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear();
+            self.terminated = false;
+            self.returns_i64 = false;
+            // Precondition
+            if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
+                self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
+            }
+            for s in &txn.body { self.emit_stmt(out, s, "  "); }
+            if !self.terminated { writeln!(out, "  ret void").ok(); }
+            writeln!(out, "}}").ok();
         }
-        for s in &txn.body { self.emit_stmt(out, s, "  "); }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
-        writeln!(out, "}}").ok();
     }
 
     // ── PRECONDITION CHECK (inline) ───────────────────────────
@@ -2245,7 +2291,7 @@ self.emit_declares(&mut out);
     // ── FUSED TRANSACTION ─────────────────────────────────────
     fn emit_fused(&mut self, out: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, name: &str) {
         let body_a: Vec<Statement> = a.body.iter()
-            .filter(|s| !matches!(s, Statement::Term { .. } | Statement::Escape(_)))
+            .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. } | Statement::Escape(_)))
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
         let fused_attr = self.slp_attr(name, "#0");
@@ -2254,6 +2300,34 @@ self.emit_declares(&mut out);
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined { self.emit_stmt(out, s, "  "); }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
+        writeln!(out, "}}").ok();
+    }
+
+    /// Emit a txn body wrapped with #assume_shape guard check.
+    /// For now the guard is a constant `true` — guard expression parsing
+    /// from the pragma string to Expr is future work.
+    fn emit_shape_guarded_body(&mut self, out: &mut String, body: &[Statement], name: &str, action: &str) {
+        let fused_attr = self.slp_attr(name, "#0");
+        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  br i1 true, label %body, label %rollback").ok();
+        writeln!(out, "  body:").ok();
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        for s in body { self.emit_stmt(out, s, "  "); }
+        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        writeln!(out, "  rollback:").ok();
+        match action {
+            "exit" => {
+                writeln!(out, "    call void @__exit(i64 1)").ok();
+                writeln!(out, "    unreachable").ok();
+            }
+            "run" => {
+                writeln!(out, "    br label %body").ok();
+            }
+            _ => { // escape
+                writeln!(out, "    ret void").ok();
+            }
+        }
         writeln!(out, "}}").ok();
     }
 
@@ -2270,9 +2344,28 @@ self.emit_declares(&mut out);
     // ── STATEMENTS ────────────────────────────────────────────
     fn emit_stmt(&mut self, out: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
-            Statement::Term { values, .. } => {
+            Statement::Term { values, swan_song, .. } => {
                 let c = self.pending_cleanup.clone();
                 for s in &c { self.emit_stmt(out, s, indent); }
+                if let Some(swan) = swan_song {
+                    self.emit_stmt(out, swan, indent);
+                }
+                if let Some(Some(v)) = values.first() {
+                    let r = self.emit_expr(out, v, indent);
+                    writeln!(out, "{}ret i64 {}", indent, r).ok();
+                } else if self.returns_i64 {
+                    writeln!(out, "{}ret i64 0", indent).ok();
+                } else {
+                    writeln!(out, "{}ret void", indent).ok();
+                }
+                self.terminated = true;
+            }
+            Statement::TermBang { values, swan_song, .. } => {
+                let c = self.pending_cleanup.clone();
+                for s in &c { self.emit_stmt(out, s, indent); }
+                if let Some(swan) = swan_song {
+                    self.emit_stmt(out, swan, indent);
+                }
                 if let Some(Some(v)) = values.first() {
                     let r = self.emit_expr(out, v, indent);
                     writeln!(out, "{}ret i64 {}", indent, r).ok();
@@ -3891,7 +3984,7 @@ self.emit_declares(&mut out);
                     // become independent, filling all CPU execution ports.
                     self.pre_extract_float_fields(&mut body4_buf);
                     self.pre_extract_int_fields(&mut body4_buf);
-                    for stmt in stmts.iter().filter(|s| !matches!(s, Statement::Term { .. })) {
+                    for stmt in stmts.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) {
                         self.emit_stmt(&mut body4_buf, stmt, "  ");
                     }
                     self.ssa_old_float_regs.clear();
@@ -3912,7 +4005,7 @@ self.emit_declares(&mut out);
             self.ssa_state_reg = Some(phi_reg.clone());
             self.pre_extract_float_fields(&mut body1_buf);
             self.pre_extract_int_fields(&mut body1_buf);
-            for stmt in stmts.iter().filter(|s| !matches!(s, Statement::Term { .. })) {
+            for stmt in stmts.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) {
                 self.emit_stmt(&mut body1_buf, stmt, "  ");
             }
             let backedge_val = self.ssa_state_reg.take().unwrap_or(phi_reg.clone());
@@ -4122,7 +4215,7 @@ self.emit_declares(&mut out);
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
                 self.pre_extract_int_fields(out);
-                for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. })) { self.emit_stmt(out, s, "  "); }
+                for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) { self.emit_stmt(out, s, "  "); }
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
                 let after_body = self.ssa_state_reg.clone().unwrap_or_else(|| pre_ssa.clone());
@@ -4138,7 +4231,7 @@ self.emit_declares(&mut out);
                 self.returns_i64 = false;
                 self.pre_extract_float_fields(out);
                 self.pre_extract_int_fields(out);
-                for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. })) { self.emit_stmt(out, s, "  "); }
+                for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) { self.emit_stmt(out, s, "  "); }
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
             }
@@ -4827,7 +4920,7 @@ mod tests {
                             timeout: None,
                             modifiers: vec![],
                         },
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: false,
                     is_reactive: true,
@@ -4877,7 +4970,7 @@ mod tests {
                         span: None,
                         watchdog: None,
                     },
-                    body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
                     is_async: false,
                     is_reactive: true,
                     reactor_speed: None,
@@ -4948,7 +5041,7 @@ mod tests {
                         span: None,
                         watchdog: None,
                     },
-                    body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
                     is_async: false,
                     is_reactive: true,
                     reactor_speed: None,
@@ -4968,7 +5061,7 @@ mod tests {
                         span: None,
                         watchdog: None,
                     },
-                    body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
                     is_async: false,
                     is_reactive: true,
                     reactor_speed: None,
@@ -5051,7 +5144,7 @@ mod tests {
                             pattern: "v".to_string(),
                             expr: Expr::Integer(1),
                         },
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: false,
                     is_reactive: false,
@@ -5107,7 +5200,7 @@ mod tests {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: false,
                     is_reactive: false,
@@ -5195,7 +5288,7 @@ mod tests {
                             timeout: None,
                             modifiers: vec![],
                         },
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: false,
                     is_reactive: false,
@@ -5247,7 +5340,7 @@ mod tests {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: false,
                     is_reactive: true,
@@ -5388,7 +5481,7 @@ mod tests {
                     name: "t".to_string(),
                     parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), span: None, watchdog: None },
-                    body: vec![Statement::Term { values: vec![], modifiers: vec![] }],
+                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
                     is_async: false, is_reactive: true, reactor_speed: None, span: None,
                     is_lambda: false, dependencies: vec![], attrs: vec![], modifiers: vec![], variant_bodies: vec![],
                 }),
@@ -5436,7 +5529,7 @@ mod tests {
                             expr: Expr::Float(2.0),
                             timeout: None, modifiers: vec![],
                         },
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: false, is_reactive: false,
                     reactor_speed: None, span: None,
@@ -5490,7 +5583,7 @@ mod tests {
                             ),
                             timeout: None, modifiers: vec![],
                         },
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: false, is_reactive: false,
                     reactor_speed: None, span: None,
@@ -5844,7 +5937,7 @@ mod tests {
                             timeout: None,
                             modifiers: vec![],
                         },
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: true,
                     is_reactive: true,
@@ -5872,7 +5965,7 @@ mod tests {
                             timeout: None,
                             modifiers: vec![],
                         },
-                        Statement::Term { values: vec![], modifiers: vec![] },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: true,
                     is_reactive: true,
@@ -5985,7 +6078,7 @@ mod tests {
                     expr: Expr::Add(Box::new(ident_s("ops")), Box::new(int_s(1))),
                     timeout: None, modifiers: vec![],
                 },
-                Statement::Term { values: vec![], modifiers: vec![] },
+                Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
             ],
             is_async: false, is_reactive: true, reactor_speed: None,
             span: None, is_lambda: false, dependencies: vec![],

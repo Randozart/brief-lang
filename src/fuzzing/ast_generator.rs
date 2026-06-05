@@ -159,7 +159,7 @@ pub fn arb_definition(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             output_type: None,
             output_names: vec![None],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            body: vec![Statement::Term { values: vec![Some(body)], modifiers: vec![] }],
+            body: vec![Statement::Term { values: vec![Some(body)], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             modifiers: vec![],
             variant_bodies: vec![],
@@ -306,8 +306,8 @@ fn arb_guarded_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
 fn arb_term_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
     let max_depth = max_depth.min(MAX_DEPTH);
     prop_oneof![
-        Just(Statement::Term { values: vec![], modifiers: vec![] }),
-        arb_expr(max_depth).prop_map(|e| Statement::Term { values: vec![Some(e)], modifiers: vec![] }),
+        Just(Statement::Term { values: vec![], modifiers: vec![], swan_song: None }),
+        arb_expr(max_depth).prop_map(|e| Statement::Term { values: vec![Some(e)], modifiers: vec![], swan_song: None }),
     ]
 }
 
@@ -609,7 +609,7 @@ mod tests {
                 Statement::Assignment { .. }
                     | Statement::Let { .. }
                     | Statement::Guarded { .. }
-                    | Statement::Term { .. }
+                    | Statement::Term { .. } | Statement::TermBang { .. }
                     | Statement::Escape(_)
                     | Statement::Expression(_)
                     | Statement::Alka(_)

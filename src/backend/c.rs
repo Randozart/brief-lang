@@ -843,7 +843,7 @@ impl CBackend {
                     output.push_str("    );\n");
                 }
             }
-            Statement::Term { .. } => {
+            Statement::Term { .. } | Statement::TermBang { .. } => {
                 let cleanup = std::mem::take(&mut self.pending_cleanup);
                 for stmt in &cleanup {
                     self.statement_to_c(output, stmt);

@@ -426,7 +426,7 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
                     new_paths.push(false_state);
                 }
 
-                Statement::Term { .. } | Statement::Escape(_) => {
+                Statement::Term { .. } | Statement::TermBang { .. } | Statement::Escape(_) => {
                     // Termination: path ends here
                     new_paths.push(state);
                 }

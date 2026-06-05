@@ -830,7 +830,7 @@ impl VhdlGenerator {
                     let _ = write!(output, "{}-- let {}\n", indent, name);
                 }
             }
-            Statement::Term { values, .. } => {
+            Statement::Term { values, .. } | Statement::TermBang { values, .. } => {
                 let cleanup = std::mem::take(&mut self.pending_cleanup);
                 for stmt in &cleanup {
                     self.statement_to_vhdl(output, stmt, indent);

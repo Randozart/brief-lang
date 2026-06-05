@@ -75,6 +75,9 @@ pub enum Token {
     #[token("term")]
     #[token("TERM")]
     Term,
+    #[token("term!")]
+    #[token("TERM!")]
+    TermBang,
     #[token("escape")]
     #[token("ESCAPE")]
     Escape,

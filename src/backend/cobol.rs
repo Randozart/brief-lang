@@ -449,7 +449,7 @@ impl CobolBackend {
                     target_name, value_str
                 ));
             }
-            Statement::Term { .. } => {
+            Statement::Term { .. } | Statement::TermBang { .. } => {
                 let cleanup = std::mem::take(&mut self.pending_cleanup);
                 for stmt in &cleanup {
                     self.generate_statement(stmt, output);

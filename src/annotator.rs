@@ -59,13 +59,26 @@ impl Annotator {
                     self.collect_calls_from_expr(condition, calls);
                     self.collect_calls_from_body(statements, calls);
                 }
-                Statement::Term { values: outputs, .. } => {
-                    for out in outputs {
-                        if let Some(expr) = out {
-                            self.collect_calls_from_expr(expr, calls);
-                        }
+            Statement::Term { values: outputs, swan_song, .. } => {
+                for out in outputs {
+                    if let Some(expr) = out {
+                        self.collect_calls_from_expr(expr, calls);
                     }
                 }
+                if let Some(swan) = swan_song {
+                    self.collect_calls_from_body(&[swan.as_ref().clone()], calls);
+                }
+            }
+            Statement::TermBang { values: outputs, swan_song, .. } => {
+                for out in outputs {
+                    if let Some(expr) = out {
+                        self.collect_calls_from_expr(expr, calls);
+                    }
+                }
+                if let Some(swan) = swan_song {
+                    self.collect_calls_from_body(&[swan.as_ref().clone()], calls);
+                }
+            }
                 _ => {}
             }
         }
@@ -330,12 +343,21 @@ impl Annotator {
                 output.push_str(&format!("{}}}\n", spaces));
                 output
             }
-            Statement::Term { values: outputs, .. } => {
+            Statement::Term { values: outputs, swan_song, .. } => {
                 let outputs_str: Vec<String> = outputs
                     .iter()
                     .map(|o| o.as_ref().map(|e| self.format_expr(e)).unwrap_or_default())
                     .collect();
-                format!("{}term {};\n", spaces, outputs_str.join(", "))
+                let swan_str = swan_song.as_ref().map(|s| format!(" -> {}", self.format_statement(s, 0).trim())).unwrap_or_default();
+                format!("{}term {}{};\n", spaces, outputs_str.join(", "), swan_str)
+            }
+            Statement::TermBang { values: outputs, swan_song, .. } => {
+                let outputs_str: Vec<String> = outputs
+                    .iter()
+                    .map(|o| o.as_ref().map(|e| self.format_expr(e)).unwrap_or_default())
+                    .collect();
+                let swan_str = swan_song.as_ref().map(|s| format!(" -> {}", self.format_statement(s, 0).trim())).unwrap_or_default();
+                format!("{}term! {}{};\n", spaces, outputs_str.join(", "), swan_str)
             }
             Statement::Escape(expr) => {
                 let val = expr

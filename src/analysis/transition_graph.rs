@@ -39,6 +39,13 @@ pub struct ReactorNode {
     /// an independent decrement path, and the loop exits when ALL reach zero.
     /// Example: `[x > 0 || y > 0][x == 0 && y == 0]` with guarded decrements.
     pub lexicographic_vars: Vec<String>,
+    /// Trigger names guaranteed to fire by #assume_event pragma.
+    /// Enables termination proofs for external-trigger loops.
+    pub assume_events: Vec<String>,
+    /// Rollback action from #assume_shape(guard_expr, escape|run|exit) pragma.
+    /// The guard expression parsing from string to Expr is future work;
+    /// for now, the guard is assumed true and only the rollback action is emitted.
+    pub assume_shape_action: Option<String>,
 }
 
 pub struct ReactorTransitionGraph {
@@ -75,6 +82,28 @@ impl ReactorTransitionGraph {
                     let write_set = extract_write_set(&simplified_body, &state_field_names);
                     let lexicographic_vars = detect_lexicographic_ranking(&txn.contract.pre_condition, &simplified_body);
 
+                    let assume_events: Vec<String> = txn.modifiers.iter()
+                        .filter(|m| m.name == "assume_event")
+                        .filter_map(|m| m.value.clone())
+                        .collect();
+
+                    let assume_shape_action = txn.modifiers.iter()
+                        .find(|m| m.name == "assume_shape")
+                        .and_then(|m| m.value.as_ref())
+                        .and_then(|v| {
+                            let parts: Vec<&str> = v.splitn(2, ", ").collect();
+                            if parts.len() == 2 {
+                                let action = parts[1].trim();
+                                if action == "run" || action == "exit" {
+                                    Some(action.to_string())
+                                } else {
+                                    Some("escape".to_string())
+                                }
+                            } else {
+                                Some("escape".to_string())
+                            }
+                        });
+
                     nodes.push(ReactorNode {
                         name: txn.name.clone(),
                         is_reactive: txn.is_reactive,
@@ -86,6 +115,8 @@ impl ReactorTransitionGraph {
                         write_set,
                         is_effectively_pure: false,
                         lexicographic_vars,
+                        assume_events,
+                        assume_shape_action,
                     });
                 }
                 TopLevel::Trigger(_) => {
@@ -684,7 +715,11 @@ fn is_pure_body(
                     return false;
                 }
             }
-            Statement::Term { .. } => {}
+            Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => {
+                if let Some(swan) = swan_song {
+                    if statement_contains_ffi(swan) { return false; }
+                }
+            }
             Statement::Escape(_) => return false,
             Statement::OnExit { .. } => return false,
             Statement::Guarded { condition, statements } => {
@@ -868,7 +903,14 @@ fn statement_contains_ffi(stmt: &Statement) -> bool {
         Statement::Assignment { expr, .. } => references_triggers_or_ffi(expr),
         Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| references_triggers_or_ffi(e)),
         Statement::Expression(e) => references_triggers_or_ffi(e),
-        Statement::Term { values, .. } => values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi(e))),
+        Statement::Term { values, swan_song, .. } => {
+            values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi(e)))
+                || swan_song.as_ref().map_or(false, |s| statement_contains_ffi(s))
+        }
+        Statement::TermBang { values, swan_song, .. } => {
+            values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi(e)))
+                || swan_song.as_ref().map_or(false, |s| statement_contains_ffi(s))
+        }
         Statement::Guarded { condition, statements } => {
             references_triggers_or_ffi(condition)
                 || statements.iter().any(|s| statement_contains_ffi(s))
@@ -1104,7 +1146,6 @@ mod tests {
         assert!(!is_pure_body(&body, &fields, &inc));
     }
 
-    #[test]
     #[test]
     fn test_is_uniform_body_group_identical() {
         let body = vec![Statement::Assignment {
