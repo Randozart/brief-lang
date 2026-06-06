@@ -668,6 +668,170 @@ All phases maintain `cargo test --lib` passing with 0 regressions.
 
 ---
 
+## Phase 7: Embedded Tier System — `.ebv` / `.sebv` / `.hebv`
+
+**Goal**: Define a clear three-tier strictness model for embedded/hardware targets,
+with cross-tier module boundaries and progressively stricter validation.
+
+### 7.0 — Contract sugar rules
+
+These apply to ALL `.bv` files, regardless of tier:
+
+| Syntax | Precondition | Postcondition | Meaning |
+|---|---|---|---|
+| `[pre][post]` | `pre` | `post` | Full contract (both sides) |
+| `[[post]` | `true` (omitted) | `post` | Postcondition only, no guard. The opening `[[` means the precondition was omitted |
+| `[pre]]` | `pre` | `true` (omitted) | Guard only, no guarantee. The closing `]]` means the postcondition was omitted |
+
+Memory aid: the left bracket `[` is always the precondition. `[[` = two left brackets =
+the first one opens an empty precondition (defaults to `true`), the second opens the
+postcondition. `]]` = two right brackets = the first closes the precondition, the second
+closes an empty postcondition (defaults to `true`).
+
+These sugar forms are **banned** in `.sbv`, `.srbv`, `.sebv`, and `.hebv`.
+
+### 7.1 — Tier definitions
+
+| Extension | Tier | Contracts | FFI / link | Dynamic types | Backend output |
+|---|---|---|---|---|---|
+| `.bv` | Cosmopolitan | Sugar allowed | Any language via `import "link/..."` | All allowed | Native binary, WASM, C/Rust source |
+| `.sbv` | Strict cosmopolitan | Full contracts required | Any language | All allowed | Same |
+| `.ebv` | Embedded (bare-metal) | Sugar allowed | C/Rust only (warn on Python/Java/JS) | Allowed but may warn | Native binary (no OS deps) |
+| `.sebv` | Strict embedded | Full contracts required | C/Rust only | Allowed | Native binary (no OS deps) |
+| `.hebv` | Hardware (logic graph) | Full contracts required, must be **total** | **No `import "link/..."`. No `frgn`.** | **Rejected** — only `Bit`, `UInt[N]`, `SInt[N]`, fixed arrays, structs | Verilog, VHDL, or SystemVerilog |
+
+### 7.2 — Cross-tier module boundaries (firmware interface)
+
+A stricter module can be imported by a looser module. The stricter module's contracts are
+**trusted** by the caller — the caller gets the guarantee without re-verification:
+
+```brief
+// heater_firmware.sebv — strict, verified, no OS deps
+export txn read_thermocouple(ch: Int) -> Int [ch >= 0 && ch < 8][term >= 0 && term < 4096];
+```
+
+```brief
+// controller.bv — cosmopolitan, calls the firmware boundary
+import { read_thermocouple } from "heater_firmware.sebv";
+// read_thermocouple guaranteed [term >= 0 && term < 4096] — caller trusts this
+```
+
+Import rules:
+
+| Importer ╲ Exporter | `.bv` | `.sbv` | `.ebv` | `.sebv` | `.hebv` |
+|---|---|---|---|---|---|
+| **`.bv`** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **`.sbv`** | ❌ | ✓ | ❌ | ✓ | ✓ |
+| **`.ebv`** | ❌ | ❌ | ✓ | ✓ | ✓ |
+| **`.sebv`** | ❌ | ❌ | ❌ | ✓ | ✓ |
+| **`.hebv`** | ❌ | ❌ | ❌ | ❌ | ✓ |
+
+A stricter module cannot depend on a looser one — a verified module must not rely on
+an unverified contract.
+
+### 7.3 — `.hebv` total contract requirement
+
+"Total" means the contract must describe a closed logic graph:
+
+- **Precondition** must fully specify all valid input states — `[true]` left open is an error
+- **Postcondition** must fully specify all output states — `[true]` right open is an error
+- **Convergence** must be compile-time provable — the transaction body must terminate
+  with a statically known bound
+- **No infinite loops** — all convergence bounds must be known at compile time
+- **No partial updates** — every state field write must be covered by the postcondition
+- **All types must be synthesizable** — only `Bit`, `UInt[N]`, `SInt[N]`, fixed-size
+  arrays, and structs with known bit widths
+
+This is what makes `.hebv` safe for hardware synthesis. The Verilog/VHDL backend can
+translate the transaction directly to a state machine with known states and known
+transition boundaries — because the contract is a complete behavioral specification.
+
+### 7.4 — Hardware validator additions
+
+**File**: `src/hardware_validator.rs`
+
+| Check | `.ebv` | `.sebv` | `.hebv` |
+|---|---|---|---|
+| No `import "link/..."` | ⚠️ Warn on Python/Java/JS | ⚠️ Warn on Python/Java/JS | ❌ Error any |
+| No `frgn` | ✓ OK | ✓ OK | ❌ Error |
+| No `syscall!` | ❌ Error | ❌ Error | ❌ Error |
+| No dynamic heap | ❌ Error | ❌ Error | ❌ Error |
+| Contracts total (no `true` defaults) | ⚠️ Warn | ❌ Error | ❌ Error |
+| All loops provably bounded | ⚠️ Warn | ❌ Error | ❌ Error |
+| Only synthesizable types | ⚠️ Warn | ⚠️ Warn | ❌ Error |
+| Cross-tier import rules | ✓ OK | ✓ OK | ❌ Error if importing non-`.hebv` |
+
+---
+
+## Phase 8: MMIO / DBVS Address Resolution and Bus Interface Generation
+
+**Goal**: Both `.ebv`/`.sebv` and `.hebv` target the same MMIO addresses, but the
+backend generates different hardware interface code around them.
+
+### 8.1 — Single source of truth: `.dbvs` address bindings
+
+The `.dbvs` schema defines address bindings symbolically. Both tiers read the same file:
+
+```dbvs
+// heater_config.dbvs
+register MMIO_THERMOCOUPLE @ 0x40000000 {
+    width: 32;
+    access: read-only;
+    interface: "axi4-lite";    // used by .heb vs .sebv backend selects appropriate
+};
+```
+
+```brief
+// heater_control.hebv — pin-level
+trg thermocouple_raw: UInt[32] @ MMIO_THERMOCOUPLE;
+// compiler resolves MMIO_THERMOCOUPLE → 0x40000000 from .dbvs
+```
+
+```brief
+// heater_monitor.ebv — MMIO level
+trg thermocouple_raw: Int @ MMIO_THERMOCOUPLE;
+// same .dbvs, same address, different backend
+```
+
+### 8.2 — Backend-specific interface generation
+
+| Tier | Address resolution | Bus generation | Backend |
+|---|---|---|---|
+| `.hebv` | `@ MMIO_THERMOCOUPLE` → 0x40000000 (pin address) | Verilog/VHDL backend auto-generates AXI-lite (or Wishbone, GPIO, etc.) slave wrapper from the `interface` field in `.dbvs` | Verilog/VHDL/SV codegen |
+| `.ebv`/`.sebv` | `@ MMIO_THERMOCOUPLE` → 0x40000000 (MMIO window) | No bus generation — hardware-side bus bridge already exists. LLVM/C backend emits volatile load/store at the address | LLVM, C, Rust codegen |
+
+For `.hebv`, the `.dbvs` `interface` field controls which bus protocol wrapper the
+hardware backend generates:
+
+```
+register MMIO_BUFFER @ 0x40001000 {
+    width: 64;
+    access: read-write;
+    interface: "axi4-lite";    // → AXI4-Lite slave controller generated
+};
+
+register GPIO_LEDS @ 0x40002000 {
+    width: 8;
+    access: write-only;
+    interface: "gpio";         // → simple GPIO output port
+};
+```
+
+If no `interface` field is specified, the backend infers a reasonable default:
+- `read-only` → GPIO input
+- `write-only` → GPIO output  
+- `read-write` → AXI4-Lite slave
+
+### 8.3 — Verification
+
+| Gate |
+|---|
+| Same `.dbvs` file drives both `.hebv` and `.ebv` compilation with correct address resolution |
+| `.hebv` output includes auto-generated AXI/GPIO wrapper in VHDL/Verilog |
+| `.ebv` output emits volatile load/store at the same address (no bus wrapper) |
+
+---
+
 ## Architecture Summary
 
 ```

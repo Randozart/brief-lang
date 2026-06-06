@@ -10,7 +10,7 @@
 // @__io_pending is set to 1 by __rt_init() on startup. On the first tick,
 // the switch hits case 1, enters the folded loop, and runs N iterations.
 //
-// import "link/brief_rt.o" in brief_rt.bv pulls in the runtime automatically.
+// import "link/brief_rt.c" in brief_rt.bv pulls in the runtime automatically.
 //
 // Build:
 //   cargo run --bin brief-compiler -- llvm benchmarks/ring_buffer.bv --out benchmarks --optimize-budget 256

@@ -384,9 +384,8 @@ fn print_usage(program: &str) {
     eprintln!("  .dbv, .dbvs, .dbvl  Data Brief (configuration)");
 }
 
-/// Embedded C runtime source for the LLVM backend.
-/// Written to disk when --link-rt is used.
-const BRIEF_RT_SOURCE: &str = include_str!("../runtime/brief_rt.c");
+/// Path to runtime C source within the standard library.
+const RUNTIME_C_PATH: &str = "lib/runtime/brief_rt.c";
 
 const STDLIB_BINDINGS: &[(&str, &str)] = &[
     (
@@ -1858,14 +1857,130 @@ fn process_target_dbv(_dbv_path: &str) -> Result<HashMap<String, u64>, String> {
     Ok(addresses)
 }
 
-/// Attempt LTO compilation pipeline: compile brief_rt.c to LLVM bitcode,
-/// merge with program IR, run opt -O3 on the merged module, then llc.
-/// Returns Some(path_to_object) on success, None if any tool is missing.
-fn try_lto_pipeline(
+/// Resolve a link dependency path to an actual file on disk.
+/// Search order: project-relative → lib/runtime/ → lib/std/c/ → absolute path.
+fn resolve_link_source(link_path: &str, source_dir: &Path) -> Option<PathBuf> {
+    let relative = link_path.strip_prefix("link/").unwrap_or(link_path);
+
+    // 1. Try project-relative path (canonicalize to resolve ..)
+    let project_path = source_dir.join(relative);
+    if let Ok(canonical) = project_path.canonicalize() {
+        if canonical.exists() {
+            return Some(canonical);
+        }
+    }
+
+    // 2. Try lib/runtime/<path>
+    let runtime_path = Path::new("lib/runtime").join(relative);
+    if let Ok(canonical) = runtime_path.canonicalize() {
+        if canonical.exists() {
+            return Some(canonical);
+        }
+    }
+
+    // 3. Try lib/std/c/<path>
+    let stdc_path = Path::new("lib/std/c").join(relative);
+    if let Ok(canonical) = stdc_path.canonicalize() {
+        if canonical.exists() {
+            return Some(canonical);
+        }
+    }
+
+    // 4. Try BRIEF_STDLIB_PATH
+    if let Ok(stdlib_path) = std::env::var("BRIEF_STDLIB_PATH") {
+        let env_path = Path::new(&stdlib_path).join(relative);
+        if let Ok(canonical) = env_path.canonicalize() {
+            if canonical.exists() {
+                return Some(canonical);
+            }
+        }
+    }
+
+    // 5. Try as absolute path
+    let abs_path = Path::new(link_path);
+    if let Ok(canonical) = abs_path.canonicalize() {
+        if canonical.exists() {
+            return Some(canonical);
+        }
+    }
+
+    eprintln!("  Warning: link source not found: {} (searched project, lib/runtime/, lib/std/c/, BRIEF_STDLIB_PATH)", link_path);
+    None
+}
+
+/// A single foreign module to be compiled to bitcode and linked via LTO.
+struct LinkModule {
+    source: PathBuf,
+    lang: ast::LinkLanguage,
+}
+
+/// Compile a foreign source file to LLVM bitcode.
+fn compile_to_bitcode(source: &Path, lang: ast::LinkLanguage, output: &Path, has_thread_pool: bool) -> Option<()> {
+    let result = match lang {
+        ast::LinkLanguage::C => {
+            let mut cmd = std::process::Command::new("clang");
+            cmd.args(["-c", "-emit-llvm", "-O2", "-fno-stack-protector"]);
+            if has_thread_pool {
+                cmd.arg("-DBRIEF_THREAD_POOL");
+            }
+            cmd.arg("-o").arg(output).arg(source);
+            cmd.output().ok()
+        }
+        ast::LinkLanguage::Cpp => {
+            let mut cmd = std::process::Command::new("clang++");
+            cmd.args(["-c", "-emit-llvm", "-O2", "-fno-stack-protector"]);
+            cmd.arg("-o").arg(output).arg(source);
+            cmd.output().ok()
+        }
+        ast::LinkLanguage::Rust => {
+            let mut cmd = std::process::Command::new("rustc");
+            cmd.args(["--emit=llvm-bc", "-C", "opt-level=3", "-o"]);
+            cmd.arg(output).arg(source);
+            cmd.output().ok()
+        }
+        ast::LinkLanguage::Zig => {
+            let mut cmd = std::process::Command::new("zig");
+            cmd.args(["build-obj", "--emit-llvm-ir", "-O", "ReleaseFast", "-o"]);
+            cmd.arg(output).arg(source);
+            cmd.output().ok()
+        }
+        ast::LinkLanguage::Python => {
+            let mut cmd = std::process::Command::new("codon");
+            cmd.args(["build", "--emit-llvm", "-O3", "-o"]);
+            cmd.arg(output).arg(source);
+            cmd.output().ok()
+        }
+        ast::LinkLanguage::Bitcode => {
+            fs::copy(source, output).ok()?;
+            return Some(());
+        }
+        ast::LinkLanguage::Object => {
+            eprintln!("  Warning: cannot LTO object file '{}' — compiling separately", source.display());
+            return None;
+        }
+    };
+
+    match result {
+        Some(output) if output.status.success() => Some(()),
+        Some(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("  Error compiling {}: {}", source.display(), stderr.lines().next().unwrap_or("unknown error"));
+            None
+        }
+        None => {
+            eprintln!("  Error: failed to invoke compiler for {}", source.display());
+            None
+        }
+    }
+}
+
+/// Generic multi-module LTO pipeline: compile all foreign sources to bitcode,
+/// merge with program IR, optimize, and lower to object code.
+fn link_and_optimize(
     out_base: &Path,
     stem: &str,
     ll_file: &Path,
-    rt_c_path: &Path,
+    link_modules: &[LinkModule],
     llvm_extra_flags: &[String],
     has_thread_pool: bool,
 ) -> Option<PathBuf> {
@@ -1896,25 +2011,22 @@ fn try_lto_pipeline(
         return None;
     }
 
-    let rt_bc = out_base.join("brief_rt.bc");
     let prog_bc = out_base.join(format!("{}.bc", stem));
     let merged_bc = out_base.join(format!("{}_merged.bc", stem));
     let merged_opt_bc = out_base.join(format!("{}_merged.opt.bc", stem));
     let obj_path = out_base.join(format!("{}.o", stem));
 
-    // Step 1: compile brief_rt.c → LLVM bitcode
-    let clang_status = {
-        let mut cmd = std::process::Command::new("clang");
-        cmd.args(["-c", "-emit-llvm", "-O2", "-fno-stack-protector"]);
-        if has_thread_pool {
-            cmd.arg("-DBRIEF_THREAD_POOL");
+    // Step 1: compile all foreign sources to bitcode
+    let mut foreign_bc_paths: Vec<PathBuf> = Vec::new();
+    for module in link_modules {
+        let bc_name = format!("{}_{}.bc", stem, foreign_bc_paths.len());
+        let bc_path = out_base.join(&bc_name);
+        if compile_to_bitcode(&module.source, module.lang, &bc_path, has_thread_pool).is_some() {
+            foreign_bc_paths.push(bc_path);
         }
-        cmd.arg("-o").arg(&rt_bc).arg(rt_c_path);
-        cmd.stdout(std::process::Stdio::null());
-        cmd.stderr(std::process::Stdio::null());
-        cmd.status().ok()
-    };
-    if clang_status.map_or(true, |s| !s.success()) {
+    }
+
+    if foreign_bc_paths.is_empty() {
         return None;
     }
 
@@ -1931,18 +2043,23 @@ fn try_lto_pipeline(
         return None;
     }
 
-    // Step 3: merge bitcode modules
-    let link_status = std::process::Command::new("llvm-link")
-        .args(["-o"])
-        .arg(&merged_bc)
-        .arg(&prog_bc)
-        .arg(&rt_bc)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
+    // Step 3: merge all bitcode modules
+    let mut link_cmd = std::process::Command::new("llvm-link");
+    link_cmd.args(["-o"]).arg(&merged_bc).arg(&prog_bc);
+    for bc_path in &foreign_bc_paths {
+        link_cmd.arg(bc_path);
+    }
+    let link_output = link_cmd
+        .output()
         .ok();
-    if link_status.map_or(true, |s| !s.success()) {
-        return None;
+    match link_output {
+        Some(out) if out.status.success() => {},
+        Some(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            eprintln!("  llvm-link error: {}", stderr.lines().next().unwrap_or("unknown error"));
+            return None;
+        }
+        None => { return None; }
     }
 
     // Step 4: opt -O3 on merged module
@@ -1954,12 +2071,16 @@ fn try_lto_pipeline(
         for flag in llvm_extra_flags {
             cmd.arg(flag);
         }
-        cmd.stdout(std::process::Stdio::null());
-        cmd.stderr(std::process::Stdio::null());
-        cmd.status().ok()
+        cmd.output()
     };
-    if opt_status.map_or(true, |s| !s.success()) {
-        return None;
+    match opt_status {
+        Ok(out) if out.status.success() => {},
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            eprintln!("  opt error: {}", stderr.lines().next().unwrap_or("unknown error"));
+            return None;
+        }
+        Err(_) => { return None; }
     }
 
     // Step 5: llc → object
@@ -1967,8 +2088,6 @@ fn try_lto_pipeline(
         .args(["-filetype=obj", "-O3", "--mcpu=native", "-o"])
         .arg(&obj_path)
         .arg(&merged_opt_bc)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         .status()
         .ok();
     if llc_status.map_or(true, |s| !s.success()) {
@@ -2209,23 +2328,33 @@ fn run_llvm_compile(
 
     if !link_deps.is_empty() {
         let out_base = out_dir.unwrap_or(std::path::Path::new("."));
-        let rt_c_path = out_base.join("brief_rt.c");
         let exe_path = out_base.join(stem);
         // Detect whether output has wake triggers
         let has_wake = output.contains("@llvm.wake_triggers");
         // Detect whether output uses thread pool for async dispatch
         let has_thread_pool = output.contains("@llvm.thread_pool");
-        // Write embedded C source to disk
-        fs::write(&rt_c_path, BRIEF_RT_SOURCE)?;
+
+        // Resolve each link dependency to an actual file path.
+        // Search: BRIEF_STDLIB_PATH / lib/ / project root / absolute path.
+        let source_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+        let link_modules: Vec<LinkModule> = link_deps.iter().filter_map(|dep| {
+            let resolved = resolve_link_source(&dep.path, source_dir)?;
+            Some(LinkModule { source: resolved, lang: dep.source_lang })
+        }).collect();
 
         let llvm_flags = llvm_backend.llvm_extra_flags();
 
-        // Try LTO pipeline first: compile brief_rt.c to bitcode, merge with program IR,
-        // run opt -O3 on the merged module, then llc. This enables inlining of __print_int,
-        // __wait_for_event, and thread pool barriers into the Brief loop body.
-        let lto_obj = try_lto_pipeline(&out_base, stem, &output_file, &rt_c_path, &llvm_flags, has_thread_pool);
+        // Try LTO pipeline first: compile all foreign sources to bitcode, merge with
+        // program IR, run opt -O3 on the merged module, then llc. This enables inlining
+        // across language boundaries.
+        let lto_obj = if !link_modules.is_empty() {
+            link_and_optimize(&out_base, stem, &output_file, &link_modules, &llvm_flags, has_thread_pool)
+        } else {
+            None
+        };
         if let Some(lto_obj_path) = lto_obj {
-            println!("  LTO-merged: {}.bc + {}.bc → optimized", stem, "brief_rt");
+            let merged_names: Vec<&str> = link_modules.iter().map(|_| "bc").collect();
+            println!("  LTO-merged: program.bc + {} foreign modules → optimized", link_modules.len());
 
             let mut link_cmd = std::process::Command::new("cc");
             link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj_path);
@@ -2249,7 +2378,11 @@ fn run_llvm_compile(
             return Ok(output_file);
         }
 
-        // LTO not available — fall back to standard cc compilation and object linking
+        // LTO not available — fall back to standard cc compilation and object linking.
+        // Copy the runtime C source from lib/runtime/ for the standard path.
+        let source_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+        let rt_c_path = resolve_link_source("link/brief_rt.c", source_dir)
+            .unwrap_or_else(|| out_base.join("brief_rt.c"));
         let rt_o_path = out_base.join("brief_rt.o");
         let ll_o_path = out_base.join(format!("{}.o", stem));
 

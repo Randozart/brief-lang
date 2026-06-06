@@ -790,18 +790,40 @@ impl<'a> Parser<'a> {
         };
 
         let last = path.last().map(|s| s.as_str()).unwrap_or("");
-        if last.ends_with(".o") || last.ends_with(".a") {
+        let first = path.first().map(|s| s.as_str()).unwrap_or("");
+
+        // Only apply LinkLanguage detection for paths starting with "link/"
+        if first == "link" {
+            let source_lang = if last.ends_with(".c") {
+                crate::ast::LinkLanguage::C
+            } else if last.ends_with(".cpp") || last.ends_with(".cc") || last.ends_with(".cxx") {
+                crate::ast::LinkLanguage::Cpp
+            } else if last.ends_with(".rs") {
+                crate::ast::LinkLanguage::Rust
+            } else if last.ends_with(".zig") {
+                crate::ast::LinkLanguage::Zig
+            } else if last.ends_with(".py") {
+                crate::ast::LinkLanguage::Python
+            } else if last.ends_with(".bc") {
+                crate::ast::LinkLanguage::Bitcode
+            } else if last.ends_with(".o") || last.ends_with(".a") {
+                crate::ast::LinkLanguage::Object
+            } else {
+                return self.spanned_err(
+                    format!("Unsupported link dependency extension: '{}'. Supported: .c, .cpp, .rs, .zig, .py, .bc, .o, .a", last)
+                );
+            };
+
             if !items.is_empty() {
                 return self.spanned_err(
-                    "Link dependencies ('.o'/'.a') do not support named imports. Use: import \"link/brief_rt.o\";"
+                    "Link dependencies do not support named imports. Use: import \"link/path.ext\";"
                         .to_string(),
                 );
             }
-            let is_bundled_rt = last == "brief_rt.o";
             self.expect(Token::Semicolon)?;
             return Ok(TopLevel::LinkDependency(crate::ast::LinkDependency {
                 path: path.join("/"),
-                is_bundled_rt,
+                source_lang,
             }));
         }
 
@@ -6250,15 +6272,15 @@ mod parser_tests {
 
     #[test]
     fn test_link_dependency_parsed() {
-        let s = "import \"link/brief_rt.o\";";
+        let s = "import \"link/brief_rt.c\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "import link dep should parse: {:?}", result.err());
         let program = result.unwrap();
         assert_eq!(program.items.len(), 1);
         if let TopLevel::LinkDependency(dep) = &program.items[0] {
-            assert_eq!(dep.path, "link/brief_rt.o");
-            assert!(dep.is_bundled_rt);
+            assert_eq!(dep.path, "link/brief_rt.c");
+            assert_eq!(dep.source_lang, crate::ast::LinkLanguage::C);
         } else {
             panic!("Expected LinkDependency, got {:?}", program.items[0]);
         }
@@ -6266,14 +6288,14 @@ mod parser_tests {
 
     #[test]
     fn test_link_dependency_user_o() {
-        let s = "import \"lib/foo.o\";";
+        let s = "import \"link/foo.o\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_ok(), "import lib/foo.o should parse: {:?}", result.err());
+        assert!(result.is_ok(), "import link/foo.o should parse: {:?}", result.err());
         let program = result.unwrap();
         if let TopLevel::LinkDependency(dep) = &program.items[0] {
-            assert_eq!(dep.path, "lib/foo.o");
-            assert!(!dep.is_bundled_rt);
+            assert_eq!(dep.path, "link/foo.o");
+            assert_eq!(dep.source_lang, crate::ast::LinkLanguage::Object);
         } else {
             panic!("Expected LinkDependency, got {:?}", program.items[0]);
         }
@@ -6281,13 +6303,14 @@ mod parser_tests {
 
     #[test]
     fn test_link_dependency_user_a() {
-        let s = "import \"lib/custom_hw.a\";";
+        let s = "import \"link/custom_hw.a\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "import .a file should parse: {:?}", result.err());
         let program = result.unwrap();
         if let TopLevel::LinkDependency(dep) = &program.items[0] {
-            assert_eq!(dep.path, "lib/custom_hw.a");
+            assert_eq!(dep.path, "link/custom_hw.a");
+            assert_eq!(dep.source_lang, crate::ast::LinkLanguage::Object);
         } else {
             panic!("Expected LinkDependency, got {:?}", program.items[0]);
         }
@@ -6306,7 +6329,7 @@ mod parser_tests {
 
     #[test]
     fn test_link_dep_rejects_named_imports() {
-        let s = "import { foo } from \"link/brief_rt.o\";";
+        let s = "import { foo } from \"link/brief_rt.c\";";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_err(), "Named imports on link deps should error");

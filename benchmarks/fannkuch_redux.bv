@@ -4,7 +4,7 @@
 
 #!exit count == N && checksum >= 0 && max_flips >= 0;
 
-import "link/brief_rt.o";
+import "link/brief_rt.c";
 
 frgn #out __print_int(n: Int) -> Bool ;
 frgn __get_env_int(name: String) -> Int ;

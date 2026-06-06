@@ -3,7 +3,7 @@
 // and provide a reactive I/O model without blocking calls.
 //
 // All trigger declarations come from std/brief_rt.bv.
-// import "link/brief_rt.o" in that file tells the compiler driver
+// import "link/brief_rt.c" in that file tells the compiler driver
 // to compile and link the runtime automatically — no CLI flags needed.
 //
 // Import this file:

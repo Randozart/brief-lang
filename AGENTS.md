@@ -12,10 +12,35 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness (nanosecond CLOCK_MONOTONIC, 5-iteration average). Ad-hoc timing produces false hangs and imprecise numbers.
 
 ### File Types
-- **.bv** - Brief (standard Brief file)
+- **.bv** - Brief (standard Brief file, cosmopolitan tier — any FFI, any language, OS assumed)
+- **.sbv** - Strict Brief (full contracts required, no sugar defaults)
 - **.rbv** - Rendered Brief (Brief + View, compiles to web frontend. Like `.tsx` is to `.ts`)
-- **.ebv** - Embedded Brief (oriented towards bare metal and embedded)
+- **.srbv** - Strict Rendered Brief (full contracts required in web target)
+- **.ebv** - Embedded Brief (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned)
+- **.sebv** - Strict Embedded Brief (full contracts required, bare metal)
+- **.hebv** - Hardware Embedded Brief (pure logic graph — no FFI, no external deps, only synthesizable types. Contracts must be total. Outputs Verilog/VHDL/SV)
 - **.dbv/.dbvs/.dbvl** - Data Brief (configuration with schema, think `.xml`/`.xmls`/`.jsonl`)
+
+### Contract Sugar Syntax
+
+Brief provides sugar for single-sided contracts. Use these where possible in the stdlib
+to teach readers the pattern:
+
+| Syntax | Precondition | Postcondition | Meaning |
+|---|---|---|---|
+| `[pre][post]` | `pre` | `post` | Full contract (both sides) |
+| `[[post]` | `true` (omitted) | `post` | Postcondition only, no guard. **The opening `[[` means the precondition was omitted.** |
+| `[pre]]` | `pre` | `true` (omitted) | Guard only, no guarantee. **The closing `]]` means the postcondition was omitted.** |
+
+Memory aid: the left bracket `[` is always the precondition. `[[` = two left brackets = the
+first one opens an empty precondition (defaults to `true`), the second opens the postcondition.
+`]]` = two right brackets = the first closes the precondition, the second closes an empty
+postcondition (defaults to `true`).
+
+**Banned in**: `.sbv`, `.srbv`, `.sebv`, `.hebv` (strict tiers require explicit both-sided contracts).
+
+**Preferred in**: `.bv`, `.ebv`, `.rbv` stdlib examples. Use the sugar to keep code readable
+while teaching users the pattern.
 
 ### Critical Philosophy
 

@@ -9,7 +9,7 @@
 // inc_a and inc_b write different state fields (a, b). The proof engine
 // guarantees no data races — plain loads/stores, no atomics needed.
 //
-// import "link/brief_rt.o" in brief_rt.bv pulls in the runtime automatically.
+// import "link/brief_rt.c" in brief_rt.bv pulls in the runtime automatically.
 //
 // Build:
 //   cargo run --bin brief-compiler -- llvm benchmarks/async_counters.bv --out benchmarks --optimize-budget 256

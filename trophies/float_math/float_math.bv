@@ -2,7 +2,7 @@
 
 import { __get_env_int } from "std/env.bv";
 import { io_pending } from "std/brief_rt.bv";
-import "link/brief_rt.o";
+import "link/brief_rt.c";
 
 let x0: Float = 0.0;
 let x1: Float = 0.0;

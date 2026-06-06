@@ -9,7 +9,7 @@
 //   OUT__print_int(42);
 //   OUT__println("hello");
 //
-import "link/brief_rt.o";
+import "link/brief_rt.c";
 
 // ===== UNDERLYING FFI (neutral) =====
 // Raw FFI calls with no sig, no #out. These CAN be eliminated by the optimizer.

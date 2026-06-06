@@ -835,10 +835,21 @@ pub struct ImportItem {
     pub alias: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LinkLanguage {
+    C,        // .c
+    Cpp,      // .cpp / .cc / .cxx
+    Rust,     // .rs
+    Zig,      // .zig
+    Python,   // .py
+    Bitcode,  // .bc
+    Object,   // .o / .a
+}
+
 #[derive(Debug, Clone)]
 pub struct LinkDependency {
     pub path: String,
-    pub is_bundled_rt: bool,
+    pub source_lang: LinkLanguage,
 }
 
 #[derive(Debug, Clone)]
