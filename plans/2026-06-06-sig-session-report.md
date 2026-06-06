@@ -1,4 +1,4 @@
-# Session Report: sig Phases 1+2 — 2026-06-06
+# Session Report: sig Phases 1+2 + Eliminate Magic — 2026-06-06
 
 ## Phase 1 — `a9d413b`
 
@@ -33,26 +33,47 @@ SigModifier enum, Signature.params (named), Expr::SigCall, parser rewrite for `s
 OutputType Array/Named grammar, `--explain` flag, `lib/std/out.bv`, multi-output term, sig verification.
 
 ### Deliverables
+- **OutputType Grammar**: Array(Box<Type>) and Named(String, Box<OutputType>). Tuple/Union → Vec<OutputType>.
+- **OUT Library**: lib/std/out.bv with sig #out wrappers.
+- **--explain Flag**: CLI plumbing through LlvmBackend.
+- **Multi-Output term a, b, c;**: Interpreter collects into Value::List.
+- **Sig Verification**: check_signature() validates against bound_defn.
 
-**OutputType Grammar**: `OutputType::Array(Box<Type>)` and `OutputType::Named(String, Box<OutputType>)` variants. `Tuple`/`Union` changed from `Vec<Type>` to `Vec<OutputType>`. Parser: 3-level precedence (union `|` < product `,` < slot `name: Type[]`).
+## Eliminate Magic — Sessions 3-7 (bd3f081 through f513329)
 
-**OUT Library**: `lib/std/out.bv` with `sig #out OUT__print_int`, `OUT__putchar`, `OUT__print`, `OUT__print_float`, `OUT__exit`, `OUT__println`.
+### Commits
+3. `bd3f081` — A1: Destroy ForAll/Exists (23 occurrences, 12 files)
+4. `05b80b8` — B1-C1+D1: Fix from parser bug, validate, update .bv files (17 files)
+5. `d4632cd` — F1: Remove None/Err discriminant magic, docs/learn/ffi.md
+6. `f2fb8a6` — G1: sig #out LLVM codegen with volatile marker
+7. `f513329` — H1-H3: AGENTS.md rules, BUGS.md entries
 
-**`--explain` Flag**: Added to CLI help, parsed alongside `--verbose`, threaded through to `LlvmBackend` with `with_explain()` builder.
+### ForAll/Exists: Destroyed
+23 references across 15 files — AST variants (ast.rs), parser arms (parser.rs), lexer tokens (lexer.rs), and every match arm in interpreter.rs, llvm.rs, webstack.rs, rust.rs, dataflow.rs, transition_graph.rs, region.rs, symbolic.rs, annotator.rs, proof_engine.rs, typechecker.rs.
 
-**Multi-Output `term a, b, c;`**: Interpreter collects multi-output into `Value::List(collected)`. Backward compatible — single-output unchanged.
+### No Magic `from` Strings
+- **Parser bug fixed**: `parser.rs:1142` — `location: String::new()` → `location.clone()`
+- **Typechecker validation**: `"c"`, `"rust"`, `"js"`, `"python"` whitelisted
+- **17 .bv files updated**: All `from "libruntime"` removed
 
-**Sig Verification**: `check_signature()` validates sig projection types against `bound_defn`. Reports `TypeError::FFIError` on mismatch.
+### No Hardcoded Runtime Declares
+- Removed `__rt_init`, `__rt_poll`, `__rt_wait`, `__exit`, `brief_thread_pool_init`, `brief_barrier_release`, `brief_barrier_wait` from `emit_declares()`
+- Re-added `__rt_init`, `__rt_poll`, `__rt_wait` with TODO marker (codegen callsites need migration)
 
-## Phase A1 (this session) — `bd3f081`
+### No `"None"`/`"Err"` Discriminant Magic
+- `llvm.rs:508`: name-hardcoded → sequential from declaration order (starting at 0)
+- 3 fallback sites: name-hardcoded → `unwrap_or(0)`
 
-**ForAll/Exists**: Destroyed 23 occurrences across 15 files. AST variants, parser arms, lexer tokens, all match arms. 450/450 pass.
+### sig #out LLVM Codegen
+- `Expr::SigCall { modifier: Out, expr }` emits volatile marker
+- `Expr::SigCall { modifier: Inline, expr }` pass-through
 
-## Open Items (remaining work in plan)
-- B1-B4: Fix `from` parser bug, validate known languages, link target resolution
-- C1-C3: Remove hardcoded LLVM runtime declares, create std/rt.bv
-- D1-D2: Replace all `from "libruntime"` with `from "c"`
-- F1: Remove `"None"`/`"Err"` discriminant magic in LLVM backend
-- G1: `sig #out` LLVM codegen with `memory(write)`
-- E1-E3: Type-based interpreter dispatch
-- H1-H3: Documentation (ffi.md, AGENTS.md, BUGS.md)
+### Documentation
+- `docs/learn/ffi.md` — zero-cost multi-language interop via LLVM LTO
+- AGENTS.md — new anti-patterns (from strings, runtime declares, name dispatch, discriminant magic)
+- BUGS.md — 5 new entries (parser from discard, runtime declares, None/Err magic, env var N vs BOUND)
+
+## Remaining
+- **E1-E3**: Type-based interpreter dispatch (interpreter.rs:646-1909)
+- **C2-C3**: Full runtime declare removal (codegen callsites → frgn_map)
+- `llvm.rs:1858-1860`: TODO marker
