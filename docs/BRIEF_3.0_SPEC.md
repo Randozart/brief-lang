@@ -2,7 +2,7 @@
 
 **Version:** 3.0  
 **Date:** 2026-06-05  
-**Status:** Final Design Specification  
+**Status:** DEPRECATED — see `spec/SPEC.md` for the current specification
 
 ---
 

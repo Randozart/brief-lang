@@ -1,0 +1,700 @@
+# Universal FFI & No-Magic Architecture
+
+**Date**: 2026-06-06
+**Status**: Master plan — all phases defined, pending implementation
+
+## Core Philosophy
+
+> Everything compiles to binary in the end. Brief tries to figure out the best way how,
+> and treats every language equal to itself.
+
+Brief is a **Cosmopolitan language**. Its role is not to reinvent forty years of systems
+libraries. Its role is to be the **orchestrator** — taking any language that produces
+LLVM bitcode, linking it into a unified module, optimizing across all language boundaries,
+and emitting for the target. The bitcode doesn't remember what language it came from.
+`opt -O3` inlines across all of them equally. The distinction between "compiled language"
+and "interpreted language" disappears at the LLVM IR level.
+
+This is the **Metropolitan FFI** — every language is a citizen of the same metropolitan
+binary. The interpreter (FFI registry dispatch), the native LLVM backend, and the Webstack
+backend are three faces of the same engine: take code, resolve imports, compile to binary.
+The language the import came from is irrelevant.
+
+### Sub-Principles
+
+- **No Magic**: Every behavior is declared in `.bv` source, never in Rust string-match
+  arms. No hardcoded names, no implicit destinations, no parser-discarded tokens.
+- **Everything is `import "link/..."`**: Runtime, stdlib native implementations, external
+  C/Rust/Zig/Python libraries — all go through the same generic pipeline.
+- **Interpreter dispatch through FFI registry**: One hashmap lookup
+  (`ffi_name_to_location` → `foreign_functions`). Faster than 20+ string comparisons
+  in the old `dispatch_method_by_type`.
+- **Webstack decomposes, doesn't transform**: Brief logic → WASM. HTML/CSS/SVG → as-is.
+  JS/TS → emitted as native browser source. Nothing is forced into WASM that the browser
+  can run natively.
+- **Zero performance loss**: LTO inlines across all language boundaries. The dispatch path
+  is strictly hashmap lookups — faster than the string matching it replaces.
+
+## Web Native Citizens (Never Compile to WASM)
+
+Anything the browser already has a native parser, renderer, or runtime for stays as-is. Compiling these to WASM would add latency for zero benefit.
+
+| Technology | How it's emitted | Reasoning |
+|---|---|---|
+| **HTML** | `.rbv` `<view>` → emitted as `.html` unchanged | Browser parses HTML natively |
+| **CSS** | `.rbv` `<style>` → `.css` file or inline `<style>` | Browser renders CSS natively |
+| **SVG** | `TopLevel::SvgComponent` → embedded in HTML/SVG DOM | Native DOM-rendered vector graphics. Already supported in `.rbv` |
+| **JS/TS (FFI targets)** | Emitted as native `.js`/`.ts` source alongside glue code | Browser's JS engine runs JS/TS natively. WASM would add an unnecessary compilation → decompilation round trip |
+| **JSON** | `JSON.parse()` / `JSON.stringify()` calls in generated JS glue | Browser has native JSON parser. For native target, goes through `yyjson` bitcode-linked |
+| **WebGL/WebGPU shaders (GLSL/WGSL/SPIR-V)** | Generated as string constants, passed directly to WebGL/WebGPU API by JS glue | GPU drivers consume these directly. No WASM bridge needed |
+| **HTML Templates / `<template>`** | Emitted as-is | Native DOM cloning |
+| **ES Modules / Import Maps** | `import './pkg/app.js'` — standard JS module system | Native browser behavior, already used by webstack glue |
+
+**The rule**: Only compile to WASM what the browser cannot run natively. This keeps the WASM binary small — containing only the Brief state machine and its C/Rust FFI dependencies.
+
+### FFI Target Classification per Backend
+
+Each `frgn` in a `.rbv` source is classified by its target capability during webstack codegen.
+The same `frgn` resolves differently depending on the target:
+
+| `from` / TOML target | Native (.bv) path | Web (.rbv) path |
+|---|---|---|
+| `from "c"` or no `from` (C ABI) | `import "link/..."` → `clang -emit-llvm` → bitcode → LTO | `clang --target=wasm32 -emit-llvm` → bitcode → `llc -march=wasm32` → inlined WASM |
+| `from "rs"` / `from "rust"` | `rustc --emit=llvm-bc` → bitcode → LTO | Same, wasm32 target |
+| `from "zig"` | `zig build-obj --emit-llvm-ir` → bitcode → LTO | Same, wasm32 target |
+| `from "py"` / `from "python"` (Codon) | `codon --emit-llvm -O3` → bitcode → LTO | Same, wasm32 target (Codon bitcode → wasm32) |
+| `from "java"` (GraalVM) | `native-image --llvm` → bitcode → LTO | Same, wasm32 target (bloated — SubstrateVM included) |
+| `from "ts"` / `from "js"` | — (no LLVM backend) | Emit as native JS/TS source alongside glue |
+| `from "webgl"` / `from "webgpu"` | Generates GLSL/WGSL/SPIR-V strings | Same strings, passed to WebGL/WebGPU API by JS glue |
+| `from "json"` | `yyjson` bitcode-linked | JS glue uses native `JSON.parse`/`JSON.stringify` |
+| `from "<profile:...>"` | Resolved through DBVS profile | Resolved through DBVS profile, target checked |
+| `target = "wasm"` in TOML | Uses TOML's `wasm_impl` JS snippet | Same (native for web) |
+
+The bitcode doesn't remember what language it came from. `opt -O3` inlines across all of
+them equally. On native target, the llc output is x86_64/AArch64/etc. On web target, the
+llc output is wasm32. Everything that produces LLVM bitcode targets both.
+
+## Phase 0: Infrastructure — Eliminate Runtime Special Treatment
+
+**Goal**: `brief_rt.c` is a regular file, not an embedded constant. `LinkDependency` is generic. The LTO pipeline handles N modules.
+
+### 0.1 — Move `brief_rt.c` from embedded constant to filesystem file
+
+**Files**: `src/main.rs:389`, `src/main.rs:2212-2219`, `src/main.rs:1864-1978`
+
+| Current | Problem | Fix |
+|---------|---------|-----|
+| `include_str!("../runtime/brief_rt.c")` | Embedded in compiler binary | Move to `lib/runtime/brief_rt.c`, delete the `include_str!` constant |
+| `is_bundled_rt` flag in parser (line 800) | Hardcoded name match on `"brief_rt.o"` | Delete the field entirely |
+| Always written to disk (line 2218-2219) | Even when program has no link deps | Only write when `import "link/brief_rt.c"` is present |
+| Single-file `try_lto_pipeline(rt_c_path)` | Only handles exactly one C file | Replace with generic `link_and_optimize(&[LinkModule])` |
+
+**After**: `import "link/brief_rt.c"` resolves through the exact same code path as `import "link/xxhash/xxhash.c"`. Zero special treatment.
+
+### 0.2 — `LinkLanguage` enum in AST
+
+**File**: `src/ast.rs:839`, `src/parser.rs:793-805`
+
+```rust
+pub enum LinkLanguage {
+    C,              // .c  → clang -emit-llvm
+    Cpp,            // .cpp / .cc / .cxx → clang++ -emit-llvm
+    Rust,           // .rs → rustc --emit=llvm-bc
+    Zig,            // .zig → zig build-obj --emit-llvm-ir
+    Python,         // .py → codon build --emit-llvm (native target only)
+    Bitcode,        // .bc → already bitcode, copy as-is
+    Object,         // .o / .a → link at object level (no LTO possible)
+}
+```
+
+Parser dispatch at line 793:
+
+| Extension | `LinkLanguage` |
+|-----------|---------------|
+| `.c` | `C` |
+| `.cpp` / `.cc` / `.cxx` | `Cpp` |
+| `.rs` | `Rust` |
+| `.zig` | `Zig` |
+| `.py` | `Python` |
+| `.bc` | `Bitcode` |
+| `.o` / `.a` | `Object` |
+
+The `LinkDependency` struct becomes:
+
+```rust
+pub struct LinkDependency {
+    pub path: String,
+    pub source_lang: LinkLanguage,
+}
+```
+
+Delete the `is_bundled_rt` field.
+
+### 0.3 — Generic multi-module LTO pipeline
+
+**File**: `src/main.rs:1864-1978`
+
+Replace `try_lto_pipeline(rt_c_path, ...)` with:
+
+```rust
+fn link_and_optimize(
+    out_base: &Path,
+    stem: &str,
+    ll_file: &Path,
+    link_modules: &[LinkModule],
+    llvm_flags: &[String],
+    wasm_target: bool,        // true → -march=wasm32 for llc
+) -> Option<PathBuf>
+```
+
+Each `LinkModule` contains `(source_path: PathBuf, lang: LinkLanguage)`.
+
+Compilation dispatch per language:
+
+| Language | Command | Output |
+|---|---|---|
+| C | `clang -c -emit-llvm -O2 source.c -o source.bc` | `.bc` |
+| C++ | `clang++ -c -emit-llvm -O2 source.cpp -o source.bc` | `.bc` |
+| Rust | `rustc --emit=llvm-bc -C opt-level=3 source.rs -o source.bc` | `.bc` |
+| Zig | `zig build-obj --emit-llvm-ir -O ReleaseFast source.zig -o source.bc` | `.bc` |
+| Python | `codon build --emit-llvm -O3 source.py -o source.bc` | `.bc` |
+| Bitcode | copy as-is | `.bc` |
+| Object | skip (cannot LTO, emit warning) | — |
+
+For WASM target (`wasm_target = true`):
+- C/C++ compiled with `clang --target=wasm32 -emit-llvm`
+- `llc -march=wasm32` instead of `--mcpu=native`
+- Other languages checked for WASM bitcode support per-language
+
+Then: `llvm-link` all `.bc` files + program `.bc` → `opt -O3` → `llc` → `.o`/`.wasm`.
+
+---
+
+## Phase 1: No-Magic FFI Dispatch
+
+**Goal**: Eliminate `dispatch_method_by_type`, `is_builtin_constructor`, and `handle_result_method`. All collection operations, Result methods, Option constructors, and enum constructors resolve through the FFI registry — zero name-string matching.
+
+### 1.1 — Register all built-in operations in FFI registry
+
+**Files**: `src/ffi/registry.rs` (add match arms), `src/interpreter.rs:1821-2051` (delete)
+
+Every operation currently in `dispatch_method_by_type` gets a `"__builtin.*"` location key and a Rust closure. The closures contain the **exact same Rust code** currently in the match arms — only the dispatch mechanism changes.
+
+| Location key | Implements | Currently at (interpreter.rs) |
+|---|---|---|
+| `"__builtin.HashMap.insert"` | `map.insert(key, value); map` | line 1869 |
+| `"__builtin.HashMap.get"` | `map.get(key) → Option::Some/None` | line 1876 |
+| `"__builtin.HashMap.contains_key"` | `map.contains_key(key) → Bool` | line 1885 |
+| `"__builtin.HashMap.remove"` | `map.remove(key); map` | line 1890 |
+| `"__builtin.HashMap.len"` | `map.len() → Int` | line 1897 |
+| `"__builtin.HashMap.is_empty"` | `map.is_empty() → Bool` | line 1898 |
+| `"__builtin.HashMap.keys"` | `map.keys().collect() → List` | line 1899 |
+| `"__builtin.HashMap.values"` | `map.values().collect() → List` | line 1903 |
+| `"__builtin.HashMap.new"` | `HashMap::new()` | line 1834 |
+| `"__builtin.HashSet.insert"` | `set.insert(item); set` | line 1914 |
+| `"__builtin.HashSet.contains"` | `set.contains(item) → Bool` | line 1917 |
+| `"__builtin.HashSet.remove"` | `set.remove(item); set` | line 1920 |
+| `"__builtin.HashSet.len"` | `set.len() → Int` | line 1923 |
+| `"__builtin.HashSet.is_empty"` | `set.is_empty() → Bool` | line 1924 |
+| `"__builtin.HashSet.new"` | `HashSet::new()` | line 1835 |
+| `"__builtin.StringBuilder.append_char"` | `buffer.push(c); buffer` | line 1942 |
+| `"__builtin.StringBuilder.append_str"` | `buffer.push_str(s); buffer` | line 1949 |
+| `"__builtin.StringBuilder.append_int"` | `buffer.push_str(&n.to_string()); buffer` | line 1956 |
+| `"__builtin.StringBuilder.append_bool"` | `buffer.push_str(&b.to_string()); buffer` | line 1963 |
+| `"__builtin.StringBuilder.append_float"` | `buffer.push_str(&f.to_string()); buffer` | line 1970 |
+| `"__builtin.StringBuilder.to_string"` | `buffer.clone() → String` | line 1977 |
+| `"__builtin.StringBuilder.clear"` | `buffer.clear(); buffer` | line 1978 |
+| `"__builtin.StringBuilder.len"` | `buffer.len() → Int` | line 1983 |
+| `"__builtin.StringBuilder.is_empty"` | `buffer.is_empty() → Bool` | line 1984 |
+| `"__builtin.StringBuilder.capacity"` | `buffer.capacity() → Int` | line 1985 |
+| `"__builtin.StringBuilder.new"` | `String::new()` | line 1836 |
+| `"__builtin.Stack.push"` | `stack.push(item); stack` | line 1993 |
+| `"__builtin.Stack.pop"` | `stack.pop() → Option::Some(item, stack)` | line 1998 |
+| `"__builtin.Stack.peek"` | `stack.last().cloned() → Option::Some` | line 2007 |
+| `"__builtin.Stack.len"` | `stack.len() → Int` | line 2012 |
+| `"__builtin.Stack.is_empty"` | `stack.is_empty() → Bool` | line 2013 |
+| `"__builtin.Stack.clear"` | `Vec::new() → Stack` | line 2014 |
+| `"__builtin.Stack.new"` | `Vec::new()` | line 1837 |
+| `"__builtin.Queue.enqueue"` | `queue.push_back(item); queue` | line 2022 |
+| `"__builtin.Queue.dequeue"` | `queue.pop_front() → Option::Some(item, queue)` | line 2027 |
+| `"__builtin.Queue.front"` | `queue.front().cloned() → Option::Some` | line 2036 |
+| `"__builtin.Queue.len"` | `queue.len() → Int` | line 2041 |
+| `"__builtin.Queue.is_empty"` | `queue.is_empty() → Bool` | line 2042 |
+| `"__builtin.Queue.clear"` | `VecDeque::new() → Queue` | line 2043 |
+| `"__builtin.Result.is_ok"` | `variant == "Ok" → Bool` | line 646 |
+| `"__builtin.Result.is_err"` | `variant == "Err" → Bool` | line 647 |
+| `"__builtin.Result.unwrap"` | `if Ok → fields["result"] else error` | line 648 |
+| `"__builtin.Result.unwrap_err"` | `if Err → fields["error"] else error` | line 655 |
+| `"__builtin.Option.Some"` | `Enum("Option", "Some", {"value": v})` | line 1348 (partial) |
+| `"__builtin.Option.None"` | `Enum("Option", "None", {})` | line 1345 (partial) |
+| `"__builtin.Result.Ok"` | `Enum("Result", "Ok", {"result": v})` | line 1348 (partial) |
+| `"__builtin.Result.Err"` | `Enum("Result", "Err", {"error": v})` | line 1351 (partial) |
+| `"__builtin.clone"` | `arg_values[0].clone()` | line 1841 |
+
+### 1.2 — Create `lib/std/__builtin/` declaration files
+
+New `.bv` files that declare `frgn` for each built-in. No `from` clause — they resolve through `fn_locations_by_name`.
+
+```brief
+// lib/std/__builtin/hashmap.bv
+frgn __builtin_HashMap_insert<K,V>(map: HashMap<K,V>, key: K, value: V) -> HashMap<K,V>;
+frgn __builtin_HashMap_get<K,V>(map: HashMap<K,V>, key: K) -> Option<V>;
+frgn __builtin_HashMap_contains_key<K,V>(map: HashMap<K,V>, key: K) -> Bool;
+frgn __builtin_HashMap_remove<K,V>(map: HashMap<K,V>, key: K) -> HashMap<K,V>;
+frgn __builtin_HashMap_len<K,V>(map: HashMap<K,V>) -> Int;
+frgn __builtin_HashMap_is_empty<K,V>(map: HashMap<K,V>) -> Bool;
+frgn __builtin_HashMap_keys<K,V>(map: HashMap<K,V>) -> List<K>;
+frgn __builtin_HashMap_values<K,V>(map: HashMap<K,V>) -> List<V>;
+frgn __builtin_HashMap_new<K,V>() -> HashMap<K,V>;
+```
+
+```brief
+// lib/std/__builtin/stack.bv
+frgn __builtin_Stack_push<T>(stack: Stack<T>, item: T) -> Stack<T>;
+frgn __builtin_Stack_pop<T>(stack: Stack<T>) -> Option<(T, Stack<T>)>;
+frgn __builtin_Stack_peek<T>(stack: Stack<T>) -> Option<T>;
+frgn __builtin_Stack_len<T>(stack: Stack<T>) -> Int;
+frgn __builtin_Stack_is_empty<T>(stack: Stack<T>) -> Bool;
+frgn __builtin_Stack_clear<T>(stack: Stack<T>) -> Stack<T>;
+frgn __builtin_Stack_new<T>() -> Stack<T>;
+```
+
+```brief
+// lib/std/__builtin/result.bv
+frgn __builtin_Result_is_ok<T,E>(r: Result<T,E>) -> Bool;
+frgn __builtin_Result_is_err<T,E>(r: Result<T,E>) -> Bool;
+frgn __builtin_Result_unwrap<T,E>(r: Result<T,E>) -> T;
+frgn __builtin_Result_unwrap_err<T,E>(r: Result<T,E>) -> E;
+frgn __builtin_Result_Ok<T,E>(value: T) -> Result<T,E>;
+frgn __builtin_Result_Err<T,E>(error: E) -> Result<T,E>;
+```
+
+```brief
+// lib/std/__builtin/option.bv
+frgn __builtin_Option_Some<T>(value: T) -> Option<T>;
+frgn __builtin_Option_None<T>() -> Option<T>;
+```
+
+(Same pattern for `string_builder.bv`, `queue.bv`, `hashset.bv`)
+
+### 1.3 — Update existing stdlib `.bv` files to use builtins
+
+Each stdlib module imports its `__builtin` declarations and wraps them in proper `defn` definitions.
+
+```brief
+// lib/std/hashmap.bv
+import { __builtin_HashMap_new, __builtin_HashMap_insert, __builtin_HashMap_get,
+         __builtin_HashMap_contains_key, __builtin_HashMap_remove,
+         __builtin_HashMap_len, __builtin_HashMap_is_empty,
+         __builtin_HashMap_keys, __builtin_HashMap_values }
+    from "std/__builtin/hashmap.bv";
+
+defn new<K,V>() -> HashMap<K,V> [true][true] {
+    term __builtin_HashMap_new();
+};
+
+defn insert<K,V>(map: HashMap<K,V>, key: K, value: V) -> HashMap<K,V> [true][true] {
+    term __builtin_HashMap_insert(map, key, value);
+};
+
+defn get<K,V>(map: HashMap<K,V>, key: K) -> Option<V> [true][true] {
+    term __builtin_HashMap_get(map, key);
+};
+
+// ... etc.
+```
+
+```brief
+// lib/std/result.bv
+import { __builtin_Result_Ok, __builtin_Result_Err,
+         __builtin_Result_is_ok, __builtin_Result_is_err,
+         __builtin_Result_unwrap, __builtin_Result_unwrap_err }
+    from "std/__builtin/result.bv";
+
+defn Ok<T,E>(value: T) -> Result<T,E> [true][true] {
+    term __builtin_Result_Ok(value);
+};
+
+defn Err<T,E>(error: E) -> Result<T,E> [true][true] {
+    term __builtin_Result_Err(error);
+};
+
+defn is_ok<T,E>(r: Result<T,E>) -> Bool [true][true] {
+    term __builtin_Result_is_ok(r);
+};
+
+// ... etc.
+```
+
+User code: `import { new, insert, get } from "std/hashmap.bv"` — calls the `defn`, which calls the `frgn`, which resolves through `ffi_name_to_location` → `foreign_functions`. **Zero string matching anywhere.**
+
+### 1.4 — Register `fn_locations_by_name` mappings
+
+In the DBVS or TOML bindings (or a new `__builtin` binding file), register the reverse name→location mappings:
+
+```
+"__builtin_HashMap_insert" → "__builtin.HashMap.insert"
+"__builtin_HashMap_get"    → "__builtin.HashMap.get"
+"__builtin_Result_Ok"       → "__builtin.Result.Ok"
+// ... etc.
+```
+
+These are loaded by `load_from_bindings_dir()` into `fn_locations_by_name`, exactly as the existing DBVS bindings work today.
+
+### 1.5 — Clean up interpreter dispatch chain
+
+**File**: `src/interpreter.rs:1370-1378`, `src/interpreter.rs:639-667`, `src/interpreter.rs:1821-2051`
+
+Delete:
+- `is_builtin_constructor()` (line 1821) — constructors are now in the registry
+- `dispatch_method_by_type()` (line 1830) — all operations in registry
+- The call site at line 1373-1378 — remove the block entirely
+- `handle_result_method()` (line 639) — Result methods moved to registry
+
+New dispatch chain at `Expr::Call`:
+
+```
+1. User defn → self.definitions hashmap lookup
+2. Dynamic .so FFI → self.frgn_registry
+3. Enum constructors from state → self.state lookup (for unit constructors stored as Value::Defn)
+4. ffi_name_to_location → foreign_functions → handles EVERYTHING built-in
+5. Error: UndefinedForeignFunction
+```
+
+**Performance analysis**:
+- Old path: 1 hashmap lookup (`definitions`) + up to 20+ string comparisons spread across 7 match arms (`is_ok`/`is_err`/`unwrap`/`unwrap_err` early check, then `dispatch_method_by_type` with nested type-variant arms and inner name matches)
+- New path: 1 hashmap lookup (`definitions`) + 1 hashmap lookup (`ffi_name_to_location`) + 1 hashmap lookup (`foreign_functions`) = **3 hashmap lookups, zero string comparisons**
+
+Strictly faster.
+
+---
+
+## Phase 2: Generic `import "link/..."` Multi-Language Pipeline
+
+**Goal**: `import "link/foo.c"`, `import "link/bar.rs"`, `import "link/baz.zig"`, `import "link/qux.py"` all compile to bitcode and LTO with the program through the same code path.
+
+### 2.1 — Link path resolution
+
+**File**: `src/import_resolver.rs`
+
+Paths starting with `link/` resolve in this order:
+1. `lib/runtime/<rest>` (for `link/brief_rt.c` → `lib/runtime/brief_rt.c`)
+2. `lib/std/c/<rest>` (for `link/xxhash/xxhash.c` → `lib/std/c/xxhash/xxhash.c`)
+3. Project root `<rest>` (for `link/mylib.c` → `./mylib.c`)
+4. Absolute paths as-is
+
+The `link/` prefix is a convention, not a filesystem requirement. The resolver strips it and searches.
+
+### 2.2 — Compiler driver generic compilation
+
+**File**: `src/main.rs:2129-2331`
+
+The driver already collects `LinkDependency` items (line 2129). Replace the hardcoded single-file brief_rt pipeline:
+
+```rust
+let link_modules: Vec<LinkModule> = link_deps.iter()
+    .filter_map(|dep| resolve_link_path(&dep.path).ok()
+        .map(|p| LinkModule { source: p, lang: dep.source_lang }))
+    .collect();
+
+if !link_modules.is_empty() {
+    let lto_obj = link_and_optimize(
+        &out_base, stem, &output_file,
+        &link_modules, &llvm_flags, wasm_target
+    );
+    // ... link with cc or wasm-ld
+}
+```
+
+### 2.3 — WASM target support in the pipeline
+
+When compiling for WASM (detected from `.rbv` target or `--target wasm` flag):
+
+- C/C++ sources compiled with `clang --target=wasm32 -emit-llvm -O2`
+- `llc -march=wasm32` instead of `--mcpu=native` 
+- Output `.wasm` object instead of native `.o`
+- Final linking via `wasm-ld` or direct `.wasm` output from `llc`
+
+The same `link_and_optimize()` function handles both — just different flags.
+
+---
+
+## Phase 3: Standard Library FFI Couplings
+
+Each library follows the same pattern:
+
+1. Vendor C/Rust source to `lib/std/c/<name>/`
+2. Create `lib/std/<name>.bv` with `import "link/std/c/<name>/..."` + `frgn` declarations
+3. Wrap with Brief `sig` and `defn` as needed
+4. Run `frgn` declarations through the standard FFI dispatch (no special treatment)
+
+### Priority order
+
+| # | Library | Why | Source pattern | License |
+|---|---|---|---|---|
+| 1 | **xxHash** | Trivial, first validation of pipeline | Single `xxhash.c` + `xxhash.h` | BSD 2-Clause |
+| 2 | **yyjson** | Zero-copy JSON for stdlib | Single `yyjson.c` + `yyjson.h` | MIT |
+| 3 | **stb_image** | Image loading, validates `#define STB_IMAGE_IMPLEMENTATION` pattern | Header-only, needs wrapper `.c` | Public Domain / MIT |
+| 4 | **lz4** | Compression for `.vpo` datasets | `lz4.c` + `lz4.h` | BSD 2-Clause |
+| 5 | **libgrapheme** | Unicode grapheme segmentation for safe string slicing | Tiny, single `.c` + `.h` | ISC |
+| 6 | **openlibm** | Bit-accurate cross-platform math | Full source tree (multiple `.c`) | BSD 2-Clause / Public Domain |
+| 7 | **nanopb** | Zero-allocation Protocol Buffers | `pb.c` + `pb.h` | zlib |
+| 8 | **sqlite** | Database — major milestone | Amalgamation (single `sqlite3.c`) | Public Domain |
+| 9 | **miniaudio** | Audio playback/capture | Header + `#define MINIAUDIO_IMPLEMENTATION` | Unlicense / MIT |
+| 10 | **sokol** | GPU graphics, windowing | Multiple headers + wrapper `.c` files | zlib |
+| 11-12 | **libuv / mbedtls** | Async I/O + Cryptography | Full source trees (many files) | MIT / Apache 2.0 |
+| 13 | **cimgui** | Immediate-mode GUI — first C++ FFI test | `cimgui.h` + `cimgui.cpp` | MIT |
+| 14 | **lwIP** | Bare-metal TCP/IP | Full source tree | BSD 3-Clause |
+
+The `#define IMPLEMENTATION` pattern (stb, miniaudio, sokol) gets a wrapper `.c` file:
+
+```c
+// lib/std/c/stb_image/stb_image.c
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+```
+
+The Brief source imports the wrapper:
+```brief
+import "link/std/c/stb_image/stb_image.c";
+frgn stbi_load(filename: Ptr<Byte>, x: Ptr<Int>, y: Ptr<Int>, comp: Ptr<Int>, req_comp: Int) -> Ptr<Byte>;
+```
+
+---
+
+## Phase 4: Webstack — `.rbv` Compilation
+
+**Key architecture**: The webstack **decomposes** the `.rbv` file by component type. Each component goes to its native runtime. Nothing is forced into WASM that the browser can run natively.
+
+### 4.1 — Component routing
+
+| Component | Fate | Implementation |
+|---|---|---|
+| **Brief logic** (reactive state machine, transactions, contracts) | → WASM via LLVM `-march=wasm32` | Existing `WebstackGenerator::generate_rust_code()` → wasm-bindgen → wasm-pack, OR direct LLVM→wasm32 path |
+| **HTML** (from `<view>` tag) | → Emitted as `.html` unchanged | Existing behavior, already works |
+| **CSS** (from `<style>` tag or imports) | → Emitted as `.css` file or inline `<style>` | Existing behavior, already works |
+| **SVG** (from `TopLevel::SvgComponent`) | → Embedded in HTML/SVG DOM | Already supported in `.rbv` pipeline |
+| **JS/TS FFI targets** (e.g., `frgn foo() from "ts"`) | → Emitted as native `.js`/`.ts` source | Browsers run JS/TS natively. JS glue calls the function directly — no WASM boundary |
+| **JSON parsing** (for web target) | → `JSON.parse()` / `JSON.stringify()` in generated JS glue | Browser's native JSON parser is faster than any WASM JSON library |
+| **WebGL/WebGPU shaders** | → Generated as GLSL/WGSL/SPIR-V string constants, passed to WebGL/WebGPU API by JS glue | GPU drivers consume these natively. No WASM bridge |
+| **HTML Templates / `<template>`** | → Emitted as-is | Native DOM cloning |
+| **C/Rust/Zig/Python (Codon)/Java (GraalVM) FFI targets** | → WASM via LLVM LTO pipeline | `import "link/lib.c"` → `clang --target=wasm32 -emit-llvm` → `llvm-link` → `opt -O3` → `llc -march=wasm32`. The bitcode is target-agnostic — the language it came from is irrelevant |
+
+### 4.2 — LLVM-to-WASM pipeline for C/Rust FFI in `.rbv`
+
+```
+import "link/lib.c" in .rbv source
+  → clang --target=wasm32 -emit-llvm -O2 lib.c → lib.bc
+  → llvm-as program.ll → program.bc
+  → llvm-link program.bc lib.bc → merged.bc
+  → opt -O3 merged.bc → merged.opt.bc
+  → llc -march=wasm32 merged.opt.bc → module.wasm
+  → Base64-encode → inline in generated HTML/JS
+```
+
+Single file output. No network fetch for WASM. Zero CORS issues.
+
+### 4.3 — JS/TS emission for web FFI targets
+
+When `.rbv` declares `frgn formatDate(d: String) -> String from "ts"`:
+
+1. The webstack generator emits the TS/JS source as a separate file (or inlined in the JS glue)
+2. The JS glue directly calls the TS/JS function — no WASM boundary, no serialization
+3. TS/JS runs natively in the browser's JS engine
+
+**Why not WASM for JS/TS?** Browsers execute JS natively in highly optimized JIT compilers (V8, SpiderMonkey). Compiling JS→WASM would add a compilation step for zero benefit — the browser would need to decompile it back or run it in a WASM interpreter that's slower than the native JIT. TS/JS are **native web citizens** — let them run as-is.
+
+### 4.4 — Source maps and debugging
+
+Generated JS glue preserves line-number mappings back to the original `.rbv` source where possible, so developers can debug their Brief→WASM logic and their JS/TS FFI targets in browser DevTools.
+
+---
+
+## Phase 5: Language-Capability Matrix (All Languages, All Targets)
+
+**Philosophy**: "Everything compiles to binary in the end." The question is which
+toolchain produces that binary from a given source language. Brief delegates to the
+appropriate compiler and treats the resulting bitcode as its own. The bitcode doesn't
+remember what language it came from — it targets whatever `llc` backend is selected.
+
+### 5.1 — Universal toolchain dispatch
+
+| Language | Native (.bv) → LLVM bitcode | Web (.rbv) → WASM | Web (.rbv) → native browser |
+|---|---|---|---|
+| **C** | `clang -emit-llvm` → `.bc` | `clang --target=wasm32 -emit-llvm` → `.bc` → `llc -march=wasm32` | — |
+| **C++** | `clang++ -emit-llvm` → `.bc` | Same, wasm32 target | — |
+| **Rust** | `rustc --emit=llvm-bc` → `.bc` | Same, wasm32 target | — |
+| **Zig** | `zig build-obj --emit-llvm-ir` → `.bc` | Same, wasm32 target | — |
+| **Python (Codon)** | `codon build --emit-llvm -O3` → `.bc` | Same, wasm32 target (Codon targets LLVM, not CPython) | — |
+| **Java (GraalVM)** | `native-image --llvm --emit-llvm-bc` → `.bc` | Same, wasm32 target (includes SubstrateVM runtime — acceptable for cosmopolitan tier) | — |
+| **TypeScript (AssemblyScript)** | `asc` → `.wasm` → `wasm2llvm` → `.bc` | Same pipeline | Emit as native JS (preferred for web — browser runs JS natively) |
+| **JavaScript** | — (no LLVM producer) | — | Emit as native JS source |
+| **Full CPython** | emscripten CPython → `.wasm` (linked as separate module, not inlined) | Same | — |
+
+### 5.2 — The CODON path (Python → bitcode)
+
+```
+import "link/mylib.py"
+  → codon build --emit-llvm -O3 mylib.py → mylib.bc
+  → llvm-link program.bc mylib.bc → merged.bc
+  → opt -O3 → llc (-march=native | -march=wasm32) → binary
+```
+
+Same pipeline as C. Python (via Codon's AOT compiler, which compiles a typed subset)
+becomes LLVM bitcode and gets inlined by `opt -O3` across the language boundary.
+Target-agnostic — the same `.py` file compiles to both native and WASM.
+
+### 5.3 — The GraalVM path (Java → bitcode)
+
+```
+import "link/MyClass.java"
+  → javac MyClass.java → MyClass.class
+  → native-image --llvm --emit-llvm-bc MyClass → MyClass.bc   (GraalVM)
+  → llvm-link → LTO pipeline
+```
+
+**Caveat**: Java AOT via GraalVM Native Image carries the SubstrateVM runtime (GC, thread
+model, metadata). This is acceptable for the cosmopolitan tier (`.bv`, general purpose).
+Embedded Brief (`.ebv`) rejects GC-dependent bitcode at compile time via the hardware
+validator.
+
+### 5.4 — The AssemblyScript path (TypeScript → bitcode)
+
+```
+import "link/mylib.ts"
+  → asc mylib.ts --exportRuntime --optimize --outFile mylib.wasm
+  → wasm2llvm mylib.wasm → mylib.bc   (or use AssemblyScript's experimental LLVM backend)
+  → llvm-link → LTO pipeline
+```
+
+**For `.rbv` (web target)**: TS is emitted as **native JS** (see 4.3). No WASM compilation
+needed — the browser runs TS/JS natively. The AssemblyScript path is only for native targets
+where TS code must be inlined into the compiled binary.
+
+### 5.5 — Boundary enforcement
+
+The hardware validator (`src/hardware_validator.rs`) enforces per-target constraints across
+all languages:
+
+| Target | Codon Python | GraalVM Java | GC-dependent bitcode | Dynamic heap | Unrestricted syscalls |
+|---|---|---|---|---|---|
+| `.bv` (general) | ✓ | ✓ | ✓ (warns) | ✓ | ✓ |
+| `.rbv` (web) | ✓ (via LLVM→WASM) | ✓ (via LLVM→WASM, bloated) | N/A (WASM sandbox) | ✓ (WASM linear memory) | ✗ (WASM sandbox) |
+| `.ebv` (embedded) | ✗ (no Codon for bare metal) | ✗ | ✗ (rejects at compile time) | ✗ (rejects) | ✗ (no OS) |
+
+---
+
+## Phase 6: Eliminate Remaining Magic
+
+### 6.1 — Remove `Ok`/`Err`/`Some`/`None` hardcoded enum constructors
+
+**File**: `src/interpreter.rs:1345-1356`
+
+These are currently hardcoded Rust match arms that create `Value::Enum` on name match. After Phase 1, they become FFI registry entries:
+- `"__builtin.Result.Ok"` → wraps value in `Enum("Result", "Ok", {"result": v})`
+- `"__builtin.Result.Err"` → wraps value in `Enum("Result", "Err", {"error": e})`
+- `"__builtin.Option.Some"` → wraps value in `Enum("Option", "Some", {"value": v})`
+- `"__builtin.Option.None"` → returns `Enum("Option", "None", {})`
+
+Declared in `lib/std/__builtin/result.bv` and `lib/std/__builtin/option.bv`, re-exported through `lib/std/result.bv` and `lib/std/option.bv`.
+
+**After**: `Ok(value)` in Brief source resolves to `defn Ok` in `std/result.bv` → calls `__builtin_Result_Ok` → FFI registry → `Enum("Result", "Ok", ...)`. Zero name magic.
+
+### 6.2 — Remove hardcoded LLVM `emit_declares()`
+
+**File**: `src/backend/llvm.rs:1840-1864`
+
+The backend has hardcoded LLVM `declare` statements for `__rt_init`, `__rt_poll`, `__rt_wait`. These should come from `std/rt.bv` through the generic `frgn` declaration emission (lines 727-751, which already works for any `frgn` in the program).
+
+Delete the hardcoded block at lines 1840-1864. The functions are already declared in `lib/std/brief_rt.bv` or should be moved there.
+
+### 6.3 — Remove `from "libruntime"` parser discard
+
+**File**: `src/parser.rs`
+
+Search for `"libruntime"` string handling. The parser currently discards `from "libruntime"` values. Delete this special case — all `from` values must be meaningful or absent.
+
+---
+
+## File Change Summary
+
+| File | Phase | Change |
+|---|---|---|
+| `src/ast.rs:839` | 0.2 | Replace `is_bundled_rt: bool` with `source_lang: LinkLanguage` |
+| `src/parser.rs:793-805` | 0.2 | Dispatch on extension → set `LinkLanguage` variant |
+| `src/parser.rs` | 6.3 | Remove `"libruntime"` discard |
+| `src/import_resolver.rs` | 0.2, 2.1 | Preserve `LinkLanguage` through resolution; resolve `link/` paths to stdlib or project |
+| `src/main.rs:389` | 0.1 | Delete `include_str!("../runtime/brief_rt.c")` |
+| `src/main.rs:1864-1978` | 0.3 | Replace `try_lto_pipeline()` with generic `link_and_optimize()` |
+| `src/main.rs:2129-2331` | 0.3, 2.2 | Generic link-dep collection + compilation dispatch |
+| `src/ffi/registry.rs` | 1.1 | Add `"__builtin.*"` match arms for all collection/Result/Option operations |
+| `src/interpreter.rs:639-667` | 1.5 | Delete `handle_result_method()` |
+| `src/interpreter.rs:1345-1356` | 6.1 | Delete hardcoded `Ok`/`Err`/`Some`/`None` constructors |
+| `src/interpreter.rs:1370-1378` | 1.5 | Delete `dispatch_method_by_type` call site |
+| `src/interpreter.rs:1821-2051` | 1.5 | Delete `is_builtin_constructor()` + `dispatch_method_by_type()` |
+| `src/backend/llvm.rs:1840-1864` | 6.2 | Delete hardcoded `emit_declares()` block |
+| `lib/std/__builtin/*.bv` | 1.2 | **New** — frgn declarations for all built-in operations |
+| `lib/std/hashmap.bv` | 1.3 | Rewrite `defn` to call `__builtin_*` frgn functions |
+| `lib/std/result.bv` | 1.3, 6.1 | Rewrite `Ok`/`Err`/`is_ok`/etc as `defn` calling `__builtin_*` |
+| `lib/std/option.bv` | 6.1 | Rewrite `Some`/`None` as `defn` calling `__builtin_*` |
+| `lib/std/stack.bv` | 1.3 | Rewrite to use `__builtin_Stack_*` |
+| `lib/std/queue.bv` | 1.3 | Rewrite to use `__builtin_Queue_*` |
+| `lib/std/string_builder.bv` | 1.3 | Rewrite to use `__builtin_StringBuilder_*` |
+| `lib/runtime/brief_rt.c` | 0.1 | **Moved** from `runtime/brief_rt.c` |
+| `lib/std/c/<name>/` | 3 | **New directories** — vendored C library sources |
+| `lib/std/<name>.bv` | 3 | **New files** — Brief wrappers for each library |
+
+---
+
+## Verification Strategy
+
+| Phase | Gate |
+|---|---|
+| 0.1 | `cargo test --lib` passes; `brief_rt.c` no longer in binary; file exists at `lib/runtime/brief_rt.c` |
+| 0.2 | Parser test: `import "link/foo.c"` produces `LinkDependency{ lang: C }` |
+| 0.3 | Link trivial C file (`int add(a,b){return a+b;}`) from Brief → call `add(2,3)` → verify result is 5 |
+| 1 | All collection/stdlib tests pass with `dispatch_method_by_type` deleted |
+| 2 | `import "link/foo.c"` + `import "link/bar.rs"` both compile to bitcode and LTO together |
+| 3 | xxHash value from Brief matches C reference output |
+| 4.1 | `.rbv` with inlined C library → single HTML file with embedded WASM |
+| 4.2 | `.rbv` with TS FFI target → `.ts` file emitted alongside JS glue |
+| 4.3 | WebGL shader in `.rbv` → GLSL string in generated JS, passed to WebGL API |
+| 5.1 | `import "link/mylib.py"` → Codon bitcode → LTO → native binary |
+| 5.2 | `import "link/mylib.py"` → Codon bitcode → `llc -march=wasm32` → WASM binary |
+| 5.3 | `import "link/MyClass.java"` → GraalVM bitcode → LTO → native binary |
+| 6 | Zero hardcoded string matches remain in interpreter or backends |
+
+All phases maintain `cargo test --lib` passing with 0 regressions.
+
+---
+
+## Architecture Summary
+
+```
+                    ┌──────────────────────────────────────┐
+                    │          Brief .bv source             │
+                    │  frgn ...  import "link/..."          │
+                    └──────┬──────┬──────┬──────────────────┘
+                           │      │      │
+                 ┌─────────┘      │      └──────────────┐
+                 ▼                ▼                      ▼
+      ┌──────────────────┐ ┌──────────────┐   ┌────────────────────┐
+      │ Interpreter      │ │ LLVM native  │   │ Webstack (.rbv)    │
+      │ (FFI registry    │ │ (--target    │   │                    │
+      │  dispatch, zero  │ │  native)     │   │ Brief logic → WASM │
+      │  string matching)│ │              │   │ HTML/CSS → as-is   │
+      │                  │ │ C → bitcode  │   │ SVG → DOM          │
+      │                  │ │ C++ → bitc.  │   │ JS/TS → native JS  │
+      │                  │ │ Rust → bitc. │   │ WebGL/GPU → native │
+      │                  │ │ Zig → bitc.  │   │ JSON → native JS   │
+      │                  │ │ Python→bitc. │   │ C libs → WASM      │
+      │                  │ │ (Codon AOT)  │   │ (via LTO pipeline) │
+      │                  │ │ Java→bitcode │   │                    │
+      │                  │ │ (GraalVM)    │   │ JS glue → gen'd    │
+      │                  │ │ TS→bitcode   │   │ deterministically  │
+      │                  │ │ (AssemblyScr)│   │                    │
+      │                  │ │              │   │ Single-file output │
+      │                  │ │ LTO inlines  │   │ (all native        │
+      │                  │ │ ALL together │   │  citizens inlined) │
+      └──────────────────┘ └──────────────┘   └────────────────────┘
+```

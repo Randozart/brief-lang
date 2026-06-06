@@ -18,8 +18,20 @@ defn <name>(<params>) -> <outputs> [pre][post] {
     // body
 }
 
-// Signature (FFI)
-sig <name>: <type> -> <result_type> from <path>
+// Signature (FFI): declares an external symbol
+frgn <name>(<params>) -> Result<T, E> from "c";
+
+// Fire-and-forget FFI
+frgn! <name>(<params>);
+
+// Observable output (prevents dead-code elimination)
+sig #out <name>(<params>) -> T from <path>;
+
+// Inline/pure (safe to fold)
+sig #inline <name>(<params>) -> T;
+
+// Import source file to link
+import "link/brief_rt.c";
 ```
 
 ### FFI Keywords
@@ -27,9 +39,54 @@ sig <name>: <type> -> <result_type> from <path>
 | Keyword | Returns | Use |
 |---------|---------|-----|
 | `frgn` | `Result<T, E>` | Import foreign function, handle errors |
-| `frgn!` | `void` | Fire-and-forget FFI call |
-| `syscall` | `Result<Int, E>` | Kernel call with return value |
-| `syscall!` | `void` | Kernel call without return |
+| `frgn!` | (none) | Fire-and-forget FFI call — no return captured |
+| `sig #out` | (modifier) | Observable output — prevents DCE |
+| `sig #inline` | (modifier) | Pure — safe to fold/eliminate |
+
+### `from` Targets
+
+| Value | Language | Notes |
+|-------|----------|-------|
+| `"c"` | C/LLVM | Zero-cost inlining via LTO |
+| `"rust"` | Rust | Zero-cost inlining via LTO |
+| `"js"` | JavaScript | Interpreter only |
+| `"python"` | Python | Interpreter only |
+| (omitted) | Any | Searches `import "link/..."` targets |
+
+### Output Types
+
+```brief
+// Single output
+-> Bool
+
+// Tuple (multiple values)
+-> Bool, String, Int
+
+// Array of types
+-> Bool[]
+
+// Named slots
+-> name: String, value: Int
+
+// Union (alternatives)
+-> Result<Int, Error> | Timeout
+```
+
+### Multi-Output Term
+
+```brief
+term a, b, c;          // returns tuple of a, b, c
+term item;             // returns single value
+term;                  // returns nothing
+```
+
+### Import Linking
+
+```brief
+import "link/brief_rt.c";    // C source → LLVM IR → llvm-link
+import "link/rust_lib.rs";   // Rust library
+import "link/zig_lib.zig";   // Zig library
+```
 
 ### Address Operators
 

@@ -2,7 +2,7 @@
 
 **Version:** v0.15.0  
 **Date:** 2026-06-05  
-**Status:** Development (stable core, experimental backends, **new: syscall architecture with target-spec resolution, LLVM inline asm, full cognitive grammar, `<-` expression discard**)  
+**Status:** Development (stable core, experimental backends, **new: `sig` contract projections with `#out`/`#inline` modifiers, zero-cost FFI via LTO, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -117,7 +117,12 @@ transaction ::= ("async")? "rct"? "txn" identifier type_params? parameters? cont
 
 body ::= "{" statement* "}" ";" | ";"
 
-signature ::= ("sig" | "sign" | "signature") identifier ":" type "->" result_type binding? ";"
+signature ::= "sig" ("#out" | "#inline")? identifier "(" parameters? ")" "->" output_type ("from" path | "=" identifier)? ";"
+
+output_type ::= union_type
+union_type ::= product_type ("|" product_type)*
+product_type ::= array_type ("," array_type)*
+array_type ::= [identifier ":"] type ("[" "]")?
 
 binding ::= "=" identifier "(" arguments? ")" | "from" path
 
@@ -320,31 +325,25 @@ watchdog ::= ("?" | "!") "[" expression "]"
 ```
 
 * **Precondition**: First bracket `[pre]` - must be true for transaction to fire
-* **Postcondition**: Second bracket `[post]` - must be true after transaction completes
 * **Watchdog**: Optional timeout/condition `?[timeout]` (optional) or `![timeout]` (required)
 
 ### 2.6 FFI Grammar
 
 ```bnf
-foreign_sig ::= ("frgn" | "frgn!" | "syscall" | "syscall!") "sig" identifier parameters? "->" result_type "from" string_literal ";"
+foreign_sig ::= ("frgn" | "frgn!") identifier parameters? "->" result_type ("from" string_literal)? ";"
 
 frgn_binding ::= identifier parameters? "->" "Result" "[" type_params "]" "from" string_literal
 
-result_type ::= "Result" "[" type "," type "]"
+result_type ::= "Result" "<" type "," type ">"
               | "void"
               | type
 
 ffi_attributes ::= "#![" ffi_attr ("," ffi_attr)* "]"
 
 ffi_attr ::= "ffi" "(" string_literal ")"
-           | "bind" "(" string_literal ")"
-           | "import" "(" string_literal ")"
-           | "map" "(" string_literal "," string_literal ")"
+
 ```
 
-> **\[Deprecated 2026-05-29\]** TOML-based FFI bindings (`from "*.toml"`) are superseded by inline `frgn` declarations with dynamic linking (see §5.2 Dynamic Linking).
-
-\n
 ### 2.3 Statements
 
 ```bnf
@@ -614,30 +613,44 @@ defn get_coords() -> (x: Int, y: Int) {
 
 ### 3.4 Signatures (FFI)
 
-Signatures declare external function bindings:
+Signatures declare external function bindings. The `frgn` keyword declares an external symbol; `frgn!` is fire-and-forget with no return.
 
 ```brief
-// Standard FFI with error handling
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+// Standard FFI returning Result — caller must handle both Ok and Err
+frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
-// Fire-and-forget
-frgn! sig log_message(msg: String) -> void from "io.toml";
+// Fire-and-forget — no return type parsed, result discarded
+frgn! log_message(msg: String);
 
-// Kernel syscall
-syscall sig read_fd(fd: Int, buf: Data, count: Int) -> Result<Int, IOError> from "kernel.toml";
+// frgn without from searches import "link/..." targets
+import "link/brief_rt.c";
+frgn __print_int(n: Int) -> Result<Bool, Error>;
 
-// Syscall without return
-syscall! sig exit(code: Int) -> void from "kernel.toml";
-
-// Bound to a specific implementation
-sig hash: String -> Int = sha256;
+// sig #out — observable output, LLVM memory(write) prevents elimination
+import { OUT__print_int } from "std/out.bv";
 ```
 
 **FFI keywords:**
-- `frgn` - Foreign function returning `Result<T, E>` (must handle)
-- `frgn!` - Foreign function returning `void` (fire-and-forget)
-- `syscall` - Kernel call returning `Result<Int, E>`
-- `syscall!` - Kernel call returning `void`
+- `frgn` — Foreign function returning `Result<T, E>` — caller must handle both paths
+- `frgn!` — Fire-and-forget — no return captured, errors cause runtime panic
+- `sig #out` — Observable output modifier — prevents dead-code elimination
+- `sig #inline` — Pure modifier — safe to fold/eliminate
+
+**`from` clause:**
+  - `from "c"` — C calling convention (symbol name is the Brief name)
+  - `from "rust"` — Rust calling convention (name-mangled symbol)
+  - `from "js"` — JavaScript (interpreter only, no LLVM backend)
+  - `from "python"` — Python (interpreter only, no LLVM backend)
+  - If omitted, the compiler searches `import "link/..."` targets for the symbol name
+
+**Zero-cost inlining:** Languages that compile to LLVM IR (C, Rust, Zig, Swift, Julia, D) are linked via `llvm-link` and inlined across language boundaries by `opt -O3`. No FFI boundary overhead in the compiled binary.
+
+**Import linking:**
+```brief
+import "link/brief_rt.c";    // compile C → LLVM IR → llvm-link → opt -O3
+import "link/rust_lib.rs";   // same for Rust
+import "link/zig_lib.zig";   // same for Zig
+```
 
 ### 3.5 State Management
 
@@ -751,28 +764,31 @@ defn get_coords() -> (x: Int, y: Int) {
 
 ### 3.4 Signatures (FFI)
 
-Signatures declare external function bindings:
+Signatures declare external function bindings. The `frgn` keyword declares an external symbol; `frgn!` is fire-and-forget with no return.
 
 ```brief
-// Standard FFI with error handling
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+// Standard FFI returning Result — caller must handle both Ok and Err
+frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
-// Fire-and-forget
-frgn! sig log_message(msg: String) -> void from "io.toml";
+// Fire-and-forget — no return type parsed, result discarded
+frgn! log_message(msg: String);
 
-// Kernel syscall
-syscall sig read_fd(fd: Int, buf: Data, count: Int) -> Result<Int, IOError> from "kernel.toml";
-
-// Syscall without return
-syscall! sig exit(code: Int) -> void from "kernel.toml";
-
-// Bound to a specific implementation
-sig hash: String -> Int = sha256;
+// sig #out — observable output
+import { OUT__print_int } from "std/out.bv";
 ```
 
 **FFI keywords:**
-- `frgn` - Foreign function returning `Result<T, E>` (must handle)
-- `frgn!` - Foreign function returning `void` (fire-and-forget)
+- `frgn` — Foreign function returning `Result<T, E>` — caller must handle both paths
+- `frgn!` — Fire-and-forget — no return captured, errors cause runtime panic
+- `sig #out` — Observable output modifier — prevents dead-code elimination
+- `sig #inline` — Pure modifier — safe to fold/eliminate
+
+**`from` clause:**
+  - `from "c"` — C calling convention
+  - `from "rust"` — Rust calling convention
+  - `from "js"` — JavaScript (interpreter only)
+  - `from "python"` — Python (interpreter only)
+  - Omitted — compiler searches `import "link/..."` targets
 - `syscall` - Kernel call returning `Result<Int, E>`
 - `syscall!` - Kernel call returning `void`
 
@@ -1582,16 +1598,16 @@ let p = make_pair(1, 2);  // Inferred: (Int, Int)
 **Foreign signatures:**
 ```brief
 // Standard FFI (must handle Result)
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
 // Fire-and-forget (no return)
-frgn! sig log(msg: String) -> void from "io.toml";
+frgn! log(msg: String);
 
 // Kernel syscall with return
-syscall sig read(fd: Int, buf: Data, count: Int) -> Result<Int, IOError> from "kernel.toml";
+syscall read(fd: Int, buf: Data, count: Int) -> Result<Int, IOError> from "kernel.toml";
 
 // Kernel syscall without return
-syscall! sig exit(code: Int) -> void from "kernel.toml";
+syscall! exit(code: Int);
 ```
 
 **FFI keywords:**
@@ -1693,7 +1709,7 @@ The bracket-based syntax still works but emits a deprecation warning:
 ```brief
 #![ffi.c, bind("./bindings.toml"), import("./lib.a"), map("uint", "uint32_t")]
 
-frgn sig custom_func(x: Int) -> Result<Int, Error> from "custom.toml";
+frgn custom_func(x: Int) -> Result<Int, Error> from "custom.toml";
 ```
 
 **Directives:**
@@ -1822,8 +1838,8 @@ The interpreter provides exactly 4 built-in functions — the minimum needed to 
 |----------|-----------|---------|
 | `__read_file` | `(path: String) -> Option<String>` | Load source code |
 | `__write_file` | `(path: String, data: String) -> Bool` | Write output |
-| `__print` | `(msg: String) -> Void` | Debug output |
-| `__exit` | `(code: Int) -> Void` | Termination |
+| `__print` | `(msg: String) -> Bool` | Debug output (frgn) |
+| `__exit` | `(code: Int)` | Termination (frgn!, fire-and-forget) |
 
 All other foreign functionality (`strlen`, `is_digit`, file I/O, math functions, etc.) is declared as `frgn` in `lib/std/` and resolved at runtime. The compiler contains no hardcoded FFI beyond the bootstrap set.
 
@@ -1831,7 +1847,7 @@ All other foreign functionality (`strlen`, `is_digit`, file I/O, math functions,
 All existing `from "*.toml"` declarations remain valid but are deprecated. The recommended pattern is:
 ```brief
 // Old (deprecated):
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
 // New:
 frgn sqrt(x: Float) -> Float from "libm.so.6";
@@ -2477,10 +2493,10 @@ let counter: Int = 0;
 frgn sqrt(x: Float) -> Float from "math.toml";
 
 // New (v0.11) - must handle errors
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
 // Or fire-and-forget
-frgn! sig log(msg: String) -> void from "io.toml";
+frgn! log(msg: String);
 ```
 
 **Contract watchdog syntax:**
@@ -2567,7 +2583,7 @@ txn transfer_alice_to_bob(amount: Int)
 import "std/math";
 import "std/io";
 
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 
 defn calculate_hypotenuse(a: Float, b: Float) -> Float {
     let a_sq = a * a;

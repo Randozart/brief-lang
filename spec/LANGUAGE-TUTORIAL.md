@@ -999,9 +999,9 @@ Using Python libraries from Brief:
 import "std/io";
 
 // Python FFI signatures
-frgn sig py_init() -> Result<Void, String> from "python.toml";
-frgn sig py_eval(code: String) -> Result<String, String> from "python.toml";
-frgn sig py_finalize() -> Result<Void, String> from "python.toml";
+frgn py_init() -> Result<Void, String> from "python.toml";
+frgn py_eval(code: String) -> Result<String, String> from "python.toml";
+frgn py_finalize() -> Result<Void, String> from "python.toml";
 
 // Wrapper functions
 defn python_init() -> Bool {
