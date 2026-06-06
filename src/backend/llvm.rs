@@ -497,17 +497,15 @@ impl LlvmBackend {
 
         // Build variant → (enum_name, discriminant, field_count) mapping.
         for (enum_name, edef) in &self.enum_types {
-            let mut next_disc: u64 = 1;
+            let mut next_disc: u64 = 0;
             for v in &edef.variants {
                 let (vname, field_count) = match v {
                     crate::ast::EnumVariant::Unit(n) => (n.clone(), 0),
                     crate::ast::EnumVariant::Tuple(n, fields) => (n.clone(), fields.len()),
                     crate::ast::EnumVariant::Struct(n, fields) => (n.clone(), fields.len()),
                 };
-                let disc = match vname.as_str() {
-                    "None" | "Err" => 0,
-                    _ => { let d = next_disc; next_disc += 1; d }
-                };
+                let disc = next_disc;
+                next_disc += 1;
                 self.variant_disc.insert(vname, (enum_name.clone(), disc, field_count));
             }
         }
@@ -2613,7 +2611,7 @@ self.emit_declares(&mut out);
                 let merge_l = format!("um{}", self.txn_counter); self.txn_counter += 1;
                 let target = self.variant_disc.get(name.as_str())
                     .map(|(_, d, _)| *d)
-                    .unwrap_or(if name == "None" || name == "Err" { 0 } else { 1 });
+                    .unwrap_or(0);
                 writeln!(out, "{}switch i64 {}, label %{} [ i64 {}, label %{} ]", indent, disc, def_l, target, arm_l).ok();
                 writeln!(out, "{}{}:", indent, arm_l).ok();
                 let pay = format!("%up{}", self.txn_counter); self.txn_counter += 1;
@@ -2923,7 +2921,7 @@ self.emit_declares(&mut out);
                     if name.starts_with(|c: char| c.is_uppercase()) && !self.program_txns.contains(name) {
                         let disc_val = self.variant_disc.get(name)
                             .map(|(_, d, _)| *d)
-                            .unwrap_or_else(|| if name == "None" || name == "Err" { 0u64 } else { 1u64 });
+                            .unwrap_or(0u64);
                         let n_slots = a_strs.len() + 1;
                         let p = format!("%cop{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, n_slots).ok();
@@ -3463,7 +3461,7 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = and i64 {}, 255", indent, disc, inner).ok();
                 let target = self.variant_disc.get(variant.as_str())
                     .map(|(_, d, _)| *d)
-                    .unwrap_or(if variant == "None" || variant == "Err" { 0 } else { 1 });
+                    .unwrap_or(0);
                 let cmp = format!("%pc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, disc, target).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
@@ -5256,6 +5254,15 @@ mod tests {
         let mut backend = LlvmBackend::new();
         let program = Program {
             items: vec![
+                TopLevel::Enum(EnumDefinition {
+                    name: "Option".to_string(),
+                    type_params: vec![],
+                    variants: vec![
+                        EnumVariant::Unit("None".to_string()),
+                        EnumVariant::Tuple("Some".to_string(), vec![Type::Int]),
+                    ],
+                    span: None,
+                }),
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(),
                     ty: Type::Int,
@@ -7333,8 +7340,8 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let _ = backend.generate(&program);
-        assert_eq!(backend.variant_disc.get("Leaf").map(|(_, d, _)| *d), Some(1));
-        assert_eq!(backend.variant_disc.get("Node").map(|(_, d, _)| *d), Some(2));
+        assert_eq!(backend.variant_disc.get("Leaf").map(|(_, d, _)| *d), Some(0));
+        assert_eq!(backend.variant_disc.get("Node").map(|(_, d, _)| *d), Some(1));
         assert_eq!(backend.variant_disc.get("Node").map(|(_, _, f)| *f), Some(2));
     }
 
