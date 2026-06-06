@@ -1135,7 +1135,7 @@ impl<'a> Parser<'a> {
             success_output,
             error_type_name: String::new(),
             error_fields: Vec::new(),
-            location: String::new(),
+            location: location.clone(),
             input_layout: None,
             output_layout: None,
             precondition: None,

@@ -18,7 +18,7 @@
 import { __get_env_int } from "std/env.bv";
 import "link/brief_rt.o";
 
-frgn __print_int(n: Int) -> Bool from "libruntime";
+frgn __print_int(n: Int) -> Bool ;
 
 let N: Int = __get_env_int("BOUND");
 let count: Int = 0;

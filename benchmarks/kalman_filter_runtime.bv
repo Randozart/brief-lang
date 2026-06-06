@@ -12,7 +12,7 @@ import { __get_env_int } from "std/env.bv";
 import "link/brief_rt.o";
 import { io_pending } from "std/brief_rt.bv";
 
-frgn #out __print_float(d: Float) -> Bool from "libruntime";
+frgn #out __print_float(d: Float) -> Bool ;
 
 let bound: Int = __get_env_int("BOUND");
 let count: Int = 0;

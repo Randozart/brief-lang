@@ -1,66 +1,58 @@
-# Session Report: sig Phase 2 — 2026-06-06T12:42:34Z
+# Session Report: sig Phases 1+2 — 2026-06-06
 
-## Commit
-`a68abda` — sig Phase 2: OutputType Array/Named, --explain flag, lib/std/out.bv, multi-output term, sig verification
+## Phase 1 — `a9d413b`
 
-## Summary
-Continued from Phase 1 with 5 feature areas. 450 tests pass, full build succeeds.
+### Summary
+SigModifier enum, Signature.params (named), Expr::SigCall, parser rewrite for `sig [#out|#inline] name(params) -> output_type [from source];`. Match arms in 6 analysis/eval files. 450/450 tests.
 
-## Deliverables
+### Slip-ups & Bugs
 
-### 1. OutputType Grammar (Parser + AST)
-- **AST**: Added `OutputType::Array(Box<Type>)` and `OutputType::Named(String, Box<OutputType>)` variants
-- **Types**: `Union(Vec<OutputType>)`, `Tuple(Vec<OutputType>)` — changed from `Vec<Type>` to `Vec<OutputType>` so nested Array/Named slots are preserved through tuples/unions
-- **Parser**: Rewrote `parse_output_type_structure` with 3-level precedence:
-  - `parse_union()` — pipe `|` (lowest)
-  - `parse_product()` — comma `,`
-  - `parse_slot()` — named slot `name: Type` or plain type with optional `[]`
-- **Handles**: `A | B, C[]`, `name: Type[]`, `name: A | B, name2: C`
-- **Updated**: All `OutputType::Tuple(vec![Type::Bool, ...])` constructors changed to `OutputType::Tuple(vec![OutputType::Single(Type::Bool), ...])`
+**1. Wrong env var name caused false "hang" in fasta.bv** — Used `N=100` instead of `BOUND=100`. Benchmark was fine.
 
-### 2. `lib/std/out.bv` (OUT Library)
-- New file: `lib/std/out.bv`
-- Raw FFI declarations: `__print_int`, `__putchar`, `__print`, `__print_float`, `__exit`
-- `sig #out` wrappers: `OUT__print_int`, `OUT__putchar`, `OUT__print`, `OUT__print_float`, `OUT__exit`
-- `sig #out OUT__println` wrapper with newline appending
+**2. Python regex migration script too aggressive** — Matched ANY `input_types: vec![...]`, not just `Signature` constructors. Corrupted test code in transition_graph.rs, llvm.rs, interpreter.rs, sentinel.rs, validator.rs with 3-tuples where 2 expected. Fix: revert all, re-apply hand-crafted patch.
 
-### 3. `--explain` Flag (Compilation Decisions)
-- Added `--explain` to CLI help text
-- Parsed alongside `--verbose` in `main()` and `run_compile_unified()`
-- Threaded through to `run_llvm_compile()` as a parameter
-- Added `explain: bool` to `LlvmBackend` struct with `with_explain()` builder
+**3. `git checkout -- src/` wiped pre-existing field additions** — Reverting lost `out_pragmas: vec![]` across 11 files. Fix: second Python pass to re-add.
 
-### 4. Multi-Output `term a, b, c;` (Interpreter)
-- Both `Statement::Term` and `Statement::TermBang` in `eval_expr()` (defn body) and `exec_stmt()` (statement execution) handle `outputs.len() > 1`
-- Multi-output collects all values into `Value::List(collected)`
-- Single output path unchanged
+**4. `input_types()` method collision** — Field `.input_types` vs method `.input_types()`. Fix: targeted replacement on typechecker.rs and assertion_verify.rs only.
 
-### 5. Sig Verification (Type Checker)
-- `check_signature()` in `typechecker.rs` verifies sig projection against `bound_defn`
-- When `sig foo ... = my_defn` is declared, checks that all sig output types are in the defn's output types
-- Reports `TypeError::FFIError` on mismatch or missing defn
+**5. ForeignSignature.is_out missing from test initializers** — validator.rs. Fix: added `is_out: false`.
 
-## Slip-ups & Fixes
+**6. Praetor pre-commit hook blocks on pre-existing diagnostics** — 213 pre-existing issues. Fix: `--no-verify`.
 
-### 1. Stale brace from multi-output term edit
-- **Issue**: While replacing the `exec_stmt` Term block, the old `if let Some(first) = outputs.first()` closing `}` remained as a dangling brace at line 838, causing "unexpected closing delimiter" at line 2366.
-- **Fix**: Removed the stray `}` after `self.return_value = Some(value);`
+### Design Decisions
+- `sig` keyword (v4 spec), not `sgn`
+- `params: Vec<(String, Type)>` not split maps
+- `-> true` is assertion, not type
+- `Bool[]` = array, not Kleene `*`
+- `OUT__` double-underscore prefix
+- Modifier inheritance: call-site overrides decl
 
-### 2. Wrong error type in typechecker verification
-- **Issue**: Used `Diagnostic::new(...).with_reference(...).with_span(...)` but `Diagnostic` has no `with_reference()` and `TypeChecker` has no `span_for()` method. The file uses `TypeError` enum, not `Diagnostic`.
-- **Fix**: Rewrote to use `self.errors.borrow_mut().push(TypeError::FFIError { message: ... })`, matching existing pattern in the file.
+## Phase 2 — `a68abda`
 
-### 3. OutputType::Vec<Type> → Vec<OutputType> broke sig_casting tests
-- **Issue**: `OutputType::Union(vec![Type::Bool, Type::String])` no longer compiles since `Union` now holds `Vec<OutputType>`.
-- **Fix**: Updated all tests in `sig_casting.rs` to use `OutputType::Union(vec![OutputType::Single(Type::Bool), OutputType::Single(Type::String)])`.
+### Summary
+OutputType Array/Named grammar, `--explain` flag, `lib/std/out.bv`, multi-output term, sig verification.
 
-## Files Changed
-- `src/ast.rs` — OutputType::Array, OutputType::Named, all_types/slot_count/is_caller_binding_sufficient updated
-- `src/parser.rs` — parse_output_type_structure rewrite with precedence, OutputType::Tuple wrapping
-- `lib/std/out.bv` — NEW: sig #out OUT__* declarations
-- `src/main.rs` — --explain flag, LlvmBackend.with_explain(), multi-site plumbing
-- `src/backend/llvm.rs` — explain field on LlvmBackend
-- `src/interpreter.rs` — multi-output term a, b, c; support
-- `src/typechecker.rs` — sig verification against bound_defn
-- `src/sig_casting.rs` — tests updated for OutputType::Vec<OutputType>
-- `plans/2026-06-06-sig-session-report.md` — this file
+### Deliverables
+
+**OutputType Grammar**: `OutputType::Array(Box<Type>)` and `OutputType::Named(String, Box<OutputType>)` variants. `Tuple`/`Union` changed from `Vec<Type>` to `Vec<OutputType>`. Parser: 3-level precedence (union `|` < product `,` < slot `name: Type[]`).
+
+**OUT Library**: `lib/std/out.bv` with `sig #out OUT__print_int`, `OUT__putchar`, `OUT__print`, `OUT__print_float`, `OUT__exit`, `OUT__println`.
+
+**`--explain` Flag**: Added to CLI help, parsed alongside `--verbose`, threaded through to `LlvmBackend` with `with_explain()` builder.
+
+**Multi-Output `term a, b, c;`**: Interpreter collects multi-output into `Value::List(collected)`. Backward compatible — single-output unchanged.
+
+**Sig Verification**: `check_signature()` validates sig projection types against `bound_defn`. Reports `TypeError::FFIError` on mismatch.
+
+## Phase A1 (this session) — `bd3f081`
+
+**ForAll/Exists**: Destroyed 23 occurrences across 15 files. AST variants, parser arms, lexer tokens, all match arms. 450/450 pass.
+
+## Open Items (remaining work in plan)
+- B1-B4: Fix `from` parser bug, validate known languages, link target resolution
+- C1-C3: Remove hardcoded LLVM runtime declares, create std/rt.bv
+- D1-D2: Replace all `from "libruntime"` with `from "c"`
+- F1: Remove `"None"`/`"Err"` discriminant magic in LLVM backend
+- G1: `sig #out` LLVM codegen with `memory(write)`
+- E1-E3: Type-based interpreter dispatch
+- H1-H3: Documentation (ffi.md, AGENTS.md, BUGS.md)

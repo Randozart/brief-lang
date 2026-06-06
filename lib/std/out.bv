@@ -15,11 +15,11 @@ import "link/brief_rt.o";
 // Raw FFI calls with no sig, no #out. These CAN be eliminated by the optimizer.
 // The OUT__ wrappers below add #out to prevent elimination.
 
-frgn __print_int(n: Int) -> Bool from "libruntime";
-frgn __putchar(c: Int) -> Int from "libruntime";
-frgn __print(msg: String) -> Bool from "libruntime";
-frgn __print_float(f: Float) -> Bool from "libruntime";
-frgn __exit() -> Void from "libruntime";
+frgn __print_int(n: Int) -> Bool ;
+frgn __putchar(c: Int) -> Int ;
+frgn __print(msg: String) -> Bool ;
+frgn __print_float(f: Float) -> Bool ;
+frgn __exit() -> Void ;
 
 // ===== OUTPUT-MARKED SIGNATURES =====
 // sig #out — WILL NOT be eliminated by dead-code elimination.

@@ -5,8 +5,8 @@
 
 import "link/brief_rt.o";
 
-frgn #out __print_int(n: Int) -> Bool from "libruntime";
-frgn __get_env_int(name: String) -> Int from "libruntime";
+frgn #out __print_int(n: Int) -> Bool ;
+frgn __get_env_int(name: String) -> Int ;
 
 let count: Int = 0;
 let N: Int = __get_env_int("BOUND");

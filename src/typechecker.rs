@@ -989,11 +989,20 @@ impl TypeChecker {
         // If toml_path is empty, we're using the new FFI syntax with profile-based resolution
         // Skip binding loading and use profile defaults
         if toml_path.is_empty() {
-            // Use profile-based FFI - address and type mappings come from the FFI state
-            // For now, just set a placeholder location
-            // BUT: if the signature already has a from "..." location, keep it
             if signature.location.is_empty() {
                 signature.location = format!("<profile:{}>", name);
+            } else {
+                // Validate from "..." value is a known FFI target language
+                let known_targets = ["c", "rust", "js", "python"];
+                if !known_targets.contains(&signature.location.as_str()) {
+                    self.errors.borrow_mut().push(TypeError::FFIError {
+                        message: format!(
+                            "unrecognized FFI target '{}' for '{}' — valid targets: {}",
+                            signature.location, name,
+                            known_targets.join(", ")
+                        ),
+                    });
+                }
             }
             return;
         }

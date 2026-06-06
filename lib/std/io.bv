@@ -24,20 +24,20 @@ import "link/brief_rt.o";
 // __raw_poll: non-blocking read of all pending events from the OS.
 // Guaranteed non-blocking because __wait_for_event already determined
 // that data is available. Returns a raw byte buffer.
-frgn __raw_poll() -> String from "libruntime";
+frgn __raw_poll() -> String ;
 
 // __wait_for_event: blocks the thread until at least one event source
 // has data. Maps to epoll_wait (Linux), kevent (BSD), wfi (ARM), hlt (x86).
 // Declared as the LAST rct txn in dispatch order so it only fires when
 // no other transaction's precondition is true.
-frgn __wait_for_event() -> Void from "libruntime";
+frgn __wait_for_event() -> Void ;
 
 // ===== CONSOLE IO (Native) =====
 // Uses transparent FFI — no compiler magic.
 // __print and __print_int are provided by brief_rt.c (linked via "link/brief_rt.o").
 
-frgn #out __print(msg: String) -> Bool from "libruntime";
-frgn #out __print_int(n: Int) -> Bool from "libruntime";
+frgn #out __print(msg: String) -> Bool ;
+frgn #out __print_int(n: Int) -> Bool ;
 
 defn print(msg: String) -> Bool [msg != ""][term == true] {
     term __print(msg);

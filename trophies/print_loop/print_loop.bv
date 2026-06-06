@@ -14,7 +14,7 @@
 import "link/brief_rt.o";
 import { io_pending } from "std/brief_rt.bv";
 
-frgn __print_int(n: Int) -> Bool from "libruntime";
+frgn __print_int(n: Int) -> Bool ;
 
 let ops: Int = 0;
 const N: Int = 50000000;

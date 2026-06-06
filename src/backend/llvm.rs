@@ -1848,21 +1848,12 @@ self.emit_declares(&mut out);
         writeln!(out, "declare i64 @llvm.abs.i64(i64, i1) #1").ok();
         writeln!(out, "declare double @llvm.fabs.f64(double) #1").ok();
         writeln!(out, "declare i64 @llvm.bitreverse.i64(i64) #1").ok();
-        // __wait_for_event is no longer a built-in intrinsic.
-        // Users declare it via frgn __wait_for_event() -> Void from "libruntime";
-        // and the normal FFI path handles the declare emission.
-        // __rt_init and __rt_wait are weak symbols provided by the C runtime.
-        // If not linked, these resolve to a no-op stub or linker error.
+        // TODO (eliminate-magic Phase C2-C3): Remove these hardcoded runtime declares
+        // once the codegen call sites are migrated to use self.frgn_map lookups.
+        // When std/rt.bv is fully integrated, these will come from user imports.
         writeln!(out, "declare void @__rt_init() local_unnamed_addr").ok();
         writeln!(out, "declare void @__rt_poll() local_unnamed_addr").ok();
         writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
-        // Thread pool entry points — provided by brief_rt.c when BRIEF_THREAD_POOL is defined.
-        // If not linked, the linker will error. The metadata section @llvm.thread_pool
-        // tells the compiler driver to add -DBRIEF_THREAD_POOL.
-        writeln!(out, "declare void @brief_thread_pool_init(i32, i8**) local_unnamed_addr").ok();
-        writeln!(out, "declare void @brief_barrier_release() local_unnamed_addr").ok();
-        writeln!(out, "declare void @brief_barrier_wait() local_unnamed_addr").ok();
-        writeln!(out, "declare void @__exit(i64) local_unnamed_addr").ok();
     }
 
     fn emit_foreign_declares(&mut self, out: &mut String) {
