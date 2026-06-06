@@ -758,6 +758,35 @@ impl TypeChecker {
             ResultType::TrueAssertion => {}
             ResultType::VoidType => {}
         }
+        // Verify sig projection against bound defn if specified
+        if let Some(ref bound_name) = sig.bound_defn {
+            if let Some(defn) = self.definitions.get(bound_name) {
+                let sig_types = match &sig.result_type {
+                    ResultType::Projection(types) => types.clone(),
+                    _ => vec![],
+                };
+                let defn_output = defn.output_type.as_ref()
+                    .map(|ot| ot.all_types())
+                    .unwrap_or_else(|| defn.outputs.clone());
+                for sig_ty in &sig_types {
+                    if !defn_output.contains(sig_ty) {
+                        self.errors.borrow_mut().push(TypeError::FFIError {
+                            message: format!(
+                                "sig '{}' projects type {:?} from defn '{}', which produces {:?}",
+                                sig.name, sig_ty, bound_name, defn_output
+                            ),
+                        });
+                    }
+                }
+            } else {
+                self.errors.borrow_mut().push(TypeError::FFIError {
+                    message: format!(
+                        "sig '{}' references defn '{}' which is not defined",
+                        sig.name, bound_name
+                    ),
+                });
+            }
+        }
     }
 
     fn check_definition(&mut self, defn: &Definition) {

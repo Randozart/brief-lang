@@ -361,27 +361,49 @@ impl Interpreter {
         let mut result = Value::Void;
         for stmt in &defn.body {
             match stmt {
-                Statement::Term { values: outputs, swan_song, .. } => {
-                    if let Some(Some(expr)) = outputs.first() {
-                        result = self.eval_expr(expr)?;
-                        if let Some(swan) = swan_song {
-                            self.exec_stmt(swan)?;
+            Statement::Term { values: outputs, swan_song, .. } => {
+                if outputs.len() > 1 {
+                    let mut collected = Vec::new();
+                    for out in outputs {
+                        if let Some(expr) = out {
+                            collected.push(self.eval_expr(expr)?);
                         }
-                        self.return_value = Some(result.clone());
                     }
+                    if let Some(swan) = swan_song {
+                        self.exec_stmt(swan)?;
+                    }
+                    self.return_value = Some(Value::List(collected));
+                } else if let Some(Some(expr)) = outputs.first() {
+                    result = self.eval_expr(expr)?;
+                    if let Some(swan) = swan_song {
+                        self.exec_stmt(swan)?;
+                    }
+                    self.return_value = Some(result.clone());
                 }
-                Statement::TermBang { values: outputs, swan_song, .. } => {
-                    if let Some(Some(expr)) = outputs.first() {
-                        result = self.eval_expr(expr)?;
-                        if let Some(swan) = swan_song {
-                            self.exec_stmt(swan)?;
+            }
+            Statement::TermBang { values: outputs, swan_song, .. } => {
+                if outputs.len() > 1 {
+                    let mut collected = Vec::new();
+                    for out in outputs {
+                        if let Some(expr) = out {
+                            collected.push(self.eval_expr(expr)?);
                         }
-                        self.return_value = Some(result.clone());
                     }
+                    if let Some(swan) = swan_song {
+                        self.exec_stmt(swan)?;
+                    }
+                    self.return_value = Some(Value::List(collected));
+                } else if let Some(Some(expr)) = outputs.first() {
+                    result = self.eval_expr(expr)?;
+                    if let Some(swan) = swan_song {
+                        self.exec_stmt(swan)?;
+                    }
+                    self.return_value = Some(result.clone());
                 }
-                _ => {
-                    self.exec_stmt(stmt)?;
-                }
+            }
+            _ => {
+                self.exec_stmt(stmt)?;
+            }
             }
             if self.return_value.is_some() {
                 result = self.return_value.take().unwrap();
@@ -776,25 +798,43 @@ impl Interpreter {
                 self.eval_expr(expr)?;
             }
             Statement::Term { values: outputs, swan_song, .. } => {
-                if let Some(first) = outputs.first() {
-                    if let Some(expr) = first {
-                        let value = self.eval_expr(expr)?;
-                        if let Some(swan) = swan_song {
-                            self.exec_stmt(swan)?;
+                if outputs.len() > 1 {
+                    let mut collected = Vec::new();
+                    for out in outputs {
+                        if let Some(expr) = out {
+                            collected.push(self.eval_expr(expr)?);
                         }
-                        self.return_value = Some(value);
                     }
+                    if let Some(swan) = swan_song {
+                        self.exec_stmt(swan)?;
+                    }
+                    self.return_value = Some(Value::List(collected));
+                } else if let Some(Some(expr)) = outputs.first() {
+                    let value = self.eval_expr(expr)?;
+                    if let Some(swan) = swan_song {
+                        self.exec_stmt(swan)?;
+                    }
+                    self.return_value = Some(value);
                 }
             }
             Statement::TermBang { values: outputs, swan_song, .. } => {
-                if let Some(first) = outputs.first() {
-                    if let Some(expr) = first {
-                        let value = self.eval_expr(expr)?;
-                        if let Some(swan) = swan_song {
-                            self.exec_stmt(swan)?;
+                if outputs.len() > 1 {
+                    let mut collected = Vec::new();
+                    for out in outputs {
+                        if let Some(expr) = out {
+                            collected.push(self.eval_expr(expr)?);
                         }
-                        self.return_value = Some(value);
                     }
+                    if let Some(swan) = swan_song {
+                        self.exec_stmt(swan)?;
+                    }
+                    self.return_value = Some(Value::List(collected));
+                } else if let Some(Some(expr)) = outputs.first() {
+                    let value = self.eval_expr(expr)?;
+                    if let Some(swan) = swan_song {
+                        self.exec_stmt(swan)?;
+                    }
+                    self.return_value = Some(value);
                 }
             }
             Statement::Escape(_expr_opt) => {

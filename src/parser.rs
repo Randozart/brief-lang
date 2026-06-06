@@ -865,14 +865,7 @@ impl<'a> Parser<'a> {
 
         // Parse output type structure (supports | , [] named slots)
         let output_type = self.parse_output_type_structure()?;
-        let result_type = match &output_type {
-            Some(ot) => ResultType::Projection(ot.all_types()),
-            None => {
-                // Single type
-                let ty = self.parse_type()?;
-                ResultType::Projection(vec![ty])
-            }
-        };
+        let result_type = ResultType::Projection(output_type.all_types());
 
         // Parse optional defn binding: = defn_name
         let bound_defn = if let Some(Ok(Token::Eq)) = self.current_token() {
@@ -918,7 +911,7 @@ impl<'a> Parser<'a> {
             alias,
             bound_defn,
             modifier,
-            output_type,
+            output_type: Some(output_type),
         })
     }
 
@@ -2907,7 +2900,7 @@ let span = self.current_span();
                 self.advance();
                 let (outputs, output_names) = self.parse_output_types_with_names(&parameters)?;
                 let output_type = if outputs.len() > 1 {
-                    Some(crate::ast::OutputType::Tuple(outputs.clone()))
+                    Some(crate::ast::OutputType::Tuple(outputs.iter().map(|t| crate::ast::OutputType::Single(t.clone())).collect()))
                 } else {
                     None
                 };
@@ -2919,7 +2912,7 @@ let span = self.current_span();
             self.advance();
             let (outputs, output_names) = self.parse_output_types_with_names(&parameters)?;
             let output_type = if outputs.len() > 1 {
-                Some(crate::ast::OutputType::Tuple(outputs.clone()))
+                Some(crate::ast::OutputType::Tuple(outputs.iter().map(|t| crate::ast::OutputType::Single(t.clone())).collect()))
             } else {
                 None
             };
@@ -3060,49 +3053,66 @@ let span = self.current_span();
     ///   -> Bool | Error            (Union)
     ///   -> Bool, String            (Tuple)
     ///   -> Bool | Error, String    (Mixed: Union then Tuple element)
-    fn parse_output_type_structure(&mut self) -> Result<Option<OutputType>, SyntaxError> {
+    fn parse_output_type_structure(&mut self) -> Result<OutputType, SyntaxError> {
         use crate::ast::OutputType;
 
-        let mut all_types = Vec::new();
-        let mut has_pipe = false;
-        let mut has_comma = false;
+        let result = self.parse_union()?;
+        Ok(result)
+    }
 
-        // Parse first type
-        all_types.push(self.parse_type()?);
+    /// Parse union: product ("|" product)*
+    fn parse_union(&mut self) -> Result<OutputType, SyntaxError> {
+        let mut alternatives = vec![self.parse_product()?];
+        while let Some(Ok(Token::Pipe)) = self.current_token() {
+            self.advance();
+            alternatives.push(self.parse_product()?);
+        }
+        if alternatives.len() == 1 {
+            Ok(alternatives.into_iter().next().unwrap())
+        } else {
+            Ok(OutputType::Union(alternatives))
+        }
+    }
 
-        // Look for pipes (union) or commas (tuple)
-        loop {
-            match self.current_token() {
-                Some(Ok(Token::Pipe)) => {
-                    has_pipe = true;
+    /// Parse product: slot ("," slot)*
+    fn parse_product(&mut self) -> Result<OutputType, SyntaxError> {
+        let mut slots = vec![self.parse_slot()?];
+        while let Some(Ok(Token::Comma)) = self.current_token() {
+            self.advance();
+            slots.push(self.parse_slot()?);
+        }
+        if slots.len() == 1 {
+            Ok(slots.into_iter().next().unwrap())
+        } else {
+            Ok(OutputType::Tuple(slots))
+        }
+    }
+
+    /// Parse slot: [name ":"] array
+    fn parse_slot(&mut self) -> Result<OutputType, SyntaxError> {
+        // Check for named slot pattern: Identifier ':' Type[]
+        if let Some(Ok(Token::Identifier(_))) = self.current_token() {
+            if let Some(Ok(Token::Colon)) = self.peek() {
+                let name = self.expect_identifier()?;
+                self.advance(); // consume ':'
+                let inner = self.parse_type()?;
+                // Check for [] suffix on named type
+                if let Some(Ok(Token::LBracket)) = self.current_token() {
                     self.advance();
-                    all_types.push(self.parse_type()?);
+                    self.expect(Token::RBracket)?;
+                    return Ok(OutputType::Named(name, Box::new(OutputType::Array(Box::new(inner)))));
                 }
-                Some(Ok(Token::Comma)) => {
-                    has_comma = true;
-                    self.advance();
-                    all_types.push(self.parse_type()?);
-                }
-                _ => break,
+                return Ok(OutputType::Named(name, Box::new(OutputType::Single(inner))));
             }
         }
-
-        // Determine structure based on what we found
-        if all_types.len() == 1 {
-            // Single output - no special structure needed
-            Ok(None)
-        } else if has_pipe && !has_comma {
-            // Pure union: A | B | C
-            Ok(Some(OutputType::Union(all_types)))
-        } else if has_comma && !has_pipe {
-            // Pure tuple: A, B, C
-            Ok(Some(OutputType::Tuple(all_types)))
-        } else if has_pipe && has_comma {
-            // Mixed: Handle as tuple, but first element is union
-            // For now, simplify to tuple (future: could model as tuple of unions)
-            Ok(Some(OutputType::Tuple(all_types)))
+        // Plain type (maybe with [] suffix)
+        let ty = self.parse_type()?;
+        if let Some(Ok(Token::LBracket)) = self.current_token() {
+            self.advance();
+            self.expect(Token::RBracket)?;
+            Ok(OutputType::Array(Box::new(ty)))
         } else {
-            Ok(None)
+            Ok(OutputType::Single(ty))
         }
     }
 

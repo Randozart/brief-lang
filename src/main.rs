@@ -370,6 +370,7 @@ fn print_usage(program: &str) {
     eprintln!("  --emit-memory-spec   Output memory allocation spec alongside compiled code");
     eprintln!("  --memory-spec-toml   Output memory spec as TOML (default: JSON)");
     eprintln!("  -v, --verbose        Verbose output");
+    eprintln!("  --explain            Show detailed compilation decisions (sig resolution, liveness, folds)");
     eprintln!("  --quiet, --whisper   Minimal output (for CI/automated use)");
     eprintln!("  -h, --help           Show this help");
     eprintln!();
@@ -1542,6 +1543,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
     let mut target: Option<&str> = None;
     let mut out_dir = None;
     let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
+    let explain = args.contains(&"--explain".to_string());
     let emit_memory_spec = args.contains(&"--emit-memory-spec".to_string());
     let memory_spec_format = if args.contains(&"--memory-spec-toml".to_string()) {
         "toml"
@@ -1683,7 +1685,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             }
         },
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1987,6 +1989,7 @@ fn run_llvm_compile(
     dead_info_disabled: bool,
     mmio_addresses: Option<HashMap<String, u64>>,
     pgo_generate: bool,
+    explain: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -2148,7 +2151,8 @@ fn run_llvm_compile(
     let mut llvm_backend = crate::backend::llvm::LlvmBackend::new()
         .with_optimize_budget(optimize_budget)
         .with_optimize_report(optimize_report)
-        .with_schema_aliases(schema_aliases);
+        .with_schema_aliases(schema_aliases)
+        .with_explain(explain);
     if dead_info_disabled {
         llvm_backend = llvm_backend.with_dead_info_disabled(true);
     }
@@ -3625,6 +3629,7 @@ fn main() {
     let command = &args[1];
 
     let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
+    let explain = args.contains(&"--explain".to_string());
     let no_stdlib = args.contains(&"--no-stdlib".to_string());
     let emit_memory_spec = args.contains(&"--emit-memory-spec".to_string());
     let memory_spec_format = if args.contains(&"--memory-spec-toml".to_string()) {
@@ -3767,6 +3772,7 @@ fn main() {
             let mut hw_target: Option<String> = None;
             let mut target_dbv: Option<String> = None;
             let mut pgo_generate = false;
+            let mut explain = false;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
@@ -3799,6 +3805,9 @@ fn main() {
                 } else if arg == "--no-dead-info" {
                     dead_info_disabled = true;
                     i += 1;
+                } else if arg == "--explain" {
+                    explain = true;
+                    i += 1;
                 } else if !arg.starts_with('-') {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -3825,7 +3834,7 @@ fn main() {
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);

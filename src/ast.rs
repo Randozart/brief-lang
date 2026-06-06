@@ -702,10 +702,16 @@ pub enum OutputType {
     Single(Type),
 
     /// Union of types: -> Bool | Error | Timeout (caller must handle all)
-    Union(Vec<Type>),
+    Union(Vec<OutputType>),
 
     /// Tuple of types: -> Bool, String, Int (all produced, caller binds all)
-    Tuple(Vec<Type>),
+    Tuple(Vec<OutputType>),
+
+    /// Array of types: -> Bool[] (dynamic-length collection)
+    Array(Box<Type>),
+
+    /// Named slot: -> name: Type (labeled output for destructuring)
+    Named(String, Box<OutputType>),
 }
 
 impl OutputType {
@@ -713,8 +719,10 @@ impl OutputType {
     pub fn all_types(&self) -> Vec<Type> {
         match self {
             OutputType::Single(ty) => vec![ty.clone()],
-            OutputType::Union(types) => types.clone(),
-            OutputType::Tuple(types) => types.clone(),
+            OutputType::Union(types) => types.iter().flat_map(|ot| ot.all_types()).collect(),
+            OutputType::Tuple(types) => types.iter().flat_map(|ot| ot.all_types()).collect(),
+            OutputType::Array(ty) => vec![ty.as_ref().clone()],
+            OutputType::Named(_, inner) => inner.all_types(),
         }
     }
 
@@ -728,11 +736,23 @@ impl OutputType {
         matches!(self, OutputType::Tuple(_))
     }
 
+    /// Check if this is an array type
+    pub fn is_array(&self) -> bool {
+        matches!(self, OutputType::Array(_))
+    }
+
+    /// Check if this is a named slot
+    pub fn is_named(&self) -> bool {
+        matches!(self, OutputType::Named(_, _))
+    }
+
     /// Get number of output slots
     pub fn slot_count(&self) -> usize {
         match self {
-            OutputType::Single(_) => 1,
-            OutputType::Union(_) | OutputType::Tuple(_) => self.all_types().len(),
+            OutputType::Single(_) | OutputType::Array(_) => 1,
+            OutputType::Named(_, inner) => inner.slot_count(),
+            OutputType::Union(types) => types.len(),
+            OutputType::Tuple(types) => types.len(),
         }
     }
 }
@@ -1021,8 +1041,10 @@ impl OutputType {
     pub fn required_caller_bindings(&self) -> Vec<Type> {
         match self {
             OutputType::Single(ty) => vec![ty.clone()],
-            OutputType::Union(types) => types.clone(), // All must be handled
-            OutputType::Tuple(types) => types.clone(), // All must be bound
+            OutputType::Union(types) => types.iter().flat_map(|ot| ot.all_types()).collect(),
+            OutputType::Tuple(types) => types.iter().flat_map(|ot| ot.all_types()).collect(),
+            OutputType::Array(ty) => vec![ty.as_ref().clone()],
+            OutputType::Named(_, inner) => inner.required_caller_bindings(),
         }
     }
 
@@ -1033,6 +1055,8 @@ impl OutputType {
         // Future: implement full exhaustiveness verification
         match self {
             OutputType::Single(ty) => ty == caller_type,
+            OutputType::Array(ty) => ty.as_ref() == caller_type,
+            OutputType::Named(_, inner) => inner.is_caller_binding_sufficient(caller_type),
             OutputType::Union(_) => true, // Deferred to type checker
             OutputType::Tuple(_) => true, // Deferred to type checker
         }

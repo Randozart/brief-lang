@@ -103,14 +103,14 @@ mod tests {
     #[test]
     fn test_valid_union_projection() {
         // defn produces Bool | String, sig projects Bool
-        let defn_output = OutputType::Union(vec![Type::Bool, Type::String]);
+        let defn_output = OutputType::Union(vec![OutputType::Single(Type::Bool), OutputType::Single(Type::String)]);
         assert!(is_valid_projection(&[Type::Bool], &defn_output));
     }
 
     #[test]
     fn test_valid_tuple_projection() {
         // defn produces Bool, String, Int, sig projects Bool, String
-        let defn_output = OutputType::Tuple(vec![Type::Bool, Type::String, Type::Int]);
+        let defn_output = OutputType::Tuple(vec![OutputType::Single(Type::Bool), OutputType::Single(Type::String), OutputType::Single(Type::Int)]);
         assert!(is_valid_projection(
             &[Type::Bool, Type::String],
             &defn_output
@@ -120,14 +120,14 @@ mod tests {
     #[test]
     fn test_invalid_projection_not_in_defn() {
         // defn produces Bool | String, sig projects Int (invalid)
-        let defn_output = OutputType::Union(vec![Type::Bool, Type::String]);
+        let defn_output = OutputType::Union(vec![OutputType::Single(Type::Bool), OutputType::Single(Type::String)]);
         assert!(!is_valid_projection(&[Type::Int], &defn_output));
     }
 
     #[test]
     fn test_invalid_tuple_projection_out_of_order() {
         // defn produces Bool, String, Int, sig requests String, Bool (wrong order)
-        let defn_output = OutputType::Tuple(vec![Type::Bool, Type::String, Type::Int]);
+        let defn_output = OutputType::Tuple(vec![OutputType::Single(Type::Bool), OutputType::Single(Type::String), OutputType::Single(Type::Int)]);
         // This should fail because tuple order matters
         let result = is_valid_projection(&[Type::String, Type::Bool], &defn_output);
         // For now this passes (simplified), but real implementation would validate order

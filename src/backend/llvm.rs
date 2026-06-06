@@ -329,6 +329,8 @@ pub struct LlvmBackend {
     /// Built during generate() from enum_types. Used by Expr::Call to look up
     /// discriminant values without scanning all enums.
     variant_disc: HashMap<String, (String, u64, usize)>,
+    /// --explain flag: print detailed compilation decisions
+    explain: bool,
 }
 
 impl LlvmBackend {
@@ -386,6 +388,7 @@ impl LlvmBackend {
             struct_types: HashMap::new(),
             enum_types: HashMap::new(),
             variant_disc: HashMap::new(),
+            explain: false,
         }
     }
 
@@ -412,6 +415,11 @@ impl LlvmBackend {
 
     pub fn with_dead_info_disabled(mut self, disabled: bool) -> Self {
         self.dead_info_disabled = disabled;
+        self
+    }
+
+    pub fn with_explain(mut self, explain: bool) -> Self {
+        self.explain = explain;
         self
     }
 
