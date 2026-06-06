@@ -39,6 +39,11 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 - Pre-populating interpreter state with enum constants (None, Some, Ok, Err)
 - Adding `x == x` self-references in preconditions to force liveness
 - Adding synthetic exit-condition fields solely to prevent dead-field elimination
+- **Hardcoded `from` strings**: `from "libruntime"` is magic — parsed and discarded. Use `from "c"` or omit `from` entirely (symbol resolves from `import "link/..."` targets).
+- **Hardcoded runtime declares**: `__rt_init`, `__rt_wait`, etc. must be declared as `frgn` in `std/rt.bv` and imported by the user — never hardcoded in `emit_declares()`.
+- **Name-based interpreter dispatch**: Matching on `fn_name == "insert"` instead of dispatching on `Value::HashMap` — dispatch on the type, not on a string.
+- **`"None"`/`"Err"` discriminant magic**: Never match on variant names for discriminants. Use the enum declaration order.
+- **Type-based dispatch**: In the interpreter, dispatch on `Value` variant, not on string-matching the function name.
 
 ### Observability as Liveness
 
@@ -155,7 +160,7 @@ Loops are transactions with bounded convergence. Recursion is a transaction chai
 | ✅ | Call, ListLiteral, ListIndex, Projection (5 targets), FieldAccess |
 | ✅ | StructInstance, ObjectLiteral, PatternMatch, Concat |
 | ✅ | Slice, MultiSlice, Block, Tuple, TupleDestructure, Cast, Match |
-| ⚠️ | **ForAll, Exists** — REMOVED from core syntax. Stub AST nodes remain but are NOT part of the surface language. |
+| ⚠️ | **ForAll, Exists** — FULLY REMOVED from AST, parser, lexer, and all match arms. |
 
 ### Statements — All fully implemented
 Assignment, Let, InlineAsm, Expression, Term (with optional swan song), TermBang (with optional swan song), Escape, Guarded, Unification, LocalTrigger.

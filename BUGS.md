@@ -532,7 +532,7 @@ Without any `memory(...)` restriction, LLVM conservatively assumes the function 
 
 **Lesson**: When new language features supersede old workarounds, audit existing code for the old pattern and clean it up. Documented here to prevent future cargo-culting.
 
----
+--- 
 
 ## 2026-06-05 — Accidental deletion of benchmark source files during cleanup
 
@@ -541,4 +541,52 @@ Without any `memory(...)` restriction, LLVM conservatively assumes the function 
 **Root Cause**: Shell glob `*` matched all files starting with the prefix. No distinction between `.bv` source, `_c.c` reference, `.o` object, `.ll` IR, and binary executable.
 
 **Lesson**: Never glob over source files. Use explicit filenames for cleanup: `rm -f benchmarks/fannkuch_redux benchmarks/fannkuch_redux.ll benchmarks/fannkuch_redux.o`. Or better: organize build artifacts in a separate subdirectory.
+
+---
+
+## 2026-06-06 — Parser discards `from "..."` value in frgn declarations
+
+**Issue**: `frgn __print_int(n: Int) -> Bool from "libruntime"` — the `"libruntime"` string was parsed but immediately thrown away. `ForeignSignature::location` was hardcoded to `String::new()` at construction.
+
+**Root Cause**: `parser.rs:1142` used `location: String::new()` instead of `location: location.clone()`. The parsed `location` variable was never written into the struct.
+
+**Fix**: Changed `String::new()` to `location.clone()` so the `from` value is actually stored.
+
+**Lesson**: Always check that parsed values are actually wired into the AST node.
+
+---
+
+## 2026-06-06 — Hardcoded runtime declares in LLVM backend
+
+**Issue**: `emit_declares()` unconditionally emitted `declare void @__rt_init()`, `declare void @__rt_wait()`, `declare void @__rt_poll()`, `declare void @__exit()`, `declare void @brief_thread_pool_init()`, etc. Users couldn't opt out and these symbols were never declared in user code.
+
+**Root Cause**: The runtime functions were hardcoded in `llvm.rs:1844-1868` instead of being declared as `frgn` in `std/rt.bv` and imported by the user.
+
+**Fix**: Removed the hardcoded runtime declares. Added a TODO to migrate the codegen call sites to use `self.frgn_map` lookups. Created `docs/learn/ffi.md` documenting the architecture.
+
+**Lesson**: Runtime functions should be declared in standard library modules, not hardcoded in codegen.
+
+---
+
+## 2026-06-06 — `"None"`/`"Err"` discriminant magic in LLVM backend
+
+**Issue**: `llvm.rs:508` hardcoded `"None" | "Err" => 0` for enum variant discriminants, assuming `None` and `Err` are always the first variant. Three other sites used `if name == "None"` as fallback logic.
+
+**Root Cause**: Hardcoded match on variant names instead of using the enum declaration order. The `variant_disc` map was populated but then ignored in favor of name matching.
+
+**Fix**: Changed to sequential discriminants starting at 0, based on declaration order (not name). All variant discriminant fallbacks use `unwrap_or(0)`.
+
+**Lesson**: Dispatch on type/variant definition, not on hardcoded names.
+
+---
+
+## 2026-06-06 — Wrong env var `N` vs `BOUND` in fasta benchmark debugging
+
+**Issue**: Reported `fasta.bv` as hanging. The benchmark was being passed `N=100` instead of `BOUND=100`.
+
+**Root Cause**: The benchmark reads `BOUND` from the environment, but `N` was used when testing. The benchmark uses `__get_env_int("BOUND")` to read the bound.
+
+**Fix**: Used `BOUND=100` instead of `N=100`. The benchmark runs correctly.
+
+**Lesson**: Always check env var names in the source code before assuming a benchmark is broken.
 
