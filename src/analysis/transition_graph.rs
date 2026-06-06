@@ -126,7 +126,7 @@ impl ReactorTransitionGraph {
             }
         }
 
-        let live_fields = compute_live_fields(&program.exit_condition, &nodes);
+        let live_fields = compute_live_fields(&program.exit_condition, &program.out_pragmas, &nodes);
         for node in &mut nodes {
             compute_effectively_pure(node, &live_fields);
         }
@@ -773,11 +773,15 @@ pub fn is_uniform_body_group(txns: &[(String, &crate::ast::Transaction)]) -> boo
 
 pub fn compute_live_fields(
     exit_condition: &Option<Box<Expr>>,
+    out_pragmas: &[String],
     nodes: &[ReactorNode],
 ) -> HashSet<String> {
     let mut live = HashSet::new();
     if let Some(ec) = exit_condition {
         collect_identifiers(ec, &mut live);
+    }
+    for name in out_pragmas {
+        live.insert(name.clone());
     }
     for node in nodes {
         collect_identifiers(&node.precondition, &mut live);
@@ -886,6 +890,10 @@ fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String
     if node.body.iter().any(|s| statement_contains_ffi(s)) {
         return;
     }
+    // term/term! with swan song is an observable side effect — prevents fold
+    if node.body.iter().any(|s| statement_has_swan_song(s)) {
+        return;
+    }
     if let (Some(bp), Some(inc)) = (&node.bounded_pre, &node.increments) {
         if inc.var == bp.var && inc.delta > 0 && live_fields.contains(&inc.var) {
             let non_counter_writes: Vec<&String> = node.write_set.iter()
@@ -895,6 +903,20 @@ fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String
                 node.is_effectively_pure = true;
             }
         }
+    }
+}
+
+/// Check if a statement contains a Term or TermBang with a swan song.
+/// Swan songs are observable side effects that prevent pure-counter fold.
+fn statement_has_swan_song(stmt: &Statement) -> bool {
+    match stmt {
+        Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => {
+            swan_song.is_some()
+        }
+        Statement::Guarded { statements, .. } => {
+            statements.iter().any(|s| statement_has_swan_song(s))
+        }
+        _ => false,
     }
 }
 
@@ -1022,6 +1044,9 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
             Expr::ArrowDiscard { target, index } => {
                 collect_identifiers(target, out);
                 collect_identifiers(index, out);
+            }
+            Expr::SigCall { expr, .. } => {
+                collect_identifiers(expr, out);
             }
             Expr::Ellipsis => {}
         }
@@ -1306,6 +1331,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: DispatchMode::Sequential,
             exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
         };
         let graph = ReactorTransitionGraph::build(&program);
         assert_eq!(graph.nodes.len(), 1);

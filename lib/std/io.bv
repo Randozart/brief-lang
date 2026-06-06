@@ -36,8 +36,8 @@ frgn __wait_for_event() -> Void from "libruntime";
 // Uses transparent FFI — no compiler magic.
 // __print and __print_int are provided by brief_rt.c (linked via "link/brief_rt.o").
 
-frgn __print(msg: String) -> Bool from "libruntime";
-frgn __print_int(n: Int) -> Bool from "libruntime";
+frgn #out __print(msg: String) -> Bool from "libruntime";
+frgn #out __print_int(n: Int) -> Bool from "libruntime";
 
 defn print(msg: String) -> Bool [msg != ""][term == true] {
     term __print(msg);

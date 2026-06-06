@@ -1,6 +1,10 @@
 # Benchmark Implementation Plan — 2026-06-05
 
-**Status:** Ready to execute
+## Execution Log
+
+**2026-06-05 16:30 UTC** — Full Tiers execution begun. AGENTS_HISTORY.md "LLVM Backend Gaps" section found to be severely outdated — StructInstance, FieldAccess, `<-` arrows, all 13 projection targets, Tuple/TupleDestructure, Slice/MultiSlice are all fully implemented in LLVM backend. Tier 2 (spectral-norm, binary-trees) is now unblocked.
+
+**Status:** In progress
 **Depends on:** Halting pattern compiler passes (committed in `c727555` — P1 fix, algebraic simplify, popcount decay, collection drain, interval bounds, lexicographic ranking)
 
 ## Context

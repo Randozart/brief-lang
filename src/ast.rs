@@ -208,6 +208,7 @@ pub struct ForeignSignature {
     pub postcondition: Option<String>, // Post-call validation (NEW v2)
     pub buffer_mode: Option<String>, // stack | heap | static
     pub ffi_kind: Option<FfiKind>,   // NEW: frgn, frgn!, syscall, syscall!
+    pub is_out: bool,                // #out modifier — function has observable output
     pub span: Option<Span>,
 }
 
@@ -431,6 +432,11 @@ pub enum Expr {
     TupleDestructure(Vec<String>, Box<Expr>),
     // Tuple literal: (a, b, c)
     Tuple(Vec<Expr>),
+    /// Sig call modifier: `sig #out expr` or `sig #inline expr`
+    SigCall {
+        modifier: SigModifier,
+        expr: Box<Expr>,
+    },
 }
 
 /// A pattern in a match arm: `Variant(f1, f2)` or `_`
@@ -656,15 +662,36 @@ impl Contract {
     }
 }
 
+/// Side-effect modifier for sig declarations.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SigModifier {
+    /// `sig #out` — function has observable external effects
+    Out,
+    /// `sig #inline` — function is pure, safe to fold/eliminate
+    Inline,
+}
+
 #[derive(Debug, Clone)]
 pub struct Signature {
     pub name: String,
-    pub input_types: Vec<Type>,
+    /// Parameter list: (name: Type, ...)
+    pub params: Vec<(String, Type)>,
     pub result_type: ResultType,
     pub source: Option<String>,
     pub alias: Option<String>,
     /// NEW: Bind sig to a specific defn for path verification
     pub bound_defn: Option<String>,
+    /// sig modifier: #out, #inline, or None
+    pub modifier: Option<SigModifier>,
+    /// Complex output type structure (union/tuple/array/named)
+    pub output_type: Option<OutputType>,
+}
+
+impl Signature {
+    /// Convenience: get just the parameter types (drop names)
+    pub fn input_types(&self) -> Vec<Type> {
+        self.params.iter().map(|(_, t)| t.clone()).collect()
+    }
 }
 
 /// Multi-output type structure for Feature A
@@ -970,6 +997,9 @@ pub struct Program {
     pub strict_mode: StrictMode,
     pub dispatch_mode: DispatchMode,
     pub exit_condition: Option<Box<Expr>>, // NEW: #!exit <expr>;
+    pub out_pragmas: Vec<String>,         // NEW: #!out(x, y);
+    /// Default sig modifier for the file scope: Some(Out) or Some(Inline)
+    pub default_sig_modifier: Option<SigModifier>,
 }
 
 /// FFI State captured from file-level attribute

@@ -397,12 +397,12 @@ void __exit(void) {
     exit(0);
 }
 
-__attribute__((always_inline)) static inline int64_t __print_str_len(const char* buf, int64_t len) {
+static inline int64_t __print_str_len(const char* buf, int64_t len) {
     fwrite(buf, 1, (size_t)len, stdout);
     return len;
 }
 
-__attribute__((always_inline)) static inline int64_t __write_bytes(const char* buf, int64_t len) {
+static inline int64_t __write_bytes(const char* buf, int64_t len) {
     fwrite(buf, 1, (size_t)len, stdout);
     return len;
 }
@@ -412,8 +412,8 @@ int64_t __read_stdin(char* buf, int64_t max_len) {
     return (int64_t)n;
 }
 
-__attribute__((always_inline)) static inline int64_t __putchar(int64_t c) {
-    putchar((int)c);
+int64_t __putchar(int64_t c) {
+    fprintf(stderr, "%c", (int)c);
     return c;
 }
 

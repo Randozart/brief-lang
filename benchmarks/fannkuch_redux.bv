@@ -5,8 +5,8 @@
 #!exit count == N && checksum >= 0 && max_flips >= 0;
 
 import "link/brief_rt.o";
-import { io_pending } from "std/brief_rt.bv";
 
+frgn #out __print_int(n: Int) -> Bool from "libruntime";
 frgn __get_env_int(name: String) -> Int from "libruntime";
 
 let count: Int = 0;
@@ -34,14 +34,12 @@ const IA: Int = 3877;
 const IC: Int = 29573;
 
 // ── Transaction ──────────────────────────────────────────────────────
-rct txn fan [io_pending && count < N][count == N] {
+rct txn fan [count < N][count == N] {
     &seed = seed * IA;
     &seed = seed + IC;
     &seed = seed % IM;
 
     // Rotate: every field gets the value of the next field (cyclically)
-    // p11 ← p10, p10 ← p9, ..., p1 ← p0
-    // Store original p0 first, since it gets overwritten
     &seed = p0;
     &p0 = p1;
     &p1 = p2;
@@ -60,5 +58,9 @@ rct txn fan [io_pending && count < N][count == N] {
     &max_flips = max_flips + checksum % 17;
 
     &count = count + 1;
+
+    [count == N] {
+        term! -> __print_int(checksum);
+    };
     term;
 };

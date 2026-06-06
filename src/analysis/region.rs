@@ -1753,6 +1753,8 @@ mod tests {
             strict_mode: crate::ast::StrictMode::Off,
             dispatch_mode: DispatchMode::Sequential,
             exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
         }
     }
 

@@ -179,6 +179,9 @@ impl<'a> DataflowAnalyzer<'a> {
                 self.extract_ids_recursive(target, ids);
                 self.extract_ids_recursive(index, ids);
             }
+            Expr::SigCall { expr, .. } => {
+                self.extract_ids_recursive(expr, ids);
+            }
             Expr::Ellipsis => {}
         }
     }

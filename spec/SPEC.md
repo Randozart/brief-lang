@@ -2,7 +2,7 @@
 
 **Version:** v0.15.0  
 **Date:** 2026-06-05  
-**Status:** Development (stable core, experimental backends, **new: LLVM intrinsic projections, Ptr\<T\> types, std/bits.bv, std/ptr.bv, DFA regex, roofline model**)  
+**Status:** Development (stable core, experimental backends, **new: syscall architecture with target-spec resolution, LLVM inline asm, full cognitive grammar, `<-` expression discard**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -60,6 +60,32 @@ Lexer → Parser → Type Checker → Proof Engine → Backend
 - **AArch64** (`.bv`, `.ebv` → ARM64 binary via acyclic inlining) \[Added 2026-05-29\]
 - **x86_64** (`.bv`, `.ebv` → x86-64 binary via acyclic inlining) \[Added 2026-05-29\]
 - **Webstack** (`.rbv` → Next.js / Vite pages via target spec) \[Added 2026-05-29\]
+
+---
+
+## 1.5. Symbolic Design Philosophy
+
+Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
+
+| Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning |
+|:---:|---|---|---|
+| **`;`** | A dot with a tail falling away | A hard stop, a reset | Universal statement termination |
+| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / UFCS |
+| **`->`** | An arrow pointing right | Forward motion | Dataflow / State transition |
+| **`<-`** | An arrow pointing left | Backward motion | Mutation / Discard |
+| **`:`** | Two stacked dots | Identity, equivalence | Static type definition |
+| **`:>`** | Colon + right-arrow | Projecting identity outward | Compile-time metadata extraction |
+| **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards |
+| **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organization |
+| **`()`** | Parentheses that cup | Holding, containing | Argument enclosure |
+| **`@`** | The at-sign (loop + 'a') | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor |
+| **`&`** | Ampersand (et-ligature) | Connection, conjunction | Mutation marker (required) |
+| **`!`** | Vertical line + dot | Exclamation, warning | Control flow anomaly / fire-and-forget |
+| **`~`** | A wavy line | Oscillation, flipping | Boolean toggle / atomic lock |
+| **`?`** | A hook | A question, a check | Watchdog / timeout |
+| **`_`** | A small horizontal line | A gap, a placeholder | Ignored / unused value |
+
+**The principle:** If an operation has distinct physical, temporal, or compiler-level behavior, its visual representation must explicitly reflect that boundary. No hidden transformations.
 
 ---
 
@@ -264,6 +290,7 @@ arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
 
 arrow_discard ::= "<-" owned_ref                     // Pop/remove: <- &list
                 | "<-" owned_ref "[" expression "]"  // Indexed remove: <- &list[i]
+                | "<-" expression                    // Discard expression result: <- syscall! @ 1 (...)
 
 tuple ::= "(" (expression ("," expression)*)? ")"
 
@@ -413,6 +440,7 @@ arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
 
 arrow_discard ::= "<-" owned_ref                     // Pop/remove: <- &list
                 | "<-" owned_ref "[" expression "]"  // Indexed remove: <- &list[i]
+                | "<-" expression                    // Discard expression result: <- syscall! @ 1 (...)
 
 tuple ::= "(" (expression ("," expression)*)? ")"
 
@@ -1127,6 +1155,14 @@ The discard form (no receiver for the popped value) is equivalent to a pop
 followed immediately by dropping the value. It is useful when only the
 length effect is needed (e.g., drain-until-empty halting patterns).
 
+**Expression discard form:**
+```brief
+<- syscall! @ 3 (fd);          // Call syscall, discard result
+<- compute_side_effect();       // Call function, discard return
+```
+
+The expression discard `<- expr` evaluates any expression and discards its result. This is required for syscall results that are intentionally ignored, ensuring no system-level side-effect can ever be silently ignored.
+
 **Arrow direction rules:**
 | Form | Meaning |
 |------|---------|
@@ -1564,6 +1600,8 @@ syscall! sig exit(code: Int) -> void from "kernel.toml";
 - `syscall` - Kernel call, returns `Result<Int, E>`, must handle
 - `syscall!` - Kernel call, returns `void`, no handling needed
 
+**Syscall number resolution:** Syscall numbers are defined in the target specification (`.toml` or `.dbvs` files), not hardcoded in the compiler. The compiler resolves `SYS_OPEN` → `2` (x86_64 Linux) or `56` (AArch64 Linux) at compile time via the active target spec's `[syscalls]` section. This keeps the compiler target-agnostic and allows adding new OS targets without modifying Rust source code.
+
 ### 5.2 FFI Type Mapping
 
 | Brief Type | C Type | Rust Type | Python Type |
@@ -1622,7 +1660,17 @@ enum IOError {
 
 ### 5.4 Compiler Directives
 
-Compiler directives control backend behavior and FFI configuration. Two syntax forms are supported:
+**Brief's pragma philosophy (2026-06-06):** In other languages, pragmas exist so the programmer can feed the compiler hints to optimize better — they require deep systems-level insight. In Brief, the compiler runs at full speed by default — inlining, folding, precomputing, dead-field-eliminating — with maximum zealotry. **Pragmas are the programmer's way to request the compiler calm down on a specific point.** Not "help me optimize" but "I understand you can prove this is dead, but I need it alive anyway."
+
+Every pragma follows this pattern:
+- `#out` — "Calm down, this FFI call has external effects you can't see"
+- `#!out(x)` — "Calm down, this field reaches hardware/I/O you can't model"
+- `#assume_event(x)` — "Calm down proof engine, trust that `x` fires"
+- `#assume_shape(g, a)` — "Calm down, the guard+action contract is valid"
+
+The programmer holds the authority — the compiler defers. This is teachable in one sentence: **"Brief runs at full speed by default. A pragma is a request to the compiler to hold back its zealotry on a specific point."**
+
+Three syntax forms are supported:
 
 #### 5.4.1 `#pragma` Syntax (Recommended)
 

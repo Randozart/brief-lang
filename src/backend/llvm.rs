@@ -4798,7 +4798,7 @@ self.emit_declares(&mut out);
     fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast::Transaction)]) -> Vec<(String, String)> {
         let prg = crate::ast::Program {
             items: txns.iter().map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect(),
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential, exit_condition: None,
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential, exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
         };
         let mut pairs = crate::backend::detect_fusable_pairs(&prg);
         pairs.retain(|(a, b)| {
@@ -4983,6 +4983,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         }
     }
 
@@ -5018,6 +5020,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("%State"));
@@ -5080,6 +5084,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("@increment("));
@@ -5129,6 +5135,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("noalias"), "Transaction should have noalias");
@@ -5220,6 +5228,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
 
@@ -5304,6 +5314,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         // Payload variant Some → discriminant 1
@@ -5360,6 +5372,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         // Lower bound should be i64::MIN = -9223372036854775808
@@ -5448,6 +5462,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         // Must NOT emit nuw nsw — we removed manual emission
@@ -5500,6 +5516,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         }
     }
 
@@ -5633,6 +5651,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = LlvmBackend::new().generate(&program);
         // MMIO triggers with is_wake → metadata only includes LinkRef::Linked symbols, not Explicit
@@ -5685,6 +5705,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("bitcast float"),
@@ -5739,6 +5761,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("fadd fast float"),
@@ -5819,6 +5843,8 @@ mod tests {
             ffi: None, strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         }
     }
 
@@ -6125,6 +6151,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         }
     }
 
@@ -6230,6 +6258,8 @@ mod tests {
             ffi: None, strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: exit_expr.map(Box::new),
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         }
     }
 
@@ -6563,6 +6593,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: DispatchMode::Sequential,
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         }
     }
 

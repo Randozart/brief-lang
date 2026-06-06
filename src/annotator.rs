@@ -262,7 +262,7 @@ impl Annotator {
 
     fn format_signature(&self, sig: &Signature) -> String {
         let inputs: Vec<String> = sig
-            .input_types
+            .input_types()
             .iter()
             .map(|t| self.type_to_string(t))
             .collect();
@@ -531,6 +531,13 @@ impl Annotator {
                 let i = self.format_expr(index);
                 let idx_str = if matches!(index.as_ref(), Expr::Term) { String::new() } else { format!("[{}]", i) };
                 format!("<- {}{}", t, idx_str)
+            }
+            Expr::SigCall { modifier, expr } => {
+                let tag = match modifier {
+                    crate::ast::SigModifier::Out => "#out",
+                    crate::ast::SigModifier::Inline => "#inline",
+                };
+                format!("sig {} {}", tag, self.format_expr(expr))
             }
             Expr::Ellipsis => "...".to_string(),
         }

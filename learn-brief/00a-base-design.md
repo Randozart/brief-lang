@@ -4,6 +4,34 @@
 
 ---
 
+## Symbolic Design Philosophy: What the Symbols Mean
+
+Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
+
+| Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning |
+|--------|-------------|-------------------|----------------|
+| **`;`** | A dot with a tail falling away | A hard stop, a reset | Universal statement termination. The parser syncs here. |
+| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / UFCS — you reach into a thing. |
+| **`->`** | An arrow pointing right | Forward motion, transformation | Dataflow / State transition — something becomes something else. |
+| **`<-`** | An arrow pointing left | Backward motion, extraction | Mutation / Discard — something comes out of something. |
+| **`:`** | Two stacked dots | Identity, equivalence | Static type / definition — "This IS that." |
+| **`:>`** | Colon combined with right-arrow | Identity that projects outward | Compile-time metadata extraction — the compiler's knowledge ABOUT this. |
+| **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards — everything inside `[]` is bounded. |
+| **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organizational unit. |
+| **`()`** | Parentheses that cup | Holding, containing | Parameter / argument enclosure. |
+| **`@`** | The at-sign — a loop with an 'a' | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor. |
+| **`&`** | Ampersand — ligature of "et" (and) | Connection, conjunction | Mutation marker — links the name to the mutable location. |
+| **`!`** | A vertical line with a dot | An exclamation, a warning | Control flow anomaly / boundary — "pay attention." |
+| **`~`** | A wavy line | Oscillation, flipping | Boolean toggle — flip back and forth like a waveform. |
+| **`?`** | A hook | A question, a check | Watchdog / timeout — "is this still OK?" |
+| **`_`** | A small horizontal line | A gap, a placeholder | Ignored / unused value. |
+
+### The Principle: Syntactic Radical Honesty
+
+If an operation has distinct physical, temporal, or compiler-level behavior under the hood, its visual representation must explicitly reflect that boundary. Every boundary-crossing operation uses a different visual symbol. No hidden transformations.
+
+---
+
 ## Why This Document Exists
 
 Most language tutorials teach you the **syntax** - what to write. This document teaches you how to **see** Brief code. It's the mental model you need to read Brief the way a Brief developer reads it, understanding intent at a glance.
@@ -91,17 +119,23 @@ io.println("hello");
 
 ---
 
-### `.` - The Accessor
+### `.` - The Accessor (Field Access & UFCS)
 
 When you see `.`, you're accessing something **inside** a struct or type:
 
 ```brief
 account.balance         // Field access
-map.get("key")      // Method call
+list.len()           // UFCS: desugars to len(list)
 result.value         // Result unwrapping
 ```
 
-**What this means**: Brief tries to be transparent. If you see `something.field`, that struct exists **somewhere** in the standard library. Nothing is hidden magic.
+**UFCS (Uniform Function Call Syntax):** `subject.method(args)` is desugared at parse time to `method(subject, args)`. There is zero magic — the compiler has no hardcoded knowledge of `.len()` or any method name. `list.len()` becomes `len(list)`, which calls the standard library function that uses `list :> Size`.
+
+**Priority hierarchy:**
+1. **Internal struct field/defn** — if `subject` has a field or internal `defn` defined in its struct body, it compiles as a direct access
+2. **UFCS fallback** — otherwise desugars to `method(subject, args)`
+
+**What this means**: Brief is transparent. If you see `something.field`, that struct exists somewhere in the standard library. Nothing is hidden magic.
 
 ---
 
@@ -185,6 +219,7 @@ The `!` suffix signals **this does something unusual to control flow**:
 frgn! log_message(msg);   // Fire-and-forget - no Result to check, runs and forgets
 syscall! exit(code);      // Kernel call that never returns
 trg! interrupt();        // Trigger that can fire during any function
+term!;                    // Immediate process termination
 ```
 
 When you see `!`, pause and think: "What makes this call unusual?"
@@ -205,15 +240,46 @@ txn long_operation() [true][done] ?[5000ms] {   // Must finish in 5 seconds
 
 ---
 
-### `->` - Return Type
+### `->` / `<-` - Directional Dataflow and Transition
 
-`->` always introduces a **return type**:
+Arrows always represent **directional movement, dataflow, or state transitions**:
 
 ```brief
-defn double(x: Int) -> Int [true][result == x * 2] {
+&list <- x;                        # Push: x ends up in list
+x <- &list;                        # Pop: last element becomes x
+<- &list;                          # Discard: pop last element, throw away
+term -> &order_status = 1;         # Swan song: on successful term, set status
+defn double(x: Int) -> Int [...] { # Signature: input transitions to output
     term x * 2;
 };
 ```
+
+`->` means forward (data goes right). `<-` means backward (data comes left). The direction tells you which way values move.
+
+### `< -` The Discard Operator
+
+`<- expr` explicitly discards the result of an expression. This is required for syscall results that you don't want to handle:
+
+```brief
+<- syscall! @ 3 (fd);              # Close fd, discard result
+```
+
+This ensures no system-level side-effect can ever be silently ignored. The compiler forces you to acknowledge the boundary.
+
+---
+
+### `;` - Universal Statement Termination
+
+`;` is a hard stop. Every statement must end in `;`, including blocks denoted by `{}` (transaction bodies, struct definitions, pragmas):
+
+```brief
+rct txn t [x < 10] [x == 10] {
+    &x = x + 1;
+    term;
+};
+```
+
+The parser uses `;` as an absolute synchronization token during error recovery, preventing cascading errors from a single syntax mistake.
 
 ---
 
@@ -437,11 +503,21 @@ When you see **curly braces** `{ }` → think **code block**
 
 When you see **parentheses** `( )` → think **arguments**
 
-When you see **dot** `.` → think **struct field/method**
+When you see **dot** `.` → think **struct field / UFCS**
+
+When you see **arrow** `->` → think **dataflow / state transition**
+
+When you see **arrow** `<-` → think **mutation / discard**
+
+When you see **colon** `:` → think **type identity**
+
+When you see **colon-arrow** `:>` → think **compiler metadata projection**
+
+When you see **semicolon** `;` → think **statement boundary**
 
 When you see **ampersand** `&` → think **mutation (required)**
 
-When you see **at sign** `@` → think **prior state**
+When you see **at sign** `@` → think **prior state / address anchor**
 
 When you see **tilde** `~` → think **boolean toggle**
 

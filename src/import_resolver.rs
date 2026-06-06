@@ -83,6 +83,8 @@ impl ImportResolver {
             strict_mode: self.strict_mode,
             dispatch_mode: program.dispatch_mode,
             exit_condition: program.exit_condition.clone(),
+            out_pragmas: program.out_pragmas.clone(),
+            default_sig_modifier: program.default_sig_modifier,
         })
     }
 
@@ -102,6 +104,8 @@ impl ImportResolver {
                 strict_mode: self.strict_mode,
                 dispatch_mode: Default::default(),
                 exit_condition: None,
+                out_pragmas: vec![],
+            default_sig_modifier: None,
             });
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
@@ -117,6 +121,8 @@ impl ImportResolver {
                     strict_mode: self.strict_mode,
                     dispatch_mode: Default::default(),
                     exit_condition: None,
+                    out_pragmas: vec![],
+            default_sig_modifier: None,
                 });
             }
             if last_component.ends_with(".css") || last_component.ends_with(".svg") {
@@ -154,6 +160,8 @@ impl ImportResolver {
                         strict_mode: self.strict_mode,
                         dispatch_mode: Default::default(),
                         exit_condition: None,
+                        out_pragmas: vec![],
+            default_sig_modifier: None,
                     },
                 );
                 return Ok(Program {
@@ -165,6 +173,8 @@ impl ImportResolver {
                     strict_mode: self.strict_mode,
                     dispatch_mode: Default::default(),
                     exit_condition: None,
+                    out_pragmas: vec![],
+            default_sig_modifier: None,
                 });
             }
         }
@@ -223,6 +233,8 @@ self.loaded_modules.insert(
                         strict_mode: self.strict_mode,
                         dispatch_mode: Default::default(),
                         exit_condition: None,
+                        out_pragmas: vec![],
+            default_sig_modifier: None,
                     },
                 );
                 return Ok(Program {
@@ -237,6 +249,8 @@ self.loaded_modules.insert(
                     strict_mode: self.strict_mode,
                     dispatch_mode: Default::default(),
                     exit_condition: None,
+                    out_pragmas: vec![],
+            default_sig_modifier: None,
                 });
             }
         }
@@ -383,6 +397,8 @@ self.loaded_modules.insert(
             strict_mode: self.strict_mode,
             dispatch_mode: Default::default(),
             exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
         })
     }
 }

@@ -11,11 +11,9 @@
 
 import { __get_env_int } from "std/env.bv";
 import "link/brief_rt.o";
-import { io_pending } from "std/brief_rt.bv";
 
 frgn __sqrtf(val: Float) -> Float;
-frgn __print_float(d: Float) -> Bool from "libruntime";
-frgn __print_float(val: Float) -> Bool;
+frgn #out __print_float(val: Float) -> Bool;
 
 let bound: Int = __get_env_int("BOUND");
 let count: Int = 0;
@@ -67,7 +65,7 @@ let vz4: Float = -0.0000951592254519715870 * dpy;
 const m4: Float = 0.0000515138902046611451 * solar_mass;
 
 rct txn simulate [
-    bound > 0 && count < bound
+    count < bound
 ][count == bound] {
     let dx01: Float = bx0 - bx1;
     let dy01: Float = by0 - by1;
@@ -248,6 +246,9 @@ rct txn simulate [
 
     [count % 5000000 == 0] {
         let __printed: Bool = __print_float(energy);
+    };
+    [count == bound] {
+        term! -> __print_float(energy);
     };
     term;
 };

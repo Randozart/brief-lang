@@ -1246,6 +1246,19 @@ Expr::Ge(l, r) => {
                 self.store_arrow_list(&root_name, &field_path, Value::List(list));
                 Ok(Value::Void)
             }
+            Expr::SigCall { modifier, expr } => {
+                let inner = self.eval_expr(expr)?;
+                match modifier {
+                    crate::ast::SigModifier::Out => {
+                        // sig #out: treat as observable — pass through value
+                        Ok(inner)
+                    }
+                    crate::ast::SigModifier::Inline => {
+                        // sig #inline: treat as pure — pass through value
+                        Ok(inner)
+                    }
+                }
+            }
             Expr::Ellipsis => {
                 Err(RuntimeError::TypeMismatch(
                     "Ellipsis (...) must be resolved at parse time in bracket context".to_string(),
@@ -1267,16 +1280,6 @@ Expr::Ge(l, r) => {
                     && matches!(&arg_values[0], Value::Enum(en, _, _) if en == "Result")
                 {
                     return self.handle_result_method(&fn_name, &arg_values);
-                }
-
-                // Built-in len for String and List — must run before user definitions
-                // to prevent infinite recursion from std/string.bv's self-referential defn len.
-                if fn_name == "len" && arg_values.len() == 1 {
-                    match &arg_values[0] {
-                        Value::String(s) => return Ok(Value::Int(s.len() as i64)),
-                        Value::List(l) => return Ok(Value::Int(l.len() as i64)),
-                        _ => {}
-                    }
                 }
 
                 if self.definitions.contains_key(&fn_name) {
@@ -2983,5 +2986,66 @@ mod tests {
             }
             _ => panic!("Expected nested list result"),
         }
+    }
+
+    #[test]
+    fn test_projection_size_on_list() {
+        let mut i = Interpreter::new();
+        let list = Value::List(vec![Value::Int(10), Value::Int(20), Value::Int(30)]);
+        i.state.insert("xs".to_string(), list);
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("xs".to_string())),
+            target: ProjectionTarget::Size,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_projection_size_on_string() {
+        let mut i = Interpreter::new();
+        i.state.insert("s".to_string(), Value::String("hello".to_string()));
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("s".to_string())),
+            target: ProjectionTarget::Size,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(5));
+    }
+
+    #[test]
+    fn test_len_through_defn_no_magic() {
+        let mut i = Interpreter::new();
+        i.state.insert("xs".to_string(), Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
+        // Register a defn len that uses :> Size (exactly as stdlib does)
+        let defn = Definition {
+            name: "len".to_string(),
+            type_params: vec![],
+            parameters: vec![("list".to_string(), Type::Custom("List".to_string()))],
+            outputs: vec![Type::Int],
+            output_type: Some(crate::ast::OutputType::Single(Type::Int)),
+            output_names: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                span: None,
+            },
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Projection {
+                    source: Box::new(Expr::Identifier("list".to_string())),
+                    target: ProjectionTarget::Size,
+                })],
+                swan_song: None,
+                modifiers: vec![],
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        };
+        i.definitions.insert("len".to_string(), defn);
+        let expr = Expr::Call("len".to_string(), vec![Expr::Identifier("xs".to_string())]);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(3));
     }
 }

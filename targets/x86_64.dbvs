@@ -1,3 +1,4 @@
+// x86_64 Target Schema
 schema X86_64Target {
     name: String,
     architecture: String,
@@ -14,4 +15,20 @@ X86_64Target {
     endian: "little",
     os: "linux",
     abi: "gnu"
+};
+
+// Linux x86_64 syscall numbers
+schema SyscallMap {
+    SYS_READ: Int = 0;
+    SYS_WRITE: Int = 1;
+    SYS_OPEN: Int = 2;
+    SYS_CLOSE: Int = 3;
+    SYS_MMAP: Int = 9;
+    SYS_MUNMAP: Int = 11;
+    SYS_BRK: Int = 12;
+    SYS_IOCTL: Int = 16;
+    SYS_NANOSLEEP: Int = 35;
+    SYS_GETPID: Int = 39;
+    SYS_EXIT: Int = 60;
+    SYS_FUTEX: Int = 202;
 };

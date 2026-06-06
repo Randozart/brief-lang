@@ -16,3 +16,14 @@ AArch64Target {
     os: "linux",
     abi: "gnu"
 };
+
+// Linux AArch64 syscall numbers
+schema SyscallMap {
+    SYS_READ: Int = 63;
+    SYS_WRITE: Int = 64;
+    SYS_OPEN: Int = 56;
+    SYS_CLOSE: Int = 57;
+    SYS_MMAP: Int = 222;
+    SYS_MUNMAP: Int = 215;
+    SYS_EXIT: Int = 93;
+};

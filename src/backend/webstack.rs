@@ -2172,6 +2172,8 @@ use crate::ast::*;
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let bindings: Vec<Binding> = vec![];
         let output = backend.generate(&program, &bindings, "test");

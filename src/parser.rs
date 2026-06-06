@@ -486,11 +486,12 @@ impl<'a> Parser<'a> {
         // Supports any ordering of these directives before the first top-level item.
         let mut exit_condition = None;
         let mut file_attrs = Vec::new();
+        let mut out_pragmas = Vec::new();
 
         loop {
             match self.current_token() {
                 Some(Ok(Token::HashBang)) => {
-                    // Could be #!exit or #! key(value) (legacy pragma)
+                    // Could be #!exit, #!out, or #! key(value) (legacy pragma)
                     if let Some(Ok(Token::Identifier(kw))) = self.peek.as_ref().map(|(t, _)| t) {
                         if kw == "exit" {
                             self.advance(); // consume #!
@@ -499,8 +500,18 @@ impl<'a> Parser<'a> {
                             self.expect(Token::Semicolon)?;
                             continue;
                         }
+                        if kw == "out" {
+                            self.advance(); // consume #!
+                            self.advance(); // consume "out"
+                            self.expect(Token::LParen)?;
+                            let var_name = self.expect_identifier()?;
+                            self.expect(Token::RParen)?;
+                            self.expect(Token::Semicolon)?;
+                            out_pragmas.push(var_name);
+                            continue;
+                        }
                     }
-                    // Not #!exit — treat as legacy #! attribues
+                    // Not #!exit or #!out — treat as legacy #! attribues
                     file_attrs.append(&mut self.parse_attributes()?);
                     continue;
                 }
@@ -531,6 +542,8 @@ impl<'a> Parser<'a> {
             strict_mode: self.strict_mode,
             dispatch_mode,
             exit_condition,
+            out_pragmas,
+            default_sig_modifier: None,
         })
     }
 
@@ -801,45 +814,90 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_signature(&mut self) -> Result<Signature, SyntaxError> {
+        use crate::ast::SigModifier;
+
         self.expect(Token::Sig)?;
-        let name = self.expect_identifier()?;
-        self.expect(Token::Colon)?;
-        let input_type = self.parse_type()?;
-        self.expect(Token::Arrow)?;
 
-        let result_type = self.parse_result_type()?;
-
-        // NEW: Parse optional defn binding: sig name: Input -> Output = defn_name;
-        let bound_defn = if let Some(Ok(Token::Eq)) = self.current_token() {
+        // Parse optional #out / #inline modifier
+        let modifier = if matches!(self.current_token(), Some(Ok(Token::Hash))) {
             self.advance();
-            let defn_name = self.expect_identifier()?;
-            // Optionally parse arguments if present (e.g., = complex(x))
-            if let Some(Ok(Token::LParen)) = self.current_token() {
-                self.advance();
-                let mut depth = 1;
-                while depth > 0 {
-                    match self.current_token() {
-                        Some(Ok(Token::LParen)) => depth += 1,
-                        Some(Ok(Token::RParen)) => depth -= 1,
-                        _ => {;}
+            if let Some(Ok(Token::Identifier(kw))) = self.current_token() {
+                match kw.as_str() {
+                    "out" => {
+                        self.advance();
+                        Some(SigModifier::Out)
                     }
-                    self.advance();
+                    "inline" => {
+                        self.advance();
+                        Some(SigModifier::Inline)
+                    }
+                    _ => return self.spanned_err("Expected 'out' or 'inline' after '#' in sig".to_string()),
                 }
+            } else {
+                return self.spanned_err("Expected 'out' or 'inline' after '#' in sig".to_string());
             }
-            Some(defn_name)
         } else {
             None
         };
 
+        let name = self.expect_identifier()?;
+
+        // Parse parameter list: (name: Type, ...)
+        self.expect(Token::LParen)?;
+        let mut params = Vec::new();
+        if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+            loop {
+                let param_name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let param_type = self.parse_type()?;
+                params.push((param_name, param_type));
+
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RParen)?;
+
+        self.expect(Token::Arrow)?;
+
+        // Parse output type structure (supports | , [] named slots)
+        let output_type = self.parse_output_type_structure()?;
+        let result_type = match &output_type {
+            Some(ot) => ResultType::Projection(ot.all_types()),
+            None => {
+                // Single type
+                let ty = self.parse_type()?;
+                ResultType::Projection(vec![ty])
+            }
+        };
+
+        // Parse optional defn binding: = defn_name
+        let bound_defn = if let Some(Ok(Token::Eq)) = self.current_token() {
+            self.advance();
+            Some(self.expect_identifier()?)
+        } else {
+            None
+        };
+
+        // Parse optional from source clause: from source_name
         let source = if let Some(Ok(Token::From)) = self.current_token() {
             self.advance();
-            let mut path = Vec::new();
-            path.push(self.expect_identifier()?);
-            while let Some(Ok(Token::Dot)) = self.current_token() {
+            if let Some(Ok(Token::String(s))) = self.current_token() {
+                let loc = s.clone();
                 self.advance();
+                Some(loc)
+            } else {
+                let mut path = Vec::new();
                 path.push(self.expect_identifier()?);
+                while let Some(Ok(Token::Dot)) = self.current_token() {
+                    self.advance();
+                    path.push(self.expect_identifier()?);
+                }
+                Some(path.join("."))
             }
-            Some(path.join("."))
         } else {
             None
         };
@@ -854,11 +912,13 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon)?;
         Ok(Signature {
             name,
-            input_types: vec![input_type],
+            params,
             result_type,
             source,
             alias,
             bound_defn,
+            modifier,
+            output_type,
         })
     }
 
@@ -926,7 +986,7 @@ impl<'a> Parser<'a> {
     fn parse_frgn_binding(&mut self) -> Result<TopLevel, SyntaxError> {
         use crate::ast::{ForeignSignature, ForeignTarget, ResultType, FfiKind};
 
-        // Handle both frgn and frgn! tokens
+        // Handle all frgn/frgn!/syscall/syscall! tokens
         let ffi_kind = match self.current_token() {
             Some(Ok(Token::Frgn)) => {
                 self.advance();
@@ -936,8 +996,28 @@ impl<'a> Parser<'a> {
                 self.advance();
                 FfiKind::FrgnBang
             }
-            _ => return self.spanned_err("Expected 'frgn' or 'frgn!'".to_string()),
+            Some(Ok(Token::Syscall)) => {
+                self.advance();
+                FfiKind::Syscall
+            }
+            Some(Ok(Token::SyscallBang)) => {
+                self.advance();
+                FfiKind::SyscallBang
+            }
+            _ => return self.spanned_err("Expected 'frgn', 'frgn!', 'syscall', or 'syscall!'".to_string()),
         };
+
+        // Parse optional #out modifier — marks function as having observable output
+        let mut is_out = matches!(ffi_kind, FfiKind::FrgnBang | FfiKind::SyscallBang);
+        if matches!(self.current_token(), Some(Ok(Token::Hash))) {
+            self.advance();
+            if let Some(Ok(Token::Identifier(kw))) = self.current_token() {
+                if kw == "out" {
+                    self.advance();
+                    is_out = true;
+                }
+            }
+        }
 
         let name = self.expect_identifier()?;
 
@@ -989,8 +1069,8 @@ impl<'a> Parser<'a> {
         self.expect(Token::RParen)?;
 
         // Parse return type
-        let success_output = if ffi_kind == FfiKind::FrgnBang {
-            // Fire-and-forget: no return type expected
+        let success_output = if ffi_kind == FfiKind::FrgnBang || ffi_kind == FfiKind::SyscallBang {
+            // Fire-and-forget or fire-and-forget syscall: no return type expected
             Vec::new()
         } else {
             self.expect(Token::Arrow)?;
@@ -1076,6 +1156,7 @@ impl<'a> Parser<'a> {
             wasm_setup: None,
             result_type,
             ffi_kind: Some(ffi_kind),
+            is_out,
             span: None,
         };
 
@@ -3053,6 +3134,11 @@ let span = self.current_span();
             return Ok(outputs);
         }
 
+        // Stop at arrow token — swan song follows
+        if let Some(Ok(Token::Arrow)) = self.current_token() {
+            return Ok(outputs);
+        }
+
         outputs.push(Some(self.parse_expression()?));
 
         while let Some(Ok(Token::Comma)) = self.current_token() {
@@ -3498,7 +3584,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 let mut swan_song = None;
                 if let Some(Ok(Token::Arrow)) = self.current_token() {
                     self.advance();
-                    swan_song = Some(Box::new(self.parse_statement()?));
+                    let swan_expr = self.parse_expression()?;
+                    swan_song = Some(Box::new(Statement::Expression(swan_expr)));
                 }
                 let modifiers = self.parse_hashtag_modifiers()?;
                 self.expect(Token::Semicolon)?;
@@ -3510,7 +3597,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 let mut swan_song = None;
                 if let Some(Ok(Token::Arrow)) = self.current_token() {
                     self.advance();
-                    swan_song = Some(Box::new(self.parse_statement()?));
+                    let swan_expr = self.parse_expression()?;
+                    swan_song = Some(Box::new(Statement::Expression(swan_expr)));
                 }
                 let modifiers = self.parse_hashtag_modifiers()?;
                 self.expect(Token::Semicolon)?;

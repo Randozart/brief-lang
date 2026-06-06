@@ -109,7 +109,7 @@ impl TypeChecker {
             "to_json".to_string(),
             Signature {
                 name: "to_json".to_string(),
-                input_types: vec![Type::Custom("Object".to_string())],
+                params: vec![("".to_string(), Type::Custom("Object".to_string()))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::String]),
                 source: None,
                 alias: None,
@@ -122,7 +122,7 @@ impl TypeChecker {
             "from_json".to_string(),
             Signature {
                 name: "from_json".to_string(),
-                input_types: vec![Type::String],
+                params: vec![("".to_string(), Type::String)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Applied(
                     "Result".to_string(),
                     vec![Type::Custom("Object".to_string()), Type::String],
@@ -138,7 +138,7 @@ impl TypeChecker {
             "new_builder".to_string(),
             Signature {
                 name: "new_builder".to_string(),
-                input_types: vec![],
+                params: vec![], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
                 source: None,
                 alias: None,
@@ -150,7 +150,7 @@ impl TypeChecker {
             "append_str".to_string(),
             Signature {
                 name: "append_str".to_string(),
-                input_types: vec![Type::Custom("StringBuilder".to_string()), Type::String],
+                params: vec![("".to_string(), Type::Custom("StringBuilder".to_string())), ("".to_string(), Type::String)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
                 source: None,
                 alias: None,
@@ -162,7 +162,7 @@ impl TypeChecker {
             "append_char".to_string(),
             Signature {
                 name: "append_char".to_string(),
-                input_types: vec![Type::Custom("StringBuilder".to_string()), Type::Char],
+                params: vec![("".to_string(), Type::Custom("StringBuilder".to_string())), ("".to_string(), Type::Char)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
                 source: None,
                 alias: None,
@@ -174,7 +174,7 @@ impl TypeChecker {
             "append_int".to_string(),
             Signature {
                 name: "append_int".to_string(),
-                input_types: vec![Type::Custom("StringBuilder".to_string()), Type::Int],
+                params: vec![("".to_string(), Type::Custom("StringBuilder".to_string())), ("".to_string(), Type::Int)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
                 source: None,
                 alias: None,
@@ -186,7 +186,7 @@ impl TypeChecker {
             "to_string".to_string(),
             Signature {
                 name: "to_string".to_string(),
-                input_types: vec![Type::Custom("StringBuilder".to_string())],
+                params: vec![("".to_string(), Type::Custom("StringBuilder".to_string()))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::String]),
                 source: None,
                 alias: None,
@@ -198,7 +198,7 @@ impl TypeChecker {
             "String".to_string(),
             Signature {
                 name: "String".to_string(),
-                input_types: vec![Type::Int],
+                params: vec![("".to_string(), Type::Int)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::String]),
                 source: None,
                 alias: None,
@@ -210,7 +210,7 @@ impl TypeChecker {
             "char_to_string".to_string(),
             Signature {
                 name: "char_to_string".to_string(),
-                input_types: vec![Type::Char],
+                params: vec![("".to_string(), Type::Char)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::String]),
                 source: None,
                 alias: None,
@@ -291,7 +291,7 @@ impl TypeChecker {
             "is_some".to_string(),
             Signature {
                 name: "is_some".to_string(),
-                input_types: vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])],
+                params: vec![("".to_string(), Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())]))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -303,7 +303,7 @@ impl TypeChecker {
             "is_none".to_string(),
             Signature {
                 name: "is_none".to_string(),
-                input_types: vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])],
+                params: vec![("".to_string(), Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())]))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -315,7 +315,7 @@ impl TypeChecker {
             "unwrap".to_string(),
             Signature {
                 name: "unwrap".to_string(),
-                input_types: vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])],
+                params: vec![("".to_string(), Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())]))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
                 source: None,
                 alias: None,
@@ -328,7 +328,7 @@ impl TypeChecker {
             "is_whitespace".to_string(),
             Signature {
                 name: "is_whitespace".to_string(),
-                input_types: vec![Type::Char],
+                params: vec![("".to_string(), Type::Char)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -340,7 +340,7 @@ impl TypeChecker {
             "is_digit".to_string(),
             Signature {
                 name: "is_digit".to_string(),
-                input_types: vec![Type::Char],
+                params: vec![("".to_string(), Type::Char)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -352,7 +352,7 @@ impl TypeChecker {
             "is_alpha".to_string(),
             Signature {
                 name: "is_alpha".to_string(),
-                input_types: vec![Type::Char],
+                params: vec![("".to_string(), Type::Char)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -364,7 +364,7 @@ impl TypeChecker {
             "is_alphanumeric".to_string(),
             Signature {
                 name: "is_alphanumeric".to_string(),
-                input_types: vec![Type::Char],
+                params: vec![("".to_string(), Type::Char)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -376,7 +376,7 @@ impl TypeChecker {
             "is_hex_digit".to_string(),
             Signature {
                 name: "is_hex_digit".to_string(),
-                input_types: vec![Type::Char],
+                params: vec![("".to_string(), Type::Char)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -389,7 +389,7 @@ impl TypeChecker {
             "to_int".to_string(),
             Signature {
                 name: "to_int".to_string(),
-                input_types: vec![Type::String],
+                params: vec![("".to_string(), Type::String)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Int]),
                 source: None,
                 alias: None,
@@ -401,7 +401,7 @@ impl TypeChecker {
             "to_float".to_string(),
             Signature {
                 name: "to_float".to_string(),
-                input_types: vec![Type::String],
+                params: vec![("".to_string(), Type::String)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Float]),
                 source: None,
                 alias: None,
@@ -414,7 +414,7 @@ impl TypeChecker {
             "len".to_string(),
             Signature {
                 name: "len".to_string(),
-                input_types: vec![Type::String],
+                params: vec![("".to_string(), Type::String)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Int]),
                 source: None,
                 alias: None,
@@ -427,7 +427,7 @@ impl TypeChecker {
             "is_ok".to_string(),
             Signature {
                 name: "is_ok".to_string(),
-                input_types: vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])],
+                params: vec![("".to_string(), Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())]))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -439,7 +439,7 @@ impl TypeChecker {
             "is_err".to_string(),
             Signature {
                 name: "is_err".to_string(),
-                input_types: vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])],
+                params: vec![("".to_string(), Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())]))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Bool]),
                 source: None,
                 alias: None,
@@ -451,7 +451,7 @@ impl TypeChecker {
             "unwrap".to_string(),
             Signature {
                 name: "unwrap".to_string(),
-                input_types: vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])],
+                params: vec![("".to_string(), Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())]))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
                 source: None,
                 alias: None,
@@ -463,7 +463,7 @@ impl TypeChecker {
             "unwrap_err".to_string(),
             Signature {
                 name: "unwrap_err".to_string(),
-                input_types: vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])],
+                params: vec![("".to_string(), Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())]))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::TypeVar("E".to_string())]),
                 source: None,
                 alias: None,
@@ -475,10 +475,7 @@ impl TypeChecker {
             "unwrap_or".to_string(),
             Signature {
                 name: "unwrap_or".to_string(),
-                input_types: vec![
-                    Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())]),
-                    Type::TypeVar("T".to_string()),
-                ],
+                params: vec![("".to_string(), Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])), ("".to_string(), Type::TypeVar("T".to_string()))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
                 source: None,
                 alias: None,
@@ -490,7 +487,7 @@ impl TypeChecker {
             "len".to_string(),
             Signature {
                 name: "len".to_string(),
-                input_types: vec![Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])],
+                params: vec![("".to_string(), Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())]))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Int]),
                 source: None,
                 alias: None,
@@ -502,10 +499,7 @@ impl TypeChecker {
             "append".to_string(),
             Signature {
                 name: "append".to_string(),
-                input_types: vec![
-                    Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())]),
-                    Type::TypeVar("T".to_string()),
-                ],
+                params: vec![("".to_string(), Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])), ("".to_string(), Type::TypeVar("T".to_string()))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())])]),
                 source: None,
                 alias: None,
@@ -517,7 +511,7 @@ impl TypeChecker {
             "char_to_string".to_string(),
             Signature {
                 name: "char_to_string".to_string(),
-                input_types: vec![Type::Char],
+                params: vec![("".to_string(), Type::Char)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::String]),
                 source: None,
                 alias: None,
@@ -529,7 +523,7 @@ impl TypeChecker {
             "String".to_string(),
             Signature {
                 name: "String".to_string(),
-                input_types: vec![Type::Int],
+                params: vec![("".to_string(), Type::Int)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::String]),
                 source: None,
                 alias: None,
@@ -541,7 +535,7 @@ impl TypeChecker {
             "Some".to_string(),
             Signature {
                 name: "Some".to_string(),
-                input_types: vec![Type::TypeVar("T".to_string())],
+                params: vec![("".to_string(), Type::TypeVar("T".to_string()))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])]),
                 source: None,
                 alias: None,
@@ -553,7 +547,7 @@ impl TypeChecker {
             "None".to_string(),
             Signature {
                 name: "None".to_string(),
-                input_types: vec![],
+                params: vec![], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])]),
                 source: None,
                 alias: None,
@@ -565,7 +559,7 @@ impl TypeChecker {
             "Ok".to_string(),
             Signature {
                 name: "Ok".to_string(),
-                input_types: vec![Type::TypeVar("T".to_string())],
+                params: vec![("".to_string(), Type::TypeVar("T".to_string()))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])]),
                 source: None,
                 alias: None,
@@ -577,7 +571,7 @@ impl TypeChecker {
             "Err".to_string(),
             Signature {
                 name: "Err".to_string(),
-                input_types: vec![Type::TypeVar("E".to_string())],
+                params: vec![("".to_string(), Type::TypeVar("E".to_string()))], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())])]),
                 source: None,
                 alias: None,
@@ -752,7 +746,7 @@ impl TypeChecker {
     }
 
     fn check_signature(&mut self, sig: &Signature) {
-        for input_ty in &sig.input_types {
+        for input_ty in &sig.input_types() {
             self.validate_type(input_ty);
         }
         match &sig.result_type {
@@ -1231,9 +1225,9 @@ impl TypeChecker {
                         ResultType::VoidType => vec![Type::Void],
                     };
                     // Try to substitute TypeVars based on input types
-                    if !args.is_empty() && !sig.input_types.is_empty() {
+                    if !args.is_empty() && !sig.input_types().is_empty() {
                         let arg_ty = self.infer_expression(&args[0]);
-                        let substitutions = self.extract_type_substitutions(&sig.input_types[0], &arg_ty);
+                        let substitutions = self.extract_type_substitutions(&sig.input_types()[0], &arg_ty);
                         if !substitutions.is_empty() {
                             if let Some(ty) = result_types.first() {
                                 return self.substitute_type_vars(ty, &substitutions);

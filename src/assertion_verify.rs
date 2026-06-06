@@ -201,7 +201,7 @@ mod tests {
     fn test_literal_true_assertion() {
         let sig = Signature {
             name: "always_true".to_string(),
-            input_types: vec![],
+            params: vec![], modifier: None, output_type: None,
             result_type: ResultType::TrueAssertion,
             source: Some("always_true_defn".to_string()),
             alias: None,
@@ -234,7 +234,7 @@ mod tests {
     fn test_false_assertion_fails() {
         let sig = Signature {
             name: "always_false".to_string(),
-            input_types: vec![],
+            params: vec![], modifier: None, output_type: None,
             result_type: ResultType::TrueAssertion,
             source: Some("always_false_defn".to_string()),
             alias: None,
@@ -267,7 +267,7 @@ mod tests {
     fn test_variable_assigned_true() {
         let sig = Signature {
             name: "check_x".to_string(),
-            input_types: vec![Type::Bool],
+            params: vec![("".to_string(), Type::Bool)], modifier: None, output_type: None,
             result_type: ResultType::TrueAssertion,
             source: Some("check_x_defn".to_string()),
             alias: None,
@@ -308,7 +308,7 @@ mod tests {
     fn test_non_bool_output_fails() {
         let sig = Signature {
             name: "not_bool".to_string(),
-            input_types: vec![],
+            params: vec![], modifier: None, output_type: None,
             result_type: ResultType::TrueAssertion,
             source: Some("not_bool_defn".to_string()),
             alias: None,
@@ -343,7 +343,7 @@ mod tests {
     fn test_no_assertion_type_skipped() {
         let sig = Signature {
             name: "regular_sig".to_string(),
-            input_types: vec![],
+            params: vec![], modifier: None, output_type: None,
             result_type: ResultType::Projection(vec![Type::Bool]),
             source: Some("regular_sig_defn".to_string()),
             alias: None,

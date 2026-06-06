@@ -345,6 +345,8 @@ impl Desugarer {
             strict_mode: StrictMode::Off,
             dispatch_mode: program.dispatch_mode,
             exit_condition: program.exit_condition.clone(),
+            out_pragmas: program.out_pragmas.clone(),
+            default_sig_modifier: program.default_sig_modifier,
         }
     }
 
@@ -452,19 +454,23 @@ impl Desugarer {
             if !self.generated_signatures.iter().any(|s| s.name == *name) {
                 let sig = Signature {
                     name: name.clone(),
-                    input_types: input_types.clone(),
+                    params: input_types.iter().map(|t| ("".to_string(), t.clone())).collect(),
                     result_type: ResultType::Projection(vec![Type::Bool]),
                     source: None,
                     alias: None,
                     bound_defn: None,
+                    modifier: None,
+                    output_type: None,
                 };
                 self.generated_signatures.push(Signature {
                     name: name.clone(),
-                    input_types,
+                    params: input_types.into_iter().map(|t| ("".to_string(), t)).collect(),
                     result_type: ResultType::TrueAssertion,
                     source: None,
                     alias: None,
                     bound_defn: None,
+                    modifier: None,
+                    output_type: None,
                 });
                 return vec![sig];
             }

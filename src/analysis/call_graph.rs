@@ -244,6 +244,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         }
     }
 
@@ -258,6 +260,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -275,6 +279,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -292,6 +298,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -313,6 +321,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -334,6 +344,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -353,6 +365,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);
@@ -374,6 +388,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let mut cg = CallGraph::new();
         cg.build_from_program(&program);

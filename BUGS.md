@@ -484,3 +484,61 @@ Without any `memory(...)` restriction, LLVM conservatively assumes the function 
 
 **Lesson**: If a benchmark must execute at runtime, use `__get_env_int("BOUND")` for the bound. A compile-time-known bound WILL be precomputed. This is correct, not a bug. See AGENTS.md §"Precomputation is Correct, Not a Bug".
 
+---
+
+## 2026-06-05 — Parser fails on `term! -> swan_song;` inside guarded blocks
+
+**Issue**: `term! -> __print_int(checksum);` inside `[count == N] { ... }` caused parse error `expected identifier, found Arrow at 66:15`.
+
+**Root Cause**: `parse_term_outputs()` didn't check for `Token::Arrow`, so it tried to parse `->` as an expression. Additionally, swan song was parsed via `parse_statement()` which consumed the trailing `;`, but the caller's `expect(Token::Semicolon)` expected another one.
+
+**Fix**: Added `Token::Arrow` check in `parse_term_outputs()` to return early. Changed swan song parsing from `parse_statement()` to `parse_expression()` wrapped in `Statement::Expression`, so semicolon is consumed once by the caller.
+
+**Lesson**: New syntax needs parser checks for all possible token sequences following `term!`. The `->` arrow, term outputs, and semicolon interact in ways that are easy to miss.
+
+---
+
+## 2026-06-05 — LLVM `attributes #1` declared FFI functions as pure, letting optimizer eliminate I/O
+
+**Issue**: `opt -O3` eliminated `__print_int` calls from merged bitcode. Benchmark binaries produced zero output.
+
+**Root Cause**: `attributes #1 = { nocallback nofree nosync nounwind willreturn }` told LLVM the function had no side effects. LLVM eliminated the calls as dead code.
+
+**Fix**: Changed to `attributes #1 = { nounwind }`. Removed `nofree`, `nosync`, `willreturn`, `nocallback` — these all signal purity.
+
+**Lesson**: FFI function declarations must not over-promise purity. Only `nounwind` is safe to assume. `willreturn` in particular tells LLVM it can speculate calls.
+
+---
+
+## 2026-06-05 — `__putchar` undefined at link time despite definition in runtime
+
+**Issue**: `__putchar` was declared in `fasta.bv` as `frgn` and present in `runtime/brief_rt.c`, but LTO link failed with `undefined reference to '__putchar'`.
+
+**Root Cause**: Function was `static inline` with `always_inline`. Clang compiled `brief_rt.c` at `-O2`, inlined all calls within the runtime translation unit, then discarded the function body. The program IR's `declare` remained unresolved across module boundaries.
+
+**Fix**: Changed to `__attribute__((used)) int64_t __putchar(int64_t c)`. No `static`, no `inline`. The `used` attribute forces emission even when no callers exist within the translation unit.
+
+**Lesson**: Runtime helper functions called only from program IR (not from within the runtime itself) must not be `static`. Use `__attribute__((used))` to prevent dead-code elimination.
+
+--- 
+
+## 2026-06-05 — `io_pending` used as liveness workaround in benchmarks
+
+**Issue**: Several benchmarks used `io_pending` (an FFI call) in their transaction guard to prevent pure-counter fold elimination. This was a relic from before `term! -> swan_song;` provided proper liveness semantics.
+
+**Root Cause**: Cargo-culted pattern from older benchmarks. `io_pending` was a hack — it forced the compiler to treat the body as impure because the precondition referenced FFI.
+
+**Fix**: Removed `io_pending` imports and guard conditions from all Tier 3 benchmarks. Guards now use `[count < N][count == N]` directly.
+
+**Lesson**: When new language features supersede old workarounds, audit existing code for the old pattern and clean it up. Documented here to prevent future cargo-culting.
+
+---
+
+## 2026-06-05 — Accidental deletion of benchmark source files during cleanup
+
+**Issue**: `rm -f benchmarks/fannkuch_redux*` matched and deleted both build artifacts AND source files (`fannkuch_redux.bv`, `fannkuch_redux_c.c`). Restored from git but lost uncommitted edits.
+
+**Root Cause**: Shell glob `*` matched all files starting with the prefix. No distinction between `.bv` source, `_c.c` reference, `.o` object, `.ll` IR, and binary executable.
+
+**Lesson**: Never glob over source files. Use explicit filenames for cleanup: `rm -f benchmarks/fannkuch_redux benchmarks/fannkuch_redux.ll benchmarks/fannkuch_redux.o`. Or better: organize build artifacts in a separate subdirectory.
+

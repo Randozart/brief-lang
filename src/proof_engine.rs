@@ -2359,6 +2359,9 @@ impl ProofEngine {
                 self.collect_identifiers(target, vars);
                 self.collect_identifiers(index, vars);
             }
+            Expr::SigCall { expr, .. } => {
+                self.collect_identifiers(expr, vars);
+            }
             Expr::Ellipsis => {}
         }
     }

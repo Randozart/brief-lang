@@ -6,7 +6,7 @@
 import "link/brief_rt.o";
 import { io_pending } from "std/brief_rt.bv";
 
-frgn __putchar(c: Int) -> Int from "libruntime";
+frgn #out __putchar(c: Int) -> Int from "libruntime";
 frgn __get_env_int(name: String) -> Int from "libruntime";
 
 let count: Int = 0;

@@ -150,6 +150,7 @@ mod tests {
             postcondition: None,
             buffer_mode: None,
             ffi_kind: None,
+            is_out: false,
             span: None,
         };
 
@@ -197,6 +198,7 @@ mod tests {
             postcondition: None,
             buffer_mode: None,
             ffi_kind: None,
+            is_out: false,
             span: None,
         };
 

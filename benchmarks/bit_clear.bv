@@ -19,7 +19,7 @@
 
 import "link/brief_rt.o";
 
-frgn __print_int(n: Int) -> Bool from "libruntime";
+frgn #out __print_int(n: Int) -> Bool from "libruntime";
 
 const initial_reg: Int = 0x7FFFFFFFFFFFFFFF;
 let reg: Int = initial_reg;

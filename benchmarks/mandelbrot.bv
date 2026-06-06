@@ -1,13 +1,12 @@
 // Mandelbrot — Integer iteration benchmark
 // Exercises: dense Int arithmetic (mul, add, mod, shift), LCG, 6-field complex
-// simulation with integer "escape" tracking. Float_math + nbody already cover Float.
-// This benchmark stresses the Int pipeline with intermediate-complexity operations.
+// simulation with integer "escape" tracking.
 
 #!exit count == N && escapes >= 0 && zr >= 0 && zi >= 0 && cr >= -200 && ci >= -200;
 
 import "link/brief_rt.o";
-import { io_pending } from "std/brief_rt.bv";
 
+frgn #out __print_int(n: Int) -> Bool from "libruntime";
 frgn __get_env_int(name: String) -> Int from "libruntime";
 
 let count: Int = 0;
@@ -29,8 +28,7 @@ const SCALE: Int = 100;
 const THRESH: Int = 40000;
 
 // ── Transaction ──────────────────────────────────────────────────────
-rct txn mb [io_pending && count < N][count == N] {
-    // LCG for next c
+rct txn mb [count < N][count == N] {
     &seed = seed * IA;
     &seed = seed + IC;
     &seed = seed % IM;
@@ -41,16 +39,22 @@ rct txn mb [io_pending && count < N][count == N] {
     &seed = seed % IM;
     &ci = seed % 200 - 100;
 
-    // Complex multiply: z = z * c (fixed-point, scale 100)
     &t1 = zr * cr / SCALE;
     &t2 = zi * ci / SCALE;
     &t3 = zr * ci / SCALE;
     &zr = t1 - t2;
     &zi = t3 + zi * cr / SCALE;
 
-    // Track norm
     &escapes = escapes + zr * zr / SCALE + zi * zi / SCALE;
 
+    [count % 5000000 == 0] {
+        __print_int(escapes);
+    };
+
     &count = count + 1;
+
+    [count == N] {
+        term! -> __print_int(escapes);
+    };
     term;
 };

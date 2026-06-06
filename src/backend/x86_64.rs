@@ -1000,6 +1000,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains(".data"));
@@ -1030,6 +1032,8 @@ mod tests {
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
+        out_pragmas: vec![],
+        default_sig_modifier: None,
         };
         let output = backend.generate(&program);
         assert!(output.contains("_start"));
