@@ -1367,549 +1367,13 @@ let enum_state = self.state.get(&fn_name).cloned();
                     return self.call_defn(&defn_name, args);
                 }
 
-if fn_name == "clone" && !arg_values.is_empty() {
-                    return Ok(arg_values[0].clone());
-                }
-                if fn_name == "char_at" && arg_values.len() == 2 {
-                    if let Value::String(s) = &arg_values[0] {
-                        if let Value::Int(idx) = &arg_values[1] {
-                            let i = *idx as usize;
-                            return Ok(s.chars().nth(i).map(Value::Char).unwrap_or(Value::Char('\0')));
-                        }
-                    }
-                }
-                if fn_name == "HashMap::new" || fn_name == "new_map" || fn_name == "empty_map" {
-                    return Ok(Value::HashMap(HashMap::new()));
-                }
-
-                if fn_name == "HashSet::new" || fn_name == "new_set" {
-                    return Ok(Value::HashSet(HashSet::new()));
-                }
-
-                // HashMap methods (called as map.insert(key, value))
-                if arg_values.len() >= 1 {
-                    if let Value::HashMap(map) = &arg_values[0] {
-                        let mut map = map.clone();
-                        
-                        if fn_name == "insert" && arg_values.len() == 3 {
-                            if let Value::String(key) = &arg_values[1] {
-                                map.insert(key.clone(), arg_values[2].clone());
-                                return Ok(Value::HashMap(map));
-                            }
-                        }
-                        
-                        if fn_name == "get" && arg_values.len() == 2 {
-                            if let Value::String(key) = &arg_values[1] {
-                                return Ok(match map.get(key) {
-                                    Some(v) => Value::Enum(
-                                        "Option".to_string(),
-                                        "Some".to_string(),
-                                        HashMap::from([("value".to_string(), v.clone())]),
-                                    ),
-                                    None => Value::Enum(
-                                        "Option".to_string(),
-                                        "None".to_string(),
-                                        HashMap::new(),
-                                    ),
-                                });
-                            }
-                        }
-                        
-                        if fn_name == "contains_key" && arg_values.len() == 2 {
-                            if let Value::String(key) = &arg_values[1] {
-                                return Ok(Value::Bool(map.contains_key(key)));
-                            }
-                        }
-                        
-                        if fn_name == "remove" && arg_values.len() == 2 {
-                            if let Value::String(key) = &arg_values[1] {
-                                map.remove(key);
-                                return Ok(Value::HashMap(map));
-                            }
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(map.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(map.is_empty()));
-                        }
-                        
-                        if fn_name == "keys" {
-                            let keys: Vec<Value> = map.keys()
-                                .map(|k| Value::String(k.clone()))
-                                .collect();
-                            return Ok(Value::List(keys));
-                        }
-                        
-                        if fn_name == "values" {
-                            let values: Vec<Value> = map.values().cloned().collect();
-                            return Ok(Value::List(values));
-                        }
-                    }
-                    
-                    // HashSet methods
-                    if let Value::HashSet(set) = &arg_values[0] {
-                        let mut set = set.clone();
-                        
-                        if fn_name == "insert" && arg_values.len() == 2 {
-                            if let Value::String(item) = &arg_values[1] {
-                                set.insert(item.clone());
-                                return Ok(Value::HashSet(set));
-                            }
-                        }
-                        
-                        if fn_name == "contains" && arg_values.len() == 2 {
-                            if let Value::String(item) = &arg_values[1] {
-                                return Ok(Value::Bool(set.contains(item)));
-                            }
-                        }
-                        
-                        if fn_name == "remove" && arg_values.len() == 2 {
-                            if let Value::String(item) = &arg_values[1] {
-                                set.remove(item);
-                                return Ok(Value::HashSet(set));
-                            }
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(set.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(set.is_empty()));
-                        }
-                    }
-                }
-
-                // HashMap built-in methods
-                if fn_name == "HashMap::new" || fn_name == "new_map" {
-                    return Ok(Value::HashMap(HashMap::new()));
-                }
-
-                if fn_name == "HashSet::new" || fn_name == "new_set" {
-                    return Ok(Value::HashSet(HashSet::new()));
-                }
-
-                // HashMap methods (called as map.insert(key, value))
-                if arg_values.len() >= 1 {
-                    if let Value::HashMap(map) = &arg_values[0] {
-                        let mut map = map.clone();
-                        
-                        if fn_name == "insert" && arg_values.len() == 3 {
-                            if let Value::String(key) = &arg_values[1] {
-                                map.insert(key.clone(), arg_values[2].clone());
-                                return Ok(Value::HashMap(map));
-                            }
-                        }
-                        
-                        if fn_name == "get" && arg_values.len() == 2 {
-                            if let Value::String(key) = &arg_values[1] {
-                                return Ok(match map.get(key) {
-                                    Some(v) => Value::Enum(
-                                        "Option".to_string(),
-                                        "Some".to_string(),
-                                        HashMap::from([("value".to_string(), v.clone())]),
-                                    ),
-                                    None => Value::Enum(
-                                        "Option".to_string(),
-                                        "None".to_string(),
-                                        HashMap::new(),
-                                    ),
-                                });
-                            }
-                        }
-                        
-                        if fn_name == "contains_key" && arg_values.len() == 2 {
-                            if let Value::String(key) = &arg_values[1] {
-                                return Ok(Value::Bool(map.contains_key(key)));
-                            }
-                        }
-                        
-                        if fn_name == "remove" && arg_values.len() == 2 {
-                            if let Value::String(key) = &arg_values[1] {
-                                map.remove(key);
-                                return Ok(Value::HashMap(map));
-                            }
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(map.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(map.is_empty()));
-                        }
-                        
-                        if fn_name == "keys" {
-                            let keys: Vec<Value> = map.keys()
-                                .map(|k| Value::String(k.clone()))
-                                .collect();
-                            return Ok(Value::List(keys));
-                        }
-                        
-                        if fn_name == "values" {
-                            let values: Vec<Value> = map.values().cloned().collect();
-                            return Ok(Value::List(values));
-                        }
-                    }
-                    
-                    // HashSet methods
-                    if let Value::HashSet(set) = &arg_values[0] {
-                        let mut set = set.clone();
-                        
-                        if fn_name == "insert" && arg_values.len() == 2 {
-                            if let Value::String(item) = &arg_values[1] {
-                                set.insert(item.clone());
-                                return Ok(Value::HashSet(set));
-                            }
-                        }
-                        
-                        if fn_name == "contains" && arg_values.len() == 2 {
-                            if let Value::String(item) = &arg_values[1] {
-                                return Ok(Value::Bool(set.contains(item)));
-                            }
-                        }
-                        
-                        if fn_name == "remove" && arg_values.len() == 2 {
-                            if let Value::String(item) = &arg_values[1] {
-                                set.remove(item);
-                                return Ok(Value::HashSet(set));
-                            }
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(set.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(set.is_empty()));
-                        }
-                    }
-                }
-
-                // StringBuilder built-in methods
-                if fn_name == "StringBuilder::new" || fn_name == "new_builder" {
-                    return Ok(Value::StringBuilder(String::new()));
-                }
-
-                if arg_values.len() >= 1 {
-                    if let Value::StringBuilder(buffer) = &arg_values[0] {
-                        let mut buffer = buffer.clone();
-                        
-                        if fn_name == "append_char" && arg_values.len() == 2 {
-                            if let Value::Char(c) = &arg_values[1] {
-                                buffer.push(*c);
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "append_str" && arg_values.len() == 2 {
-                            if let Value::String(s) = &arg_values[1] {
-                                buffer.push_str(s);
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "append_int" && arg_values.len() == 2 {
-                            if let Value::Int(n) = &arg_values[1] {
-                                buffer.push_str(&n.to_string());
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "append_bool" && arg_values.len() == 2 {
-                            if let Value::Bool(b) = &arg_values[1] {
-                                buffer.push_str(&b.to_string());
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "append_float" && arg_values.len() == 2 {
-                            if let Value::Float(f) = &arg_values[1] {
-                                buffer.push_str(&f.to_string());
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "to_string" {
-                            return Ok(Value::String(buffer.clone()));
-                        }
-                        
-                        if fn_name == "clear" {
-                            buffer.clear();
-                            return Ok(Value::StringBuilder(buffer));
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(buffer.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(buffer.is_empty()));
-                        }
-                        
-                        if fn_name == "capacity" {
-                            // For simplicity, capacity = len (no pre-allocation yet)
-                            return Ok(Value::Int(buffer.len() as i64));
-                        }
-                    }
-                }
-
-                // StringBuilder built-in methods
-                if fn_name == "StringBuilder::new" || fn_name == "new_builder" {
-                    return Ok(Value::StringBuilder(String::new()));
-                }
-
-                if arg_values.len() >= 1 {
-                    if let Value::StringBuilder(buffer) = &arg_values[0] {
-                        let mut buffer = buffer.clone();
-                        
-                        if fn_name == "append_char" && arg_values.len() == 2 {
-                            if let Value::Char(c) = &arg_values[1] {
-                                buffer.push(*c);
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "append_str" && arg_values.len() == 2 {
-                            if let Value::String(s) = &arg_values[1] {
-                                buffer.push_str(s);
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "append_int" && arg_values.len() == 2 {
-                            if let Value::Int(n) = &arg_values[1] {
-                                buffer.push_str(&n.to_string());
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "append_bool" && arg_values.len() == 2 {
-                            if let Value::Bool(b) = &arg_values[1] {
-                                buffer.push_str(&b.to_string());
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "append_float" && arg_values.len() == 2 {
-                            if let Value::Float(f) = &arg_values[1] {
-                                buffer.push_str(&f.to_string());
-                                return Ok(Value::StringBuilder(buffer));
-                            }
-                        }
-                        
-                        if fn_name == "to_string" {
-                            return Ok(Value::String(buffer.clone()));
-                        }
-                        
-                        if fn_name == "clear" {
-                            buffer.clear();
-                            return Ok(Value::StringBuilder(buffer));
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(buffer.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(buffer.is_empty()));
-                        }
-                        
-                        if fn_name == "capacity" {
-                            // For simplicity, capacity = len (no pre-allocation yet)
-                            return Ok(Value::Int(buffer.len() as i64));
-                        }
-                    }
-                }
-
-                // Stack built-in methods
-                if fn_name == "Stack::new" || fn_name == "new_stack" {
-                    return Ok(Value::Stack(Vec::new()));
-                }
-
-                if arg_values.len() >= 1 {
-                    if let Value::Stack(stack) = &arg_values[0] {
-                        let mut stack = stack.clone();
-                        
-                        if fn_name == "push" && arg_values.len() == 2 {
-                            stack.push(arg_values[1].clone());
-                            return Ok(Value::Stack(stack));
-                        }
-                        
-                        if fn_name == "pop" && !stack.is_empty() {
-                            let item = stack.pop().unwrap();
-                            return Ok(Value::Enum(
-                                "Option".to_string(),
-                                "Some".to_string(),
-                                HashMap::from([
-                                    ("0".to_string(), item.clone()),
-                                    ("1".to_string(), Value::Stack(stack)),
-                                ]),
-                            ));
-                        }
-                        
-                        if fn_name == "peek" && !stack.is_empty() {
-                            let item = stack.last().unwrap().clone();
-                            return Ok(Value::Enum(
-                                "Option".to_string(),
-                                "Some".to_string(),
-                                HashMap::from([("value".to_string(), item)]),
-                            ));
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(stack.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(stack.is_empty()));
-                        }
-                        
-                        if fn_name == "clear" {
-                            stack.clear();
-                            return Ok(Value::Stack(stack));
-                        }
-                    }
-                    
-                    // Queue methods
-                    if let Value::Queue(queue) = &arg_values[0] {
-                        let mut queue = queue.clone();
-                        
-                        if fn_name == "enqueue" && arg_values.len() == 2 {
-                            queue.push_back(arg_values[1].clone());
-                            return Ok(Value::Queue(queue));
-                        }
-                        
-                        if fn_name == "dequeue" && !queue.is_empty() {
-                            let item = queue.pop_front().unwrap();
-                            return Ok(Value::Enum(
-                                "Option".to_string(),
-                                "Some".to_string(),
-                                HashMap::from([
-                                    ("0".to_string(), item.clone()),
-                                    ("1".to_string(), Value::Queue(queue)),
-                                ]),
-                            ));
-                        }
-                        
-                        if fn_name == "front" && !queue.is_empty() {
-                            let item = queue.front().unwrap().clone();
-                            return Ok(Value::Enum(
-                                "Option".to_string(),
-                                "Some".to_string(),
-                                HashMap::from([("value".to_string(), item)]),
-                            ));
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(queue.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(queue.is_empty()));
-                        }
-                        
-                        if fn_name == "clear" {
-                            queue.clear();
-                            return Ok(Value::Queue(queue));
-                        }
-                    }
-                }
-
-                // Stack built-in methods
-                if fn_name == "Stack::new" || fn_name == "new_stack" {
-                    return Ok(Value::Stack(Vec::new()));
-                }
-
-                if arg_values.len() >= 1 {
-                    if let Value::Stack(stack) = &arg_values[0] {
-                        let mut stack = stack.clone();
-                        
-                        if fn_name == "push" && arg_values.len() == 2 {
-                            stack.push(arg_values[1].clone());
-                            return Ok(Value::Stack(stack));
-                        }
-                        
-                        if fn_name == "pop" && !stack.is_empty() {
-                            let item = stack.pop().unwrap();
-                            return Ok(Value::Enum(
-                                "Option".to_string(),
-                                "Some".to_string(),
-                                HashMap::from([
-                                    ("0".to_string(), item.clone()),
-                                    ("1".to_string(), Value::Stack(stack)),
-                                ]),
-                            ));
-                        }
-                        
-                        if fn_name == "peek" && !stack.is_empty() {
-                            let item = stack.last().unwrap().clone();
-                            return Ok(Value::Enum(
-                                "Option".to_string(),
-                                "Some".to_string(),
-                                HashMap::from([("value".to_string(), item)]),
-                            ));
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(stack.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(stack.is_empty()));
-                        }
-                        
-                        if fn_name == "clear" {
-                            stack.clear();
-                            return Ok(Value::Stack(stack));
-                        }
-                    }
-                    
-                    // Queue methods
-                    if let Value::Queue(queue) = &arg_values[0] {
-                        let mut queue = queue.clone();
-                        
-                        if fn_name == "enqueue" && arg_values.len() == 2 {
-                            queue.push_back(arg_values[1].clone());
-                            return Ok(Value::Queue(queue));
-                        }
-                        
-                        if fn_name == "dequeue" && !queue.is_empty() {
-                            let item = queue.pop_front().unwrap();
-                            return Ok(Value::Enum(
-                                "Option".to_string(),
-                                "Some".to_string(),
-                                HashMap::from([
-                                    ("0".to_string(), item.clone()),
-                                    ("1".to_string(), Value::Queue(queue)),
-                                ]),
-                            ));
-                        }
-                        
-                        if fn_name == "front" && !queue.is_empty() {
-                            let item = queue.front().unwrap().clone();
-                            return Ok(Value::Enum(
-                                "Option".to_string(),
-                                "Some".to_string(),
-                                HashMap::from([("value".to_string(), item)]),
-                            ));
-                        }
-                        
-                        if fn_name == "len" {
-                            return Ok(Value::Int(queue.len() as i64));
-                        }
-                        
-                        if fn_name == "is_empty" {
-                            return Ok(Value::Bool(queue.is_empty()));
-                        }
-                        
-                        if fn_name == "clear" {
-                            queue.clear();
-                            return Ok(Value::Queue(queue));
-                        }
+// Type-based method dispatch on the receiver value's variant.
+                // Constructors (HashMap::new, etc.) and methods (insert, get, push, etc.)
+                // are dispatched based on the Value type, not the function name string.
+                if !arg_values.is_empty() || Interpreter::is_builtin_constructor(&fn_name) {
+                    let method_result = self.dispatch_method_by_type(&fn_name, &mut arg_values);
+                    if let Some(result) = method_result {
+                        return result;
                     }
                 }
 
@@ -2346,11 +1810,244 @@ let s_val = self.eval_expr(s)?;
                         return self.eval_expr(&arm.body);
                     }
                 }
-                Err(RuntimeError::TypeMismatch(
+Err(RuntimeError::TypeMismatch(
                     "Non-exhaustive match: no arm matched".to_string(),
                 ))
             }
         }
+    }
+
+    /// Check if fn_name is a built-in constructor (no receiver needed).
+    fn is_builtin_constructor(fn_name: &str) -> bool {
+        matches!(fn_name, "HashMap::new" | "new_map" | "empty_map"
+            | "HashSet::new" | "new_set"
+            | "StringBuilder::new" | "new_builder"
+            | "Stack::new" | "new_stack")
+    }
+
+    /// Dispatch methods based on the receiver value's type variant.
+    /// Returns Some(Ok(...)) if the method was handled, None to fall through.
+    fn dispatch_method_by_type(&mut self, fn_name: &str, arg_values: &mut Vec<Value>) -> Option<Result<Value, RuntimeError>> {
+        use std::collections::VecDeque;
+
+        match fn_name {
+            "HashMap::new" | "new_map" | "empty_map" => return Some(Ok(Value::HashMap(HashMap::new()))),
+            "HashSet::new" | "new_set" => return Some(Ok(Value::HashSet(HashSet::new()))),
+            "StringBuilder::new" | "new_builder" => return Some(Ok(Value::StringBuilder(String::new()))),
+            "Stack::new" | "new_stack" => return Some(Ok(Value::Stack(Vec::new()))),
+            _ => {}
+        }
+
+        if fn_name == "clone" && !arg_values.is_empty() {
+            return Some(Ok(arg_values[0].clone()));
+        }
+
+        if arg_values.is_empty() {
+            return None;
+        }
+
+        if (fn_name == "is_ok" || fn_name == "is_err" || fn_name == "unwrap" || fn_name == "unwrap_err")
+            && matches!(&arg_values[0], Value::Enum(en, _, _) if en == "Result")
+        {
+            return Some(self.handle_result_method(fn_name, arg_values));
+        }
+
+        match &arg_values[0] {
+            Value::String(_) => {
+                if fn_name == "char_at" && arg_values.len() == 2 {
+                    if let Value::String(s) = &arg_values[0] {
+                        if let Value::Int(idx) = &arg_values[1] {
+                            let i = *idx as usize;
+                            return Some(Ok(s.chars().nth(i).map(Value::Char).unwrap_or(Value::Char('\0'))));
+                        }
+                    }
+                }
+            }
+            Value::HashMap(_) => {
+                if let Value::HashMap(map) = &arg_values[0] {
+                    match fn_name {
+                        "insert" if arg_values.len() == 3 => {
+                            if let Value::String(key) = &arg_values[1] {
+                                let mut map = map.clone();
+                                map.insert(key.clone(), arg_values[2].clone());
+                                return Some(Ok(Value::HashMap(map)));
+                            }
+                        }
+                        "get" if arg_values.len() == 2 => {
+                            if let Value::String(key) = &arg_values[1] {
+                                return Some(Ok(match map.get(key) {
+                                    Some(v) => Value::Enum("Option".to_string(), "Some".to_string(),
+                                        HashMap::from([("value".to_string(), v.clone())])),
+                                    None => Value::Enum("Option".to_string(), "None".to_string(), HashMap::new()),
+                                }));
+                            }
+                        }
+                        "contains_key" if arg_values.len() == 2 => {
+                            if let Value::String(key) = &arg_values[1] {
+                                return Some(Ok(Value::Bool(map.contains_key(key))));
+                            }
+                        }
+                        "remove" if arg_values.len() == 2 => {
+                            if let Value::String(key) = &arg_values[1] {
+                                let mut map = map.clone();
+                                map.remove(key);
+                                return Some(Ok(Value::HashMap(map)));
+                            }
+                        }
+                        "len" => return Some(Ok(Value::Int(map.len() as i64))),
+                        "is_empty" => return Some(Ok(Value::Bool(map.is_empty()))),
+                        "keys" => {
+                            let keys: Vec<Value> = map.keys().map(|k| Value::String(k.clone())).collect();
+                            return Some(Ok(Value::List(keys)));
+                        }
+                        "values" => {
+                            let values: Vec<Value> = map.values().cloned().collect();
+                            return Some(Ok(Value::List(values)));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Value::HashSet(_) => {
+                if let Value::HashSet(set) = &arg_values[0] {
+                    match fn_name {
+                        "insert" if arg_values.len() == 2 => {
+                            if let Value::String(item) = &arg_values[1] {
+                                let mut set = set.clone();
+                                set.insert(item.clone());
+                                return Some(Ok(Value::HashSet(set)));
+                            }
+                        }
+                        "contains" if arg_values.len() == 2 => {
+                            if let Value::String(item) = &arg_values[1] {
+                                return Some(Ok(Value::Bool(set.contains(item))));
+                            }
+                        }
+                        "remove" if arg_values.len() == 2 => {
+                            if let Value::String(item) = &arg_values[1] {
+                                let mut set = set.clone();
+                                set.remove(item);
+                                return Some(Ok(Value::HashSet(set)));
+                            }
+                        }
+                        "len" => return Some(Ok(Value::Int(set.len() as i64))),
+                        "is_empty" => return Some(Ok(Value::Bool(set.is_empty()))),
+                        _ => {}
+                    }
+                }
+            }
+            Value::StringBuilder(_) => {
+                if let Value::StringBuilder(buffer) = &arg_values[0] {
+                    match fn_name {
+                        "append_char" if arg_values.len() == 2 => {
+                            if let Value::Char(c) = &arg_values[1] {
+                                let mut buffer = buffer.clone();
+                                buffer.push(*c);
+                                return Some(Ok(Value::StringBuilder(buffer)));
+                            }
+                        }
+                        "append_str" if arg_values.len() == 2 => {
+                            if let Value::String(s) = &arg_values[1] {
+                                let mut buffer = buffer.clone();
+                                buffer.push_str(s);
+                                return Some(Ok(Value::StringBuilder(buffer)));
+                            }
+                        }
+                        "append_int" if arg_values.len() == 2 => {
+                            if let Value::Int(n) = &arg_values[1] {
+                                let mut buffer = buffer.clone();
+                                buffer.push_str(&n.to_string());
+                                return Some(Ok(Value::StringBuilder(buffer)));
+                            }
+                        }
+                        "append_bool" if arg_values.len() == 2 => {
+                            if let Value::Bool(b) = &arg_values[1] {
+                                let mut buffer = buffer.clone();
+                                buffer.push_str(&b.to_string());
+                                return Some(Ok(Value::StringBuilder(buffer)));
+                            }
+                        }
+                        "append_float" if arg_values.len() == 2 => {
+                            if let Value::Float(f) = &arg_values[1] {
+                                let mut buffer = buffer.clone();
+                                buffer.push_str(&f.to_string());
+                                return Some(Ok(Value::StringBuilder(buffer)));
+                            }
+                        }
+                        "to_string" => return Some(Ok(Value::String(buffer.clone()))),
+                        "clear" => {
+                            let mut buffer = buffer.clone();
+                            buffer.clear();
+                            return Some(Ok(Value::StringBuilder(buffer)));
+                        }
+                        "len" => return Some(Ok(Value::Int(buffer.len() as i64))),
+                        "is_empty" => return Some(Ok(Value::Bool(buffer.is_empty()))),
+                        "capacity" => return Some(Ok(Value::Int(buffer.len() as i64))),
+                        _ => {}
+                    }
+                }
+            }
+            Value::Stack(_) => {
+                if let Value::Stack(stack) = &arg_values[0] {
+                    match fn_name {
+                        "push" if arg_values.len() == 2 => {
+                            let mut stack = stack.clone();
+                            stack.push(arg_values[1].clone());
+                            return Some(Ok(Value::Stack(stack)));
+                        }
+                        "pop" if !stack.is_empty() => {
+                            let mut stack = stack.clone();
+                            let item = stack.pop().unwrap();
+                            return Some(Ok(Value::Enum("Option".to_string(), "Some".to_string(),
+                                HashMap::from([
+                                    ("0".to_string(), item.clone()),
+                                    ("1".to_string(), Value::Stack(stack)),
+]))));
+                        }
+                        "peek" if !stack.is_empty() => {
+                            let item = stack.last().unwrap().clone();
+                            return Some(Ok(Value::Enum("Option".to_string(), "Some".to_string(),
+                                HashMap::from([("value".to_string(), item)]))));
+                        }
+                        "len" => return Some(Ok(Value::Int(stack.len() as i64))),
+                        "is_empty" => return Some(Ok(Value::Bool(stack.is_empty()))),
+                        "clear" => return Some(Ok(Value::Stack(Vec::new()))),
+                        _ => {}
+                    }
+                }
+            }
+            Value::Queue(_) => {
+                if let Value::Queue(queue) = &arg_values[0] {
+                    match fn_name {
+                        "enqueue" if arg_values.len() == 2 => {
+                            let mut queue = queue.clone();
+                            queue.push_back(arg_values[1].clone());
+                            return Some(Ok(Value::Queue(queue)));
+                        }
+                        "dequeue" if !queue.is_empty() => {
+                            let mut queue = queue.clone();
+                            let item = queue.pop_front().unwrap();
+                            return Some(Ok(Value::Enum("Option".to_string(), "Some".to_string(),
+                                HashMap::from([
+                                    ("0".to_string(), item.clone()),
+                                    ("1".to_string(), Value::Queue(queue)),
+                                ]))));
+                        }
+                        "front" if !queue.is_empty() => {
+                            let item = queue.front().unwrap().clone();
+                            return Some(Ok(Value::Enum("Option".to_string(), "Some".to_string(),
+                                HashMap::from([("value".to_string(), item)]))));
+                        }
+                        "len" => return Some(Ok(Value::Int(queue.len() as i64))),
+                        "is_empty" => return Some(Ok(Value::Bool(queue.is_empty()))),
+                        "clear" => return Some(Ok(Value::Queue(VecDeque::new()))),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        None
     }
 }
 
