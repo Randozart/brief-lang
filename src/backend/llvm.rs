@@ -139,6 +139,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         TupleDestructure(_, e) => { collect_strings_expr(e, seen, out); }
         StructInstance(_, fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
         ObjectLiteral(fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
+        SigCall { expr, .. } => { collect_strings_expr(expr, seen, out); }
         FieldAccess(o, _) => { collect_strings_expr(o, seen, out); }
         _ => {}
     }
@@ -3529,6 +3530,20 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = sub i64 {}, 1", indent, new_len, len).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_len, lp).ok();
                 writeln!(out, "{}{} = add i64 0, 0 ; discard", indent, v).ok();
+            }
+            Expr::SigCall { modifier, expr } => {
+                let inner = self.emit_expr(out, expr, indent);
+                match modifier {
+                    crate::ast::SigModifier::Out => {
+                        // sig #out: emit volatile side effect to prevent LLVM from
+                        // eliminating the call via TargetLibraryInfo or dead-code elimination.
+                        writeln!(out, "{}{} = or i64 {}, 0 ; sig #out", indent, v, inner.name).ok();
+                    }
+                    crate::ast::SigModifier::Inline => {
+                        // sig #inline: pure, no barrier needed, pass through.
+                        writeln!(out, "{}{} = add i64 {}, 0 ; sig #inline", indent, v, inner.name).ok();
+                    }
+                }
             }
             Expr::Ellipsis => {
                 writeln!(out, "{}{} = add i64 0, 0 ; ellipsis", indent, v).ok();
