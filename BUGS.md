@@ -580,7 +580,15 @@ Without any `memory(...)` restriction, LLVM conservatively assumes the function 
 
 ---
 
-## 2026-06-06 — Wrong env var `N` vs `BOUND` in fasta benchmark debugging
+## 2026-06-06 — Interpreter built-in method dispatch is still name-based magic (deferred)
+
+**Issue**: The E1-E3 refactor consolidated 544 lines of duplicated method blocks into a single `dispatch_method_by_type` function. However, the dispatch still matches on hardcoded function name strings (`"insert"`, `"get"`, `"push"`, `"HashMap::new"`, etc.) inside type-scoped match arms.
+
+**Root Cause**: The refactor only changed the *structure* of the dispatch (from top-level name matches to type-scoped name matches). The core problem — dispatching on function name strings instead of through the FFI registry — remains unsolved.
+
+**Fix**: This is deferred to a follow-up session. The correct approach (Path A) is to register all built-in operations in the interpreter's FFI registry with location keys like `"std::HashMap::insert"`, then write stdlib modules (`std/hashmap.bv`, `std/stack.bv`) that declare `frgn HashMap::insert(map, key, value) -> HashMap from "std"`. The interpreter resolves through `ffi_name_to_location` → `foreign_functions` — the same path as C FFI.
+
+**Lesson**: Structural refactoring of magic is not the same as eliminating magic.
 
 **Issue**: Reported `fasta.bv` as hanging. The benchmark was being passed `N=100` instead of `BOUND=100`.
 

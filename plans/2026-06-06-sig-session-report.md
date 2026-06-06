@@ -46,7 +46,12 @@ OutputType Array/Named grammar, `--explain` flag, `lib/std/out.bv`, multi-output
 4. `05b80b8` — B1-C1+D1: Fix from parser bug, validate, update .bv files (17 files)
 5. `d4632cd` — F1: Remove None/Err discriminant magic, docs/learn/ffi.md
 6. `f2fb8a6` — G1: sig #out LLVM codegen with volatile marker
-7. `f513329` — H1-H3: AGENTS.md rules, BUGS.md entries
+8. `adafcb9` — E1-E3: Type-based interpreter dispatch (consolidated duplicate method blocks, 544→241 lines)
+
+### E1-E3: Type-Based Interpreter Dispatch
+Consolidated 544 lines of duplicated HashMap/HashSet/StringBuilder/Stack/Queue method blocks into a single `dispatch_method_by_type` function. Each method is dispatched by the receiver's `Value` variant then the method name within that type.
+
+**Remaining magic**: The dispatch still matches on hardcoded method name strings inside type-scoped arms. The correct fix (Path A: register operations in the FFI registry and resolve through `ffi_name_to_location`) is deferred. See `BUGS.md` and `AGENTS.md` "Known Gaps" for details.
 
 ### ForAll/Exists: Destroyed
 23 references across 15 files — AST variants (ast.rs), parser arms (parser.rs), lexer tokens (lexer.rs), and every match arm in interpreter.rs, llvm.rs, webstack.rs, rust.rs, dataflow.rs, transition_graph.rs, region.rs, symbolic.rs, annotator.rs, proof_engine.rs, typechecker.rs.
@@ -74,6 +79,6 @@ OutputType Array/Named grammar, `--explain` flag, `lib/std/out.bv`, multi-output
 - BUGS.md — 5 new entries (parser from discard, runtime declares, None/Err magic, env var N vs BOUND)
 
 ## Remaining
-- **E1-E3**: Type-based interpreter dispatch (interpreter.rs:646-1909)
+- **E1-E3** (Path A): Register all built-in operations in FFI registry instead of name-based dispatch — deferred to follow-up
 - **C2-C3**: Full runtime declare removal (codegen callsites → frgn_map)
 - `llvm.rs:1858-1860`: TODO marker

@@ -168,6 +168,7 @@ Assignment, Let, InlineAsm, Expression, Term (with optional swan song), TermBang
 ### Known Gaps
 - **Recursive defn calls**: No recursion guard or stack depth limit. Deep recursion overflows the Rust interpreter.
 - **ForAll/Exists**: Removed from surface syntax.
+- **Interpreter built-in method dispatch**: `dispatch_method_by_type` still matches on function name strings. Deferred — should use FFI registry (Path A: register all operations under `"std::HashMap::insert"` etc., resolve through `ffi_name_to_location`).
 
 ## LLVM Backend Gaps
 
