@@ -2296,16 +2296,6 @@ let s_val = self.eval_expr(s)?;
                     )),
                 }
             }
-            Expr::ForAll { .. } => Ok(Value::Bool(true)),
-            Expr::Exists { var, expr } => {
-                let list = self.eval_expr(expr)?;
-                match list {
-                    Value::List(items) => Ok(Value::Bool(!items.is_empty())),
-                    _ => Err(RuntimeError::TypeMismatch(
-                        "Exists requires a list expression".to_string(),
-                    )),
-                }
-            }
             Expr::MultiSlice { value, coordinates, mask: _ } => {
                 let base = self.eval_expr(value)?;
                 if coordinates.is_empty() {

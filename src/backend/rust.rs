@@ -601,12 +601,6 @@ impl RustBackend {
                 let items: Vec<String> = elems.iter().map(|e| self.expr_to_rust(e)).collect();
                 format!("({})", items.join(", "))
             }
-            Expr::ForAll { var, expr } => {
-                format!("/* forall {} */ {}", var, self.expr_to_rust(expr))
-            }
-            Expr::Exists { var, expr } => {
-                format!("/* exists {} */ {}", var, self.expr_to_rust(expr))
-            }
             Expr::Slice { value, start, end, .. } => {
                 let val = self.expr_to_rust(value);
                 match (start, end) {

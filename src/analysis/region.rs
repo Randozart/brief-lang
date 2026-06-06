@@ -1378,7 +1378,6 @@ fn expr_has_call(expr: &Expr) -> bool {
             expr_has_call(value)
                 || mask.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
         }
-        Expr::ForAll { expr, .. } | Expr::Exists { expr, .. } => expr_has_call(expr),
         _ => false,
     }
 }
@@ -1649,14 +1648,6 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
             value: Box::new(substitute_expr(value, old_var, new_expr)),
             coordinates: coordinates.clone(),
             mask: mask.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
-        },
-        Expr::ForAll { var, expr } => Expr::ForAll {
-            var: var.clone(),
-            expr: Box::new(substitute_expr(expr, old_var, new_expr)),
-        },
-        Expr::Exists { var, expr } => Expr::Exists {
-            var: var.clone(),
-            expr: Box::new(substitute_expr(expr, old_var, new_expr)),
         },
         _ => expr.clone(),
     }

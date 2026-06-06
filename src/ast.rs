@@ -418,14 +418,6 @@ pub enum Expr {
         value: Box<Expr>,
         arms: Vec<MatchArm>,
     },
-    ForAll {
-        var: String,
-        expr: Box<Expr>,
-    },
-    Exists {
-        var: String,
-        expr: Box<Expr>,
-    },
     // Block expression: { stmts...; last_expr }
     Block(Vec<Statement>, Box<Expr>),
     // Tuple destructuring: let (a, b) = expr;
@@ -538,9 +530,6 @@ impl Expr {
             }
             Expr::PatternMatch { value, .. } => {
                 value.extract_deps_recursive(deps);
-            }
-            Expr::ForAll { expr, .. } | Expr::Exists { expr, .. } => {
-                expr.extract_deps_recursive(deps);
             }
             _ => {} // Float, String, Bool don't add dependencies
         }

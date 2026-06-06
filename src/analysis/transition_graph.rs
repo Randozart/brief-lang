@@ -1023,9 +1023,6 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                 collect_identifiers(&arm.body, out);
             }
         }
-        Expr::ForAll { expr, .. } | Expr::Exists { expr, .. } => {
-            collect_identifiers(expr, out);
-        }
         Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
             collect_identifiers(last, out);
         }

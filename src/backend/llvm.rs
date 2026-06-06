@@ -115,7 +115,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
             collect_strings_expr(l, seen, out);
             collect_strings_expr(r, seen, out);
         }
-        Not(e) | Neg(e) | BitNot(e) | Cast(e, _) | Exists { expr: e, .. } => {
+        Not(e) | Neg(e) | BitNot(e) | Cast(e, _) => {
             collect_strings_expr(e, seen, out);
         }
         Block(stmts, last) => {
@@ -140,9 +140,6 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         StructInstance(_, fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
         ObjectLiteral(fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
         FieldAccess(o, _) => { collect_strings_expr(o, seen, out); }
-        ForAll { expr, .. } => {
-            collect_strings_expr(expr, seen, out);
-        }
         _ => {}
     }
 }
@@ -3543,14 +3540,6 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{} = sub i64 {}, 1", indent, new_len, len).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_len, lp).ok();
                 writeln!(out, "{}{} = add i64 0, 0 ; discard", indent, v).ok();
-            }
-            // Quantifiers
-            Expr::ForAll { .. } => { writeln!(out, "{}{} = add i64 0, 1 ; forall", indent, v).ok(); }
-            Expr::Exists { expr, .. } => {
-                let inner = self.emit_expr(out, expr, indent);
-                let cmp = format!("%ec{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, cmp, inner).ok();
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
             }
             Expr::Ellipsis => {
                 writeln!(out, "{}{} = add i64 0, 0 ; ellipsis", indent, v).ok();

@@ -1734,14 +1734,6 @@ impl WebstackGenerator {
                 let flds = fields.join(", ");
                 format!("// pattern_match: {} {}({})", val, variant, flds)
             }
-            Expr::ForAll { var, expr } => {
-                let e = self.expr_to_js_value(expr);
-                format!("// forall {} in {}", var, e)
-            }
-            Expr::Exists { var, expr } => {
-                let e = self.expr_to_js_value(expr);
-                format!("// exists {} in {}", var, e)
-            }
             Expr::Block(stmts, last) => {
                 format!("// block_expr: {} stmts, last = {}", stmts.len(), self.expr_to_js_value(last))
             }

@@ -1461,7 +1461,6 @@ impl TypeChecker {
                 }
             }
             Expr::PatternMatch { .. } => Type::Bool,
-            Expr::ForAll { .. } | Expr::Exists { .. } => Type::Bool,
             Expr::Block(_stmts, last_expr) => self.infer_expression(last_expr),
             Expr::Match { value: _, arms } => {
                 // Try to infer from the last arm first (usually _ = default)

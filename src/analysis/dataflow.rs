@@ -156,9 +156,6 @@ impl<'a> DataflowAnalyzer<'a> {
                     }
                 }
             }
-            Expr::ForAll { expr, .. } | Expr::Exists { expr, .. } => {
-                self.extract_ids_recursive(expr, ids);
-            }
             Expr::Block(stmts, expr) => {
                 for stmt in stmts {
                     self.extract_ids_from_statement(stmt, ids);

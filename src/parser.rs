@@ -160,8 +160,6 @@ impl<'a> Parser<'a> {
             Token::Err => "Err".into(),
             Token::Some => "Some".into(),
             Token::None => "None".into(),
-            Token::Forall => "forall".into(),
-            Token::Exists => "exists".into(),
             Token::Bank => "bank".into(),
             Token::Trg => "trg".into(),
             Token::TrgBang => "trg!".into(),
@@ -236,8 +234,6 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Asm)) => { self.advance(); Ok("asm".to_string()) }
             Some(Ok(Token::Stage)) => { self.advance(); Ok("stage".to_string()) }
             Some(Ok(Token::On)) => { self.advance(); Ok("on".to_string()) }
-            Some(Ok(Token::Forall)) => { self.advance(); Ok("forall".to_string()) }
-            Some(Ok(Token::Exists)) => { self.advance(); Ok("exists".to_string()) }
             Some(Ok(Token::Within)) => { self.advance(); Ok("within".to_string()) }
             Some(Ok(Token::Bank)) => { self.advance(); Ok("bank".to_string()) }
             Some(Ok(Token::Match)) => { self.advance(); Ok("match".to_string()) }
@@ -4834,18 +4830,6 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 let val = *val;
                 self.advance();
                 Ok(Expr::Integer(val))
-            }
-            Some(Ok(Token::Forall)) => {
-                self.advance();
-                let var = self.expect_identifier()?;
-                let expr = self.parse_expression()?;
-                Ok(Expr::ForAll { var, expr: Box::new(expr) })
-            }
-            Some(Ok(Token::Exists)) => {
-                self.advance();
-                let var = self.expect_identifier()?;
-                let expr = self.parse_expression()?;
-                Ok(Expr::Exists { var, expr: Box::new(expr) })
             }
             Some(Ok(Token::Float(val))) => {
                 let val = *val;

@@ -154,12 +154,6 @@ pub enum Token {
     #[token("on")]
     #[token("ON")]
     On,
-    #[token("forall")]
-    #[token("FORALL")]
-    Forall,
-    #[token("exists")]
-    #[token("EXISTS")]
-    Exists,
     #[token("within")]
     #[token("WITHIN")]
     Within,
