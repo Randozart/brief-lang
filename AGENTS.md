@@ -80,6 +80,44 @@ If the compiler folded your hot loop to `store i64 N`, **the compiler is right.*
 
 The C reference must use the SAME observable. Symmetric benchmarks, symmetric optimizations.
 
+#### `term! -> swan_song` is the correct liveness pattern for terminal programs
+
+When a program must run a specific FFI call (print, write) as its final act before exiting,
+use `term! -> frgn_call(args);`. The `term!` emits `ret` — a function terminator that the
+optimizer cannot eliminate. The swan song runs as a statement before `ret`, so the FFI call
+is structurally live by construction.
+
+**Do NOT:**
+- Use `io_pending` or other opaque triggers purely to prevent fold elimination
+- Add `#!exit` pragmas when `term!` already terminates the program
+- Add synthetic exit-condition fields or `x == x` self-references
+- Complain that `main` is just `ret` — if your program produces no observable output,
+  the compiler is RIGHT to eliminate it. The fix is `frgn __print_int(result)`, not hacks.
+
+**The correct pattern:**
+```brief
+frgn __get_env_int(name: Ptr<Byte>) -> Int ;
+frgn __print_int(n: Int) -> Bool ;
+frgn XXH64(data: Int, len: Int, seed: Int) -> Int ;
+
+let N: Int = __get_env_int("BOUND");   // runtime-determined — prevents precomputation
+let done: Int = 0;
+let result: Int = 0;
+
+rct txn compute [done < N][done == N] {
+    [done == N - 1] {
+        &result = XXH64(addr, len, 0);
+        term! -> __print_int(result);   // program exit, swan song runs before ret
+    };
+    &done = done + 1;
+    term;
+};
+```
+
+**Every tier (interpreter, LLVM backend) must handle `term! -> swan_song` identically.**
+If adding a new backend, implement `Statement::TermBang` with swan song as a blocker
+before the backend ships — it is the canonical way to produce observable terminal output.
+
 ## Benchmark Philosophy
 
 ### Benchmarks test semantic goals, not syntactic features
@@ -248,6 +286,10 @@ The Brief-in-Brief compiler lives in `lib/compiler/`. Run via `brief-compiler se
 
 **Do NOT add as built-ins**: `is_digit`, `is_alpha`, `is_alphanumeric`, `is_upper`, `is_lower`, `is_space`, `char_to_string`, `None`, `Some`, `Ok`, `Err`. These are in `lib/std/` — import them.
 
+## Optimization Design
+
+See `docs/design/optimization-decision-tree.md` for the full decision tree — precomputation → enum dispatch → async → folded struct-SSA → fallback — and the rationale for each path (phi reduction, SROA pipeline, why struct phis were eliminated, cross-cutting optimizations).
+
 ## Critical Context
 
 ### Already Done (Don't Redo)
@@ -278,3 +320,14 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
 - 434 tests pass, 0 fail
 - Interpreter is the reference — if it runs a program, the backend should eventually compile it
 - All additions are additive (new match arms) — never modify existing optimization paths
+
+## `--dev` / `--prod` Budget Semantics (2026-06-07)
+
+The compiler has two optimization budget modes:
+
+- **`--dev`** (default when no flag given): Uses the current folding budget (default 256, overridable via `--optimize-budget`). Best for fast compilation during development.
+- **`--prod`**: Uses the maximum folding budget (`u64::MAX`), enabling the compiler to fully precompute every bounded loop at compile time. Only overridden by an explicit `--optimize-budget <N>` flag — if the user sets a budget, that budget wins regardless of dev/prod.
+
+**Implementation note**: The budget flag is set before codegen, not in the codegen itself. The `--optimize-budget` CLI flag overrides both defaults. If neither `--dev`/`--prod` nor `--optimize-budget` is set, `--dev` (budget=256) is the implicit default.
+
+See `plans/2026-06-06-universal-ffi-no-magic-architecture.md` for the full master plan.

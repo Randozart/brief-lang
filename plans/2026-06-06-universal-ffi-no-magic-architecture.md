@@ -894,7 +894,117 @@ cosmetic/syntax cleanup for when DBVS is revisited.
 
 ---
 
-## Architecture Summary
+## Phase 10: Watchdog Trigger Preemptibility Analysis
+
+**Date**: 2026-06-07
+**Status**: Planned — design approved, not yet implemented
+**Files**: `src/analysis/watchdog.rs` (NEW), `src/analysis/mod.rs`, minor wiring in `src/interpreter.rs`
+
+### Motivation
+
+Brief's computational model is one big state machine — the program is a `main()` that
+transitions between states until it hits `term!` or exhausts all paths. For embedded,
+safety-critical, and interactive programs, **provable termination is less useful than
+provable preemptibility**. A program that cannot prove it ends on its own should still
+prove it CAN be stopped — by a user, a supervisor, or an external system.
+
+The watchdog concept already exists in the AST (`Contract.watchdog: Option<WatchdogSpec>`,
+`WatchdogSpec { condition: Expr, is_required: bool }`) and is parsed as a third bracket
+`[pre][post][watchdog]` or external `?[cond]` / `?![cond]` after the brackets. Currently
+it serves as a runtime condition check (evaluated at `term`). Phase 10 extends it to also
+support **compile-time liveness proofs** when the expression references a `frgn trg`.
+
+### 10.1 — Semantics
+
+| Syntax | Meaning |
+|--------|---------|
+| `?[@button]` | Prove external trigger `button` can preempt this transaction. **Optional**: skipped if the transaction already proves natural termination (convergent loop with `[count < N][count == N]` + `term`). |
+| `?![@button]` | Prove external trigger `button` can preempt this transaction. **Required**: always enforced, even if the transaction terminates naturally. |
+| `?[timeout]` | Existing runtime watchdog — boolean condition checked at `term`. No change in behavior. |
+
+The `@` prefix parses as `Expr::PriorState(Ident("button"))` — the existing prior-state
+expression. The analysis detects the `PriorState` wrapper to distinguish trigger references
+from variable references.
+
+### 10.2 — Detection
+
+When `WatchdogSpec.condition` is `Expr::PriorState(Box::new(Expr::Identifier(name)))`,
+treat the watchdog as a trigger preemptibility proof. Otherwise, treat it as an existing
+runtime condition check (no change in behavior).
+
+### 10.3 — Conflict Chain Analysis
+
+For each transaction T with `?[@trg]` or `?![@trg]`:
+
+| Step | What the analyzer does | Error if fails |
+|------|----------------------|----------------|
+| **10.3.1** | Resolve `trg` against all `frgn trg` declarations in the program | `"@trg is not a declared frgn trg"` |
+| **10.3.2** | Find all transactions with `trg` in their guard (`[trg]` or `[trg && ...]` condition) | `"No handler for trigger @trg"` |
+| **10.3.3** | Collect all variables written by the handler chain — walk the transition graph from each handler through all reachable `rct txn` and `defn` calls, collecting every `&var = expr` assignment | — |
+| **10.3.4** | Compute intersection with T's precondition variables (all identifiers appearing in `pre_condition`) | `"Handler chain for @trg doesn't write to any variable in T's precondition"` |
+| **10.3.5** | For each intersecting variable, evaluate: does the handler's write pattern **falsify** T's precondition? (e.g., if T says `[ready == true]`, does the handler set `ready = false`?) | `"@trg handler writes to ready but doesn't falsify [ready == true]"` |
+| **10.3.6** | Verify the handler chain does NOT restore the precondition before its own `term` (i.e., the kill is permanent — the loop won't restart) | `"@trg handler chain restores T's precondition — loop would restart"` |
+
+For `?` (optional): if step 10.3.4 fails (no conflict), check whether T already proves
+natural termination — if so, the proof passes (watchdog is optional, not needed).
+
+For `?!` (required): always enforce all 6 steps. Even if T terminates, the user explicitly
+wants proof that `@trg` CAN preempt it.
+
+### 10.4 — Triple Brackets vs External Syntax
+
+The existing parser already handles two syntaxes:
+
+1. **External syntax** (all modes): `?[@trg]` or `?![@trg]` written after the bracket
+   pairs. This is the primary syntax for trigger watchdogs.
+
+2. **Third bracket** (strict mode only): `[pre][post][@trg]` — the third bracket holds
+   a trigger reference. The same analysis applies.
+
+Both parse into the same `WatchdogSpec { condition: Expr::PriorState(..), is_required: bool }`.
+The analysis pass treats them identically.
+
+### 10.5 — Pipeline Placement
+
+The analysis runs after the transition graph is built and before backend codegen.
+It is a new file `src/analysis/watchdog.rs` that consumes:
+
+- The full `Program` (for `frgn trg` declarations)
+- The transition graph (for handler reachability)
+- The transaction's `Contract` (for the watchdog spec and precondition)
+
+It produces a `Vec<WatchdogError>` — one error per failed link in the proof chain.
+If any errors exist and the watchdog is required (`is_required = true`), compilation
+fails. If optional (`is_required = false`) and the error is in steps 10.3.4–10.3.6,
+a warning is emitted but compilation continues (the transaction might still terminate
+naturally).
+
+### 10.6 — Interaction with Existing Backends
+
+The analysis is purely compile-time — it produces no runtime code. Backends that
+currently emit watchdog code (COBOL recursion depth limiter, Verilog timeout counter)
+continue to do so when the condition is a non-trigger expression. When the condition
+is a trigger reference, the backend emits a comment noting the preemptibility proof
+succeeded at compile time:
+
+```rust
+// Verified: @button can preempt transaction loop
+```
+
+### 10.7 — Test Plan
+
+| Test | Expectation |
+|------|-------------|
+| `?[@valid_button]` with handler that sets `can_run = false` where T's precondition is `[can_run]` | ✅ Pass |
+| `?[@valid_button]` but no txn guards on `[button]` | ❌ "No handler for trigger" |
+| `?[@valid_button]` but handler writes to unrelated variable | ❌ "No conflict with precondition" |
+| `?[@valid_button]` but handler toggles `ready` back to `true` before `term` | ❌ "Handler restores precondition" |
+| `?[@valid_button]` on convergent loop `[i < N][i == N]` | ✅ Pass (optional — skip) |
+| `?![@valid_button]` on same convergent loop | ❌ "Required watchdog lacks preemptibility proof" |
+| `?[@undeclared]` | ❌ "Not a declared frgn trg" |
+| `?[timeout]` (normal variable, not a trigger) | ✅ Existing runtime watchdog — no analysis change |
+
+---
 
 ```
                     ┌──────────────────────────────────────┐

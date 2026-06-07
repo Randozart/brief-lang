@@ -497,9 +497,9 @@ fn resolve_location_to_impl(location: &str) -> Option<ForeignFn> {
             } else { Err(RuntimeError::TypeMismatch("Result::unwrap_err expects Result".into())) }
         },
         "__builtin.Result.Ok" => |args| Ok(Value::Enum("Result".to_string(), "Ok".to_string(),
-            HashMap::from([("result".to_string(), args[0].clone())]))),
+            HashMap::from([("value".to_string(), args[0].clone())]))),
         "__builtin.Result.Err" => |args| Ok(Value::Enum("Result".to_string(), "Err".to_string(),
-            HashMap::from([("error".to_string(), args[0].clone())]))),
+            HashMap::from([("value".to_string(), args[0].clone())]))),
 
         // Option
         "__builtin.Option.Some" => |args| Ok(Value::Enum("Option".to_string(), "Some".to_string(),

@@ -598,3 +598,50 @@ Without any `memory(...)` restriction, LLVM conservatively assumes the function 
 
 **Lesson**: Always check env var names in the source code before assuming a benchmark is broken.
 
+---
+
+## 2026-06-07 — `term! -> swan_song` emits `ret void` inside `i32 @main` in folded loop path
+
+**Issue**: When `term! -> __print_int(h)` is inside a guarded block in a transaction body that enters the folded struct-SSA loop path (Path 5), the backend emits `ret void` inside `define i32 @main()`. LLVM/llc rejects: "value doesn't match function result type 'i32'".
+
+**Root Cause**: `emit_folded_main` (llvm.rs:4299) emits `define i32 @main()`, but the body emission in `emit_folded_loop` at line 4121 sets `self.returns_i64 = false`. The `term!` handler at line 2387-2401 has three branches:
+- `values.first()` is Some → always emits `ret i64 %r` (still wrong for i32 main, but unreachable for our case)
+- `values` is empty + `self.returns_i64 = true` → `ret i64 0` (not taken)
+- `values` is empty + `self.returns_i64 = false` → `ret void` (TAKEN — crashes llc)
+
+The `returns_i64` flag tracks whether the enclosing compute/txn function returns i64 (for transaction wrappers) or void (for `compute()`). But it doesn't account for the folded loop path where the body is inlined directly into `define i32 @main()`.
+
+**Fix**: Add a `main_body: bool` flag to the backend struct. When set, `term!` and `term` handlers emit `ret i32 0` instead of `ret void` or `ret i64`. Set `main_body = true` in `emit_folded_main`, `emit_ssa_main`, and `emit_folded_multi_main` before emitting the loop body. Reset to false after.
+
+**Lesson**: The `returns_i64` flag is overloaded — it really means "returns i64 specifically" but is used as "returns something" in some paths and "returns void" in others. When the body is inlined into `i32 @main`, neither value is correct.
+
+---
+
+## 2026-06-07 — Guarded block handler restores `self.terminated` after `term!`, emits code after `ret`
+
+**Issue**: When `term!` fires inside a guarded block, the Guarded handler at line 2587-2604 saves `self.terminated`, sets it to false, emits the guard body (which includes `term!` that sets `terminated = true`), then RESTORES `self.terminated` to the pre-guard value (false). The caller continues emitting code after the `ret` instruction, including subsequent unrolled iterations in `emit_folded_loop`.
+
+**Root Cause**: Line 2604: `self.terminated = prev_terminated;` unconditionally restores the flag, undoing the effect of any terminating statement (term!, escape) inside the guarded body. The `if !self.terminated` check at line 2602 correctly prevents emitting the br-to-merge when terminated, but the restoration at 2604 undermines this.
+
+**Fix**: Replace the unconditional restore with conditional:
+```rust
+if !self.terminated {
+    self.terminated = prev_terminated;
+}
+```
+If a terminating statement fired inside the guarded body, leave `self.terminated = true` so callers know the block terminated. Only restore when no termination occurred.
+
+**Lesson**: The save/restore pattern around `self.terminated` in the Guarded handler assumes the guarded body never terminates execution — it's designed for "do something then continue" guards. When a guard body contains `term!`, this assumption is violated. Any save/restore of control-flow flags must account for the possibility that the inner code changes them in a way that should persist.
+
+---
+
+## 2026-06-07 — `-lm` missing in compiler driver link step (FIXED)
+
+**Issue**: `brief_rt.c` provides `float __sqrtf(float x) { return sqrtf(x); }` (line 392), which is actively used by `benchmarks/nbody_sqrt.bv` (24 call sites). The compiler driver at `main.rs:~2360` never passes `-lm` to the linker. The C reference gets `-lm` via the same clang invocation, creating asymmetry. Programs using `__sqrtf` get undefined reference at link time.
+
+**Root Cause**: The link command at `main.rs:2359-2365` was assembled incrementally (conditionally adding `-lrt`, `-lpthread`) and `-lm` was never added. Since `sqrtf` is in libm (not libc), glibc requires explicit `-lm`.
+
+**Fix**: Added `link_cmd.arg("-lm");` to the link command unconditionally (brief_rt.c references `sqrtf`). Also added `-lm` to the linking-failed hint message.
+
+**Lesson**: Every library dependency of the runtime must be provided to the linker. `sqrtf` from `libm` is the runtime's dependency, not the user program's. The compiler driver is responsible for its own runtime module's link requirements.
+

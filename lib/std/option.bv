@@ -1,6 +1,9 @@
 // Option<T> - Represents optional values
 // Eliminates null pointer exceptions
 
+import { __builtin_Option_Some, __builtin_Option_None }
+    from "std/__builtin/option.bv";
+
 // ===== ENUM DEFINITION =====
 
 enum Option<T> {
@@ -9,6 +12,14 @@ enum Option<T> {
 };
 
 // ===== CONSTRUCTION =====
+
+defn Some<T>(value: T) [true][term.is_some()] -> Option<T> {
+    term __builtin_Option_Some(value);
+};
+
+defn None<T>() [true][term.is_none()] -> Option<T> {
+    term __builtin_Option_None();
+};
 
 defn some<T>(value: T) [true][term.is_some()] -> Option<T> {
     term Some(value);

@@ -1373,6 +1373,7 @@ impl TypeChecker {
                         match &src_ty {
                             Type::Applied(name, _) if name == "List" || name == "Vector" || name == "String" => {}
                             Type::Custom(n) if n == "String" || n == "str" => {}
+                            Type::String => {}
                             _ => {
                                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
                                     expected: "List, Vector, or String".to_string(),
@@ -1397,6 +1398,10 @@ impl TypeChecker {
                                 // list :> Ptr → Ptr<element_type>
                                 let elem_ty = inner.first().cloned().unwrap_or(Type::Int);
                                 Type::Applied("Ptr".to_string(), vec![elem_ty])
+                            }
+                            Type::String => {
+                                // string :> Ptr → Ptr<Char>
+                                Type::Applied("Ptr".to_string(), vec![Type::Char])
                             }
                             Type::Custom(n) if n == "String" || n == "str" => {
                                 // string :> Ptr → Ptr<Char>

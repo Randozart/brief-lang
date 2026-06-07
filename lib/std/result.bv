@@ -1,3 +1,35 @@
+import { __builtin_Result_Ok, __builtin_Result_Err,
+         __builtin_Result_is_ok, __builtin_Result_is_err,
+         __builtin_Result_unwrap, __builtin_Result_unwrap_err }
+    from "std/__builtin/result.bv";
+
+// ===== CONSTRUCTORS =====
+
+defn Ok<T,E>(value: T) [true][term.is_ok()] -> Result<T,E> {
+    term __builtin_Result_Ok(value);
+};
+
+defn Err<T,E>(error: E) [true][term.is_err()] -> Result<T,E> {
+    term __builtin_Result_Err(error);
+};
+
+// ===== INSPECTION =====
+
+defn is_ok<T,E>(r: Result<T,E>) [true][term == true || term == false] -> Bool {
+    term __builtin_Result_is_ok(r);
+};
+
+defn is_err<T,E>(r: Result<T,E>) [true][term == true || term == false] -> Bool {
+    term __builtin_Result_is_err(r);
+};
+
+defn unwrap<T,E>(r: Result<T,E>) [r.is_ok()][true] -> T {
+    term __builtin_Result_unwrap(r);
+};
+
+defn unwrap_err<T,E>(r: Result<T,E>) [r.is_err()][true] -> E {
+    term __builtin_Result_unwrap_err(r);
+};
 
 // ===== FUNCTIONAL METHODS =====
 

@@ -1294,16 +1294,7 @@ Expr::Ge(l, r) => {
                     return self.frgn_registry.call(&fn_name, &arg_values);
                 }
 
-                // Check if this is an enum constructor call (e.g. Ok(value), Err(error))
-let enum_state = self.state.get(&fn_name).cloned();
-                if let Some(Value::Enum(enum_name, variant, _)) = &enum_state {
-                    if !arg_values.is_empty() {
-                        let mut fields = HashMap::new();
-                        fields.insert("value".to_string(), arg_values[0].clone());
-                        return Ok(Value::Enum(enum_name.clone(), fn_name.clone(), fields));
-                    }
-                    return Ok(enum_state.unwrap());
-                }
+                // Check for Value::Defn from state (registered defn aliases)
                 let defn_call = self.state.get(&fn_name).and_then(|v| {
                     if let Value::Defn(n) = v {
                         Some(n.clone())
@@ -2075,12 +2066,12 @@ pub(crate) fn read_file_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             Ok(content) => Ok(Value::Enum(
                 "Result".to_string(),
                 "Ok".to_string(),
-                HashMap::from([("result".to_string(), Value::String(content))]),
+                HashMap::from([("value".to_string(), Value::String(content))]),
             )),
             Err(e) => Ok(Value::Enum(
                 "Result".to_string(),
                 "Err".to_string(),
-                HashMap::from([("error".to_string(), Value::String(format!("{}", e)))]),
+                HashMap::from([("value".to_string(), Value::String(format!("{}", e)))]),
             )),
         }
     } else {

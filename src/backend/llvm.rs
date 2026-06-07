@@ -283,6 +283,9 @@ pub struct LlvmBackend {
     let_binding_types: HashMap<String, Type>,
     terminated: bool,
     returns_i64: bool,
+    /// Return type of the enclosing function for term/termbang/escape emission.
+    /// "void" by default; set to "i32" inside emit_folded_main / emit_ssa_main / etc.
+    fn_ret_ty: String,
     range_bounds: HashMap<String, (i64, i64)>,
     field_to_meta_idx: HashMap<String, usize>,
     triggers: HashMap<String, crate::ast::TriggerDeclaration>,
@@ -351,6 +354,7 @@ impl LlvmBackend {
             let_binding_types: HashMap::new(),
             terminated: false,
             returns_i64: false,
+            fn_ret_ty: "void".to_string(),
             range_bounds: HashMap::new(),
             field_to_meta_idx: HashMap::new(),
             triggers: HashMap::new(),
@@ -2376,7 +2380,17 @@ self.emit_declares(&mut out);
                 }
                 if let Some(Some(v)) = values.first() {
                     let r = self.emit_expr(out, v, indent);
-                    writeln!(out, "{}ret i64 {}", indent, r).ok();
+                    if self.fn_ret_ty == "i32" {
+                        let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, r).ok();
+                        writeln!(out, "{}ret i32 {}", indent, tr).ok();
+                    } else if self.fn_ret_ty == "i64" {
+                        writeln!(out, "{}ret i64 {}", indent, r).ok();
+                    } else {
+                        writeln!(out, "{}ret i64 {}", indent, r).ok();
+                    }
+                } else if self.fn_ret_ty == "i32" {
+                    writeln!(out, "{}ret i32 0", indent).ok();
                 } else if self.returns_i64 {
                     writeln!(out, "{}ret i64 0", indent).ok();
                 } else {
@@ -2392,7 +2406,17 @@ self.emit_declares(&mut out);
                 }
                 if let Some(Some(v)) = values.first() {
                     let r = self.emit_expr(out, v, indent);
-                    writeln!(out, "{}ret i64 {}", indent, r).ok();
+                    if self.fn_ret_ty == "i32" {
+                        let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, r).ok();
+                        writeln!(out, "{}ret i32 {}", indent, tr).ok();
+                    } else if self.fn_ret_ty == "i64" {
+                        writeln!(out, "{}ret i64 {}", indent, r).ok();
+                    } else {
+                        writeln!(out, "{}ret i64 {}", indent, r).ok();
+                    }
+                } else if self.fn_ret_ty == "i32" {
+                    writeln!(out, "{}ret i32 0", indent).ok();
                 } else if self.returns_i64 {
                     writeln!(out, "{}ret i64 0", indent).ok();
                 } else {
@@ -2405,7 +2429,17 @@ self.emit_declares(&mut out);
                 for s in &c { self.emit_stmt(out, s, indent); }
                 if let Some(v) = e {
                     let r = self.emit_expr(out, v, indent);
-                    writeln!(out, "{}ret i64 {}", indent, r).ok();
+                    if self.fn_ret_ty == "i32" {
+                        let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, r).ok();
+                        writeln!(out, "{}ret i32 {}", indent, tr).ok();
+                    } else {
+                        writeln!(out, "{}ret i64 {}", indent, r).ok();
+                    }
+                } else if self.fn_ret_ty == "i32" {
+                    writeln!(out, "{}ret i32 0", indent).ok();
+                } else if self.returns_i64 {
+                    writeln!(out, "{}ret i64 0", indent).ok();
                 } else {
                     writeln!(out, "{}ret void", indent).ok();
                 }
@@ -2586,6 +2620,19 @@ self.emit_declares(&mut out);
                 let end_l = format!("{}_e", gid);
                 let prev_terminated = self.terminated;
                 self.terminated = false;
+
+                // SSA mode: wrap guard in a named entry block so phi at merge
+                // has a known predecessor label for the skip path.
+                let ssa_pre_reg = self.ssa_state_reg.clone();
+                let entry_l: String;
+                if ssa_pre_reg.is_some() {
+                    entry_l = format!("{}_ge", gid);
+                    writeln!(out, "{}br label %{}", indent, entry_l).ok();
+                    writeln!(out, "{}{}:", indent, entry_l).ok();
+                } else {
+                    entry_l = String::new();
+                }
+
                 let guard_id = format!("guard_{}", self.pgo_guard_idx);
                 self.pgo_guard_idx += 1;
                 if let Some(ref profile) = self.pgo_profile {
@@ -2601,7 +2648,23 @@ self.emit_declares(&mut out);
                 for s in statements { self.emit_stmt(out, s, &format!("{}  ", indent)); }
                 if !self.terminated { writeln!(out, "{}  br label %{}", indent, end_l).ok(); }
                 writeln!(out, "{}{}:", indent, end_l).ok();
-                self.terminated = prev_terminated;
+                if !self.terminated {
+                    // SSA mode: phi merge at guard — the guard body may have
+                    // modified state via insertvalue (only on the then path).
+                    // Without a phi, the insertvalue result from %then_l would
+                    // be undefined on the skip path.
+                    if let Some(ref pre_reg) = ssa_pre_reg {
+                        if let Some(ref post_reg) = self.ssa_state_reg {
+                            if post_reg != pre_reg {
+                                let merge = format!("%me{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "  {} = phi %State [ {}, %{} ], [ {}, %{} ]",
+                                    merge, post_reg, then_l, pre_reg, entry_l);
+                                self.ssa_state_reg = Some(merge);
+                            }
+                        }
+                    }
+                    self.terminated = prev_terminated;
+                }
             }
             Statement::Unification { name, pattern, expr } => {
                 let val = self.emit_expr(out, expr, indent);
@@ -3949,6 +4012,7 @@ self.emit_declares(&mut out);
 
     // ── MAIN FUNCTION ─────────────────────────────────────────
     fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
+        self.fn_ret_ty = "i32".to_string();
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#3")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
@@ -4306,6 +4370,7 @@ self.emit_declares(&mut out);
         use_phi: bool,
         body: Option<&[Statement]>,
     ) {
+        self.fn_ret_ty = "i32".to_string();
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
@@ -4331,6 +4396,7 @@ self.emit_declares(&mut out);
         out: &mut String,
         txns: &[(String, &crate::ast::Transaction)],
     ) {
+        self.fn_ret_ty = "i32".to_string();
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
@@ -4428,6 +4494,7 @@ self.emit_declares(&mut out);
                 }
             }
         }
+        self.fn_ret_ty = "i32".to_string();
         let main_attr = self.slp_attr("main", if has_wake { "#3" } else { "#0" });
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", main_attr).ok();
         writeln!(out, "  entry:").ok();

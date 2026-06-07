@@ -1,8 +1,8 @@
 # Brief Language Specification
 
-**Version:** v0.15.0  
-**Date:** 2026-06-05  
-**Status:** Development (stable core, experimental backends, **new: `sig` contract projections with `#out`/`#inline` modifiers, zero-cost FFI via LTO, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`**)  
+**Version:** v0.16.0  
+**Date:** 2026-06-07  
+**Status:** Development (stable core, experimental backends, **new: Universal FFI via LTO library coupling (C/Rust/Zig), `import "link/..."` with `resolve_link_source()` search, FFI registry eliminating built-in magic, xxHash vendored as stdlib module, `sig` contract projections with `#out`/`#inline` modifiers, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -643,13 +643,27 @@ import { OUT__print_int } from "std/out.bv";
   - `from "python"` — Python (interpreter only, no LLVM backend)
   - If omitted, the compiler searches `import "link/..."` targets for the symbol name
 
-**Zero-cost inlining:** Languages that compile to LLVM IR (C, Rust, Zig, Swift, Julia, D) are linked via `llvm-link` and inlined across language boundaries by `opt -O3`. No FFI boundary overhead in the compiled binary.
+**Zero-cost inlining (LTO pipeline):** Languages that compile to LLVM IR (C, Rust, Zig, Swift, Julia, D) are linked via `llvm-link` and inlined across language boundaries by `opt -O2`. No FFI boundary overhead in the compiled binary. The pipeline is:
 
-**Import linking:**
+1. **`compile_to_bitcode()`** — compiles the foreign source file to LLVM bitcode using the appropriate compiler (`clang` for C, `rustc --emit=llvm-bc` for Rust, `zig build-obj -femit-llvm-bc` for Zig). The `LinkLanguage` enum determines which compiler to invoke:
+   - `CLanguage` — invokes `clang -O2 -c -emit-llvm -o <bc> <file>`
+   - `RustLanguage` — invokes `rustc --emit=llvm-bc -C opt-level=2 -o <bc> <file>`
+   - `ZigLanguage` — invokes `zig build-obj -femit-llvm-bc -O ReleaseFast -o <bc> <file>`
+2. **`link_and_optimize()`** — runs `llvm-link` to merge program bitcode with foreign bitcode, then `opt -O2 -S -vectorize-slp=false` to inline and optimize. Returns `Some(bc_path)` on success or `None` with a warning.
+
+**`import "link/..."` search order:**
+The `resolve_link_source()` function searches in this order, returning the first match:
+1. Project-relative (same directory as source file)
+2. `lib/runtime/` — built-in runtime modules (`brief_rt.c`)
+3. `lib/std/c/` — vendored C libraries (`xxhash/`, `yyjson/`, etc.)
+4. `BRIEF_STDLIB_PATH` environment variable
+5. Absolute path resolution
+
+The `import "link/..."` directive's `"..."` path is the file name (e.g., `"brief_rt.c"`, `"xxhash/xxhash.c"`). The resolver appends this to each search directory. This means `import "link/xxhash/xxhash.c"` resolves to `lib/std/c/xxhash/xxhash.c` via the `lib/std/c/` prefix.
+
 ```brief
-import "link/brief_rt.c";    // compile C → LLVM IR → llvm-link → opt -O3
-import "link/rust_lib.rs";   // same for Rust
-import "link/zig_lib.zig";   // same for Zig
+import "link/brief_rt.c";       // resolves to lib/runtime/brief_rt.c
+import "link/xxhash/xxhash.c";  // resolves to lib/std/c/xxhash/xxhash.c
 ```
 
 ### 3.5 State Management
@@ -1853,6 +1867,23 @@ frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
 frgn sqrt(x: Float) -> Float from "libm.so.6";
 ```
 
+### 5.6 FFI Registry (No-Magic Architecture)
+
+The interpreter maintains an **FFI registry** that maps location keys (e.g., `"std::HashMap::insert"`, `"std::string::len"`) to Rust-side handler functions. This replaces the previous pattern of hardcoded string matches on function names.
+
+**Architecture:**
+1. All built-in operations are registered in `ffi_name_to_location` with a unique location key
+2. The `foreign_functions` map associates each location key with a Rust closure/handler
+3. Stdlib modules in `lib/std/__builtin/` declare `frgn` signatures that import these registered operations as if they were true FFI calls
+4. The `__builtin.dbvs` schema file documents all registered location keys and their type signatures
+
+**Key benefit:** No hardcoded `fn_name == "insert"` string matching anywhere in the interpreter. All dispatch goes through the registry path — the same path used for C, Rust, and Zig FFI. This means:
+- Adding a new built-in operation is a matter of registering it in the FFI registry and writing a `frgn` declaration in the corresponding `.bv` file
+- The interpreter, LLVM backend, and any future backends all use the same resolution path
+- The registry is transparent and inspectable via `--explain ffi`
+
+**Migration status:** All collection operations (HashMap, HashSet, Stack, Queue, StringBuilder) and string operations are registered. Older direct-method-dispatch paths (`dispatch_method_by_type`) are deleted. The interpreter no longer contains any hardcoded Rust string matches that serve as "built-in" functions.
+
 ---
 
 ## 6. Standard Library
@@ -1873,6 +1904,7 @@ frgn sqrt(x: Float) -> Float from "libm.so.6";
 | `std/result` | Result type methods | `is_ok`, `is_err`, `unwrap`, `map`, `map_err` |
 | `std/bits` | Bit manipulation \[2026-06-05\] | `popcount`, `leading_zeros`, `trailing_zeros`, `abs`, `bit_reverse`, `ffs`, `is_power_of_two`, `rotate_left`, `rotate_right` |
 | `std/ptr` | Safe pointer operations \[2026-06-05\] | `read_i64`, `write_i64`, `address`, `read_byte`, `copy` |
+| `std/xxhash` | xxHash hashing \[2026-06-07, LTO coupled\] | `XXH64`, `XXH32`, `XXH3_64`, `XXH3_128` via `frgn` from vendored `xxhash.c` |
 
 ### 6.2 Math Module
 
@@ -2353,6 +2385,12 @@ reset = "RESETn"
 | Bottleneck config | ✅ Complete | bottlenecks.dbvs schema for PCIe, cache, bandwidth, FPGA \[2026-06-05\] |
 | **FFI** | | |
 | Foreign signatures | ✅ Complete | `frgn`, `frgn!`, `syscall`, `syscall!` |
+| `import "link/..."` LTO pipeline | ✅ Complete | C/Rust/Zig → bitcode → `llvm-link` → `opt -O2` \[2026-06-06\] |
+| `compile_to_bitcode()` | ✅ Complete | Compiles C/Rust/Zig to LLVM bitcode via `clang`/`rustc`/`zig` \[2026-06-06\] |
+| `link_and_optimize()` | ✅ Complete | `llvm-link` + `opt -O2` with `-vectorize-slp=false` \[2026-06-06\] |
+| FFI Registry | ✅ Complete | No hardcoded string matching; all dispatch through `ffi_name_to_location` → `foreign_functions` \[2026-06-06\] |
+| `__builtin.dbvs` | ✅ Complete | Schema documenting all registered FFI location keys \[2026-06-06\] |
+| `brief_rt.c` as import | ✅ Complete | Runtime functions via `import "link/brief_rt.c"` not hardcoded \[2026-06-06\] |
 | Resource declarations | ✅ Complete | `rsrc` keyword |
 | Bit-packing | ✅ Complete | AST-level |
 | Vector types | ✅ Complete | Embedded only |
@@ -2365,6 +2403,8 @@ reset = "RESETn"
 | **Standard Library** | | |
 | `std/bits.bv` | ✅ Complete | Bit manipulation: popcount, leading_zeros, trailing_zeros, abs, bit_reverse, ffs, rotate \[2026-06-05\] |
 | `std/ptr.bv` | ✅ Complete | Safe pointer ops: read_i64, write_i64, address, read_byte, copy \[2026-06-05\] |
+| `lib/std/c/xxhash/` | ✅ Complete | Vendored xxHash v0.8.2 (xxhash.h + xxhash.c); LTO-coupled via `import "link/xxhash/xxhash.c"` \[2026-06-07\] |
+| `std/xxhash.bv` | ✅ Complete | xxHash FFI declarations + convenience wrappers: `XXH64`, `XXH32`, `XXH3_64`, `XXH3_128` \[2026-06-07\] |
 | **Backends** | | |
 | Rust | ✅ Complete | Native executables |
 | C | ✅ Complete | Hosted and bare-metal |
@@ -2609,4 +2649,4 @@ txn main() [true][true] {
 
 ---
 
-*Last updated: Brief v0.12.0 (2026-05-06)*
+*Last updated: Brief v0.16.0 (2026-06-07)*

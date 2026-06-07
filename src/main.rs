@@ -2358,6 +2358,7 @@ fn run_llvm_compile(
 
             let mut link_cmd = std::process::Command::new("cc");
             link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj_path);
+            link_cmd.arg("-lm");
             if has_wake {
                 link_cmd.args(["-lrt", "-lpthread"]);
             } else if has_thread_pool {
@@ -2370,7 +2371,7 @@ fn run_llvm_compile(
                 }
                 _ => {
                     eprintln!("  Warning: linking failed. Link manually:");
-                    eprintln!("    cc -no-pie {} -o {}", lto_obj_path.display(), exe_path.display());
+                    eprintln!("    cc -no-pie {} -o {} -lm", lto_obj_path.display(), exe_path.display());
                     if has_wake { eprintln!("    (add -lrt -lpthread)"); }
                     if has_thread_pool && !has_wake { eprintln!("    (add -lpthread)"); }
                 }
