@@ -235,7 +235,9 @@ mod tests {
             attrs: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
-        })
+                 outputs: Vec::new(),
+         output_type: None,
+     })
     }
 
     #[test]

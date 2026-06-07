@@ -1,64 +1,69 @@
 // Queue<T> - FIFO data structure
-// Implemented as a list with enqueue/dequeue semantics
+// Delegates to native Value::Queue via __builtin_* FFI functions
 
-// ===== STRUCT DEFINITION =====
+import { __builtin_Queue_new, __builtin_Queue_enqueue,
+         __builtin_Queue_dequeue, __builtin_Queue_front,
+         __builtin_Queue_len, __builtin_Queue_is_empty,
+         __builtin_Queue_clear }
+    from "std/__builtin/queue.bv";
 
-struct Queue<T> {
-    items: List<T>
-};
-
-// ===== CONSTRUCTION =====
+struct Queue<T> {};
 
 defn new_queue<T>() -> Queue<T> [true][term.is_empty()] {
-    term Queue { items: [] };
+    term __builtin_Queue_new();
 };
 
 defn with_capacity<T>(capacity: Int) -> Queue<T> [capacity > 0][term.is_empty()] {
-    term Queue { items: [] };
+    term __builtin_Queue_new();
 };
 
-// ===== OPERATIONS =====
-
 defn enqueue<T>(queue: Queue<T>, item: T) [true][term :> Size == queue :> Size + 1] -> Queue<T> {
-    &queue.items <- item;
-    term queue;
+    term __builtin_Queue_enqueue(queue, item);
 };
 
 defn dequeue<T>(queue: Queue<T>) [!queue.is_empty()][term :> Size == queue :> Size - 1] -> Queue<T> {
-    [queue.is_empty()] {
-        term queue;
-    };
-    <- &queue.items[0];
+    let pair: Option<(T, Queue<T>)> = __builtin_Queue_dequeue(queue);
+    uni pair(Some((_, new_queue))) => { term new_queue; };
     term queue;
 };
 
 defn front<T>(queue: Queue<T>) [!queue.is_empty()][true] -> Option<T> {
-    [queue.is_empty()] {
-        term None;
-    };
-    term Some(queue.items[0]);
+    term __builtin_Queue_front(queue);
 };
 
 defn head<T>(queue: Queue<T>) [!queue.is_empty()][true] -> T {
-    term queue.items[0];
+    uni __builtin_Queue_front(queue)(Some(v)) => { term v; };
+    term queue.head(); // unreachable if precondition holds
 };
 
-// ===== METADATA =====
-
 defn len<T>(queue: Queue<T>) [true][term >= 0] -> Int {
-    term queue.items :> Size;
+    term __builtin_Queue_len(queue);
 };
 
 defn is_empty<T>(queue: Queue<T>) [true][term == true || term == false] -> Bool {
-    term queue.items :> Size == 0;
+    term __builtin_Queue_is_empty(queue);
 };
 
-// ===== CONVERSION =====
-
 defn to_list<T>(queue: Queue<T>) [true][term :> Size == queue :> Size] -> List<T> {
-    term queue.items;
+    let result: List<T> = [];
+    let q: Queue<T> = queue;
+    [!q.is_empty()] {
+        uni __builtin_Queue_dequeue(q)(Some((item, rest))) => {
+            &result = result + [item];
+            &q = rest;
+        };
+    };
+    term result;
+};
+
+txn from_list_loop<T>(items: List<T>, result: Queue<T>, i: Int)
+    [i < items :> Size][i == items :> Size] -> Queue<T>
+{
+    &result = __builtin_Queue_enqueue(result, items[i]);
+    &i = i + 1;
+    term result;
 };
 
 defn from_list<T>(items: List<T>) [true][term :> Size == items :> Size] -> Queue<T> {
-    term Queue { items: items };
+    term from_list_loop(items, new_queue(), 0);
 };

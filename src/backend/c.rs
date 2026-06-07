@@ -896,9 +896,9 @@ impl CBackend {
                     output.push_str("    return 0; /* escape */\n");
                 }
             }
-            Statement::Unification { name, pattern, expr } => {
+            Statement::Unification { name, variant, fields: _, expr } => {
                 let val = self.expr_to_c(expr);
-                output.push_str(&format!("    /* unification: {} {} = {} */\n", name, pattern, val));
+                output.push_str(&format!("    /* unification: {} {} = {} */\n", name, variant, val));
             }
         }
     }

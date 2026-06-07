@@ -2451,14 +2451,15 @@ impl ProofEngine {
             match stmt {
                 Statement::Unification {
                     name,
-                    pattern,
+                    variant,
+                    fields: _,
                     expr,
                 } => {
                     if let Expr::Call(sig_name, _) = expr {
                         sig_callers
                             .entry(sig_name.clone())
                             .or_insert_with(Vec::new)
-                            .push((caller_name.to_string(), pattern.clone()));
+                            .push((caller_name.to_string(), variant.clone()));
                     }
                 }
                 Statement::Guarded { statements, .. } => {

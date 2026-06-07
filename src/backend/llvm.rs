@@ -42,7 +42,7 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
     }
 }
 use crate::ast::{
-    ArrowDir, DispatchMode, Expr, ForeignSignature, MatchPattern, Program, ProjectionTarget, Statement, TopLevel, Type,
+    ArrowDir, DispatchMode, Expr, ForeignSignature, MatchPattern, Pattern, Program, ProjectionTarget, Statement, TopLevel, Type,
 };
 
 #[derive(Debug, Clone)]
@@ -2666,7 +2666,7 @@ self.emit_declares(&mut out);
                     self.terminated = prev_terminated;
                 }
             }
-            Statement::Unification { name, pattern, expr } => {
+            Statement::Unification { name, variant, fields: _, expr } => {
                 let val = self.emit_expr(out, expr, indent);
                 let disc = format!("%ud{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = and i64 {}, 255", indent, disc, val).ok();
@@ -2680,7 +2680,7 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}{}:", indent, arm_l).ok();
                 let pay = format!("%up{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = lshr i64 {}, 8", indent, pay, val).ok();
-                self.let_bindings.insert(pattern.clone(), pay.clone());
+                self.let_bindings.insert(variant.clone(), pay.clone());
                 writeln!(out, "{}br label %{}", indent, merge_l).ok();
                 writeln!(out, "{}{}:", indent, def_l).ok();
                 writeln!(out, "{}  unreachable", indent).ok();
@@ -3492,7 +3492,9 @@ self.emit_declares(&mut out);
                             writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, gep).ok();
                             let reg = format!("%mfr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = add i64 0, {}", indent, reg, ld).ok();
-                            self.let_bindings.insert(fname.clone(), reg);
+                            if let Pattern::Var(vname) = fname {
+                                self.let_bindings.insert(vname.clone(), reg);
+                            }
                         }
                         let av = self.emit_expr(out, &arm.body, indent);
                         phi_v.push(av.name); phi_l.push(format!("%%ma{}_{}", mid, vi));
@@ -5143,7 +5145,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5194,7 +5198,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5267,7 +5273,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
                 TopLevel::Transaction(Transaction {
                     name: "sleep".to_string(),
                     parameters: vec![],
@@ -5287,7 +5295,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5368,7 +5378,8 @@ mod tests {
                     body: vec![
                         Statement::Unification {
                             name: "Some".to_string(),
-                            pattern: "v".to_string(),
+                            variant: "v".to_string(),
+                            fields: vec![],
                             expr: Expr::Integer(1),
                         },
                         Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
@@ -5382,7 +5393,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5440,7 +5453,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5530,7 +5545,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5584,7 +5601,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5719,7 +5738,9 @@ mod tests {
                     body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
                     is_async: false, is_reactive: true, reactor_speed: None, span: None,
                     is_lambda: false, dependencies: vec![], attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5773,7 +5794,9 @@ mod tests {
                     is_lambda: false, dependencies: vec![],
                     attrs: vec![], modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5829,7 +5852,9 @@ mod tests {
                     is_lambda: false, dependencies: vec![],
                     attrs: vec![], modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -5913,7 +5938,9 @@ mod tests {
                 body, is_async: false, is_reactive: true, reactor_speed: None,
                 span: None, is_lambda: false, dependencies: vec![],
                 attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-            }));
+                         outputs: Vec::new(),
+             output_type: None,
+         }));
         }
         Program {
             items, comments: vec![], reactor_speed: None, attrs: Vec::new(),
@@ -6191,7 +6218,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
                 TopLevel::Transaction(Transaction {
                     name: "inc_b".to_string(),
                     parameters: vec![],
@@ -6219,7 +6248,9 @@ mod tests {
                     attrs: vec![],
                     modifiers: vec![],
                     variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -6328,7 +6359,9 @@ mod tests {
             is_async: false, is_reactive: true, reactor_speed: None,
             span: None, is_lambda: false, dependencies: vec![],
             attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-        }));
+                 outputs: Vec::new(),
+         output_type: None,
+     }));
         Program {
             items,
             comments: vec![], reactor_speed: None, attrs: vec![],
@@ -6660,7 +6693,9 @@ mod tests {
             attrs: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
-        }));
+                 outputs: Vec::new(),
+         output_type: None,
+     }));
         Program {
             items,
             comments: vec![],
@@ -7055,7 +7090,9 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![],
                     is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         }
@@ -7148,7 +7185,9 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![],
                     is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7192,7 +7231,9 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![],
                     is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7271,7 +7312,9 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![],
                     is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7331,7 +7374,9 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![],
                     is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7373,11 +7418,11 @@ let spec = crate::target_spec::TargetSpec {
                             expr: Expr::Match {
                                 value: Box::new(Expr::Call("Some".to_string(), vec![Expr::Integer(7)])),
                                 arms: vec![
-                                    MatchArm {
-                                        pattern: MatchPattern::Variant {
-                                            name: "Some".to_string(),
-                                            fields: vec!["val".to_string()],
-                                        },
+                                        MatchArm {
+                                            pattern: MatchPattern::Variant {
+                                                name: "Some".to_string(),
+                                                fields: vec![Pattern::Var("val".to_string())],
+                                            },
                                         guard: None,
                                         body: Box::new(Expr::Identifier("val".to_string())),
                                     },
@@ -7395,7 +7440,9 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![],
                     is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7452,7 +7499,9 @@ let spec = crate::target_spec::TargetSpec {
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7489,7 +7538,9 @@ let spec = crate::target_spec::TargetSpec {
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7522,7 +7573,9 @@ let spec = crate::target_spec::TargetSpec {
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7560,7 +7613,9 @@ let spec = crate::target_spec::TargetSpec {
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7598,7 +7653,9 @@ let spec = crate::target_spec::TargetSpec {
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7632,7 +7689,9 @@ let spec = crate::target_spec::TargetSpec {
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7673,7 +7732,9 @@ let spec = crate::target_spec::TargetSpec {
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };
@@ -7705,7 +7766,9 @@ let spec = crate::target_spec::TargetSpec {
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], is_async: false,
                     attrs: vec![], modifiers: vec![], variant_bodies: vec![],
-                }),
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
             ],
             ..empty_program()
         };

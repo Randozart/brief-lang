@@ -441,7 +441,9 @@ impl Desugarer {
             dependencies,
             modifiers: Vec::new(),
             variant_bodies: Vec::new(),
-        };
+                 outputs: Vec::new(),
+         output_type: None,
+     };
 
         (new_txn, sigs, state)
     }
@@ -628,7 +630,9 @@ mod tests {
             attrs: Vec::new(),
             modifiers: vec![],
             variant_bodies: vec![],
-        };
+                 outputs: Vec::new(),
+         output_type: None,
+     };
 
         let mut desugarer = Desugarer::new();
         let result = desugarer.expand_implicit_terms_txn(&txn);

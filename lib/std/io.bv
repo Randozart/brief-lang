@@ -172,17 +172,19 @@ defn create_dir(path: String) -> Bool [path != ""][term == true || term == false
 
 // ===== PATH OPERATIONS (Native) =====
 
-defn join_path(parts: List<String>) -> String [parts :> Size > 0][term :> Size >= 0] {
-    let result = new_builder();
-    let i: Int = 0;
-    [i < parts :> Size] {
-        [i > 0] {
-            result = result.append_char('/');
-        };
-        result = result.append_str(parts[i]);
-        &i = i + 1;
+txn join_path_loop(parts: List<String>, result: StringBuilder, i: Int)
+    [i < parts :> Size][i == parts :> Size] -> String
+{
+    [i > 0] {
+        &result = result.append_char('/');
     };
+    &result = result.append_str(parts[i]);
+    &i = i + 1;
     term result.to_string();
+};
+
+defn join_path(parts: List<String>) -> String [parts :> Size > 0][term :> Size >= 0] {
+    term join_path_loop(parts, new_builder(), 0);
 };
 
 defn split_path(path: String) -> String [path != ""][term :> Size >= 0] {

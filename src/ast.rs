@@ -411,7 +411,7 @@ pub enum Expr {
     PatternMatch {
         value: Box<Expr>,
         variant: String,
-        fields: Vec<String>,
+        fields: Vec<Pattern>,
     },
     // Match expression: match value { Variant(f1) => body, _ => default }
     Match {
@@ -435,7 +435,7 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MatchPattern {
     Wildcard,
-    Variant { name: String, fields: Vec<String> },
+    Variant { name: String, fields: Vec<Pattern> },
 }
 
 /// A single arm in a match expression
@@ -444,6 +444,24 @@ pub struct MatchArm {
     pub pattern: MatchPattern,
     pub guard: Option<Box<Expr>>,
     pub body: Box<Expr>,
+}
+
+impl std::fmt::Display for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Pattern::Var(name) => write!(f, "{}", name),
+            Pattern::Wildcard => write!(f, "_"),
+            Pattern::Tuple(elems) => {
+                let inner = elems.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
+                write!(f, "({})", inner)
+            }
+            Pattern::LitInt(n) => write!(f, "{}", n),
+            Pattern::LitFloat(n) => write!(f, "{}", n),
+            Pattern::LitString(s) => write!(f, "\"{}\"", s),
+            Pattern::LitChar(c) => write!(f, "'{}'", c),
+            Pattern::LitBool(b) => write!(f, "{}", b),
+        }
+    }
 }
 
 impl Expr {
@@ -537,6 +555,18 @@ impl Expr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Var(String),
+    Wildcard,
+    Tuple(Vec<Pattern>),
+    LitInt(i64),
+    LitFloat(f64),
+    LitString(String),
+    LitChar(char),
+    LitBool(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     // Assignment: &lhs = expr; or lhs = expr;
     Assignment {
@@ -549,7 +579,8 @@ pub enum Statement {
     // Unification: identifier(pattern) = expr;
     Unification {
         name: String,
-        pattern: String,
+        variant: String,
+        fields: Vec<Pattern>,
         expr: Expr,
     },
 
@@ -776,6 +807,8 @@ pub struct Transaction {
     pub attrs: Vec<Attribute>,
     pub modifiers: Vec<Hashtag>,
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
+    pub outputs: Vec<Type>,
+    pub output_type: Option<OutputType>,
 }
 
 #[derive(Debug, Clone)]

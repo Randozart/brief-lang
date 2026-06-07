@@ -463,7 +463,7 @@ impl Annotator {
                     "{} {}({})",
                     self.format_expr(value),
                     variant,
-                    fields.join(", ")
+                    fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ")
                 )
             }
             Expr::Slice {
@@ -507,7 +507,7 @@ impl Annotator {
                         MatchPattern::Wildcard => "_".to_string(),
                         MatchPattern::Variant { name, fields } => {
                             if fields.is_empty() { name.clone() }
-                            else { format!("{}({})", name, fields.join(", ")) }
+                            else { format!("{}({})", name, fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ")) }
                         }
                     };
                     let guard_str = arm.guard.as_ref()

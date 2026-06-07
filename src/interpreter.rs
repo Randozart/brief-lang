@@ -171,6 +171,7 @@ pub struct Interpreter {
     pub prior_state: HashMap<String, Value>,
     pub foreign_functions: HashMap<String, ForeignFn>,
     pub definitions: HashMap<String, Definition>,
+    pub callable_txns: HashMap<String, Transaction>,
     pub ffi_bindings: HashMap<String, ForeignSignature>,
     pub ffi_name_to_location: HashMap<String, String>,
     pub orchestrator: Orchestrator,
@@ -190,6 +191,7 @@ impl Interpreter {
             prior_state: HashMap::new(),
             foreign_functions,
             definitions: HashMap::new(),
+            callable_txns: HashMap::new(),
             ffi_bindings: HashMap::new(),
             ffi_name_to_location: HashMap::new(),
             orchestrator: Orchestrator::new(),
@@ -409,6 +411,85 @@ impl Interpreter {
                 result = self.return_value.take().unwrap();
                 break;
             }
+        }
+
+        self.state = old_state;
+        self.return_value = old_return;
+        Ok(result)
+    }
+
+    fn call_txn(&mut self, name: &str, args: &[Expr]) -> Result<Value, RuntimeError> {
+        let txn = match self.callable_txns.get(name) {
+            Some(t) => t.clone(),
+            None => return Err(RuntimeError::UndefinedForeignFunction(name.to_string())),
+        };
+
+        let mut local_scope = self.state.clone();
+        for (i, (param_name, _)) in txn.parameters.iter().enumerate() {
+            if i < args.len() {
+                let arg_val = self.eval_expr(&args[i])?;
+                local_scope.insert(param_name.clone(), arg_val);
+            }
+        }
+
+        let old_state = std::mem::replace(&mut self.state, local_scope);
+        let old_return = self.return_value.take();
+
+        let mut iterations = 0;
+        let max_iterations = 10_000_000;
+        let mut result = Value::Void;
+
+        // Convergence loop: execute body while precondition holds.
+        // The precondition becoming false is the convergence signal.
+        loop {
+            let pre_val = self.eval_expr(&txn.contract.pre_condition)?;
+            if pre_val != Value::Bool(true) {
+                break;
+            }
+
+            if iterations >= max_iterations {
+                break;
+            }
+            iterations += 1;
+
+            let prior_state = self.state.clone();
+
+            let mut txn_failed = false;
+            for stmt in &txn.body {
+                if let Err(e) = self.exec_stmt(stmt) {
+                    match e {
+                        RuntimeError::Escaped => {
+                            self.state = prior_state.clone();
+                            txn_failed = true;
+                        }
+                        _ => {
+                            self.state = prior_state.clone();
+                            txn_failed = true;
+                        }
+                    }
+                    break;
+                }
+                if let Some(rv) = self.return_value.take() {
+                    result = rv;
+                }
+            }
+
+            if txn_failed {
+                break;
+            }
+
+            if self.state == prior_state {
+                break;
+            }
+        }
+
+        // Verify postcondition on the final (converged) state.
+        // If it fails, roll back to entry state.
+        let post_val = self.eval_expr(&txn.contract.post_condition)?;
+        if post_val != Value::Bool(true) {
+            self.state = old_state.clone();
+            self.return_value = old_return;
+            return Ok(result);
         }
 
         self.state = old_state;
@@ -656,6 +737,10 @@ impl Interpreter {
                 self.state.insert(const_decl.name.clone(), value);
             } else if let TopLevel::Definition(defn) = item {
                 self.definitions.insert(defn.name.clone(), defn.clone());
+            } else if let TopLevel::Transaction(txn) = item {
+                if !txn.is_reactive {
+                    self.callable_txns.insert(txn.name.clone(), txn.clone());
+                }
             }
         }
 
@@ -715,6 +800,34 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+
+    fn pattern_match(pat: &Pattern, value: &Value, state: &mut HashMap<String, Value>) -> bool {
+        match pat {
+            Pattern::Wildcard => true,
+            Pattern::Var(name) => {
+                state.insert(name.clone(), value.clone());
+                true
+            }
+            Pattern::Tuple(elements) => {
+                let items = match value {
+                    Value::List(v) => v,
+                    Value::Stack(v) => v,
+                    _ => return false,
+                };
+                if elements.len() != items.len() {
+                    return false;
+                }
+                elements.iter().zip(items.iter()).all(|(p, v)| {
+                    Self::pattern_match(p, v, state)
+                })
+            }
+            Pattern::LitInt(n) => matches!(value, Value::Int(v) if *v == *n),
+            Pattern::LitFloat(f) => matches!(value, Value::Float(v) if *v == *f),
+            Pattern::LitString(s) => matches!(value, Value::String(v) if v == s),
+            Pattern::LitChar(c) => matches!(value, Value::Char(v) if v == c),
+            Pattern::LitBool(b) => matches!(value, Value::Bool(v) if v == b),
+        }
     }
 
     pub fn exec_stmt(&mut self, stmt: &Statement) -> Result<(), RuntimeError> {
@@ -834,35 +947,26 @@ impl Interpreter {
             }
             Statement::Unification {
                 name,
-                pattern,
+                variant,
+                fields,
                 expr,
             } => {
-                // Look up value from state (set by previous let) not by evaluating expr
                 let value = self.state.get(name).cloned().unwrap_or(Value::Void);
-                let variant_name = pattern.split_once('(').map(|(n, _)| n).unwrap_or(pattern);
-                let field_names: Vec<&str> = pattern.split_once('(')
-                    .and_then(|(_, rest)| rest.strip_suffix(')'))
-                    .map(|inner| inner.split(',').map(|s| s.trim()).collect())
-                    .unwrap_or_default();
                 let matched = match &value {
-                    Value::Enum(_, variant, fields) if variant == variant_name => {
-                        let mut sorted_keys: Vec<&String> = fields.keys().collect();
-                        sorted_keys.sort();
-                        let vals: Vec<&Value> = sorted_keys.iter()
-                            .filter_map(|k| fields.get(*k)).collect();
-                        for (i, fname) in field_names.iter().enumerate() {
-                            if i < vals.len() && !fname.is_empty() && *fname != "_" {
-                                self.state.insert(fname.to_string(), vals[i].clone());
-                            }
+                    Value::Enum(_, v, enum_fields) if variant == "_" || v == variant => {
+                        if fields.is_empty() {
+                            true
+                        } else {
+                            let mut keys: Vec<&String> = enum_fields.keys().collect();
+                            keys.sort();
+                            let vals: Vec<&Value> = keys.iter()
+                                .filter_map(|k| enum_fields.get(*k)).collect();
+                            fields.iter().zip(vals.iter()).all(|(pat, val)| {
+                                Self::pattern_match(pat, val, &mut self.state)
+                            })
                         }
-                        true
                     }
-                    _ if variant_name == pattern => {
-                        if let Some(first) = field_names.first() {
-                            if !first.is_empty() && *first != "_" {
-                                self.state.insert(first.to_string(), value);
-                            }
-                        }
+                    _ if variant != "_" && fields.is_empty() => {
                         true
                     }
                     _ => false,
@@ -1289,6 +1393,11 @@ Expr::Ge(l, r) => {
                     return self.call_defn(&fn_name, args);
                 }
 
+                // Check callable transactions (non-reactive txns with convergence loops)
+                if self.callable_txns.contains_key(&fn_name) {
+                    return self.call_txn(&fn_name, args);
+                }
+
                 // Check dynamically linked FFI (frgn declarations with from "lib.so")
                 if self.frgn_registry.declarations.contains_key(&fn_name) {
                     return self.frgn_registry.call(&fn_name, &arg_values);
@@ -1355,8 +1464,13 @@ Expr::Ge(l, r) => {
                     ProjectionTarget::Size => match source_val {
                         Value::List(items) => Ok(Value::Int(items.len() as i64)),
                         Value::String(s) => Ok(Value::Int(s.len() as i64)),
+                        Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
+                        Value::HashSet(s) => Ok(Value::Int(s.len() as i64)),
+                        Value::Stack(v) => Ok(Value::Int(v.len() as i64)),
+                        Value::Queue(q) => Ok(Value::Int(q.len() as i64)),
+                        Value::StringBuilder(sb) => Ok(Value::Int(sb.len() as i64)),
                         _ => Err(RuntimeError::TypeMismatch(
-                            "Size projection requires List or String".to_string(),
+                            "Size projection requires List, String, or collection type".to_string(),
                         )),
                     },
                     ProjectionTarget::Bytes => {
@@ -1540,29 +1654,19 @@ Expr::Ge(l, r) => {
                 variant,
                 fields,
             } => {
-                // Evaluate the value being matched
                 let matched_value = self.eval_expr(value)?;
-
-                // Check if it's an Enum with the matching variant
                 match matched_value {
-                    Value::Enum(enum_name, matched_variant, enum_fields) => {
-                        // Check if the variant matches
+                    Value::Enum(_, matched_variant, enum_fields) => {
                         if matched_variant == *variant {
-                            // Bind the pattern variables to the enum fields
-                            // For a pattern like Ok(h), we bind the first field to h
-                            // For a pattern like Ok(a, b), we bind first two fields to a and b
-                            let enum_field_values: Vec<_> = enum_fields.values().cloned().collect();
-
-                            for (i, pattern_var) in fields.iter().enumerate() {
-                                if let Some(field_value) = enum_field_values.get(i) {
-                                    self.state.insert(pattern_var.clone(), field_value.clone());
-                                }
-                            }
-
-                            // Return true - the pattern matched
-                            Ok(Value::Bool(true))
+                            let mut keys: Vec<&String> = enum_fields.keys().collect();
+                            keys.sort();
+                            let vals: Vec<&Value> = keys.iter()
+                                .filter_map(|k| enum_fields.get(*k)).collect();
+                            let all_matched = fields.iter().zip(vals.iter()).all(|(pat, val)| {
+                                Self::pattern_match(pat, val, &mut self.state)
+                            });
+                            Ok(Value::Bool(all_matched))
                         } else {
-                            // Variant doesn't match
                             Ok(Value::Bool(false))
                         }
                     }
@@ -1714,18 +1818,13 @@ let s_val = self.eval_expr(s)?;
                         MatchPattern::Variant { name, fields } => {
                             match &target {
                                 Value::Enum(_, variant, enum_fields) if variant == name => {
-                                    for (i, field_name) in fields.iter().enumerate() {
-                                        let key = if i == 0 { "value" } else { "" };
-                                        let val = if i == 0 {
-                                            enum_fields.get("value").cloned()
-                                        } else {
-                                            enum_fields.get(&format!("field{}", i)).cloned()
-                                        };
-                                        if let Some(v) = val {
-                                            self.state.insert(field_name.clone(), v);
-                                        }
-                                    }
-                                    true
+                                    let mut keys: Vec<&String> = enum_fields.keys().collect();
+                                    keys.sort();
+                                    let vals: Vec<&Value> = keys.iter()
+                                        .filter_map(|k| enum_fields.get(*k)).collect();
+                                    fields.iter().zip(vals.iter()).all(|(pat, val)| {
+                                        Self::pattern_match(pat, val, &mut self.state)
+                                    })
                                 }
                                 _ => false,
                             }
@@ -2473,5 +2572,914 @@ mod tests {
         let expr = Expr::Call("len".to_string(), vec![Expr::Identifier("xs".to_string())]);
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(3));
+    }
+
+    fn make_enum(variant: &str, fields: Vec<(&str, Value)>) -> Value {
+        Value::Enum(
+            "Option".to_string(),
+            variant.to_string(),
+            fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        )
+    }
+
+    #[test]
+    fn test_uni_wildcard_matches_some() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(42))]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "_".to_string(),
+            fields: vec![],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_uni_wildcard_matches_none() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("None", vec![]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "_".to_string(),
+            fields: vec![],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_uni_binds_field_from_variant() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(99))]));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Var("v".to_string())],
+            expr: Expr::Block(vec![], Box::new(Expr::Term)),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("v"), Some(&Value::Int(99)));
+    }
+
+    #[test]
+    fn test_uni_mismatch_does_not_bind() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("None", vec![]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Var("v".to_string())],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        // flag should not have been set (match failed)
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(0)));
+        // v should not be bound
+        assert!(!i.state.contains_key("v"));
+    }
+
+    #[test]
+    fn test_uni_wildcard_does_not_bind_fields() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(42))]));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "_".to_string(),
+            fields: vec![],
+            expr: Expr::Block(vec![], Box::new(Expr::Term)),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        // wildcard should bind nothing
+        assert!(!i.state.contains_key("0"));
+    }
+
+    #[test]
+    fn test_uni_multiple_fields() {
+        let mut i = Interpreter::new();
+        let fields: HashMap<String, Value> = [
+            ("0".to_string(), Value::Int(10)),
+            ("1".to_string(), Value::String("hello".to_string())),
+        ].into();
+        i.state.insert("pair".to_string(), Value::Enum(
+            "Pair".to_string(), "Pair".to_string(), fields,
+        ));
+        let stmt = Statement::Unification {
+            name: "pair".to_string(),
+            variant: "Pair".to_string(),
+            fields: vec![
+                Pattern::Var("a".to_string()),
+                Pattern::Var("b".to_string()),
+            ],
+            expr: Expr::Block(vec![], Box::new(Expr::Term)),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("a"), Some(&Value::Int(10)));
+        assert_eq!(i.state.get("b"), Some(&Value::String("hello".to_string())));
+    }
+
+    #[test]
+    fn test_uni_literal_pattern_matches() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(42))]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::LitInt(42)],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_uni_literal_pattern_mismatch() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(99))]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::LitInt(42)],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn test_uni_literal_string_matches() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Msg", vec![("0", Value::String("ok".to_string()))]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Msg".to_string(),
+            fields: vec![Pattern::LitString("ok".to_string())],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_uni_tuple_pattern() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![(
+            "0",
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+        )]));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Tuple(vec![
+                Pattern::Var("a".to_string()),
+                Pattern::Var("b".to_string()),
+            ])],
+            expr: Expr::Block(vec![], Box::new(Expr::Term)),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("a"), Some(&Value::Int(1)));
+        assert_eq!(i.state.get("b"), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn test_uni_tuple_pattern_mismatch_length() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![(
+            "0",
+            Value::List(vec![Value::Int(1)]), // length 1, but pattern expects length 2
+        )]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Tuple(vec![
+                Pattern::Var("a".to_string()),
+                Pattern::Var("b".to_string()),
+            ])],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn test_uni_recursive_nested_enum() {
+        let mut i = Interpreter::new();
+        // Simulate Some(Some(42)) — nested enum
+        let inner = make_enum("Some", vec![("0", Value::Int(42))]);
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", inner)]));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Var("inner".to_string())],
+            expr: Expr::Block(vec![], Box::new(Expr::Term)),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("inner"), Some(&make_enum("Some", vec![("0", Value::Int(42))])));
+    }
+
+    #[test]
+    fn test_uni_simple_name_always_matches() {
+        let mut i = Interpreter::new();
+        i.state.insert("flag".to_string(), Value::Int(0));
+        // Syntax 3: uni x = expr — always matches, binds nothing
+        let stmt = Statement::Unification {
+            name: "uni".to_string(),
+            variant: "x".to_string(),
+            fields: vec![],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_uni_fieldless_variant_matches_void() {
+        // Syntax: uni val(Some) = expr;  — a variant name with no field patterns
+        // This matches Void under the same catch-all that syntax 3 uses
+        let mut i = Interpreter::new();
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        // Void matches because variant != "_" && fields.is_empty() is a catch-all
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_uni_wildcard_matches_void() {
+        let mut i = Interpreter::new();
+        // val is not in state, value is Void
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "_".to_string(),
+            fields: vec![],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        // Wildcard only matches enums in the current interpreter, so Void should not match
+        // The first match arm requires Value::Enum, the second requires variant != "_"
+        // So wildcard on Void should NOT match
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn test_uni_field_with_wildcard_ignores_field() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(42))]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Wildcard],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+        // Nothing bound to the wildcard
+        assert!(!i.state.contains_key("_"));
+    }
+
+    #[test]
+    fn test_uni_literal_float_matches() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Val", vec![("0", Value::Float(3.14))]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Val".to_string(),
+            fields: vec![Pattern::LitFloat(3.14)],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_uni_literal_bool_matches() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Flag", vec![("0", Value::Bool(true))]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Flag".to_string(),
+            fields: vec![Pattern::LitBool(true)],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_uni_literal_char_matches() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Ch", vec![("0", Value::Char('x'))]));
+        i.state.insert("flag".to_string(), Value::Int(0));
+        let stmt = Statement::Unification {
+            name: "val".to_string(),
+            variant: "Ch".to_string(),
+            fields: vec![Pattern::LitChar('x')],
+            expr: Expr::Block(
+                vec![Statement::Assignment {
+                    lhs: Expr::OwnedRef("flag".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                }],
+                Box::new(Expr::Term),
+            ),
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("flag"), Some(&Value::Int(1)));
+    }
+
+    #[test]
+    fn test_pattern_match_binds_field() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(42))]));
+        let expr = Expr::PatternMatch {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Var("v".to_string())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+        assert_eq!(i.state.get("v"), Some(&Value::Int(42)));
+    }
+
+    #[test]
+    fn test_pattern_match_variant_mismatch() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("None", vec![]));
+        let expr = Expr::PatternMatch {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Var("v".to_string())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false));
+        assert!(!i.state.contains_key("v"));
+    }
+
+    #[test]
+    fn test_pattern_match_literal_int() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("N", vec![("0", Value::Int(42))]));
+        let expr = Expr::PatternMatch {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            variant: "N".to_string(),
+            fields: vec![Pattern::LitInt(42)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_pattern_match_literal_int_mismatch() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("N", vec![("0", Value::Int(99))]));
+        let expr = Expr::PatternMatch {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            variant: "N".to_string(),
+            fields: vec![Pattern::LitInt(42)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_pattern_match_tuple_field() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("P", vec![(
+            "0",
+            Value::List(vec![Value::Int(10), Value::Int(20)]),
+        )]));
+        let expr = Expr::PatternMatch {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            variant: "P".to_string(),
+            fields: vec![Pattern::Tuple(vec![
+                Pattern::Var("a".to_string()),
+                Pattern::Var("b".to_string()),
+            ])],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+        assert_eq!(i.state.get("a"), Some(&Value::Int(10)));
+        assert_eq!(i.state.get("b"), Some(&Value::Int(20)));
+    }
+
+    #[test]
+    fn test_pattern_match_wildcard_field() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(42))]));
+        let expr = Expr::PatternMatch {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            variant: "Some".to_string(),
+            fields: vec![Pattern::Wildcard],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+        assert!(!i.state.contains_key("_"));
+    }
+
+    #[test]
+    fn test_pattern_match_no_fields() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("None", vec![]));
+        let expr = Expr::PatternMatch {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            variant: "None".to_string(),
+            fields: vec![],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_match_simple_variant_binds_field() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("Some", vec![("0", Value::Int(7))]));
+        let expr = Expr::Match {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            arms: vec![
+                MatchArm {
+                    pattern: MatchPattern::Variant {
+                        name: "Some".to_string(),
+                        fields: vec![Pattern::Var("x".to_string())],
+                    },
+                    guard: None,
+                    body: Box::new(Expr::Identifier("x".to_string())),
+                },
+                MatchArm {
+                    pattern: MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Integer(0)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(7));
+    }
+
+    #[test]
+    fn test_match_falls_through_to_wildcard() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("None", vec![]));
+        let expr = Expr::Match {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            arms: vec![
+                MatchArm {
+                    pattern: MatchPattern::Variant {
+                        name: "Some".to_string(),
+                        fields: vec![Pattern::Var("x".to_string())],
+                    },
+                    guard: None,
+                    body: Box::new(Expr::Identifier("x".to_string())),
+                },
+                MatchArm {
+                    pattern: MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Integer(0)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0));
+    }
+
+    #[test]
+    fn test_match_literal_pattern() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("N", vec![("0", Value::Int(42))]));
+        let expr = Expr::Match {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            arms: vec![
+                MatchArm {
+                    pattern: MatchPattern::Variant {
+                        name: "N".to_string(),
+                        fields: vec![Pattern::LitInt(42)],
+                    },
+                    guard: None,
+                    body: Box::new(Expr::Integer(1)),
+                },
+                MatchArm {
+                    pattern: MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Integer(0)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_match_literal_pattern_mismatch() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("N", vec![("0", Value::Int(99))]));
+        let expr = Expr::Match {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            arms: vec![
+                MatchArm {
+                    pattern: MatchPattern::Variant {
+                        name: "N".to_string(),
+                        fields: vec![Pattern::LitInt(42)],
+                    },
+                    guard: None,
+                    body: Box::new(Expr::Integer(1)),
+                },
+                MatchArm {
+                    pattern: MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Integer(0)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0));
+    }
+
+    #[test]
+    fn test_match_tuple_pattern() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("P", vec![(
+            "0",
+            Value::List(vec![Value::Int(3), Value::Int(4)]),
+        )]));
+        let expr = Expr::Match {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            arms: vec![
+                MatchArm {
+                    pattern: MatchPattern::Variant {
+                        name: "P".to_string(),
+                        fields: vec![Pattern::Tuple(vec![
+                            Pattern::Var("a".to_string()),
+                            Pattern::Var("b".to_string()),
+                        ])],
+                    },
+                    guard: None,
+                    body: Box::new(Expr::Identifier("a".to_string())),
+                },
+                MatchArm {
+                    pattern: MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Integer(0)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_match_wildcard_only() {
+        let mut i = Interpreter::new();
+        i.state.insert("val".to_string(), make_enum("None", vec![]));
+        let expr = Expr::Match {
+            value: Box::new(Expr::Identifier("val".to_string())),
+            arms: vec![
+                MatchArm {
+                    pattern: MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Integer(99)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(99));
+    }
+
+    #[test]
+    fn test_match_multiple_fields() {
+        let mut i = Interpreter::new();
+        let fields: HashMap<String, Value> = [
+            ("0".to_string(), Value::Int(10)),
+            ("1".to_string(), Value::Int(20)),
+        ].into();
+        i.state.insert("pair".to_string(), Value::Enum(
+            "Pair".to_string(), "Pair".to_string(), fields,
+        ));
+        let expr = Expr::Match {
+            value: Box::new(Expr::Identifier("pair".to_string())),
+            arms: vec![
+                MatchArm {
+                    pattern: MatchPattern::Variant {
+                        name: "Pair".to_string(),
+                        fields: vec![
+                            Pattern::Var("a".to_string()),
+                            Pattern::Var("b".to_string()),
+                        ],
+                    },
+                    guard: None,
+                    body: Box::new(Expr::Add(
+                        Box::new(Expr::Identifier("a".to_string())),
+                        Box::new(Expr::Identifier("b".to_string())),
+                    )),
+                },
+                MatchArm {
+                    pattern: MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Integer(0)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(30));
+    }
+
+    #[test]
+    fn test_callable_txn_simple_iteration() {
+        let mut i = Interpreter::new();
+        // txn count_up(n: Int, result: Int, i: Int) [i < n][i == n] -> Int { &result = result + 1; &i = i + 1; term result; };
+        let txn = Transaction {
+            is_async: false,
+            is_reactive: false,
+            name: "count_up".to_string(),
+            parameters: vec![
+                ("n".to_string(), Type::Int),
+                ("result".to_string(), Type::Int),
+                ("i".to_string(), Type::Int),
+            ],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Identifier("n".to_string())),
+                ),
+                post_condition: Expr::Eq(
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Identifier("n".to_string())),
+                ),
+                watchdog: None,
+                span: None,
+            },
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("result".to_string()),
+                    expr: Expr::Add(
+                        Box::new(Expr::Identifier("result".to_string())),
+                        Box::new(Expr::Integer(1)),
+                    ),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("i".to_string()),
+                    expr: Expr::Add(
+                        Box::new(Expr::Identifier("i".to_string())),
+                        Box::new(Expr::Integer(1)),
+                    ),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Term {
+                    values: vec![Some(Expr::Identifier("result".to_string()))],
+                    swan_song: None,
+                    modifiers: vec![],
+                },
+            ],
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        };
+        i.callable_txns.insert("count_up".to_string(), txn);
+        let result = i.eval_expr(&Expr::Call("count_up".to_string(), vec![
+            Expr::Integer(5),
+            Expr::Integer(0),
+            Expr::Integer(0),
+        ])).unwrap();
+        assert_eq!(result, Value::Int(5));
+    }
+
+    #[test]
+    fn test_callable_txn_no_loop_if_pre_false() {
+        let mut i = Interpreter::new();
+        let txn = Transaction {
+            is_async: false,
+            is_reactive: false,
+            name: "noop".to_string(),
+            parameters: vec![
+                ("n".to_string(), Type::Int),
+                ("result".to_string(), Type::Int),
+                ("i".to_string(), Type::Int),
+            ],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Identifier("n".to_string())),
+                ),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                span: None,
+            },
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("result".to_string()),
+                    expr: Expr::Integer(99),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Term {
+                    values: vec![Some(Expr::Identifier("result".to_string()))],
+                    swan_song: None,
+                    modifiers: vec![],
+                },
+            ],
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        };
+        i.callable_txns.insert("noop".to_string(), txn);
+        // pre is i < n, but i=5, n=3 → false, so body never runs
+        let result = i.eval_expr(&Expr::Call("noop".to_string(), vec![
+            Expr::Integer(3),
+            Expr::Integer(0),
+            Expr::Integer(5),
+        ])).unwrap();
+        assert_eq!(result, Value::Void);
+    }
+
+    #[test]
+    fn test_callable_state_restored_after_txn() {
+        let mut i = Interpreter::new();
+        let txn = Transaction {
+            is_async: false,
+            is_reactive: false,
+            name: "mutate".to_string(),
+            parameters: vec![("x".to_string(), Type::Int)],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(10)),
+                ),
+                post_condition: Expr::Eq(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(10)),
+                ),
+                watchdog: None,
+                span: None,
+            },
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("x".to_string()),
+                    expr: Expr::Add(
+                        Box::new(Expr::Identifier("x".to_string())),
+                        Box::new(Expr::Integer(1)),
+                    ),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Term {
+                    values: vec![Some(Expr::Identifier("x".to_string()))],
+                    swan_song: None,
+                    modifiers: vec![],
+                },
+            ],
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        };
+        i.callable_txns.insert("mutate".to_string(), txn);
+        i.state.insert("outer".to_string(), Value::Int(42));
+        let result = i.eval_expr(&Expr::Call("mutate".to_string(), vec![
+            Expr::Integer(0),
+        ])).unwrap();
+        assert_eq!(result, Value::Int(10));
+        // outer variable should still be intact
+        assert_eq!(i.state.get("outer"), Some(&Value::Int(42)));
     }
 }

@@ -404,10 +404,10 @@ impl RustBackend {
                     output.push_str(&format!("        let {}: {} = {};\n", name, rust_ty, default));
                 }
             }
-            Statement::Unification { name, pattern, expr } => {
+            Statement::Unification { name, variant, fields: _, expr } => {
                 let expr_code = self.expr_to_rust(expr);
-                output.push_str(&format!("        // uni {}({}) = {}\n", name, pattern, expr_code));
-                output.push_str(&format!("        if let {}({}) = {} {{\n", name, pattern, expr_code));
+                output.push_str(&format!("        // uni {}({}) = {}\n", name, variant, expr_code));
+                output.push_str(&format!("        if let {}({}) = {} {{\n", name, variant, expr_code));
                 output.push_str("        }\n");
             }
             Statement::InlineAsm { asm_string, clobbers, .. } => {
@@ -635,7 +635,7 @@ impl RustBackend {
                 format!("{}[{}]", val, coords.join(", "))
             }
             Expr::PatternMatch { value, variant, fields } => {
-                let fields_str = fields.join(", ");
+                let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ");
                 format!("match *{} {{ {}({}) => true, _ => false }}", self.expr_to_rust(value), variant, fields_str)
             }
             Expr::Block(stmts, last_expr) => {

@@ -645,3 +645,56 @@ If a terminating statement fired inside the guarded body, leave `self.terminated
 
 **Lesson**: Every library dependency of the runtime must be provided to the linker. `sqrtf` from `libm` is the runtime's dependency, not the user program's. The compiler driver is responsible for its own runtime module's link requirements.
 
+---
+
+## 2026-06-07 — `Statement::Guarded` is one-shot, not a loop — ~130 defns silently broken
+
+**Issue**: Every `defn` in the standard library and compiler that uses `[guard] { ... &i = i + 1; }` for iteration only processes the first element. The guarded statement fires once, then falls through — there is no loop.
+
+**Root Cause**: `Statement::Guarded` evaluates its condition once and executes the body zero or one times (src/interpreter.rs:842-861). The `defn` body executes as a straight-line sequence — no implicit transaction wrapping, no reactor loop. The pattern `let i = 0; [i < list :> Size] { ... &i = i + 1; }` was cargo-culted from `rct txn` bodies where the outer reactor loop provides convergence. But `defn` has no such loop.
+
+Affected files and approximate counts:
+- `lib/std/iterator.bv`: 14 defns
+- `lib/std/hashmap.bv`: 3 defns
+- `lib/std/hashset.bv`: 4 defns
+- `lib/std/stack.bv`, `queue.bv`: 2 defns
+- `lib/std/math.bv`: 3 defns
+- `lib/std/string.bv`: ~38 defns (including a near-duplicate second copy of ~17 functions)
+- `lib/std/io.bv`: 1 defn
+- `lib/std/encoding.bv`: 5 defns
+- `lib/std/json.bv`: 1 defn
+- `lib/compiler/`: ~60+ defns (deferred — self-hosting already broken)
+
+**Fix**: Replace broken `defn` iterators with callable `txn` declarations. Regular `txn` takes parameters and returns values like `defn`, but with `[pre][post]` convergence loop semantics — the body re-executes until the postcondition is met.
+
+```brief
+// BEFORE (broken — guarded fires once):
+defn iter_filter<T>(list, pred) -> List<T> [true] {
+    let i = 0;
+    [i < list :> Size] { ... &i = i + 1; };   // one-shot!
+    term result;
+};
+
+// AFTER (correct — convergence loop):
+txn iter_filter<T>(list: List<T>, pred: T -> Bool)
+    [i < list :> Size][i == list :> Size] -> List<T>
+{
+    [pred(list[i])] { &result = result.append(list[i]); };
+    &i = i + 1;
+    term result;
+};
+```
+
+The callable `txn` is invoked via `Expr::Call` just like a `defn`. The interpreter registers non-reactive txns in a `callable_txns` map and executes them as convergent loops (evaluate pre → execute body → check post → repeat if state changed). State is cloned per-call and restored on return, providing isolation.
+
+Concrete changes:
+1. AST: Add `output_type: Option<OutputType>` and `outputs: Vec<Type>` to `Transaction`
+2. Parser: Parse optional `-> ReturnType` after contract for regular `txn`s (not `rct`)
+3. Interpreter: Register `txn` in `callable_txns` during init; dispatch from `Expr::Call`; convergence loop execution
+4. Backends: Add stubs for callable txn dispatch returning 0
+5. Stdlib: Convert ~71 broken defns in `lib/std/` to txns
+6. `lib/std/option.bv`: Fix filter postcondition `[term.is_some() && pred(unwrap(opt))]` → `[!term.is_some() \|\| pred(unwrap(term))]`
+7. `lib/std/string.bv`: Remove the near-duplicate second copy (~17 functions, lines 580-876)
+
+**Lesson**: The convergence loop is the defining feature of `txn` — `defn` has straight-line execution. When writing iteration, use `txn` with `[pre][post]` contracts. `Statement::Guarded` is for one-shot conditionals only, never for loops. `[guard] { body }` inside a `txn` with `[pre][post]` is correct because the txn's outer convergence loop re-evaluates the body, not because the guarded statement loops by itself.
+

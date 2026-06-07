@@ -1004,6 +1004,84 @@ succeeded at compile time:
 | `?[@undeclared]` | ❌ "Not a declared frgn trg" |
 | `?[timeout]` (normal variable, not a trigger) | ✅ Existing runtime watchdog — no analysis change |
 
+### 10.8 — Prerequisite: Extend `uni` pattern matching with structured `Pattern` AST
+
+**Date**: 2026-06-07
+**Status**: In progress — required before Phase 1.3 can land
+
+The current `Statement::Unification` stores `pattern: String` — a flat encoding
+like `"Some(v)"` or `"Some((item,rest))"`. The interpreter splits this string on
+`,` to extract field names, which breaks on nested tuples (`"(item,rest)"` becomes
+`["(item", "rest)"]`).
+
+Phase 1.3 (native collection builtins) needs `__builtin_Stack_pop` to return
+`Option<(T, Stack<T>)>` and have `uni pair(Some((item, new_stack)))` correctly
+destructure the inner tuple. The string-based pattern can't handle this.
+
+**Fix**: Replace `pattern: String` with `pattern: Pattern` in both compilers.
+
+#### AST
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Var(String),              // v, _, "literal"
+    Tuple(Vec<Pattern>),      // (a, b), (_, rest)
+    Wildcard,                 // _
+    LitInt(i64),
+    LitFloat(f64),
+    LitString(String),
+    LitChar(char),
+    LitBool(bool),
+}
+```
+
+The `Statement::Unification` struct changes from:
+```rust
+pub struct Unification {   // current
+    pub name: String,
+    pub pattern: String,       // flat string
+    pub expr: Box<Expr>,
+}
+```
+to:
+```rust
+pub struct PatternMatch {
+    pub name: String,          // variable being matched
+    pub variant: String,       // variant name (Ok, Some, None, etc.)
+    pub fields: Vec<Pattern>,  // structured patterns
+}
+```
+
+Keep backwards compat: the old `Unification` pattern string format can be
+parsed into `Pattern::Var` during a migration shim.
+
+#### Files affected
+
+| File | Change |
+|------|--------|
+| `src/ast.rs` | Add `Pattern` enum; update `Statement::Unification` to use `Pattern` |
+| `src/parser.rs` | `parse_pattern_fields()` returns `Vec<Pattern>` instead of `Vec<String>` |
+| `src/interpreter.rs` | `Statement::Unification` handler matches recursively on `Pattern::Tuple` |
+| `src/desugarer.rs` | Update `Unification` construction |
+| `src/analysis/*.rs` | Update pattern field access (transition_graph, call_graph, range, region) |
+| `src/backend/*.rs` | Update all backends' `Unification` handling |
+| `lib/compiler/parser.bv` | Mirror pattern parsing in self-hosted compiler |
+| `lib/compiler/ast.bv` | Mirror `Pattern` type in self-hosted compiler |
+
+#### After
+
+```brief
+let pair: Option<(T, Stack<T>)> = __builtin_Stack_pop(stack);
+uni pair(Some((item, rest))) = {
+    // item: T, rest: Stack<T>
+    term rest;
+};
+```
+
+Pattern matching becomes a general-purpose tool available to all `uni`
+statements — not just enums with flat fields.
+
 ---
 
 ```
@@ -1032,5 +1110,48 @@ succeeded at compile time:
       │                  │ │              │   │ Single-file output │
       │                  │ │ LTO inlines  │   │ (all native        │
       │                  │ │ ALL together │   │  citizens inlined) │
-      └──────────────────┘ └──────────────┘   └────────────────────┘
+       └──────────────────┘ └──────────────┘   └────────────────────┘
+```
+
+---
+
+## Phase 11: Sync Domains — Deterministic Lockstep Execution (2026-06-07)
+
+### Motivation
+
+Every concurrent system — multi-core CPU, RTOS task set, FPGA clock domain — needs a way to declare **deterministic execution boundaries across concurrent operations**. Without this, parallel tasks can read half-committed state from other tasks, leading to transient corruption. The `sync(domain)` keyword provides a native, compiler-proven synchronization primitive.
+
+### Design
+
+Three forms, one concept: **"these operations must start and finish at the same time."**
+
+| Form | Syntax | Use case |
+|------|--------|----------|
+| **Prefix modifier** | `sync(domainA) rct txn Name [pre][post] { body }` | Reactive lockstep — all txns in `domainA` fire and commit simultaneously |
+| **Prefix on callable** | `sync(domainB) txn Name [pre][post] -> Ret { body }` | Same lockstep guarantee when called as a group |
+| **Prefix on defn** | `sync(domainC) defn Name(args) -> Ret { body }` | Declares a defn as participating in a domain (affects its behavior when called from a sync block) |
+| **Block statement** | `sync { stmt1; stmt2; ... };` | Fork-join barrier — all statements run in parallel, barrier at end |
+
+### Semantics
+
+- **Entry barrier**: No transaction in the domain starts executing until ALL members have met their preconditions. The domain's effective precondition is the AND of all member preconditions.
+- **Exit barrier**: No transaction in the domain commits its state until ALL members have completed their bodies. Swan songs (`term ->`) are deferred until the barrier resolves.
+- **Block statement**: Inside a `defn` or `txn` body, `sync { ... }` dispatches all statements to the async thread pool, waits on a futex barrier, and resumes after all complete. If the thread pool is disabled, executes sequentially (same effect, compatible fallback).
+- **No `let` inside sync blocks**: `let` creates a binding that other statements may depend on, violating the "all start simultaneously" invariant. The parser emits an error.
+- **No nested sync blocks**: Contradicts the barrier model. Parser error.
+
+### Implementation Phases
+
+| Step | File(s) | Change |
+|------|---------|--------|
+| 11.1 | `lexer.rs` | Add `Token::Sync` keyword |
+| 11.2 | `ast.rs` | Add `sync_domains: Vec<String>` to `Transaction`, `Definition`; add `Statement::SyncBlock { body: Vec<Statement> }` |
+| 11.3 | `parser.rs` | Parse `sync(id...)` prefix on txn/rct txn/defn; parse `sync { body }` as statement. Error on `let` inside sync block. Error on nested sync blocks. |
+| 11.4 | `desugarer.rs` | Propagate `sync_domains` through desugaring |
+| 11.5 | `interpreter.rs` | Execute `SyncBlock` (fallback serial, thread pool with barrier). Enforce sync domain entry/exit barriers in reactor loop. |
+| 11.6 | `analysis/transition_graph.rs` | Group transitions by sync domain; precondition = AND of all members |
+| 11.7 | `backend/llvm.rs` | Stub for `SyncBlock`; entry/exit barrier codegen for sync domain txns |
+| 11.8 | All other backends | Add stub match arm for `Statement::SyncBlock` |
+| 11.9 | Tests | Parser + interpreter + transition graph + all backends still pass |
+| 11.10 | AGENTS.md | Note Phase 11 complete, update test count
 ```

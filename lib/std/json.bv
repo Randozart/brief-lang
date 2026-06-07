@@ -99,21 +99,23 @@ defn array_get(data: Data, index: Int) [index >= 0][term.is_null() || true] -> D
 };
 
 // Helper: Array to list of strings (if strings)
+txn array_to_strings_loop(data: Data, len: Int, result: List<String>, i: Int)
+    [i < len][i == len] -> List<String>
+{
+  let item: Data = __get_index(data, i);
+  [__is_string(item)] {
+    &result = result + [__get_string(data, "__item")];
+  };
+  &i = i + 1;
+  term result;
+};
+
 defn array_to_strings(data: Data) [__is_array(data)][term :> Size == __array_len(data)] -> List<String> {
   let len: Int = __array_len(data);
   [len == 0] {
     term [];
   };
-  let result: List<String> = [];
-  let i: Int = 0;
-  [i < len] {
-    let item: Data = __get_index(data, i);
-    [__is_string(item)] {
-      &result = result + [__get_string(data, "__item")];  // Note: need proper way to get from temp
-    };
-    &i = i + 1;
-  };
-  term result;
+  term array_to_strings_loop(data, len, [], 0);
 };
 
 // Helper: Get array item count safely

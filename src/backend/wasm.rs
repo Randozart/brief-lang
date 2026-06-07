@@ -119,9 +119,9 @@ impl WasmBackend {
                     writeln!(output, "    local.set ${}", name).ok();
                 }
             }
-            Statement::Unification { name, pattern, expr } => {
+            Statement::Unification { name, variant, fields: _, expr } => {
                 self.generate_expr(output, expr);
-                writeln!(output, "    ;; unification: {} {} (value on stack)", name, pattern).ok();
+                writeln!(output, "    ;; unification: {} {} (value on stack)", name, variant).ok();
             }
         }
     }

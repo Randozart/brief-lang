@@ -1,116 +1,136 @@
 // Iterator - Iterator trait and adapters
 // Tier 9: Standard Library Extensions
-
-// ===== ITERATOR TRAIT (Conceptual) =====
-
-// trait Iterator<T> {
-//     defn next(self) -> Option<T>;
-// }
+//
+// All iterative operations use `txn` (convergent transaction) with
+// `[pre][post]` contracts for looping.  The `_loop` suffix marks txns
+// that take accumulator parameters (`result`, `i`) — the defn wrappers
+// provide initial values so the public API is unchanged.
 
 // ===== ITERATOR ADAPTERS =====
 
 // Map over iterator
-defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> [true][term :> Size == list :> Size] {
-    let result: List<U> = [];
-    let i: Int = 0;
-    [i < list :> Size] {
-        result = result.append(f(list[i]));
-        &i = i + 1;
-    };
+txn iter_map_loop<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
+    [i < list :> Size][i == list :> Size] -> List<U>
+{
+    &result = result.append(f(list[i]));
+    &i = i + 1;
     term result;
+};
+
+defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> [true][term :> Size == list :> Size] {
+    term iter_map_loop(list, f, [], 0);
 };
 
 // Filter iterator
-defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][term :> Size <= list :> Size] {
-    let result: List<T> = [];
-    let i: Int = 0;
-    [i < list :> Size] {
-        [pred(list[i])] {
-            result = result.append(list[i]);
-        };
-        &i = i + 1;
+txn iter_filter_loop<T>(list: List<T>, pred: T -> Bool, result: List<T>, i: Int)
+    [i < list :> Size][i == list :> Size] -> List<T>
+{
+    [pred(list[i])] {
+        &result = result.append(list[i]);
     };
+    &i = i + 1;
     term result;
+};
+
+defn iter_filter<T>(list: List<T>, pred: T -> Bool) -> List<T> [true][term :> Size <= list :> Size] {
+    term iter_filter_loop(list, pred, [], 0);
 };
 
 // Fold (reduce) iterator
-defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [f != null][true] {
-    let acc = initial;
-    let i: Int = 0;
-    [i < list :> Size] {
-        &acc = f(acc, list[i]);
-        &i = i + 1;
-    };
+txn iter_fold_loop<T, U>(list: List<T>, f: (U, T) -> U, acc: U, i: Int)
+    [i < list :> Size][i == list :> Size] -> U
+{
+    &acc = f(acc, list[i]);
+    &i = i + 1;
     term acc;
 };
 
+defn iter_fold<T, U>(list: List<T>, initial: U, f: (U, T) -> U) -> U [f != null][true] {
+    term iter_fold_loop(list, f, initial, 0);
+};
+
 // Take first n items
-defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term :> Size == n.min(list :> Size)] {
-    let result: List<T> = [];
-    let i: Int = 0;
-    [i < n && i < list :> Size] {
-        result = result.append(list[i]);
-        &i = i + 1;
-    };
+txn iter_take_loop<T>(list: List<T>, n: Int, result: List<T>, i: Int)
+    [i < n && i < list :> Size][i == n || i == list :> Size] -> List<T>
+{
+    &result = result.append(list[i]);
+    &i = i + 1;
     term result;
+};
+
+defn iter_take<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term :> Size == n.min(list :> Size)] {
+    term iter_take_loop(list, n, [], 0);
 };
 
 // Skip first n items
-defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term :> Size == (list :> Size - n).max(0)] {
-    let result: List<T> = [];
-    let i: Int = n;
-    [i < list :> Size] {
-        result = result.append(list[i]);
-        &i = i + 1;
-    };
+txn iter_skip_loop<T>(list: List<T>, n: Int, result: List<T>, i: Int)
+    [i < list :> Size][i == list :> Size] -> List<T>
+{
+    &result = result.append(list[i]);
+    &i = i + 1;
     term result;
+};
+
+defn iter_skip<T>(list: List<T>, n: Int) -> List<T> [n >= 0][term :> Size == (list :> Size - n).max(0)] {
+    term iter_skip_loop(list, n, [], n);
 };
 
 // Enumerate (index, value)
-defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term :> Size == list :> Size] {
-    let result: List<(Int, T)> = [];
-    let i: Int = 0;
-    [i < list :> Size] {
-        result = result.append((i, list[i]));
-        &i = i + 1;
-    };
+txn iter_enumerate_loop<T>(list: List<T>, result: List<(Int, T)>, i: Int)
+    [i < list :> Size][i == list :> Size] -> List<(Int, T)>
+{
+    &result = result.append((i, list[i]));
+    &i = i + 1;
     term result;
 };
 
+defn iter_enumerate<T>(list: List<T>) -> List<(Int, T)> [true][term :> Size == list :> Size] {
+    term iter_enumerate_loop(list, [], 0);
+};
+
 // Find first matching
-defn iter_find<T>(list: List<T>, pred: T -> Bool) -> Option<T> [pred != null][term.is_some() -> pred(unwrap(term))] {
-    let i: Int = 0;
-    [i < list :> Size] {
-        [pred(list[i])] {
-            term Some(list[i]);
-        };
-        &i = i + 1;
+txn iter_find_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
+    [i < list :> Size][i == list :> Size] -> Option<T>
+{
+    [pred(list[i])] {
+        term Some(list[i]);
     };
+    &i = i + 1;
     term None;
 };
 
+defn iter_find<T>(list: List<T>, pred: T -> Bool) -> Option<T> [pred != null][true] {
+    term iter_find_loop(list, pred, 0);
+};
+
 // Check if any match
-defn iter_any<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || term == false] {
-    let i: Int = 0;
-    [i < list :> Size] {
-        [pred(list[i])] {
-            term true;
-        };
-        &i = i + 1;
+txn iter_any_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
+    [i < list :> Size][i == list :> Size] -> Bool
+{
+    [pred(list[i])] {
+        term true;
     };
+    &i = i + 1;
     term false;
 };
 
+defn iter_any<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || term == false] {
+    term iter_any_loop(list, pred, 0);
+};
+
 // Check if all match
-defn iter_all<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || term == false] {
-    let i: Int = 0;
-    [i < list :> Size] {
-        [!pred(list[i])] {
-            term false;
-        };
-        &i = i + 1;
+txn iter_all_loop<T>(list: List<T>, pred: T -> Bool, i: Int)
+    [i < list :> Size][i == list :> Size] -> Bool
+{
+    [!pred(list[i])] {
+        term false;
     };
+    &i = i + 1;
     term true;
+};
+
+defn iter_all<T>(list: List<T>, pred: T -> Bool) -> Bool [true][term == true || term == false] {
+    term iter_all_loop(list, pred, 0);
 };
 
 // Collect into list (identity for List)
@@ -118,93 +138,95 @@ defn iter_collect<T>(list: List<T>) -> List<T> [true][term :> Size == list :> Si
     term list;
 };
 
-// Chain two iterators
+// Chain two iterators (pure concatenation, no loop needed)
 defn iter_chain<T>(a: List<T>, b: List<T>) -> List<T> [true][term :> Size == a :> Size + b :> Size] {
     term a + b;
 };
 
 // Flat map (map then flatten)
-defn iter_flatmap<T, U>(list: List<T>, f: T -> List<U>) -> List<U> [f != null][term :> Size >= 0] {
-    let result: List<U> = [];
-    let i: Int = 0;
-    [i < list :> Size] {
-        let mapped = f(list[i]);
-        let j: Int = 0;
-        [j < mapped :> Size] {
-            result = result.append(mapped[j]);
-            &j = j + 1;
-        };
-        &i = i + 1;
+txn iter_flatmap_loop<T, U>(list: List<T>, f: T -> List<U>, result: List<U>, i: Int, j: Int)
+    [i < list :> Size][i == list :> Size] -> List<U>
+{
+    let mapped = f(list[i]);
+    [j < mapped :> Size] {
+        &result = result.append(mapped[j]);
+        &j = j + 1;
     };
+    &i = i + 1;
     term result;
+};
+
+defn iter_flatmap<T, U>(list: List<T>, f: T -> List<U>) -> List<U> [f != null][true] {
+    term iter_flatmap_loop(list, f, [], 0, 0);
 };
 
 // Partition into two lists
-defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [pred != null][true] {
-    let trues: List<T> = [];
-    let falses: List<T> = [];
-    let i: Int = 0;
-    [i < list :> Size] {
-        [pred(list[i])] {
-            trues = trues.append(list[i]);
-        };
-        [!pred(list[i])] {
-            falses = falses.append(list[i]);
-        };
-        &i = i + 1;
+txn iter_partition_loop<T>(list: List<T>, pred: T -> Bool, trues: List<T>, falses: List<T>, i: Int)
+    [i < list :> Size][i == list :> Size] -> (List<T>, List<T>)
+{
+    [pred(list[i])] {
+        &trues = trues.append(list[i]);
     };
+    [!pred(list[i])] {
+        &falses = falses.append(list[i]);
+    };
+    &i = i + 1;
     term (trues, falses);
 };
 
+defn iter_partition<T>(list: List<T>, pred: T -> Bool) -> (List<T>, List<T>) [pred != null][true] {
+    term iter_partition_loop(list, pred, [], [], 0);
+};
+
 // Zip two iterators
-defn iter_zip<T, U>(a: List<T>, b: List<U>) -> List<(T, U)> [true][term :> Size == a :> Size.min(b :> Size)] {
-    let result: List<(T, U)> = [];
-    let i: Int = 0;
-    [i < a :> Size && i < b :> Size] {
-        result = result.append((a[i], b[i]));
-        &i = i + 1;
-    };
+txn iter_zip_loop<T, U>(a: List<T>, b: List<U>, result: List<(T, U)>, i: Int)
+    [i < a :> Size && i < b :> Size][i == a :> Size || i == b :> Size] -> List<(T, U)>
+{
+    &result = result.append((a[i], b[i]));
+    &i = i + 1;
     term result;
 };
 
-// Sum of numeric list
-defn iter_sum(list: List<Int>) -> Int [true][term >= 0] {
-    term iter_fold(list, 0, |acc, x| acc + x);
+defn iter_zip<T, U>(a: List<T>, b: List<U>) -> List<(T, U)> [true][term :> Size == a :> Size.min(b :> Size)] {
+    term iter_zip_loop(a, b, [], 0);
 };
 
-// Product of numeric list
+// Sum of numeric list (pure defn, delegates to fold)
+defn iter_sum(list: List<Int>) -> Int [true][term >= 0] {
+    term iter_fold_loop(list, |acc, x| acc + x, 0, 0);
+};
+
+// Product of numeric list (pure defn, delegates to fold)
 defn iter_product(list: List<Int>) -> Int [true][term >= 0] {
-    term iter_fold(list, 1, |acc, x| acc * x);
+    term iter_fold_loop(list, |acc, x| acc * x, 1, 0);
 };
 
 // Maximum element
-defn iter_max<T>(list: List<T>) -> Option<T> [list :> Size > 0][true] {
-    [list :> Size == 0] {
-        term None;
+txn iter_max_loop<T>(list: List<T>, max_val: T, i: Int)
+    [i < list :> Size][i == list :> Size] -> Option<T>
+{
+    [list[i] > max_val] {
+        &max_val = list[i];
     };
-    let max_val = list[0];
-    let i: Int = 1;
-    [i < list :> Size] {
-        [list[i] > max_val] {
-            &max_val = list[i];
-        };
-        &i = i + 1;
-    };
+    &i = i + 1;
     term Some(max_val);
 };
 
+defn iter_max<T>(list: List<T>) -> Option<T> [list :> Size > 0][true] {
+    term iter_max_loop(list, list[0], 1);
+};
+
 // Minimum element
-defn iter_min<T>(list: List<T>) -> Option<T> [list :> Size > 0][true] {
-    [list :> Size == 0] {
-        term None;
+txn iter_min_loop<T>(list: List<T>, min_val: T, i: Int)
+    [i < list :> Size][i == list :> Size] -> Option<T>
+{
+    [list[i] < min_val] {
+        &min_val = list[i];
     };
-    let min_val = list[0];
-    let i: Int = 1;
-    [i < list :> Size] {
-        [list[i] < min_val] {
-            &min_val = list[i];
-        };
-        &i = i + 1;
-    };
+    &i = i + 1;
     term Some(min_val);
+};
+
+defn iter_min<T>(list: List<T>) -> Option<T> [list :> Size > 0][true] {
+    term iter_min_loop(list, list[0], 1);
 };

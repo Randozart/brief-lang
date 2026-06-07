@@ -1401,14 +1401,15 @@ impl WebstackGenerator {
             }
             Statement::Unification {
                 name,
-                pattern,
+                variant,
+                fields: _,
                 expr,
             } => {
-                // Unification: name(pattern) = expr
+                // Unification: name(variant) = expr
                 let expr_code = self.expr_to_js_value(expr);
                 output.push_str(&format!(
                     "        // unification: {}({}) = {}\n",
-                    name, pattern, expr_code
+                    name, variant, expr_code
                 ));
             }
             Statement::LocalTrigger { name, ty, expr, .. } => {
@@ -1731,7 +1732,7 @@ impl WebstackGenerator {
             }
             Expr::PatternMatch { value, variant, fields } => {
                 let val = self.expr_to_js_value(value);
-                let flds = fields.join(", ");
+                let flds = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ");
                 format!("// pattern_match: {} {}({})", val, variant, flds)
             }
             Expr::Block(stmts, last) => {

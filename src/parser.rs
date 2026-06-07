@@ -2729,6 +2729,20 @@ let span = self.current_span();
 
         let contract = self.parse_contract()?;
 
+        // Parse optional return type for regular (non-reactive) txns
+        let (txn_outputs, txn_output_type) = if !is_reactive && matches!(self.current_token(), Some(Ok(Token::Arrow))) {
+            self.advance();
+            let (outputs, _output_names) = self.parse_output_types_with_names(&parameters)?;
+            let output_type = if outputs.len() > 1 {
+                Some(crate::ast::OutputType::Tuple(outputs.iter().map(|t| crate::ast::OutputType::Single(t.clone())).collect()))
+            } else {
+                None
+            };
+            (outputs, output_type)
+        } else {
+            (Vec::new(), None)
+        };
+
         // Capture closing-brace span for better error messages on missing ';'
         let closing_brace_span;
         // Lambda-style: allow ; termination (no body)
@@ -2844,6 +2858,8 @@ let span = self.current_span();
             attrs: Vec::new(),
             modifiers: Vec::new(),
             variant_bodies,
+            outputs: txn_outputs,
+            output_type: txn_output_type,
         })
     }
 
@@ -3400,49 +3416,48 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
     /// Parse a sequence of pattern fields inside parentheses, handling
     /// nested groups, string literals, identifiers, and wildcards.
-    fn parse_pattern_fields(&mut self) -> Result<Vec<String>, SyntaxError> {
+    fn parse_pattern_fields(&mut self) -> Result<Vec<Pattern>, SyntaxError> {
         let mut fields = Vec::new();
         loop {
             match self.current_token() {
                 Some(Ok(Token::Underscore)) => {
-                    fields.push("_".to_string());
+                    fields.push(Pattern::Wildcard);
                     self.advance();
                 }
                 Some(Ok(Token::String(s))) => {
                     let val = s.clone();
-                    fields.push(format!("\"{}\"", val));
+                    fields.push(Pattern::LitString(val));
                     self.advance();
                 }
                 Some(Ok(Token::LParen)) => {
                     self.advance();
                     let inner = self.parse_pattern_fields()?;
                     self.expect(Token::RParen)?;
-                    fields.push(format!("({})", inner.join(",")));
+                    fields.push(Pattern::Tuple(inner));
                 }
                 Some(Ok(Token::Integer(val))) => {
-                    fields.push(val.to_string());
+                    fields.push(Pattern::LitInt(*val));
                     self.advance();
                 }
                 Some(Ok(Token::Float(val))) => {
-                    fields.push(val.to_string());
+                    fields.push(Pattern::LitFloat(*val));
                     self.advance();
                 }
                 Some(Ok(Token::BoolTrue)) => {
-                    fields.push("true".to_string());
+                    fields.push(Pattern::LitBool(true));
                     self.advance();
                 }
                 Some(Ok(Token::BoolFalse)) => {
-                    fields.push("false".to_string());
+                    fields.push(Pattern::LitBool(false));
                     self.advance();
                 }
                 Some(Ok(Token::Char(c))) => {
-                    fields.push(format!("'{}'", c));
+                    fields.push(Pattern::LitChar(*c));
                     self.advance();
                 }
                 _ => {
-                    // Try as identifier or keyword
                     match self.expect_identifier() {
-                        Ok(name) => fields.push(name),
+                        Ok(name) => fields.push(Pattern::Var(name)),
                         Err(_) => break,
                     }
                 }
@@ -3663,15 +3678,14 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     let pattern_name = match self.current_token() {
                         Some(Ok(Token::Underscore)) => {
                             self.advance();
-                            // Simple wildcard pattern
-                            let pattern = "_".to_string();
                             self.expect(Token::RParen)?;
                             self.expect(Token::Eq)?;
                             let expr = self.parse_unification_rhs()?;
                             self.expect(Token::Semicolon)?;
                             return Ok(Statement::Unification {
                                 name: var_name,
-                                pattern,
+                                variant: "_".to_string(),
+                                fields: vec![],
                                 expr,
                             });
                         }
@@ -3717,27 +3731,28 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     self.advance();
                     
                     // Check for pattern data: Variant(field1, ...) or just Variant
-                    let pattern = if let Some(Ok(Token::LParen)) = self.current_token() {
+                    let fields = if let Some(Ok(Token::LParen)) = self.current_token() {
                         self.advance();
-                        let fields = self.parse_pattern_fields()?;
+                        let f = self.parse_pattern_fields()?;
                         self.expect(Token::RParen)?;
-                        format!("{}({})", pattern_name, fields.join(","))
-} else {
-                        pattern_name.clone()
+                        f
+                    } else {
+                        vec![]
                     };
-                    
+
                     self.expect(Token::RParen)?;
                     self.expect(Token::Eq)?;
                     let expr = self.parse_unification_rhs()?;
                     self.expect(Token::Semicolon)?;
                     Ok(Statement::Unification {
                         name: var_name,
-                        pattern,
+                        variant: pattern_name,
+                        fields,
                         expr,
                     })
                 } else {
                     // Simple pattern: uni pattern = expr;
-                    let pattern = match &target {
+                    let pattern_name = match &target {
                         Expr::Identifier(n) => n.clone(),
                         _ => return self.spanned_err("Expected pattern name after uni".to_string()),
                     };
@@ -3746,7 +3761,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     self.expect(Token::Semicolon)?;
                     Ok(Statement::Unification {
                         name: "uni".to_string(),
-                        pattern,
+                        variant: pattern_name,
+                        fields: vec![],
                         expr,
                     })
                 }
@@ -3833,33 +3849,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         // Expect ( for pattern fields
                         if matches!(self.current_token(), Some(Ok(Token::LParen))) {
                             self.advance(); // consume (
-                            let mut fields = Vec::new();
-                            while let Some(Ok(token)) = self.current_token() {
-                            let token_is_field = matches!(token, 
-                                Token::Identifier(_) | Token::TypeData | Token::TypeInt | Token::TypeString | 
-                                Token::TypeBool | Token::TypeChar | Token::TypeFloat | Token::TypeVoid | Token::TypeUInt);
-                            if token_is_field {
-                                match self.expect_identifier() {
-                                    Ok(field_name) => {
-                                        fields.push(field_name);
-                                        if let Some(Ok(Token::Comma)) = self.current_token() {
-                                            self.advance();
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                    Err(_) => break,
-                                }
-                            } else {
-                                break;
+                            let fields = self.parse_pattern_fields()?;
+                            self.expect(Token::RParen)?;
+                            Expr::PatternMatch {
+                                value: Box::new(Expr::Identifier(var_name_clone)),
+                                variant: variant_name,
+                                fields,
                             }
-                        }
-                        self.expect(Token::RParen)?;
-                        Expr::PatternMatch {
-                            value: Box::new(Expr::Identifier(var_name_clone)),
-                            variant: variant_name,
-                            fields,
-                        }
                         } else {
                             // Variant without parens - still a pattern match
                             Expr::PatternMatch {
@@ -4009,7 +4005,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                                     self.expect(Token::Semicolon)?;
                                     Ok(Statement::Unification {
                                         name,
-                                        pattern: pattern.clone(),
+                                        variant: pattern.clone(),
+                                        fields: vec![],
                                         expr: right,
                                     })
                                 } else {
@@ -5277,21 +5274,9 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 // Check for variant fields: Variant(f1, f2, ...)
                 let fields = if let Some(Ok(Token::LParen)) = self.current_token() {
                     self.advance();
-                    let mut fields = Vec::new();
-                    if let Some(Ok(Token::RParen)) = self.current_token() {
-                        self.advance();
-                    } else {
-                        loop {
-                            fields.push(self.expect_identifier()?);
-                            if let Some(Ok(Token::Comma)) = self.current_token() {
-                                self.advance();
-                            } else {
-                                self.expect(Token::RParen)?;
-                                break;
-                            }
-                        }
-                    }
-                    fields
+                    let f = self.parse_pattern_fields()?;
+                    self.expect(Token::RParen)?;
+                    f
                 } else {
                     Vec::new()
                 };
@@ -6450,6 +6435,298 @@ mod parser_tests {
         let mut parser = Parser::new("x :> Invalid");
         let result = parser.parse_expression();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_uni_simple_pattern() {
+        let mut parser = Parser::new("uni x = 42;");
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "uni");
+                assert_eq!(variant, "x");
+                assert!(fields.is_empty());
+                assert!(matches!(expr, Expr::Integer(42)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_uni_variant_with_field() {
+        let src = "uni val(Some(v)) = 42;";
+        let mut parser = Parser::new(src);
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "val");
+                assert_eq!(variant, "Some");
+                assert_eq!(fields.len(), 1);
+                assert!(matches!(&fields[0], Pattern::Var(f) if f == "v"));
+                assert!(matches!(expr, Expr::Integer(42)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_uni_wildcard() {
+        let src = "uni val(_) = 99;";
+        let mut parser = Parser::new(src);
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "val");
+                assert_eq!(variant, "_");
+                assert!(fields.is_empty());
+                assert!(matches!(expr, Expr::Integer(99)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_uni_variant_with_tuple_field() {
+        let src = "uni val(Some((a, b))) = 0;";
+        let mut parser = Parser::new(src);
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "val");
+                assert_eq!(variant, "Some");
+                assert_eq!(fields.len(), 1);
+                match &fields[0] {
+                    Pattern::Tuple(elems) => {
+                        assert_eq!(elems.len(), 2);
+                        assert!(matches!(&elems[0], Pattern::Var(e) if e == "a"));
+                        assert!(matches!(&elems[1], Pattern::Var(e) if e == "b"));
+                    }
+                    other => panic!("Expected Tuple pattern, got {:?}", other),
+                }
+                assert!(matches!(expr, Expr::Integer(0)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_uni_variant_with_literal_int() {
+        let src = "uni val(Some(42)) = 0;";
+        let mut parser = Parser::new(src);
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "val");
+                assert_eq!(variant, "Some");
+                assert_eq!(fields.len(), 1);
+                assert!(matches!(&fields[0], Pattern::LitInt(42)));
+                assert!(matches!(expr, Expr::Integer(0)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_uni_variant_with_literal_string() {
+        let src = r#"uni val(Msg("hello")) = 0;"#;
+        let mut parser = Parser::new(src);
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "val");
+                assert_eq!(variant, "Msg");
+                assert_eq!(fields.len(), 1);
+                assert!(matches!(&fields[0], Pattern::LitString(s) if s == "hello"));
+                assert!(matches!(expr, Expr::Integer(0)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_uni_variant_with_multiple_fields() {
+        let src = "uni pair(Pair(a, b)) = 1;";
+        let mut parser = Parser::new(src);
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "pair");
+                assert_eq!(variant, "Pair");
+                assert_eq!(fields.len(), 2);
+                assert!(matches!(&fields[0], Pattern::Var(f) if f == "a"));
+                assert!(matches!(&fields[1], Pattern::Var(f) if f == "b"));
+                assert!(matches!(expr, Expr::Integer(1)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_uni_block_rhs() {
+        let src = "uni val(Some(v)) = { term; };";
+        let mut parser = Parser::new(src);
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "val");
+                assert_eq!(variant, "Some");
+                assert_eq!(fields.len(), 1);
+                assert!(matches!(&fields[0], Pattern::Var(f) if f == "v"));
+                assert!(matches!(expr, Expr::Block(_, _)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_uni_with_wildcard_in_block_rhs() {
+        let src = "uni val(_) = { term; };";
+        let mut parser = Parser::new(src);
+        let stmt = parser.parse_statement().unwrap();
+        match stmt {
+            Statement::Unification { name, variant, fields, expr } => {
+                assert_eq!(name, "val");
+                assert_eq!(variant, "_");
+                assert!(fields.is_empty());
+                assert!(matches!(expr, Expr::Block(_, _)));
+            }
+            _ => panic!("Expected Unification, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_match_wildcard_only() {
+        let src = "match x { _ = 0 }";
+        let mut parser = Parser::new(src);
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Match { value, arms } => {
+                assert!(matches!(*value, Expr::Identifier(n) if n == "x"));
+                assert_eq!(arms.len(), 1);
+                assert!(matches!(arms[0].pattern, MatchPattern::Wildcard));
+                assert!(matches!(*arms[0].body, Expr::Integer(0)));
+            }
+            _ => panic!("Expected Match, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_match_variant_with_field() {
+        let src = "match x { Some(v) = v, _ = 0 }";
+        let mut parser = Parser::new(src);
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Match { value, arms } => {
+                assert!(matches!(*value, Expr::Identifier(n) if n == "x"));
+                assert_eq!(arms.len(), 2);
+                match &arms[0].pattern {
+                    MatchPattern::Variant { name, fields } => {
+                        assert_eq!(name, "Some");
+                        assert_eq!(fields.len(), 1);
+                        assert!(matches!(&fields[0], Pattern::Var(f) if f == "v"));
+                    }
+                    _ => panic!("Expected Variant pattern"),
+                }
+                assert!(matches!(arms[1].pattern, MatchPattern::Wildcard));
+            }
+            _ => panic!("Expected Match, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_match_variant_with_literal_int() {
+        let src = "match x { N(42) = 1, _ = 0 }";
+        let mut parser = Parser::new(src);
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Match { value, arms } => {
+                assert!(matches!(*value, Expr::Identifier(n) if n == "x"));
+                assert_eq!(arms.len(), 2);
+                match &arms[0].pattern {
+                    MatchPattern::Variant { name, fields } => {
+                        assert_eq!(name, "N");
+                        assert_eq!(fields.len(), 1);
+                        assert!(matches!(&fields[0], Pattern::LitInt(42)));
+                    }
+                    _ => panic!("Expected Variant pattern"),
+                }
+            }
+            _ => panic!("Expected Match, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_match_variant_with_tuple() {
+        let src = "match x { P((a, b)) = a, _ = 0 }";
+        let mut parser = Parser::new(src);
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Match { value, arms } => {
+                assert!(matches!(*value, Expr::Identifier(n) if n == "x"));
+                assert_eq!(arms.len(), 2);
+                match &arms[0].pattern {
+                    MatchPattern::Variant { name, fields } => {
+                        assert_eq!(name, "P");
+                        assert_eq!(fields.len(), 1);
+                        match &fields[0] {
+                            Pattern::Tuple(elems) => {
+                                assert_eq!(elems.len(), 2);
+                                assert!(matches!(&elems[0], Pattern::Var(e) if e == "a"));
+                                assert!(matches!(&elems[1], Pattern::Var(e) if e == "b"));
+                            }
+                            _ => panic!("Expected Tuple pattern"),
+                        }
+                    }
+                    _ => panic!("Expected Variant pattern"),
+                }
+            }
+            _ => panic!("Expected Match, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_match_variant_with_literal_string() {
+        let src = r#"match x { Msg("ok") = 1, _ = 0 }"#;
+        let mut parser = Parser::new(src);
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Match { value, arms } => {
+                assert!(matches!(*value, Expr::Identifier(n) if n == "x"));
+                assert_eq!(arms.len(), 2);
+                match &arms[0].pattern {
+                    MatchPattern::Variant { name, fields } => {
+                        assert_eq!(name, "Msg");
+                        assert_eq!(fields.len(), 1);
+                        assert!(matches!(&fields[0], Pattern::LitString(s) if s == "ok"));
+                    }
+                    _ => panic!("Expected Variant pattern"),
+                }
+            }
+            _ => panic!("Expected Match, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_match_multiple_fields() {
+        let src = "match x { Pair(a, b) = 0, _ = 1 }";
+        let mut parser = Parser::new(src);
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Match { value, arms } => {
+                assert!(matches!(*value, Expr::Identifier(n) if n == "x"));
+                assert_eq!(arms.len(), 2);
+                match &arms[0].pattern {
+                    MatchPattern::Variant { name, fields } => {
+                        assert_eq!(name, "Pair");
+                        assert_eq!(fields.len(), 2);
+                        assert!(matches!(&fields[0], Pattern::Var(f) if f == "a"));
+                        assert!(matches!(&fields[1], Pattern::Var(f) if f == "b"));
+                    }
+                    _ => panic!("Expected Variant pattern"),
+                }
+            }
+            _ => panic!("Expected Match, got {:?}", expr),
+        }
     }
 }
 

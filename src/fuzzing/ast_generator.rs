@@ -125,7 +125,9 @@ pub fn arb_transaction(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             attrs: Vec::new(),
             modifiers: vec![],
             variant_bodies: vec![],
-        })
+                 outputs: Vec::new(),
+         output_type: None,
+     })
     })
 }
 

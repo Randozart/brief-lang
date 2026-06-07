@@ -1593,8 +1593,8 @@ impl VerilogGenerator {
             Statement::InlineAsm { asm_string, .. } => {
                 out.push_str(&format!("        /* asm: {} */\n", asm_string));
             }
-            Statement::Unification { name, pattern, expr } => {
-                out.push_str(&format!("        // unification: {} {} <= {}\n", name, pattern, self.expr_to_verilog(expr)));
+            Statement::Unification { name, variant, fields: _, expr } => {
+                out.push_str(&format!("        // unification: {} {} <= {}\n", name, variant, self.expr_to_verilog(expr)));
             }
             Statement::Assignment { lhs, expr, .. } => {
                 if let Expr::Identifier(name) = lhs {

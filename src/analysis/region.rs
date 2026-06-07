@@ -1490,10 +1490,11 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
             }
         }
         Statement::Escape(e) => Statement::Escape(e.as_ref().map(|x| substitute_expr(x, old_var, new_expr))),
-        Statement::Unification { name, pattern, expr } => {
+        Statement::Unification { name, variant, fields, expr } => {
             Statement::Unification {
                 name: name.clone(),
-                pattern: pattern.clone(),
+                variant: variant.clone(),
+                fields: fields.clone(),
                 expr: substitute_expr(expr, old_var, new_expr),
             }
         }
@@ -1710,7 +1711,9 @@ mod tests {
             attrs: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
-        })
+                 outputs: Vec::new(),
+         output_type: None,
+     })
     }
 
     fn assign(lhs: &str, expr: Expr) -> Statement {

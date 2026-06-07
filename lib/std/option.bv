@@ -112,7 +112,7 @@ defn or_else<T>(opt: Option<T>, fallback: () -> Option<T>) [fallback != null][te
     term fallback();
 };
 
-defn filter<T>(opt: Option<T>, pred: T -> Bool) [pred != null][term.is_some() && pred(unwrap(opt))] -> Option<T> {
+defn filter<T>(opt: Option<T>, pred: T -> Bool) [pred != null][!term.is_some() || pred(unwrap(term))] -> Option<T> {
     uni opt(Some(v)) = {
         [pred(v)] {
             term Some(v);

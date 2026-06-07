@@ -509,9 +509,9 @@ impl CobolBackend {
             Statement::InlineAsm { asm_string, .. } => {
                 output.push_str(&format!("    *> asm: {}\n", asm_string));
             }
-            Statement::Unification { name, pattern, expr } => {
+            Statement::Unification { name, variant, fields: _, expr } => {
                 let expr_str = self.translate_expr(expr);
-                output.push_str(&format!("    *> unification: {} {} = {}\n", name, pattern, expr_str));
+                output.push_str(&format!("    *> unification: {} {} = {}\n", name, variant, expr_str));
             }
         }
     }
@@ -746,7 +746,9 @@ mod tests {
             attrs: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
-        };
+                 outputs: Vec::new(),
+         output_type: None,
+     };
 
         Program {
             items: vec![TopLevel::Transaction(txn)],

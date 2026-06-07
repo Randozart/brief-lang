@@ -317,9 +317,52 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 434 tests pass, 0 fail
+- 501 tests pass, 0 fail
 - Interpreter is the reference — if it runs a program, the backend should eventually compile it
 - All additions are additive (new match arms) — never modify existing optimization paths
+
+## Iteration Pattern
+
+**Iteration requires `txn` with `[pre][post]` convergence, NOT `defn` + `[guard]`:**
+
+`Statement::Guarded` is a **one-shot conditional** — it evaluates the guard once and executes the body zero or one times. It does NOT loop. A `defn` body executes as a straight-line sequence with no implicit transaction wrapping.
+
+The correct pattern for iteration in Brief is a **callable `txn`** (not `rct txn`). A regular `txn` takes parameters and returns values like a `defn`, but its body executes in a convergence loop: evaluate precondition → execute body → check postcondition → repeat if precondition still holds. The precondition becoming false is the convergence signal.
+
+```brief
+// CORRECT — convergence loop via txn + [pre][post]:
+txn iter_map<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
+    [i < list :> Size][i == list :> Size] -> List<U>
+{
+    &result = result.append(f(list[i]));
+    &i = i + 1;
+    term result;
+};
+
+defn iter_map<T, U>(list: List<T>, f: T -> U) -> List<U> {
+    term iter_map_loop(list, f, [], 0);
+};
+```
+
+| Construct | Semantics | When to use |
+|-----------|-----------|-------------|
+| `defn` | Pure function, straight-line | Stateless computations, wrappers |
+| `txn params [pre][post] -> Ret { body }` | Callable convergent loop | Iteration, accumulation, recursion |
+| `rct txn [pre][post] { body }` | Reactive, reactor-driven | State machines, event-driven |
+| `[guard] { body }` | One-shot conditional | If/else, conditional execution inside a `txn` body |
+
+Evolution: The old pattern `[guard] { &i = i + 1; }` inside `defn` bodies was cargo-culted from `rct txn` internals, where the outer reactor loop provides convergence. But `defn` has no such loop — the guarded statement fires once and falls through. ~130 defns in `lib/` were silently broken. All have been migrated to callable `txn`s.
+
+## Testing Mandate
+
+**Every new feature, every code path, every match arm must have corresponding tests.** No exceptions.
+
+- **Interpreter changes**: Add direct AST-construction tests in `src/interpreter.rs` that exercise every branch of the new code.
+- **Parser changes**: Add source-text parsing tests in `src/parser.rs` that verify the parsed AST structure.
+- **Backend changes**: Ensure existing tests still pass (`cargo test --lib`). For non-trivial codegen, add LLVM IR string-assertion tests.
+- **Legacy code**: Changing old code paths (destructuring, field access in backends) does not require new tests for each backend — but the compiler must build and all existing tests must pass.
+
+Run `cargo test --lib` before every commit. If a change has no test, it does not exist.
 
 ## `--dev` / `--prod` Budget Semantics (2026-06-07)
 
