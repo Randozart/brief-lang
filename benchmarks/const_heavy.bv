@@ -3,6 +3,8 @@
 import { __get_env_int } from "std/env.bv";
 import "link/brief_rt.c";
 
+frgn __print_int(n: Int) -> Bool ;
+
 const C00: Int = 100;  const C01: Int = 200;
 const C02: Int = 300;  const C03: Int = 400;
 const C04: Int = 500;  const C05: Int = 600;
@@ -18,11 +20,14 @@ let total: Int = __get_env_int("BOUND");
 let count: Int = 0;
 let acc: Int = 0;
 
-rct txn tick [count < total && acc == acc][count == total] {
+rct txn tick [count < total][count == total] {
     &acc = acc + count / 100 + C00 + C01 + C02 + C03 + C04
           + C05 + C06 + C07 + C08 + C09
           + C10 + C11 + C12 + C13 + C14
           + C15 + C16 + C17 + C18 + C19;
     &count = count + 1;
+    [count % 5000000 == 0] {
+        __print_int(acc);
+    };
     term;
 };

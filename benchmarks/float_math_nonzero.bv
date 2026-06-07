@@ -1,8 +1,9 @@
 #!exit count == total && x0 >= 0.0;
 
 import { __get_env_int } from "std/env.bv";
-import { io_pending } from "std/brief_rt.bv";
 import "link/brief_rt.c";
+
+frgn __print_float(d: Float) -> Bool ;
 
 let x0: Float = 1.0;
 let x1: Float = 0.5;
@@ -28,9 +29,7 @@ const Q11: Float = 0.1;
 const Q22: Float = 0.1;
 
 rct txn tick [
-    io_pending && count < total &&
-    x0 == x0 && x1 == x1 && x2 == x2 &&
-    p00 == p00 && p11 == p11 && p22 == p22
+    count < total
 ][count == total] {
     &x0 = A00 * x0 + A01 * x1 + A02 * x2;
     &x1 = A10 * x0 + A11 * x1 + A12 * x2;
@@ -39,5 +38,9 @@ rct txn tick [
     &p11 = p11 + Q11;
     &p22 = p22 + Q22;
     &count = count + 1;
+    [count % 5000000 == 0] {
+        let trace: Float = p00 + p11 + p22;
+        __print_float(x0 + x1 + x2 + trace);
+    };
     term;
 };

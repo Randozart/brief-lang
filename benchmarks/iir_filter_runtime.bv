@@ -12,6 +12,8 @@
 import { __get_env_int } from "std/env.bv";
 import "link/brief_rt.c";
 
+frgn __print_float(d: Float) -> Bool ;
+
 let bound: Int = __get_env_int("BOUND");
 let x1: Float = 0.0;
 let x2: Float = 0.0;
@@ -26,7 +28,7 @@ const a1: Float = -1.815341082700;
 const a2: Float = 0.831005589300;
 const input: Float = 1.0;
 
-rct txn process [bound > 0 && count < bound && x1 == x1 && x2 == x2 && y1 == y1 && y2 == y2][count == bound] {
+rct txn process [bound > 0 && count < bound][count == bound] {
     let f0: Float = b0 * input;
     let f1: Float = b1 * x1;
     let f2: Float = b2 * x2;
@@ -44,5 +46,8 @@ rct txn process [bound > 0 && count < bound && x1 == x1 && x2 == x2 && y1 == y1 
     &y1 = out;
 
     &count = count + 1;
+    [count % 5000000 == 0] {
+        __print_float(out);
+    };
     term;
 };

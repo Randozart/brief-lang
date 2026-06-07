@@ -33,9 +33,3 @@ rct txn step_b [count < total][count == total] {
     &count = count + 1;
     term;
 };
-
-rct txn step_b [count < total][count == total] {
-    &acc_b = acc_b + count;
-    &count = count + 1;
-    term;
-};

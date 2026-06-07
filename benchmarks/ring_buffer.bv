@@ -1,14 +1,8 @@
-// Enum Switched Counter — Tests enum dispatch with wake hybrid (Path 4)
+// Ring Buffer — Tests enum dispatch with wake hybrid (Path 4)
 //
 // Tests:
-//   - Auto-wake: @link trigger → is_wake = true
-//   - Enumerable bool trigger gating (io_pending: Bool → 2 values ≤ budget)
-//   - Switch-dispatch entry point (eliminates @reactor_tick)
 //   - Folded while-loop (ops < N → ops == N convergence)
-//   - Wake+enum hybrid: @__rt_init()/@__rt_wait() with switch loop-back
-//
-// @__io_pending is set to 1 by __rt_init() on startup. On the first tick,
-// the switch hits case 1, enters the folded loop, and runs N iterations.
+//   - FFI output prevents dead-code elimination
 //
 // import "link/brief_rt.c" in brief_rt.bv pulls in the runtime automatically.
 //
@@ -19,12 +13,18 @@
 
 #!exit ops == N;
 
-import { io_pending } from "std/brief_rt.bv";
+import "link/brief_rt.c";
+import { __get_env_int } from "std/env.bv";
+
+frgn __print_int(n: Int) -> Bool ;
 
 let ops: Int = 0;
-const N: Int = 50000000;  // 50M ops
+let N: Int = __get_env_int("BOUND");
 
-rct txn work [io_pending && ops < N][ops == N] {
+rct txn work [ops < N][ops == N] {
     &ops = ops + 1;
+    [ops % 5000000 == 0] {
+        __print_int(ops);
+    };
     term;
 };

@@ -10,7 +10,6 @@
 
 import { __get_env_int } from "std/env.bv";
 import "link/brief_rt.c";
-import { io_pending } from "std/brief_rt.bv";
 
 frgn #out __print_float(d: Float) -> Bool ;
 
@@ -56,11 +55,7 @@ const q21: Float = 0.0;
 const q22: Float = 0.001;
 
 rct txn propagate [
-    bound > 0 && count < bound &&
-    x0 == x0 && x1 == x1 && x2 == x2 &&
-    p00 == p00 && p01 == p01 && p02 == p02 &&
-    p10 == p10 && p11 == p11 && p12 == p12 &&
-    p20 == p20 && p21 == p21 && p22 == p22
+    bound > 0 && count < bound
 ][count == bound] {
     // State propagation: x_new = A * x
     let nx0: Float = a00 * x0 + a01 * x1 + a02 * x2;

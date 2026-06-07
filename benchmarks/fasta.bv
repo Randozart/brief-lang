@@ -4,7 +4,6 @@
 #!exit count == N;
 
 import "link/brief_rt.c";
-import { io_pending } from "std/brief_rt.bv";
 
 frgn #out __putchar(c: Int) -> Int ;
 frgn __get_env_int(name: String) -> Int ;
@@ -17,7 +16,7 @@ const IA: Int = 3877;
 const IC: Int = 29573;
 
 // ── Transaction ──────────────────────────────────────────────────────
-rct txn fasta [io_pending && count < N][count == N] {
+rct txn fasta [count < N][count == N] {
     &seed = seed * IA;
     &seed = seed + IC;
     &seed = seed % IM;

@@ -4,7 +4,7 @@
 //   - Auto-categorization: two txns with disjoint writes → async candidates
 //   - Thread pool: workers execute body functions concurrently
 //   - Dual-barrier synchronization: release → reactor → wait per tick
-//   - Auto-wake: @link triggers default to wake
+//   - FFI output prevents dead-code elimination
 //
 // inc_a and inc_b write different state fields (a, b). The proof engine
 // guarantees no data races — plain loads/stores, no atomics needed.
@@ -18,17 +18,26 @@
 
 #!exit a == N && b == N;
 
-import { io_pending } from "std/brief_rt.bv";
+import "link/brief_rt.c";
+import { __get_env_int } from "std/env.bv";
+
+frgn __print_int(n: Int) -> Bool ;
 
 let a: Int = 0;
 let b: Int = 0;
-const N: Int = 25000000;  // 25M per counter = 50M total
+let N: Int = __get_env_int("BOUND");
 
-rct async txn inc_a [io_pending && a < N][a == N] {
+rct async txn inc_a [a < N][a == N] {
     &a = a + 1;
+    [a % 5000000 == 0] {
+        __print_int(a);
+    };
     term;
 };
-rct async txn inc_b [io_pending && b < N][b == N] {
+rct async txn inc_b [b < N][b == N] {
     &b = b + 1;
+    [b % 5000000 == 0] {
+        __print_int(b);
+    };
     term;
 };

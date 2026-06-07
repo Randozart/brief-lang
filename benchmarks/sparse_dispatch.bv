@@ -16,14 +16,16 @@
 import { __get_env_int } from "std/env.bv";
 import "link/brief_rt.c";
 
+frgn __print_int(n: Int) -> Bool ;
+
 let count: Int = 0;
 let total: Int = __get_env_int("BOUND");
 
-rct txn ping [count % 8 == 0][count == total] { &count = count + 1; term; };
-rct txn ack  [count % 8 == 1][count == total] { &count = count + 1; term; };
-rct txn err  [count % 8 == 2][count == total] { &count = count + 1; term; };
-rct txn debug[count % 8 == 3][count == total] { &count = count + 1; term; };
-rct txn data [count % 8 == 4][count == total] { &count = count + 1; term; };
-rct txn ctrl [count % 8 == 5][count == total] { &count = count + 1; term; };
-rct txn sync [count % 8 == 6][count == total] { &count = count + 1; term; };
-rct txn stat [count % 8 == 7][count == total] { &count = count + 1; term; };
+rct txn ping  [count < total && count % 8 == 0][count == total] { &count = count + 1; [count % 5000000 == 0] { __print_int(count); }; term; };
+rct txn ack   [count < total && count % 8 == 1][count == total] { &count = count + 1; [count % 5000000 == 0] { __print_int(count); }; term; };
+rct txn err   [count < total && count % 8 == 2][count == total] { &count = count + 1; [count % 5000000 == 0] { __print_int(count); }; term; };
+rct txn debug [count < total && count % 8 == 3][count == total] { &count = count + 1; [count % 5000000 == 0] { __print_int(count); }; term; };
+rct txn data  [count < total && count % 8 == 4][count == total] { &count = count + 1; [count % 5000000 == 0] { __print_int(count); }; term; };
+rct txn ctrl  [count < total && count % 8 == 5][count == total] { &count = count + 1; [count % 5000000 == 0] { __print_int(count); }; term; };
+rct txn sync_ [count < total && count % 8 == 6][count == total] { &count = count + 1; [count % 5000000 == 0] { __print_int(count); }; term; };
+rct txn stat  [count < total && count % 8 == 7][count == total] { &count = count + 1; [count % 5000000 == 0] { __print_int(count); }; term; };
