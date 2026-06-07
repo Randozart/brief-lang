@@ -1,0 +1,420 @@
+// Built-in operations — interpreter-native operations exposed through FFI registry.
+// These are the lowest-level operations that the interpreter must perform natively:
+//   HashMap, HashSet, StringBuilder, Stack, Queue, Result, Option, String, clone.
+//
+// This file is loaded by the interpreter to populate fn_locations_by_name, which maps
+// __builtin_* names to __builtin.* location keys. The location keys match the match
+// arms in src/ffi/registry.rs resolve_location_to_impl().
+//
+// NOTE: Addresses are arbitrary (in the __builtin range). They are never used as
+// physical addresses — they're just identifiers for the DBVS parser.
+
+// ===== HashMap =====
+
+register 0x1000 as "__builtin_HashMap_new" {
+    type: Data;
+    location: "__builtin.HashMap.new";
+    target: native;
+    description: "Create empty HashMap";
+    check: [true];
+}
+
+register 0x1001 as "__builtin_HashMap_insert" {
+    type: Data;
+    location: "__builtin.HashMap.insert";
+    target: native;
+    description: "Insert key-value pair into HashMap";
+    check: [true];
+}
+
+register 0x1002 as "__builtin_HashMap_get" {
+    type: Data;
+    location: "__builtin.HashMap.get";
+    target: native;
+    description: "Get value by key from HashMap";
+    check: [true];
+}
+
+register 0x1003 as "__builtin_HashMap_contains_key" {
+    type: Data;
+    location: "__builtin.HashMap.contains_key";
+    target: native;
+    description: "Check if HashMap contains key";
+    check: [true];
+}
+
+register 0x1004 as "__builtin_HashMap_remove" {
+    type: Data;
+    location: "__builtin.HashMap.remove";
+    target: native;
+    description: "Remove key-value pair from HashMap";
+    check: [true];
+}
+
+register 0x1005 as "__builtin_HashMap_len" {
+    type: Data;
+    location: "__builtin.HashMap.len";
+    target: native;
+    description: "Get HashMap entry count";
+    check: [true];
+}
+
+register 0x1006 as "__builtin_HashMap_is_empty" {
+    type: Data;
+    location: "__builtin.HashMap.is_empty";
+    target: native;
+    description: "Check if HashMap is empty";
+    check: [true];
+}
+
+register 0x1007 as "__builtin_HashMap_keys" {
+    type: Data;
+    location: "__builtin.HashMap.keys";
+    target: native;
+    description: "Get all keys from HashMap";
+    check: [true];
+}
+
+register 0x1008 as "__builtin_HashMap_values" {
+    type: Data;
+    location: "__builtin.HashMap.values";
+    target: native;
+    description: "Get all values from HashMap";
+    check: [true];
+}
+
+// ===== HashSet =====
+
+register 0x1010 as "__builtin_HashSet_new" {
+    type: Data;
+    location: "__builtin.HashSet.new";
+    target: native;
+    description: "Create empty HashSet";
+    check: [true];
+}
+
+register 0x1011 as "__builtin_HashSet_insert" {
+    type: Data;
+    location: "__builtin.HashSet.insert";
+    target: native;
+    description: "Insert item into HashSet";
+    check: [true];
+}
+
+register 0x1012 as "__builtin_HashSet_contains" {
+    type: Data;
+    location: "__builtin.HashSet.contains";
+    target: native;
+    description: "Check if HashSet contains item";
+    check: [true];
+}
+
+register 0x1013 as "__builtin_HashSet_remove" {
+    type: Data;
+    location: "__builtin.HashSet.remove";
+    target: native;
+    description: "Remove item from HashSet";
+    check: [true];
+}
+
+register 0x1014 as "__builtin_HashSet_len" {
+    type: Data;
+    location: "__builtin.HashSet.len";
+    target: native;
+    description: "Get HashSet size";
+    check: [true];
+}
+
+register 0x1015 as "__builtin_HashSet_is_empty" {
+    type: Data;
+    location: "__builtin.HashSet.is_empty";
+    target: native;
+    description: "Check if HashSet is empty";
+    check: [true];
+}
+
+// ===== StringBuilder =====
+
+register 0x1020 as "__builtin_StringBuilder_new" {
+    type: Data;
+    location: "__builtin.StringBuilder.new";
+    target: native;
+    description: "Create empty StringBuilder";
+    check: [true];
+}
+
+register 0x1021 as "__builtin_StringBuilder_append_char" {
+    type: Data;
+    location: "__builtin.StringBuilder.append_char";
+    target: native;
+    description: "Append char to StringBuilder";
+    check: [true];
+}
+
+register 0x1022 as "__builtin_StringBuilder_append_str" {
+    type: Data;
+    location: "__builtin.StringBuilder.append_str";
+    target: native;
+    description: "Append string to StringBuilder";
+    check: [true];
+}
+
+register 0x1023 as "__builtin_StringBuilder_append_int" {
+    type: Data;
+    location: "__builtin.StringBuilder.append_int";
+    target: native;
+    description: "Append int to StringBuilder";
+    check: [true];
+}
+
+register 0x1024 as "__builtin_StringBuilder_append_bool" {
+    type: Data;
+    location: "__builtin.StringBuilder.append_bool";
+    target: native;
+    description: "Append bool to StringBuilder";
+    check: [true];
+}
+
+register 0x1025 as "__builtin_StringBuilder_append_float" {
+    type: Data;
+    location: "__builtin.StringBuilder.append_float";
+    target: native;
+    description: "Append float to StringBuilder";
+    check: [true];
+}
+
+register 0x1026 as "__builtin_StringBuilder_to_string" {
+    type: Data;
+    location: "__builtin.StringBuilder.to_string";
+    target: native;
+    description: "Convert StringBuilder to String";
+    check: [true];
+}
+
+register 0x1027 as "__builtin_StringBuilder_clear" {
+    type: Data;
+    location: "__builtin.StringBuilder.clear";
+    target: native;
+    description: "Clear StringBuilder contents";
+    check: [true];
+}
+
+register 0x1028 as "__builtin_StringBuilder_len" {
+    type: Data;
+    location: "__builtin.StringBuilder.len";
+    target: native;
+    description: "Get StringBuilder length";
+    check: [true];
+}
+
+register 0x1029 as "__builtin_StringBuilder_is_empty" {
+    type: Data;
+    location: "__builtin.StringBuilder.is_empty";
+    target: native;
+    description: "Check if StringBuilder is empty";
+    check: [true];
+}
+
+// ===== Stack =====
+
+register 0x1030 as "__builtin_Stack_new" {
+    type: Data;
+    location: "__builtin.Stack.new";
+    target: native;
+    description: "Create empty Stack";
+    check: [true];
+}
+
+register 0x1031 as "__builtin_Stack_push" {
+    type: Data;
+    location: "__builtin.Stack.push";
+    target: native;
+    description: "Push item onto Stack";
+    check: [true];
+}
+
+register 0x1032 as "__builtin_Stack_pop" {
+    type: Data;
+    location: "__builtin.Stack.pop";
+    target: native;
+    description: "Pop item from Stack";
+    check: [true];
+}
+
+register 0x1033 as "__builtin_Stack_peek" {
+    type: Data;
+    location: "__builtin.Stack.peek";
+    target: native;
+    description: "Peek at top of Stack";
+    check: [true];
+}
+
+register 0x1034 as "__builtin_Stack_len" {
+    type: Data;
+    location: "__builtin.Stack.len";
+    target: native;
+    description: "Get Stack size";
+    check: [true];
+}
+
+register 0x1035 as "__builtin_Stack_is_empty" {
+    type: Data;
+    location: "__builtin.Stack.is_empty";
+    target: native;
+    description: "Check if Stack is empty";
+    check: [true];
+}
+
+register 0x1036 as "__builtin_Stack_clear" {
+    type: Data;
+    location: "__builtin.Stack.clear";
+    target: native;
+    description: "Clear Stack contents";
+    check: [true];
+}
+
+// ===== Queue =====
+
+register 0x1040 as "__builtin_Queue_new" {
+    type: Data;
+    location: "__builtin.Queue.new";
+    target: native;
+    description: "Create empty Queue";
+    check: [true];
+}
+
+register 0x1041 as "__builtin_Queue_enqueue" {
+    type: Data;
+    location: "__builtin.Queue.enqueue";
+    target: native;
+    description: "Enqueue item to Queue";
+    check: [true];
+}
+
+register 0x1042 as "__builtin_Queue_dequeue" {
+    type: Data;
+    location: "__builtin.Queue.dequeue";
+    target: native;
+    description: "Dequeue item from Queue";
+    check: [true];
+}
+
+register 0x1043 as "__builtin_Queue_front" {
+    type: Data;
+    location: "__builtin.Queue.front";
+    target: native;
+    description: "Peek at front of Queue";
+    check: [true];
+}
+
+register 0x1044 as "__builtin_Queue_len" {
+    type: Data;
+    location: "__builtin.Queue.len";
+    target: native;
+    description: "Get Queue size";
+    check: [true];
+}
+
+register 0x1045 as "__builtin_Queue_is_empty" {
+    type: Data;
+    location: "__builtin.Queue.is_empty";
+    target: native;
+    description: "Check if Queue is empty";
+    check: [true];
+}
+
+register 0x1046 as "__builtin_Queue_clear" {
+    type: Data;
+    location: "__builtin.Queue.clear";
+    target: native;
+    description: "Clear Queue contents";
+    check: [true];
+}
+
+// ===== Result =====
+
+register 0x1050 as "__builtin_Result_is_ok" {
+    type: Data;
+    location: "__builtin.Result.is_ok";
+    target: native;
+    description: "Check if Result is Ok";
+    check: [true];
+}
+
+register 0x1051 as "__builtin_Result_is_err" {
+    type: Data;
+    location: "__builtin.Result.is_err";
+    target: native;
+    description: "Check if Result is Err";
+    check: [true];
+}
+
+register 0x1052 as "__builtin_Result_unwrap" {
+    type: Data;
+    location: "__builtin.Result.unwrap";
+    target: native;
+    description: "Unwrap Result value";
+    check: [true];
+}
+
+register 0x1053 as "__builtin_Result_unwrap_err" {
+    type: Data;
+    location: "__builtin.Result.unwrap_err";
+    target: native;
+    description: "Unwrap Result error";
+    check: [true];
+}
+
+register 0x1054 as "__builtin_Result_Ok" {
+    type: Data;
+    location: "__builtin.Result.Ok";
+    target: native;
+    description: "Construct Ok Result";
+    check: [true];
+}
+
+register 0x1055 as "__builtin_Result_Err" {
+    type: Data;
+    location: "__builtin.Result.Err";
+    target: native;
+    description: "Construct Err Result";
+    check: [true];
+}
+
+// ===== Option =====
+
+register 0x1060 as "__builtin_Option_Some" {
+    type: Data;
+    location: "__builtin.Option.Some";
+    target: native;
+    description: "Construct Some Option";
+    check: [true];
+}
+
+register 0x1061 as "__builtin_Option_None" {
+    type: Data;
+    location: "__builtin.Option.None";
+    target: native;
+    description: "Construct None Option";
+    check: [true];
+}
+
+// ===== String =====
+
+register 0x1070 as "__builtin_String_char_at" {
+    type: Data;
+    location: "__builtin.String.char_at";
+    target: native;
+    description: "Get character at index in String";
+    check: [true];
+}
+
+// ===== Clone =====
+
+register 0x1080 as "__builtin_clone" {
+    type: Data;
+    location: "__builtin.clone";
+    target: native;
+    description: "Clone a value";
+    check: [true];
+}

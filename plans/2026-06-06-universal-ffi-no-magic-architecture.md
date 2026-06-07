@@ -832,6 +832,68 @@ If no `interface` field is specified, the backend infers a reasonable default:
 
 ---
 
+## Phase 9: DBVS Redesign — Decouple FFI Bindings from MMIO Registers
+
+**Goal**: The DBVS format currently uses `register <hex_address> as "<name>"` for both
+hardware register maps and FFI function bindings. For FFI bindings, the hex address is
+meaningless — a legacy from the MMIO use case. The DBVS parser and schema should be
+redesigned to use appropriate syntax for each domain.
+
+### 9.1 — Current problem
+
+The DBVS parser at `src/dbrief/parser.rs:294` calls `parse_register()` which requires
+a hex address as the first token. For FFI bindings (`std/bindings/*.dbvs`), this address:
+
+```
+register 0x1000 as "__builtin_HashMap_new" {
+    location: "__builtin.HashMap.new";
+};
+```
+
+The address `0x1000` is never used — it's parsed into `DbriefRegister.address` but
+never read during FFI binding resolution (which uses `as "<name>"` → `location`
+mapping). It's cargo-culted from hardware register definitions.
+
+### 9.2 — Proposed direction
+
+Add a new DBVS keyword for bindings that don't require an address, e.g.:
+
+```
+bind "__builtin_HashMap_new" {
+    location: "__builtin.HashMap.new";
+    description: "Create empty HashMap";
+}
+```
+
+This would parse into the same internal representation but without requiring a fake
+hex address. The `register` keyword remains for MMIO/hardware use cases.
+
+Alternatively, keep the `register` keyword but make the address optional for
+bindings that have `type: Data` (non-MMIO):
+
+```
+register as "__builtin_HashMap_new" {
+    location: "__builtin.HashMap.new";
+    description: "Create empty HashMap";
+}
+```
+
+### 9.3 — Status
+
+**DEFERRED** — Not a priority. The current syntax works correctly for FFI bindings;
+the hex address is simply ignored for non-MMIO operations. This redesign is a
+cosmetic/syntax cleanup for when DBVS is revisited.
+
+### 9.4 — Files affected
+
+| File | Change |
+|---|---|
+| `src/dbrief/parser.rs:294-330` | Add `bind` keyword or optional address on `register` |
+| `std/bindings/*.dbvs` | Migrate to new syntax |
+| `src/ffi/loader.rs` | Verify no breaking changes to binding loading |
+
+---
+
 ## Architecture Summary
 
 ```

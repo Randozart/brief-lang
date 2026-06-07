@@ -1,0 +1,7 @@
+frgn __builtin_Stack_new<T>() -> Stack<T>;
+frgn __builtin_Stack_push<T>(stack: Stack<T>, item: T) -> Stack<T>;
+frgn __builtin_Stack_pop<T>(stack: Stack<T>) -> Option<(T, Stack<T>)>;
+frgn __builtin_Stack_peek<T>(stack: Stack<T>) -> Option<T>;
+frgn __builtin_Stack_len<T>(stack: Stack<T>) -> Int;
+frgn __builtin_Stack_is_empty<T>(stack: Stack<T>) -> Bool;
+frgn __builtin_Stack_clear<T>(stack: Stack<T>) -> Stack<T>;

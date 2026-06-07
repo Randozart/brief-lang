@@ -1,0 +1,6 @@
+frgn __builtin_Result_is_ok<T,E>(r: Result<T,E>) -> Bool;
+frgn __builtin_Result_is_err<T,E>(r: Result<T,E>) -> Bool;
+frgn __builtin_Result_unwrap<T,E>(r: Result<T,E>) -> T;
+frgn __builtin_Result_unwrap_err<T,E>(r: Result<T,E>) -> E;
+frgn __builtin_Result_Ok<T,E>(value: T) -> Result<T,E>;
+frgn __builtin_Result_Err<T,E>(error: E) -> Result<T,E>;

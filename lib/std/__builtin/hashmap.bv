@@ -1,0 +1,9 @@
+frgn __builtin_HashMap_new<K,V>() -> HashMap<K,V>;
+frgn __builtin_HashMap_insert<K,V>(map: HashMap<K,V>, key: String, value: V) -> HashMap<K,V>;
+frgn __builtin_HashMap_get<K,V>(map: HashMap<K,V>, key: String) -> Option<V>;
+frgn __builtin_HashMap_contains_key<K,V>(map: HashMap<K,V>, key: String) -> Bool;
+frgn __builtin_HashMap_remove<K,V>(map: HashMap<K,V>, key: String) -> HashMap<K,V>;
+frgn __builtin_HashMap_len<K,V>(map: HashMap<K,V>) -> Int;
+frgn __builtin_HashMap_is_empty<K,V>(map: HashMap<K,V>) -> Bool;
+frgn __builtin_HashMap_keys<K,V>(map: HashMap<K,V>) -> List<String>;
+frgn __builtin_HashMap_values<K,V>(map: HashMap<K,V>) -> List<V>;
