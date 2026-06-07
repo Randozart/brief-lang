@@ -2247,14 +2247,29 @@ fn run_llvm_compile(
 
     let link_deps: Vec<crate::ast::LinkDependency> = {
         let mut seen = std::collections::HashSet::new();
-        program.items.iter()
+        let mut deps: Vec<_> = program.items.iter()
             .filter_map(|item| match item {
                 crate::ast::TopLevel::LinkDependency(dep) => {
                     if seen.insert(dep.path.clone()) { Some(dep.clone()) } else { None }
                 }
                 _ => None,
             })
-            .collect()
+            .collect();
+
+        // Auto-link brief_rt.c when any @ link trigger is present.
+        // trg is a complete abstraction — the user writes only the declaration;
+        // the compiler injects the C runtime automatically.
+        let has_link_triggers = program.items.iter().any(|item| {
+            matches!(item, crate::ast::TopLevel::Trigger(t) if matches!(t.address, crate::ast::LinkRef::Linked(_)))
+        });
+        if has_link_triggers && !seen.contains("link/brief_rt.c") {
+            deps.push(crate::ast::LinkDependency {
+                path: "link/brief_rt.c".to_string(),
+                source_lang: crate::ast::LinkLanguage::C,
+            });
+        }
+
+        deps
     };
 
     let mut tc = typechecker::TypeChecker::new()

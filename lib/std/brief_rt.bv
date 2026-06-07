@@ -3,6 +3,11 @@
 // import "link/brief_rt.c" tells the compiler driver to compile/link runtime.
 import "link/brief_rt.c";
 
+// Runtime trigger declarations — standard OS-level event triggers.
+// All triggers map to symbols in brief_rt.c via @ link.
+// import "link/brief_rt.c" tells the compiler driver to compile/link runtime.
+import "link/brief_rt.c";
+
 trg sigint:      Bool   @ link __sigint_flag;
 trg sigterm:     Bool   @ link __sigterm_flag;
 trg sighup:      Bool   @ link __sighup_flag;

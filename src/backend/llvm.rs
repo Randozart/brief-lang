@@ -733,7 +733,7 @@ self.emit_declares(&mut out);
             let ret_ty = match sig.result_type {
                 crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
                 crate::ast::ResultType::Projection(ref ts) => {
-                    if ts.is_empty() { "void" }
+                    if ts.is_empty() || ts.iter().any(|t| matches!(t, Type::Void)) { "void" }
                     else if ts.iter().any(|t| matches!(t, Type::Float)) { "float" }
                     else { "i64" }
                 }
@@ -1203,6 +1203,11 @@ self.emit_declares(&mut out);
                 } else {
                     Some(&all_internal_counter)
                 };
+                // Declare __rt_wait for wake-triggered programs.
+                // trg owns its runtime — the compiler emits the declare implicitly.
+                if has_wake_triggers {
+                    writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
+                }
                 self.emit_folded_multi_main(
                     &mut out,
                     &txns,
@@ -1234,6 +1239,9 @@ self.emit_declares(&mut out);
                     }
                 }
                 // Main
+                if has_wake_triggers {
+                    writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
+                }
                 self.emit_main(&mut out, has_wake_triggers);
                 // Wake trigger metadata
                 if has_wake_triggers {
@@ -1851,20 +1859,6 @@ self.emit_declares(&mut out);
         writeln!(out, "declare i64 @llvm.abs.i64(i64, i1) #1").ok();
         writeln!(out, "declare double @llvm.fabs.f64(double) #1").ok();
         writeln!(out, "declare i64 @llvm.bitreverse.i64(i64) #1").ok();
-        // TODO (eliminate-magic Phase C2-C3): Remove these hardcoded runtime declares
-        // once the codegen call sites are migrated to use self.frgn_map lookups.
-        // When std/rt.bv is fully integrated, these will come from user imports.
-        writeln!(out, "declare void @__rt_init() local_unnamed_addr").ok();
-        writeln!(out, "declare void @__rt_poll() local_unnamed_addr").ok();
-        writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
-    }
-
-    fn emit_foreign_declares(&mut self, out: &mut String) {
-        self.frgn_map.clear();
-        // Collect from the program items (called in generate, after header)
-        // This is just the declare section — actual foreign binding iteration
-        // is done in generate() before this function would be called.
-        // We emit declares for known bootstrap intrinsics conditionally.
     }
 
     // ── Field index ───────────────────────────────────────────
@@ -4051,10 +4045,6 @@ self.emit_declares(&mut out);
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
-        if has_wake_triggers {
-            writeln!(out, "  call void @__rt_init()").ok();
-            writeln!(out, "  call void @__rt_poll()").ok();
-        }
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
@@ -4534,9 +4524,10 @@ self.emit_declares(&mut out);
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
-        if has_wake {
-            writeln!(out, "  call void @__rt_init()").ok();
-            writeln!(out, "  call void @__rt_poll()").ok();
+        if self.has_async_txns && !self.is_lightweight_async {
+            let count = self.async_txn_names.len() as i32;
+            writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
+            writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
         }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "tick:").ok();
@@ -5655,8 +5646,6 @@ mod tests {
         let output = LlvmBackend::new().generate(&program);
         assert!(!output.contains("@llvm.wake_triggers"),
             "No wake triggers → no @llvm.wake_triggers metadata");
-        assert!(!output.contains("call void @__rt_init()"),
-            "No wake triggers → no __rt_init call");
         assert!(!output.contains("call void @__rt_wait()"),
             "No wake triggers → no __rt_wait call");
     }
@@ -5696,12 +5685,10 @@ mod tests {
     }
 
     #[test]
-    fn test_main_calls_rt_init_and_rt_wait_with_wake_triggers() {
+    fn test_main_calls_rt_wait_with_wake_triggers() {
         // Use Int trigger (non-enumerable) to force standard reactor path
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, true);
         let output = LlvmBackend::new().generate(&program);
-        assert!(output.contains("call void @__rt_init()"),
-            "main() calls __rt_init() when wake triggers exist");
         assert!(output.contains("call void @__rt_wait()"),
             "main() calls __rt_wait() after reactor_tick");
     }
@@ -5710,14 +5697,12 @@ mod tests {
     fn test_enum_with_wake_triggers_hybrid() {
         // Bool trigger with is_wake → enters enum dispatch in hybrid wake mode.
         // Previously this bypassed enum entirely (Phase A gate). Now enum dispatch
-        // is active, with @__rt_init()/__rt_wait() wrapping the switch arms.
+        // is active, with __rt_wait() wrapping the switch arms.
         // With uniform-body detection: identical case arms skip the switch dispatch.
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
         let output = LlvmBackend::new().generate(&program);
         assert!(output.contains("call void @__rt_wait()"),
             "Wake triggers get __rt_wait between ticks");
-        assert!(output.contains("call void @__rt_init()"),
-            "Wake triggers get __rt_init at startup");
         assert!(!output.contains("switch i64"),
             "Uniform enum bodies skip the switch dispatch");
         assert!(output.contains("load volatile"),
@@ -5727,12 +5712,10 @@ mod tests {
     }
 
     #[test]
-    fn test_main_no_init_wait_without_wake_triggers() {
+    fn test_main_no_wait_without_wake_triggers() {
         // Use Int trigger (non-enumerable) to force standard reactor path
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, false);
         let output = LlvmBackend::new().generate(&program);
-        assert!(!output.contains("call void @__rt_init()"),
-            "main() does not call __rt_init() without wake triggers");
         assert!(!output.contains("call void @__rt_wait()"),
             "main() does not call __rt_wait() without wake triggers");
     }
@@ -5742,10 +5725,16 @@ mod tests {
         // Use Int trigger (non-enumerable) to force standard reactor path
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, false);
         let output = LlvmBackend::new().generate(&program);
-        assert!(output.contains("declare void @__rt_init()"),
-            "__rt_init always declared");
+        assert!(!output.contains("declare void @__rt_wait()"),
+            "__rt_wait not declared without wake triggers");
+    }
+
+    #[test]
+    fn test_rt_declares_present_with_wake() {
+        let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, true);
+        let output = LlvmBackend::new().generate(&program);
         assert!(output.contains("declare void @__rt_wait()"),
-            "__rt_wait always declared");
+            "__rt_wait declared with wake triggers");
     }
 
     #[test]
