@@ -4768,11 +4768,24 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(ProjectionTarget::Contains(Box::new(expr)))
             }
             "Pop" => Ok(ProjectionTarget::Pop),
+            "Get" => {
+                // Get(key) — non-mutating HashMap read → Option<V>
+                self.expect(Token::LParen)?;
+                let key_expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(ProjectionTarget::Get(Box::new(key_expr)))
+            }
+            "Top" => Ok(ProjectionTarget::Top),
+            "Front" => Ok(ProjectionTarget::Front),
+            "Elements" => Ok(ProjectionTarget::Elements),
+            "AsStack" => Ok(ProjectionTarget::AsStack),
+            "AsQueue" => Ok(ProjectionTarget::AsQueue),
             _ => Err(SyntaxError::InvalidExpression {
                 reason: format!(
                     "expected projection target (Size, Bytes, Ptr, Alignment, Range, \
                      Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match, \
-                     Keys, Values, Contains, Pop, or integer index), \
+                     Keys, Values, Contains, Pop, Get, Top, Front, Elements, AsStack, AsQueue, \
+                     or integer index), \
                      found '{}'",
                     name
                 ),

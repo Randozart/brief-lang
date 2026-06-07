@@ -169,6 +169,22 @@ pub(crate) fn json_value_to_value(v: JsonValue) -> Value {
 
 pub type ForeignFn = fn(Vec<Value>) -> Result<Value, RuntimeError>;
 
+pub struct EnumVariantInfo {
+    pub enum_name: String,
+    pub variant_name: String,
+    pub field_names: Vec<String>,
+}
+
+impl Clone for EnumVariantInfo {
+    fn clone(&self) -> Self {
+        Self {
+            enum_name: self.enum_name.clone(),
+            variant_name: self.variant_name.clone(),
+            field_names: self.field_names.clone(),
+        }
+    }
+}
+
 pub struct Interpreter {
     pub state: HashMap<String, Value>,
     pub prior_state: HashMap<String, Value>,
@@ -184,6 +200,7 @@ pub struct Interpreter {
     pub profile_mode: bool,
     pub branch_counts: HashMap<String, (u64, u64)>,
     guard_counter: usize,
+    pub enum_variants: HashMap<String, EnumVariantInfo>,
 }
 
 impl Interpreter {
@@ -204,6 +221,7 @@ impl Interpreter {
             profile_mode: false,
             branch_counts: HashMap::new(),
             guard_counter: 0,
+            enum_variants: HashMap::new(),
         }
     }
 
@@ -297,16 +315,28 @@ impl Interpreter {
                 self.definitions.insert(defn.name.clone(), defn.clone());
             } else if let TopLevel::Enum(enum_def) = item {
                 for variant in &enum_def.variants {
-                    let variant_name = match variant {
-                        EnumVariant::Unit(name) => name.clone(),
-                        EnumVariant::Tuple(name, _) => name.clone(),
-                        EnumVariant::Struct(name, _) => name.clone(),
+                    let (variant_name, field_names) = match variant {
+                        EnumVariant::Unit(name) => (name.clone(), vec![]),
+                        EnumVariant::Tuple(name, types) => {
+                            let names: Vec<String> = (0..types.len()).map(|i| format!("field_{}", i)).collect();
+                            (name.clone(), names)
+                        }
+                        EnumVariant::Struct(name, fields) => {
+                            let names: Vec<String> = fields.iter().map(|f| f.0.clone()).collect();
+                            (name.clone(), names)
+                        }
                     };
-                    self.state.insert(variant_name.clone(), Value::Enum(
+                    let v_name = variant_name.clone();
+                    self.state.insert(v_name, Value::Enum(
                         enum_def.name.clone(),
-                        variant_name,
+                        variant_name.clone(),
                         std::collections::HashMap::new(),
                     ));
+                    self.enum_variants.insert(variant_name.clone(), EnumVariantInfo {
+                        enum_name: enum_def.name.clone(),
+                        variant_name,
+                        field_names,
+                    });
                 }
             }
         }
@@ -1536,14 +1566,28 @@ Expr::Ge(l, r) => {
                                 Ok(removed)
                             }
                             Value::HashSet(set) => {
-                                // Pop arbitrary element from set
-                                let elem = set.iter().next().cloned()
-                                    .ok_or_else(|| RuntimeError::TypeMismatch(
-                                        "Cannot pop from empty HashSet".to_string()
-                                    ))?;
-                                set.remove(&elem);
-                                self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
-                                Ok(Value::String(elem))
+                                // If specific index (not Term), remove that element by value
+                                if let Expr::Term = index.as_ref() {
+                                    // Pop arbitrary element from set
+                                    let elem = set.iter().next().cloned()
+                                        .ok_or_else(|| RuntimeError::TypeMismatch(
+                                            "Cannot pop from empty HashSet".to_string()
+                                        ))?;
+                                    set.remove(&elem);
+                                    self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
+                                    Ok(Value::String(elem))
+                                } else {
+                                    let key_val = self.eval_expr(index)?;
+                                    let elem = self.value_to_string(&key_val)?;
+                                    if set.remove(&elem) {
+                                        self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
+                                        Ok(Value::String(elem))
+                                    } else {
+                                        Err(RuntimeError::TypeMismatch(
+                                            format!("Element '{}' not found in HashSet", elem)
+                                        ))
+                                    }
+                                }
                             }
                             Value::Stack(stack) => {
                                 let removed = stack.pop().ok_or_else(|| RuntimeError::TypeMismatch(
@@ -1585,9 +1629,19 @@ Expr::Ge(l, r) => {
                         self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
                     }
                     Value::HashSet(set) => {
-                        let elem = set.iter().next().cloned();
-                        if let Some(e) = elem {
-                            set.remove(&e);
+                        if let Expr::Term = index.as_ref() {
+                            let elem = set.iter().next().cloned();
+                            if let Some(e) = elem {
+                                set.remove(&e);
+                            }
+                        } else {
+                            let key_val = self.eval_expr(index)?;
+                            let elem = self.value_to_string(&key_val)?;
+                            if !set.remove(&elem) {
+                                return Err(RuntimeError::TypeMismatch(
+                                    format!("Element '{}' not found in HashSet", elem)
+                                ));
+                            }
                         }
                         self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
                     }
@@ -1719,7 +1773,24 @@ Expr::Ge(l, r) => {
                     return self.call_defn(&defn_name, args);
                 }
 
-                // Delegate to FFI registry: check if this name has a registered location.
+                // 4a. Check if fn_name is an enum variant constructor (registered during load_program)
+                let enum_construction = self.enum_variants.get(&fn_name).cloned();
+                if let Some(variant_info) = enum_construction {
+                    let mut fields = std::collections::HashMap::new();
+                    for (i, arg) in args.iter().enumerate() {
+                        let val = self.eval_expr(arg)?;
+                        if i < variant_info.field_names.len() {
+                            fields.insert(variant_info.field_names[i].clone(), val);
+                        }
+                    }
+                    return Ok(Value::Enum(
+                        variant_info.enum_name,
+                        variant_info.variant_name,
+                        fields,
+                    ));
+                }
+
+                // 5. Delegate to FFI registry: check if this name has a registered location.
                 if let Some(location) = self.ffi_name_to_location.get(&fn_name) {
                     if let Some(frgn_fn) = self.foreign_functions.get(location) {
                         if let Some(sig) = self.ffi_bindings.get(&fn_name) {
@@ -2008,6 +2079,90 @@ Expr::Ge(l, r) => {
                         }
                         _ => Err(RuntimeError::TypeMismatch(
                             "Index projection requires Tuple".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::Get(key_expr) => {
+                        let key = self.eval_expr(key_expr)?;
+                        let key_str = self.value_to_string(&key)?;
+                        match &source_val {
+                            Value::HashMap(m) => {
+                                match m.get(&key_str) {
+                                    Some(val) => {
+                                        let mut fields = std::collections::HashMap::new();
+                                        fields.insert("field_0".to_string(), val.clone());
+                                        Ok(Value::Enum("Option".to_string(), "Some".to_string(), fields))
+                                    }
+                                    None => Ok(Value::Enum("Option".to_string(), "None".to_string(),
+                                        std::collections::HashMap::new())),
+                                }
+                            }
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "Get projection requires HashMap".to_string(),
+                            )),
+                        }
+                    }
+                    ProjectionTarget::Top => match &source_val {
+                        Value::Stack(s) => {
+                            match s.last() {
+                                Some(val) => {
+                                    let mut fields = std::collections::HashMap::new();
+                                    fields.insert("field_0".to_string(), val.clone());
+                                    Ok(Value::Enum("Option".to_string(), "Some".to_string(), fields))
+                                }
+                                None => Ok(Value::Enum("Option".to_string(), "None".to_string(),
+                                    std::collections::HashMap::new())),
+                            }
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "Top projection requires Stack".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::Front => match &source_val {
+                        Value::Queue(q) => {
+                            match q.front() {
+                                Some(val) => {
+                                    let mut fields = std::collections::HashMap::new();
+                                    fields.insert("field_0".to_string(), val.clone());
+                                    Ok(Value::Enum("Option".to_string(), "Some".to_string(), fields))
+                                }
+                                None => Ok(Value::Enum("Option".to_string(), "None".to_string(),
+                                    std::collections::HashMap::new())),
+                            }
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "Front projection requires Queue".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::Elements => match &source_val {
+                        Value::HashSet(s) => {
+                            let mut elems: Vec<Value> = s.iter().cloned().map(Value::String).collect();
+                            elems.sort_by(|a, b| {
+                                if let (Value::String(a), Value::String(b)) = (a, b) {
+                                    a.cmp(b)
+                                } else {
+                                    std::cmp::Ordering::Equal
+                                }
+                            });
+                            Ok(Value::List(elems))
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "Elements projection requires HashSet".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::AsStack => match &source_val {
+                        Value::List(items) => {
+                            Ok(Value::Stack(items.clone()))
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "AsStack projection requires List".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::AsQueue => match &source_val {
+                        Value::List(items) => {
+                            Ok(Value::Queue(std::collections::VecDeque::from(items.clone())))
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "AsQueue projection requires List".to_string(),
                         )),
                     },
                 }

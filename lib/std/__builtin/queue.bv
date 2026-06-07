@@ -1,7 +1,0 @@
-frgn __builtin_Queue_new<T>() -> Queue<T>;
-frgn __builtin_Queue_enqueue<T>(queue: Queue<T>, item: T) -> Queue<T>;
-frgn __builtin_Queue_dequeue<T>(queue: Queue<T>) -> Option<(T, Queue<T>)>;
-frgn __builtin_Queue_front<T>(queue: Queue<T>) -> Option<T>;
-frgn __builtin_Queue_len<T>(queue: Queue<T>) -> Int;
-frgn __builtin_Queue_is_empty<T>(queue: Queue<T>) -> Bool;
-frgn __builtin_Queue_clear<T>(queue: Queue<T>) -> Queue<T>;

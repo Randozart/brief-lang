@@ -3199,6 +3199,24 @@ self.emit_declares(&mut out);
                     ProjectionTarget::Index(n) => {
                         writeln!(out, "{}{} = add i64 0, {} ; Index stub", indent, v, n).ok();
                     }
+                    ProjectionTarget::Get(_) => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; Get stub", indent, v).ok();
+                    }
+                    ProjectionTarget::Top => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; Top stub", indent, v).ok();
+                    }
+                    ProjectionTarget::Front => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; Front stub", indent, v).ok();
+                    }
+                    ProjectionTarget::Elements => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; Elements stub", indent, v).ok();
+                    }
+                    ProjectionTarget::AsStack => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; AsStack stub", indent, v).ok();
+                    }
+                    ProjectionTarget::AsQueue => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; AsQueue stub", indent, v).ok();
+                    }
                 }
             }
             Expr::Slice { value, start, end, stride, .. } => {

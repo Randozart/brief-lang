@@ -1,41 +1,26 @@
-import { __builtin_Result_Ok, __builtin_Result_Err,
-         __builtin_Result_is_ok, __builtin_Result_is_err,
-         __builtin_Result_unwrap, __builtin_Result_unwrap_err }
-    from "std/__builtin/result.bv";
-
-// ===== CONSTRUCTORS =====
-
-defn Ok<T,E>(value: T) [true][term.is_ok()] -> Result<T,E> {
-    term __builtin_Result_Ok(value);
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
 };
-
-defn Err<T,E>(error: E) [true][term.is_err()] -> Result<T,E> {
-    term __builtin_Result_Err(error);
-};
-
-// ===== INSPECTION =====
 
 defn is_ok<T,E>(r: Result<T,E>) [true][term == true || term == false] -> Bool {
-    term __builtin_Result_is_ok(r);
+    uni r(Ok(_)) = { term true; };
+    uni r(Err(_)) = { term false; };
+    term false;
 };
-
 defn is_err<T,E>(r: Result<T,E>) [true][term == true || term == false] -> Bool {
-    term __builtin_Result_is_err(r);
+    uni r(Ok(_)) = { term false; };
+    uni r(Err(_)) = { term true; };
+    term false;
 };
-
 defn unwrap<T,E>(r: Result<T,E>) [r.is_ok()][true] -> T {
-    term __builtin_Result_unwrap(r);
+    uni r(Ok(v)) = { term v; };
 };
-
 defn unwrap_err<T,E>(r: Result<T,E>) [r.is_err()][true] -> E {
-    term __builtin_Result_unwrap_err(r);
+    uni r(Err(e)) = { term e; };
 };
-
-// ===== FUNCTIONAL METHODS =====
-
-// Map over Result (transforms Ok value)
-defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E> 
-    [f != null][term.is_ok() || term.is_err()] 
+defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E>
+    [f != null][term.is_ok() || term.is_err()]
 {
     [result.is_ok()] {
         let val = result.unwrap();
@@ -47,10 +32,8 @@ defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E>
     };
     term Err("unreachable");
 };
-
-// Map_err (transforms Err value)
-defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F> 
-    [f != null][term.is_ok() || term.is_err()] 
+defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F>
+    [f != null][term.is_ok() || term.is_err()]
 {
     [result.is_ok()] {
         let val = result.unwrap();
@@ -62,10 +45,8 @@ defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F>
     };
     term Err("unreachable");
 };
-
-// And_then (flat map for Result)
-defn result_and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Result<U, E> 
-    [f != null][term.is_ok() || term.is_err()] 
+defn result_and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Result<U, E>
+    [f != null][term.is_ok() || term.is_err()]
 {
     [result.is_ok()] {
         let val = result.unwrap();
@@ -77,54 +58,38 @@ defn result_and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Res
     };
     term Err("unreachable");
 };
-
-// Or_else
-defn result_or_else<T, E>(result: Result<T, E>, f: E -> Result<T, E>) -> Result<T, E> 
-    [f != null][term.is_ok() || term.is_err()] 
+defn result_or_else<T, E>(result: Result<T, E>, f: E -> Result<T, E>) -> Result<T, E>
+    [f != null][term.is_ok() || term.is_err()]
 {
-    [result.is_ok()] {
-        term result;
-    };
+    [result.is_ok()] { term result; };
     [result.is_err()] {
         let err = result.unwrap_err();
         term f(err);
     };
     term Err("unreachable");
 };
-
-// And (returns second Result if first is Ok)
-defn result_and<T, E, U>(result: Result<T, E>, other: Result<U, E>) -> Result<U, E> 
-    [true][term.is_ok() || term.is_err()] 
+defn result_and<T, E, U>(result: Result<T, E>, other: Result<U, E>) -> Result<U, E>
+    [true][term.is_ok() || term.is_err()]
 {
-    [result.is_ok()] {
-        term other;
-    };
+    [result.is_ok()] { term other; };
     [result.is_err()] {
         let err = result.unwrap_err();
         term Err(err);
     };
     term Err("unreachable");
 };
-
-// Or (returns first Ok, or second Result)
-defn result_or<T, E>(result: Result<T, E>, other: Result<T, E>) -> Result<T, E> 
-    [true][term.is_ok() || term.is_err()] 
+defn result_or<T, E>(result: Result<T, E>, other: Result<T, E>) -> Result<T, E>
+    [true][term.is_ok() || term.is_err()]
 {
-    [result.is_ok()] {
-        term result;
-    };
+    [result.is_ok()] { term result; };
     term other;
 };
-
-// Filter (keeps Ok only if predicate is true)
-defn result_filter<T, E>(result: Result<T, E>, pred: T -> Bool) -> Result<T, E> 
-    [pred != null][term.is_ok() || term.is_err()] 
+defn result_filter<T, E>(result: Result<T, E>, pred: T -> Bool) -> Result<T, E>
+    [pred != null][term.is_ok() || term.is_err()]
 {
     [result.is_ok()] {
         let val = result.unwrap();
-        [pred(val)] {
-            term Ok(val);
-        };
+        [pred(val)] { term Ok(val); };
         term Err("filtered_out");
     };
     [result.is_err()] {

@@ -1553,6 +1553,102 @@ impl TypeChecker {
                             }
                         }
                     }
+                    ProjectionTarget::Get(_) => {
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "HashMap" => {
+                                let val_ty = inner.get(1).cloned().unwrap_or(Type::String);
+                                Type::Applied("Option".to_string(), vec![val_ty])
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "HashMap".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Get projection".to_string(),
+                                });
+                                Type::Applied("Option".to_string(), vec![Type::String])
+                            }
+                        }
+                    }
+                    ProjectionTarget::Top => {
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "Stack" => {
+                                let val_ty = inner.first().cloned().unwrap_or(Type::String);
+                                Type::Applied("Option".to_string(), vec![val_ty])
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Stack".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Top projection".to_string(),
+                                });
+                                Type::Applied("Option".to_string(), vec![Type::String])
+                            }
+                        }
+                    }
+                    ProjectionTarget::Front => {
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "Queue" => {
+                                let val_ty = inner.first().cloned().unwrap_or(Type::String);
+                                Type::Applied("Option".to_string(), vec![val_ty])
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Queue".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Front projection".to_string(),
+                                });
+                                Type::Applied("Option".to_string(), vec![Type::String])
+                            }
+                        }
+                    }
+                    ProjectionTarget::Elements => {
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "HashSet" => {
+                                let elem_ty = inner.first().cloned().unwrap_or(Type::String);
+                                Type::Applied("List".to_string(), vec![elem_ty])
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "HashSet".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Elements projection".to_string(),
+                                });
+                                Type::Applied("List".to_string(), vec![Type::String])
+                            }
+                        }
+                    }
+                    ProjectionTarget::AsStack => {
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "List" => {
+                                let elem_ty = inner.first().cloned().unwrap_or(Type::String);
+                                Type::Applied("Stack".to_string(), vec![elem_ty])
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "List".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "AsStack projection".to_string(),
+                                });
+                                Type::Applied("Stack".to_string(), vec![Type::String])
+                            }
+                        }
+                    }
+                    ProjectionTarget::AsQueue => {
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "List" => {
+                                let elem_ty = inner.first().cloned().unwrap_or(Type::String);
+                                Type::Applied("Queue".to_string(), vec![elem_ty])
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "List".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "AsQueue projection".to_string(),
+                                });
+                                Type::Applied("Queue".to_string(), vec![Type::String])
+                            }
+                        }
+                    }
                 }
             }
             Expr::PatternMatch { .. } => Type::Bool,

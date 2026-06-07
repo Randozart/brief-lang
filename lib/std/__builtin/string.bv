@@ -1,1 +1,0 @@
-frgn __builtin_String_char_at(s: String, idx: Int) -> Char;

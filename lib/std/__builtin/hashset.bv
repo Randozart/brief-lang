@@ -1,6 +1,0 @@
-frgn __builtin_HashSet_new<T>() -> HashSet<T>;
-frgn __builtin_HashSet_insert<T>(set: HashSet<T>, item: String) -> HashSet<T>;
-frgn __builtin_HashSet_contains<T>(set: HashSet<T>, item: String) -> Bool;
-frgn __builtin_HashSet_remove<T>(set: HashSet<T>, item: String) -> HashSet<T>;
-frgn __builtin_HashSet_len<T>(set: HashSet<T>) -> Int;
-frgn __builtin_HashSet_is_empty<T>(set: HashSet<T>) -> Bool;

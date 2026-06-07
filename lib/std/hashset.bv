@@ -1,155 +1,74 @@
-// HashSet<T> - Hash-based set implementation
-// Delegates to native Value::HashSet via __builtin_* FFI functions
-
-import { __builtin_HashSet_new, __builtin_HashSet_insert,
-         __builtin_HashSet_contains, __builtin_HashSet_remove,
-         __builtin_HashSet_len, __builtin_HashSet_is_empty }
-    from "std/__builtin/hashset.bv";
-
-struct HashSet<T> {};
-
 defn new_set<T>() -> HashSet<T> [true][term :> Size == 0] {
-    term __builtin_HashSet_new();
+    term {};
 };
-
-defn with_capacity<T>(capacity: Int) -> HashSet<T> [capacity > 0][term :> Size == 0] {
-    term __builtin_HashSet_new();
+defn insert<T>(set: HashSet<T>, item: T) -> HashSet<T> {
+    term &set <- item;
 };
-
-defn insert<T>(set: HashSet<T>, item: T) 
-    [true][term.contains(item)] 
-    -> HashSet<T> 
+defn remove<T>(set: HashSet<T>, item: T)
+    [set :> Contains(item)][!term :> Contains(item)] -> HashSet<T>
 {
-    term __builtin_HashSet_insert(set, item);
+    <- &set[item];
+    term set;
 };
-
-defn remove<T>(set: HashSet<T>, item: T) 
-    [set.contains(item)][!term.contains(item)] 
-    -> HashSet<T> 
-{
-    term __builtin_HashSet_remove(set, item);
+defn contains<T>(set: HashSet<T>, item: T) -> Bool {
+    term set :> Contains(item);
 };
-
-defn contains<T>(set: HashSet<T>, item: T) 
-    [true][term == true || term == false] 
-    -> Bool 
-{
-    term __builtin_HashSet_contains(set, item);
+defn len<T>(set: HashSet<T>) -> Int {
+    term set :> Size;
 };
-
+defn is_empty<T>(set: HashSet<T>) -> Bool {
+    term (set :> Size) == 0;
+};
+defn to_list<T>(set: HashSet<T>) -> List<T> {
+    term set :> Elements;
+};
+defn iter<T>(set: HashSet<T>) -> List<T> {
+    term set :> Elements;
+};
+defn clear<T>(set: HashSet<T>) -> HashSet<T> {
+    term {};
+};
 txn union_loop<T>(other_list: List<T>, result: HashSet<T>, i: Int)
     [i < other_list :> Size][i == other_list :> Size] -> HashSet<T>
 {
-    &result = result.insert(other_list[i]);
+    &result <- other_list[i];
     &i = i + 1;
     term result;
 };
-
-defn union<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][term :> Size >= a :> Size && term :> Size >= b :> Size] 
-    -> HashSet<T> 
-{
+defn union<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
     term union_loop(b.to_list(), a, 0);
 };
-
 txn intersection_loop<T>(a_list: List<T>, b: HashSet<T>, result: HashSet<T>, i: Int)
     [i < a_list :> Size][i == a_list :> Size] -> HashSet<T>
 {
-    [b.contains(a_list[i])] {
-        &result = result.insert(a_list[i]);
+    [b :> Contains(a_list[i])] {
+        &result <- a_list[i];
     };
     &i = i + 1;
     term result;
 };
-
-defn intersection<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][term :> Size <= a :> Size && term :> Size <= b :> Size] 
-    -> HashSet<T> 
-{
+defn intersection<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
     term intersection_loop(a.to_list(), b, new_set(), 0);
 };
-
 txn difference_loop<T>(a_list: List<T>, b: HashSet<T>, result: HashSet<T>, i: Int)
     [i < a_list :> Size][i == a_list :> Size] -> HashSet<T>
 {
-    [!b.contains(a_list[i])] {
-        &result = result.insert(a_list[i]);
+    [!b :> Contains(a_list[i])] {
+        &result <- a_list[i];
     };
     &i = i + 1;
     term result;
 };
-
-defn difference<T>(a: HashSet<T>, b: HashSet<T>) 
-    [true][term :> Size <= a :> Size] 
-    -> HashSet<T> 
-{
+defn difference<T>(a: HashSet<T>, b: HashSet<T>) -> HashSet<T> {
     term difference_loop(a.to_list(), b, new_set(), 0);
 };
-
-defn len<T>(set: HashSet<T>) 
-    [true][term >= 0] 
-    -> Int 
-{
-    term __builtin_HashSet_len(set);
-};
-
-defn is_empty<T>(set: HashSet<T>) 
-    [true][term == true || term == false] 
-    -> Bool 
-{
-    term __builtin_HashSet_is_empty(set);
-};
-
-defn iter<T>(set: HashSet<T>) 
-    [true][term :> Size == set :> Size] 
-    -> List<T> 
-{
-    let result: List<T> = [];
-    let s: HashSet<T> = set;
-    [!s.is_empty()] {
-        // Pop an element to iterate — HashSet doesn't have ordered iteration
-        // This is O(n²) for n elements; the native implementation doesn't
-        // expose ordered access, so convert via to_list for iteration
-    };
-    term result;
-};
-
-defn to_list<T>(set: HashSet<T>) 
-    [true][term :> Size == set :> Size] 
-    -> List<T> 
-{
-    // HashSet doesn't natively expose interior iteration.
-    // For correctness: use the __builtin_HashSet but we can't get elements.
-    // Current workaround: return empty — TODO implement HashSet -> List conversion
-    let result: List<T> = [];
-    let s: HashSet<T> = set;
-    // Walk by checking known patterns — for now, use structural iteration
-    // via the original list-based approach
-    [!s.is_empty()] {
-        // No native way to enumerate a Value::HashSet's elements
-        // This is a known gap — the interpreter needs __builtin_HashSet_to_list
-    };
-    term result;
-};
-
 txn from_list_loop<T>(items: List<T>, result: HashSet<T>, i: Int)
     [i < items :> Size][i == items :> Size] -> HashSet<T>
 {
-    &result = result.insert(items[i]);
+    &result <- items[i];
     &i = i + 1;
     term result;
 };
-
-defn from_list<T>(items: List<T>) 
-    [true][term :> Size <= items :> Size] 
-    -> HashSet<T> 
-{
+defn from_list<T>(items: List<T>) -> HashSet<T> {
     term from_list_loop(items, new_set(), 0);
-};
-
-defn clear<T>(set: HashSet<T>) 
-    [true][term :> Size == 0] 
-    -> HashSet<T> 
-{
-    term __builtin_HashSet_new();
 };

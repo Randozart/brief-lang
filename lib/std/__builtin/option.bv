@@ -1,2 +1,0 @@
-frgn __builtin_Option_Some<T>(value: T) -> Option<T>;
-frgn __builtin_Option_None<T>() -> Option<T>;

@@ -352,6 +352,18 @@ pub enum ProjectionTarget {
     Pop,
     /// Index into a tuple: `pair :> 0` returns first element
     Index(usize),
+    /// Non-mutating HashMap read: `map :> Get(key)` → Option<V>
+    Get(Box<Expr>),
+    /// Stack peek: `stack :> Top` → Option<V>
+    Top,
+    /// Queue front: `queue :> Front` → Option<V>
+    Front,
+    /// HashSet enumeration: `set :> Elements` → List<Value>
+    Elements,
+    /// List → Stack conversion: `list :> AsStack` → Stack
+    AsStack,
+    /// List → Queue conversion: `list :> AsQueue` → Queue
+    AsQueue,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,79 +1,44 @@
-// HashMap<K, V> - Hash-based map implementation
-// Delegates to native Value::HashMap via __builtin_* FFI functions
-
-import { __builtin_HashMap_new, __builtin_HashMap_insert,
-         __builtin_HashMap_get, __builtin_HashMap_contains_key,
-         __builtin_HashMap_remove, __builtin_HashMap_len,
-         __builtin_HashMap_is_empty, __builtin_HashMap_keys,
-         __builtin_HashMap_values }
-    from "std/__builtin/hashmap.bv";
-
-struct HashMap<K, V> {};
-
-defn new_map<K,V>() -> HashMap<K,V> [true][term.is_empty()] {
-    term __builtin_HashMap_new();
+defn new_map<K,V>() -> HashMap<K,V> [true][term :> Size == 0] {
+    term {};
 };
-
-defn with_capacity<K,V>(capacity: Int) -> HashMap<K,V> [capacity > 0][term.is_empty()] {
-    term __builtin_HashMap_new();
+defn with_capacity<K,V>(capacity: Int) -> HashMap<K,V> [capacity > 0][term :> Size == 0] {
+    term {};
 };
-
-defn insert<K,V>(map: HashMap<K,V>, key: K, value: V) 
-    [true][term.contains_key(key) && term.get(key) == Some(value)] 
-    -> HashMap<K,V> 
+defn insert<K,V>(map: HashMap<K,V>, key: K, value: V)
+    [true][term :> Contains(key) && term :> Get(key) == Some(value)] -> HashMap<K,V>
 {
-    term __builtin_HashMap_insert(map, key, value);
+    term &map <- (key, value);
 };
-
-defn get<K,V>(map: HashMap<K,V>, key: K) 
-    [true][term.is_some() == map.contains_key(key)] 
-    -> Option<V> 
+defn get<K,V>(map: HashMap<K,V>, key: K)
+    [true][term.is_some() == map :> Contains(key)] -> Option<V>
 {
-    term __builtin_HashMap_get(map, key);
+    term map :> Get(key);
 };
-
-defn contains_key<K,V>(map: HashMap<K,V>, key: K) 
-    [true][term == true || term == false] 
-    -> Bool 
+defn contains_key<K,V>(map: HashMap<K,V>, key: K) -> Bool {
+    term map :> Contains(key);
+};
+defn remove<K,V>(map: HashMap<K,V>, key: K)
+    [map :> Contains(key)][!(term :> 1) :> Contains(key)] -> (Option<V>, HashMap<K,V>)
 {
-    term __builtin_HashMap_contains_key(map, key);
+    let v = map :> Get(key);
+    <- &map[key];
+    term (v, map);
 };
-
-defn remove<K,V>(map: HashMap<K,V>, key: K) 
-    [map.contains_key(key)][!term.contains_key(key)] 
-    -> HashMap<K,V> 
-{
-    term __builtin_HashMap_remove(map, key);
+defn len<K,V>(map: HashMap<K,V>) -> Int {
+    term map :> Size;
 };
-
-defn len<K,V>(map: HashMap<K,V>) 
-    [true][term >= 0] 
-    -> Int 
-{
-    term __builtin_HashMap_len(map);
+defn is_empty<K,V>(map: HashMap<K,V>) -> Bool {
+    term (map :> Size) == 0;
 };
-
-defn is_empty<K,V>(map: HashMap<K,V>) 
-    [true][term == true || term == false] 
-    -> Bool 
-{
-    term __builtin_HashMap_is_empty(map);
+defn keys<K,V>(map: HashMap<K,V>) -> List<K> {
+    term map :> Keys;
 };
-
-defn keys<K,V>(map: HashMap<K,V>) 
-    [true][term :> Size == map :> Size] 
-    -> List<K> 
-{
-    term __builtin_HashMap_keys(map);
+defn values<K,V>(map: HashMap<K,V>) -> List<V> {
+    term map :> Values;
 };
-
-defn values<K,V>(map: HashMap<K,V>) 
-    [true][term :> Size == map :> Size] 
-    -> List<V> 
-{
-    term __builtin_HashMap_values(map);
+defn clear<K,V>(map: HashMap<K,V>) -> HashMap<K,V> {
+    term {};
 };
-
 txn iter_loop<K,V>(ks: List<K>, vs: List<V>, result: List<(K,V)>, i: Int)
     [i < ks :> Size][i == ks :> Size] -> List<(K,V)>
 {
@@ -81,56 +46,31 @@ txn iter_loop<K,V>(ks: List<K>, vs: List<V>, result: List<(K,V)>, i: Int)
     &i = i + 1;
     term result;
 };
-
-defn iter<K,V>(map: HashMap<K,V>) 
-    [true][term :> Size == map :> Size] 
-    -> List<(K,V)> 
-{
+defn iter<K,V>(map: HashMap<K,V>) -> List<(K,V)> {
     term iter_loop(map.keys(), map.values(), [], 0);
 };
-
 txn merge_loop<K,V>(bk: List<K>, bv: List<V>, result: HashMap<K,V>, i: Int)
     [i < bk :> Size][i == bk :> Size] -> HashMap<K,V>
 {
-    &result = result.insert(bk[i], bv[i]);
+    &result <- (bk[i], bv[i]);
     &i = i + 1;
     term result;
 };
-
-defn merge<K,V>(a: HashMap<K,V>, b: HashMap<K,V>) 
-    [true][term :> Size >= a :> Size] 
-    -> HashMap<K,V> 
-{
+defn merge<K,V>(a: HashMap<K,V>, b: HashMap<K,V>) -> HashMap<K,V> {
     term merge_loop(b.keys(), b.values(), a, 0);
 };
-
 txn filter_loop<K,V>(mk: List<K>, mv: List<V>, pred: (K, V) -> Bool, result: HashMap<K,V>, i: Int)
     [i < mk :> Size][i == mk :> Size] -> HashMap<K,V>
 {
     [pred(mk[i], mv[i])] {
-        &result = result.insert(mk[i], mv[i]);
+        &result <- (mk[i], mv[i]);
     };
     &i = i + 1;
     term result;
 };
-
-defn filter<K,V>(map: HashMap<K,V>, pred: (K, V) -> Bool) 
-    [true][term :> Size <= map :> Size] 
-    -> HashMap<K,V> 
-{
+defn filter<K,V>(map: HashMap<K,V>, pred: (K, V) -> Bool) -> HashMap<K,V> {
     term filter_loop(map.keys(), map.values(), pred, new_map(), 0);
 };
-
-defn clear<K,V>(map: HashMap<K,V>) 
-    [true][term.is_empty()] 
-    -> HashMap<K,V> 
-{
-    term __builtin_HashMap_new();
-};
-
-defn entry<K,V>(map: HashMap<K,V>, key: K) 
-    [true][term.is_some() == map.contains_key(key)] 
-    -> Option<V> 
-{
-    term map.get(key);
+defn entry<K,V>(map: HashMap<K,V>, key: K) -> Option<V> {
+    term map :> Get(key);
 };
