@@ -4061,8 +4061,23 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     self.advance();
                     let right = self.parse_expression()?;
 
-                    // Extract target+index from either side — one must be &list
-                    if let Some((target, index)) = self.extract_arrow_target(expr.clone()) {
+                    // Check for two-sided transfer: &dest <- &source or &dest <- &source[; filter]
+                    let left_target = self.extract_arrow_target(expr.clone());
+                    let right_target = self.extract_arrow_target(right.clone());
+
+                    if left_target.is_some() && right_target.is_some() {
+                        // Both sides have & → ArrowTransfer
+                        let (dest, _) = left_target.unwrap();
+                        let (source, _) = right_target.unwrap();
+                        let filter = self.extract_arrow_filter(&right);
+                        let modifiers = self.parse_hashtag_modifiers()?;
+                        self.expect(Token::Semicolon)?;
+                        Ok(Statement::Expression(Expr::ArrowTransfer {
+                            dest: Box::new(dest),
+                            source: Box::new(source),
+                            filter,
+                        }))
+                    } else if let Some((target, index)) = left_target {
                         // &list <- x or &list[i] <- x → Push/Insert
                         let modifiers = self.parse_hashtag_modifiers()?;
                         self.expect(Token::Semicolon)?;
@@ -4131,6 +4146,43 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 } else {
                     None
                 }
+            }
+            Expr::MultiSlice { value, ops, .. } => {
+                // Accept `&list[; cond]` and `&list[0; cond]` as arrow targets.
+                // Coordinates beyond the first are invalid for arrow targets.
+                if !self.is_valid_arrow_inner(&*value) {
+                    return None;
+                }
+                // Find the first Coord op to extract the index (if any)
+                let coord_idx = ops.iter().position(|op| matches!(op, crate::ast::BracketOp::Coord(_)));
+                match coord_idx {
+                    Some(i) => {
+                        if let crate::ast::BracketOp::Coord(crate::ast::SliceCoordinate::Index(idx)) = &ops[i] {
+                            Some((*value, *idx.clone()))
+                        } else {
+                            // Range/named coordinates not valid for arrow targets
+                            None
+                        }
+                    }
+                    None => Some((*value, Expr::Term)),
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract the optional filter from a `MultiSlice` expression.
+    /// Returns `Some(filter)` for `&list[; cond]`, `None` otherwise.
+    fn extract_arrow_filter(&self, expr: &Expr) -> Option<Box<Expr>> {
+        match expr {
+            Expr::MultiSlice { ops, .. } => {
+                ops.iter().find_map(|op| {
+                    if let crate::ast::BracketOp::Mask(m) = op {
+                        Some(m.clone())
+                    } else {
+                        None
+                    }
+                })
             }
             _ => None,
         }
@@ -4666,6 +4718,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
     }
 
     fn parse_projection_target(&mut self) -> Result<ProjectionTarget, SyntaxError> {
+        // Handle integer index: `:> 0`, `:> 1`, etc.
+        if let Some(Ok(Token::Integer(n))) = self.current_token() {
+            let idx = *n as usize;
+            self.advance();
+            return Ok(ProjectionTarget::Index(idx));
+        }
         let name = self.expect_identifier()?;
         match name.as_str() {
             "Size" => Ok(ProjectionTarget::Size),
@@ -4700,10 +4758,21 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     })?;
                 Ok(ProjectionTarget::Match(pattern))
             }
+            "Keys" => Ok(ProjectionTarget::Keys),
+            "Values" => Ok(ProjectionTarget::Values),
+            "Contains" => {
+                // Contains(expr) — check if HashMap/HashSet contains key/element
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(ProjectionTarget::Contains(Box::new(expr)))
+            }
+            "Pop" => Ok(ProjectionTarget::Pop),
             _ => Err(SyntaxError::InvalidExpression {
                 reason: format!(
                     "expected projection target (Size, Bytes, Ptr, Alignment, Range, \
-                     Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match), \
+                     Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match, \
+                     Keys, Values, Contains, Pop, or integer index), \
                      found '{}'",
                     name
                 ),
@@ -4724,8 +4793,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     let result = self.parse_multi_slice()?;
                     expr = Expr::MultiSlice {
                         value: Box::new(expr),
-                        coordinates: result.coordinates,
-                        mask: result.mask,
+                        ops: result.ops,
                     };
                 } else {
                     let result = self.parse_bracket_contents()?;
@@ -4785,8 +4853,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     let result = self.parse_multi_slice()?;
                     expr = Expr::MultiSlice {
                         value: Box::new(expr),
-                        coordinates: result.coordinates,
-                        mask: result.mask,
+                        ops: result.ops,
                     };
                     continue;
                 }
@@ -5125,26 +5192,75 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
             }
             Some(Ok(Token::LBrace)) => {
-                // Object literal: { field: value, ... }
                 self.advance();
-                let mut fields = Vec::new();
+                // Empty braces: try ObjectLiteral, default to SetLiteral
                 if let Some(Ok(Token::RBrace)) = self.current_token() {
-                    // Empty object
-                } else {
+                    self.advance();
+                    return Ok(Expr::ObjectLiteral(vec![]));
+                }
+                // Peek to check if first element starts with a string/int (map literal)
+                // or an identifier followed by `:` (object literal) or just `,` (set literal)
+                let is_map_like = matches!(self.current_token(), Some(Ok(Token::String(_))))
+                    || matches!(self.current_token(), Some(Ok(Token::Integer(_))))
+                    || matches!(self.current_token(), Some(Ok(Token::TypeString)));
+                if is_map_like {
+                    // MapLiteral: {"key": value, ...} or {0: value, ...}
+                    let mut entries = Vec::new();
                     loop {
-                        let field_name = self.expect_identifier()?;
+                        let key = self.parse_expression()?;
                         self.expect(Token::Colon)?;
-                        let field_value = self.parse_expression()?;
-                        fields.push((field_name, field_value));
+                        let val = self.parse_expression()?;
+                        entries.push((key, val));
                         if let Some(Ok(Token::Comma)) = self.current_token() {
                             self.advance();
                         } else {
                             break;
                         }
                     }
+                    self.expect(Token::RBrace)?;
+                    return Ok(Expr::MapLiteral(entries));
                 }
-                self.expect(Token::RBrace)?;
-                Ok(Expr::ObjectLiteral(fields))
+                // Try ObjectLiteral first: { ident: value, ... }
+                match self.current_token() {
+                    Some(Ok(Token::Identifier(_))) => {
+                        let field_name = self.expect_identifier()?;
+                        if let Some(Ok(Token::Colon)) = self.current_token() {
+                            // ObjectLiteral
+                            self.advance();
+                            let field_value = self.parse_expression()?;
+                            let mut fields = vec![(field_name, field_value)];
+                            while let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                                let fn2 = self.expect_identifier()?;
+                                self.expect(Token::Colon)?;
+                                let fv2 = self.parse_expression()?;
+                                fields.push((fn2, fv2));
+                            }
+                            self.expect(Token::RBrace)?;
+                            Ok(Expr::ObjectLiteral(fields))
+                        } else {
+                            // Single identifier without colon → SetLiteral element
+                            let mut elements = vec![Expr::Identifier(field_name)];
+                            while let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                                elements.push(self.parse_expression()?);
+                            }
+                            self.expect(Token::RBrace)?;
+                            Ok(Expr::SetLiteral(elements))
+                        }
+                    }
+                    _ => {
+                        // SetLiteral: { expr, expr, ... }
+                        let first = self.parse_expression()?;
+                        let mut elements = vec![first];
+                        while let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                            elements.push(self.parse_expression()?);
+                        }
+                        self.expect(Token::RBrace)?;
+                        Ok(Expr::SetLiteral(elements))
+                    }
+                }
             }
             Some(Ok(Token::LParen)) => {
                 self.advance();
@@ -5496,15 +5612,19 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             return false;
         }
         
-        // If starts with `]`, `;`, `..`, `::`, it's not multidimensional
-        if bytes[pos] == b']' || bytes[pos] == b';' {
+        // If starts with `]`, it's not multidimensional
+        if bytes[pos] == b']' {
             return false;
         }
         if pos + 1 < bytes.len() && bytes[pos] == b'.' && bytes[pos + 1] == b'.' {
-            return false;
+            // `..` is a range inside a single slice; `...` (ellipsis) is multi
+            if pos + 2 < bytes.len() && bytes[pos + 2] == b'.' {
+                return true; // `...` ellipsis
+            }
+            return false; // `..` range
         }
         if pos + 1 < bytes.len() && bytes[pos] == b':' && bytes[pos + 1] == b':' {
-            return false;
+            return true; // `::` stride is a bracket op
         }
         
         // Scan until we find a comma, semicolon, or closing bracket
@@ -5512,7 +5632,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         while pos < bytes.len() {
             match bytes[pos] {
                 b',' => return true,  // Found comma = multidimensional
-                b';' | b']' => return false,  // Found semicolon or bracket = single dimension
+                b';' => return true,  // Found semicolon = mask bracket op
+                b']' => return false,  // Closing bracket = single dimension
                 b'.' => {
                     // `...` (ellipsis) — treat as multidimensional
                     if pos + 2 < bytes.len() && bytes[pos] == b'.' && bytes[pos + 1] == b'.' && bytes[pos + 2] == b'.' {
@@ -5530,8 +5651,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
                 b':' => {
                     if found_colon {
-                        // :: means stride, not multidimensional
-                        return false;
+                        // :: means stride = bracket op
+                        return true;
                     }
                     found_colon = true;
                 }
@@ -5542,33 +5663,41 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         false
     }
 
-    /// Parse a multidimensional slice: vec[coord1, coord2, ...; mask]
+    /// Parse a multidimensional slice: vec[coord1, coord2, ... ; mask :: stride]
     fn parse_multi_slice(&mut self) -> Result<MultiSliceResult, SyntaxError> {
-        let mut coordinates = Vec::new();
-        let mut mask: Option<Box<Expr>> = None;
-        
+        let mut ops: Vec<crate::ast::BracketOp> = Vec::new();
+
         loop {
-            // Parse a single coordinate
-            let coord = self.parse_slice_coordinate()?;
-            coordinates.push(coord);
-            
-            // Check what comes next
-            if let Some(Ok(Token::Comma)) = self.current_token() {
-                self.advance(); // consume comma, continue to next coordinate
-            } else if let Some(Ok(Token::Semicolon)) = self.current_token() {
-                self.advance(); // consume semicolon
-                mask = Some(Box::new(self.parse_expression()?));
+            if let Some(Ok(Token::RBracket)) = self.current_token() {
                 break;
-            } else if let Some(Ok(Token::RBracket)) = self.current_token() {
-                break;
+            }
+            if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                // Filter/mask: ; cond
+                self.advance();
+                let expr = self.parse_expression()?;
+                ops.push(crate::ast::BracketOp::Mask(Box::new(expr)));
+            } else if let Some(Ok(Token::ColonColon)) = self.current_token() {
+                // Stride: ::N
+                self.advance();
+                let expr = self.parse_expression()?;
+                ops.push(crate::ast::BracketOp::Stride(Box::new(expr)));
             } else {
-                return self.spanned_err("Expected ',', ';', or ']' in multidimensional slice".to_string());
+                // Coordinate: index, range, named, @dim, ...
+                // Comma before next coordinate is handled inside each iteration:
+                // only coordinates are comma-separated; mask/stride have their own prefixes.
+                let coord = self.parse_slice_coordinate()?;
+                ops.push(crate::ast::BracketOp::Coord(coord));
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                    // more coordinates follow
+                }
+                // Continue loop — next may be another coord, ;, ::, or ]
             }
         }
-        
+
         self.expect(Token::RBracket)?;
-        
-        Ok(MultiSliceResult { coordinates, mask })
+
+        Ok(MultiSliceResult { ops })
     }
 
     /// Parse a single slice coordinate: index, range, named, ellipsis, or @dim
@@ -5727,8 +5856,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 }
 
 struct MultiSliceResult {
-    coordinates: Vec<crate::ast::SliceCoordinate>,
-    mask: Option<Box<Expr>>,
+    ops: Vec<crate::ast::BracketOp>,
 }
 
 #[cfg(test)]
@@ -6383,9 +6511,9 @@ mod parser_tests {
         let mut parser = Parser::new("s[...]");
         let expr = parser.parse_expression().unwrap();
         match &expr {
-            crate::ast::Expr::MultiSlice { coordinates, .. } => {
-                assert_eq!(coordinates.len(), 1);
-                assert!(matches!(coordinates[0], crate::ast::SliceCoordinate::Ellipsis));
+            crate::ast::Expr::MultiSlice { ops, .. } => {
+                assert_eq!(ops.len(), 1);
+                assert!(matches!(ops[0], crate::ast::BracketOp::Coord(crate::ast::SliceCoordinate::Ellipsis)));
             }
             _ => panic!("Expected MultiSlice, got {:?}", expr),
         }
@@ -6396,20 +6524,19 @@ mod parser_tests {
         let mut parser = Parser::new("s[@2:5..10]");
         let expr = parser.parse_expression().unwrap();
         match &expr {
-            crate::ast::Expr::MultiSlice { coordinates, .. } => {
-                assert_eq!(coordinates.len(), 1);
-                match &coordinates[0] {
-                    crate::ast::SliceCoordinate::AtDimension { dimension, coord } => {
-                        assert_eq!(*dimension, 2);
-                        match coord.as_ref() {
-                            crate::ast::SliceCoordinate::Range { start, end } => {
-                                assert!(start.is_some());
-                                assert!(end.is_some());
-                            }
-                            _ => panic!("Expected Range inner coordinate"),
+            crate::ast::Expr::MultiSlice { ops, .. } => {
+                assert_eq!(ops.len(), 1);
+                if let crate::ast::BracketOp::Coord(crate::ast::SliceCoordinate::AtDimension { dimension, coord }) = &ops[0] {
+                    assert_eq!(*dimension, 2);
+                    match coord.as_ref() {
+                        crate::ast::SliceCoordinate::Range { start, end } => {
+                            assert!(start.is_some());
+                            assert!(end.is_some());
                         }
+                        _ => panic!("Expected Range inner coordinate"),
                     }
-                    _ => panic!("Expected AtDimension coordinate"),
+                } else {
+                    panic!("Expected Coord(AtDimension), got {:?}", ops[0]);
                 }
             }
             _ => panic!("Expected MultiSlice, got {:?}", expr),
@@ -6421,10 +6548,38 @@ mod parser_tests {
         let mut parser = Parser::new("s[..., 0]");
         let expr = parser.parse_expression().unwrap();
         match &expr {
-            crate::ast::Expr::MultiSlice { coordinates, .. } => {
-                assert_eq!(coordinates.len(), 2);
-                assert!(matches!(coordinates[0], crate::ast::SliceCoordinate::Ellipsis));
-                assert!(matches!(coordinates[1], crate::ast::SliceCoordinate::Index(_)));
+            crate::ast::Expr::MultiSlice { ops, .. } => {
+                assert_eq!(ops.len(), 2);
+                assert!(matches!(ops[0], crate::ast::BracketOp::Coord(crate::ast::SliceCoordinate::Ellipsis)));
+                assert!(matches!(ops[1], crate::ast::BracketOp::Coord(crate::ast::SliceCoordinate::Index(_))));
+            }
+            _ => panic!("Expected MultiSlice, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_multi_slice_with_mask() {
+        let mut parser = Parser::new("list[; age >= 18]");
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            crate::ast::Expr::MultiSlice { ops, .. } => {
+                assert_eq!(ops.len(), 1);
+                assert!(matches!(ops[0], crate::ast::BracketOp::Mask(_)));
+            }
+            _ => panic!("Expected MultiSlice, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_multi_slice_with_stride_and_mask() {
+        let mut parser = Parser::new("list[::3 ; age >= 18 ::2]");
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            crate::ast::Expr::MultiSlice { ops, .. } => {
+                assert_eq!(ops.len(), 3);
+                assert!(matches!(ops[0], crate::ast::BracketOp::Stride(_)));
+                assert!(matches!(ops[1], crate::ast::BracketOp::Mask(_)));
+                assert!(matches!(ops[2], crate::ast::BracketOp::Stride(_)));
             }
             _ => panic!("Expected MultiSlice, got {:?}", expr),
         }

@@ -42,7 +42,7 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
     }
 }
 use crate::ast::{
-    ArrowDir, DispatchMode, Expr, ForeignSignature, MatchPattern, Pattern, Program, ProjectionTarget, Statement, TopLevel, Type,
+    ArrowDir, BracketOp, DispatchMode, Expr, ForeignSignature, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
 };
 
 #[derive(Debug, Clone)]
@@ -3184,6 +3184,21 @@ self.emit_declares(&mut out);
                             }
                         }
                     }
+                    ProjectionTarget::Keys => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; Keys stub", indent, v).ok();
+                    }
+                    ProjectionTarget::Values => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; Values stub", indent, v).ok();
+                    }
+                    ProjectionTarget::Contains(_) => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; Contains stub", indent, v).ok();
+                    }
+                    ProjectionTarget::Pop => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; Pop stub", indent, v).ok();
+                    }
+                    ProjectionTarget::Index(n) => {
+                        writeln!(out, "{}{} = add i64 0, {} ; Index stub", indent, v, n).ok();
+                    }
                 }
             }
             Expr::Slice { value, start, end, stride, .. } => {
@@ -3279,15 +3294,14 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}:", copy_end).ok();
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, rp).ok();
             }
-            Expr::MultiSlice { value, coordinates, .. } => {
+            Expr::MultiSlice { value, ops } => {
                 let l = self.emit_expr(out, value, indent);
-                // Delegate to Slice or Index per coordinate, matching the interpreter
-                // at interpreter.rs:1848. For a single coordinate, pass through.
-                // For multiple, emit as a series of slices.
-                if coordinates.len() == 1 {
-                    match &coordinates[0] {
-                        crate::ast::SliceCoordinate::Index(idx) => {
-                            // Delegate to ListIndex: reuse the ListIndex logic
+                let coords: Vec<&SliceCoordinate> = ops.iter().filter_map(|op| {
+                    if let BracketOp::Coord(c) = op { Some(c) } else { None }
+                }).collect();
+                if coords.len() == 1 {
+                    match coords[0] {
+                        SliceCoordinate::Index(idx) => {
                             let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
                             let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
@@ -3297,7 +3311,7 @@ self.emit_declares(&mut out);
                             let idx_val = self.emit_expr(out, idx, indent);
                             writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, v, de, idx_val).ok();
                         }
-                        crate::ast::SliceCoordinate::Range { start, end, .. } => {
+                        SliceCoordinate::Range { start, end, .. } => {
                             let sv = if let Some(s) = start {
                                 let r = self.emit_expr(out, s, indent); r.to_string()
                             } else { "i64 0".to_string() };
@@ -3309,9 +3323,9 @@ self.emit_declares(&mut out);
                             writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
                             writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, v, de, sv).ok();
                         }
-                        crate::ast::SliceCoordinate::Named { coord, .. } => {
+                        SliceCoordinate::Named { coord, .. } => {
                             match coord.as_ref() {
-                                crate::ast::SliceCoordinate::Index(idx) => {
+                                SliceCoordinate::Index(idx) => {
                                     let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
                                     writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
                                     let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
@@ -3324,10 +3338,9 @@ self.emit_declares(&mut out);
                                 _ => { writeln!(out, "{}{} = add i64 0, {} ; multi-slice", indent, v, l).ok(); }
                             }
                         }
-                        crate::ast::SliceCoordinate::AtDimension { coord, .. } => {
-                            // Delegate to inner coordinate
+                        SliceCoordinate::AtDimension { coord, .. } => {
                             match coord.as_ref() {
-                                crate::ast::SliceCoordinate::Index(idx) => {
+                                SliceCoordinate::Index(idx) => {
                                     let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
                                     writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, l).ok();
                                     let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
@@ -3340,7 +3353,7 @@ self.emit_declares(&mut out);
                                 _ => { writeln!(out, "{}{} = add i64 0, {} ; multi-slice", indent, v, l).ok(); }
                             }
                         }
-                        crate::ast::SliceCoordinate::Ellipsis => {
+                        SliceCoordinate::Ellipsis => {
                             writeln!(out, "{}{} = add i64 0, {} ; multi-slice", indent, v, l).ok();
                         }
                     }
@@ -7645,8 +7658,7 @@ let spec = crate::target_spec::TargetSpec {
                             lhs: Expr::Identifier("v".to_string()),
                             expr: Expr::MultiSlice {
                                 value: Box::new(Expr::ListLiteral(mkv)),
-                                coordinates: vec![SliceCoordinate::Index(Box::new(Expr::Integer(2)))],
-                                mask: None,
+                                ops: vec![BracketOp::Coord(SliceCoordinate::Index(Box::new(Expr::Integer(2))))],
                             },
                             timeout: None, modifiers: vec![],
                         },

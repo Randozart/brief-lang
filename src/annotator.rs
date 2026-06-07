@@ -496,10 +496,13 @@ impl Annotator {
                 let exprs_str = exprs.iter().map(|e| self.format_expr(e)).collect::<Vec<_>>().join(", ");
                 format!("({})", exprs_str)
             }
-            Expr::MultiSlice { value, coordinates, mask } => {
-                let coords_str = coordinates.iter().map(|c| self.format_slice_coordinate(c)).collect::<Vec<_>>().join(", ");
-                let mask_str = mask.as_ref().map(|m| format!("; {}", self.format_expr(m))).unwrap_or_default();
-                format!("{}[{}{}]", self.format_expr(value), coords_str, mask_str)
+            Expr::MultiSlice { value, ops } => {
+                let ops_str: Vec<String> = ops.iter().map(|op| match op {
+                    BracketOp::Coord(c) => self.format_slice_coordinate(c),
+                    BracketOp::Mask(m) => format!("; {}", self.format_expr(m)),
+                    BracketOp::Stride(s) => format!("::{}", self.format_expr(s)),
+                }).collect();
+                format!("{}[{}]", self.format_expr(value), ops_str.join(", "))
             }
             Expr::Match { value, arms } => {
                 let arms_str = arms.iter().map(|arm| {
@@ -530,6 +533,15 @@ impl Annotator {
                 let idx_str = if matches!(index.as_ref(), Expr::Term) { String::new() } else { format!("[{}]", i) };
                 format!("<- {}{}", t, idx_str)
             }
+            Expr::ArrowTransfer { dest, source, filter } => {
+                let d = self.format_expr(dest);
+                let s = self.format_expr(source);
+                if let Some(f) = filter {
+                    format!("{} <- {}[; {}]", d, s, self.format_expr(f))
+                } else {
+                    format!("{} <- {}", d, s)
+                }
+            }
             Expr::SigCall { modifier, expr } => {
                 let tag = match modifier {
                     crate::ast::SigModifier::Out => "#out",
@@ -538,6 +550,16 @@ impl Annotator {
                 format!("sig {} {}", tag, self.format_expr(expr))
             }
             Expr::Ellipsis => "...".to_string(),
+            Expr::MapLiteral(entries) => {
+                let pairs: Vec<String> = entries.iter()
+                    .map(|(k, v)| format!("{}: {}", self.format_expr(k), self.format_expr(v)))
+                    .collect();
+                format!("{{{}}}", pairs.join(", "))
+            }
+            Expr::SetLiteral(entries) => {
+                let elems: Vec<String> = entries.iter().map(|e| self.format_expr(e)).collect();
+                format!("{{{}}}", elems.join(", "))
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::ast::{ArrowDir, Expr, Hashtag, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
+use crate::ast::{ArrowDir, BracketOp, Expr, Hashtag, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -991,12 +991,15 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
             if let Some(s) = stride { collect_identifiers(s, out); }
             if let Some(m) = mask { collect_identifiers(m, out); }
         }
-        Expr::MultiSlice { value, coordinates, mask } => {
+        Expr::MultiSlice { value, ops } => {
             collect_identifiers(value, out);
-            for coord in coordinates {
-                collect_identifiers_in_coord(coord, out);
+            for op in ops {
+                match op {
+                    BracketOp::Coord(c) => collect_identifiers_in_coord(c, out),
+                    BracketOp::Mask(m) => collect_identifiers(m, out),
+                    BracketOp::Stride(s) => collect_identifiers(s, out),
+                }
             }
-            if let Some(m) = mask { collect_identifiers(m, out); }
         }
         Expr::FieldAccess(obj, _) => {
             collect_identifiers(obj, out);
@@ -1042,10 +1045,28 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                 collect_identifiers(target, out);
                 collect_identifiers(index, out);
             }
+            Expr::ArrowTransfer { dest, source, filter } => {
+                collect_identifiers(dest, out);
+                collect_identifiers(source, out);
+                if let Some(f) = filter {
+                    collect_identifiers(f, out);
+                }
+            }
             Expr::SigCall { expr, .. } => {
                 collect_identifiers(expr, out);
             }
             Expr::Ellipsis => {}
+            Expr::MapLiteral(entries) => {
+                for (k, v) in entries {
+                    collect_identifiers(k, out);
+                    collect_identifiers(v, out);
+                }
+            }
+            Expr::SetLiteral(entries) => {
+                for e in entries {
+                    collect_identifiers(e, out);
+                }
+            }
         }
     }
 

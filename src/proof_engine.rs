@@ -2027,10 +2027,14 @@ impl ProofEngine {
                     self.collect_list_simd_ops_in_expr(m, ops);
                 }
             }
-            Expr::MultiSlice { value, mask, .. } => {
+            Expr::MultiSlice { value, ops: mops } => {
                 self.collect_list_simd_ops_in_expr(value, ops);
-                if let Some(m) = mask {
-                    self.collect_list_simd_ops_in_expr(m, ops);
+                for mop in mops {
+                    match mop {
+                        BracketOp::Mask(m) => self.collect_list_simd_ops_in_expr(m, ops),
+                        BracketOp::Stride(s) => self.collect_list_simd_ops_in_expr(s, ops),
+                        BracketOp::Coord(_) => {}
+                    }
                 }
             }
             _ => {}
@@ -2359,10 +2363,28 @@ impl ProofEngine {
                 self.collect_identifiers(target, vars);
                 self.collect_identifiers(index, vars);
             }
+            Expr::ArrowTransfer { dest, source, filter } => {
+                self.collect_identifiers(dest, vars);
+                self.collect_identifiers(source, vars);
+                if let Some(f) = filter {
+                    self.collect_identifiers(f, vars);
+                }
+            }
             Expr::SigCall { expr, .. } => {
                 self.collect_identifiers(expr, vars);
             }
             Expr::Ellipsis => {}
+            Expr::MapLiteral(entries) => {
+                for (k, v) in entries {
+                    self.collect_identifiers(k, vars);
+                    self.collect_identifiers(v, vars);
+                }
+            }
+            Expr::SetLiteral(entries) => {
+                for e in entries {
+                    self.collect_identifiers(e, vars);
+                }
+            }
         }
     }
 

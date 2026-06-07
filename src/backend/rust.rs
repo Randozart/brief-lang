@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ast::{BitRange, Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{BitRange, BracketOp, Expr, Program, SliceCoordinate, Statement, TopLevel, Type};
 use crate::backend::{MemoryOverlay, GuardTracker};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -611,12 +611,12 @@ impl RustBackend {
                     (None, None) => format!("{}", val),
                 }
             }
-            Expr::MultiSlice { value, coordinates, .. } => {
+            Expr::MultiSlice { value, ops } => {
                 let val = self.expr_to_rust(value);
-                let coords: Vec<String> = coordinates.iter().map(|c| {
-                    match c {
-                        crate::ast::SliceCoordinate::Index(e) => self.expr_to_rust(e),
-                        crate::ast::SliceCoordinate::Range { start, end } => {
+                let parts: Vec<String> = ops.iter().map(|op| match op {
+                    BracketOp::Coord(c) => match c {
+                        SliceCoordinate::Index(e) => self.expr_to_rust(e),
+                        SliceCoordinate::Range { start, end } => {
                             match (start, end) {
                                 (Some(s), Some(e)) => format!("{}..{}", self.expr_to_rust(s), self.expr_to_rust(e)),
                                 (Some(s), None) => format!("{}..", self.expr_to_rust(s)),
@@ -624,16 +624,18 @@ impl RustBackend {
                                 (None, None) => "..".to_string(),
                             }
                         }
-                        crate::ast::SliceCoordinate::Named { name, coord } => {
+                        SliceCoordinate::Named { name, coord } => {
                             format!("{}:{}", name, self.expr_to_rust_slice_coord(coord))
                         }
-                        crate::ast::SliceCoordinate::AtDimension { dimension, coord } => {
+                        SliceCoordinate::AtDimension { dimension, coord } => {
                             format!("@{}:{}", dimension, self.expr_to_rust_slice_coord(coord))
                         }
-                        crate::ast::SliceCoordinate::Ellipsis => "...".to_string(),
-                    }
+                        SliceCoordinate::Ellipsis => "...".to_string(),
+                    },
+                    BracketOp::Mask(m) => format!("; {}", self.expr_to_rust(m)),
+                    BracketOp::Stride(s) => format!("::{}", self.expr_to_rust(s)),
                 }).collect();
-                format!("{}[{}]", val, coords.join(", "))
+                format!("{}[{}]", val, parts.join(", "))
             }
             Expr::PatternMatch { value, variant, fields } => {
                 let fields_str = fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ");

@@ -220,18 +220,21 @@ Loops are transactions with bounded convergence. Recursion is a transaction chai
 | ✅ | Integer, Float, String, Char, Bool, Term, Identifier, OwnedRef, PriorState |
 | ✅ | Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Le, Gt, Ge, Or, And, Not |
 | ✅ | Neg, BitNot, BitAnd, BitOr, BitXor, Shl, Shr |
-| ✅ | Call, ListLiteral, ListIndex, Projection (5 targets), FieldAccess |
+| ✅ | Call, ListLiteral, ListIndex, Projection (18 targets), FieldAccess |
 | ✅ | StructInstance, ObjectLiteral, PatternMatch, Concat |
 | ✅ | Slice, MultiSlice, Block, Tuple, TupleDestructure, Cast, Match |
+| ✅ | ArrowMut, ArrowDiscard, ArrowTransfer (dispatch on Value type, not string names) |
+| ✅ | MapLiteral, SetLiteral (evaluate to Value::HashMap, Value::HashSet) |
 | ⚠️ | **ForAll, Exists** — FULLY REMOVED from AST, parser, lexer, and all match arms. |
 
 ### Statements — All fully implemented
-Assignment, Let, InlineAsm, Expression, Term (with optional swan song), TermBang (with optional swan song), Escape, Guarded, Unification, LocalTrigger.
+Assignment, Let, InlineAsm, Expression, Term (with optional swan song), TermBang (with optional swan song), Escape, Guarded, Unification, LocalTrigger, SyncBlock.
 
 ### Known Gaps
 - **Recursive defn calls**: No recursion guard or stack depth limit. Deep recursion overflows the Rust interpreter.
 - **ForAll/Exists**: Removed from surface syntax.
 - **Interpreter built-in method dispatch**: `dispatch_method_by_type` still matches on function name strings. Deferred — should use FFI registry (Path A: register all operations under `"std::HashMap::insert"` etc., resolve through `ffi_name_to_location`).
+- **LLVM backend**: Slice/MultiSlice/Tuple/MapLiteral/SetLiteral/ArrowTransfer/projection stubs remain (see Backend Gaps below).
 
 ## LLVM Backend Gaps
 
@@ -246,6 +249,9 @@ Additive only — never weaken existing optimization paths.
 | **StructInstance / ObjectLiteral** | Returns 0. Missing allocation + GEP + stores. |
 | **FieldAccess** | Returns object pointer as-is. Missing GEP at known field offset. |
 | **ForAll** | Returns 1 always. Matches interpreter stub. |
+| **MapLiteral / SetLiteral** | No LLVM emission. Falls through to `add i64 0, 0`. |
+| **ArrowTransfer** | No LLVM emission. Falls through to generic `add i64 0, 0`. |
+| **Keys, Values, Contains, Pop, Index projections** | Stubs returning `add i64 0, 0`. |
 
 ### Top-Level — Silently Skipped
 | TopLevel | Impact |
@@ -293,8 +299,9 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 ## Critical Context
 
 ### Already Done (Don't Redo)
-- **Projection operator (`:>`)** — fully implemented, 5 targets (Size, Bytes, Ptr, Alignment, Range). `Expr::ListLen` deleted. All stdlib migrated (277 calls across 16 files).
-- **`<-` arrow syntax** — first-class Expr variants for collection mutation (push/pop/insert/remove).
+- **Projection operator (`:>`)** — fully implemented, 8 targets (Size, Bytes, Ptr, Alignment, Range, Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match, Keys, Values, Contains, Pop, Index). `Expr::ListLen` deleted. All stdlib migrated.
+- **`<-` arrow syntax** — fully implemented for List, HashMap, HashSet, Stack, Queue via `ArrowMut`/`ArrowDiscard`/`ArrowTransfer`. Dispatch on Value type, not string names.
+- **`->` vs `<-` convention** — `->` reserved for return types and swan songs; `<-` exclusively for collection mutation (`&` sigil marks mutated operand).
 - **`term -> swan_song;`** (commit action) and **`term!`** (program exit) — both implemented in interpreter + LLVM backend.
 - **`#assume_event(name)`** and **`#assume_shape(guard, action)`** — pragma infrastructure in parser, analysis, LLVM.
 - **`#` prefix for all directives** — reuses Hashtag/Attribute parsing.
@@ -308,6 +315,12 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 - **MMIO / DBVS / hardware handoff** — address plumbing, schema validation, Vivado XSA extraction.
 - **alka/on_exit disabled** — parser paths commented out, code left for future revisit.
 - **`__rt_poll()`** — non-blocking event drain at main() entry.
+- **Sync domains (Phase 11)** — `sync(domain)` prefix on `txn`/`defn`, `TopLevel::SyncGroup`, `Statement::SyncBlock`.
+- **BracketOp (MultiSlice refactor)** — flat `Vec<BracketOp>` replaces `coordinates`+`mask`. Ops: `Coord`, `Mask`, `Stride` in any order.
+- **MapLiteral / SetLiteral** — `{"a": 1}` evaluates to `Value::HashMap`, `{1, 2, 3}` to `Value::HashSet`. ObjectLiteral `{field: val}` preserved.
+- **Value::Tuple** — true distinct variant. `Expr::Tuple` evaluates to `Value::Tuple`. Tuple destructure handles both `List` and `Tuple`.
+- **ProjectionTarget::Index(usize)** — tuple indexing via `pair :> 0`.
+- **MultiSlice mask/stride evaluation** — `BracketOp::Mask` and `BracketOp::Stride` ops now evaluated in interpreter. `_` bound as implicit element variable. `Expr::Slice.mask` also implemented. ArrowTransfer filter implemented with same `_`-binding pattern.
 
 ### Not a Priority
 - Self-hosting pipeline (broken, deferred)
@@ -317,9 +330,12 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 501 tests pass, 0 fail
+- 526 tests pass, 0 fail
 - Interpreter is the reference — if it runs a program, the backend should eventually compile it
 - All additions are additive (new match arms) — never modify existing optimization paths
+- Phases 11–13 (sync domains, HashMap/HashSet, Stack/Queue/Tuple) complete
+- BracketOp refactor (flat ops list for `MultiSlice`) complete
+- MultiSlice mask/stride evaluation implemented in interpreter. `_` bound as implicit element variable for filter expressions.
 
 ## Iteration Pattern
 

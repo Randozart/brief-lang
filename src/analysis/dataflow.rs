@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, SliceCoordinate, Statement, TopLevel, Transaction};
+use crate::ast::{BracketOp, Expr, Program, SliceCoordinate, Statement, TopLevel, Transaction};
 use std::collections::{HashMap, HashSet};
 
 pub struct DataflowAnalyzer<'a> {
@@ -137,12 +137,15 @@ impl<'a> DataflowAnalyzer<'a> {
                 if let Some(st) = stride { self.extract_ids_recursive(st, ids); }
                 if let Some(m) = mask { self.extract_ids_recursive(m, ids); }
             }
-            Expr::MultiSlice { value, coordinates, mask } => {
+            Expr::MultiSlice { value, ops } => {
                 self.extract_ids_recursive(value, ids);
-                for coord in coordinates {
-                    self.extract_ids_from_slice_coord(coord, ids);
+                for op in ops {
+                    match op {
+                        BracketOp::Coord(c) => self.extract_ids_from_slice_coord(c, ids),
+                        BracketOp::Mask(m) => self.extract_ids_recursive(m, ids),
+                        BracketOp::Stride(s) => self.extract_ids_recursive(s, ids),
+                    }
                 }
-                if let Some(m) = mask { self.extract_ids_recursive(m, ids); }
             }
             Expr::PatternMatch { value, .. } => {
                 self.extract_ids_recursive(value, ids);
@@ -176,10 +179,28 @@ impl<'a> DataflowAnalyzer<'a> {
                 self.extract_ids_recursive(target, ids);
                 self.extract_ids_recursive(index, ids);
             }
+            Expr::ArrowTransfer { dest, source, filter } => {
+                self.extract_ids_recursive(dest, ids);
+                self.extract_ids_recursive(source, ids);
+                if let Some(f) = filter {
+                    self.extract_ids_recursive(f, ids);
+                }
+            }
             Expr::SigCall { expr, .. } => {
                 self.extract_ids_recursive(expr, ids);
             }
             Expr::Ellipsis => {}
+            Expr::MapLiteral(entries) => {
+                for (k, v) in entries {
+                    self.extract_ids_recursive(k, ids);
+                    self.extract_ids_recursive(v, ids);
+                }
+            }
+            Expr::SetLiteral(entries) => {
+                for e in entries {
+                    self.extract_ids_recursive(e, ids);
+                }
+            }
         }
     }
 

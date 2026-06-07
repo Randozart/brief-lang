@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, ProjectionTarget, Statement, TopLevel, Type};
+use crate::ast::{BracketOp, Expr, Program, ProjectionTarget, Statement, TopLevel, Type};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Classification of a transaction body by computational weight.
@@ -1377,9 +1377,13 @@ fn expr_has_call(expr: &Expr) -> bool {
                 || stride.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
                 || mask.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
         }
-        Expr::MultiSlice { value, mask, .. } => {
+        Expr::MultiSlice { value, ops } => {
             expr_has_call(value)
-                || mask.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+                || ops.iter().any(|op| match op {
+                    BracketOp::Mask(m) => expr_has_call(m),
+                    BracketOp::Stride(s) => expr_has_call(s),
+                    BracketOp::Coord(_) => false,
+                })
         }
         _ => false,
     }
@@ -1649,10 +1653,13 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
             stride: stride.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
             mask: mask.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
         },
-        Expr::MultiSlice { value, coordinates, mask } => Expr::MultiSlice {
+        Expr::MultiSlice { value, ops } => Expr::MultiSlice {
             value: Box::new(substitute_expr(value, old_var, new_expr)),
-            coordinates: coordinates.clone(),
-            mask: mask.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
+            ops: ops.iter().map(|op| match op {
+                BracketOp::Coord(c) => BracketOp::Coord(c.clone()),
+                BracketOp::Mask(m) => BracketOp::Mask(Box::new(substitute_expr(m, old_var, new_expr))),
+                BracketOp::Stride(s) => BracketOp::Stride(Box::new(substitute_expr(s, old_var, new_expr))),
+            }).collect(),
         },
         _ => expr.clone(),
     }

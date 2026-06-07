@@ -1472,6 +1472,87 @@ impl TypeChecker {
                             Err(_) => Type::Bool,
                         }
                     }
+                    ProjectionTarget::Keys => {
+                        match &src_ty {
+                            Type::Applied(name, _) if name == "HashMap" => {}
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "HashMap".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Keys projection".to_string(),
+                                });
+                            }
+                        }
+                        Type::Applied("List".to_string(), vec![Type::String])
+                    }
+                    ProjectionTarget::Values => {
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "HashMap" => {
+                                let val_ty = inner.get(1).cloned().unwrap_or(Type::String);
+                                Type::Applied("List".to_string(), vec![val_ty])
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "HashMap".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Values projection".to_string(),
+                                });
+                                Type::Applied("List".to_string(), vec![Type::String])
+                            }
+                        }
+                    }
+                    ProjectionTarget::Contains(_) => {
+                        match &src_ty {
+                            Type::Applied(name, _) if name == "HashMap" || name == "HashSet" => {}
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "HashMap or HashSet".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Contains projection".to_string(),
+                                });
+                            }
+                        }
+                        Type::Bool
+                    }
+                    ProjectionTarget::Pop => {
+                        match &src_ty {
+                            Type::Applied(name, inner) if name == "HashSet" => {
+                                inner.first().cloned().unwrap_or(Type::String)
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "HashSet".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Pop projection".to_string(),
+                                });
+                                Type::String
+                            }
+                        }
+                    }
+                    ProjectionTarget::Index(n) => {
+                        match &src_ty {
+                            Type::Tuple(types) => {
+                                if *n < types.len() {
+                                    types[*n].clone()
+                                } else {
+                                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                        expected: format!("tuple with at least {} elements", n + 1),
+                                        found: format!("tuple of length {}", types.len()),
+                                        context: "Index projection".to_string(),
+                                    });
+                                    Type::Int
+                                }
+                            }
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Tuple".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "Index projection".to_string(),
+                                });
+                                Type::Int
+                            }
+                        }
+                    }
                 }
             }
             Expr::PatternMatch { .. } => Type::Bool,

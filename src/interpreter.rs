@@ -36,6 +36,7 @@ pub enum Value {
     Bool(bool),
     Data(Vec<u8>),
     List(Vec<Value>),
+    Tuple(Vec<Value>),  // True tuple type (not flattened to List)
     HashMap(HashMap<String, Value>),  // HashMap (string keys for simplicity)
     HashSet(HashSet<String>),  // HashSet (string values for simplicity)
     StringBuilder(String),  // StringBuilder (internal buffer as String)
@@ -60,6 +61,7 @@ impl fmt::Display for Value {
             Value::Bool(v) => write!(f, "{}", v),
             Value::Data(_) => write!(f, "<data>"),
             Value::List(items) => write!(f, "[{}]", items.len()),
+            Value::Tuple(items) => write!(f, "({})", items.len()),
             Value::HashMap(map) => write!(f, "<HashMap {}>", map.len()),
             Value::HashSet(set) => write!(f, "<HashSet {}>", set.len()),
             Value::StringBuilder(s) => write!(f, "<StringBuilder {}>", s.len()),
@@ -98,6 +100,7 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
         Value::String(s) => JsonValue::String(s.clone()),
         Value::Char(c) => JsonValue::String(c.to_string()),
         Value::List(items) => JsonValue::Array(items.iter().map(value_to_json_value).collect()),
+        Value::Tuple(items) => JsonValue::Array(items.iter().map(value_to_json_value).collect()),
         Value::HashMap(map) => {
             let json_map: serde_json::Map<String, JsonValue> = map
                 .iter()
@@ -497,6 +500,63 @@ impl Interpreter {
         Ok(result)
     }
 
+    /// Resolve any Value from state by root name and optional field path.
+    fn resolve_arrow_value(&self, root: &str, field_path: &[String]) -> Result<Value, RuntimeError> {
+        let mut val = self.state.get(root)
+            .ok_or_else(|| RuntimeError::UndefinedVariable(root.to_string()))?
+            .clone();
+        for field in field_path {
+            val = match val {
+                Value::Instance { typename: _, ref fields } => {
+                    fields.get(field)
+                        .ok_or_else(|| RuntimeError::TypeMismatch(
+                            format!("Instance has no field '{}'", field)
+                        ))?
+                        .clone()
+                }
+                _ => return Err(RuntimeError::TypeMismatch(
+                    format!("Cannot access field '{}' on non-instance value", field)
+                )),
+            };
+        }
+        Ok(val)
+    }
+
+    /// Store any Value back into state through the root and field path.
+    fn store_arrow_value(&mut self, root: &str, field_path: &[String], val: Value) {
+        if field_path.is_empty() {
+            self.state.insert(root.to_string(), val);
+        } else {
+            let mut current_val = self.state.get(root)
+                .expect("Root must exist")
+                .clone();
+            let mut stack: Vec<(String, Value)> = Vec::new();
+            for field in field_path.iter().rev() {
+                stack.push((field.clone(), current_val.clone()));
+                current_val = match &current_val {
+                    Value::Instance { fields, .. } => {
+                        fields.get(field)
+                            .expect("Field must exist")
+                            .clone()
+                    }
+                    _ => return,
+                };
+            }
+            let mut current = val;
+            for (field, parent_val) in stack {
+                let (typename, mut fields) = match parent_val {
+                    Value::Instance { typename, fields } => {
+                        (typename.clone(), fields.clone())
+                    }
+                    _ => return,
+                };
+                fields.insert(field, current);
+                current = Value::Instance { typename, fields };
+            }
+            self.state.insert(root.to_string(), current);
+        }
+    }
+
     /// Extract (root_variable_name, field_path) from an arrow mutation target.
     /// Supports: `&name`, `&name[i]`, `&name.field`, `&name.field[i]`
     fn extract_arrow_root(&self, target: &Expr) -> Result<(String, Vec<String>), RuntimeError> {
@@ -598,6 +658,20 @@ impl Interpreter {
                     )),
                 }
             }
+        }
+    }
+
+    /// Convert a Value to a String for use as a HashMap key.
+    fn value_to_string(&self, val: &Value) -> Result<String, RuntimeError> {
+        match val {
+            Value::String(s) => Ok(s.clone()),
+            Value::Int(i) => Ok(i.to_string()),
+            Value::Float(f) => Ok(f.to_string()),
+            Value::Bool(b) => Ok(b.to_string()),
+            Value::Char(c) => Ok(c.to_string()),
+            _ => Err(RuntimeError::TypeMismatch(
+                "Value cannot be used as a HashMap key".to_string()
+            )),
         }
     }
 
@@ -1370,8 +1444,7 @@ Expr::Ge(l, r) => {
             }
             Expr::ArrowMut { dir, target, index, value } => {
                 let (root_name, field_path) = self.extract_arrow_root(target)?;
-                let mut list = self.resolve_arrow_list(&root_name, &field_path)?;
-                let pos = self.eval_arrow_pos(&list, index)?;
+                let mut collection = self.resolve_arrow_value(&root_name, &field_path)?;
                 match dir {
                     ArrowDir::Push => {
                         let val = match value {
@@ -1380,34 +1453,214 @@ Expr::Ge(l, r) => {
                                 "ArrowMut Push requires a value".to_string()
                             )),
                         };
-                        match pos {
-                            Some(p) if p < list.len() => list.insert(p, val),
-                            _ => list.push(val),
+                        match (&mut collection, val) {
+                            (Value::List(list), v) => {
+                                let pos = self.eval_arrow_pos(list, index)?;
+                                match pos {
+                                    Some(p) if p < list.len() => list.insert(p, v),
+                                    _ => list.push(v),
+                                }
+                                self.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
+                                Ok(Value::List(list.clone()))
+                            }
+                            (Value::HashMap(map), val) if matches!(index.as_ref(), Expr::Term) => {
+                                // &map <- (key, value) — insert entry
+                                // val can be Value::List or Value::Tuple (both are 2-element)
+                                let pair = match val {
+                                    Value::List(p) | Value::Tuple(p) => p,
+                                    _ => return Err(RuntimeError::TypeMismatch(
+                                        "HashMap insert requires a 2-element tuple or list (key, value)".to_string()
+                                    )),
+                                };
+                                if pair.len() != 2 {
+                                    return Err(RuntimeError::TypeMismatch(
+                                        "HashMap insert requires exactly 2 elements (key, value)".to_string()
+                                    ));
+                                }
+                                let mut pair_iter = pair.into_iter();
+                                let key = self.value_to_string(&pair_iter.next().unwrap())?;
+                                let val = pair_iter.next().unwrap();
+                                map.insert(key, val);
+                                self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
+                                Ok(Value::HashMap(map.clone()))
+                            }
+                            (Value::HashMap(map), v) => {
+                                // &map[key] <- value — insert/replace at key
+                                let key_val = self.eval_expr(index)?;
+                                let key = self.value_to_string(&key_val)?;
+                                map.insert(key, v);
+                                self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
+                                Ok(Value::HashMap(map.clone()))
+                            }
+                            (Value::HashSet(set), v) => {
+                                let elem = self.value_to_string(&v)?;
+                                set.insert(elem);
+                                self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
+                                Ok(Value::HashSet(set.clone()))
+                            }
+                            (Value::Stack(stack), v) => {
+                                stack.push(v);
+                                self.store_arrow_value(&root_name, &field_path, Value::Stack(stack.clone()));
+                                Ok(Value::Stack(stack.clone()))
+                            }
+                            (Value::Queue(queue), v) => {
+                                queue.push_back(v);
+                                self.store_arrow_value(&root_name, &field_path, Value::Queue(queue.clone()));
+                                Ok(Value::Queue(queue.clone()))
+                            }
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "ArrowMut Push requires a compatible collection type".to_string()
+                            )),
                         }
-                        self.store_arrow_list(&root_name, &field_path, Value::List(list.clone()));
-                        Ok(Value::List(list))
                     }
                     ArrowDir::Pop => {
-                        let removed = match pos {
-                            Some(p) if p < list.len() => list.remove(p),
-                            _ => list.pop().ok_or_else(|| RuntimeError::TypeMismatch(
-                                "Cannot pop from empty list".to_string()
-                            ))?,
-                        };
-                        self.store_arrow_list(&root_name, &field_path, Value::List(list));
-                        Ok(removed)
+                        match &mut collection {
+                            Value::List(list) => {
+                                let pos = self.eval_arrow_pos(list, index)?;
+                                let removed = match pos {
+                                    Some(p) if p < list.len() => list.remove(p),
+                                    _ => list.pop().ok_or_else(|| RuntimeError::TypeMismatch(
+                                        "Cannot pop from empty list".to_string()
+                                    ))?,
+                                };
+                                self.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
+                                Ok(removed)
+                            }
+                            Value::HashMap(map) => {
+                                let key_val = self.eval_expr(index)?;
+                                let key = self.value_to_string(&key_val)?;
+                                let removed = map.remove(&key).ok_or_else(|| RuntimeError::TypeMismatch(
+                                    format!("Key '{}' not found in HashMap", key)
+                                ))?;
+                                self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
+                                Ok(removed)
+                            }
+                            Value::HashSet(set) => {
+                                // Pop arbitrary element from set
+                                let elem = set.iter().next().cloned()
+                                    .ok_or_else(|| RuntimeError::TypeMismatch(
+                                        "Cannot pop from empty HashSet".to_string()
+                                    ))?;
+                                set.remove(&elem);
+                                self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
+                                Ok(Value::String(elem))
+                            }
+                            Value::Stack(stack) => {
+                                let removed = stack.pop().ok_or_else(|| RuntimeError::TypeMismatch(
+                                    "Cannot pop from empty Stack".to_string()
+                                ))?;
+                                self.store_arrow_value(&root_name, &field_path, Value::Stack(stack.clone()));
+                                Ok(removed)
+                            }
+                            Value::Queue(queue) => {
+                                let removed = queue.pop_front().ok_or_else(|| RuntimeError::TypeMismatch(
+                                    "Cannot dequeue from empty Queue".to_string()
+                                ))?;
+                                self.store_arrow_value(&root_name, &field_path, Value::Queue(queue.clone()));
+                                Ok(removed)
+                            }
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "ArrowMut Pop requires a compatible collection type".to_string()
+                            )),
+                        }
                     }
                 }
             }
             Expr::ArrowDiscard { target, index } => {
                 let (root_name, field_path) = self.extract_arrow_root(target)?;
-                let mut list = self.resolve_arrow_list(&root_name, &field_path)?;
-                let pos = self.eval_arrow_pos(&list, index)?;
-                match pos {
-                    Some(p) if p < list.len() => { list.remove(p); }
-                    _ => { list.pop(); }
+                let mut collection = self.resolve_arrow_value(&root_name, &field_path)?;
+                match &mut collection {
+                    Value::List(list) => {
+                        let pos = self.eval_arrow_pos(list, index)?;
+                        match pos {
+                            Some(p) if p < list.len() => { list.remove(p); }
+                            _ => { list.pop(); }
+                        }
+                        self.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
+                    }
+                    Value::HashMap(map) => {
+                        let key_val = self.eval_expr(index)?;
+                        let key = self.value_to_string(&key_val)?;
+                        map.remove(&key);
+                        self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
+                    }
+                    Value::HashSet(set) => {
+                        let elem = set.iter().next().cloned();
+                        if let Some(e) = elem {
+                            set.remove(&e);
+                        }
+                        self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
+                    }
+                    Value::Stack(stack) => { stack.pop(); self.store_arrow_value(&root_name, &field_path, Value::Stack(stack.clone())); }
+                    Value::Queue(queue) => { queue.pop_front(); self.store_arrow_value(&root_name, &field_path, Value::Queue(queue.clone())); }
+                    _ => return Err(RuntimeError::TypeMismatch(
+                        "ArrowDiscard requires a compatible collection type".to_string()
+                    )),
                 }
-                self.store_arrow_list(&root_name, &field_path, Value::List(list));
+                Ok(Value::Void)
+            }
+            Expr::ArrowTransfer { dest, source, filter } => {
+                let (dest_root, dest_path) = self.extract_arrow_root(dest)?;
+                let (source_root, source_path) = self.extract_arrow_root(source)?;
+                let mut src_val = self.resolve_arrow_value(&source_root, &source_path)?;
+                let mut dest_val = self.resolve_arrow_value(&dest_root, &dest_path)?;
+                // Transfer matching elements from source to dest
+                match (&mut src_val, &mut dest_val) {
+                    (Value::List(src), Value::List(dest)) => {
+                        if let Some(f) = filter {
+                            let mut remaining = std::mem::take(src);
+                            let mut i = 0;
+                            while i < remaining.len() {
+                                let prev = self.state.insert("_".to_string(), remaining[i].clone());
+                                let cond = self.eval_expr(f)?;
+                                if prev.is_some() {
+                                    self.state.insert("_".to_string(), prev.unwrap());
+                                } else {
+                                    self.state.remove("_");
+                                }
+                                if cond == Value::Bool(true) {
+                                    dest.push(remaining.remove(i));
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                            *src = remaining;
+                        } else {
+                            dest.extend(src.drain(..));
+                        }
+                    }
+                    (Value::HashMap(src), Value::HashMap(dest)) => {
+                        if let Some(f) = filter {
+                            let mut remaining = std::mem::take(src);
+                            let keys: Vec<String> = remaining.keys().cloned().collect();
+                            for key in keys {
+                                if let Some(val) = remaining.remove(&key) {
+                                    let prev = self.state.insert("_".to_string(), val.clone());
+                                    let cond = self.eval_expr(f)?;
+                                    if prev.is_some() {
+                                        self.state.insert("_".to_string(), prev.unwrap());
+                                    } else {
+                                        self.state.remove("_");
+                                    }
+                                    if cond == Value::Bool(true) {
+                                        dest.insert(key, val);
+                                    } else {
+                                        src.insert(key, val);
+                                    }
+                                }
+                            }
+                        } else {
+                            dest.extend(src.drain());
+                        }
+                    }
+                    _ => {
+                        return Err(RuntimeError::TypeMismatch(
+                            "ArrowTransfer requires matching collection types".to_string()
+                        ));
+                    }
+                }
+                self.store_arrow_value(&dest_root, &dest_path, dest_val);
+                self.store_arrow_value(&source_root, &source_path, src_val);
                 Ok(Value::Void)
             }
             Expr::SigCall { modifier, expr } => {
@@ -1490,6 +1743,25 @@ Expr::Ge(l, r) => {
                 }
                 Ok(Value::List(values))
             }
+            Expr::MapLiteral(entries) => {
+                let mut map = std::collections::HashMap::new();
+                for (key_expr, val_expr) in entries {
+                    let key_val = self.eval_expr(&key_expr)?;
+                    let key = self.value_to_string(&key_val)?;
+                    let val = self.eval_expr(&val_expr)?;
+                    map.insert(key, val);
+                }
+                Ok(Value::HashMap(map))
+            }
+            Expr::SetLiteral(entries) => {
+                let mut set = std::collections::HashSet::new();
+                for elem in entries {
+                    let val = self.eval_expr(&elem)?;
+                    let s = self.value_to_string(&val)?;
+                    set.insert(s);
+                }
+                Ok(Value::HashSet(set))
+            }
             Expr::ListIndex(list_expr, index_expr) => {
                 let list_val = self.eval_expr(list_expr)?;
                 let index_val = self.eval_expr(index_expr)?;
@@ -1513,6 +1785,7 @@ Expr::Ge(l, r) => {
                 match target {
                     ProjectionTarget::Size => match source_val {
                         Value::List(items) => Ok(Value::Int(items.len() as i64)),
+                        Value::Tuple(items) => Ok(Value::Int(items.len() as i64)),
                         Value::String(s) => Ok(Value::Int(s.len() as i64)),
                         Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
                         Value::HashSet(s) => Ok(Value::Int(s.len() as i64)),
@@ -1602,15 +1875,16 @@ Expr::Ge(l, r) => {
                             Value::Char(_) => 4,
                             Value::String(_) => 5,
                             Value::List(_) => 6,
-                            Value::Data(_) => 7,
-                            Value::HashMap(_) => 8,
-                            Value::HashSet(_) => 9,
-                            Value::StringBuilder(_) => 10,
-                            Value::Stack(_) => 11,
-                            Value::Queue(_) => 12,
-                            Value::Instance { .. } => 13,
-                            Value::Enum { .. } => 14,
-                            Value::Defn(_) => 15,
+                            Value::Tuple(_) => 7,
+                            Value::Data(_) => 8,
+                            Value::HashMap(_) => 9,
+                            Value::HashSet(_) => 10,
+                            Value::StringBuilder(_) => 11,
+                            Value::Stack(_) => 12,
+                            Value::Queue(_) => 13,
+                            Value::Instance { .. } => 14,
+                            Value::Enum { .. } => 15,
+                            Value::Defn(_) => 16,
                             Value::Void => 0,
                         };
                         Ok(Value::Int(discriminant))
@@ -1663,6 +1937,79 @@ Expr::Ge(l, r) => {
                             )),
                         }
                     }
+                    ProjectionTarget::Keys => match &source_val {
+                        Value::HashMap(m) => {
+                            let mut keys: Vec<Value> = m.keys().cloned().map(Value::String).collect();
+                            keys.sort_by(|a, b| {
+                                if let (Value::String(a), Value::String(b)) = (a, b) {
+                                    a.cmp(b)
+                                } else {
+                                    std::cmp::Ordering::Equal
+                                }
+                            });
+                            Ok(Value::List(keys))
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "Keys projection requires HashMap".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::Values => match &source_val {
+                        Value::HashMap(m) => {
+                            let vals: Vec<Value> = m.values().cloned().collect();
+                            Ok(Value::List(vals))
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "Values projection requires HashMap".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::Contains(key_expr) => {
+                        let key = self.eval_expr(key_expr)?;
+                        match &source_val {
+                            Value::HashMap(m) => {
+                                let key_str = self.value_to_string(&key)?;
+                                Ok(Value::Bool(m.contains_key(&key_str)))
+                            }
+                            Value::HashSet(s) => {
+                                let elem = self.value_to_string(&key)?;
+                                Ok(Value::Bool(s.contains(&elem)))
+                            }
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "Contains projection requires HashMap or HashSet".to_string(),
+                            )),
+                        }
+                    }
+                    ProjectionTarget::Pop => match source_val {
+                        Value::HashSet(mut s) => {
+                            let elem = s.iter().next().cloned()
+                                .ok_or_else(|| RuntimeError::TypeMismatch(
+                                    "Pop projection requires non-empty HashSet".to_string(),
+                                ))?;
+                            s.remove(&elem);
+                            // Pop projection is a query + mutation — store back
+                            // We need root name. For projection, we don't have it here.
+                            // Pop as projection is a design issue — use arrow syntax instead.
+                            Err(RuntimeError::TypeMismatch(
+                                "Pop projection not yet supported — use '<- &set' instead".to_string(),
+                            ))
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "Pop projection requires HashSet".to_string(),
+                        )),
+                    },
+                    ProjectionTarget::Index(n) => match &source_val {
+                        Value::Tuple(items) => {
+                            if *n < items.len() {
+                                Ok(items[*n].clone())
+                            } else {
+                                Err(RuntimeError::TypeMismatch(
+                                    format!("Index {} out of bounds for tuple of length {}", n, items.len()),
+                                ))
+                            }
+                        }
+                        _ => Err(RuntimeError::TypeMismatch(
+                            "Index projection requires Tuple".to_string(),
+                        )),
+                    },
                 }
             }
             Expr::FieldAccess(obj_expr, field_name) => {
@@ -1734,7 +2081,7 @@ Expr::Ge(l, r) => {
                     _ => Err(RuntimeError::TypeMismatch("list concat".to_string())),
                 }
             }
-            Expr::Slice { value, start, end, stride, mask: _ } => {
+            Expr::Slice { value, start, end, stride, mask } => {
                 let list_val = self.eval_expr(value)?;
                 // String slicing
                 if let Value::String(ref s) = list_val {
@@ -1810,6 +2157,24 @@ let s_val = self.eval_expr(s)?;
                     }
                     idx += stride;
                 }
+
+                // Apply mask filter if present
+                if let Some(mask_expr) = mask {
+                    let mut filtered = Vec::new();
+                    for item in result {
+                        let prev = self.state.insert("_".to_string(), item.clone());
+                        let cond = self.eval_expr(mask_expr)?;
+                        if prev.is_some() {
+                            self.state.insert("_".to_string(), prev.unwrap());
+                        } else {
+                            self.state.remove("_");
+                        }
+                        if cond == Value::Bool(true) {
+                            filtered.push(item);
+                        }
+                    }
+                    result = filtered;
+                }
                 
                 Ok(Value::List(result))
             }
@@ -1827,12 +2192,12 @@ let s_val = self.eval_expr(s)?;
                 for e in exprs {
                     values.push(self.eval_expr(e)?);
                 }
-                Ok(Value::List(values))
+                Ok(Value::Tuple(values))
             }
             Expr::TupleDestructure(names, expr) => {
                 let value = self.eval_expr(expr)?;
                 match value {
-                    Value::List(items) => {
+                    Value::Tuple(items) | Value::List(items) => {
                         for (i, name) in names.iter().enumerate() {
                             if i < items.len() {
                                 self.state.insert(name.clone(), items[i].clone());
@@ -1845,19 +2210,80 @@ let s_val = self.eval_expr(s)?;
                     )),
                 }
             }
-            Expr::MultiSlice { value, coordinates, mask: _ } => {
+            Expr::MultiSlice { value, ops } => {
                 let base = self.eval_expr(value)?;
-                if coordinates.is_empty() {
-                    return Ok(base);
-                }
-                let has_ellipsis = coordinates.iter().any(|c| matches!(c, SliceCoordinate::Ellipsis));
-                if has_ellipsis {
-                    let dims = Self::list_nesting_depth(&base);
-                    let expanded = Self::expand_coordinates(coordinates, dims)?;
-                    self.apply_multi_slice_coords(&base, &expanded)
+
+                // Step 1: collect and apply all Coord ops together (multi-dimensional)
+                let coords: Vec<SliceCoordinate> = ops.iter().filter_map(|op| {
+                    if let BracketOp::Coord(c) = op { Some(c.clone()) } else { None }
+                }).collect();
+
+                let mut current = if coords.is_empty() {
+                    base
                 } else {
-                    self.apply_multi_slice_coords(&base, coordinates)
+                    let has_ellipsis = coords.iter().any(|c| matches!(c, SliceCoordinate::Ellipsis));
+                    if has_ellipsis {
+                        let dims = Self::list_nesting_depth(&base);
+                        let expanded = Self::expand_coordinates(&coords, dims)?;
+                        self.apply_multi_slice_coords(&base, &expanded)?
+                    } else {
+                        self.apply_multi_slice_coords(&base, &coords)?
+                    }
+                };
+
+                // Step 2: apply Mask and Stride ops sequentially
+                for op in ops {
+                    match op {
+                        BracketOp::Coord(_) => {}
+                        BracketOp::Stride(stride_expr) => {
+                            let list = match current {
+                                Value::List(ref items) => items.clone(),
+                                _ => return Err(RuntimeError::TypeMismatch(
+                                    "Stride requires a list value".to_string(),
+                                )),
+                            };
+                            let s_val = self.eval_expr(stride_expr)?;
+                            let s = match s_val {
+                                Value::Int(n) if n > 0 => n as usize,
+                                Value::Int(_) => {
+                                    return Err(RuntimeError::TypeMismatch(
+                                        "Stride must be positive".to_string(),
+                                    ));
+                                }
+                                _ => {
+                                    return Err(RuntimeError::TypeMismatch(
+                                        "Stride must be an integer".to_string(),
+                                    ));
+                                }
+                            };
+                            current = Value::List(list.into_iter().step_by(s).collect());
+                        }
+                        BracketOp::Mask(mask_expr) => {
+                            let list = match current {
+                                Value::List(ref items) => items.clone(),
+                                _ => return Err(RuntimeError::TypeMismatch(
+                                    "Mask requires a list value".to_string(),
+                                )),
+                            };
+                            let mut filtered = Vec::new();
+                            for item in list {
+                                let prev = self.state.insert("_".to_string(), item.clone());
+                                let cond = self.eval_expr(mask_expr)?;
+                                if prev.is_some() {
+                                    self.state.insert("_".to_string(), prev.unwrap());
+                                } else {
+                                    self.state.remove("_");
+                                }
+                                if cond == Value::Bool(true) {
+                                    filtered.push(item);
+                                }
+                            }
+                            current = Value::List(filtered);
+                        }
+                    }
                 }
+
+                Ok(current)
             }
             Expr::Cast(inner, _) => self.eval_expr(inner),
             Expr::Match { value, arms } => {
@@ -3531,5 +3957,451 @@ mod tests {
         assert_eq!(result, Value::Int(10));
         // outer variable should still be intact
         assert_eq!(i.state.get("outer"), Some(&Value::Int(42)));
+    }
+
+    // ── Phase 12: HashMap/HashSet arrow operations ──
+
+    #[test]
+    fn test_hashmap_arrow_push_key_value() {
+        let mut i = Interpreter::new();
+        i.state.insert("m".to_string(), Value::HashMap(std::collections::HashMap::new()));
+        // Push (key, value) as a tuple (list with 2 elements)
+        let expr = Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("m".to_string())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::Tuple(vec![
+                Expr::String("a".to_string()),
+                Expr::Integer(1),
+            ]))),
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::HashMap(map) => assert_eq!(map.get("a"), Some(&Value::Int(1))),
+            _ => panic!("Expected HashMap"),
+        }
+    }
+
+    #[test]
+    fn test_hashmap_arrow_push_indexed() {
+        let mut i = Interpreter::new();
+        i.state.insert("m".to_string(), Value::HashMap(std::collections::HashMap::new()));
+        // &m[key] <- value
+        let expr = Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("m".to_string())),
+            index: Box::new(Expr::String("b".to_string())),
+            value: Some(Box::new(Expr::Integer(2))),
+        };
+        i.eval_expr(&expr).unwrap();
+        match i.state.get("m").unwrap() {
+            Value::HashMap(map) => assert_eq!(map.get("b"), Some(&Value::Int(2))),
+            _ => panic!("Expected HashMap"),
+        }
+    }
+
+    #[test]
+    fn test_hashmap_arrow_pop_key() {
+        let mut i = Interpreter::new();
+        let mut map = std::collections::HashMap::new();
+        map.insert("x".to_string(), Value::Int(42));
+        i.state.insert("m".to_string(), Value::HashMap(map));
+        // value <- &m[key]
+        let popped = i.eval_expr(&Expr::ArrowMut {
+            dir: ArrowDir::Pop,
+            target: Box::new(Expr::OwnedRef("m".to_string())),
+            index: Box::new(Expr::String("x".to_string())),
+            value: None,
+        }).unwrap();
+        assert_eq!(popped, Value::Int(42));
+        match i.state.get("m").unwrap() {
+            Value::HashMap(map) => assert!(map.is_empty()),
+            _ => panic!("Expected HashMap"),
+        }
+    }
+
+    #[test]
+    fn test_hashset_arrow_push() {
+        let mut i = Interpreter::new();
+        i.state.insert("s".to_string(), Value::HashSet(std::collections::HashSet::new()));
+        let expr = Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("s".to_string())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::String("hello".to_string()))),
+        };
+        i.eval_expr(&expr).unwrap();
+        match i.state.get("s").unwrap() {
+            Value::HashSet(set) => assert!(set.contains("hello")),
+            _ => panic!("Expected HashSet"),
+        }
+    }
+
+    #[test]
+    fn test_hashset_arrow_pop() {
+        let mut i = Interpreter::new();
+        let mut set = std::collections::HashSet::new();
+        set.insert("world".to_string());
+        i.state.insert("s".to_string(), Value::HashSet(set));
+        let popped = i.eval_expr(&Expr::ArrowMut {
+            dir: ArrowDir::Pop,
+            target: Box::new(Expr::OwnedRef("s".to_string())),
+            index: Box::new(Expr::Term),
+            value: None,
+        }).unwrap();
+        assert_eq!(popped, Value::String("world".to_string()));
+        match i.state.get("s").unwrap() {
+            Value::HashSet(set) => assert!(set.is_empty()),
+            _ => panic!("Expected HashSet"),
+        }
+    }
+
+    #[test]
+    fn test_hashset_arrow_discard() {
+        let mut i = Interpreter::new();
+        let mut set = std::collections::HashSet::new();
+        set.insert("discard".to_string());
+        i.state.insert("s".to_string(), Value::HashSet(set));
+        i.eval_expr(&Expr::ArrowDiscard {
+            target: Box::new(Expr::OwnedRef("s".to_string())),
+            index: Box::new(Expr::Term),
+        }).unwrap();
+        match i.state.get("s").unwrap() {
+            Value::HashSet(set) => assert!(set.is_empty()),
+            _ => panic!("Expected HashSet"),
+        }
+    }
+
+    #[test]
+    fn test_map_literal_eval() {
+        let mut i = Interpreter::new();
+        let expr = Expr::MapLiteral(vec![
+            (Expr::String("a".to_string()), Expr::Integer(1)),
+            (Expr::String("b".to_string()), Expr::Integer(2)),
+        ]);
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::HashMap(map) => {
+                assert_eq!(map.len(), 2);
+                assert_eq!(map.get("a"), Some(&Value::Int(1)));
+                assert_eq!(map.get("b"), Some(&Value::Int(2)));
+            }
+            _ => panic!("Expected HashMap"),
+        }
+    }
+
+    #[test]
+    fn test_set_literal_eval() {
+        let mut i = Interpreter::new();
+        let expr = Expr::SetLiteral(vec![
+            Expr::String("x".to_string()),
+            Expr::String("y".to_string()),
+        ]);
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::HashSet(set) => {
+                assert_eq!(set.len(), 2);
+                assert!(set.contains("x"));
+                assert!(set.contains("y"));
+            }
+            _ => panic!("Expected HashSet"),
+        }
+    }
+
+    #[test]
+    fn test_projection_keys() {
+        let mut i = Interpreter::new();
+        let mut map = std::collections::HashMap::new();
+        map.insert("a".to_string(), Value::Int(1));
+        map.insert("b".to_string(), Value::Int(2));
+        i.state.insert("m".to_string(), Value::HashMap(map));
+        let result = i.eval_expr(&Expr::Projection {
+            source: Box::new(Expr::OwnedRef("m".to_string())),
+            target: ProjectionTarget::Keys,
+        }).unwrap();
+        match result {
+            Value::List(keys) => {
+                assert_eq!(keys.len(), 2);
+                assert!(keys.contains(&Value::String("a".to_string())));
+                assert!(keys.contains(&Value::String("b".to_string())));
+            }
+            _ => panic!("Expected List"),
+        }
+    }
+
+    #[test]
+    fn test_projection_contains() {
+        let mut i = Interpreter::new();
+        let mut set = std::collections::HashSet::new();
+        set.insert("hello".to_string());
+        i.state.insert("s".to_string(), Value::HashSet(set));
+        let result = i.eval_expr(&Expr::Projection {
+            source: Box::new(Expr::OwnedRef("s".to_string())),
+            target: ProjectionTarget::Contains(Box::new(Expr::String("hello".to_string()))),
+        }).unwrap();
+        assert_eq!(result, Value::Bool(true));
+        let result = i.eval_expr(&Expr::Projection {
+            source: Box::new(Expr::OwnedRef("s".to_string())),
+            target: ProjectionTarget::Contains(Box::new(Expr::String("nope".to_string()))),
+        }).unwrap();
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_arrow_transfer_list() {
+        let mut i = Interpreter::new();
+        i.state.insert("src".to_string(), Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3),
+        ]));
+        i.state.insert("dest".to_string(), Value::List(vec![]));
+        i.eval_expr(&Expr::ArrowTransfer {
+            dest: Box::new(Expr::OwnedRef("dest".to_string())),
+            source: Box::new(Expr::OwnedRef("src".to_string())),
+            filter: None,
+        }).unwrap();
+        assert_eq!(i.state.get("src"), Some(&Value::List(vec![])));
+        assert_eq!(i.state.get("dest"), Some(&Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3),
+        ])));
+    }
+
+    #[test]
+    fn test_arrow_transfer_hashmap() {
+        let mut i = Interpreter::new();
+        let mut src = std::collections::HashMap::new();
+        src.insert("a".to_string(), Value::Int(1));
+        src.insert("b".to_string(), Value::Int(2));
+        i.state.insert("src".to_string(), Value::HashMap(src));
+        i.state.insert("dest".to_string(), Value::HashMap(std::collections::HashMap::new()));
+        i.eval_expr(&Expr::ArrowTransfer {
+            dest: Box::new(Expr::OwnedRef("dest".to_string())),
+            source: Box::new(Expr::OwnedRef("src".to_string())),
+            filter: None,
+        }).unwrap();
+        match (i.state.get("src").unwrap(), i.state.get("dest").unwrap()) {
+            (Value::HashMap(src), Value::HashMap(dest)) => {
+                assert!(src.is_empty());
+                assert_eq!(dest.len(), 2);
+            }
+            _ => panic!("Expected HashMaps"),
+        }
+    }
+
+    #[test]
+    fn test_multislice_stride() {
+        let mut i = Interpreter::new();
+        let list = Value::List(vec![Value::Int(0), Value::Int(1), Value::Int(2),
+            Value::Int(3), Value::Int(4), Value::Int(5)]);
+        i.state.insert("xs".to_string(), list);
+        // xs[::2] — take every 2nd element
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![BracketOp::Stride(Box::new(Expr::Integer(2)))],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::Int(0), Value::Int(2), Value::Int(4),
+        ]));
+    }
+
+    #[test]
+    fn test_multislice_stride_with_coords() {
+        let mut i = Interpreter::new();
+        let inner1 = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let inner2 = Value::List(vec![Value::Int(4), Value::Int(5), Value::Int(6)]);
+        let inner3 = Value::List(vec![Value::Int(7), Value::Int(8), Value::Int(9)]);
+        let matrix = Value::List(vec![inner1, inner2, inner3]);
+        // matrix[0..3 ::2] — first 3 rows, then every 2nd
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("matrix".to_string())),
+            ops: vec![
+                BracketOp::Coord(SliceCoordinate::Index(Box::new(Expr::Integer(0)))),
+                BracketOp::Stride(Box::new(Expr::Integer(2))),
+            ],
+        };
+        i.state.insert("matrix".to_string(), matrix);
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::List(items) => {
+                assert_eq!(items.len(), 2); // every 2nd of [1,2,3] → [1,3]
+                assert_eq!(items[0], Value::Int(1));
+                assert_eq!(items[1], Value::Int(3));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_multislice_mask() {
+        let mut i = Interpreter::new();
+        let list = Value::List(vec![Value::Int(10), Value::Int(25), Value::Int(5),
+            Value::Int(30), Value::Int(15)]);
+        i.state.insert("xs".to_string(), list);
+        // xs[; _ > 15] — keep elements > 15
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![BracketOp::Mask(Box::new(
+                Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(15)))
+            ))],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::Int(25), Value::Int(30),
+        ]));
+    }
+
+    #[test]
+    fn test_multislice_stride_then_mask() {
+        let mut i = Interpreter::new();
+        let list = Value::List(vec![Value::Int(10), Value::Int(25), Value::Int(5),
+            Value::Int(30), Value::Int(15), Value::Int(40)]);
+        i.state.insert("xs".to_string(), list);
+        // xs[::2 ; _ > 12] — every 2nd, then keep > 12
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![
+                BracketOp::Stride(Box::new(Expr::Integer(2))),
+                BracketOp::Mask(Box::new(
+                    Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
+                        Box::new(Expr::Integer(12)))
+                )),
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        // Every 2nd: [10, 5, 15] → filter > 12: [15]
+        assert_eq!(result, Value::List(vec![Value::Int(15)]));
+    }
+
+    #[test]
+    fn test_multislice_mask_then_stride() {
+        let mut i = Interpreter::new();
+        let list = Value::List(vec![Value::Int(10), Value::Int(25), Value::Int(5),
+            Value::Int(30), Value::Int(15)]);
+        i.state.insert("xs".to_string(), list);
+        // xs[; _ > 12 ::2] — keep > 12, then take every 2nd
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![
+                BracketOp::Mask(Box::new(
+                    Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
+                        Box::new(Expr::Integer(12)))
+                )),
+                BracketOp::Stride(Box::new(Expr::Integer(2))),
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        // Filter > 12: [25, 30, 15] → every 2nd: [25, 15]
+        assert_eq!(result, Value::List(vec![Value::Int(25), Value::Int(15)]));
+    }
+
+    #[test]
+    fn test_slice_with_mask() {
+        let mut i = Interpreter::new();
+        let list = Value::List(vec![Value::Int(10), Value::Int(25), Value::Int(5),
+            Value::Int(30), Value::Int(15)]);
+        i.state.insert("xs".to_string(), list);
+        // xs[0..5 ; _ > 10] — slice then filter
+        let expr = Expr::Slice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            start: None,
+            end: None,
+            stride: None,
+            mask: Some(Box::new(
+                Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(10)))
+            )),
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::Int(25), Value::Int(30), Value::Int(15),
+        ]));
+    }
+
+    #[test]
+    fn test_arrow_transfer_list_with_filter() {
+        let mut i = Interpreter::new();
+        i.state.insert("src".to_string(), Value::List(vec![
+            Value::Int(1), Value::Int(6), Value::Int(3), Value::Int(8), Value::Int(2),
+        ]));
+        i.state.insert("dest".to_string(), Value::List(vec![]));
+        i.eval_expr(&Expr::ArrowTransfer {
+            dest: Box::new(Expr::OwnedRef("dest".to_string())),
+            source: Box::new(Expr::OwnedRef("src".to_string())),
+            filter: Some(Box::new(
+                Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(5)))
+            )),
+        }).unwrap();
+        assert_eq!(i.state.get("src"), Some(&Value::List(vec![
+            Value::Int(1), Value::Int(3), Value::Int(2),
+        ])));
+        assert_eq!(i.state.get("dest"), Some(&Value::List(vec![
+            Value::Int(6), Value::Int(8),
+        ])));
+    }
+
+    #[test]
+    fn test_arrow_transfer_hashmap_with_filter() {
+        let mut i = Interpreter::new();
+        let mut src = std::collections::HashMap::new();
+        src.insert("a".to_string(), Value::Int(10));
+        src.insert("b".to_string(), Value::Int(25));
+        src.insert("c".to_string(), Value::Int(5));
+        i.state.insert("src".to_string(), Value::HashMap(src));
+        i.state.insert("dest".to_string(), Value::HashMap(std::collections::HashMap::new()));
+        i.eval_expr(&Expr::ArrowTransfer {
+            dest: Box::new(Expr::OwnedRef("dest".to_string())),
+            source: Box::new(Expr::OwnedRef("src".to_string())),
+            filter: Some(Box::new(
+                Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(15)))
+            )),
+        }).unwrap();
+        match (i.state.get("src").unwrap(), i.state.get("dest").unwrap()) {
+            (Value::HashMap(src), Value::HashMap(dest)) => {
+                assert_eq!(src.len(), 2); // b=25 moved, a=10 and c=5 stay
+                assert_eq!(dest.len(), 1);
+                assert_eq!(dest.get("b"), Some(&Value::Int(25)));
+            }
+            _ => panic!("Expected HashMaps"),
+        }
+    }
+
+    #[test]
+    fn test_multislice_stride_zero_error() {
+        let mut i = Interpreter::new();
+        let list = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        i.state.insert("xs".to_string(), list);
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![BracketOp::Stride(Box::new(Expr::Integer(0)))],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_multislice_mask_on_non_list_error() {
+        let mut i = Interpreter::new();
+        i.state.insert("xs".to_string(), Value::Int(42));
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![BracketOp::Mask(Box::new(
+                Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(10)))
+            ))],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_multislice_stride_on_non_list_error() {
+        let mut i = Interpreter::new();
+        i.state.insert("xs".to_string(), Value::Int(42));
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![BracketOp::Stride(Box::new(Expr::Integer(2)))],
+        };
+        assert!(i.eval_expr(&expr).is_err());
     }
 }

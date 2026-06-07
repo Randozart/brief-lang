@@ -313,6 +313,18 @@ pub enum ArrowDir {
     Pop,
 }
 
+/// A single operation inside a `MultiSlice` bracket expression.
+/// `list[::3 ; age >= 18 ::2]` parses to `[Stride(3), Mask(age >= 18), Stride(2)]`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BracketOp {
+    /// Dimension coordinate: `5`, `0..10`, `time:5`, `@dim`, `...`
+    Coord(SliceCoordinate),
+    /// Filter/mask: `; age >= 18`
+    Mask(Box<Expr>),
+    /// Stride: `::3`
+    Stride(Box<Expr>),
+}
+
 /// Target of a `:>` projection: `expr :> Size`
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectionTarget {
@@ -330,6 +342,16 @@ pub enum ProjectionTarget {
     PtrBang,
     /// Compile-time DFA regex: `input :> Match("pattern")`
     Match(String),
+    /// Returns a List of all keys in a HashMap: `map :> Keys`
+    Keys,
+    /// Returns a List of all values in a HashMap: `map :> Values`
+    Values,
+    /// Checks if a HashMap or HashSet contains a value: `map :> Contains("key")`
+    Contains(Box<Expr>),
+    /// Pops and returns an arbitrary element from a HashSet: `set :> Pop`
+    Pop,
+    /// Index into a tuple: `pair :> 0` returns first element
+    Index(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -357,6 +379,14 @@ pub enum Expr {
     ArrowDiscard {
         target: Box<Expr>,
         index: Box<Expr>,
+    },
+    /// Two-sided transfer: `&dest <- &source` or `&dest <- &source[; filter]`
+    /// All matching elements move from source to dest.
+    /// `filter` is None for unconditional transfer.
+    ArrowTransfer {
+        dest: Box<Expr>,
+        source: Box<Expr>,
+        filter: Option<Box<Expr>>,
     },
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
@@ -389,6 +419,10 @@ pub enum Expr {
     },
     Call(String, Vec<Expr>),
     ListLiteral(Vec<Expr>),
+    /// HashMap literal: `{"a": 1, "b": 2}`
+    MapLiteral(Vec<(Expr, Expr)>),
+    /// HashSet literal: `{1, 2, 3}`
+    SetLiteral(Vec<Expr>),
     ListIndex(Box<Expr>, Box<Expr>),
     Slice {
         value: Box<Expr>,
@@ -397,11 +431,10 @@ pub enum Expr {
         stride: Option<Box<Expr>>,
         mask: Option<Box<Expr>>,
     },
-    // Multidimensional slice: vec[coord1, coord2, ...; mask]
+    // Multidimensional slice: vec[coord1, coord2, ...; mask :: stride]
     MultiSlice {
         value: Box<Expr>,
-        coordinates: Vec<SliceCoordinate>,
-        mask: Option<Box<Expr>>,
+        ops: Vec<BracketOp>,
     },
 
     FieldAccess(Box<Expr>, String),
@@ -548,6 +581,24 @@ impl Expr {
             }
             Expr::PatternMatch { value, .. } => {
                 value.extract_deps_recursive(deps);
+            }
+            Expr::ArrowTransfer { dest, source, filter } => {
+                dest.extract_deps_recursive(deps);
+                source.extract_deps_recursive(deps);
+                if let Some(f) = filter {
+                    f.extract_deps_recursive(deps);
+                }
+            }
+            Expr::MapLiteral(entries) => {
+                for (k, v) in entries {
+                    k.extract_deps_recursive(deps);
+                    v.extract_deps_recursive(deps);
+                }
+            }
+            Expr::SetLiteral(entries) => {
+                for e in entries {
+                    e.extract_deps_recursive(deps);
+                }
             }
             _ => {} // Float, String, Bool don't add dependencies
         }

@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{BitRange, Contract, Expr, ForeignTarget, Program, Statement, TopLevel, Transaction, Type};
+use crate::ast::{BitRange, BracketOp, Contract, Expr, ForeignTarget, Program, Statement, TopLevel, Transaction, Type};
 use crate::view_compiler::{Binding, Directive};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1725,11 +1725,14 @@ impl WebstackGenerator {
                 let a_val = self.expr_to_js_value(a);
                 format!("JsValue::from(!{}.as_f64().unwrap_or(0.0) as i32)", a_val)
             }
-            Expr::MultiSlice { value, coordinates, mask } => {
+            Expr::MultiSlice { value, ops } => {
                 let val = self.expr_to_js_value(value);
-                let coords: Vec<String> = coordinates.iter().map(|c| self.expr_to_js_slice_coord(c)).collect();
-                let mask_str = mask.as_ref().map(|m| self.expr_to_js_value(m)).unwrap_or_default();
-                format!("// multi_slice: {}[{} ; {}]", val, coords.join(", "), mask_str)
+                let parts: Vec<String> = ops.iter().map(|op| match op {
+                    BracketOp::Coord(c) => self.expr_to_js_slice_coord(c),
+                    BracketOp::Mask(m) => format!("; {}", self.expr_to_js_value(m)),
+                    BracketOp::Stride(s) => format!("::{}", self.expr_to_js_value(s)),
+                }).collect();
+                format!("// multi_slice: {}[{}]", val, parts.join(", "))
             }
             Expr::PatternMatch { value, variant, fields } => {
                 let val = self.expr_to_js_value(value);

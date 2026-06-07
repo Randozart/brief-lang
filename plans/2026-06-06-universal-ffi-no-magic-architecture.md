@@ -1,7 +1,7 @@
 # Universal FFI & No-Magic Architecture
 
-**Date**: 2026-06-06
-**Status**: Master plan — all phases defined, pending implementation
+**Date**: 2026-06-07
+**Status**: Phases 11–13 complete. BracketOp refactor complete. See AGENTS.md for current gaps.
 
 ## Core Philosophy
 
@@ -1153,6 +1153,41 @@ Three forms, one concept: **"these operations must start and finish at the same 
 | 11.7 | Tests | Parser + interpreter + transition graph |
 | 11.8 | AGENTS.md | Note Phase 11 complete, update test count |
 
+### Language Design — Arrow Conventions (`->` vs `<-`)
+
+The two arrow tokens have distinct, non-overlapping roles:
+
+**`->` (Arrow)** — reserved for "eventful" transformations:
+- `defn fn(params) -> RetType` — function return type
+- `term expr -> cleanup` — swan song / commit action triggered after convergence
+
+No mutation. No data movement. Only declaration of what happens *after* a computation completes.
+
+**`<-` (ArrowLeft)** — exclusively for collection mutation and data movement.
+The `&` sigil marks which operand(s) are being mutated:
+
+| Syntax | `&` on left | `&` on right | Semantics |
+|--------|-------------|-------------|-----------|
+| `&list <- value` | ✅ Push | — | Append `value` to tail of `list` |
+| `value <- &list` | — | ✅ Pop | Remove one element from tail of `list` into `value` |
+| `&list[0] <- value` | ✅ Push at index | — | Insert `value` at head of `list` |
+| `value <- &list[0]` | — | ✅ Pop at index | Remove head element of `list` into `value` |
+| `<- &list` | — | ✅ Discard | Pop tail from `list`, throw away |
+| `<- &list[0]` | — | ✅ Discard at index | Pop head from `list`, throw away |
+| `&dest <- &src[; cond]` | ✅ Transfer | ✅ Transfer | Pop all matching elements from `src` into `dest` |
+| `dest <- src[; cond]` | — | — | Query/copy — no mutation |
+
+The `;` inside brackets introduces a mask/filter expression (parsed as `MultiSocket`'s `mask` field).
+
+### Open Work Items
+
+| Item | Scope | Priority |
+|------|-------|----------|
+| **A** — `extract_arrow_target` MultiSocket arm | `parser.rs` only, ~5 min | Immediate (fixes `adults <- &list[; cond]`) |
+| **B** — `Expr::ArrowTransfer` for two-sided `&` | `ast.rs`, `parser.rs`, `interpreter.rs`, all backends, ~1 hr | Immediate (fixes `&dest <- &src[; cond]`) |
+| **C** — Phase 12 | HashMap/HashSet primitives, ~3-4 hr | Next |
+| **D** — Phase 13 | Stack/Queue/Tuple primitives, ~2-3 hr | After C |
+
 ---
 
 ## Phase 12: HashMap/HashSet Primitives (2026-06-07)
@@ -1178,6 +1213,21 @@ let first: Int = set :> Pop;        // 1 (set now {2, 3})
 let m2 = map.insert("c", 3);     // dispatches on Value::HashMap, not fn_name == "insert"
 let exists = set.contains(1);    // dispatches on Value::HashSet
 ```
+
+#### Arrow Syntax for HashMap/HashSet
+
+| Syntax | `&` on left | `&` on right | Semantics |
+|--------|-------------|-------------|-----------|
+| `&map <- (key, value)` | ✅ Push | — | Insert entry (tuple as key-value pair) |
+| `&map[key] <- value` | ✅ Push at key | — | Insert/replace at key (indexed push) |
+| `value <- &map[key]` | — | ✅ Pop at key | Remove by key, return value |
+| `<- &map[key]` | — | ✅ Discard at key | Remove by key, discard |
+| `&set <- value` | ✅ Push | — | Insert into set |
+| `value <- &set` | — | ✅ Pop | Remove arbitrary element |
+| `<- &set` | — | ✅ Discard | Remove arbitrary element, discard |
+| `&dest <- &map[; cond]` | ✅ Transfer | ✅ Transfer | Transfer matching entries between maps |
+
+The right-hand `(key, value)` is a tuple literal — no new parsing needed. `[key]` on map uses the existing list-index bracket syntax. This eliminates the old `fn_name == "insert"` string-match dispatch entirely: the interpreter dispatches on `ArrowMut` variant + `Value` type instead.
 
 ### Implementation Steps
 
@@ -1209,6 +1259,19 @@ let first: Int = pair :> 0;             // projection by index
 // Stack/Queue already have runtime backing via Value::Stack / Value::Queue
 ```
 
+#### Arrow Syntax for Stack/Queue
+
+| Syntax | Semantics |
+|--------|-----------|
+| `&stack <- value` | Push to top |
+| `value <- &stack` | Pop from top |
+| `<- &stack` | Pop from top, discard |
+| `&queue <- value` | Enqueue (push back) |
+| `value <- &queue` | Dequeue (pop front) |
+| `<- &queue` | Dequeue, discard |
+
+Both use the existing `<-` arrow patterns. No new syntax — the interpreter dispatches on `Value::Stack` vs `Value::Queue`.
+
 ### Implementation Steps
 
 | Step | File(s) | Change |
@@ -1218,3 +1281,50 @@ let first: Int = pair :> 0;             // projection by index
 | 13.3 | `stdlib` | `stack.bv` / `queue.bv` become thin wrappers |
 | 13.4 | All backends | Add stubs for new projection targets |
 | 13.5 | Tests | Stack/Queue dispatch, tuple projection |
+
+---
+
+### BracketOp Design — Unified Bracket Operations for `MultiSlice`
+
+`list[::3 ; age >= 18 ::2]` reveals that `coordinates` + `mask` as separate fields is
+too rigid. A flat `Vec<BracketOp>` replaces them for `Expr::MultiSlice`:
+
+```rust
+pub enum BracketOp {
+    Coord(SliceCoordinate),  // `5`, `0..10`, `time:5`, `@dim`, `...`
+    Mask(Box<Expr>),          // `; age >= 18`
+    Stride(Box<Expr>),        // `::3`
+}
+
+MultiSlice {
+    value: Box<Expr>,
+    ops: Vec<BracketOp>,
+}
+```
+
+Semantic order in interpreter: walk `ops` sequentially, maintaining an element stream:
+- `Coord` — dimension navigation / index selection
+- `Mask` — filter the stream
+- `Stride` — decimate the stream (take every Nth)
+
+Example: `list[::3 ; age >= 18 ::2]`
+`ops` = `[Stride(3), Mask(age >= 18), Stride(2)]`
+1. Take every 3rd element from source
+2. Filter to those with `age >= 18`
+3. Take every 2nd of the filtered set
+
+`Expr::Slice` (single-dim) keeps its existing `start`, `end`, `stride`, `mask` fields
+— only `MultiSlice` gets the flat ops list, since it's the only form that needs
+arbitrary ordering of bracket symbols.
+
+`SliceCoordinate` enum stays as-is (used inside `BracketOp::Coord`).
+
+#### Impact
+
+| File | Change |
+|------|--------|
+| `ast.rs` | Add `BracketOp` enum, update `MultiSlice`, remove standalone `mask` field |
+| `parser.rs` | `parse_multi_slice` emits `Vec<BracketOp>`; `::` after `;` becomes `Stride` |
+| `interpreter.rs` | Walk `ops` sequentially instead of `coordinates` + `mask` |
+| All other files | Match arms for `MultiSlice` — field name change from `coordinates`/`mask` to `ops` |
+| `extract_arrow_target` | MultiSlice arm checks for `Coord` ops only (extract index/range) |
