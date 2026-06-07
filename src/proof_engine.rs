@@ -888,7 +888,7 @@ impl SymbolicExecutor {
                     terminated = true;
                     path_kind = PathKind::Escape;
                 }
-                Statement::Expression(_) | Statement::Unification { .. } | Statement::LocalTrigger { .. } => {}
+                Statement::Expression(_) | Statement::Unification { .. } | Statement::SyncBlock { .. } | Statement::LocalTrigger { .. } => {}
                 Statement::Alka(_) | Statement::OnExit { .. } => {}
             }
         }
@@ -2449,7 +2449,8 @@ impl ProofEngine {
     ) {
         for stmt in body {
             match stmt {
-                Statement::Unification {
+                Statement::SyncBlock { .. } => {}
+            Statement::Unification {
                     name,
                     variant,
                     fields: _,
@@ -2847,6 +2848,7 @@ impl ProofEngine {
                     self.collect_write_vars(stmt, vars);
                 }
             }
+            Statement::SyncBlock { .. } => {}
             Statement::Unification { .. } => {}
             Statement::LocalTrigger { .. } => {}
             Statement::Alka(_) | Statement::OnExit { .. } => {}

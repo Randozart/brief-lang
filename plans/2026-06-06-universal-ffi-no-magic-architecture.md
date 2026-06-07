@@ -1140,18 +1140,81 @@ Three forms, one concept: **"these operations must start and finish at the same 
 - **No `let` inside sync blocks**: `let` creates a binding that other statements may depend on, violating the "all start simultaneously" invariant. The parser emits an error.
 - **No nested sync blocks**: Contradicts the barrier model. Parser error.
 
-### Implementation Phases
+### Implementation Steps
 
 | Step | File(s) | Change |
 |------|---------|--------|
 | 11.1 | `lexer.rs` | Add `Token::Sync` keyword |
-| 11.2 | `ast.rs` | Add `sync_domains: Vec<String>` to `Transaction`, `Definition`; add `Statement::SyncBlock { body: Vec<Statement> }` |
-| 11.3 | `parser.rs` | Parse `sync(id...)` prefix on txn/rct txn/defn; parse `sync { body }` as statement. Error on `let` inside sync block. Error on nested sync blocks. |
-| 11.4 | `desugarer.rs` | Propagate `sync_domains` through desugaring |
-| 11.5 | `interpreter.rs` | Execute `SyncBlock` (fallback serial, thread pool with barrier). Enforce sync domain entry/exit barriers in reactor loop. |
-| 11.6 | `analysis/transition_graph.rs` | Group transitions by sync domain; precondition = AND of all members |
-| 11.7 | `backend/llvm.rs` | Stub for `SyncBlock`; entry/exit barrier codegen for sync domain txns |
-| 11.8 | All other backends | Add stub match arm for `Statement::SyncBlock` |
-| 11.9 | Tests | Parser + interpreter + transition graph + all backends still pass |
-| 11.10 | AGENTS.md | Note Phase 11 complete, update test count
+| 11.2 | `ast.rs` | Add `Statement::SyncBlock { body: Vec<Statement> }` |
+| 11.3 | `parser.rs` | Parse `sync(id...)` prefix on txn/rct txn/defn → store as `modifiers: Vec<Hashtag>` entry (`Hashtag { name: "sync", args: [...] }`). Parse `sync { body }` as `Statement::SyncBlock`. Error on `let` inside sync block. Error on nested sync blocks. |
+| 11.4 | `interpreter.rs` | Execute `SyncBlock` (fallback serial). In reactor loop, extract sync groups from `modifiers`; enforce entry/exit barriers. |
+| 11.5 | `analysis/transition_graph.rs` | Group transitions by sync domain extracted from `modifiers`; precondition = AND of all members |
+| 11.6 | All backends | Add stub match arm for `Statement::SyncBlock` |
+| 11.7 | Tests | Parser + interpreter + transition graph |
+| 11.8 | AGENTS.md | Note Phase 11 complete, update test count |
+
+---
+
+## Phase 12: HashMap/HashSet Primitives (2026-06-07)
+
+### Motivation
+
+`HashMap` and `HashSet` are already first-class `Value` variants backed by Rust's native `HashMap` and `HashSet`. But they lack literal syntax, direct dispatch, and `:>` projection targets — forcing users through `__builtin_*` FFI calls and the interpreter through string-match dispatch (an explicit anti-pattern per AGENTS.md).
+
+### Design
+
+```brief
+// Literal syntax (disambiguated from blocks at expression level)
+let map: HashMap<String, Int> = {"a": 1, "b": 2};
+let set: HashSet<Int> = {1, 2, 3};
+
+// Projection targets
+let n: Int = map :> Size;           // 2
+let ks: List<String> = map :> Keys; // ["a", "b"]
+let has: Bool = map :> Contains("a"); // true
+let first: Int = set :> Pop;        // 1 (set now {2, 3})
+
+// Direct dispatch (no string-match)
+let m2 = map.insert("c", 3);     // dispatches on Value::HashMap, not fn_name == "insert"
+let exists = set.contains(1);    // dispatches on Value::HashSet
 ```
+
+### Implementation Steps
+
+| Step | File(s) | Change |
+|------|---------|--------|
+| 12.1 | `lexer.rs` | Handle `{` at expression level as dict/set literal opener (vs block at statement level) |
+| 12.2 | `ast.rs` | Add `Expr::MapLiteral { entries: Vec<(Expr, Expr)> }`, `Expr::SetLiteral { entries: Vec<Expr> }`, `ProjectionTarget::Keys`, `ProjectionTarget::Values`, `ProjectionTarget::Contains(Expr)`, `ProjectionTarget::Pop` |
+| 12.3 | `parser.rs` | `{` after `=`, `,`, `(`, `[`, infix op → expression literal; `{` after statement keyword → block |
+| 12.4 | `interpreter.rs` | Evaluate `MapLiteral`/`SetLiteral` directly. Eliminate all `dispatch_method_by_type` string matches for `insert`, `keys`, `values`, `contains`, `contains_key`, `get`, `remove`, `clear`, `is_empty`, `len` — dispatch on `Value::HashMap` / `Value::HashSet` variant directly |
+| 12.5 | `stdlib` | `hashmap.bv` / `hashset.bv` become thin wrappers (or eliminated) |
+| 12.6 | All backends | Add stubs for `MapLiteral`, `SetLiteral`, new projection targets |
+| 12.7 | Tests | Literal parsing, interpreter dispatch, projection targets |
+
+---
+
+## Phase 13: Stack/Queue/Tuple Primitives (2026-06-07)
+
+### Motivation
+
+Same rationale as Phase 12, extended to Stack (`Vec`), Queue (`VecDeque`), and Tuple (currently flattened to `Value::List`). These complete the collection-primitive story.
+
+### Design
+
+```brief
+// True tuple type (not flattened to List)
+let pair: (Int, String) = (1, "hello");
+let first: Int = pair :> 0;             // projection by index
+
+// Stack/Queue already have runtime backing via Value::Stack / Value::Queue
+```
+
+### Implementation Steps
+
+| Step | File(s) | Change |
+|------|---------|--------|
+| 13.1 | `ast.rs` | Add `Value::Tuple(Vec<Value>)` as a true distinct variant. Add `ProjectionTarget::Index(usize)` for tuple indexing. |
+| 13.2 | `interpreter.rs` | Stack operations dispatch on `Value::Stack`, Queue on `Value::Queue`. String-match elimination for `push`, `pop`, `enqueue`, `dequeue`, `peek`. |
+| 13.3 | `stdlib` | `stack.bv` / `queue.bv` become thin wrappers |
+| 13.4 | All backends | Add stubs for new projection targets |
+| 13.5 | Tests | Stack/Queue dispatch, tuple projection |

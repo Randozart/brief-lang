@@ -252,6 +252,7 @@ impl<'a> DataflowAnalyzer<'a> {
                 }
             }
             Statement::InlineAsm { .. } | Statement::Alka(_) => {}
+            Statement::SyncBlock { .. } => {}
         }
     }
 

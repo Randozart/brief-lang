@@ -648,6 +648,12 @@ pub enum Statement {
         body: Vec<Statement>,
         span: Option<Span>,
     },
+
+    // Sync block: sync { stmt1; stmt2; ... };
+    // Fork-join barrier — all statements start and finish simultaneously.
+    SyncBlock {
+        body: Vec<Statement>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -912,6 +918,10 @@ pub enum TopLevel {
         name: String,
         content: String,
     },
+    SyncGroup {
+        domains: Vec<String>,
+        item: Box<TopLevel>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -969,6 +979,7 @@ impl StructDefinition {
             variants: Vec::new(),
         }
     }
+
 }
 
 #[derive(Debug, Clone)]

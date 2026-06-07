@@ -654,6 +654,25 @@ impl<'a> Parser<'a> {
                 let constant = self.parse_constant()?;
                 Ok(TopLevel::Constant(constant))
             }
+            Some(Ok(Token::Sync)) => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let mut domains = Vec::new();
+                loop {
+                    let domain = self.expect_identifier()?;
+                    domains.push(domain);
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                        self.advance();
+                        break;
+                    }
+                    self.expect(Token::Comma)?;
+                }
+                let item = self.parse_top_level()?;
+                Ok(TopLevel::SyncGroup {
+                    domains,
+                    item: Box::new(item),
+                })
+            }
             Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Async)) => {
                 let mut txn = self.parse_transaction()?;
                 txn.attrs = attrs;
@@ -1340,7 +1359,7 @@ impl<'a> Parser<'a> {
             span,
             modifiers: Vec::new(),
             variants,
-        })
+     })
     }
 
     fn parse_struct_variants(&mut self) -> Result<Vec<StructVariant>, SyntaxError> {
@@ -1593,7 +1612,7 @@ impl<'a> Parser<'a> {
             transactions,
             view_html,
             span,
-        })
+     })
     }
 
     fn parse_enum(&mut self) -> Result<EnumDefinition, SyntaxError> {
@@ -3620,6 +3639,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     modifiers,
                 })
                 }
+            }
+            Some(Ok(Token::Sync)) => {
+                self.advance();
+                self.expect(Token::LBrace)?;
+                let body = self.parse_body()?;
+                self.expect(Token::RBrace)?;
+                Ok(Statement::SyncBlock { body })
             }
             Some(Ok(Token::Term)) => {
                 self.advance();

@@ -301,6 +301,10 @@ impl Reactor {
                 // TODO: Full async yield/await semantics with rollback support
                 Ok(StmtResult::Continue)
             }
+            Statement::SyncBlock { .. } => {
+                interp.exec_stmt(stmt)?;
+                Ok(StmtResult::Continue)
+            }
             Statement::Alka(_) | Statement::OnExit { .. } => Ok(StmtResult::Continue),
         }
     }

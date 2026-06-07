@@ -119,6 +119,7 @@ impl WasmBackend {
                     writeln!(output, "    local.set ${}", name).ok();
                 }
             }
+            Statement::SyncBlock { .. } => {}
             Statement::Unification { name, variant, fields: _, expr } => {
                 self.generate_expr(output, expr);
                 writeln!(output, "    ;; unification: {} {} (value on stack)", name, variant).ok();

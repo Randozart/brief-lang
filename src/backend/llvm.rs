@@ -2666,6 +2666,7 @@ self.emit_declares(&mut out);
                     self.terminated = prev_terminated;
                 }
             }
+            Statement::SyncBlock { .. } => {}
             Statement::Unification { name, variant, fields: _, expr } => {
                 let val = self.emit_expr(out, expr, indent);
                 let disc = format!("%ud{}", self.txn_counter); self.txn_counter += 1;

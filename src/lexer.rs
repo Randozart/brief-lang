@@ -172,6 +172,10 @@ pub enum Token {
     #[token("MATCH")]
     Match,
 
+    #[token("sync")]
+    #[token("SYNC")]
+    Sync,
+
     #[token("some")]
     #[token("SOME")]
     Some,

@@ -1295,6 +1295,7 @@ fn count_statements_recursive(body: &[Statement]) -> usize {
             Statement::Term { .. } | Statement::TermBang { .. } | Statement::Unification { .. }
             | Statement::InlineAsm { .. } | Statement::Alka(_)
             | Statement::LocalTrigger { .. } | Statement::Escape(_) => 1,
+            Statement::SyncBlock { body } => 1 + count_statements_recursive(body),
         }
     }).sum()
 }
@@ -1315,6 +1316,7 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
         Statement::Escape(_) => false,
         Statement::OnExit { body, .. } => body.iter().any(|s| has_ffi_or_terminator_stmt(s)),
         Statement::LocalTrigger { .. } => false,
+        Statement::SyncBlock { .. } => false,
     }
 }
 
@@ -1340,6 +1342,7 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, _trigger_vars: &HashSet<String>) ->
         Statement::Escape(_) => false,
         Statement::OnExit { body, .. } => body.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars)),
         Statement::LocalTrigger { .. } => false,
+        Statement::SyncBlock { .. } => false,
     }
 }
 
@@ -1490,6 +1493,7 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
             }
         }
         Statement::Escape(e) => Statement::Escape(e.as_ref().map(|x| substitute_expr(x, old_var, new_expr))),
+        Statement::SyncBlock { body } => Statement::SyncBlock { body: body.clone() },
         Statement::Unification { name, variant, fields, expr } => {
             Statement::Unification {
                 name: name.clone(),

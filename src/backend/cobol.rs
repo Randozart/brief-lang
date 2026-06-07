@@ -509,6 +509,7 @@ impl CobolBackend {
             Statement::InlineAsm { asm_string, .. } => {
                 output.push_str(&format!("    *> asm: {}\n", asm_string));
             }
+            Statement::SyncBlock { .. } => {}
             Statement::Unification { name, variant, fields: _, expr } => {
                 let expr_str = self.translate_expr(expr);
                 output.push_str(&format!("    *> unification: {} {} = {}\n", name, variant, expr_str));

@@ -892,6 +892,7 @@ impl VhdlGenerator {
                     let _ = write!(output, "{}-- asm: {} (clobbers: {})\n", indent, asm_string, clobber_list);
                 }
             }
+            Statement::SyncBlock { .. } => {}
             Statement::Unification { name, variant, fields: _, expr } => {
                 let expr_code = self.expr_to_string(expr);
                 let _ = write!(output, "{}-- uni {}({}) = {}\n", indent, name, variant, expr_code);

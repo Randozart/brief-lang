@@ -741,6 +741,18 @@ impl Interpreter {
                 if !txn.is_reactive {
                     self.callable_txns.insert(txn.name.clone(), txn.clone());
                 }
+            } else if let TopLevel::SyncGroup { item: inner, .. } = item {
+                match &**inner {
+                    TopLevel::Definition(defn) => {
+                        self.definitions.insert(defn.name.clone(), defn.clone());
+                    }
+                    TopLevel::Transaction(txn) => {
+                        if !txn.is_reactive {
+                            self.callable_txns.insert(txn.name.clone(), txn.clone());
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -786,6 +798,39 @@ impl Interpreter {
                                 }
                             }
                             // If escaped, state is already restored and we continue
+                        }
+                    }
+                } else if let TopLevel::SyncGroup { item: inner, .. } = item {
+                    if let TopLevel::Transaction(txn) = &**inner {
+                        if txn.is_reactive {
+                            let pre_val = self.eval_expr(&txn.contract.pre_condition)?;
+                            if pre_val == Value::Bool(true) {
+                                self.prior_state = self.state.clone();
+                                let mut transaction_escaped = false;
+                                let mut transaction_failed = false;
+                                for stmt in &txn.body {
+                                    if let Err(e) = self.exec_stmt(stmt) {
+                                        match e {
+                                            RuntimeError::Escaped => {
+                                                transaction_escaped = true;
+                                            }
+                                            _ => {
+                                                self.state = self.prior_state.clone();
+                                                transaction_failed = true;
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                                if !transaction_failed && !transaction_escaped {
+                                    let post_val = self.eval_expr(&txn.contract.post_condition)?;
+                                    if post_val != Value::Bool(true) {
+                                        self.state = self.prior_state.clone();
+                                    } else if self.state != self.prior_state {
+                                        executed = true;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -943,6 +988,11 @@ impl Interpreter {
                     for stmt in statements {
                         self.exec_stmt(stmt)?;
                     }
+                }
+            }
+            Statement::SyncBlock { body } => {
+                for stmt in body {
+                    self.exec_stmt(stmt)?;
                 }
             }
             Statement::Unification {
