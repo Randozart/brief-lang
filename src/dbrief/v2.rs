@@ -17,6 +17,9 @@ pub struct DbriefDocument {
     pub schemas: Vec<SchemaDef>,
     pub data_groups: Vec<DataGroup>,
     pub rules: Vec<RuleDef>,
+    /// Key → byte offset index for lazy loading (populated when track_offsets is enabled)
+    #[serde(skip)]
+    pub key_offsets: std::collections::HashMap<String, Vec<usize>>,
 }
 
 /// A schema definition (from .dbvs or inline in .dbv)
@@ -104,14 +107,28 @@ pub fn parse_document(input: &str) -> Result<DbriefDocument, String> {
     parser.parse()
 }
 
+pub fn parse_document_track_offsets(input: &str) -> Result<DbriefDocument, String> {
+    let mut parser = Parser::new(input.to_string());
+    parser.track_offsets = true;
+    parser.parse()
+}
+
 struct Parser {
     input: String,
     pos: usize,
+    track_offsets: bool,
+    /// Accumulated key → byte offsets during parsing
+    offsets: std::collections::HashMap<String, Vec<usize>>,
 }
 
 impl Parser {
     fn new(input: String) -> Self {
-        Parser { input, pos: 0 }
+        Parser {
+            input,
+            pos: 0,
+            track_offsets: false,
+            offsets: std::collections::HashMap::new(),
+        }
     }
 
     fn parse(&mut self) -> Result<DbriefDocument, String> {
@@ -120,6 +137,7 @@ impl Parser {
             schemas: Vec::new(),
             data_groups: Vec::new(),
             rules: Vec::new(),
+            key_offsets: std::collections::HashMap::new(),
         };
 
         loop {
@@ -147,7 +165,18 @@ impl Parser {
                 }
                 // as Schema { ... } — grouped data
                 'a' | 'A' if self.starts_with_ignore_case("as") => {
+                    let offset = if self.track_offsets { Some(self.pos) } else { None };
                     let group = self.parse_grouped_data()?;
+                    if let Some(off) = offset {
+                        for entry in &group.entries {
+                            if let Some(ref key) = entry.key {
+                                doc.key_offsets
+                                    .entry(key.clone())
+                                    .or_default()
+                                    .push(off);
+                            }
+                        }
+                    }
                     doc.data_groups.push(group);
                 }
                 // key as Schema { ... } — keyed data entry
@@ -158,7 +187,16 @@ impl Parser {
                 }
                 // Must be a data entry line (positional or keyed)
                 _ => {
+                    let offset = if self.track_offsets { Some(self.pos) } else { None };
                     let entry = self.parse_data_line()?;
+                    if let (true, Some(off)) = (self.track_offsets, offset) {
+                        if let Some(ref key) = entry.key {
+                            doc.key_offsets
+                                .entry(key.clone())
+                                .or_default()
+                                .push(off);
+                        }
+                    }
                     // Propagate entry's schema_name to the group if set
                     let group = DataGroup {
                         schema_name: entry.schema_name.clone(),

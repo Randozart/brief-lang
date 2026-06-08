@@ -20,10 +20,21 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Import, ImportItem, Program, StrictMode, TopLevel};
+use crate::ast::{Import, ImportItem, Program, StrictMode, TopLevel, Expr};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use crate::dbrief::v2 as dbrief_v2;
+
+/// Recursively fill in the `path` field of any `Expr::DbvlTable` in an expression tree.
+fn inject_dbvl_path(expr: &mut Expr, file_path: &str) {
+    if let Expr::MapLiteral(pairs) = expr {
+        for (_, val) in pairs.iter_mut() {
+            inject_dbvl_path(val, file_path);
+        }
+    } else {
+        expr.set_dbvl_path(file_path);
+    }
+}
 
 pub struct ImportResolver {
     loaded_modules: HashMap<String, Program>,
@@ -260,8 +271,14 @@ self.loaded_modules.insert(
             let content = std::fs::read_to_string(&dbrief_path)
                 .map_err(|e| format!("Failed to read DBrief file '{}': {}", dbrief_path.display(), e))?;
 
-            let doc = dbrief_v2::parse_document(&content)
-                .map_err(|e| format!("Failed to parse DBrief file '{}': {}", dbrief_path.display(), e))?;
+            let is_dbvl = path_str.ends_with(".dbvl");
+
+            // For .dbvl files, use offset-tracking parser for lazy loading
+            let doc = if is_dbvl {
+                dbrief_v2::parse_document_track_offsets(&content)
+            } else {
+                dbrief_v2::parse_document(&content)
+            }.map_err(|e| format!("Failed to parse DBrief file '{}': {}", dbrief_path.display(), e))?;
 
             // Determine the constant name from import items
             let constant_name = import
@@ -277,7 +294,26 @@ self.loaded_modules.insert(
                     fname
                 });
 
-            let dbrief_items = crate::dbrief::bridge::document_to_program(&doc, &constant_name);
+            let file_path_str = dbrief_path.to_string_lossy().to_string();
+
+            // Generate program items, then fill in the path for lazy DbvlTable entries
+            let mut dbrief_items = crate::dbrief::bridge::document_to_program_flags(
+                &doc, &constant_name, is_dbvl,
+            );
+
+            // Fill in the file path for any lazy DbvlTable expressions
+            let file_path_clone = file_path_str.clone();
+            for item in &mut dbrief_items {
+                if let crate::ast::TopLevel::Constant(c) = item {
+                    if let crate::ast::Expr::MapLiteral(pairs) = &mut c.expr {
+                        for (_, val) in pairs.iter_mut() {
+                            val.set_dbvl_path(&file_path_clone);
+                        }
+                    } else {
+                        c.expr.set_dbvl_path(&file_path_clone);
+                    }
+                }
+            }
 
             let program_for_cache = Program {
                 items: dbrief_items.clone(),

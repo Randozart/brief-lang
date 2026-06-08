@@ -477,6 +477,23 @@ pub enum Expr {
         source: Box<Expr>,
         ops: Vec<SubtypeOp>,
     },
+    /// Lazy-loaded DBVL table for large-file imports.
+    /// Evaluates to Value::DbvlTable — users see it as a Map.
+    DbvlTable {
+        path: String,
+        field_names: Vec<String>,
+        key_offsets: HashMap<String, Vec<usize>>,
+        schema_name: Option<String>,
+    },
+}
+
+impl Expr {
+    /// Set the file path on a DbvlTable expression (used by import resolver).
+    pub fn set_dbvl_path(&mut self, file_path: &str) {
+        if let Self::DbvlTable { path, .. } = self {
+            path.clone_from(&file_path.to_string());
+        }
+    }
 }
 
 /// A pattern in a match arm: `Variant(f1, f2)` or `_`

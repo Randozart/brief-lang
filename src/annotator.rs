@@ -560,6 +560,9 @@ impl Annotator {
                 let elems: Vec<String> = entries.iter().map(|e| self.format_expr(e)).collect();
                 format!("{{{}}}", elems.join(", "))
             }
+            Expr::DbvlTable { path, key_offsets, .. } => {
+                format!("DbvlTable({}, {} entries)", path, key_offsets.len())
+            }
             Expr::SubtypeProjection { source, .. } => {
                 format!("<: {}", self.format_expr(source))
             }

@@ -2385,6 +2385,7 @@ impl ProofEngine {
                     self.collect_identifiers(e, vars);
                 }
             }
+            Expr::DbvlTable { .. } => {}
             Expr::SubtypeProjection { source, .. } => {
                 self.collect_identifiers(source, vars);
             }

@@ -6,7 +6,13 @@ use std::collections::HashMap;
 
 /// Convert a parsed DbriefDocument into a Vec of Brief TopLevel items.
 /// `name` is the import alias (e.g. "data" from `import data from "file.dbv"`).
+/// `use_lazy` — if true, creates Expr::DbvlTable for schema-typed data with key_offsets.
 pub fn document_to_program(doc: &DbriefDocument, name: &str) -> Vec<ast::TopLevel> {
+    document_to_program_flags(doc, name, false)
+}
+
+/// Like `document_to_program` but with option for lazy DBVL loading.
+pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: bool) -> Vec<ast::TopLevel> {
     let mut items: Vec<ast::TopLevel> = Vec::new();
 
     // 1. Convert schemas to Struct definitions
@@ -15,7 +21,6 @@ pub fn document_to_program(doc: &DbriefDocument, name: &str) -> Vec<ast::TopLeve
     }
 
     // 2. Convert data groups into a constant named by the import alias.
-    //    The constant value is a MapLiteral from schema-name → entries.
     if !doc.data_groups.is_empty() {
         let mut data_map: Vec<(ast::Expr, ast::Expr)> = Vec::new();
 
@@ -25,32 +30,54 @@ pub fn document_to_program(doc: &DbriefDocument, name: &str) -> Vec<ast::TopLeve
                 None => "_".to_string(),
             };
 
-            // Convert entries to a map: key → instance
-            let mut entry_map: Vec<(ast::Expr, ast::Expr)> = Vec::new();
-            for entry in &group.entries {
-                let key_expr = match &entry.key {
-                    Some(k) => ast::Expr::String(k.clone()),
-                    None => ast::Expr::Integer(entry_map.len() as i64),
-                };
-                let val_expr = data_entry_to_expr(entry, group.schema_name.as_deref(), &doc.schemas);
-                entry_map.push((key_expr, val_expr));
-            }
+            // Check if we can use lazy DbvlTable
+            let can_use_lazy = use_lazy
+                && group.schema_name.is_some()
+                && !doc.key_offsets.is_empty();
 
-            data_map.push((
-                ast::Expr::String(group_name),
-                ast::Expr::MapLiteral(entry_map),
-            ));
+            if can_use_lazy {
+                // Create lazy DbvlTable — builds key-offset index
+                let field_names: Vec<String> = group.entries.iter()
+                    .filter_map(|e| e.key.clone())
+                    .collect();
+                // Use schema field names for proper ordering
+                let schema_field_names = doc.schemas.iter()
+                    .find(|s| Some(s.name.as_str()) == group.schema_name.as_deref())
+                    .map(|s| s.fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
+                    .unwrap_or_else(|| field_names.clone());
+
+                data_map.push((
+                    ast::Expr::String(group_name),
+                    ast::Expr::DbvlTable {
+                        path: String::new(),               // filled in by the import resolver
+                        field_names: schema_field_names,
+                        key_offsets: doc.key_offsets.clone(),
+                        schema_name: group.schema_name.clone(),
+                    },
+                ));
+            } else {
+                // Full materialization — convert all entries
+                let mut entry_map: Vec<(ast::Expr, ast::Expr)> = Vec::new();
+                for entry in &group.entries {
+                    let key_expr = match &entry.key {
+                        Some(k) => ast::Expr::String(k.clone()),
+                        None => ast::Expr::Integer(entry_map.len() as i64),
+                    };
+                    let val_expr = data_entry_to_expr(entry, group.schema_name.as_deref(), &doc.schemas);
+                    entry_map.push((key_expr, val_expr));
+                }
+                data_map.push((
+                    ast::Expr::String(group_name),
+                    ast::Expr::MapLiteral(entry_map),
+                ));
+            }
         }
 
         // If only one group and it has no schema name, use value directly
-        let value = if doc.data_groups.len() == 1 && doc.data_groups[0].schema_name.is_none() {
+        let value = if data_map.len() == 1 && doc.data_groups[0].schema_name.is_none() && doc.data_groups[0].entries.len() == 1 {
             let group = &doc.data_groups[0];
             if group.entries.len() == 1 && group.entries[0].fields.len() == 1 {
-                // Single anonymous value — unwrap
                 data_field_to_expr(&group.entries[0].fields[0])
-            } else if group.entries.len() == 1 {
-                // Single entry with multiple fields — make a struct instance
-                data_entry_to_expr(&group.entries[0], None, &doc.schemas)
             } else {
                 ast::Expr::MapLiteral(data_map)
             }

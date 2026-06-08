@@ -28,6 +28,22 @@ use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
+/// Metadata for a lazy-loaded DBVL table with key-offset index
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DbvlTableInner {
+    pub path: String,
+    /// Key → byte offset(s) in the file (Vec supports duplicate keys)
+    pub key_offsets: HashMap<String, Vec<usize>>,
+    /// Field names from schema, in order
+    pub field_names: Vec<String>,
+    /// Schema name this table conforms to
+    pub schema_name: Option<String>,
+    /// Index of the key field (default 0)
+    pub schema_key_index: Option<usize>,
+}
+
+use std::sync::Arc;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
@@ -50,6 +66,9 @@ pub enum Value {
     Enum(String, String, HashMap<String, Value>), // (enum_name, variant_name, fields)
     Defn(String),
     Void,
+    /// Lazy-loaded DBVL table with key-offset index.
+    /// Users see it as a Map[String, T] — the DbvlTable type is internal.
+    DbvlTable(Arc<DbvlTableInner>),
 }
 
 impl fmt::Display for Value {
@@ -76,6 +95,10 @@ impl fmt::Display for Value {
             }
             Value::Defn(name) => write!(f, "<defn {}>", name),
             Value::Void => write!(f, "void"),
+            Value::DbvlTable(t) => {
+                let schema = t.schema_name.as_deref().unwrap_or("?");
+                write!(f, "<DbvlTable {} '{}' ({} entries, lazy)>", schema, t.path, t.key_offsets.len())
+            }
         }
     }
 }
@@ -137,6 +160,12 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
         Value::Data(_) => JsonValue::Null,
         Value::Defn(_) => JsonValue::Null,
         Value::Void => JsonValue::Null,
+        Value::DbvlTable(t) => {
+            let mut map = serde_json::Map::new();
+            map.insert("__lazy".to_string(), JsonValue::String(t.path.clone()));
+            map.insert("entries".to_string(), JsonValue::Number(t.key_offsets.len().into()));
+            JsonValue::Object(map)
+        }
     }
 }
 
@@ -202,6 +231,8 @@ pub struct Interpreter {
     pub branch_counts: HashMap<String, (u64, u64)>,
     guard_counter: usize,
     pub enum_variants: HashMap<String, EnumVariantInfo>,
+    /// Cache for lazy-loaded DBVL table entries: path → key → values
+    pub dbvl_cache: HashMap<String, HashMap<String, Vec<Value>>>,
 }
 
 impl Interpreter {
@@ -223,6 +254,7 @@ impl Interpreter {
             branch_counts: HashMap::new(),
             guard_counter: 0,
             enum_variants: HashMap::new(),
+            dbvl_cache: HashMap::new(),
         }
     }
 
@@ -1847,6 +1879,19 @@ Expr::Ge(l, r) => {
                             Ok(items[idx as usize].clone())
                         }
                     }
+                    (Value::DbvlTable(table), Value::String(key)) => {
+                        let results = self.resolve_dbvl_key(&table, &key)?;
+                        if results.len() == 1 {
+                            Ok(results.into_iter().next().unwrap())
+                        } else if results.is_empty() {
+                            Err(RuntimeError::TypeMismatch(
+                                format!("Key '{}' not found in DBVL table", key),
+                            ))
+                        } else {
+                            // Multiple matching lines → return as List
+                            Ok(Value::List(results))
+                        }
+                    }
                     _ => Err(RuntimeError::TypeMismatch(
                         "List indexing requires List and Int".to_string(),
                     )),
@@ -1957,6 +2002,7 @@ Expr::Ge(l, r) => {
                             Value::Instance { .. } => 14,
                             Value::Enum { .. } => 15,
                             Value::Defn(_) => 16,
+                            Value::DbvlTable(_) => 17,
                             Value::Void => 0,
                         };
                         Ok(Value::Int(discriminant))
@@ -2402,6 +2448,15 @@ let s_val = self.eval_expr(s)?;
                 let source_val = self.eval_expr(source)?;
                 self.eval_subtype_projection(source_val, ops)
             }
+            Expr::DbvlTable { path, field_names, key_offsets, schema_name } => {
+                Ok(Value::DbvlTable(Arc::new(DbvlTableInner {
+                    path: path.clone(),
+                    key_offsets: key_offsets.clone(),
+                    field_names: field_names.clone(),
+                    schema_name: schema_name.clone(),
+                    schema_key_index: Some(0),
+                })))
+            }
             Expr::Match { value, arms } => {
                 let target = self.eval_expr(value)?;
                 for arm in arms {
@@ -2661,6 +2716,118 @@ Err(RuntimeError::TypeMismatch(
             Ok(Value::List(items))
         }
     }
+
+    /// Resolve a key in a lazy-loaded DbvlTable.
+    /// Checks cache first, then seeks + parses the line from the file.
+    fn resolve_dbvl_key(&mut self, table: &DbvlTableInner, key: &str) -> Result<Vec<Value>, RuntimeError> {
+        // Check cache
+        if let Some(entry_cache) = self.dbvl_cache.get(&table.path) {
+            if let Some(values) = entry_cache.get(key) {
+                return Ok(values.clone());
+            }
+        }
+
+        // Look up key in offset index
+        let offsets = match table.key_offsets.get(key) {
+            Some(offsets) => offsets.clone(),
+            None => return Ok(vec![]), // key not found
+        };
+
+        // Read the file
+        let content = std::fs::read_to_string(&table.path)
+            .map_err(|e| RuntimeError::TypeMismatch(
+                format!("Failed to read DBVL file '{}': {}", table.path, e)
+            ))?;
+
+        let mut results = Vec::new();
+        for &offset in &offsets {
+            // Extract line at byte offset
+            let rest = &content[offset..];
+            let line = rest.lines().next().unwrap_or("");
+
+            // Parse CSV line into values
+            let values = parse_csv_line(line);
+            let mut field_map = HashMap::new();
+            for (i, val) in values.iter().enumerate() {
+                let field_name = table.field_names.get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("field_{}", i));
+                field_map.insert(field_name, val.clone());
+            }
+
+            let entry = match &table.schema_name {
+                Some(schema) => {
+                    // Try to match field names to schema positions
+                    let mut named_fields: Vec<(String, Value)> = Vec::new();
+                    for (i, val) in values.iter().enumerate() {
+                        if i < table.field_names.len() {
+                            named_fields.push((table.field_names[i].clone(), val.clone()));
+                        }
+                    }
+                    Value::Instance {
+                        typename: schema.clone(),
+                        fields: named_fields.into_iter().collect(),
+                    }
+                }
+                None => Value::HashMap(field_map),
+            };
+            results.push(entry);
+        }
+
+        // Cache the result
+        self.dbvl_cache
+            .entry(table.path.clone())
+            .or_default()
+            .insert(key.to_string(), results.clone());
+
+        Ok(results)
+    }
+}
+
+/// Parse a single CSV line into Values (lightweight, for lazy dbvl loading)
+fn parse_csv_line(line: &str) -> Vec<Value> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for ch in line.chars() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+            }
+            ',' if !in_quotes => {
+                result.push(parse_csv_value(current.trim()));
+                current = String::new();
+            }
+            c => {
+                current.push(c);
+            }
+        }
+    }
+    result.push(parse_csv_value(current.trim()));
+
+    result
+}
+
+/// Parse a single CSV field value into a Brief Value
+fn parse_csv_value(s: &str) -> Value {
+    // Try int first
+    if let Ok(n) = s.parse::<i64>() {
+        return Value::Int(n);
+    }
+    // Try float
+    if let Ok(f) = s.parse::<f64>() {
+        return Value::Float(f);
+    }
+    // Bool
+    if s == "true" {
+        return Value::Bool(true);
+    }
+    if s == "false" {
+        return Value::Bool(false);
+    }
+    // Default: string
+    Value::String(s.to_string())
 }
 
 pub(crate) fn print_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
