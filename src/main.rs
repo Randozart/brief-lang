@@ -1951,6 +1951,43 @@ fn compile_to_bitcode(source: &Path, lang: ast::LinkLanguage, output: &Path, has
             cmd.arg(output).arg(source);
             cmd.output().ok()
         }
+        ast::LinkLanguage::Java => {
+            // javac → native-image --llvm --emit-llvm-bc
+            let class_name = source.file_stem().and_then(|s| s.to_str()).unwrap_or("Main");
+            let class_dir = output.parent().unwrap_or(Path::new("."));
+            let javac = std::process::Command::new("javac")
+                .arg("-d").arg(class_dir)
+                .arg(source)
+                .output().ok()?;
+            if !javac.status.success() {
+                let stderr = String::from_utf8_lossy(&javac.stderr);
+                eprintln!("  Error compiling Java '{}': {}", source.display(), stderr.lines().next().unwrap_or("unknown error"));
+                return None;
+            }
+            let class_file = class_dir.join(format!("{}.class", class_name));
+            let mut cmd = std::process::Command::new("native-image");
+            cmd.args(["--llvm", "--emit-llvm-bc", "-O3", "-o"])
+                .arg(output)
+                .arg(&class_file);
+            cmd.output().ok()
+        }
+        ast::LinkLanguage::AssemblyScript => {
+            // asc → .wasm → wasm2llvm → .bc
+            let wasm_path = output.with_extension("wasm");
+            let asc = std::process::Command::new("asc")
+                .args(["--optimize", "--outFile"])
+                .arg(&wasm_path)
+                .arg(source)
+                .output().ok()?;
+            if !asc.status.success() {
+                let stderr = String::from_utf8_lossy(&asc.stderr);
+                eprintln!("  Error compiling AssemblyScript '{}': {}", source.display(), stderr.lines().next().unwrap_or("unknown error"));
+                return None;
+            }
+            let mut cmd = std::process::Command::new("wasm2llvm");
+            cmd.args(["--out"]).arg(output).arg(&wasm_path);
+            cmd.output().ok()
+        }
         ast::LinkLanguage::Bitcode => {
             fs::copy(source, output).ok()?;
             return Some(());

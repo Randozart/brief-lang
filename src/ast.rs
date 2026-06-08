@@ -939,13 +939,15 @@ pub struct ImportItem {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LinkLanguage {
-    C,        // .c
-    Cpp,      // .cpp / .cc / .cxx
-    Rust,     // .rs
-    Zig,      // .zig
-    Python,   // .py
-    Bitcode,  // .bc
-    Object,   // .o / .a
+    C,              // .c
+    Cpp,            // .cpp / .cc / .cxx
+    Rust,           // .rs
+    Zig,            // .zig
+    Python,         // .py
+    Java,           // .java → native-image --llvm --emit-llvm-bc
+    AssemblyScript, // .ts   → asc → .wasm → wasm2llvm → .bc
+    Bitcode,        // .bc
+    Object,         // .o / .a
 }
 
 #[derive(Debug, Clone)]

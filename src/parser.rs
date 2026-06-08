@@ -823,13 +823,17 @@ impl<'a> Parser<'a> {
                 crate::ast::LinkLanguage::Zig
             } else if last.ends_with(".py") {
                 crate::ast::LinkLanguage::Python
+            } else if last.ends_with(".java") {
+                crate::ast::LinkLanguage::Java
+            } else if last.ends_with(".ts") || last.ends_with(".as.ts") {
+                crate::ast::LinkLanguage::AssemblyScript
             } else if last.ends_with(".bc") {
                 crate::ast::LinkLanguage::Bitcode
             } else if last.ends_with(".o") || last.ends_with(".a") {
                 crate::ast::LinkLanguage::Object
             } else {
                 return self.spanned_err(
-                    format!("Unsupported link dependency extension: '{}'. Supported: .c, .cpp, .rs, .zig, .py, .bc, .o, .a", last)
+                    format!("Unsupported link dependency extension: '{}'. Supported: .c, .cpp, .rs, .zig, .py, .java, .ts, .bc, .o, .a", last)
                 );
             };
 

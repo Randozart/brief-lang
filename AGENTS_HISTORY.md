@@ -607,3 +607,23 @@ New analysis module implementing the 6-step trigger preemptibility proof from th
 - Non-trigger watchdogs skipped, natural death without watchdog
 - Precondition variable extraction, trigger-in-guard detection
 - Handler writes through Guarded blocks (recursive inspection)
+
+### Phase 5: GraalVM & AssemblyScript
+- Added `LinkLanguage::Java` and `LinkLanguage::AssemblyScript` to `src/ast.rs`
+- Added parser support for `.java` and `.ts` extensions in `link/` declarations
+- Added `compile_to_bitcode` dispatch:
+  - **Java**: `javac` → `native-image --llvm --emit-llvm-bc`
+  - **AssemblyScript**: `asc` → `.wasm` → `wasm2llvm` → `.bc`
+
+### Phase 7: .hebv Hardware Tier
+- Added `.hebv` to `is_strict_extension()` (full contracts required)
+- Added `.hebv` to all file-extension dispatch patterns in `main.rs` (~25 locations)
+- Added hardware validator checks (B5001-B5009): no `link/` imports, no `frgn`, total contracts, synthesizable types only (no Float, String, unsized Int/UInt, dynamic collections)
+- Routes through verilog backend (same as `.ebv`)
+
+### Phase 3: C FFI Libraries Vendored
+- **yyjson** in `lib/std/c/json/` — JSON parsing (single-header + wrapper)
+- **stb_image** in `lib/std/c/stb_image/` — image loading (single-header + wrapper)
+- **lz4** in `lib/std/c/lz4/` — compression (single-header + wrapper)
+- All follow the same pattern: single-header library + `_IMPLEMENTATION` `.c` wrapper
+- Included via `import "link/<lib>/<lib>.c"` in Brief source; compiled to bitcode via LTO
