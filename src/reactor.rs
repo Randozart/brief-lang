@@ -343,3 +343,182 @@ pub fn run_reactor(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+    use crate::interpreter::{Interpreter, Value};
+
+    fn make_rct_txn(name: &str, pre: Expr, post: Expr, body: Vec<Statement>) -> TopLevel {
+        TopLevel::Transaction(Transaction {
+            name: name.to_string(),
+            is_reactive: true,
+            is_async: false,
+            parameters: vec![],
+            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
+            body,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        })
+    }
+
+    fn make_rct_txn_with_deps(name: &str, pre: Expr, post: Expr, body: Vec<Statement>, deps: Vec<String>) -> TopLevel {
+        TopLevel::Transaction(Transaction {
+            name: name.to_string(),
+            is_reactive: true,
+            is_async: false,
+            parameters: vec![],
+            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
+            body,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: deps,
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        })
+    }
+
+    fn simple_program(items: Vec<TopLevel>) -> Program {
+        Program { items, comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None }
+    }
+
+    fn build_reactor(prog: &Program) -> Reactor {
+        let mut r = Reactor::new();
+        r.build_from_program(prog);
+        r
+    }
+
+    #[test]
+    fn test_build_from_program_empty() {
+        let reactor = build_reactor(&simple_program(vec![]));
+        assert!(reactor.transactions.is_empty());
+    }
+
+    #[test]
+    fn test_build_from_program_with_reactive_txn() {
+        let txn = make_rct_txn("test", Expr::Bool(true), Expr::Bool(true), vec![]);
+        let reactor = build_reactor(&simple_program(vec![txn]));
+        assert_eq!(reactor.transactions.len(), 1);
+        assert_eq!(reactor.transactions[0].name, "test");
+    }
+
+    #[test]
+    fn test_build_from_program_skips_non_reactive() {
+        let prog = simple_program(vec![
+            TopLevel::Definition(Definition {
+                name: "foo".into(), type_params: vec![], parameters: vec![], outputs: vec![],
+                output_type: None, output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![], is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+            TopLevel::Transaction(Transaction {
+                name: "bar".into(), is_reactive: false, is_async: false, parameters: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)), body: vec![],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![], outputs: vec![],
+                output_type: None,
+            }),
+        ]);
+        let reactor = build_reactor(&prog);
+        assert_eq!(reactor.transactions.len(), 0);
+    }
+
+    #[test]
+    fn test_dependency_map_populated() {
+        let txn = make_rct_txn_with_deps("dep_test", Expr::Bool(true), Expr::Bool(true), vec![], vec!["x".into()]);
+        let reactor = build_reactor(&simple_program(vec![txn]));
+        assert!(reactor.dependency_map.contains_key("x"));
+    }
+
+    #[test]
+    fn test_mark_dirty_propagates() {
+        let txn = make_rct_txn_with_deps("a", Expr::Bool(true), Expr::Bool(true), vec![], vec!["y".into()]);
+        let mut reactor = build_reactor(&simple_program(vec![txn]));
+        assert!(reactor.dirty_preconditions.contains(&0usize));
+        reactor.clear_dirty();
+        assert!(reactor.dirty_preconditions.is_empty());
+        reactor.mark_dirty("y");
+        assert!(reactor.dirty_preconditions.contains(&0usize));
+    }
+
+    #[test]
+    fn test_get_dirty_transactions() {
+        let txn = make_rct_txn("a", Expr::Identifier("z".into()), Expr::Bool(true), vec![]);
+        let reactor = build_reactor(&simple_program(vec![txn]));
+        assert!(!reactor.get_dirty_transactions().is_empty());
+    }
+
+    #[test]
+    fn test_run_executes_txn() {
+        let body = vec![
+            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(42), timeout: None, modifiers: vec![] },
+            Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+        ];
+        let txn = make_rct_txn("set_x",
+            Expr::Bool(true),
+            Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(42))),
+            body);
+        let mut interp = Interpreter::new();
+        interp.state.insert("x".into(), Value::Int(0));
+        let reactor = build_reactor(&simple_program(vec![txn]));
+        let result = reactor.run(&mut interp).unwrap();
+        assert!(result);
+        assert_eq!(interp.state.get("x"), Some(&Value::Int(42)));
+    }
+
+    #[test]
+    fn test_run_skips_txn_pre_false() {
+        let body = vec![Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(99), timeout: None, modifiers: vec![] }];
+        let txn = make_rct_txn("skip", Expr::Bool(false), Expr::Bool(true), body);
+        let mut interp = Interpreter::new();
+        interp.state.insert("x".into(), Value::Int(0));
+        let reactor = build_reactor(&simple_program(vec![txn]));
+        let result = reactor.run(&mut interp).unwrap();
+        assert!(!result);
+        assert_eq!(interp.state.get("x"), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn test_escape_guard_detection() {
+        let body = vec![
+            Statement::Guarded {
+                condition: Expr::Bool(true),
+                statements: vec![Statement::Escape(None)],
+            },
+        ];
+        let txn = make_rct_txn("escape_test", Expr::Bool(true), Expr::Bool(true), body);
+        let mut interp = Interpreter::new();
+        let reactor = build_reactor(&simple_program(vec![txn]));
+        assert!(reactor.will_escape(&reactor.transactions[0], &mut interp));
+    }
+
+    #[test]
+    fn test_run_escape_triggers_rollback() {
+        let body = vec![
+            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(10), timeout: None, modifiers: vec![] },
+            Statement::Guarded { condition: Expr::Bool(true), statements: vec![Statement::Escape(None)] },
+        ];
+        let txn = make_rct_txn("rollback", Expr::Bool(true), Expr::Bool(true), body);
+        let mut interp = Interpreter::new();
+        interp.state.insert("x".into(), Value::Int(5));
+        interp.prior_state = interp.state.clone();
+        let reactor = build_reactor(&simple_program(vec![txn]));
+        let result = reactor.run(&mut interp).unwrap();
+        // Pre-evaluation guard skips the transaction entirely (escape would fire)
+        assert!(!result);
+        // State unchanged since transaction wasn't executed
+        assert_eq!(interp.state.get("x"), Some(&Value::Int(5)));
+    }
+}
