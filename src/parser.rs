@@ -295,6 +295,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if the next two tokens are `<` followed by `:` (the `<:` operator)
+    /// Check if the next two tokens are `<` followed by `:` (the `<:` operator)
     fn check_lt_colon(&self) -> bool {
         matches!(self.current_token(), Some(Ok(Token::Lt)))
             && matches!(self.peek_token(), Some(Ok(Token::Colon)))
@@ -442,6 +443,69 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse ops inside a `<:` subtype projection block: `{ FILTER(.x); COUNT; }` or `["pattern"]`
+    /// Parse the source expression for a `<:` projection.
+    /// Like parse_postfix, but stops before consuming `{` (struct literal) or `[` (match ops).
+    fn parse_projection_source(&mut self) -> Result<Expr, SyntaxError> {
+        // Start by parsing an identifier (not full parse_primary, which would
+        // consume `{...}` as struct literal)
+        let name = self.expect_identifier()?;
+        let mut expr = Expr::Identifier(name);
+        loop {
+            match self.current_token() {
+                // Leave `[` for parse_subtype_ops to handle as MATCH
+                Some(Ok(Token::Dot)) => {
+                    self.advance();
+                    let field = self.expect_identifier()?;
+                    expr = Expr::FieldAccess(Box::new(expr), field);
+                }
+                Some(Ok(Token::LParen)) => {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if let Some(Ok(Token::RParen)) = self.current_token() {
+                        self.advance();
+                    } else {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if let Some(Ok(Token::Comma)) = self.current_token() {
+                                self.advance();
+                            } else {
+                                self.expect(Token::RParen)?;
+                                break;
+                            }
+                        }
+                    }
+                    let call_name = match &expr {
+                        Expr::Identifier(n) => n.clone(),
+                        _ => return self.spanned_err("Can only call named targets in projection source".to_string()),
+                    };
+                    expr = Expr::Call(call_name, args);
+                }
+                Some(Ok(Token::ColonGreaterThan)) => {
+                    self.advance();
+                    let target = self.parse_projection_target()?;
+                    expr = Expr::Projection {
+                        source: Box::new(expr),
+                        target,
+                    };
+                }
+                Some(Ok(Token::Lt))|Some(Ok(Token::Gt))|Some(Ok(Token::EqEq))
+                | Some(Ok(Token::Ne))|Some(Ok(Token::Le))|Some(Ok(Token::Ge))
+                | Some(Ok(Token::Plus))|Some(Ok(Token::Minus))|Some(Ok(Token::Star))
+                | Some(Ok(Token::Slash))|Some(Ok(Token::Percent))
+                | Some(Ok(Token::AndAnd))|Some(Ok(Token::OrOr))
+                | Some(Ok(Token::Pipe))|Some(Ok(Token::BitXor))
+                | Some(Ok(Token::Shl))|Some(Ok(Token::Shr))
+                | Some(Ok(Token::Arrow))|Some(Ok(Token::ArrowLeft))
+                | Some(Ok(Token::Colon))|Some(Ok(Token::Eq))
+                | Some(Ok(Token::Semicolon))|Some(Ok(Token::Comma))
+                | Some(Ok(Token::RBrace))|Some(Ok(Token::RBracket))
+                | Some(Ok(Token::RParen)) => break,
+                _ => break,
+            }
+        }
+        Ok(expr)
+    }
+
     fn parse_subtype_ops(&mut self) -> Result<Vec<crate::ast::SubtypeOp>, SyntaxError> {
         // Check for string projection: `source["pattern"]`
         if let Some(Ok(Token::LBracket)) = self.current_token() {
@@ -3686,7 +3750,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     if self.check_lt_colon() {
                         self.advance(); // consume `<`
                         self.advance(); // consume `:`
-                        let source = self.parse_expression()?;
+                        let source = self.parse_projection_source()?;
                         let ops = self.parse_subtype_ops()?;
                         self.expect(Token::Semicolon)?;
                         return Ok(Statement::Let {
@@ -3728,7 +3792,9 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     if self.check_lt_colon() {
                         self.advance(); // consume `<`
                         self.advance(); // consume `:`
-                        let source = self.parse_expression()?;
+                        // Parse source expression, but stop before `{` (struct literal)
+                        // parse_expression would consume `{...}` as struct literal fields
+                        let source = self.parse_projection_source()?;
                         let ops = self.parse_subtype_ops()?;
                         self.expect(Token::Semicolon)?;
                         return Ok(Statement::Let {
@@ -7140,11 +7206,164 @@ mod parser_tests {
 
     // ---- Subtype projection (<:) tests ----
 
-    // Parser <: subtype projection tests are deferred due to a pre-existing bug
-    // in check_lt_colon for the non-tuple let path (it returns false when it should
-    // return true for `<` `:` sequences). The interpreter tests for SubtypeProjection
-    // evaluation pass via direct AST construction.
-    // Bug tracked in: src/parser.rs:3728 check_lt_colon()
+    fn parse_subtype_expr(src: &str) -> Expr {
+        let full = format!("defn f [x][x] {{\n{}\nterm 0;\n}};", src);
+        let mut p = Parser::new(&full);
+        let prog = p.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Definition(d) => match &d.body[0] {
+                Statement::Let { expr: Some(e), .. } => e.clone(),
+                _ => panic!("Expected Let, got {:?}", &d.body[0]),
+            },
+            _ => panic!("Expected Definition, got {:?}", &prog.items[0]),
+        }
+    }
+
+    fn check_subtype_ops(src: &str, expected_ops: &[crate::ast::SubtypeOp]) {
+        let expr = parse_subtype_expr(src);
+        match expr {
+            Expr::SubtypeProjection { ops, .. } => {
+                assert_eq!(ops.len(), expected_ops.len());
+                for (got, want) in ops.iter().zip(expected_ops.iter()) {
+                    assert_eq!(got, want);
+                }
+            }
+            _ => panic!("Expected SubtypeProjection, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_subtype_filter() {
+        check_subtype_ops(
+            "let result <: items { FILTER(active); };",
+            &[crate::ast::SubtypeOp::Filter(Box::new(Expr::Identifier("active".into())))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_map() {
+        check_subtype_ops(
+            "let result <: items { MAP(x * 2); };",
+            &[crate::ast::SubtypeOp::Map(Box::new(Expr::Mul(
+                Box::new(Expr::Identifier("x".into())),
+                Box::new(Expr::Integer(2)),
+            )))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_sort() {
+        check_subtype_ops(
+            "let result <: items { SORT(name); };",
+            &[crate::ast::SubtypeOp::Sort(Box::new(Expr::Identifier("name".into())))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_limit() {
+        check_subtype_ops(
+            "let result <: items { LIMIT(10); };",
+            &[crate::ast::SubtypeOp::Limit(10)],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_skip() {
+        check_subtype_ops(
+            "let result <: items { SKIP(5); };",
+            &[crate::ast::SubtypeOp::Skip(5)],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_unique() {
+        check_subtype_ops(
+            "let result <: items { UNIQUE; };",
+            &[crate::ast::SubtypeOp::Unique],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_join() {
+        check_subtype_ops(
+            "let result <: items { JOIN(other, key); };",
+            &[crate::ast::SubtypeOp::Join(
+                Box::new(Expr::Identifier("other".into())),
+                Box::new(Expr::Identifier("key".into())),
+            )],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_group() {
+        check_subtype_ops(
+            "let result <: items { GROUP(category); };",
+            &[crate::ast::SubtypeOp::Group(Box::new(Expr::Identifier("category".into())))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_count() {
+        check_subtype_ops(
+            "let result <: items { COUNT; };",
+            &[crate::ast::SubtypeOp::Count],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_sum() {
+        check_subtype_ops(
+            "let result <: items { SUM(price); };",
+            &[crate::ast::SubtypeOp::Sum(Box::new(Expr::Identifier("price".into())))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_avg() {
+        check_subtype_ops(
+            "let result <: items { AVG(score); };",
+            &[crate::ast::SubtypeOp::Avg(Box::new(Expr::Identifier("score".into())))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_min() {
+        check_subtype_ops(
+            "let result <: items { MIN(age); };",
+            &[crate::ast::SubtypeOp::Min(Box::new(Expr::Identifier("age".into())))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_max() {
+        check_subtype_ops(
+            "let result <: items { MAX(height); };",
+            &[crate::ast::SubtypeOp::Max(Box::new(Expr::Identifier("height".into())))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_match() {
+        check_subtype_ops(
+            r#"let result <: email["^(.+)@(.+)$"];"#,
+            &[crate::ast::SubtypeOp::Match(Box::new(Expr::String("^(.+)@(.+)$".into())))],
+        );
+    }
+
+    #[test]
+    fn test_parse_subtype_composite_chain() {
+        check_subtype_ops(
+            "let result <: items { FILTER(active); MAP(x * 2); LIMIT(5); };",
+            &[
+                crate::ast::SubtypeOp::Filter(Box::new(Expr::Identifier("active".into()))),
+                crate::ast::SubtypeOp::Map(Box::new(Expr::Mul(
+                    Box::new(Expr::Identifier("x".into())),
+                    Box::new(Expr::Integer(2)),
+                ))),
+                crate::ast::SubtypeOp::Limit(5),
+            ],
+        );
+    }
 }
 
 enum BracketElement {

@@ -698,20 +698,9 @@ Concrete changes:
 
 **Lesson**: The convergence loop is the defining feature of `txn` — `defn` has straight-line execution. When writing iteration, use `txn` with `[pre][post]` contracts. `Statement::Guarded` is for one-shot conditionals only, never for loops. `[guard] { body }` inside a `txn` with `[pre][post]` is correct because the txn's outer convergence loop re-evaluates the body, not because the guarded statement loops by itself.
 
-## 2026-06-08 — `<:` subtype projection parser bug (non-tuple let path)
+## 2026-06-08 (FIXED) — `<:` subtype projection parser bug
 
-**Issue**: `let result <: items { FILTER(.active); };` fails to parse. Error: `expected ':' found '('`.
+**Root Cause**: `parse_primary()` at `src/parser.rs:5168` interpreted `items { COUNT; }` as a struct literal (`identifier { field: value }`), consuming the ops block. `parse_expression()` was used for the source but it calls `parse_primary()` which treats any `{` after an identifier as a struct literal.
 
-**Root Cause**: In `src/parser.rs:3728`, `check_lt_colon()` returns `false` in the non-tuple `let` path, even though the current token is `Lt` and the peek token is `Colon`. The function correctly detects `<:` in the tuple-destructuring path (line 3686) but not the simple-identifier path (line 3728). Exact mechanism unclear — token type comparison appears correct.
-
-**Fix**: `check_lt_colon()` is defined at `src/parser.rs:298`:
-```rust
-fn check_lt_colon(&self) -> bool {
-    matches!(self.current_token(), Some(Ok(Token::Lt)))
-        && matches!(self.peek_token(), Some(Ok(Token::Colon)))
-}
-```
-This SHOULD work since after `expect_identifier()` consumes `r`, current token is `Lt` (for `<`) and peek token is `Colon` (for `:`). Needs investigation at the token level — possibly a logos lexer issue where `<:` is consumed as a single token, or `peek_token()` returns a different token type.
-
-**Workaround**: Interpreter-level SubtypeProjection expressions (direct AST construction) work correctly. Only the parser `check_lt_colon()` detection fails.
+**Fix**: Replaced `parse_expression()` with `parse_projection_source()` in both `<:` let-statement paths (tuple and non-tuple). This new function parses an identifier + postfix operations but stops before `{` and `[`, leaving them for `parse_subtype_ops()` to handle as the ops block or MATCH bracket syntax.
 
