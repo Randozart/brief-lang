@@ -293,6 +293,7 @@ fn resolve_location_to_impl(location: &str) -> Option<ForeignFn> {
         "std::io::print" => print_impl,
         "std::io::println" => println_impl,
         "std::io::input" => input_impl,
+        "std::dbvl::append" => dbvl_append_impl,
 
         // Math functions
         "std::f64::sqrt" => sqrt_impl,
@@ -413,6 +414,66 @@ fn println_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 }
 fn input_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     interpreter::input_impl(args)
+}
+
+/// Append a line to a DBVL file (CSV format)
+pub(crate) fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.len() < 2 {
+        return Err(RuntimeError::TypeMismatch(
+            "dbvl_append requires at least 2 arguments: path (String), values (List)".into()
+        ));
+    }
+    let path = match &args[0] {
+        Value::String(s) => s.clone(),
+        other => {
+            return Err(RuntimeError::TypeMismatch(
+                format!("First argument to dbvl_append must be a String path, got {:?}", other)
+            ));
+        }
+    };
+    let values = match &args[1] {
+        Value::List(items) => items.clone(),
+        other => {
+            return Err(RuntimeError::TypeMismatch(
+                format!("Second argument to dbvl_append must be a List of values, got {:?}", other)
+            ));
+        }
+    };
+
+    // Convert values to CSV-safe strings
+    let csv_parts: Vec<String> = values.iter().map(|v| match v {
+        Value::String(s) => {
+            if s.contains(',') || s.contains('"') || s.contains('\n') {
+                format!("\"{}\"", s.replace('"', "\"\""))
+            } else {
+                s.clone()
+            }
+        }
+        Value::Int(n) => n.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Bool(true) => "true".into(),
+        Value::Bool(false) => "false".into(),
+        Value::Char(c) => c.to_string(),
+        other => format!("{:?}", other),
+    }).collect();
+
+    let line = csv_parts.join(",") + "\n";
+
+    use std::io::Write;
+    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(mut file) => {
+            if let Err(e) = file.write_all(line.as_bytes()) {
+                Err(RuntimeError::TypeMismatch(
+                    format!("Failed to append to '{}': {}", path, e)
+                ))
+            } else {
+                Ok(Value::Bool(true))
+            }
+        }
+        Err(e) => Err(RuntimeError::TypeMismatch(
+            format!("Failed to open '{}' for appending: {}", path, e)
+        )),
+    }
 }
 
 // Math implementations

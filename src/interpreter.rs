@@ -4936,4 +4936,82 @@ mod tests {
         }).unwrap();
         assert_eq!(result, Value::Bool(false));
     }
+
+    // ---- DBVL Append Tests ----
+
+    #[test]
+    fn test_dbvl_append_basic() {
+        let path = "/tmp/dbrief_test_append.csv";
+        // Clean up any previous test file
+        let _ = std::fs::remove_file(path);
+
+        let values = vec![
+            Value::String("key1".into()),
+            Value::String("value1".into()),
+            Value::Int(42),
+        ];
+        let args = vec![
+            Value::String(path.into()),
+            Value::List(values),
+        ];
+
+        let result = crate::ffi::registry::dbvl_append_impl(args).unwrap();
+        assert_eq!(result, Value::Bool(true));
+
+        // Read file back and verify
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(content.contains("key1,value1,42"));
+
+        // Clean up
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_dbvl_append_csv_escaping() {
+        let path = "/tmp/dbrief_test_escape.csv";
+        let _ = std::fs::remove_file(path);
+
+        // Value with comma — should be quoted
+        let values = vec![
+            Value::String("hello,world".into()),
+            Value::String("normal".into()),
+        ];
+        let args = vec![
+            Value::String(path.into()),
+            Value::List(values),
+        ];
+
+        crate::ffi::registry::dbvl_append_impl(args).unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(content.contains("\"hello,world\",normal"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_dbvl_append_multiple_lines() {
+        let path = "/tmp/dbrief_test_multi.csv";
+        let _ = std::fs::remove_file(path);
+
+        for i in 0..3 {
+            let values = vec![
+                Value::String(format!("key{}", i)),
+                Value::Int(i),
+            ];
+            let args = vec![
+                Value::String(path.into()),
+                Value::List(values),
+            ];
+            crate::ffi::registry::dbvl_append_impl(args).unwrap();
+        }
+
+        let content = std::fs::read_to_string(path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "key0,0");
+        assert_eq!(lines[1], "key1,1");
+        assert_eq!(lines[2], "key2,2");
+
+        let _ = std::fs::remove_file(path);
+    }
 }

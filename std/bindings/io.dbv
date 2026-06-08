@@ -5,6 +5,7 @@ as FnBinding {
     print          { "print", "std::io::print" }
     println        { "println", "std::io::println" }
     input          { "input", "std::io::input" }
+    dbvl_append    { "dbvl_append", "std::dbvl::append" }
     read_file      { "read_file", "std::fs::read_to_string" }
     write_file     { "write_file", "std::fs::write" }
     append_file    { "append_file", "std::fs::append" }
