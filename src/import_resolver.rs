@@ -500,3 +500,135 @@ impl Default for ImportResolver {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+    use std::path::PathBuf;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn import_program(path: Vec<&str>, items: Vec<ImportItem>) -> Program {
+        Program {
+            items: vec![TopLevel::Import(Import { path: path.iter().map(|s| s.to_string()).collect(), items })],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        }
+    }
+
+    #[test]
+    fn test_resolve_empty_import() {
+        let prog = import_program(vec![], vec![]);
+        let mut resolver = ImportResolver::new();
+        let result = resolver.resolve_imports(&prog, &PathBuf::from("main.bv")).unwrap();
+        assert_eq!(result.items.len(), 0);
+    }
+
+    #[test]
+    fn test_resolve_bv_file() {
+        let dir = TempDir::new().unwrap();
+        let bv_path = dir.path().join("test_module.bv");
+        fs::write(&bv_path, "defn hello -> Int { term 42; };").unwrap();
+
+        let prog = import_program(vec!["test_module"], vec![]);
+        let mut resolver = ImportResolver::new();
+        resolver.add_search_path(dir.path().to_path_buf());
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        let defns: Vec<&TopLevel> = result.items.iter().filter(|i| matches!(i, TopLevel::Definition(_))).collect();
+        assert_eq!(defns.len(), 1);
+    }
+
+    #[test]
+    fn test_resolve_checked_cached_modules() {
+        let dir = TempDir::new().unwrap();
+        let bv_path = dir.path().join("cache_test.bv");
+        fs::write(&bv_path, "defn cached -> Int { term 1; };").unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let mut resolver = ImportResolver::new();
+        resolver.add_search_path(dir.path().to_path_buf());
+        let prog = import_program(vec!["cache_test"], vec![]);
+        resolver.resolve_imports(&prog, &src).unwrap();
+        // The cache key is the path_str used in resolve_import
+        assert!(resolver.loaded_modules.contains_key("cache_test"));
+    }
+
+    #[test]
+    fn test_import_css_file() {
+        let dir = TempDir::new().unwrap();
+        let css_path = dir.path().join("styles.m.css");
+        fs::write(&css_path, "body { color: red; }").unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let prog = import_program(vec!["styles.m.css"], vec![]);
+        let mut resolver = ImportResolver::new();
+        resolver.add_search_path(dir.path().to_path_buf());
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        assert!(result.items.iter().any(|i| matches!(i, TopLevel::Stylesheet(_))));
+    }
+
+    #[test]
+    fn test_strict_mode_propagation() {
+        let dir = TempDir::new().unwrap();
+        let bv_path = dir.path().join("strict_test.bv");
+        fs::write(&bv_path, "defn s -> Int { term 0; };").unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let mut resolver = ImportResolver::new().with_strict_mode(true);
+        resolver.add_search_path(dir.path().to_path_buf());
+        let prog = import_program(vec!["strict_test"], vec![]);
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        assert_eq!(result.strict_mode, StrictMode::Strict);
+    }
+
+    #[test]
+    fn test_filter_items_by_name() {
+        let dir = TempDir::new().unwrap();
+        let bv_path = dir.path().join("filter_mod.bv");
+        fs::write(&bv_path, "defn keep -> Int { term 1; };\ndefn discard -> Int { term 2; };").unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let mut resolver = ImportResolver::new();
+        resolver.add_search_path(dir.path().to_path_buf());
+        let prog = import_program(vec!["filter_mod"], vec![ImportItem { name: "keep".into(), alias: None }]);
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        let names: Vec<&str> = result.items.iter().filter_map(|i| match i {
+            TopLevel::Definition(d) => Some(d.name.as_str()),
+            _ => None,
+        }).collect();
+        assert_eq!(names, vec!["keep"]);
+    }
+
+    #[test]
+    fn test_filter_items_empty() {
+        let dir = TempDir::new().unwrap();
+        let bv_path = dir.path().join("full_mod.bv");
+        fs::write(&bv_path, "defn a -> Int { term 0; }; defn b -> Int { term 0; };").unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let mut resolver = ImportResolver::new();
+        resolver.add_search_path(dir.path().to_path_buf());
+        let prog = import_program(vec!["full_mod"], vec![]);
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        let count = result.items.iter().filter(|i| matches!(i, TopLevel::Definition(_))).count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_resolve_module_not_found() {
+        let prog = import_program(vec!["nonexistent_mod"], vec![]);
+        let mut resolver = ImportResolver::new();
+        let src = PathBuf::from("/tmp/main.bv");
+        let result = resolver.resolve_imports(&prog, &src);
+        assert!(result.is_err());
+    }
+}
