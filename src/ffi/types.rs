@@ -122,6 +122,12 @@ impl FfiValue {
                 FfiValue::Variant(name.clone(), variant.clone(), ffi_fields)
             }
             crate::interpreter::Value::Void => FfiValue::Void,
+            crate::interpreter::Value::DbvlTable(t) => {
+                let mut meta = std::collections::HashMap::new();
+                meta.insert("__lazy".to_string(), FfiValue::String(t.path.clone()));
+                meta.insert("entries".to_string(), FfiValue::Int(t.key_offsets.len() as i64));
+                FfiValue::Struct("DbvlTable".to_string(), meta)
+            }
             _ => FfiValue::Void, // Fallback for types we can't map easily
         }
     }

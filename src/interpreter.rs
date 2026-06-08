@@ -2495,7 +2495,7 @@ Err(RuntimeError::TypeMismatch(
     }
 
     /// Evaluate a `<:` subtype projection: applies a sequence of ops to a source value.
-    fn eval_subtype_projection(&mut self, source: Value, ops: &[crate::ast::SubtypeOp]) -> Result<Value, RuntimeError> {
+    fn eval_subtype_projection(&mut self, mut source: Value, ops: &[crate::ast::SubtypeOp]) -> Result<Value, RuntimeError> {
         // Check for string match projection
         if let Value::String(ref s) = source {
             for op in ops {
@@ -2529,6 +2529,47 @@ Err(RuntimeError::TypeMismatch(
             }
             return Ok(Value::String(s.clone()));
         }
+
+        // Check for DbvlTable conversion to collection
+        let source = match source {
+            Value::DbvlTable(table_ref) => {
+                // Check for indexed FILTER on key field
+                if let Some(crate::ast::SubtypeOp::Filter(predicate)) = ops.first() {
+                    if let Some(literal_key) = try_extract_key_eq(predicate, table_ref.schema_key_index.unwrap_or(0)) {
+                        let results = self.resolve_dbvl_key(&table_ref, &literal_key)?;
+                        let remaining_ops = &ops[1..];
+                        if remaining_ops.is_empty() {
+                            if results.len() == 1 {
+                                return Ok(results.into_iter().next().unwrap());
+                            }
+                            return Ok(Value::List(results));
+                        }
+                        // Apply remaining ops to the resolved list by converting to Value::List
+                        // and falling through to the collection processing code below
+                        Value::List(results)
+                    } else {
+                        // Full materialization
+                        let mut all_entries = Vec::new();
+                        for key in table_ref.key_offsets.keys() {
+                            if let Ok(mut results) = self.resolve_dbvl_key(&table_ref, key) {
+                                all_entries.append(&mut results);
+                            }
+                        }
+                        Value::List(all_entries)
+                    }
+                } else {
+                    // Full materialization
+                    let mut all_entries = Vec::new();
+                    for key in table_ref.key_offsets.keys() {
+                        if let Ok(mut results) = self.resolve_dbvl_key(&table_ref, key) {
+                            all_entries.append(&mut results);
+                        }
+                    }
+                    Value::List(all_entries)
+                }
+            }
+            other => other,
+        };
 
         // Collection projection — source must be a list
         let mut items: Vec<Value> = match source {
@@ -2782,6 +2823,30 @@ Err(RuntimeError::TypeMismatch(
 
         Ok(results)
     }
+}
+
+/// Try to extract a literal key comparison from a FILTER predicate.
+/// Detects patterns like `_.key_field == "literal"` or `_.field_0 == "literal"`.
+fn try_extract_key_eq(expr: &crate::ast::Expr, key_index: usize) -> Option<String> {
+    if let crate::ast::Expr::Eq(left, right) = expr {
+        // Check if left side is `_.field_name` or `_.field_N`
+        let is_key_field = match left.as_ref() {
+            crate::ast::Expr::FieldAccess(obj, field) => {
+                matches!(obj.as_ref(), crate::ast::Expr::Identifier(name) if name == "_")
+                    && (field == &format!("field_{}", key_index) || field == "field_0")
+            }
+            _ => false,
+        };
+        if is_key_field {
+            // Extract literal from right side
+            match right.as_ref() {
+                crate::ast::Expr::String(s) => return Some(s.clone()),
+                crate::ast::Expr::Integer(n) => return Some(n.to_string()),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 /// Parse a single CSV line into Values (lightweight, for lazy dbvl loading)
