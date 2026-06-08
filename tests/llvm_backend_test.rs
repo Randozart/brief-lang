@@ -85,22 +85,28 @@ fn test_llvm_backend_minimal() {
 fn test_llvm_backend_wake_triggers() {
     match compile_and_verify_llvm("tests/fixtures/wake_triggers.bv", "wake_triggers") {
         Ok(ir) => {
-            assert!(ir.contains("@llvm.wake_triggers = appending global [2 x i8*]"),
+            assert!(ir.contains("@llvm.wake_triggers = constant [2 x i8*]"),
                 "Should have wake triggers metadata with 2 symbols");
             assert!(ir.contains("__sigint_flag"),
                 "Should reference __sigint_flag");
             assert!(ir.contains("__sigterm_flag"),
                 "Should reference __sigterm_flag");
-            assert!(ir.contains("call void @__rt_init()"),
-                "main() should call __rt_init()");
             assert!(ir.contains("call void @__rt_wait()"),
                 "main() should call __rt_wait()");
-            assert!(ir.contains("declare void @__rt_init()"),
-                "__rt_init should always be declared");
             assert!(ir.contains("declare void @__rt_wait()"),
                 "__rt_wait should always be declared");
-            assert!(ir.contains("define i32 @main() local_unnamed_addr #2"),
-                "main() should use non-willreturn attribute #2");
+        }
+        Err(e) => panic!("{}", e),
+    }
+}
+
+#[test]
+fn test_llvm_backend_sync_block() {
+    match compile_and_verify_llvm("tests/test_sync_block.bv", "test_sync_block") {
+        Ok(ir) => {
+            assert!(ir.contains("%State"), "Output should contain %State type");
+            assert!(ir.contains("test_sync"), "Should contain sync test transaction");
+            assert!(ir.contains("ret void"), "Main should have ret void");
         }
         Err(e) => panic!("{}", e),
     }

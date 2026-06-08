@@ -627,3 +627,61 @@ New analysis module implementing the 6-step trigger preemptibility proof from th
 - **lz4** in `lib/std/c/lz4/` — compression (single-header + wrapper)
 - All follow the same pattern: single-header library + `_IMPLEMENTATION` `.c` wrapper
 - Included via `import "link/<lib>/<lib>.c"` in Brief source; compiled to bitcode via LTO
+
+---
+
+## Session 2026-06-08 (Afternoon): Test Coverage Fixes & Contract Cleanup
+
+**Files changed**: 20 modified, 0 deleted, 0 new  
+**Tests**: 559 lib + all integration passing (bootstrap_determinism = pre-existing self-hosting deferred bug)
+
+### SyncBlock Parser Fix
+- `Statement::SyncBlock` handler in `src/parser.rs:3652` was missing trailing `;` consumption — caused parse error on `sync { ... };` inside transaction bodies. Added `self.expect(Token::Semicolon)?;`.
+- Added parser unit test `test_sync_block_in_txn_body`.
+
+### SyncBlock Interpreter Tests (3 new)
+- `test_sync_block_executes_statements_in_order` — verifies sequential state mutation
+- `test_sync_block_nested_guarded` — verifies Guarded inside SyncBlock works
+- `test_sync_block_empty` — verifies empty sync block doesn't crash
+
+### Hardware Validator Tests (8 new)
+- `test_hebv_rejects_link_dependency` — B5001
+- `test_hebv_rejects_frgn` — B5002
+- `test_hebv_rejects_true_precondition` — B5004
+- `test_hebv_rejects_true_postcondition` — B5005
+- `test_hebv_rejects_float_type` — B5007
+- `test_hebv_rejects_string_type` — B5008
+- `test_hebv_rejects_unsized_int` — B5006
+- `test_hebv_accepts_synthesizable_types` — Bool + bounded txns OK
+
+### Parser Tests for LinkLanguage (2 new)
+- `test_link_dependency_java` — `.java` → `LinkLanguage::Java`
+- `test_link_dependency_typescript` — `.ts` → `LinkLanguage::AssemblyScript`
+
+### Vendored C Library Compilation Tests (5 new)
+- `test_xxhash_compiles`, `test_yyjson_compiles`, `test_brief_json_compiles`
+- `test_stb_image_compiles`, `test_lz4_compiles`
+- Each tests `clang -c` on the implementation wrapper succeeds
+
+### LLVM Backend Tests (1 new + 1 fixed)
+- `test_llvm_backend_sync_block` — compiles `tests/test_sync_block.bv`, verifies `%State` + `test_sync` + `ret void`
+- `test_llvm_backend_wake_triggers` — fixed assertions to match `trg ... @ link` IR output (`constant` not `appending global`, no `__rt_init`)
+
+### Contract Fixes Across All Test Files
+Replaced illegal patterns (`[true]`, `[x==x]`, `[true][true]`) with meaningful contracts:
+| File | Context | Fix |
+|------|---------|-----|
+| `tests/fixtures/*.bv` (7 phase files) | `[x==x]` from bad sed | `[[meaningful_post]` |
+| `tests/fixtures/wake_triggers.bv` | `#io sigint;` | `trg sigint: Bool @ link __sigint_flag;` |
+| `tests/fixtures/event_model.bv` | `[true]` | `[event_count>=0][event_count>=0]` |
+| `tests/test_c.rs` | `[x>=0][x>=0]` | `[[result == a + b]` etc. |
+| `tests/test_rust.rs` | `[true]` | `[[meaningful_post]` |
+| `tests/test_aarch64.rs` | `[true]`, `[guard]` | `[[post]`, `[guard][data==@data+1]` |
+| `tests/test_verilog.rs` | `[true]` | `[[result == a / b]` |
+| `tests/test_wasm.rs` | pre-existing API mismatch | Fixed imports, `WasmBackend` API |
+| `tests/test_x86_64.rs`, `tests/test_vhdl.rs` | `[true]` | `[[meaningful_post]` |
+| `tests/integration_features.rs` | `[true][true]` on `defn` | Removed contract (defn allows omission) |
+| `tests/fuzz_backend.rs` | `Statement::Term(_)` | Fixed to `Statement::Term { .. }` |
+| `tests/ffi_typechecker_tests.rs` | `&program` | `&mut program` |
+| `tests/ffi_comprehensive_tests.rs` | `&program`, `Type::Option`, old API | `&mut program`, `Custom("Option")`, 5-arg resolve |
+| `tests/bootstrap_determinism.rs` | `"main.bv"` path | `"lib/compiler/main.bv"` |

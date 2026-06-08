@@ -2,15 +2,13 @@
 let a: Int = 0;
 let b: Int = 0;
 
-rct txn first [true]
-  [a == @a + 1]
+rct txn first [[a == @a + 1]
 {
   &a = a + 1;
   term;
 };
 
-rct txn second [a == @a]
-  [b == @b + 1]
+rct txn second [[b == @b + 1]
 {
   &b = b + 1;
   term;

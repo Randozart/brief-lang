@@ -5,8 +5,7 @@ let c: Int = 0;
 let d: Int = 0;
 let e: Int = 0;
 
-rct txn compute [true]
-  [a == @a + 10 && b == @b - 3 && c == @c * 2 && d == @d / 4 && e == @e % 5]
+rct txn compute [[a == @a + 10 && b == @b - 3 && c == @c * 2 && d == @d / 4 && e == @e % 5]
 {
   &a = a + 10;
   &b = b - 3;

@@ -4559,4 +4559,66 @@ mod tests {
         };
         assert!(i.eval_expr(&expr).is_err());
     }
+
+    #[test]
+    fn test_sync_block_executes_statements_in_order() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        i.state.insert("y".to_string(), Value::Int(0));
+        let sync_block = Statement::SyncBlock {
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("x".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("y".to_string()),
+                    expr: Expr::Integer(2),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+            ],
+        };
+        i.exec_stmt(&sync_block).unwrap();
+        assert_eq!(i.state.get("x"), Some(&Value::Int(1)));
+        assert_eq!(i.state.get("y"), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn test_sync_block_nested_guarded() {
+        let mut i = Interpreter::new();
+        i.state.insert("a".to_string(), Value::Bool(false));
+        i.state.insert("b".to_string(), Value::Int(0));
+        let sync_block = Statement::SyncBlock {
+            body: vec![
+                Statement::Guarded {
+                    condition: Expr::Bool(true),
+                    statements: vec![Statement::Assignment {
+                        lhs: Expr::OwnedRef("a".to_string()),
+                        expr: Expr::Bool(true),
+                        timeout: None,
+                        modifiers: vec![],
+                    }],
+                },
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("b".to_string()),
+                    expr: Expr::Integer(42),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+            ],
+        };
+        i.exec_stmt(&sync_block).unwrap();
+        assert_eq!(i.state.get("a"), Some(&Value::Bool(true)));
+        assert_eq!(i.state.get("b"), Some(&Value::Int(42)));
+    }
+
+    #[test]
+    fn test_sync_block_empty() {
+        let mut i = Interpreter::new();
+        let sync_block = Statement::SyncBlock { body: vec![] };
+        i.exec_stmt(&sync_block).unwrap();
+    }
 }

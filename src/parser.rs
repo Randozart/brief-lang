@@ -3649,6 +3649,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 self.expect(Token::LBrace)?;
                 let body = self.parse_body()?;
                 self.expect(Token::RBrace)?;
+                self.expect(Token::Semicolon)?;
                 Ok(Statement::SyncBlock { body })
             }
             Some(Ok(Token::Term)) => {
@@ -6469,6 +6470,54 @@ mod parser_tests {
             assert_eq!(dep.source_lang, crate::ast::LinkLanguage::Object);
         } else {
             panic!("Expected LinkDependency, got {:?}", program.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_link_dependency_java() {
+        let s = "import \"link/Main.java\";";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "import link java should parse: {:?}", result.err());
+        let program = result.unwrap();
+        if let TopLevel::LinkDependency(dep) = &program.items[0] {
+            assert_eq!(dep.path, "link/Main.java");
+            assert_eq!(dep.source_lang, crate::ast::LinkLanguage::Java);
+        } else {
+            panic!("Expected LinkDependency, got {:?}", program.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_link_dependency_typescript() {
+        let s = "import \"link/math.ts\";";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "import link typescript should parse: {:?}", result.err());
+        let program = result.unwrap();
+        if let TopLevel::LinkDependency(dep) = &program.items[0] {
+            assert_eq!(dep.path, "link/math.ts");
+            assert_eq!(dep.source_lang, crate::ast::LinkLanguage::AssemblyScript);
+        } else {
+            panic!("Expected LinkDependency, got {:?}", program.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_sync_block_in_txn_body() {
+        let s = "let x: Int; let y: Int; txn test [x==0][x>0] { sync { &x = 1; &y = 2; }; term; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "sync block in txn should parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.items.len(), 3);
+        if let TopLevel::Transaction(txn) = &program.items[2] {
+            assert_eq!(txn.name, "test");
+            assert_eq!(txn.body.len(), 2);
+            assert!(matches!(txn.body[0], Statement::SyncBlock { .. }));
+            assert!(matches!(txn.body[1], Statement::Term { .. }));
+        } else {
+            panic!("Expected Transaction");
         }
     }
 

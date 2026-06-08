@@ -685,6 +685,145 @@ impl ReadGraph {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+    use crate::errors::Severity;
+
+    fn make_program(items: Vec<TopLevel>) -> Program {
+        Program {
+            items,
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        }
+    }
+
+    fn txn(name: &str, pre: Expr, post: Expr, body: Vec<Statement>) -> TopLevel {
+        TopLevel::Transaction(Transaction {
+            name: name.to_string(),
+            is_reactive: true, is_async: false,
+            parameters: vec![],
+            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
+            body, reactor_speed: None, span: None,
+            is_lambda: false, dependencies: vec![], attrs: vec![],
+            modifiers: vec![], variant_bodies: vec![], outputs: vec![], output_type: None,
+        })
+    }
+
+    fn state(name: &str, ty: Type) -> TopLevel {
+        TopLevel::StateDecl(StateDecl {
+            name: name.to_string(), ty, expr: None, address: None,
+            bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+        })
+    }
+
+    #[test]
+    fn test_hebv_rejects_link_dependency() {
+        let program = make_program(vec![
+            TopLevel::LinkDependency(LinkDependency {
+                path: "link/foo.c".to_string(),
+                source_lang: LinkLanguage::C,
+            }),
+        ]);
+        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert!(diags[0].title.contains("link"));
+    }
+
+    #[test]
+    fn test_hebv_rejects_frgn() {
+        let program = make_program(vec![
+            TopLevel::ForeignBinding {
+                name: "foo".to_string(),
+                toml_path: "foo.toml".to_string(),
+                target: ForeignTarget::Native,
+                signature: ForeignSignature {
+                    name: "foo".to_string(),
+                    location: "std::foo".to_string(),
+                    wasm_impl: None, wasm_setup: None, inputs: vec![],
+                    success_output: vec![], result_type: ResultType::VoidType,
+                    error_type_name: "Error".to_string(), error_fields: vec![],
+                    input_layout: None, output_layout: None,
+                    precondition: None, postcondition: None,
+                    buffer_mode: None, ffi_kind: None, is_out: false, span: None,
+                },
+                span: None,
+            },
+        ]);
+        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert!(diags[0].title.contains("frgn"));
+    }
+
+    #[test]
+    fn test_hebv_rejects_true_precondition() {
+        let program = make_program(vec![
+            txn("bad", Expr::Bool(true), Expr::Bool(false), vec![]),
+        ]);
+        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let pre_errors: Vec<_> = diags.iter().filter(|d| d.title.contains("precondition")).collect();
+        assert_eq!(pre_errors.len(), 1, "Expected rejection of [true] precondition");
+    }
+
+    #[test]
+    fn test_hebv_rejects_true_postcondition() {
+        let program = make_program(vec![
+            txn("bad", Expr::Bool(false), Expr::Bool(true), vec![]),
+        ]);
+        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let post_errors: Vec<_> = diags.iter().filter(|d| d.title.contains("postcondition")).collect();
+        assert_eq!(post_errors.len(), 1, "Expected rejection of [true] postcondition");
+    }
+
+    #[test]
+    fn test_hebv_rejects_float_type() {
+        let program = make_program(vec![state("x", Type::Float)]);
+        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].title.contains("Float"));
+    }
+
+    #[test]
+    fn test_hebv_rejects_string_type() {
+        let program = make_program(vec![state("s", Type::String)]);
+        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].title.contains("String"));
+    }
+
+    #[test]
+    fn test_hebv_rejects_unsized_int() {
+        let program = make_program(vec![state("x", Type::Int)]);
+        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let int_errors: Vec<_> = diags.iter().filter(|d| d.title.contains("Int/UInt")).collect();
+        assert!(!int_errors.is_empty(), "Expected rejection of unsized Int");
+    }
+
+    #[test]
+    fn test_hebv_accepts_synthesizable_types() {
+        let program = make_program(vec![
+            state("a", Type::Bool),
+            txn("good",
+                Expr::Identifier("a".to_string()),
+                Expr::Not(Box::new(Expr::Identifier("a".to_string()))),
+                vec![]),
+        ]);
+        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let type_errors: Vec<_> = diags.iter().filter(|d| d.code.starts_with("B500")).collect();
+        assert_eq!(type_errors.len(), 0, "Bool + bounded txns should be OK");
+    }
+}
+
 fn get_dbrief_type_size(db_type: &crate::dbrief::ast::DbriefType, engine: &DbvsEngine) -> u64 {
     use crate::dbrief::ast::DbriefType;
     match db_type {

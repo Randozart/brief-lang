@@ -2,8 +2,7 @@
 let a: Int = 0;
 let b: Int = 0;
 
-rct txn test [true]
-  [a == @a + 1]
+rct txn test [[a == @a + 1]
 {
   &a = a + 1;
   &b = b + 1;
