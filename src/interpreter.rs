@@ -5169,6 +5169,123 @@ mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    // ---- SubtypeOp gap tests ----
+
+    #[test]
+    fn test_subtype_skip_on_list() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4), Value::Int(5),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Skip(2)],
+        }).unwrap();
+        assert_eq!(result, Value::List(vec![Value::Int(3), Value::Int(4), Value::Int(5)]));
+    }
+
+    #[test]
+    fn test_subtype_unique_on_list() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(1), Value::Int(1), Value::Int(2), Value::Int(2), Value::Int(3),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Unique],
+        }).unwrap();
+        assert_eq!(result, Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
+    }
+
+    #[test]
+    fn test_subtype_sort_on_list() {
+        let mut i = Interpreter::new();
+        i.state.insert("items".to_string(), Value::List(vec![
+            Value::Tuple(vec![Value::String("b".into()), Value::Int(2)]),
+            Value::Tuple(vec![Value::String("a".into()), Value::Int(1)]),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("items".to_string())),
+            ops: vec![SubtypeOp::Sort(Box::new(Expr::Projection {
+                source: Box::new(Expr::Identifier("_".to_string())),
+                target: ProjectionTarget::Index(0),
+            }))],
+        }).unwrap();
+        if let Value::List(sorted) = result {
+            assert_eq!(sorted.len(), 2);
+            // First element should be "a"
+            if let Value::Tuple(ref fields) = sorted[0] {
+                assert_eq!(fields[0], Value::String("a".into()));
+            } else { panic!("Expected Tuple"); }
+        } else { panic!("Expected List"); }
+    }
+
+    #[test]
+    fn test_subtype_avg_on_list() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Avg(Box::new(Expr::Identifier("_".to_string())))],
+        }).unwrap();
+        assert_eq!(result, Value::Float(2.5));
+    }
+
+    #[test]
+    fn test_subtype_min_on_list() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(3), Value::Int(1), Value::Int(4), Value::Int(1), Value::Int(5),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Min(Box::new(Expr::Identifier("_".to_string())))],
+        }).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_subtype_max_on_list() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(3), Value::Int(1), Value::Int(4), Value::Int(1), Value::Int(5),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Max(Box::new(Expr::Identifier("_".to_string())))],
+        }).unwrap();
+        assert_eq!(result, Value::Int(5));
+    }
+
+    #[test]
+    fn test_subtype_join_two_lists() {
+        let mut i = Interpreter::new();
+        i.state.insert("left".to_string(), Value::List(vec![
+            Value::Tuple(vec![Value::Int(1), Value::String("a".into())]),
+            Value::Tuple(vec![Value::Int(2), Value::String("b".into())]),
+        ]));
+        i.state.insert("right".to_string(), Value::List(vec![
+            Value::Tuple(vec![Value::Int(1), Value::String("x".into())]),
+            Value::Tuple(vec![Value::Int(3), Value::String("y".into())]),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("left".to_string())),
+            ops: vec![SubtypeOp::Join(
+                Box::new(Expr::Identifier("right".to_string())),
+                Box::new(Expr::Projection {
+                    source: Box::new(Expr::Identifier("_".to_string())),
+                    target: ProjectionTarget::Index(0),
+                }),
+            )],
+        }).unwrap();
+        if let Value::List(joined) = result {
+            // Should join on matching key (1) — 1 row with both fields
+            assert!(!joined.is_empty(), "Join should produce at least one result");
+        } else { panic!("Expected List"); }
+    }
+
     // ---- DBVL Append Tests ----
 
     #[test]
