@@ -1,0 +1,18 @@
+// Math FFI Bindings — New Format
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    sqrt      { "sqrt", "std::f64::sqrt" }
+    pow       { "pow", "std::f64::powf" }
+    abs_float { "abs_float", "std::f64::abs" }
+    floor     { "floor", "std::f64::floor" }
+    ceil      { "ceil", "std::f64::ceil" }
+    round     { "round", "std::f64::round" }
+    sin       { "sin", "std::f64::sin" }
+    cos       { "cos", "std::f64::cos" }
+    tan       { "tan", "std::f64::tan" }
+    log       { "log", "std::f64::ln" }
+    exp       { "exp", "std::f64::exp" }
+    min_float { "min_float", "f64::min" }
+    max_float { "max_float", "f64::max" }
+}

@@ -114,26 +114,31 @@ impl FunctionRegistry {
         self.functions.iter()
     }
 
-    /// Load all bindings from std/bindings/*.dbvs (Metropolitan FFI)
+    /// Load all bindings from std/bindings/*.dbv and *.dbvs
     pub fn load_from_bindings_dir(&mut self) {
         let bindings_dir = Self::bindings_dir();
-        let mut dbvs_count = 0;
-        let mut metro_channels = 0;
+        let mut loaded_count = 0;
 
         if let Ok(entries) = std::fs::read_dir(&bindings_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 let ext = path.extension().and_then(|s| s.to_str());
                 
-                if ext == Some("dbvs") {
+                if ext == Some("dbv") {
+                    if let Err(e) = self.load_from_dbv(&path) {
+                        eprintln!("[WARN] Failed to load DBV binding {}: {}", path.display(), e);
+                    } else {
+                        loaded_count += 1;
+                    }
+                } else if ext == Some("dbvs") {
                     if let Err(e) = self.load_from_dbvs(&path) {
                         eprintln!("[WARN] Failed to load DBVS binding {}: {}", path.display(), e);
                     } else {
-                        dbvs_count += 1;
+                        loaded_count += 1;
                     }
                 } else if ext == Some("toml") {
                     // TOML files are deprecated - log warning but still load for backward compat
-                    eprintln!("[WARN] TOML bindings are deprecated, use .dbvs: {}", path.display());
+                    eprintln!("[WARN] TOML bindings are deprecated, use .dbv or .dbvs: {}", path.display());
                     if let Err(e) = self.load_from_toml(&path) {
                         eprintln!("[WARN] Failed to load legacy TOML binding {}: {}", path.display(), e);
                     }
@@ -142,10 +147,53 @@ impl FunctionRegistry {
         }
 
         eprintln!(
-            "[INFO] FFI Registry loaded {} functions from {} DBVS schemas (Metropolitan FFI)",
+            "[INFO] FFI Registry loaded {} functions from {} binding files",
             self.functions.len(),
-            dbvs_count
+            loaded_count
         );
+    }
+
+    /// Load bindings from a single DBV file (new format using v2 parser)
+    fn load_from_dbv(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+
+        let doc = crate::dbrief::v2::parse_document(&content)
+            .map_err(|e| format!("Failed to parse DBV: {}", e))?;
+
+        // Look for FnBinding data groups
+        for group in &doc.data_groups {
+            if group.schema_name.as_deref() != Some("FnBinding") {
+                continue;
+            }
+            for entry in &group.entries {
+                // Extract name and impl from positional fields
+                let name = match entry.fields.first() {
+                    Some(crate::dbrief::v2::DataField::Positional(crate::dbrief::v2::DataValue::String(n))) => n.clone(),
+                    _ => continue,
+                };
+                let impl_location = match entry.fields.get(1) {
+                    Some(crate::dbrief::v2::DataField::Positional(crate::dbrief::v2::DataValue::String(l))) => l.clone(),
+                    _ => continue,
+                };
+
+                // Build reverse name→location map
+                self.fn_locations_by_name.insert(name.clone(), impl_location.clone());
+
+                // Register the function implementation
+                if let Some(func) = resolve_location_to_impl(&impl_location) {
+                    self.register(impl_location.clone(), func);
+                } else {
+                    eprintln!(
+                        "[WARN] No implementation for location '{}' in {}",
+                        impl_location,
+                        path.display()
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Load bindings from a single DBVS schema file

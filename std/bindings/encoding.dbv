@@ -1,0 +1,18 @@
+// Encoding FFI Bindings — New Format
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    __base64_encode  { "__base64_encode", "encoding::base64_encode" }
+    __base64_decode  { "__base64_decode", "encoding::base64_decode" }
+    __hex_encode     { "__hex_encode", "encoding::hex_encode" }
+    __hex_decode     { "__hex_decode", "encoding::hex_decode" }
+    __url_encode     { "__url_encode", "encoding::url_encode" }
+    __url_decode     { "__url_decode", "encoding::url_decode" }
+    __html_escape    { "__html_escape", "encoding::html_escape" }
+    __html_unescape  { "__html_unescape", "encoding::html_unescape" }
+    __md5            { "__md5", "encoding::md5" }
+    __sha1           { "__sha1", "encoding::sha1" }
+    __sha256         { "__sha256", "encoding::sha256" }
+    __sha512         { "__sha512", "encoding::sha512" }
+    __uuid_v4        { "__uuid_v4", "encoding::uuid_v4" }
+}

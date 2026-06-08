@@ -1,0 +1,10 @@
+// Time FFI Bindings — New Format
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    current_timestamp { "current_timestamp", "std::time::SystemTime::now" }
+    sleep_ms          { "sleep_ms", "std::thread::sleep" }
+    sleep_seconds     { "sleep_seconds", "std::thread::sleep" }
+    measure_time_ms   { "measure_time_ms", "std::time::Instant::now" }
+    elapsed_ms        { "elapsed_ms", "std::time::Instant::elapsed" }
+}

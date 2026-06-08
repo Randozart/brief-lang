@@ -1,0 +1,18 @@
+// System Triggers FFI Bindings — New Format
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    sigint              { "sigint", "signal::SIGINT" }
+    sigterm             { "sigterm", "signal::SIGTERM" }
+    sighup              { "sighup", "signal::SIGHUP" }
+    stdin_line          { "stdin_line", "std::io::stdin_line" }
+    stdin_ready         { "stdin_ready", "std::io::stdin_ready" }
+    clock_tick_1hz      { "clock_tick_1hz", "time::tick_1hz" }
+    clock_tick_10hz     { "clock_tick_10hz", "time::tick_10hz" }
+    clock_tick_100hz    { "clock_tick_100hz", "time::tick_100hz" }
+    stdout_ready        { "stdout_ready", "std::io::stdout_ready" }
+    file_event          { "file_event", "fs::watch_event" }
+    network_data        { "network_data", "net::socket_data" }
+    network_connected   { "network_connected", "net::connected" }
+    network_disconnected { "network_disconnected", "net::disconnected" }
+}

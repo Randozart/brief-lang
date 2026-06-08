@@ -1,0 +1,17 @@
+// JSON FFI Bindings — New Format
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    __json_parse     { "__json_parse", "json::parse" }
+    __json_stringify { "__json_stringify", "json::stringify" }
+    __json_is_object { "__json_is_object", "json::is_object" }
+    __json_is_array  { "__json_is_array", "json::is_array" }
+    __json_is_string { "__json_is_string", "json::is_string" }
+    __json_is_number { "__json_is_number", "json::is_number" }
+    __json_is_bool   { "__json_is_bool", "json::is_bool" }
+    __json_is_null   { "__json_is_null", "json::is_null" }
+    __json_get       { "__json_get", "json::get" }
+    __json_set       { "__json_set", "json::set" }
+    __json_keys      { "__json_keys", "json::keys" }
+    __json_length    { "__json_length", "json::length" }
+}

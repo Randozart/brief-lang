@@ -1,0 +1,7 @@
+// HTTP FFI Bindings — New Format
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    __http_get  { "__http_get", "http::get" }
+    __http_post { "__http_post", "http::post" }
+}

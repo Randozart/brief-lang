@@ -1,0 +1,20 @@
+// String FFI Bindings — New Format
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    string_length    { "string_length", "std::string::String::len" }
+    substring        { "substring", "std::string::String::chars" }
+    string_replace   { "string_replace", "std::string::String::replace" }
+    string_contains  { "string_contains", "std::string::String::contains" }
+    string_starts_with { "string_starts_with", "std::string::String::starts_with" }
+    string_ends_with   { "string_ends_with", "std::string::String::ends_with" }
+    string_to_upper  { "string_to_upper", "std::string::String::to_uppercase" }
+    string_to_lower  { "string_to_lower", "std::string::String::to_lowercase" }
+    string_trim      { "string_trim", "std::string::String::trim" }
+    string_split     { "string_split", "std::string::String::split" }
+    parse_int        { "parse_int", "std::str::FromStr::from_str" }
+    parse_float      { "parse_float", "std::str::FromStr::from_str" }
+    int_to_string    { "int_to_string", "std::string::ToString::to_string" }
+    float_to_string  { "float_to_string", "std::string::ToString::to_string" }
+    string_concat    { "string_concat", "std::string::String::push_str" }
+}

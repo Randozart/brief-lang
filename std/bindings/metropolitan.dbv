@@ -1,0 +1,28 @@
+// Metropolitan FFI Bindings — New Format
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    __shm_open             { "__shm_open", "metro::shm::open" }
+    __shm_unlink           { "__shm_unlink", "metro::shm::unlink" }
+    __ftruncate_shm        { "__ftruncate_shm", "metro::shm::ftruncate" }
+    __shm_list             { "__shm_list", "metro::shm::list" }
+    __shm_exists           { "__shm_exists", "metro::shm::exists" }
+    __shm_size             { "__shm_size", "metro::shm::size" }
+    __mmap_anonymous       { "__mmap_anonymous", "metro::mmap::anonymous" }
+    __munmap               { "__munmap", "metro::mmap::unmap" }
+    __msync                { "__msync", "metro::mmap::sync" }
+    __mmap_write           { "__mmap_write", "metro::mmap::write" }
+    __mmap_read            { "__mmap_read", "metro::mmap::read" }
+    __mmap_read_u32        { "__mmap_read_u32", "metro::mmap::read_u32" }
+    __mmap_write_u32       { "__mmap_write_u32", "metro::mmap::write_u32" }
+    __atomic_load_u32      { "__atomic_load_u32", "metro::atomic::load_u32" }
+    __atomic_store_u32     { "__atomic_store_u32", "metro::atomic::store_u32" }
+    __atomic_cas_u32       { "__atomic_cas_u32", "metro::atomic::cas_u32" }
+    __atomic_fence         { "__atomic_fence", "metro::atomic::fence" }
+    __atomic_xchg_u32      { "__atomic_xchg_u32", "metro::atomic::xchg_u32" }
+    __atomic_add_u32       { "__atomic_add_u32", "metro::atomic::add_u32" }
+    __metro_create_channel { "__metro_create_channel", "metro::channel::create" }
+    __metro_destroy_channel { "__metro_destroy_channel", "metro::channel::destroy" }
+    __metro_get_channel_layout { "__metro_get_channel_layout", "metro::channel::get_layout" }
+    __metro_generate_c_header  { "__metro_generate_c_header", "metro::channel::gen_c_header" }
+}
