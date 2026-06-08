@@ -23,6 +23,7 @@
 use crate::ast::{Import, ImportItem, Program, StrictMode, TopLevel};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use crate::dbrief::v2 as dbrief_v2;
 
 pub struct ImportResolver {
     loaded_modules: HashMap<String, Program>,
@@ -59,13 +60,8 @@ impl ImportResolver {
 
         while index < items.len() {
             if let TopLevel::Import(import) = &items[index] {
-                // Skip .dbvs schema imports - they're handled by schema validation
-                let path_str = import.path.join("/");
-                if path_str.ends_with(".dbvs") {
-                    index += 1;
-                    continue;
-                }
-                
+                // DBrief imports (dbv/dbvl/dbvs) are handled in resolve_import,
+                // not skipped like before.
                 let resolved = self.resolve_import(import, file_path)?;
                 items.remove(index);
                 items.splice(index..index, resolved.items.clone());
@@ -110,22 +106,7 @@ impl ImportResolver {
         } else {
             // Check if this is a file-based import (ends with .css, .svg, etc.)
             let last_component = import.path.last().unwrap();
-            if last_component.ends_with(".dbvs") {
-                // Skip .dbvs imports - they're schema imports, not Brief modules
-                return Ok(Program {
-                    items: vec![],
-                    comments: vec![],
-                    reactor_speed: None,
-                    attrs: Vec::new(),
-                    ffi: None,
-                    strict_mode: self.strict_mode,
-                    dispatch_mode: Default::default(),
-                    exit_condition: None,
-                    out_pragmas: vec![],
-            default_sig_modifier: None,
-                });
-            }
-            if last_component.ends_with(".css") || last_component.ends_with(".svg") {
+            if last_component.ends_with(".css") || last_component.ends_with(".svg") || last_component.ends_with(".dbv") || last_component.ends_with(".dbvs") || last_component.ends_with(".dbvl") {
                 import.path.join("/")
             } else {
                 import.path.join(".")
@@ -253,6 +234,81 @@ self.loaded_modules.insert(
             default_sig_modifier: None,
                 });
             }
+        }
+
+        // Check for DBrief import (.dbv, .dbvl, .dbvs)
+        if path_str.ends_with(".dbv") || path_str.ends_with(".dbvl") || path_str.ends_with(".dbvs") {
+            let dbrief_src_dir = source_file
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+
+            // Search in source dir and all search paths
+            let dbrief_path = self
+                .search_paths
+                .iter()
+                .map(|p| dbrief_src_dir.join(p).join(&path_str))
+                .chain(std::iter::once(dbrief_src_dir.join(&path_str)))
+                .find(|p| p.exists())
+                .ok_or_else(|| {
+                    format!(
+                        "DBrief file not found: {} (searched in lib/, imports/, ./ and source dir)",
+                        path_str
+                    )
+                })?;
+
+            let content = std::fs::read_to_string(&dbrief_path)
+                .map_err(|e| format!("Failed to read DBrief file '{}': {}", dbrief_path.display(), e))?;
+
+            let doc = dbrief_v2::parse_document(&content)
+                .map_err(|e| format!("Failed to parse DBrief file '{}': {}", dbrief_path.display(), e))?;
+
+            // Determine the constant name from import items
+            let constant_name = import
+                .items
+                .first()
+                .map(|item| item.alias.as_ref().unwrap_or(&item.name).clone())
+                .unwrap_or_else(|| {
+                    // Fallback: use filename without extension
+                    let fname = dbrief_path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "data".to_string());
+                    fname
+                });
+
+            let dbrief_items = crate::dbrief::bridge::document_to_program(&doc, &constant_name);
+
+            let program_for_cache = Program {
+                items: dbrief_items.clone(),
+                comments: vec![],
+                reactor_speed: None,
+                attrs: Vec::new(),
+                ffi: None,
+                strict_mode: self.strict_mode,
+                dispatch_mode: Default::default(),
+                exit_condition: None,
+                out_pragmas: vec![],
+                default_sig_modifier: None,
+            };
+
+            self.loaded_modules.insert(
+                path_str.clone(),
+                program_for_cache,
+            );
+
+            return Ok(Program {
+                items: dbrief_items,
+                comments: vec![],
+                reactor_speed: None,
+                attrs: Vec::new(),
+                ffi: None,
+                strict_mode: self.strict_mode,
+                dispatch_mode: Default::default(),
+                exit_condition: None,
+                out_pragmas: vec![],
+                default_sig_modifier: None,
+            });
         }
 
         // Default: Brief module (.bv or .ebv)

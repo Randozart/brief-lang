@@ -16,11 +16,14 @@ pub mod ast;
 pub mod parser;
 pub mod eval;
 pub mod alloc;
+pub mod v2;
+pub mod bridge;
 
 pub use ast::*;
 pub use parser::{parse_dbrief, parse_dbvs, parse_dbvl};
 pub use eval::*;
 pub use alloc::*;
+pub use v2::*;
 
 use std::collections::HashMap;
 
