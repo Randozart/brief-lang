@@ -7696,4 +7696,104 @@ let spec = crate::target_spec::TargetSpec {
         // store into list element: store i64 %t..., i64* %lep...
         assert!(output.contains("%lep") && output.contains("store i64"), "Should store at list element ptr. Output:\n{}", output);
     }
+
+    #[test]
+    fn test_slice_full_range_emitted() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "xs".into(), ty: Type::Int,
+                    expr: Some(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3), Expr::Integer(4), Expr::Integer(5)])),
+                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "slice".into(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("xs".into()),
+                            expr: Expr::Slice { value: Box::new(Expr::Identifier("xs".into())), start: Some(Box::new(Expr::Integer(1))), end: Some(Box::new(Expr::Integer(3))), stride: None, mask: None },
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false, dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Slice with start/end should emit a copy loop
+        assert!(output.contains("phi") || output.contains("icmp"), "Slice should produce loop. Output:\n{}", output);
+    }
+
+    #[test]
+    fn test_map_literal_emitted() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "m".into(), ty: Type::Custom("Map".into()),
+                    expr: Some(Expr::MapLiteral(vec![(Expr::String("a".into()), Expr::Integer(1))])),
+                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // MapLiteral falls through to stub — should not crash
+        assert!(!output.is_empty());
+    }
+
+    #[test]
+    fn test_set_literal_emitted() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "s".into(), ty: Type::Custom("Set".into()),
+                    expr: Some(Expr::SetLiteral(vec![Expr::Integer(1), Expr::Integer(2)])),
+                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(!output.is_empty());
+    }
+
+    #[test]
+    fn test_projection_keys_stub() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "k".into(), ty: Type::Int,
+                    expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into())), target: ProjectionTarget::Keys }),
+                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(!output.is_empty());
+    }
+
+    #[test]
+    fn test_projection_contains_stub() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "c".into(), ty: Type::Bool,
+                    expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into())), target: ProjectionTarget::Contains(Box::new(Expr::String("k".into()))) }),
+                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(!output.is_empty());
+    }
 }

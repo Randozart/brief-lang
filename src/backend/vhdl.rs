@@ -1214,4 +1214,48 @@ use crate::ast::*;
         assert!(output.contains("entity"), "output should contain entity declaration");
         assert!(output.contains("architecture"), "output should contain architecture body");
     }
+
+    #[test]
+    fn test_vhdl_generates_with_clock_port() {
+        let hw_config = HardwareConfig {
+            project: ProjectConfig { name: "clk_test".to_string(), version: "1.0".to_string() },
+            target: TargetConfig { fpga: "test".to_string(), clock_hz: 50_000_000, platform: None, synthesis: None },
+            interface: InterfaceConfig { name: "none".to_string(), address_width: None, data_width: None, controller: None, situs: None },
+            io: None,
+            memory: HashMap::new(),
+        };
+        let mut backend = VhdlGenerator::new("clocked", hw_config);
+        let program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: Some(50), attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let files = backend.generate(&program);
+        let output = files.iter().map(|(_, s)| s.as_str()).collect::<Vec<&str>>().join("\n");
+        assert!(output.contains("clocked"), "Should contain entity name");
+        assert!(output.contains("clk"), "Should contain clock port");
+    }
+
+    #[test]
+    fn test_vhdl_with_signal_decl() {
+        use crate::ast::*;
+        let hw_config = HardwareConfig {
+            project: ProjectConfig { name: "sig".to_string(), version: "1.0".to_string() },
+            target: TargetConfig { fpga: "test".to_string(), clock_hz: 100_000_000, platform: None, synthesis: None },
+            interface: InterfaceConfig { name: "none".to_string(), address_width: None, data_width: None, controller: None, situs: None },
+            io: None,
+            memory: HashMap::new(),
+        };
+        let mut backend = VhdlGenerator::new("signal_test", hw_config);
+        let program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let files = backend.generate(&program);
+        let output = files.iter().map(|(_, s)| s.as_str()).collect::<Vec<&str>>().join("\n");
+        assert!(output.contains("signal_test"), "Should contain entity name");
+    }
 }

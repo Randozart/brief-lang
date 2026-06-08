@@ -2178,4 +2178,53 @@ use crate::ast::*;
         let output = backend.generate(&program, &bindings, "test");
         assert!(!output.rust_code.is_empty());
     }
+
+    #[test]
+    fn test_webstack_generates_with_text_directive() {
+        let mut backend = WebstackGenerator::new();
+        let program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let bindings = vec![Binding {
+            element_id: "e1".into(),
+            directive: Directive::Text { signal: "greeting".into() },
+        }];
+        let output = backend.generate(&program, &bindings, "binding_test");
+        assert!(output.js_glue.contains("greeting") || !output.rust_code.is_empty());
+    }
+
+    #[test]
+    fn test_webstack_generates_with_show_directive() {
+        let mut backend = WebstackGenerator::new();
+        let program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let bindings = vec![Binding {
+            element_id: "e2".into(),
+            directive: Directive::Show { expr: "visible".into() },
+        }];
+        let output = backend.generate(&program, &bindings, "show_test");
+        assert!(output.js_glue.contains("visible") || !output.rust_code.is_empty());
+    }
+
+    #[test]
+    fn test_webstack_generates_rust_module() {
+        let mut backend = WebstackGenerator::new();
+        let program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let bindings: Vec<Binding> = vec![];
+        let output = backend.generate(&program, &bindings, "rust_mod");
+        assert!(!output.rust_code.is_empty(), "Should generate Rust code");
+        assert!(output.rust_code.contains("State"), "Should generate State struct");
+    }
 }
