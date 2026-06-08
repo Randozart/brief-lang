@@ -948,3 +948,68 @@ fn strip_surrounding_quotes(s: &str) -> String {
         trimmed.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_register_signal_and_transaction() {
+        let mut vc = ViewCompiler::new();
+        vc.register_signal("sig_a", 0);
+        vc.register_transaction("txn_b", 1);
+        assert!(vc.signals.contains_key("sig_a"));
+        assert!(vc.transactions.contains_key("txn_b"));
+        assert_eq!(vc.transactions.get("txn_b"), Some(&1));
+    }
+
+    #[test]
+    fn test_compile_basic_html_no_directives() {
+        let mut vc = ViewCompiler::new();
+        let (bindings, html, _) = vc.compile("<div>hello</div>");
+        assert!(bindings.is_empty(), "No directives = no bindings");
+        assert!(!html.is_empty());
+        // No directives so no IDs injected
+        assert!(!html.contains("id="));
+    }
+
+    #[test]
+    fn test_compile_b_text_directive() {
+        let mut vc = ViewCompiler::new();
+        let (bindings, html, _) = vc.compile(r#"<div b-text="name">text</div>"#);
+        assert!(!bindings.is_empty(), "Should create text binding");
+        let has_text = bindings.iter().any(|b| matches!(&b.directive, Directive::Text { .. }));
+        assert!(has_text, "Should have Text directive");
+    }
+
+    #[test]
+    fn test_compile_b_show_directive() {
+        let mut vc = ViewCompiler::new();
+        let (bindings, html, _) = vc.compile(r#"<div b-show="isVisible">text</div>"#);
+        let has_show = bindings.iter().any(|b| matches!(&b.directive, Directive::Show { .. }));
+        assert!(has_show, "Should have Show directive");
+    }
+
+    #[test]
+    fn test_compile_b_hide_directive() {
+        let mut vc = ViewCompiler::new();
+        let (bindings, html, _) = vc.compile(r#"<div b-hide="isHidden">text</div>"#);
+        let has_hide = bindings.iter().any(|b| matches!(&b.directive, Directive::Hide { .. }));
+        assert!(has_hide, "Should have Hide directive");
+    }
+
+    #[test]
+    fn test_compile_inject_ids_adds_id_attr() {
+        let mut vc = ViewCompiler::new();
+        let (_, html, _) = vc.compile(r#"<div b-text="x">text</div>"#);
+        assert!(html.contains("id=\""), "Should inject id for directive elements");
+    }
+
+    #[test]
+    fn test_compile_empty_html() {
+        let mut vc = ViewCompiler::new();
+        let (bindings, html, _) = vc.compile("");
+        assert!(bindings.is_empty());
+        assert!(html.is_empty());
+    }
+}

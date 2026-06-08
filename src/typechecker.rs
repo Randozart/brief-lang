@@ -1945,3 +1945,218 @@ Expr::ObjectLiteral(fields) => {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::*;
+
+    fn make_program(items: Vec<TopLevel>) -> Program {
+        Program { items, comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None }
+    }
+
+    fn check(prog: &mut Program) -> Vec<super::TypeError> {
+        let mut tc = super::TypeChecker::new();
+        tc.check_program(prog)
+    }
+
+    #[test]
+    fn test_check_program_empty() {
+        let mut prog = make_program(vec![]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_check_basic_definition() {
+        let mut prog = make_program(vec![
+            TopLevel::Definition(Definition {
+                name: "foo".into(), type_params: vec![], parameters: vec![],
+                outputs: vec![Type::Int], output_type: None, output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_definition_type_mismatch() {
+        let mut prog = make_program(vec![
+            TopLevel::Definition(Definition {
+                name: "foo".into(), type_params: vec![], parameters: vec![],
+                outputs: vec![Type::Bool], output_type: None, output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(!errors.is_empty(), "Expected type mismatch error for Bool vs Int");
+    }
+
+    #[test]
+    fn test_check_undefined_variable() {
+        let mut prog = make_program(vec![
+            TopLevel::Definition(Definition {
+                name: "test".into(), type_params: vec![], parameters: vec![],
+                outputs: vec![Type::Int], output_type: None, output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![
+                    Statement::Let { name: "x".into(), ty: Some(Type::Int), expr: Some(Expr::Identifier("y".into())), address: None, address_expr: None, bit_range: None, is_override: false, modifiers: vec![] },
+                    Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None },
+                ],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(!errors.is_empty(), "Expected error for undefined 'y'");
+    }
+
+    #[test]
+    fn test_check_assignment_type_mismatch() {
+        let mut prog = make_program(vec![
+            TopLevel::StateDecl(StateDecl {
+                name: "x".into(), ty: Type::Int, expr: Some(Expr::String("hello".into())),
+                address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(!errors.is_empty(), "Expected type mismatch for Int vs String");
+    }
+
+    #[test]
+    fn test_check_state_decl_initial_value() {
+        let mut prog = make_program(vec![
+            TopLevel::StateDecl(StateDecl {
+                name: "x".into(), ty: Type::Int, expr: Some(Expr::Integer(5)),
+                address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Int initializer should be fine: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_state_decl_uninitialized_warning() {
+        let mut prog = make_program(vec![
+            TopLevel::StateDecl(StateDecl {
+                name: "x".into(), ty: Type::Int, expr: None,
+                address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        // Uninitialized state decl produces a warning, not an error
+        assert!(errors.is_empty(), "Uninitialized is a warning, not error");
+    }
+
+    #[test]
+    fn test_check_signature_registration() {
+        let mut prog = make_program(vec![
+            TopLevel::Signature(Signature {
+                name: "my_sig".into(), params: vec![("x".into(), Type::Int)],
+                result_type: ResultType::Projection(vec![Type::Bool]),
+                source: None, alias: None, bound_defn: None, modifier: None, output_type: None,
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Signature should register: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_transaction_basic() {
+        let mut prog = make_program(vec![
+            TopLevel::Transaction(Transaction {
+                name: "tx".into(), is_reactive: false, is_async: false, parameters: vec![],
+                contract: Contract { pre_condition: Expr::Gt(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(0))), post_condition: Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(0))), watchdog: None, span: None },
+                body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+                reactor_speed: None, span: None, is_lambda: false,
+                dependencies: vec![], attrs: vec![], modifiers: vec![],
+                variant_bodies: vec![], outputs: vec![], output_type: None,
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Transaction should pass: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_enum_variant_registration() {
+        let mut prog = make_program(vec![
+            TopLevel::Enum(EnumDefinition {
+                name: "Color".into(), type_params: vec![],
+                variants: vec![
+                    EnumVariant::Unit("Red".into()),
+                    EnumVariant::Tuple("Rgb".into(), vec![Type::Int, Type::Int, Type::Int]),
+                ],
+                span: None,
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Enum should register: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_constant_declaration() {
+        let mut prog = make_program(vec![
+            TopLevel::Constant(Constant {
+                name: "MAX".into(), ty: Type::Int, expr: Expr::Integer(100),
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Constant should pass: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_frgn_binding_basic() {
+        let mut prog = make_program(vec![
+            TopLevel::ForeignBinding {
+                name: "my_fn".into(), toml_path: "test".into(),
+                signature: ForeignSignature {
+                    name: "my_fn".into(), location: "std::test::fn".into(),
+                    wasm_impl: None, wasm_setup: None,
+                    inputs: vec![("x".into(), Type::Int)],
+                    success_output: vec![("result".into(), Type::Int)],
+                    result_type: ResultType::Projection(vec![Type::Int]),
+                    error_type_name: "Error".into(),
+                    error_fields: vec![("msg".into(), Type::String)],
+                    input_layout: None, output_layout: None,
+                    precondition: None, postcondition: None,
+                    buffer_mode: None, ffi_kind: None, is_out: false,
+                    span: None,
+                },
+                target: ForeignTarget::Native, span: None,
+            },
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Foreign binding should pass: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_geometry_compatible() {
+        let tc = super::TypeChecker::new();
+        assert!(tc.check_geometry(&Type::Int, &Type::Int));
+        assert!(tc.check_geometry(&Type::Bool, &Type::Bool));
+    }
+
+    #[test]
+    fn test_check_geometry_incompatible() {
+        let tc = super::TypeChecker::new();
+        assert!(!tc.check_geometry(&Type::Int, &Type::Bool));
+        assert!(!tc.check_geometry(&Type::String, &Type::Int));
+    }
+
+    #[test]
+    fn test_check_diagnostics_collection() {
+        let mut tc = super::TypeChecker::new();
+        let mut prog = make_program(vec![
+            TopLevel::StateDecl(StateDecl {
+                name: "unused".into(), ty: Type::Int, expr: None,
+                address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+            }),
+        ]);
+        let _ = tc.check_program(&mut prog);
+        let diags = tc.get_diagnostics();
+        assert!(!diags.is_empty(), "Should have at least one diagnostic for uninitialized");
+    }
+}
