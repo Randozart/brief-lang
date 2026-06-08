@@ -1,19 +1,5 @@
 // I/O FFI Bindings — New Format
-// Defines file system and stream operations available via FFI
-
-schema FnBinding {
-    name: String
-    impl: String
-}
-
-schema IoError {
-    variant: String where in { "NotFound", "PermissionDenied", "AlreadyExists", "InvalidInput", "Other" }
-}
-
-schema IoResult {
-    success: Bool
-    error: IoError
-}
+schema FnBinding { name: String; impl: String }
 
 as FnBinding {
     print          { "print", "std::io::print" }
@@ -22,9 +8,10 @@ as FnBinding {
     read_file      { "read_file", "std::fs::read_to_string" }
     write_file     { "write_file", "std::fs::write" }
     append_file    { "append_file", "std::fs::append" }
-    file_exists    { "file_exists", "std::fs::exists" }
+    file_exists    { "file_exists", "std::path::Path::exists" }
     delete_file    { "delete_file", "std::fs::remove_file" }
     create_dir     { "create_dir", "std::fs::create_dir" }
+    create_dir_all { "create_dir_all", "std::fs::create_dir_all" }
     delete_dir     { "delete_dir", "std::fs::remove_dir" }
     delete_dir_all { "delete_dir_all", "std::fs::remove_dir_all" }
 }

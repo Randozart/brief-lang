@@ -4,13 +4,14 @@
 // Conversion to native Value happens at import time (Phase B).
 
 use std::collections::HashMap;
+use serde::Serialize;
 
 // ============================================================================
 // Types
 // ============================================================================
 
 /// Parsed DBrief document — can represent .dbv, .dbvs, or .dbvl content
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DbriefDocument {
     pub imports: Vec<String>,
     pub schemas: Vec<SchemaDef>,
@@ -19,14 +20,14 @@ pub struct DbriefDocument {
 }
 
 /// A schema definition (from .dbvs or inline in .dbv)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SchemaDef {
     pub name: String,
     pub fields: Vec<FieldDef>,
 }
 
 /// A single field in a schema
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FieldDef {
     pub name: String,
     pub ty: FieldType,
@@ -37,7 +38,7 @@ pub struct FieldDef {
 }
 
 /// Field type expression
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum FieldType {
     String,
     Int,
@@ -52,17 +53,15 @@ pub enum FieldType {
 }
 
 /// A named data group (e.g. `as Item { ... }`)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DataGroup {
-    /// Schema name this data conforms to, if any
     pub schema_name: Option<String>,
     pub entries: Vec<DataEntry>,
 }
 
 /// A single data entry with optional key and optional schema reference
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DataEntry {
-    /// Entry key (e.g. `rusty_key` in `rusty_key as Item { ... }`)
     pub key: Option<String>,
     /// Schema name when using inline `key as Schema { ... }` form
     pub schema_name: Option<String>,
@@ -70,14 +69,14 @@ pub struct DataEntry {
 }
 
 /// A field value — either positional or named
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum DataField {
     Positional(DataValue),
     Named(String, DataValue),
 }
 
 /// A data value expression
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum DataValue {
     String(String),
     Int(i64),
@@ -88,7 +87,7 @@ pub enum DataValue {
 }
 
 /// A query/validation rule
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RuleDef {
     pub name: String,
     pub params: Vec<(String, FieldType)>,
