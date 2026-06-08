@@ -13,3 +13,4 @@ pub mod struct_generator;
 pub mod region;
 pub mod schema_validator;
 pub mod transition_graph;
+pub mod watchdog;

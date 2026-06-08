@@ -496,7 +496,9 @@ impl AArch64Backend {
             Statement::InlineAsm { asm_string, .. } => {
                 let _ = writeln!(output, "    {}", asm_string);
             }
-            Statement::SyncBlock { .. } => {}
+            Statement::SyncBlock { body } => {
+                for s in body { self.generate_statement(output, s); }
+            }
             Statement::Unification { name, variant, fields: _, expr } => {
                 self.generate_expr(output, expr);
                 writeln!(output, "    // unification: {} {} (value in x0)", name, variant).ok();

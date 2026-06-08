@@ -241,11 +241,6 @@ impl Default for FunctionRegistry {
 fn resolve_location_to_impl(location: &str) -> Option<ForeignFn> {
     let func: fn(Vec<Value>) -> Result<Value, RuntimeError> = match location {
         // clone — used internally by interpreter for Value deep-copy
-        "__builtin.clone" => |args| {
-            if args.is_empty() { Err(RuntimeError::TypeMismatch("clone requires at least one argument".into())) }
-            else { Ok(args[0].clone()) }
-        },
-
         // ===== Existing IO functions =====
         "std::io::print" => print_impl,
         "std::io::println" => println_impl,
@@ -315,14 +310,6 @@ fn resolve_location_to_impl(location: &str) -> Option<ForeignFn> {
         "metro::channel::destroy" => metro_channel_destroy_impl,
         "metro::channel::get_layout" => metro_channel_get_layout_impl,
         "metro::channel::gen_c_header" => metro_channel_gen_c_header_impl,
-
-        // Collections
-        "collections::filter" => collections_filter_impl,
-        "collections::map" => collections_map_impl,
-        "collections::reduce" => collections_reduce_impl,
-        "collections::unique" => collections_unique_impl,
-        "collections::sort" => collections_sort_impl,
-        "collections::reverse" => collections_reverse_impl,
 
         // Encoding
         "encoding::base64_encode" => encoding_base64_encode_impl,
@@ -857,63 +844,6 @@ fn value_to_u32(args: &[Value], idx: usize) -> Result<u32, RuntimeError> {
     }
 }
 
-// ===== Collections Implementations =====
-
-fn collections_filter_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
-    if args.is_empty() {
-        return Err(RuntimeError::TypeMismatch("collections::filter expects at least 1 argument (list)".to_string()));
-    }
-    Ok(args[0].clone())
-}
-
-fn collections_map_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
-    if args.is_empty() {
-        return Err(RuntimeError::TypeMismatch("collections::map expects at least 1 argument (list)".to_string()));
-    }
-    Ok(args[0].clone())
-}
-
-fn collections_reduce_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
-    if args.is_empty() {
-        return Err(RuntimeError::TypeMismatch("collections::reduce expects at least 1 argument (list)".to_string()));
-    }
-    match &args[0] {
-        Value::List(items) => {
-            if items.is_empty() {
-                Ok(Value::Int(0))
-            } else {
-                Ok(items[0].clone())
-            }
-        }
-        _ => Ok(args[0].clone()),
-    }
-}
-
-fn collections_unique_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
-    if args.is_empty() {
-        return Err(RuntimeError::TypeMismatch("collections::unique expects 1 argument (list)".to_string()));
-    }
-    Ok(args[0].clone())
-}
-
-fn collections_sort_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
-    if args.is_empty() {
-        return Err(RuntimeError::TypeMismatch("collections::sort expects 1 argument (list)".to_string()));
-    }
-    Ok(args[0].clone())
-}
-
-fn collections_reverse_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
-    match args.first() {
-        Some(Value::List(items)) => {
-            let reversed: Vec<Value> = items.iter().cloned().rev().collect();
-            Ok(Value::List(reversed))
-        }
-        Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("collections::reverse expects 1 argument (list)".to_string())),
-    }
-}
-
 // ===== Encoding Implementations =====
 
 fn encoding_base64_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
@@ -1240,13 +1170,6 @@ mod tests {
         registry.load_from_bindings_dir();
 
         let new_locations = [
-            // Collections
-            "collections::filter",
-            "collections::map",
-            "collections::reduce",
-            "collections::unique",
-            "collections::sort",
-            "collections::reverse",
             // Encoding
             "encoding::base64_encode",
             "encoding::base64_decode",

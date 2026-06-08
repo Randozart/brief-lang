@@ -556,3 +556,54 @@ brief-compiler selfhost <file.bv>
 - AST/backend match arms remain intact for future revisit
 - 5 tests removed; 434 tests pass, 0 fail
 - **Cleanup**: `*.opt.ll` added to `.gitignore`.
+
+---
+
+## Session 2026-06-08: Native Collections Cleanup, SyncBlock Backends, Watchdog Analysis
+
+**Files changed**: 15 modified, 2 deleted, 1 new  
+**Tests**: 545 pass (was 527), 0 fail — **18 new tests**
+
+### Stale FFI Registry Cleanup
+- **Deleted** `std/bindings/__builtin.dbvs` (420 lines) — all HashMap/HashSet/Stack/Queue/StringBuilder/Result/Option FFI entries. These were vestigial: collections dispatch natively through arrow syntax (`&map <- key`, `value <- &stack`) and projection targets (`map :> Keys`). Result/Option methods (`is_ok`, `unwrap`) are implemented in pure Brief via `uni` pattern matching.
+- **Deleted** `std/bindings/collections.dbvs` (50 lines) — stub entries (`__filter`, `__map`, `__reduce`, `__unique`, `__sort`, `__reverse`) with no-op implementations.
+- **Removed** `collections_*_impl` functions and `"collections::*"` match arms from `src/ffi/registry.rs` (6 functions: filter, map, reduce, unique, sort, reverse; 6 match arms).
+- **Removed** `"__builtin.clone"` from `registry.rs` — clone is native `Value::clone()`.
+- **Note**: The interpreter's `Expr::Call` dispatch at `interpreter.rs:1738` already handles all operations through: user defns → callable txns → dynamic FFI → enum constructors → FFI registry. With `__builtin` entries removed, Result/Option still work because their `is_ok`/`is_err`/`unwrap` etc. are pure Brief `uni` pattern matching in `lib/std/result.bv` and `lib/std/option.bv`.
+
+### All 10 Backends: SyncBlock Replaced
+Each backend had `Statement::SyncBlock { .. } => {}` — a silent no-op. Replaced with sequential emission of inner body statements:
+- `src/backend/llvm.rs` — iterates body, emits each statement
+- `src/backend/x86_64.rs`, `aarch64.rs` — `self.generate_statement(output, s)`
+- `src/backend/webstack.rs`, `rust.rs` — `self.statement_to_rust(output, s)`
+- `src/backend/verilog.rs` — `self.statement_to_verilog(s)` (returns String)
+- `src/backend/vhdl.rs` — `self.statement_to_vhdl(output, s, indent)`
+- `src/backend/wasm.rs` — `self.generate_statement(output, s)`
+- `src/backend/c.rs` — `self.statement_to_c(output, stmt)`
+- `src/backend/cobol.rs` — `self.generate_statement(stmt, output)`
+
+### Phase 10: Watchdog Preemptibility Analysis (`src/analysis/watchdog.rs`, 740 lines)
+New analysis module implementing the 6-step trigger preemptibility proof from the plan spec:
+
+| Step | What it does |
+|------|-------------|
+| **1** | Resolve `trg` against `frgn trg` declarations |
+| **2** | Find all transactions guarding on the trigger |
+| **3** | Collect all variables written by the handler chain |
+| **4** | Intersect with the watched transaction's precondition variables |
+| **5** | Check if handler writes falsify the precondition |
+| **6** | Check if handler restores the precondition before `term` |
+
+**Error types**: `UnknownTrigger`, `NoHandler`, `NoConflict`, `HandlerDoesNotFalsify`, `HandlerRestoresPrecondition`
+
+**Wired into pipeline**: Runs after PGO, before LLVM codegen. Fatal errors for missing triggers/handlers; warnings for optional watchdog edge cases.
+
+**18 tests** covering:
+- Unknown trigger, missing handler, no conflict, doesn't falsify, restores precondition
+- Happy path (handler sets `ready = false`, precondition `[ready]`)
+- Optional watchdog on convergent loop (skips)
+- Required watchdog on convergent loop (still fails)
+- Guarded-block write detection, literal evaluation, convergent-loop detection
+- Non-trigger watchdogs skipped, natural death without watchdog
+- Precondition variable extraction, trigger-in-guard detection
+- Handler writes through Guarded blocks (recursive inspection)

@@ -2324,6 +2324,33 @@ fn run_llvm_compile(
         }
     }
 
+    // Phase 10: Watchdog preemptibility analysis
+    {
+        let watchdog_errors = brief_compiler::analysis::watchdog::analyze(&program);
+        if !watchdog_errors.is_empty() {
+            for err in &watchdog_errors {
+                match err {
+                    brief_compiler::analysis::watchdog::WatchdogError::UnknownTrigger(txn, trigger)
+                    | brief_compiler::analysis::watchdog::WatchdogError::NoHandler(txn, trigger) => {
+                        eprintln!("error: {}", err);
+                    }
+                    _ => {
+                        // Optional watchdog warnings for non-fatal issues
+                        eprintln!("warning: {}", err);
+                    }
+                }
+            }
+            // Hard errors (UnknownTrigger, NoHandler) — compilation fails
+            let has_fatal = watchdog_errors.iter().any(|e| {
+                matches!(e, brief_compiler::analysis::watchdog::WatchdogError::UnknownTrigger(..)
+                         | brief_compiler::analysis::watchdog::WatchdogError::NoHandler(..))
+            });
+            if has_fatal {
+                std::process::exit(1);
+            }
+        }
+    }
+
     let output = llvm_backend.generate(&program);
 
     for warning in llvm_backend.warnings() {

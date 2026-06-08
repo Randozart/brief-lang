@@ -896,7 +896,9 @@ impl CBackend {
                     output.push_str("    return 0; /* escape */\n");
                 }
             }
-            Statement::SyncBlock { .. } => {}
+            Statement::SyncBlock { body } => {
+                for stmt in body { self.statement_to_c(output, stmt); }
+            }
             Statement::Unification { name, variant, fields: _, expr } => {
                 let val = self.expr_to_c(expr);
                 output.push_str(&format!("    /* unification: {} {} = {} */\n", name, variant, val));

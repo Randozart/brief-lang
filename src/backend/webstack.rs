@@ -1431,7 +1431,9 @@ impl WebstackGenerator {
                 self.pending_cleanup.borrow_mut().extend(body.iter().cloned());
                 output.push_str("        // #on_exit cleanup registered\n");
             }
-            Statement::SyncBlock { .. } => {}
+            Statement::SyncBlock { body } => {
+                for s in body { self.statement_to_rust(output, s); }
+            }
         }
     }
 

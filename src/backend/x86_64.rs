@@ -496,7 +496,9 @@ impl X86_64Backend {
             Statement::InlineAsm { asm_string, .. } => {
                 writeln!(output, "    {}", asm_string).ok();
             }
-            Statement::SyncBlock { .. } => {}
+            Statement::SyncBlock { body } => {
+                for s in body { self.generate_statement(output, s); }
+            }
             Statement::Unification { name, variant, fields: _, expr } => {
                 self.generate_expr(output, expr);
                 writeln!(output, "    ; unification: {} {} (expr in rax)", name, variant).ok();

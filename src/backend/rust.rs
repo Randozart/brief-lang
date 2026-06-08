@@ -404,7 +404,9 @@ impl RustBackend {
                     output.push_str(&format!("        let {}: {} = {};\n", name, rust_ty, default));
                 }
             }
-            Statement::SyncBlock { .. } => {}
+            Statement::SyncBlock { body } => {
+                for s in body { self.statement_to_rust(output, s); }
+            }
             Statement::Unification { name, variant, fields: _, expr } => {
                 let expr_code = self.expr_to_rust(expr);
                 output.push_str(&format!("        // uni {}({}) = {}\n", name, variant, expr_code));

@@ -1593,7 +1593,9 @@ impl VerilogGenerator {
             Statement::InlineAsm { asm_string, .. } => {
                 out.push_str(&format!("        /* asm: {} */\n", asm_string));
             }
-            Statement::SyncBlock { .. } => {}
+            Statement::SyncBlock { body } => {
+                for s in body { out.push_str(&self.statement_to_verilog(s)); }
+            }
             Statement::Unification { name, variant, fields: _, expr } => {
                 out.push_str(&format!("        // unification: {} {} <= {}\n", name, variant, self.expr_to_verilog(expr)));
             }
