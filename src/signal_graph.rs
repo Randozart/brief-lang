@@ -68,3 +68,43 @@ impl Default for SignalGraph {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_subscribe_adds_subscriber() {
+        let mut sg = SignalGraph::new();
+        sg.subscribe("sig_a", "txn_1");
+        let notified = sg.update_signal("sig_a", JsValue::NULL);
+        assert_eq!(notified, vec!["txn_1".to_string()]);
+    }
+
+    #[test]
+    fn test_update_signal_notifies_subscribers() {
+        let mut sg = SignalGraph::new();
+        sg.subscribe("sig_a", "txn_1");
+        sg.subscribe("sig_a", "txn_2");
+        let mut notified = sg.update_signal("sig_a", JsValue::NULL);
+        notified.sort();
+        assert_eq!(notified, vec!["txn_1".to_string(), "txn_2".to_string()]);
+    }
+
+    #[test]
+    fn test_get_value_returns_stored_value() {
+        let mut sg = SignalGraph::new();
+        assert!(sg.get_value("sig_a").is_none());
+        sg.update_signal("sig_a", JsValue::NULL);
+        assert!(sg.get_value("sig_a").is_some());
+    }
+
+    #[test]
+    fn test_clear_subscribers_removes_all() {
+        let mut sg = SignalGraph::new();
+        sg.subscribe("sig_a", "txn_1");
+        sg.clear_subscribers();
+        let notified = sg.update_signal("sig_a", JsValue::NULL);
+        assert!(notified.is_empty());
+    }
+}

@@ -643,3 +643,88 @@ impl fmt::Display for ContractError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_span_new_and_dummy() {
+        let s = Span::new(10, 20, 5, 3);
+        assert_eq!(s.start, 10);
+        assert_eq!(s.end, 20);
+        assert_eq!(s.line, 5);
+        assert_eq!(s.column, 3);
+        let d = Span::dummy();
+        assert_eq!(d.start, 0);
+        assert_eq!(d.end, 0);
+        assert_eq!(d.line, 0);
+        assert_eq!(d.column, 0);
+    }
+
+    #[test]
+    fn test_span_display() {
+        let s = Span::new(0, 0, 7, 12);
+        assert_eq!(format!("{}", s), "7:12");
+    }
+
+    #[test]
+    fn test_span_format_with_source() {
+        let s = Span::new(6, 7, 1, 7);
+        let source = "let x = 42;";
+        let formatted = s.format(source);
+        assert!(formatted.contains("1 | let x = 42;"));
+        assert!(formatted.contains("file:1:7"));
+    }
+
+    #[test]
+    fn test_diagnostic_verbose_format() {
+        let diag = Diagnostic::new("E001", Severity::Error, "test error")
+            .with_span(Span::new(0, 1, 1, 1))
+            .with_explanation("something went wrong")
+            .with_hint("try this instead")
+            .with_note("note here");
+        let output = diag.format_verbose("x=1", "test.bv");
+        assert!(output.contains("error:"));
+        assert!(output.contains("E001"));
+        assert!(output.contains("something went wrong"));
+        assert!(output.contains("try this instead"));
+        assert!(output.contains("note here"));
+    }
+
+    #[test]
+    fn test_diagnostic_whisper_format() {
+        let diag = Diagnostic::new("W001", Severity::Warning, "warning title")
+            .with_span(Span::new(0, 1, 2, 3));
+        let output = diag.format_whisper("x=1", "test.bv");
+        assert!(output.len() < 200);
+        assert!(output.contains("warning"));
+        assert!(output.contains("W001"));
+    }
+
+    #[test]
+    fn test_diagnostic_builder_methods() {
+        let d = Diagnostic::new("C001", Severity::Note, "info")
+            .with_proof_step("step 1")
+            .with_proof_step("step 2")
+            .with_example("example 1")
+            .with_span(Span::dummy());
+        assert_eq!(d.proof_chain.len(), 2);
+        assert_eq!(d.examples.len(), 1);
+        assert!(d.span.is_some());
+    }
+
+    #[test]
+    fn test_diagnostic_empty_code_format() {
+        let diag = Diagnostic::new("", Severity::Info, "no code");
+        let output = diag.format_verbose("", "test.bv");
+        assert!(output.contains("info:"));
+        assert!(output.contains("no code"));
+    }
+
+    #[test]
+    fn test_error_mode_enum() {
+        assert_ne!(ErrorMode::Verbose, ErrorMode::Whisper);
+        assert_eq!(ErrorMode::Verbose, ErrorMode::Verbose);
+    }
+}

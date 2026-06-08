@@ -587,3 +587,99 @@ impl Annotator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::*;
+    use super::*;
+
+    fn make_defn(name: &str, body: Vec<Statement>) -> TopLevel {
+        TopLevel::Definition(Definition {
+            name: name.to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body,
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        })
+    }
+
+    fn make_call_expr(name: &str) -> Expr {
+        Expr::Call(name.to_string(), vec![])
+    }
+
+    #[test]
+    fn test_analyze_empty_program() {
+        let mut ann = Annotator::new();
+        let prog = Program { items: vec![], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        ann.analyze(&prog);
+        assert!(ann.call_paths.is_empty());
+    }
+
+    #[test]
+    fn test_analyze_definition_no_calls() {
+        let mut ann = Annotator::new();
+        let stmts = vec![Statement::Term { values: vec![Some(Expr::Integer(42))], swan_song: None, modifiers: vec![] }];
+        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        ann.analyze(&prog);
+        assert_eq!(ann.call_paths.get("foo").map(|v| v.len()).unwrap_or(0), 0);
+    }
+
+    #[test]
+    fn test_analyze_definition_with_call() {
+        let mut ann = Annotator::new();
+        let stmts = vec![Statement::Expression(make_call_expr("bar"))];
+        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        ann.analyze(&prog);
+        let calls = ann.call_paths.get("foo").unwrap();
+        assert_eq!(calls, &vec!["bar".to_string()]);
+    }
+
+    #[test]
+    fn test_analyze_nested_call() {
+        let mut ann = Annotator::new();
+        let inner = make_call_expr("inner");
+        let outer = Expr::Call("outer".to_string(), vec![inner]);
+        let stmts = vec![Statement::Expression(outer)];
+        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        ann.analyze(&prog);
+        let calls = ann.call_paths.get("foo").unwrap();
+        assert_eq!(calls, &vec!["outer".to_string(), "inner".to_string()]);
+    }
+
+    #[test]
+    fn test_analyze_guarded_call() {
+        let mut ann = Annotator::new();
+        let guarded = Statement::Guarded {
+            condition: Expr::Bool(true),
+            statements: vec![Statement::Expression(make_call_expr("inside_guard"))],
+        };
+        let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        ann.analyze(&prog);
+        let calls = ann.call_paths.get("foo").unwrap();
+        assert_eq!(calls, &vec!["inside_guard".to_string()]);
+    }
+
+    #[test]
+    fn test_analyze_guarded_assignment_call() {
+        let mut ann = Annotator::new();
+        let guarded = Statement::Guarded {
+            condition: Expr::Bool(true),
+            statements: vec![Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: make_call_expr("calc"),
+                timeout: None,
+                modifiers: vec![],
+            }],
+        };
+        let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        ann.analyze(&prog);
+        let calls = ann.call_paths.get("foo").unwrap();
+        assert_eq!(calls, &vec!["calc".to_string()]);
+    }
+}

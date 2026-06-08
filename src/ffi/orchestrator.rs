@@ -221,3 +221,67 @@ fn is_empty_value(value: &Value) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{ForeignBinding, ForeignTarget, Type};
+
+    #[test]
+    fn test_orchestrator_new() {
+        let orch = Orchestrator::new();
+        assert_eq!(is_metropolitan_target(&ForeignBinding::new("test".into(), "loc".into(), ForeignTarget::Native)), false);
+    }
+
+    #[test]
+    fn test_orchestrator_with_metro_hub() {
+        let hub = Arc::new(MetropolitanHub::new());
+        let orch = Orchestrator::with_metro_hub(hub.clone());
+        assert!(Arc::ptr_eq(&hub, &orch.metro_hub));
+    }
+
+    #[test]
+    fn test_is_metropolitan_target_match() {
+        let binding = ForeignBinding::new("m".into(), "l".into(), ForeignTarget::Metropolitan);
+        assert!(is_metropolitan_target(&binding));
+    }
+
+    #[test]
+    fn test_is_metropolitan_target_mismatch() {
+        let native = ForeignBinding::new("n".into(), "l".into(), ForeignTarget::Native);
+        let c = ForeignBinding::new("c".into(), "l".into(), ForeignTarget::C);
+        assert!(!is_metropolitan_target(&native));
+        assert!(!is_metropolitan_target(&c));
+    }
+
+    #[test]
+    fn test_orchestrator_metro_hub_accessor() {
+        let hub = Arc::new(MetropolitanHub::new());
+        let orch = Orchestrator::with_metro_hub(hub);
+        let _ref = orch.metro_hub();
+    }
+
+    fn dummy_fn(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+        Ok(Value::Void)
+    }
+
+    #[test]
+    fn test_orchestrator_call_missing_layout() {
+        let orch = Orchestrator::new();
+        let binding = ForeignBinding {
+            input_layout: None,
+            output_layout: None,
+            ..ForeignBinding::new("test".into(), "loc".into(), ForeignTarget::Native)
+        };
+        let result = orch.call(&binding, vec![], dummy_fn);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_orchestrator_sentinel_default() {
+        let mut sentinel = Sentinel::new();
+        let binding = ForeignBinding::new("test".into(), "loc".into(), ForeignTarget::Native);
+        let result = sentinel.validate_precondition(&binding, &[]);
+        assert!(result.is_ok());
+    }
+}

@@ -192,3 +192,110 @@ impl NativeMapper {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::types::{Endian, FfiValue, MemoryLayout, FieldDescriptor};
+
+    fn make_layout(fields: Vec<FieldDescriptor>) -> MemoryLayout {
+        let total_bytes = fields.iter().map(|f| f.offset + f.size_bytes).max().unwrap_or(0);
+        MemoryLayout { size_bytes: total_bytes, alignment: 8, fields, endian: Endian::Little }
+    }
+
+    #[test]
+    fn test_drop_int_little_endian() {
+        let mapper = NativeMapper;
+        let layout = make_layout(vec![FieldDescriptor {
+            name: "val".into(), offset: 0, size_bytes: 8, element_size: None, count: None, endian: Some(Endian::Little),
+        }]);
+        let mut buf = vec![0u8; 8];
+        let data = [FfiValue::Int(0x0102030405060708i64)];
+        let written = Mapper::drop(&mapper, &mut buf, &layout, &data).unwrap();
+        assert_eq!(written, 8);
+        assert_eq!(buf, vec![0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
+    }
+
+    #[test]
+    fn test_drop_int_big_endian() {
+        let mapper = NativeMapper;
+        let layout = make_layout(vec![FieldDescriptor {
+            name: "val".into(), offset: 0, size_bytes: 8, element_size: None, count: None, endian: Some(Endian::Big),
+        }]);
+        let mut buf = vec![0u8; 8];
+        let data = [FfiValue::Int(0x0102030405060708i64)];
+        Mapper::drop(&mapper, &mut buf, &layout, &data).unwrap();
+        assert_eq!(buf, vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+    }
+
+    #[test]
+    fn test_drop_buffer_overflow_error() {
+        let mapper = NativeMapper;
+        let layout = make_layout(vec![FieldDescriptor {
+            name: "val".into(), offset: 10, size_bytes: 8, element_size: None, count: None, endian: None,
+        }]);
+        let mut buf = vec![0u8; 8];
+        let data = [FfiValue::Int(42)];
+        let result = Mapper::drop(&mapper, &mut buf, &layout, &data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_drop_bool_true_and_false() {
+        let mapper = NativeMapper;
+        let layout = make_layout(vec![
+            FieldDescriptor { name: "a".into(), offset: 0, size_bytes: 1, element_size: None, count: None, endian: None },
+            FieldDescriptor { name: "b".into(), offset: 1, size_bytes: 1, element_size: None, count: None, endian: None },
+        ]);
+        let mut buf = vec![0u8; 2];
+        Mapper::drop(&mapper, &mut buf, &layout, &[FfiValue::Bool(true), FfiValue::Bool(false)]).unwrap();
+        assert_eq!(buf, vec![1, 0]);
+    }
+
+    #[test]
+    fn test_drop_string_truncation() {
+        let mapper = NativeMapper;
+        let layout = make_layout(vec![FieldDescriptor {
+            name: "s".into(), offset: 0, size_bytes: 4, element_size: None, count: None, endian: None,
+        }]);
+        let mut buf = vec![0u8; 4];
+        Mapper::drop(&mapper, &mut buf, &layout, &[FfiValue::String("abcdef".into())]).unwrap();
+        assert_eq!(&buf, b"abcd");
+    }
+
+    #[test]
+    fn test_fetch_field_by_size() {
+        let mapper = NativeMapper;
+        let layout = make_layout(vec![
+            FieldDescriptor { name: "b".into(), offset: 0, size_bytes: 1, element_size: None, count: None, endian: None },
+            FieldDescriptor { name: "i".into(), offset: 1, size_bytes: 4, element_size: None, count: None, endian: None },
+        ]);
+        let mut buf = vec![0u8; 5];
+        buf[0] = 1;
+        buf[1..5].copy_from_slice(&42i32.to_le_bytes());
+        match mapper.fetch(&buf, &layout).unwrap() {
+            FfiValue::Struct(_, fields) => {
+                assert_eq!(fields.get("b"), Some(&FfiValue::Bool(true)));
+                assert_eq!(fields.get("i"), Some(&FfiValue::Int(42)));
+            }
+            _ => panic!("Expected Struct"),
+        }
+    }
+
+    #[test]
+    fn test_fetch_field_underflow_error() {
+        let mapper = NativeMapper;
+        let layout = make_layout(vec![FieldDescriptor {
+            name: "x".into(), offset: 10, size_bytes: 4, element_size: None, count: None, endian: None,
+        }]);
+        let buf = vec![0u8; 5];
+        assert!(mapper.fetch(&buf, &layout).is_err());
+    }
+
+    #[test]
+    fn test_fetch_empty_layout_returns_void() {
+        let mapper = NativeMapper;
+        let layout = make_layout(vec![]);
+        assert_eq!(mapper.fetch(&[], &layout).unwrap(), FfiValue::Void);
+    }
+}

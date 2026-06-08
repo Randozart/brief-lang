@@ -117,3 +117,59 @@ impl Default for TargetSpecLoader {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_find_without_toml_ext() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("myspec.toml");
+        fs::write(&file_path, "name = 'test'\n").unwrap();
+
+        let mut loader = TargetSpecLoader::new();
+        loader.add_path(dir.path().to_path_buf());
+        let result = loader.find("myspec");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().file_name().unwrap(), "myspec.toml");
+    }
+
+    #[test]
+    fn test_find_with_toml_ext() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("myspec.toml");
+        fs::write(&file_path, "name = 'test'\n").unwrap();
+
+        let mut loader = TargetSpecLoader::new();
+        loader.add_path(dir.path().to_path_buf());
+        let result = loader.find("myspec.toml");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_find_not_found_returns_none() {
+        let loader = TargetSpecLoader::new();
+        let result = loader.find("nonexistent_spec_xyz");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_project_root_default_paths() {
+        let loader = TargetSpecLoader::project_root();
+        assert_eq!(loader.search_paths.len(), 2);
+        assert_eq!(loader.search_paths[0], PathBuf::from("lib/targets"));
+        assert_eq!(loader.search_paths[1], PathBuf::from("."));
+    }
+
+    #[test]
+    fn test_loader_with_custom_path() {
+        let dir = TempDir::new().unwrap();
+        let mut loader = TargetSpecLoader::new();
+        loader.add_path(dir.path().to_path_buf());
+        assert!(loader.search_paths.len() >= 1);
+        assert_eq!(loader.search_paths.last().unwrap(), dir.path());
+    }
+}

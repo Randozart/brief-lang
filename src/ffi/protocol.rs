@@ -54,3 +54,38 @@ pub enum Value {
     Data(Vec<u8>),
     Void,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::types::{FfiValue, MemoryLayout, Endian};
+
+    struct DummyMapper;
+    impl Mapper for DummyMapper {
+        fn drop(&self, _buf: &mut [u8], _layout: &MemoryLayout, _data: &[FfiValue]) -> Result<usize, String> {
+            Ok(42)
+        }
+        fn fetch(&self, _buf: &[u8], _layout: &MemoryLayout) -> Result<FfiValue, String> {
+            Ok(FfiValue::Void)
+        }
+        fn validate(&self, _buf: &[u8], _contract: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn test_mapper_trait_object_safety() {
+        let mapper: Box<dyn Mapper> = Box::new(DummyMapper);
+        let layout = MemoryLayout { endian: Endian::Native, fields: vec![], alignment: 1, size_bytes: 0 };
+        let result: Result<usize, String> = Mapper::drop(&*mapper, &mut [], &layout, &[]);
+        assert_eq!(result, Ok(42));
+    }
+
+    #[test]
+    fn test_value_debug_clone() {
+        let v = Value::Int(42);
+        let _debug = format!("{:?}", v);
+        let _cloned = v.clone();
+        assert!(matches!(v, Value::Int(42)));
+    }
+}

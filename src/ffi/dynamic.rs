@@ -232,3 +232,87 @@ impl FrgnRegistry {
         Ok(Value::Enum("Result".to_string(), "Ok".to_string(), fields))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_frgn_type_from_name_valid() {
+        assert_eq!(FrgnType::from_name("Int"), Some(FrgnType::Int));
+        assert_eq!(FrgnType::from_name("Float"), Some(FrgnType::Float));
+        assert_eq!(FrgnType::from_name("Bool"), Some(FrgnType::Bool));
+        assert_eq!(FrgnType::from_name("Char"), Some(FrgnType::Char));
+        assert_eq!(FrgnType::from_name("String"), Some(FrgnType::String));
+        assert_eq!(FrgnType::from_name("Void"), Some(FrgnType::Void));
+    }
+
+    #[test]
+    fn test_frgn_type_from_name_invalid() {
+        assert_eq!(FrgnType::from_name("Invalid"), None);
+        assert_eq!(FrgnType::from_name(""), None);
+    }
+
+    #[test]
+    fn test_wrap_ok_creates_result_enum() {
+        let result = wrap_ok(&FrgnType::Int, Value::Int(42));
+        match result {
+            Value::Enum(_, variant, fields) => {
+                assert_eq!(variant, "Ok");
+                assert_eq!(fields.get("value"), Some(&Value::Int(42)));
+            }
+            _ => panic!("Expected Enum(Result, Ok, ...)"),
+        }
+    }
+
+    #[test]
+    fn test_wrap_err_creates_result_enum() {
+        let result = wrap_err("something failed".to_string());
+        match result {
+            Value::Enum(_, variant, fields) => {
+                assert_eq!(variant, "Err");
+                assert_eq!(fields.get("error"), Some(&Value::String("something failed".into())));
+            }
+            _ => panic!("Expected Enum(Result, Err, ...)"),
+        }
+    }
+
+    #[test]
+    fn test_frgn_registry_register_and_unknown() {
+        let mut registry = FrgnRegistry::new();
+        registry.register(FrgnDecl {
+            name: "foo".into(),
+            params: vec![],
+            ret: FrgnType::Void,
+            lib: "invalid.so".into(),
+        });
+        let result = registry.call("nonexistent", &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_frgn_registry_unknown_function() {
+        let mut registry = FrgnRegistry::new();
+        let result = registry.call("unknown_fn", &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_frgn_decl_display() {
+        let decl = FrgnDecl {
+            name: "my_fn".into(),
+            params: vec![("x".into(), FrgnType::Int)],
+            ret: FrgnType::Bool,
+            lib: "lib.so".into(),
+        };
+        let debug = format!("{:?}", decl);
+        assert!(debug.contains("my_fn"));
+    }
+
+    #[test]
+    fn test_frgn_type_equality_and_clone() {
+        let t = FrgnType::Float;
+        assert_eq!(t.clone(), t);
+        assert_ne!(FrgnType::Int, FrgnType::Float);
+    }
+}

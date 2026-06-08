@@ -93,3 +93,44 @@ pub fn resolve_mapper_path(
         ))
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_find_mapper_delegates_to_registry() {
+        let dir = TempDir::new().unwrap();
+        let mapper_path = dir.path().join("my_mapper.bv");
+        std::fs::write(&mapper_path, "defn hello -> Int { term 42; };").unwrap();
+
+        let mut registry = MapperRegistry::new();
+        registry.add_search_path(dir.path().to_path_buf());
+        let result = find_mapper("my_mapper", None, &registry);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, "my_mapper");
+    }
+
+    #[test]
+    fn test_create_mapper_registry_succeeds() {
+        let _registry: MapperRegistry = create_mapper_registry();
+    }
+
+    #[test]
+    fn test_describe_mapper_type() {
+        let brief_info = MapperInfo {
+            name: "brief".into(),
+            path: PathBuf::from("brief.bv"),
+            mapper_type: MapperType::Brief,
+        };
+        let rust_info = MapperInfo {
+            name: "rust".into(),
+            path: PathBuf::from("rust_mapper"),
+            mapper_type: MapperType::Rust,
+        };
+        assert_eq!(describe_mapper_type(&brief_info), "Brief mapper (.bv file)");
+        assert_eq!(describe_mapper_type(&rust_info), "Rust mapper (Cargo crate)");
+    }
+}

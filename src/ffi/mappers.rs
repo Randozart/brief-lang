@@ -167,6 +167,64 @@ impl Default for MapperRegistry {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_registry_new_has_no_registered_mappers() {
+        let registry = MapperRegistry::new();
+        assert!(registry.mappers.is_empty());
+    }
+
+    #[test]
+    fn test_registry_add_search_path() {
+        let mut registry = MapperRegistry::new();
+        let path = PathBuf::from("/tmp/mapper_test");
+        registry.add_search_path(path.clone());
+        assert_eq!(registry.search_paths.last().unwrap(), &path);
+    }
+
+    #[test]
+    fn test_find_mapper_with_tempdir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join("my_mapper.bv");
+        std::fs::write(&file_path, "defn x -> Int { term 0; };").unwrap();
+
+        let mut registry = MapperRegistry::new();
+        registry.add_search_path(dir.path().to_path_buf());
+        let result = registry.find_mapper("my_mapper", None);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, "my_mapper");
+    }
+
+    #[test]
+    fn test_find_mapper_not_found() {
+        let registry = MapperRegistry::new();
+        let result = registry.find_mapper("nonexistent_mapper_xyz", None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_mapper_info_debug_clone() {
+        let info = MapperInfo {
+            name: "test".into(),
+            path: PathBuf::from("test.bv"),
+            mapper_type: MapperType::Rust,
+        };
+        let _debug = format!("{:?}", info);
+        let cloned = info.clone();
+        assert_eq!(cloned.name, "test");
+    }
+
+    #[test]
+    fn test_mapper_type_equality() {
+        assert_eq!(MapperType::Brief, MapperType::Brief);
+        assert_eq!(MapperType::Rust, MapperType::Rust);
+        assert_ne!(MapperType::Brief, MapperType::Rust);
+    }
+}
+
 /// Get the global mapper registry
 pub fn create_registry() -> MapperRegistry {
     MapperRegistry::new()
