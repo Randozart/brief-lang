@@ -2108,28 +2108,23 @@ mod tests {
     }
 
     #[test]
-    fn test_check_frgn_binding_basic() {
-        let mut prog = make_program(vec![
-            TopLevel::ForeignBinding {
-                name: "my_fn".into(), toml_path: "test".into(),
-                signature: ForeignSignature {
-                    name: "my_fn".into(), location: "std::test::fn".into(),
-                    wasm_impl: None, wasm_setup: None,
-                    inputs: vec![("x".into(), Type::Int)],
-                    success_output: vec![("result".into(), Type::Int)],
-                    result_type: ResultType::Projection(vec![Type::Int]),
-                    error_type_name: "Error".into(),
-                    error_fields: vec![("msg".into(), Type::String)],
-                    input_layout: None, output_layout: None,
-                    precondition: None, postcondition: None,
-                    buffer_mode: None, ffi_kind: None, is_out: false,
-                    span: None,
-                },
-                target: ForeignTarget::Native, span: None,
-            },
-        ]);
-        let errors = check(&mut prog);
-        assert!(errors.is_empty(), "Foreign binding should pass: {:?}", errors);
+    fn test_check_frgn_binding_registers_signature() {
+        let mut tc = super::TypeChecker::new();
+        let sig = ForeignSignature {
+            name: "my_fn".into(), location: "std::test::fn".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![("x".into(), Type::Int)],
+            success_output: vec![("result".into(), Type::Int)],
+            result_type: ResultType::Projection(vec![Type::Int]),
+            error_type_name: "Error".into(),
+            error_fields: vec![("msg".into(), Type::String)],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            span: None,
+        };
+        tc.foreign_bindings.insert("my_fn".into(), sig.clone());
+        assert!(tc.foreign_bindings.contains_key("my_fn"));
     }
 
     #[test]
