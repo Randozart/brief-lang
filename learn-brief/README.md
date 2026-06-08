@@ -1,7 +1,7 @@
 # Learn Brief - Complete Tutorial
 
-**Version:** 0.12.0  
-**Last Updated:** 2026-05-06  
+**Version:** 0.16.0  
+**Last Updated:** 2026-06-08  
 **Status:** Complete ✅
 
 ---
@@ -62,7 +62,7 @@
    - Split and join
 
 8. **[07-ffi.md](07-ffi.md)** - Foreign Function Interface
-   - FFI signatures (`frgn sig`)
+   - FFI signatures (`frgn`)
    - Error handling
    - Metropolitan FFI (zero-copy)
    - Type mapping
@@ -100,11 +100,12 @@
 
 ### Reference
 
-13. **[13-projections.md](13-projections.md)** - The `:>` Projection Operator
+13. **[13-projections.md](13-projections.md)** - Projections (`:>` and `<:`)
     - Metadata projections (Size, Bytes, Ptr, Alignment, Range)
     - Bit manipulation projections (Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse)
-    - Reflection (Type, Ptr!)
-    - Standard library wrappers
+    - Reflection (Type, Ptr!, Keys, Values, Contains, Pop, Index, Get, Top, Front, Elements)
+    - `<:` subtype projections (FILTER, MAP, SORT, GROUP, aggregates)
+    - String match via `<:[...]`
 
 ---
 
@@ -140,7 +141,7 @@ defn add(a: Int, b: Int) -> Int {
 };
 
 // FFI
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn sqrt(x: Float) -> Result<Float, MathError>;
 ```
 
 ### Type System
@@ -228,5 +229,5 @@ After completing this tutorial:
 
 *Happy coding! 🚀*
 
-*Last updated: 2026-05-06*  
-*Version: Brief v0.12.0*
+*Last updated: 2026-06-08*  
+*Version: Brief v0.16.0*

@@ -1,7 +1,7 @@
 # Brief Language Specification
 
 **Version:** v0.16.0  
-**Date:** 2026-06-07  
+**Date:** 2026-06-08  
 **Status:** Development (stable core, experimental backends, **new: Universal FFI via LTO library coupling (C/Rust/Zig), `import "link/..."` with `resolve_link_source()` search, FFI registry eliminating built-in magic, xxHash vendored as stdlib module, `sig` contract projections with `#out`/`#inline` modifiers, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
@@ -75,6 +75,7 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 | **`<-`** | An arrow pointing left | Backward motion | Mutation / Discard |
 | **`:`** | Two stacked dots | Identity, equivalence | Static type definition |
 | **`:>`** | Colon + right-arrow | Projecting identity outward | Compile-time metadata extraction |
+| **`<:`** | Left-arrow + colon | Derived projection inward | Compile-time optimized query / subtype projection |
 | **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards |
 | **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organization |
 | **`()`** | Parentheses that cup | Holding, containing | Argument enclosure |
@@ -288,6 +289,10 @@ projection ::= expression ":>" projection_target
 projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
                     | "Popcount" | "LeadingZeros" | "TrailingZeros"
                     | "Absolute" | "BitReverse" | "Type" | "Ptr!"
+                    | "Keys" | "Values" | "Contains" "(" expression ")"
+                    | "Pop" | "Index" "(" integer ")" | "Get" "(" expression ")"
+                    | "Top" | "Front" | "Elements"
+                    | "AsStack" | "AsQueue"
 
 arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
             | expression "<-" owned_ref              // Insert (prepend): x <- &list
@@ -432,6 +437,10 @@ projection ::= expression ":>" projection_target
 projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
                     | "Popcount" | "LeadingZeros" | "TrailingZeros"
                     | "Absolute" | "BitReverse" | "Type" | "Ptr!"
+                    | "Keys" | "Values" | "Contains" "(" expression ")"
+                    | "Pop" | "Index" "(" integer ")" | "Get" "(" expression ")"
+                    | "Top" | "Front" | "Elements"
+                    | "AsStack" | "AsQueue"
 
 arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
             | expression "<-" owned_ref              // Insert (prepend): x <- &list
@@ -617,7 +626,7 @@ Signatures declare external function bindings. The `frgn` keyword declares an ex
 
 ```brief
 // Standard FFI returning Result — caller must handle both Ok and Err
-frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn sqrt(x: Float) -> Result<Float, MathError>;
 
 // Fire-and-forget — no return type parsed, result discarded
 frgn! log_message(msg: String);
@@ -782,7 +791,7 @@ Signatures declare external function bindings. The `frgn` keyword declares an ex
 
 ```brief
 // Standard FFI returning Result — caller must handle both Ok and Err
-frgn sqrt(x: Float) -> Result<Float, MathError> from "math.toml";
+frgn sqrt(x: Float) -> Result<Float, MathError>;
 
 // Fire-and-forget — no return type parsed, result discarded
 frgn! log_message(msg: String);
@@ -1228,11 +1237,7 @@ or constant evaluation.
 | `Absolute` | Int, Float | Absolute value | `@llvm.abs.i64`, `@llvm.fabs.f64` |
 | `BitReverse` | Int | Bit-reversed value | `@llvm.bitreverse.i64` |
 
-**Regex projection:**
-
-| Target | Source type | Result | Notes |
-|--------|-------------|--------|-------|
-| `Match("pattern")` | String | Bool, String, or Tuple | Compile-time DFA; O(n) linear scan \[2026-06-05\] |
+*(Regex matching moved to `<:` string projection — see §3.17)*
 
 **Reflection projection:**
 
@@ -1296,23 +1301,60 @@ verification, no safety envelope, full programmer control.
 
 ---
 
-### 3.17 DFA Regex (`:> Match`)
+### 3.17 Subtype Projection (`<:`)
 
-The `:> Match("pattern")` projection compiles a regular expression to a
-Deterministic Finite Automaton (DFA) at compile time. The resulting state
-machine processes input in O(n) linear time with zero backtracking — no ReDoS
-risk.
+The `<:` operator performs a **compile-time optimized projection** from a source
+value into a derived value. Two forms exist depending on the source type.
 
-**Syntax:**
+#### Collection Projection
+
+For `List<T>`, `HashMap<K,V>`, or other collections, `<:` applies a sequence of
+relational operations in a single fused pass with zero intermediate allocations:
 
 ```brief
-let matched: Bool = "hello@example.com" :> Match("^[a-z]+@[a-z]+\\.[a-z]+$");
+let regional_stats <: transactions {
+    FILTER(.is_active);
+    GROUP(.region);
+    COUNT;
+};
+```
 
-// Single capture group returns a String
-let (domain: String) = "user@example.com" :> Match("@([a-z]+)\\.");
+**Allowed operations:**
 
-// Multiple capture groups return a Tuple
-let (user, domain) = input :> Match("^([a-z]+)@([a-z]+)\\.com$");
+| Op | Signature | Semantics | Output |
+|----|-----------|-----------|--------|
+| `FILTER(.expr)` | `T -> Bool` | Keep matching elements | `List<T>` |
+| `MAP(.expr)` | `T -> U` | Transform each element | `List<U>` |
+| `SORT(.expr)` | `T -> Ord` | Sort by key | `List<T>` |
+| `LIMIT(N)` | `Int` | Take first N | `List<T>` |
+| `SKIP(N)` | `Int` | Skip first N | `List<T>` |
+| `UNIQUE` | — | Remove adjacent dupes | `List<T>` |
+| `JOIN(other, .key)` | `(T,U) -> K` | Merge collections | `List<(T,U)>` |
+| `GROUP(.key)` | `T -> K` | Group by key | (must be followed by aggregate) |
+| `COUNT` | — | Count elements | `Int` |
+| `SUM(.field)` | `T -> num` | Sum | `Int` / `Float` |
+| `AVG(.field)` | `T -> num` | Average | `Float` |
+| `MIN(.field)` | `T -> Ord` | Minimum | `typeof(field)` |
+| `MAX(.field)` | `T -> Ord` | Maximum | `typeof(field)` |
+
+The last operation determines the return type. Aggregates (COUNT, SUM, AVG, MIN,
+MAX) are terminal — they collapse the collection to a scalar. Non-aggregates
+return a `List<T>`. GROUP must be followed by an aggregate.
+
+#### String Projection
+
+For `String` sources, `<:` compiles a regular expression into a DFA at compile
+time and captures groups in a single O(n) scan:
+
+```brief
+let (user, domain) <: email["^([a-z]+)@(.+)$"];
+```
+
+Patterns can be a string literal or a `const` variable:
+
+```brief
+const pat = "^([a-z]+)@(.+)$";
+let (user, domain) <: email[pat];
 ```
 
 **Return type inference:**
@@ -1323,17 +1365,15 @@ let (user, domain) = input :> Match("^([a-z]+)@([a-z]+)\\.com$");
 | 1 | `String` — captured content |
 | N | `Tuple([String; N])` — all captures |
 
-**Compile-time compilation:**
-
-The regex is compiled during parsing. Invalid patterns produce a compile-time
-error. The DFA transition table is embedded as a constant LLVM global array;
-the scan loop is a tight O(n) character-by-character state machine with no
-dynamic allocations.
-
 **Supported syntax:** Literals, `.` (any char), `*` (zero-or-more),
 `+` (one-or-more), `?` (zero-or-one), `[...]` character classes,
 `^`/`$` anchors, `()` capture groups, `|` alternation,
 `\d`/`\w`/`\s`/`\D`/`\W` escape sequences.
+
+The DFA is built via Thompson construction → subset construction at parse time.
+Invalid patterns produce a compile-time error. The DFA transition table is
+embedded as a constant LLVM global array; the scan loop is a tight O(n)
+character-by-character state machine with no dynamic allocations.
 
 ---
 
@@ -2053,14 +2093,14 @@ let diff = time.diff_seconds(later, now);  // 60
 time.sleep(time.duration_millis(100));
 ```
 
-### 6.10 DFA Regex Module
+### 6.10 String Pattern Match Module
 
-Compile-time regex compilation via `:> Match("pattern")` (§3.17). The DFA is
+Compile-time regex compilation via `<:` string projection (§3.17). The DFA is
 compiled during parsing using Thompson construction → subset construction.
 The transition table is embedded as a constant; the scan loop is O(n) linear.
 
 ```brief
-let found = "hello@example.com" :> Match("^[a-z]+@[a-z]+\\.[a-z]+$");
+let found <: "hello@example.com"["^[a-z]+@[a-z]+\\.[a-z]+$"];
 ```
 
 ### 6.11 RooflineAnalyzer
@@ -2377,10 +2417,10 @@ reset = "RESETn"
 | Generics | ⚠️ Partial | Syntax works, trait bounds pending |
 | Traits | ❌ Planned | For generic constraints |
 | `Ptr<T>` types | ✅ Complete | Verified pointer with compile-time bounds tracking \[2026-06-05\] |
-| `:>` projections | ✅ Complete | 12 targets: Size, Bytes, Ptr, Alignment, Range, Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr! \[2026-06-05\] |
+| `:>` projections | ✅ Complete | 23 targets: Size, Bytes, Ptr, Alignment, Range, Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Keys, Values, Contains, Pop, Index, Get, Top, Front, Elements, AsStack, AsQueue \[2026-06-05\] |
 | LLVM intrinsic projections | ✅ Complete | ctpop, ctlz, cttz, abs, bitreverse via `:>` operator \[2026-06-05\] |
 | Pointer dereference (`ptr[i]`) | ✅ Complete | Direct GEP for Ptr\<T\>; checked by PointerVerifier \[2026-06-05\] |
-| DFA regex (`:> Match`) | ✅ Complete | Compile-time DFA, O(n) linear scan, zero backtracking \[2026-06-05\] |
+| `<:` subtype projection | ✅ Complete | Collection ops (FILTER, MAP, SORT, GROUP, aggregate) + string regex MATCH via DFA \[2026-06-08\] |
 | RooflineAnalyzer | ✅ Complete | Cache-aware LUT sizing, roofline model via bottlenecks.dbvs \[2026-06-05\] |
 | Bottleneck config | ✅ Complete | bottlenecks.dbvs schema for PCIe, cache, bandwidth, FPGA \[2026-06-05\] |
 | **FFI** | | |

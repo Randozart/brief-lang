@@ -218,19 +218,16 @@ rct txn count_input [io.io_ready] {
 
 Triggers map to OS events through:
 1. **`@ link` symbol bindings** in `.bv` files (LLVM backend)
-2. **DBVS schema files** for hardware targets: `std/bindings/system_triggers.dbvs`
+2. **`.dbv` binding files** for hardware targets: `std/bindings/system_triggers.dbv`
 
-```dbvs
-register 0x100 as "sigint" {
-    type: Trigger(Bool);
-    location: "signal::SIGINT";
-    target: native;
-    trigger: {
-        event_type: "signal";
-        signal: "SIGINT";
-        mode: "edge";
-    }
-}
+```brief
+// Triggers are declared with `trg` in the BV source file:
+trg sigint: Bool @ link __sigint_flag;
+trg sigterm: Bool @ link __sigterm_flag;
+trg stdin_ready: Bool @ link __stdin_ready;
+
+// Bindings define the trigger implementation location
+import bindings from "std/bindings/system_triggers.dbv";
 ```
 
 ## Escape and Rollback

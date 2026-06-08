@@ -16,6 +16,7 @@ Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** 
 | **`<-`** | An arrow pointing left | Backward motion, extraction | Mutation / Discard — something comes out of something. |
 | **`:`** | Two stacked dots | Identity, equivalence | Static type / definition — "This IS that." |
 | **`:>`** | Colon combined with right-arrow | Identity that projects outward | Compile-time metadata extraction — the compiler's knowledge ABOUT this. |
+| **`<:`** | Left-arrow combined with colon | Derived projection inward | Compile-time optimized queries and subtype projections — the compiler's knowledge FROM this. |
 | **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards — everything inside `[]` is bounded. |
 | **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organizational unit. |
 | **`()`** | Parentheses that cup | Holding, containing | Parameter / argument enclosure. |
@@ -152,6 +153,10 @@ val :> Popcount;    // How many set bits (via @llvm.ctpop)?
 val :> Absolute;    // Absolute value (via @llvm.fabs)
 val :> Type;        // What type is this at compile time?
 x :> Ptr!;          // Raw address — dangerous, no safety envelope
+map :> Keys;        // List of keys from a HashMap
+set :> Contains(v); // Check membership in a HashSet
+pair :> Index(0);   // Access first element of a tuple
+stack :> Top;       // Peek at top of a Stack
 ```
 
 `:>` is the "cheat code" — it lets the compiler handle operations it can
@@ -343,9 +348,9 @@ defn absolute(x: Int) -> Int [true][result >= 0] {
 Calls **outside** Brief. Requires error handling unless using `!` (fire-and-forget).
 
 ```brief
-frgn sig sqrt(x: Float) -> Result<Float, MathError> from "math.dbvs";
+frgn sqrt(x: Float) -> Result<Float, MathError>;
 
-frgn! sig log(msg: String) -> void from "io.dbvs";
+frgn! log(msg: String) -> void;
 ```
 
 ---

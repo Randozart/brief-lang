@@ -1,12 +1,17 @@
-# Projections: The `:>` Operator
+# Projections: `:>` and `<:` Operators
 
-**The `:>` (metadata lens) operator reads compile-time-known properties from
-values without runtime overhead. All targets map to either a constant or a
-zero-cost LLVM intrinsic.**
+**Brief has two projection operators: `:>` for compile-time metadata extraction,
+and `<:` for compile-time-optimized queries and subtype projections.**
 
 ---
 
-## Syntax
+## `:>` — Metadata Lens
+
+The `:>` (metadata lens) operator reads compile-time-known properties from
+values without runtime overhead. All targets map to either a constant or a
+zero-cost LLVM intrinsic.
+
+### Syntax
 
 ```bnf
 projection ::= expression ":>" projection_target
@@ -14,6 +19,10 @@ projection ::= expression ":>" projection_target
 projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
                     | "Popcount" | "LeadingZeros" | "TrailingZeros"
                     | "Absolute" | "BitReverse" | "Type" | "Ptr!"
+                    | "Keys" | "Values" | "Contains" "(" expression ")"
+                    | "Pop" | "Index" "(" integer ")" | "Get" "(" expression ")"
+                    | "Top" | "Front" | "Elements"
+                    | "AsStack" | "AsQueue"
 ```
 
 ---
@@ -185,30 +194,65 @@ compiler to verify safety.
 
 ---
 
-## Regex Projection
+## `<:` — Subtype Projection
 
-### `:> Match("pattern")`
+The `<:` operator performs a **compile-time optimized projection** from a source
+value into a derived value. Two forms exist depending on the source type.
 
-Compiles a regular expression to a Deterministic Finite Automaton (DFA) at
-compile time. The DFA processes input in O(n) linear time with zero
-backtracking — no ReDoS risk.
+### Collection Projection
+
+For `List<T>`, `HashMap<K,V>`, or other collections, `<:` applies a sequence of
+relational operations in a single fused pass with zero intermediate allocations:
 
 ```brief
-// Bool result (no capture groups)
-let matched = "hello@example.com" :> Match("^[a-z@.]+$");
+let regional_stats <: transactions {
+    FILTER(.is_active);
+    GROUP(.region);
+    COUNT;
+};
+```
 
-// String result (single capture group)
-let domain = input :> Match("@([a-z]+)\\.");
+**Allowed operations:**
 
-// Tuple result (multiple capture groups)
-let (user, domain) = input :> Match("^([a-z]+)@([a-z]+)\\.com$");
+| Op | Semantics |
+|----|-----------|
+| `FILTER(.expr)` | Keep elements matching predicate |
+| `MAP(.expr)` | Transform each element |
+| `SORT(.expr)` | Sort by key expression |
+| `LIMIT(N)` | Take first N elements |
+| `SKIP(N)` | Skip first N elements |
+| `UNIQUE` | Remove adjacent duplicates |
+| `JOIN(other, .key)` | Merge with another collection |
+| `GROUP(.key)` | Group by key (must be followed by aggregate) |
+| `COUNT` | Count elements (terminal) |
+| `SUM(.field)` | Sum of field (terminal) |
+| `AVG(.field)` | Average of field (terminal) |
+| `MIN(.field)` | Minimum of field (terminal) |
+| `MAX(.field)` | Maximum of field (terminal) |
+
+The last operation determines the return type. Aggregates are terminal — they
+collapse the collection to a scalar. Non-aggregates return `List<T>`. GROUP
+must be followed by an aggregate.
+
+### String Projection
+
+For `String` sources, `<:` compiles a regular expression into a DFA at compile
+time and captures groups in a single O(n) scan:
+
+```brief
+// Multiple capture groups return a Tuple
+let (user, domain) <: email["^([a-z]+)@(.+)$"];
+
+// Patterns can be a const variable:
+const pat = "^([a-z]+)@(.+)$";
+let (user, domain) <: email[pat];
 ```
 
 **Return types:** 0 groups → Bool, 1 group → String, N groups → Tuple.
 
-The regex is parsed and compiled to an NFA (Thompson construction) then
-converted to a DFA (subset construction) at parse time. Invalid patterns
-produce a compile-time error.
+The DFA is built via Thompson construction → subset construction at parse time.
+Invalid patterns produce a compile-time error. The transition table is embedded
+as a constant; the scan loop is O(n) linear with zero dynamic allocations.
 
 ---
 
@@ -232,7 +276,7 @@ let v = read_i64(p, 0);            // Bounds-checked by contract
 
 | Target | Input type | Output type | LLVM | stdlib |
 |--------|------------|-------------|------|--------|
-| `Size` | List, String | Int | Header load | `std/collections` |
+| `Size` | List, String, Map | Int | Header load | `std/collections` |
 | `Bytes` | Any | Int | Constant | — |
 | `Ptr` | State, List | `Ptr<T>` | Header load | `std/ptr` |
 | `Alignment` | Any | Int | Constant | — |
@@ -244,4 +288,24 @@ let v = read_i64(p, 0);            // Bounds-checked by contract
 | `BitReverse` | Int | Int | `@llvm.bitreverse` | `std/bits` |
 | `Type` | Any | Int | Constant | — |
 | `Ptr!` | Any | Int | Header load | — |
-| `Match` | String | Bool / String / Tuple | DFA scan loop | — |
+| `Keys` | HashMap | `List<K>` | Iteration | — |
+| `Values` | HashMap | `List<V>` | Iteration | — |
+| `Contains(val)` | Map, Set | Bool | Lookup | — |
+| `Pop` | HashSet | `T` | Remove+return | — |
+| `Index(n)` | Tuple | `T` | Element access | — |
+| `Get(key)` | HashMap | `Option<V>` | Lookup | — |
+| `Top` | Stack | `Option<V>` | Peek | — |
+| `Front` | Queue | `Option<V>` | Peek | — |
+| `Elements` | HashSet | `List<T>` | Enumeration | — |
+| `AsStack` | List | Stack | Conversion | — |
+| `AsQueue` | List | Queue | Conversion | — |
+
+**`<:` projection ops** (not `:>` targets):
+
+| Op | Source type | Output type | Notes |
+|----|------------|-------------|-------|
+| `FILTER(.p)`, `MAP(.x)`, `SORT(.k)` | Collection | `List<T>` | Fused pass, no intermediate alloc |
+| `COUNT`, `SUM(.f)`, `AVG(.f)` | Collection | Int / Float | Terminal aggregate |
+| `MIN(.f)`, `MAX(.f)` | Collection | `typeof(f)` | Terminal aggregate |
+| `GROUP(.k)` + aggregate | Collection | `Map<K, V>` | Group-then-aggregate |
+| `["pattern"]` | String | Bool / String / Tuple | DFA scan loop, O(n) |

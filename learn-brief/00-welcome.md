@@ -85,6 +85,11 @@ This folder contains a complete Brief tutorial:
 6. **06-string.md** - String manipulation, StringBuilder
 7. **07-ffi.md** - Foreign function interface
 8. **08-examples.md** - Complete examples
+9. **09-patterns.md** - Common patterns
+10. **10-best-practices.md** - Best practices
+11. **11-triggers.md** - Triggers and events
+12. **12-pragmas.md** - Pragmas and directives
+13. **13-projections.md** - Projections (`:>` and `<:` operators)
 
 ## Next Steps
 
@@ -92,5 +97,5 @@ Start with [01-basics.md](01-basics.md) to learn the fundamentals!
 
 ---
 
-*Last updated: 2026-05-06*  
-*Version: Brief v0.12.0*
+*Last updated: 2026-06-08*  
+*Version: Brief v0.16.0*
