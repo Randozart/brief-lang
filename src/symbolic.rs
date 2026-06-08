@@ -260,7 +260,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             SymbolicValue::Unknown
         }
 Expr::Term | Expr::Slice { .. } | Expr::MultiSlice { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) | Expr::Concat(_, _) | Expr::Cast(_, _) | Expr::Match { .. } => SymbolicValue::Unknown,
-        Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } | Expr::MapLiteral(_) | Expr::SetLiteral(_) | Expr::SigCall { .. } => SymbolicValue::Unknown,
+        Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } | Expr::MapLiteral(_) | Expr::SetLiteral(_) | Expr::SigCall { .. } | Expr::SubtypeProjection { .. } => SymbolicValue::Unknown,
             Expr::Ellipsis => SymbolicValue::Unknown,
         }
     }

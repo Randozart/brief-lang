@@ -86,6 +86,10 @@ impl<'a> Parser<'a> {
         self.current.as_ref().map(|(t, _)| t)
     }
 
+    fn peek_token(&self) -> Option<&Result<Token, ()>> {
+        self.peek.as_ref().map(|(t, _)| t)
+    }
+
     fn current_span(&self) -> Option<Span> {
         self.current.as_ref().map(|(_, span)| {
             let line = self.source[..span.start].matches('\n').count() + 1;
@@ -290,6 +294,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Check if the next two tokens are `<` followed by `:` (the `<:` operator)
+    fn check_lt_colon(&self) -> bool {
+        matches!(self.current_token(), Some(Ok(Token::Lt)))
+            && matches!(self.peek_token(), Some(Ok(Token::Colon)))
+    }
+
     fn parse_hashtag_modifiers(&mut self) -> Result<Vec<Hashtag>, SyntaxError> {
         let mut mods = Vec::new();
         loop {
@@ -428,6 +438,131 @@ impl<'a> Parser<'a> {
                 expected: "identifier".to_string(),
                 span,
             }),
+        }
+    }
+
+    /// Parse ops inside a `<:` subtype projection block: `{ FILTER(.x); COUNT; }` or `["pattern"]`
+    fn parse_subtype_ops(&mut self) -> Result<Vec<crate::ast::SubtypeOp>, SyntaxError> {
+        // Check for string projection: `source["pattern"]`
+        if let Some(Ok(Token::LBracket)) = self.current_token() {
+            self.advance();
+            let pattern = self.parse_expression()?;
+            self.expect(Token::RBracket)?;
+            return Ok(vec![crate::ast::SubtypeOp::Match(Box::new(pattern))]);
+        }
+
+        // Otherwise, expect `{` for collection projection
+        self.expect(Token::LBrace)?;
+
+        let mut ops = Vec::new();
+        loop {
+            // Check for closing brace
+            if let Some(Ok(Token::RBrace)) = self.current_token() {
+                self.advance();
+                break;
+            }
+
+            let op = self.parse_single_subtype_op()?;
+            ops.push(op);
+
+            // Expect semicolon after each op
+            if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                self.advance();
+            } else if let Some(Ok(Token::RBrace)) = self.current_token() {
+                // Allow last op without semicolon
+                self.advance();
+                break;
+            } else {
+                return self.spanned_err("Expected ';' or '}' after projection operation".to_string());
+            }
+        }
+
+        Ok(ops)
+    }
+
+    /// Parse a single subtype operation keyword + args
+    fn parse_single_subtype_op(&mut self) -> Result<crate::ast::SubtypeOp, SyntaxError> {
+        let ident = self.expect_identifier()?;
+        let upper = ident.to_uppercase();
+
+        match upper.as_str() {
+            "FILTER" => {
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Filter(Box::new(expr)))
+            }
+            "MAP" => {
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Map(Box::new(expr)))
+            }
+            "SORT" => {
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Sort(Box::new(expr)))
+            }
+            "LIMIT" => {
+                self.expect(Token::LParen)?;
+                let n = self.expect_integer()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Limit(n as usize))
+            }
+            "SKIP" => {
+                self.expect(Token::LParen)?;
+                let n = self.expect_integer()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Skip(n as usize))
+            }
+            "UNIQUE" => {
+                Ok(crate::ast::SubtypeOp::Unique)
+            }
+            "JOIN" => {
+                self.expect(Token::LParen)?;
+                let other = self.parse_expression()?;
+                self.expect(Token::Comma)?;
+                let key = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Join(Box::new(other), Box::new(key)))
+            }
+            "GROUP" => {
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Group(Box::new(expr)))
+            }
+            "COUNT" => {
+                Ok(crate::ast::SubtypeOp::Count)
+            }
+            "SUM" => {
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Sum(Box::new(expr)))
+            }
+            "AVG" => {
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Avg(Box::new(expr)))
+            }
+            "MIN" => {
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Min(Box::new(expr)))
+            }
+            "MAX" => {
+                self.expect(Token::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                Ok(crate::ast::SubtypeOp::Max(Box::new(expr)))
+            }
+            _ => {
+                self.spanned_err(format!("Unknown projection operation '{}'. Expected FILTER, MAP, SORT, LIMIT, SKIP, UNIQUE, JOIN, GROUP, COUNT, SUM, AVG, MIN, or MAX", ident))
+            }
         }
     }
 
@@ -3546,6 +3681,28 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     } else {
                         None
                     };
+
+                    // Check for `<:` subtype projection (string match destructuring)
+                    if self.check_lt_colon() {
+                        self.advance(); // consume `<`
+                        self.advance(); // consume `:`
+                        let source = self.parse_expression()?;
+                        let ops = self.parse_subtype_ops()?;
+                        self.expect(Token::Semicolon)?;
+                        return Ok(Statement::Let {
+                            name: names.join(","),
+                            ty,
+                            expr: Some(Expr::SubtypeProjection {
+                                source: Box::new(source),
+                                ops,
+                            }),
+                            address: None,
+                            address_expr: None,
+                            bit_range: None,
+                            is_override: false,
+                            modifiers: Vec::new(),
+                        });
+                    }
                     
                     self.expect(Token::Eq)?;
                     let expr = self.parse_expression()?;
@@ -3566,6 +3723,28 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     })
                 } else {
                     let name = self.expect_identifier()?;
+
+                    // Check for `<:` subtype projection
+                    if self.check_lt_colon() {
+                        self.advance(); // consume `<`
+                        self.advance(); // consume `:`
+                        let source = self.parse_expression()?;
+                        let ops = self.parse_subtype_ops()?;
+                        self.expect(Token::Semicolon)?;
+                        return Ok(Statement::Let {
+                            name,
+                            ty: None,
+                            expr: Some(Expr::SubtypeProjection {
+                                source: Box::new(source),
+                                ops,
+                            }),
+                            address: None,
+                            address_expr: None,
+                            bit_range: None,
+                            is_override: false,
+                            modifiers: Vec::new(),
+                        });
+                    }
 
                 let mut modifiers = self.parse_hashtag_modifiers()?;
                 let mut address: Option<u64> = None;
@@ -4744,24 +4923,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             "Type" => Ok(ProjectionTarget::Type),
             "Ptr!" => Ok(ProjectionTarget::PtrBang),
             "Match" => {
-                // Match("pattern") — compile-time DFA regex
-                self.expect(Token::LParen)?;
-                let pattern = match self.current_token() {
-                    Some(Ok(Token::String(s))) => {
-                        let pat = s.clone();
-                        self.advance();
-                        pat
-                    }
-                    _ => return self.spanned_err("Expected string literal for Match pattern".to_string()),
-                };
-                self.expect(Token::RParen)?;
-                // Compile the regex at parse time
-                let _ = crate::analysis::dfa::compile_to_dfa(&pattern)
-                    .map_err(|e| SyntaxError::InvalidExpression {
-                        reason: format!("Invalid regex pattern '{}': {}", pattern, e),
-                        span: self.current_span().unwrap_or_else(Span::dummy),
-                    })?;
-                Ok(ProjectionTarget::Match(pattern))
+                return self.spanned_err("Match projection is no longer supported; use the `<:` operator instead".to_string());
             }
             "Keys" => Ok(ProjectionTarget::Keys),
             "Values" => Ok(ProjectionTarget::Values),

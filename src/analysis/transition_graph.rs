@@ -1067,6 +1067,9 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                     collect_identifiers(e, out);
                 }
             }
+            Expr::SubtypeProjection { source, .. } => {
+                collect_identifiers(source, out);
+            }
         }
     }
 

@@ -23,6 +23,7 @@
 use crate::ast::*;
 use crate::ffi::orchestrator::Orchestrator;
 use crate::ffi::FFI_REGISTRY;
+use regex::Regex;
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -1964,50 +1965,6 @@ Expr::Ge(l, r) => {
                         // Raw pointer — same as Ptr, returns simulated address
                         Ok(Value::Int(0))
                     }
-                    ProjectionTarget::Match(pattern) => {
-                        let input = match &source_val {
-                            Value::String(s) => s.clone(),
-                            _ => return Err(RuntimeError::TypeMismatch(
-                                "Match projection requires String".to_string(),
-                            )),
-                        };
-                        match crate::analysis::dfa::compile_to_dfa(pattern) {
-                            Ok(re) => {
-                                match crate::analysis::dfa::execute_dfa(&re, &input) {
-                                    Some((_, _, groups)) if re.num_groups == 0 => {
-                                        Ok(Value::Bool(true))
-                                    }
-                                    Some((_, _, groups)) if re.num_groups == 1 => {
-                                        // Single capture: return the captured string
-                                        let cap = &input[groups[0].0..groups[0].1];
-                                        Ok(Value::String(cap.to_string()))
-                                    }
-                                    Some((_, _, groups)) => {
-                                        // Multiple captures: return tuple
-                                        let captured: Vec<Value> = groups.iter()
-                                            .map(|(s, e)| Value::String(input[*s..*e].to_string()))
-                                            .collect();
-                                        // Wrap in a list (tuples are represented as lists in interpreter)
-                                        Ok(Value::List(captured))
-                                    }
-                                    None => {
-                                        if re.num_groups == 0 {
-                                            Ok(Value::Bool(false))
-                                        } else {
-                                            // No match: empty strings
-                                            let empty: Vec<Value> = (0..re.num_groups)
-                                                .map(|_| Value::String(String::new()))
-                                                .collect();
-                                            Ok(Value::List(empty))
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => Err(RuntimeError::TypeMismatch(
-                                format!("Invalid regex pattern: {}", e),
-                            )),
-                        }
-                    }
                     ProjectionTarget::Keys => match &source_val {
                         Value::HashMap(m) => {
                             let mut keys: Vec<Value> = m.keys().cloned().map(Value::String).collect();
@@ -2441,6 +2398,10 @@ let s_val = self.eval_expr(s)?;
                 Ok(current)
             }
             Expr::Cast(inner, _) => self.eval_expr(inner),
+            Expr::SubtypeProjection { source, ops } => {
+                let source_val = self.eval_expr(source)?;
+                self.eval_subtype_projection(source_val, ops)
+            }
             Expr::Match { value, arms } => {
                 let target = self.eval_expr(value)?;
                 for arm in arms {
@@ -2478,6 +2439,228 @@ Err(RuntimeError::TypeMismatch(
         }
     }
 
+    /// Evaluate a `<:` subtype projection: applies a sequence of ops to a source value.
+    fn eval_subtype_projection(&mut self, source: Value, ops: &[crate::ast::SubtypeOp]) -> Result<Value, RuntimeError> {
+        // Check for string match projection
+        if let Value::String(ref s) = source {
+            for op in ops {
+                if let crate::ast::SubtypeOp::Match(pattern_expr) = op {
+                    let pattern_val = self.eval_expr(pattern_expr)?;
+                    if let Value::String(pattern) = pattern_val {
+                        let re = Regex::new(&pattern)
+                            .map_err(|e| RuntimeError::TypeMismatch(format!("Invalid regex: {}", e)))?;
+                        if let Some(caps) = re.captures(s) {
+                            // Count groups
+                            let group_count = caps.iter().len().saturating_sub(1);
+                            if group_count == 0 {
+                                return Ok(Value::Bool(true));
+                            }
+                            let mut groups = Vec::new();
+                            for i in 1..caps.iter().len() {
+                                if let Some(m) = caps.get(i) {
+                                    groups.push(Value::String(m.as_str().to_string()));
+                                }
+                            }
+                            match groups.len() {
+                                0 => return Ok(Value::Bool(true)),
+                                1 => return Ok(groups.into_iter().next().unwrap()),
+                                _ => return Ok(Value::Tuple(groups)),
+                            }
+                        } else {
+                            return Ok(Value::Bool(false));
+                        }
+                    }
+                }
+            }
+            return Ok(Value::String(s.clone()));
+        }
+
+        // Collection projection — source must be a list
+        let mut items: Vec<Value> = match source {
+            Value::List(list) => list,
+            Value::Tuple(tup) => tup,
+            Value::HashMap(map) => map.into_values().collect(),
+            Value::HashSet(set) => set.into_iter().map(Value::String).collect(),
+            val => {
+                return Err(RuntimeError::TypeMismatch(
+                    format!("Subtype projection requires a collection or string, got {:?}", val)
+                ));
+            }
+        };
+
+        // Helper to compare two Values for ordering
+        fn cmp_values(a: &Value, b: &Value) -> std::cmp::Ordering {
+            match (a, b) {
+                (Value::Int(ai), Value::Int(bi)) => ai.cmp(bi),
+                (Value::Float(af), Value::Float(bf)) => af.partial_cmp(bf).unwrap_or(std::cmp::Ordering::Equal),
+                (Value::String(as_), Value::String(bs)) => as_.cmp(bs),
+                (Value::Int(ai), Value::Float(bf)) => (*ai as f64).partial_cmp(bf).unwrap_or(std::cmp::Ordering::Equal),
+                (Value::Float(af), Value::Int(bi)) => af.partial_cmp(&(*bi as f64)).unwrap_or(std::cmp::Ordering::Equal),
+                _ => std::cmp::Ordering::Equal,
+            }
+        }
+
+        // Helper to compare Values for equality (used in dedup/group)
+        fn values_equal(a: &Value, b: &Value) -> bool {
+            match (a, b) {
+                (Value::Int(ai), Value::Int(bi)) => ai == bi,
+                (Value::Float(af), Value::Float(bf)) => (af - bf).abs() < 1e-10,
+                (Value::String(as_), Value::String(bs)) => as_ == bs,
+                (Value::Bool(ab), Value::Bool(bb)) => ab == bb,
+                (Value::Tuple(av), Value::Tuple(bv)) => av.len() == bv.len() && av.iter().zip(bv.iter()).all(|(x, y)| values_equal(x, y)),
+                _ => std::mem::discriminant(a) == std::mem::discriminant(b),
+            }
+        }
+
+        // Apply each non-terminal op in order
+        let mut is_terminal = false;
+        for op in ops {
+            match op {
+                crate::ast::SubtypeOp::Match(_) => {
+                    return Err(RuntimeError::TypeMismatch("MATCH can only be used on String sources".into()));
+                }
+                crate::ast::SubtypeOp::Filter(predicate) => {
+                    items = items.into_iter().filter(|item| {
+                        self.state.insert("_".to_string(), item.clone());
+                        let result = self.eval_expr(predicate).unwrap_or(Value::Bool(false));
+                        result == Value::Bool(true)
+                    }).collect();
+                }
+                crate::ast::SubtypeOp::Map(transform) => {
+                    items = items.into_iter().map(|item| {
+                        self.state.insert("_".to_string(), item);
+                        self.eval_expr(transform).unwrap_or(Value::Bool(false))
+                    }).collect();
+                }
+                crate::ast::SubtypeOp::Limit(n) => {
+                    let take = (*n).min(items.len());
+                    items = items.into_iter().take(take).collect();
+                }
+                crate::ast::SubtypeOp::Skip(n) => {
+                    let skip = (*n).min(items.len());
+                    items = items.into_iter().skip(skip).collect();
+                }
+                crate::ast::SubtypeOp::Unique => {
+                    let mut seen = Vec::new();
+                    items = items.into_iter().filter(|item| {
+                        if seen.iter().any(|s: &Value| values_equal(s, item)) {
+                            false
+                        } else {
+                            seen.push(item.clone());
+                            true
+                        }
+                    }).collect();
+                }
+                crate::ast::SubtypeOp::Sort(key) => {
+                    let keys: Vec<Value> = items.iter().map(|item| {
+                        self.state.insert("_".to_string(), item.clone());
+                        self.eval_expr(key).unwrap_or(Value::Int(0))
+                    }).collect();
+                    let mut indices: Vec<usize> = (0..items.len()).collect();
+                    indices.sort_by(|&a, &b| cmp_values(&keys[a], &keys[b]));
+                    items = indices.into_iter().map(|i| items[i].clone()).collect();
+                }
+                crate::ast::SubtypeOp::Join(other, key) => {
+                    let other_val = self.eval_expr(other)?;
+                    let other_list = match other_val {
+                        Value::List(list) => list,
+                        _ => return Err(RuntimeError::TypeMismatch("JOIN requires a List source".into())),
+                    };
+                    // Compute key for each source item
+                    let item_keys: Vec<Value> = items.iter().map(|a| {
+                        self.state.insert("_".to_string(), a.clone());
+                        self.eval_expr(key).unwrap_or(Value::Int(0))
+                    }).collect();
+                    let other_keys: Vec<Value> = other_list.iter().map(|b| {
+                        self.state.insert("_".to_string(), b.clone());
+                        self.eval_expr(key).unwrap_or(Value::Int(0))
+                    }).collect();
+
+                    let mut result = Vec::new();
+                    for (i, a) in items.iter().enumerate() {
+                        for (j, b) in other_list.iter().enumerate() {
+                            if values_equal(&item_keys[i], &other_keys[j]) {
+                                result.push(Value::Tuple(vec![a.clone(), b.clone()]));
+                            }
+                        }
+                    }
+                    items = result;
+                }
+                crate::ast::SubtypeOp::Group(key) => {
+                    let mut group_keys: Vec<Value> = Vec::new();
+                    let mut group_items: Vec<Vec<Value>> = Vec::new();
+                    for item in items {
+                        self.state.insert("_".to_string(), item.clone());
+                        let k = self.eval_expr(key).unwrap_or(Value::Int(0));
+                        if let Some(pos) = group_keys.iter().position(|gk| values_equal(gk, &k)) {
+                            group_items[pos].push(item);
+                        } else {
+                            group_keys.push(k);
+                            group_items.push(vec![item]);
+                        }
+                    }
+                    items = group_keys.into_iter().zip(group_items.into_iter())
+                        .map(|(k, v)| Value::Tuple(vec![k, Value::List(v)]))
+                        .collect();
+                }
+                crate::ast::SubtypeOp::Count => {
+                    is_terminal = true;
+                    items = vec![Value::Int(items.len() as i64)];
+                }
+                crate::ast::SubtypeOp::Sum(expr) => {
+                    is_terminal = true;
+                    let total: i64 = items.iter().map(|item| {
+                        self.state.insert("_".to_string(), item.clone());
+                        match self.eval_expr(expr).unwrap_or(Value::Int(0)) {
+                            Value::Int(n) => n,
+                            Value::Float(f) => f as i64,
+                            _ => 0,
+                        }
+                    }).sum();
+                    items = vec![Value::Int(total)];
+                }
+                crate::ast::SubtypeOp::Avg(expr) => {
+                    is_terminal = true;
+                    let len = items.len();
+                    if len == 0 {
+                        items = vec![Value::Int(0)];
+                    } else {
+                        let total: f64 = items.iter().map(|item| {
+                            self.state.insert("_".to_string(), item.clone());
+                            match self.eval_expr(expr).unwrap_or(Value::Int(0)) {
+                                Value::Int(n) => n as f64,
+                                Value::Float(f) => f,
+                                _ => 0.0,
+                            }
+                        }).sum();
+                        items = vec![Value::Float(total / len as f64)];
+                    }
+                }
+                crate::ast::SubtypeOp::Min(expr) => {
+                    is_terminal = true;
+                    let best = items.iter().map(|item| {
+                        self.state.insert("_".to_string(), item.clone());
+                        self.eval_expr(expr).unwrap_or(Value::Int(i64::MAX))
+                    }).min_by(|a, b| cmp_values(a, b));
+                    items = vec![best.unwrap_or(Value::Int(0))];
+                }
+                crate::ast::SubtypeOp::Max(expr) => {
+                    is_terminal = true;
+                    let best = items.iter().map(|item| {
+                        self.state.insert("_".to_string(), item.clone());
+                        self.eval_expr(expr).unwrap_or(Value::Int(i64::MIN))
+                    }).max_by(|a, b| cmp_values(a, b));
+                    items = vec![best.unwrap_or(Value::Int(0))];
+                }
+            }
+        }
+
+        if is_terminal {
+            Ok(items.into_iter().next().unwrap_or(Value::Int(0)))
+        } else {
+            Ok(Value::List(items))
+        }
+    }
 }
 
 pub(crate) fn print_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
@@ -4620,5 +4803,137 @@ mod tests {
         let mut i = Interpreter::new();
         let sync_block = Statement::SyncBlock { body: vec![] };
         i.exec_stmt(&sync_block).unwrap();
+    }
+
+    // ---- Subtype Projection Tests ----
+
+    #[test]
+    fn test_projection_filter() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4), Value::Int(5),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Filter(Box::new(Expr::Gt(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(3)),
+            )))],
+        }).unwrap();
+        assert_eq!(result, Value::List(vec![Value::Int(4), Value::Int(5)]));
+    }
+
+    #[test]
+    fn test_projection_map() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Map(Box::new(Expr::Mul(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(2)),
+            )))],
+        }).unwrap();
+        assert_eq!(result, Value::List(vec![Value::Int(2), Value::Int(4), Value::Int(6)]));
+    }
+
+    #[test]
+    fn test_projection_filter_limit() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4), Value::Int(5),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![
+                SubtypeOp::Filter(Box::new(Expr::Gt(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ))),
+                SubtypeOp::Limit(2),
+            ],
+        }).unwrap();
+        assert_eq!(result, Value::List(vec![Value::Int(2), Value::Int(3)]));
+    }
+
+    #[test]
+    fn test_projection_count_aggregate() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(10), Value::Int(20), Value::Int(30),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Count],
+        }).unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_projection_sum() {
+        let mut i = Interpreter::new();
+        i.state.insert("list".to_string(), Value::List(vec![
+            Value::Int(5), Value::Int(10), Value::Int(15),
+        ]));
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("list".to_string())),
+            ops: vec![SubtypeOp::Sum(Box::new(Expr::Identifier("_".to_string())))],
+        }).unwrap();
+        assert_eq!(result, Value::Int(30));
+    }
+
+    #[test]
+    fn test_projection_group_count() {
+        let mut i = Interpreter::new();
+        i.state.insert("items".to_string(), Value::List(vec![
+            Value::Tuple(vec![Value::String("A".into()), Value::Int(1)]),
+            Value::Tuple(vec![Value::String("A".into()), Value::Int(2)]),
+            Value::Tuple(vec![Value::String("B".into()), Value::Int(3)]),
+        ]));
+        // Group by first element of each tuple
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::Identifier("items".to_string())),
+            ops: vec![
+                SubtypeOp::Group(Box::new(Expr::Projection {
+                    source: Box::new(Expr::Identifier("_".to_string())),
+                    target: ProjectionTarget::Index(0),
+                })),
+            ],
+        }).unwrap();
+        // Result is a list of (key, list) tuples
+        if let Value::List(groups) = result {
+            assert_eq!(groups.len(), 2); // two groups: A and B
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn test_projection_string_match() {
+        let mut i = Interpreter::new();
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::String("user@example.com".into())),
+            ops: vec![SubtypeOp::Match(Box::new(Expr::String("^([a-z]+)@(.+)$".into())))],
+        }).unwrap();
+        match result {
+            Value::Tuple(groups) => {
+                assert_eq!(groups.len(), 2);
+                assert_eq!(groups[0], Value::String("user".into()));
+                assert_eq!(groups[1], Value::String("example.com".into()));
+            }
+            _ => panic!("Expected Tuple, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_projection_string_no_match() {
+        let mut i = Interpreter::new();
+        let result = i.eval_expr(&Expr::SubtypeProjection {
+            source: Box::new(Expr::String("hello world".into())),
+            ops: vec![SubtypeOp::Match(Box::new(Expr::String("^[0-9]+$".into())))],
+        }).unwrap();
+        assert_eq!(result, Value::Bool(false));
     }
 }

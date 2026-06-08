@@ -340,8 +340,6 @@ pub enum ProjectionTarget {
     BitReverse,
     Type,
     PtrBang,
-    /// Compile-time DFA regex: `input :> Match("pattern")`
-    Match(String),
     /// Returns a List of all keys in a HashMap: `map :> Keys`
     Keys,
     /// Returns a List of all values in a HashMap: `map :> Values`
@@ -474,6 +472,11 @@ pub enum Expr {
         modifier: SigModifier,
         expr: Box<Expr>,
     },
+    /// `<:` subtype projection: `let result <: items { FILTER(.active); COUNT; };`
+    SubtypeProjection {
+        source: Box<Expr>,
+        ops: Vec<SubtypeOp>,
+    },
 }
 
 /// A pattern in a match arm: `Variant(f1, f2)` or `_`
@@ -489,6 +492,39 @@ pub struct MatchArm {
     pub pattern: MatchPattern,
     pub guard: Option<Box<Expr>>,
     pub body: Box<Expr>,
+}
+
+/// A single operation inside a `<:` subtype projection block
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubtypeOp {
+    /// FILTER(.predicate) — keep elements matching predicate
+    Filter(Box<Expr>),
+    /// MAP(.expr) — transform each element
+    Map(Box<Expr>),
+    /// SORT(.key) — sort by key expression
+    Sort(Box<Expr>),
+    /// LIMIT(N) — take first N elements
+    Limit(usize),
+    /// SKIP(N) — skip first N elements
+    Skip(usize),
+    /// UNIQUE — remove adjacent duplicates
+    Unique,
+    /// JOIN(collection_expr, .key) — merge with another collection
+    Join(Box<Expr>, Box<Expr>),
+    /// GROUP(.key) — group by key expression
+    Group(Box<Expr>),
+    /// COUNT — count elements (terminal aggregate)
+    Count,
+    /// SUM(.expr) — sum of expression (terminal aggregate)
+    Sum(Box<Expr>),
+    /// AVG(.expr) — average of expression (terminal aggregate)
+    Avg(Box<Expr>),
+    /// MIN(.expr) — minimum of expression (terminal aggregate)
+    Min(Box<Expr>),
+    /// MAX(.expr) — maximum of expression (terminal aggregate)
+    Max(Box<Expr>),
+    /// MATCH(pattern) — regex pattern for string projection
+    Match(Box<Expr>),
 }
 
 impl std::fmt::Display for Pattern {

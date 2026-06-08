@@ -2385,6 +2385,9 @@ impl ProofEngine {
                     self.collect_identifiers(e, vars);
                 }
             }
+            Expr::SubtypeProjection { source, .. } => {
+                self.collect_identifiers(source, vars);
+            }
         }
     }
 

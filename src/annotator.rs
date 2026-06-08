@@ -560,6 +560,9 @@ impl Annotator {
                 let elems: Vec<String> = entries.iter().map(|e| self.format_expr(e)).collect();
                 format!("{{{}}}", elems.join(", "))
             }
+            Expr::SubtypeProjection { source, .. } => {
+                format!("<: {}", self.format_expr(source))
+            }
         }
     }
 

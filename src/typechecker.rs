@@ -1357,6 +1357,13 @@ impl TypeChecker {
             Expr::TupleDestructure(_names, expr) => {
                 self.infer_expression(expr)
             },
+            Expr::SubtypeProjection { source, ops } => {
+                // Infer source type; validate ops will be refined later
+                let src_ty = self.infer_expression(source);
+                // For aggregates, return Int; for collections, return source type
+                let is_aggregate = ops.iter().any(|op| matches!(op, SubtypeOp::Count | SubtypeOp::Sum(_) | SubtypeOp::Avg(_) | SubtypeOp::Min(_) | SubtypeOp::Max(_)));
+                if is_aggregate { Type::Int } else { src_ty }
+            },
             Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r) => {
                 let l_ty = self.infer_expression(l);
                 let r_ty = self.infer_expression(r);
@@ -1451,26 +1458,6 @@ impl TypeChecker {
                     ProjectionTarget::PtrBang => {
                         // Raw pointer — returns Int address
                         Type::Int
-                    }
-                    ProjectionTarget::Match(pattern) => {
-                        // Match projection — source must be String
-                        match &src_ty {
-                            Type::String => {}
-                            _ => {
-                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                                    expected: "String".to_string(),
-                                    found: self.type_to_string(&src_ty),
-                                    context: "Match projection".to_string(),
-                                });
-                            }
-                        }
-                        // Determine return type based on capture group count
-                        match crate::analysis::dfa::compile_to_dfa(pattern) {
-                            Ok(re) if re.num_groups == 0 => Type::Bool,
-                            Ok(re) if re.num_groups == 1 => Type::String,
-                            Ok(re) => Type::Tuple(vec![Type::String; re.num_groups]),
-                            Err(_) => Type::Bool,
-                        }
                     }
                     ProjectionTarget::Keys => {
                         match &src_ty {
