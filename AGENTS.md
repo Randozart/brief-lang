@@ -283,6 +283,7 @@ Preserve contract information in codegen so the optimizer can reason about it.
 8. **Never weaken C benchmarks**: Fix Brief to match or beat C, not hobble C.
 9. **Interpreter IS the reference**: Add to interpreter first, then codegen.
 10. **Benchmarks on our own terms**: End-to-end results. Features for benchmarks must add language value.
+11. **NEVER discard staged or uncommitted work without asking.** The git index (staging area) holds work-in-progress from prior sessions that may be uncommitted but critical. Before any destructive action (`git checkout --`, `git restore`, `rm -f`, `git reset --hard`), inspect everything that will be destroyed. If in doubt, `git stash` instead of discard — stashes are recoverable, `git checkout --` is not. A single `git restore --staged .` followed by `git checkout -- <files>` can erase hours of uncommitted work with no recovery path.
 
 ## Self-Hosting Pipeline
 
