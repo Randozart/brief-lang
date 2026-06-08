@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Expr, HardwareConfig, Program, Statement, TopLevel};
+use crate::ast::{Expr, HardwareConfig, Program, Statement, TopLevel, Type};
 use crate::dbrief::DbvsEngine;
 use crate::errors::{Diagnostic, Severity};
 use crate::target_spec::TargetSpec;
@@ -66,7 +66,116 @@ impl HardwareValidator {
             diagnostics.extend(Self::check_memory_overlaps(program, hw_config, spec, dbvs_engine));
         }
 
+        // .hebv-specific checks (pure logic graph tier)
+        if is_ebv {
+            diagnostics.extend(Self::check_hebv_restrictions(program));
+        }
+
         diagnostics
+    }
+
+    fn check_hebv_restrictions(program: &Program) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for item in &program.items {
+            match item {
+                TopLevel::LinkDependency(_) => {
+                    diagnostics.push(Diagnostic::new(
+                        "B5001",
+                        Severity::Error,
+                        ".hebv does not allow 'import \"link/...\"' — no external dependencies",
+                    ));
+                }
+                TopLevel::ForeignBinding { .. } => {
+                    diagnostics.push(Diagnostic::new(
+                        "B5002",
+                        Severity::Error,
+                        ".hebv does not allow 'frgn' declarations — pure logic graph only",
+                    ));
+                }
+                TopLevel::Import(imp) => {
+                    for item in &imp.items {
+                        if let Some(path) = imp.path.first() {
+                            if path == "link" {
+                                diagnostics.push(Diagnostic::new(
+                                    "B5003",
+                                    Severity::Error,
+                                    ".hebv cannot import from 'link/' — no external dependencies",
+                                ));
+                            }
+                        }
+                    }
+                }
+                TopLevel::Transaction(txn) => {
+                    // Check total contracts (no [true] defaults)
+                    if matches!(txn.contract.pre_condition, Expr::Bool(true)) {
+                        diagnostics.push(Diagnostic::new(
+                            "B5004",
+                            Severity::Error,
+                            &format!(".hebv transaction '{}' has [true] precondition — must be total", txn.name),
+                        ));
+                    }
+                    if matches!(txn.contract.post_condition, Expr::Bool(true)) {
+                        diagnostics.push(Diagnostic::new(
+                            "B5005",
+                            Severity::Error,
+                            &format!(".hebv transaction '{}' has [true] postcondition — must be total", txn.name),
+                        ));
+                    }
+                    // Check for dynamic heap usage
+                    Self::check_synthesizable_types(&txn.parameters, &mut diagnostics, &txn.name);
+                }
+                TopLevel::StateDecl(decl) => {
+                    Self::check_type_synthesizable(&decl.ty, &mut diagnostics, &decl.name);
+                }
+                _ => {}
+            }
+        }
+        diagnostics
+    }
+
+    fn check_synthesizable_types(params: &[(String, Type)], diagnostics: &mut Vec<Diagnostic>, txn_name: &str) {
+        for (name, ty) in params {
+            Self::check_type_synthesizable(ty, diagnostics, &format!("{}.{}", txn_name, name));
+        }
+    }
+
+    fn check_type_synthesizable(ty: &Type, diagnostics: &mut Vec<Diagnostic>, context: &str) {
+        match ty {
+            Type::Int | Type::UInt => {
+                diagnostics.push(Diagnostic::new(
+                    "B5006",
+                    Severity::Error,
+                    &format!(".hebv type '{}' uses Int/UInt (unsized) — use UInt[N] or SInt[N] for synthesizable logic", context),
+                ));
+            }
+            Type::Float => {
+                diagnostics.push(Diagnostic::new(
+                    "B5007",
+                    Severity::Error,
+                    &format!(".hebv type '{}' uses Float — not synthesizable", context),
+                ));
+            }
+            Type::String => {
+                diagnostics.push(Diagnostic::new(
+                    "B5008",
+                    Severity::Error,
+                    &format!(".hebv type '{}' uses String — not synthesizable", context),
+                ));
+            }
+            Type::Bool | Type::Char => {} // OK for hardware
+            Type::Vector(inner, _) => Self::check_type_synthesizable(inner, diagnostics, context),
+            Type::Tuple(types) => {
+                for t in types {
+                    Self::check_type_synthesizable(t, diagnostics, context);
+                }
+            }
+            Type::Custom(_) | Type::Enum(_) => {
+                // Struct/enum — assumed synthesizable if fields are
+            }
+            Type::Constrained(inner, _) => Self::check_type_synthesizable(inner, diagnostics, context),
+            Type::Data | Type::Void => {} // OK
+            _ => {}
+        }
     }
 
     fn check_memory_overlaps(

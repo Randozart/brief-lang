@@ -348,7 +348,7 @@ fn print_usage(program: &str) {
     eprintln!("  --out <dir>     Output directory");
     eprintln!();
     eprintln!("Verilog Options:");
-    eprintln!("  --hw <file>      Hardware config TOML, .dbv, or .dbvs (required for .ebv files)");
+    eprintln!("  --hw <file>      Hardware config TOML, .dbv, or .dbvs (required for .ebv/.hebv files)");
     eprintln!("  --tcl            Generate TCL build scripts alongside SystemVerilog");
     eprintln!("  --tcl-only       Generate TCL only (skip SystemVerilog generation)");
     eprintln!();
@@ -378,6 +378,7 @@ fn print_usage(program: &str) {
     eprintln!("  .bv, .br            Core Brief (specification)");
     eprintln!("  .rbv                Rendered Brief (Brief + View)");
     eprintln!("  .ebv                Embedded Brief (hardware targets)");
+    eprintln!("  .hebv               Hardware Embedded Brief (logic graph, synthesizable only)");
     eprintln!("  .sbv                Strict Brief (requires full contracts)");
     eprintln!("  .sebv               Strict Embedded Brief");
     eprintln!("  .srbv               Strict Rendered Brief");
@@ -760,7 +761,7 @@ fn run_bind(
 /// Intent: is strict extension.
 fn is_strict_extension(file_path: &PathBuf) -> bool {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    matches!(ext, "sbv" | "sebv" | "srbv")
+    matches!(ext, "sbv" | "sebv" | "srbv" | "hebv")
 }
 
 /// Intent: run check.
@@ -1560,7 +1561,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         } else if arg == "--out" && i + 1 < args.len() {
             out_dir = Some(PathBuf::from(&args[i + 1]));
             i += 2;
-        } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv")
+        } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".hebv")
             || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv") {
             file_path = Some(PathBuf::from(arg));
             i += 1;
@@ -1581,7 +1582,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
     // Detect source type from extension
     let source_type = if matches!(file_path.extension().and_then(|e| e.to_str()), Some("rbv" | "srbv")) {
         "rendered"
-    } else if matches!(file_path.extension().and_then(|e| e.to_str()), Some("ebv" | "sebv")) {
+    } else if matches!(file_path.extension().and_then(|e| e.to_str()), Some("ebv" | "sebv" | "hebv")) {
         "embedded"
     } else {
         "foundational"
@@ -1639,7 +1640,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         if source_type == "embedded" && !spec.has_capability("hardware_triggers") {
             let prefix = if is_strict { "Error B4001" } else { "Error B4001" };
             eprintln!("{}: Target '{}' lacks required 'hardware_triggers' capability", prefix, target_name);
-            eprintln!("  .ebv/.sebv files require target with hardware_triggers support");
+            eprintln!("  .ebv/.sebv/.hebv files require target with hardware_triggers support");
             eprintln!("  Hint: Use a target spec with capabilities = [\"logic\", \"hardware_triggers\"]");
             std::process::exit(1);
         }
@@ -2609,7 +2610,7 @@ fn run_c(
         None
     };
 
-    let is_ebv = file_path.extension().map(|e| e == "ebv").unwrap_or(false);
+    let is_ebv = file_path.extension().map(|e| e == "ebv" || e == "hebv").unwrap_or(false);
 
     let mut c_backend = backend::c::CBackend::new();
     if let Some(linkage) = linkage_config {
@@ -2904,7 +2905,7 @@ fn run_verilog(
     }
 
     // Hardware validation
-    let is_ebv = file_path.extension().map(|e| e == "ebv").unwrap_or(false);
+    let is_ebv = file_path.extension().map(|e| e == "ebv" || e == "hebv").unwrap_or(false);
     
     let dbvs_engine: Option<crate::dbrief::DbvsEngine> = None;
 
@@ -3831,7 +3832,7 @@ fn main() {
                 .iter()
                 .skip(2)
                 .find(|a| {
-                    a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv")
+                    a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv") || a.ends_with(".hebv")
                         || a.ends_with(".sebv") || a.ends_with(".rbv") || a.ends_with(".srbv")
                 })
                 .map(PathBuf::from);
@@ -3872,7 +3873,7 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv")
+                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".hebv")
                     || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -3913,7 +3914,7 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -4036,7 +4037,7 @@ fn main() {
                 } else if arg == "--target" && i + 1 < args.len() {
                     target = Some(args[i + 1].as_str());
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -4073,7 +4074,7 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".br") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") || arg.ends_with(".br") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -4103,7 +4104,7 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") {
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -4229,7 +4230,7 @@ fn main() {
                 } else if arg == "--tcl-only" {
                     tcl_only = true;
                     i += 1;
-                } else if arg.ends_with(".ebv") || arg.ends_with(".sebv") {
+                } else if arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else if arg.ends_with(".bv") || arg.ends_with(".sbv") {
@@ -4245,7 +4246,7 @@ fn main() {
 
             if let Some(path) = file_path {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if ext == "ebv" || ext == "sebv" {
+                if ext == "ebv" || ext == "sebv" || ext == "hebv" {
                     if let Some(hw) = hw_config {
                         if let Err(e) = run_verilog(
                             &path,
@@ -4538,7 +4539,7 @@ fn main() {
 
         "selfhost" => {
             let file_path = args.iter().skip(2).find(|a| {
-                a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv")
+                a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv") || a.ends_with(".hebv")
                     || a.ends_with(".rbv") || a.ends_with(".srbv")
             }).map(|s| s.to_string());
 
