@@ -951,7 +951,8 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
         Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => {
             out.insert(name.clone());
         }
-        Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_) | Expr::BinaryOp(_) | Expr::UnaryOp(_) => {}
+        Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_) | Expr::BinaryOp(_) | Expr::UnaryOp(_)
+        | Expr::ProjectionExpr(_) | Expr::CallExpr(_) | Expr::ListLiteralExpr(_) | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_) | Expr::SliceExpr(_) | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_) | Expr::StructInstanceExpr(_) | Expr::ObjectLiteralExpr(_) | Expr::TupleExpr(_) | Expr::TupleDestructureExpr(_) => {}
         // Self-identity operations (x == x, x >= x, x <= x) are tautologies that
         // don't actually observe the field's value. Skip them to avoid keeping
         // fields artificially alive in dead-field analysis.

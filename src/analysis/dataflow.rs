@@ -206,6 +206,7 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::SubtypeProjection { source, .. } => {
                 self.extract_ids_recursive(source, ids);
             }
+            _ => {}
         }
     }
 

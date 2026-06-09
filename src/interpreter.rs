@@ -2494,8 +2494,8 @@ Err(RuntimeError::TypeMismatch(
                     "Non-exhaustive match: no arm matched".to_string(),
                 ))
             }
-            Expr::BinaryOp(_) | Expr::UnaryOp(_) => {
-                Err(RuntimeError::TypeMismatch("Binary/unary ops must be evaluated through feature dispatch".to_string()))
+            _ => {
+                Err(RuntimeError::TypeMismatch("Expr variant not yet handled in interpreter".to_string()))
             }
         }
     }

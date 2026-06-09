@@ -22,7 +22,12 @@
 
 use crate::errors::Span;
 use crate::features::binary_op::BinaryOpExpr;
+use crate::features::call::CallExpr;
+use crate::features::collection::*;
+use crate::features::field::*;
 use crate::features::literal::LiteralExpr;
+use crate::features::projection::ProjectionExpr;
+use crate::features::tuple::*;
 use crate::features::unary_op::UnaryOpExpr;
 use crate::ffi::types::MemoryLayout;
 use serde::Deserialize;
@@ -435,12 +440,22 @@ pub enum Expr {
         source: Box<Expr>,
         target: ProjectionTarget,
     },
+    // Pattern B — packed projection
+    ProjectionExpr(ProjectionExpr),
     Call(String, Vec<Expr>),
+    // Pattern B — packed call
+    CallExpr(CallExpr),
     ListLiteral(Vec<Expr>),
+    // Pattern B — packed list literal
+    ListLiteralExpr(ListLiteralExpr),
     /// HashMap literal: `{"a": 1, "b": 2}`
     MapLiteral(Vec<(Expr, Expr)>),
+    // Pattern B — packed map literal
+    MapLiteralExpr(MapLiteralExpr),
     /// HashSet literal: `{1, 2, 3}`
     SetLiteral(Vec<Expr>),
+    // Pattern B — packed set literal
+    SetLiteralExpr(SetLiteralExpr),
     ListIndex(Box<Expr>, Box<Expr>),
     Slice {
         value: Box<Expr>,
@@ -449,15 +464,25 @@ pub enum Expr {
         stride: Option<Box<Expr>>,
         mask: Option<Box<Expr>>,
     },
+    // Pattern B — packed slice
+    SliceExpr(SliceExpr),
     // Multidimensional slice: vec[coord1, coord2, ...; mask :: stride]
     MultiSlice {
         value: Box<Expr>,
         ops: Vec<BracketOp>,
     },
+    // Pattern B — packed multi-slice
+    MultiSliceExpr(MultiSliceExpr),
 
     FieldAccess(Box<Expr>, String),
+    // Pattern B — packed field access
+    FieldAccessExpr(FieldAccessExpr),
     StructInstance(String, Vec<(String, Expr)>),
+    // Pattern B — packed struct instance
+    StructInstanceExpr(StructInstanceExpr),
     ObjectLiteral(Vec<(String, Expr)>),
+    // Pattern B — packed object literal
+    ObjectLiteralExpr(ObjectLiteralExpr),
 // Pattern matching in guards: [value Variant(field1, field2)] { ... }
     PatternMatch {
         value: Box<Expr>,
@@ -473,8 +498,12 @@ pub enum Expr {
     Block(Vec<Statement>, Box<Expr>),
     // Tuple destructuring: let (a, b) = expr;
     TupleDestructure(Vec<String>, Box<Expr>),
+    // Pattern B — packed tuple destructure
+    TupleDestructureExpr(TupleDestructureExpr),
     // Tuple literal: (a, b, c)
     Tuple(Vec<Expr>),
+    // Pattern B — packed tuple literal
+    TupleExpr(TupleExpr),
     /// Sig call modifier: `sig #out expr` or `sig #inline expr`
     SigCall {
         modifier: SigModifier,
