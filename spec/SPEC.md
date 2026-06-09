@@ -1,7 +1,7 @@
 # Brief Language Specification
 
 **Version:** v0.16.0  
-**Date:** 2026-06-08  
+**Date:** 2026-06-09  
 **Status:** Development (stable core, experimental backends, **new: Universal FFI via LTO library coupling (C/Rust/Zig), `import "link/..."` with `resolve_link_source()` search, FFI registry eliminating built-in magic, xxHash vendored as stdlib module, `sig` contract projections with `#out`/`#inline` modifiers, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
@@ -105,10 +105,15 @@ top_level ::= definition
             | struct_def
             | rstruct_def
             | enum_def
+            | type_def       (* NEW 2026-06-09: Type Name <: Base { ... } *)
             | signature
             | resource_decl
             | render_block
             | exit_condition
+
+type_def ::= "type" identifier type_params? "<:" type_expr "{" (type_property | constraint)* "}" ";"
+type_property ::= identifier "=" expression ";"
+constraint ::= "[" expression "]"
 
 exit_condition ::= "#!exit" expression
 
@@ -1641,6 +1646,97 @@ defn make_pair<T>(a: T, b: T) -> (T, T) {
 };
 
 let p = make_pair(1, 2);  // Inferred: (Int, Int)
+```
+
+---
+
+### 4.7 Type Derivation (`type` keyword)
+
+> **Added 2026-06-09 (Phase 1.5)**
+
+Brief types can be defined via `Type Name <: Base { ... }` declarations. The `<:`
+operator (read as "derives from") connects a new type to its base type. Properties
+and constraints within the `{ }` body define how the new type differs from the base.
+
+#### 4.7.1 Primitive Kernel (compiler-native properties)
+
+| Property | Type | Default | Meaning |
+|----------|------|---------|---------|
+| `Bytes` | `Int` | _required_ | Physical width in bytes — LLVM `alloca`, VHDL width |
+| `Alignment` | `Int` | `= Bytes` | Alignment boundary — LLVM `align` |
+| `Endian` | `Enum` | `Little` | Byte order — LLVM `bswap`/load-store order |
+| `Volatile` | `Bool` | `false` | LLVM `load volatile`/`store volatile` |
+| `Atomic` | `Bool` | `false` | LLVM atomic operations |
+| `ElementType` | `Type` | _(none)_ | Unlocks `[]` and slicing — compiler synthesizes GEP |
+| `FixedSize` | `Bool` | _(none)_ | `false` unlocks `<-`/`->` — heap/circular buffer |
+| `InsertAt` | `Expr` | _(none)_ | Index expression for insertion position |
+| `ExtractFrom` | `Expr` | _(none)_ | Index or `<:{}` query for extraction position |
+| `AllowIndex` | `Bool` | `true` | Override to `false` to block `[]` |
+| `AllowSlice` | `Bool` | `true` | Override to `false` to block slicing |
+| `AllowArrow` | `Bool` | `true` | Override to `false` to block `<-`/`->` |
+| `Codec` | `Struct` | _(none)_ | Struct with `encode`/`decode` — literal translation |
+
+#### 4.7.2 InsertAt / ExtractFrom
+
+| Expression | Strategy | Example |
+|---|---|---|
+| `0` | Constant front, head-pointer advance | Queue pop |
+| `:> Size` | Append position, pointer increments | List/Queue push |
+| `:> Size - N` | Offset from end, pointer decrements | Stack pop |
+| `<: { MIN(.key) }` | Maintain heap by key | Priority queue |
+| `<: { MAX(.key) }` | Maintain heap by key | Priority queue |
+
+Unrecognized expression forms produce a compile-time error in Pass 1.
+
+#### 4.7.3 Examples
+
+```brief
+// Scalar derivation
+Type U8  <: Bits { Bytes = 1; Alignment = 1; };
+Type U32 <: Bits { Bytes = 4; Alignment = 4; };
+Type Int <: U64;
+Type MmioReg <: U32 { Volatile = true; };
+
+// Collection derivation
+Type List<T> <: Bits {
+    ElementType = T;
+    FixedSize = false;
+    InsertAt = :> Size;
+    ExtractFrom = :> Size - 1;
+};
+
+Type Stack<T> <: List<T> { AllowIndex = false; };
+Type Queue<T> <: List<T> { ExtractFrom = 0; AllowIndex = false; };
+
+// Codec-bearing type
+import { Utf8 } from "std/utf8.bv";
+Type String <: List<U8> { Codec = Utf8; };
+
+// Refinement constraint
+Type PositiveInt <: Int {
+    [ > 0 && < 100 ]
+};
+```
+
+#### 4.7.4 Two-Pass Pipeline
+
+```
+PASS 1: Type-Universe Pass
+  - Collect all Type declarations
+  - Resolve derivation chain to Bits
+  - Inherit + override properties
+  - Validate Bytes on all Bits-derived types
+  - Validate InsertAt/ExtractFrom forms
+  - Validate Codec has encode/decode
+  - FREEZE: type universe immutable
+
+PASS 2: Executable Pass
+  - Parse defn/txn/rct
+  - Resolve let x: Type against frozen universe
+  - Validate :> projections against metadata
+  - Synthesize bracket/arrow from AllowIndex/AllowArrow
+  - Encode literals via Codec
+  - Emit backend code with frozen metadata
 ```
 
 ---
