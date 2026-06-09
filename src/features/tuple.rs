@@ -5,73 +5,50 @@ use crate::typechecker::TypeChecker;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TupleExpr {
-    pub elements: Vec<Expr>,
-}
-
-impl TupleExpr {
-    pub fn new(elements: Vec<Expr>) -> Self {
-        TupleExpr { elements }
-    }
+    pub exprs: Vec<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TupleDestructureExpr {
     pub names: Vec<String>,
-    pub source: Box<Expr>,
+    pub expr: Box<Expr>,
 }
 
-impl TupleDestructureExpr {
-    pub fn new(names: Vec<String>, source: Expr) -> Self {
-        TupleDestructureExpr { names, source: Box::new(source) }
+impl ExprTypecheck for TupleExpr {
+    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Int) }
+}
+impl ExprTypecheck for TupleDestructureExpr {
+    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Void) }
+}
+
+impl ExprEval for TupleExpr {
+    fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
+        let mut values = Vec::new();
+        for e in &self.exprs { values.push(ctx.eval_expr(e)?); }
+        Ok(Value::Tuple(values))
     }
 }
 
-macro_rules! stub_impls {
-    ($ty:ty) => {
-        impl ExprTypecheck for $ty {
-            fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> {
-                Ok(Type::Void)
+impl ExprEval for TupleDestructureExpr {
+    fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
+        let value = ctx.eval_expr(&self.expr)?;
+        match value {
+            Value::Tuple(items) | Value::List(items) => {
+                for (i, name) in self.names.iter().enumerate() {
+                    if i < items.len() {
+                        ctx.state.insert(name.clone(), items[i].clone());
+                    }
+                }
+                Ok(Value::Void)
             }
+            _ => Err(RuntimeError::TypeMismatch("Tuple destructure requires a list value".into())),
         }
-        impl ExprEval for $ty {
-            fn evaluate(&self, _ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
-                Err(RuntimeError::TypeMismatch(String::new()))
-            }
-        }
-        impl ExprCodegenLLVM for $ty {
-            fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-                crate::backend::llvm::TypedRegister { name: "%tup".to_string(), ty: Type::Void }
-            }
-        }
-        impl ExprCodegenVHDL for $ty {
-            fn emit_vhdl(&self, _ctx: &crate::backend::vhdl::VhdlGenerator, _dispatch: &ExprDispatch) -> String {
-                "'0'".to_string()
-            }
-        }
-        impl ExprCodegenWebstack for $ty {
-            fn emit_js(&self, _ctx: &crate::backend::webstack::WebstackGenerator, _dispatch: &ExprDispatch) -> String {
-                "JsValue::TRUE".to_string()
-            }
-        }
-    };
-}
-
-stub_impls!(TupleExpr);
-stub_impls!(TupleDestructureExpr);
-
-#[cfg(all(kani, feature = "kani_full"))]
-mod kani_full_tests {
-    use super::*;
-
-    #[kani::proof]
-    fn verify_tuple_construct() {
-        let e = TupleExpr::new(vec![Expr::Integer(1), Expr::Integer(2)]);
-        assert_eq!(e.elements.len(), 2);
-    }
-
-    #[kani::proof]
-    fn verify_tuple_destructure_construct() {
-        let e = TupleDestructureExpr::new(vec!["a".to_string()], Expr::Integer(0));
-        assert_eq!(e.names.len(), 1);
     }
 }
+
+impl ExprCodegenLLVM for TupleExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%tup".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for TupleDestructureExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%tds".into(), ty: Type::Void } } }
+impl ExprCodegenVHDL for TupleExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
+impl ExprCodegenVHDL for TupleDestructureExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
+impl ExprCodegenWebstack for TupleExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }
+impl ExprCodegenWebstack for TupleDestructureExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

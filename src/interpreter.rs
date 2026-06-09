@@ -21,7 +21,22 @@
 // or embeds the Work.
 
 use crate::ast::*;
+use crate::features::arrow::{ArrowMutExpr, ArrowDiscardExpr, ArrowTransferExpr};
+use crate::features::binary_op::{BinaryOpExpr, BinaryOpKind};
+use crate::features::block::BlockExpr;
+use crate::features::call::CallExpr;
+use crate::features::collection::{ListLiteralExpr, MapLiteralExpr, SetLiteralExpr, ListIndexExpr, SliceExpr, MultiSliceExpr};
+use crate::features::dbvl::DbvlTableExpr;
+use crate::features::ellipsis::EllipsisExpr;
+use crate::features::field::{FieldAccessExpr, StructInstanceExpr, ObjectLiteralExpr};
+use crate::features::pattern::{PatternMatchExpr, MatchExpr};
+use crate::features::projection::ProjectionExpr;
+use crate::features::sigcall::SigCallExpr;
+use crate::features::subtype::SubtypeProjectionExpr;
+use crate::features::tuple::{TupleExpr, TupleDestructureExpr};
+use crate::features::unary_op::{UnaryOpExpr, UnaryOpKind};
 use crate::features::traits::{ExprDispatch, ExprEval};
+use crate::features::literal::LiteralExpr;
 use crate::ffi::orchestrator::Orchestrator;
 use crate::ffi::FFI_REGISTRY;
 use regex::Regex;
@@ -565,7 +580,7 @@ impl Interpreter {
     }
 
     /// Resolve any Value from state by root name and optional field path.
-    fn resolve_arrow_value(&self, root: &str, field_path: &[String]) -> Result<Value, RuntimeError> {
+    pub(crate) fn resolve_arrow_value(&self, root: &str, field_path: &[String]) -> Result<Value, RuntimeError> {
         let mut val = self.state.get(root)
             .ok_or_else(|| RuntimeError::UndefinedVariable(root.to_string()))?
             .clone();
@@ -587,7 +602,7 @@ impl Interpreter {
     }
 
     /// Store any Value back into state through the root and field path.
-    fn store_arrow_value(&mut self, root: &str, field_path: &[String], val: Value) {
+    pub(crate) fn store_arrow_value(&mut self, root: &str, field_path: &[String], val: Value) {
         if field_path.is_empty() {
             self.state.insert(root.to_string(), val);
         } else {
@@ -623,7 +638,7 @@ impl Interpreter {
 
     /// Extract (root_variable_name, field_path) from an arrow mutation target.
     /// Supports: `&name`, `&name[i]`, `&name.field`, `&name.field[i]`
-    fn extract_arrow_root(&self, target: &Expr) -> Result<(String, Vec<String>), RuntimeError> {
+    pub(crate) fn extract_arrow_root(&self, target: &Expr) -> Result<(String, Vec<String>), RuntimeError> {
         match target {
             Expr::OwnedRef(n) => Ok((n.clone(), vec![])),
             Expr::FieldAccess(inner, field) => {
@@ -707,7 +722,7 @@ impl Interpreter {
 
     /// Evaluate the index expression for an arrow operation.
     /// Returns None for Term (end operations) or Some(position) for specific index.
-    fn eval_arrow_pos(&mut self, list: &[Value], index: &Expr) -> Result<Option<usize>, RuntimeError> {
+    pub(crate) fn eval_arrow_pos(&mut self, list: &[Value], index: &Expr) -> Result<Option<usize>, RuntimeError> {
         match index {
             Expr::Term => Ok(None),
             idx_expr => {
@@ -726,7 +741,7 @@ impl Interpreter {
     }
 
     /// Convert a Value to a String for use as a HashMap key.
-    fn value_to_string(&self, val: &Value) -> Result<String, RuntimeError> {
+    pub(crate) fn value_to_string(&self, val: &Value) -> Result<String, RuntimeError> {
         match val {
             Value::String(s) => Ok(s.clone()),
             Value::Int(i) => Ok(i.to_string()),
@@ -739,7 +754,7 @@ impl Interpreter {
         }
     }
 
-    fn list_nesting_depth(value: &Value) -> usize {
+    pub(crate) fn list_nesting_depth(value: &Value) -> usize {
         match value {
             Value::List(items) => match items.first() {
                 Some(inner) => 1 + Self::list_nesting_depth(inner),
@@ -749,7 +764,7 @@ impl Interpreter {
         }
     }
 
-    fn expand_coordinates(
+    pub(crate) fn expand_coordinates(
         coords: &[SliceCoordinate],
         total_dims: usize,
     ) -> Result<Vec<SliceCoordinate>, RuntimeError> {
@@ -782,7 +797,7 @@ impl Interpreter {
         Ok(expanded)
     }
 
-    fn apply_multi_slice_coords(
+    pub(crate) fn apply_multi_slice_coords(
         &mut self,
         value: &Value,
         coords: &[SliceCoordinate],
@@ -1006,7 +1021,7 @@ impl Interpreter {
         Ok(())
     }
 
-    fn pattern_match(pat: &Pattern, value: &Value, state: &mut HashMap<String, Value>) -> bool {
+    pub(crate) fn pattern_match(pat: &Pattern, value: &Value, state: &mut HashMap<String, Value>) -> bool {
         match pat {
             Pattern::Wildcard => true,
             Pattern::Var(name) => {
@@ -1295,1225 +1310,106 @@ impl Interpreter {
         match expr {
             // Pattern B: delegate to feature struct
             Expr::Literal(lit) => lit.evaluate(self, &ExprDispatch),
+            // Legacy scalar variants — keep inline until Phase 14 (variant removal)
             Expr::Integer(v) => Ok(Value::Int(*v)),
             Expr::Float(v) => Ok(Value::Float(*v)),
             Expr::String(v) => Ok(Value::String(v.clone())),
-            Expr::Char(v) => Ok(Value::Char(*v)),  // NEW
+            Expr::Char(v) => Ok(Value::Char(*v)),
             Expr::Bool(v) => Ok(Value::Bool(*v)),
-            Expr::Term => self
-                .state
-                .get("term")
-                .cloned()
+            Expr::Term => self.state.get("term").cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable("term".to_string())),
-            Expr::Identifier(name) => self
-                .state
-                .get(name)
-                .cloned()
+            Expr::Identifier(name) => self.state.get(name).cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
-            Expr::OwnedRef(name) => self
-                .state
-                .get(name)
-                .cloned()
+            Expr::OwnedRef(name) => self.state.get(name).cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
-            Expr::PriorState(name) => self
-                .prior_state
-                .get(name)
-                .cloned()
+            Expr::PriorState(name) => self.prior_state.get(name).cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
-Expr::Add(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val.clone(), r_val.clone()) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l + r)),
-                    (Value::Float(l), Value::Float(r)) => Ok(Value::Float(l + r)),
-                    (Value::String(l), Value::String(r)) => Ok(Value::String(l + &r)),
-                    (Value::String(l), Value::Int(r)) => Ok(Value::String(l + &r.to_string())),
-                    (Value::Int(l), Value::String(r)) => Ok(Value::String(l.to_string() + &r)),
-                    (Value::String(l), Value::Char(r)) => { let mut s = l; s.push(r); Ok(Value::String(s)) },
-                    (Value::Char(l), Value::String(r)) => Ok(Value::String(l.to_string() + &r)),
-                    (Value::String(l), Value::Void) => Ok(Value::String(l)),
-                    _ => Err(RuntimeError::TypeMismatch("Addition".to_string())),
-                }
-            }
-            Expr::Sub(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l - r)),
-                    (Value::Float(l), Value::Float(r)) => Ok(Value::Float(l - r)),
-                    _ => Err(RuntimeError::TypeMismatch("Subtraction".to_string())),
-                }
-            }
-            Expr::Mul(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l * r)),
-                    (Value::Float(l), Value::Float(r)) => Ok(Value::Float(l * r)),
-                    _ => Err(RuntimeError::TypeMismatch("Multiplication".to_string())),
-                }
-            }
-            Expr::Div(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => {
-                        if r == 0 {
-                            return Err(RuntimeError::DivisionByZero);
-                        }
-                        Ok(Value::Int(l / r))
-                    }
-                    (Value::Float(l), Value::Float(r)) => {
-                        if r == 0.0 {
-                            return Err(RuntimeError::DivisionByZero);
-                        }
-                        Ok(Value::Float(l / r))
-                    }
-                    _ => Err(RuntimeError::TypeMismatch("Division".to_string())),
-                }
-            }
-            Expr::Mod(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => {
-                        if r == 0 {
-                            return Err(RuntimeError::DivisionByZero);
-                        }
-                        Ok(Value::Int(l % r))
-                    }
-                    _ => Err(RuntimeError::TypeMismatch("Division".to_string())),
-                }
-            }
-            Expr::Eq(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                Ok(Value::Bool(l_val == r_val))
-            }
-            Expr::Ne(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                Ok(Value::Bool(l_val != r_val))
-            }
-            Expr::Lt(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                fn ord(v: &Value) -> String {
-                    match v { Value::Enum(_, n, _) => n.clone(), _ => format!("{:?}", v) }
-                }
-                match (&l_val, &r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l < r)),
-                    (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l < r)),
-                    (Value::Char(l), Value::Char(r)) => Ok(Value::Bool(l < r)),
-                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l < r)),
-                    _ => Ok(Value::Bool(ord(&l_val) < ord(&r_val))),
-                }
-            }
-            Expr::Le(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                fn ord(v: &Value) -> String {
-                    match v { Value::Enum(_, n, _) => n.clone(), _ => format!("{:?}", v) }
-                }
-                match (&l_val, &r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l <= r)),
-                    (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l <= r)),
-                    (Value::Char(l), Value::Char(r)) => Ok(Value::Bool(l <= r)),
-                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l <= r)),
-                    _ => Ok(Value::Bool(ord(&l_val) <= ord(&r_val))),
-                }
-            }
-            Expr::Gt(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                fn ord(v: &Value) -> String {
-                    match v { Value::Enum(_, n, _) => n.clone(), _ => format!("{:?}", v) }
-                }
-                match (&l_val, &r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l > r)),
-                    (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l > r)),
-                    (Value::Char(l), Value::Char(r)) => Ok(Value::Bool(l > r)),
-                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l > r)),
-                    _ => Ok(Value::Bool(ord(&l_val) > ord(&r_val))),
-                }
-            }
-Expr::Ge(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                fn ord(v: &Value) -> String {
-                    match v { Value::Enum(_, n, _) => n.clone(), _ => format!("{:?}", v) }
-                }
-                match (&l_val, &r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Bool(l >= r)),
-                    (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l >= r)),
-                    (Value::Char(l), Value::Char(r)) => Ok(Value::Bool(l >= r)),
-                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l >= r)),
-                    _ => Ok(Value::Bool(ord(&l_val) >= ord(&r_val))),
-                }
-            }
-            Expr::Or(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l || r)),
-                    _ => Err(RuntimeError::TypeMismatch("Logical OR".to_string())),
-                }
-            }
-            Expr::And(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l && r)),
-                    _ => Err(RuntimeError::TypeMismatch("Logical AND".to_string())),
-                }
-            }
-            Expr::BitAnd(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l & r)),
-                    _ => Err(RuntimeError::TypeMismatch("Bitwise AND".to_string())),
-                }
-            }
-            Expr::BitOr(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l | r)),
-                    _ => Err(RuntimeError::TypeMismatch("Bitwise OR".to_string())),
-                }
-            }
-            Expr::BitXor(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l ^ r)),
-                    _ => Err(RuntimeError::TypeMismatch("Bitwise XOR".to_string())),
-                }
-            }
-            Expr::Shl(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l << r)),
-                    _ => Err(RuntimeError::TypeMismatch("Shift left".to_string())),
-                }
-            }
-            Expr::Shr(l, r) => {
-                let l_val = self.eval_expr(l)?;
-                let r_val = self.eval_expr(r)?;
-                match (l_val, r_val) {
-                    (Value::Int(l), Value::Int(r)) => Ok(Value::Int(l >> r)),
-                    _ => Err(RuntimeError::TypeMismatch("Shift right".to_string())),
-                }
-            }
-            Expr::Not(inner) => {
-                let val = self.eval_expr(inner)?;
-                match val {
-                    Value::Bool(b) => Ok(Value::Bool(!b)),
-                    _ => Err(RuntimeError::TypeMismatch("Logical NOT".to_string())),
-                }
-            }
-            Expr::Neg(inner) => {
-                let val = self.eval_expr(inner)?;
-                match val {
-                    Value::Int(i) => Ok(Value::Int(-i)),
-                    Value::Float(f) => Ok(Value::Float(-f)),
-                    _ => Err(RuntimeError::TypeMismatch("Negation".to_string())),
-                }
-            }
-            Expr::BitNot(inner) => {
-                let val = self.eval_expr(inner)?;
-                match val {
-                    Value::Int(i) => Ok(Value::Int(!i)),
-                    _ => Err(RuntimeError::TypeMismatch("Bitwise NOT".to_string())),
-                }
-            }
-            Expr::ArrowMut { dir, target, index, value } => {
-                let (root_name, field_path) = self.extract_arrow_root(target)?;
-                let mut collection = self.resolve_arrow_value(&root_name, &field_path)?;
-                match dir {
-                    ArrowDir::Push => {
-                        let val = match value {
-                            Some(v) => self.eval_expr(v)?,
-                            None => return Err(RuntimeError::TypeMismatch(
-                                "ArrowMut Push requires a value".to_string()
-                            )),
-                        };
-                        match (&mut collection, val) {
-                            (Value::List(list), v) => {
-                                let pos = self.eval_arrow_pos(list, index)?;
-                                match pos {
-                                    Some(p) if p < list.len() => list.insert(p, v),
-                                    _ => list.push(v),
-                                }
-                                self.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
-                                Ok(Value::List(list.clone()))
-                            }
-                            (Value::HashMap(map), val) if matches!(index.as_ref(), Expr::Term) => {
-                                // &map <- (key, value) — insert entry
-                                // val can be Value::List or Value::Tuple (both are 2-element)
-                                let pair = match val {
-                                    Value::List(p) | Value::Tuple(p) => p,
-                                    _ => return Err(RuntimeError::TypeMismatch(
-                                        "HashMap insert requires a 2-element tuple or list (key, value)".to_string()
-                                    )),
-                                };
-                                if pair.len() != 2 {
-                                    return Err(RuntimeError::TypeMismatch(
-                                        "HashMap insert requires exactly 2 elements (key, value)".to_string()
-                                    ));
-                                }
-                                let mut pair_iter = pair.into_iter();
-                                let key = self.value_to_string(&pair_iter.next().unwrap())?;
-                                let val = pair_iter.next().unwrap();
-                                map.insert(key, val);
-                                self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
-                                Ok(Value::HashMap(map.clone()))
-                            }
-                            (Value::HashMap(map), v) => {
-                                // &map[key] <- value — insert/replace at key
-                                let key_val = self.eval_expr(index)?;
-                                let key = self.value_to_string(&key_val)?;
-                                map.insert(key, v);
-                                self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
-                                Ok(Value::HashMap(map.clone()))
-                            }
-                            (Value::HashSet(set), v) => {
-                                let elem = self.value_to_string(&v)?;
-                                set.insert(elem);
-                                self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
-                                Ok(Value::HashSet(set.clone()))
-                            }
-                            (Value::Stack(stack), v) => {
-                                stack.push(v);
-                                self.store_arrow_value(&root_name, &field_path, Value::Stack(stack.clone()));
-                                Ok(Value::Stack(stack.clone()))
-                            }
-                            (Value::Queue(queue), v) => {
-                                queue.push_back(v);
-                                self.store_arrow_value(&root_name, &field_path, Value::Queue(queue.clone()));
-                                Ok(Value::Queue(queue.clone()))
-                            }
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "ArrowMut Push requires a compatible collection type".to_string()
-                            )),
-                        }
-                    }
-                    ArrowDir::Pop => {
-                        match &mut collection {
-                            Value::List(list) => {
-                                let pos = self.eval_arrow_pos(list, index)?;
-                                let removed = match pos {
-                                    Some(p) if p < list.len() => list.remove(p),
-                                    _ => list.pop().ok_or_else(|| RuntimeError::TypeMismatch(
-                                        "Cannot pop from empty list".to_string()
-                                    ))?,
-                                };
-                                self.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
-                                Ok(removed)
-                            }
-                            Value::HashMap(map) => {
-                                let key_val = self.eval_expr(index)?;
-                                let key = self.value_to_string(&key_val)?;
-                                let removed = map.remove(&key).ok_or_else(|| RuntimeError::TypeMismatch(
-                                    format!("Key '{}' not found in HashMap", key)
-                                ))?;
-                                self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
-                                Ok(removed)
-                            }
-                            Value::HashSet(set) => {
-                                // If specific index (not Term), remove that element by value
-                                if let Expr::Term = index.as_ref() {
-                                    // Pop arbitrary element from set
-                                    let elem = set.iter().next().cloned()
-                                        .ok_or_else(|| RuntimeError::TypeMismatch(
-                                            "Cannot pop from empty HashSet".to_string()
-                                        ))?;
-                                    set.remove(&elem);
-                                    self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
-                                    Ok(Value::String(elem))
-                                } else {
-                                    let key_val = self.eval_expr(index)?;
-                                    let elem = self.value_to_string(&key_val)?;
-                                    if set.remove(&elem) {
-                                        self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
-                                        Ok(Value::String(elem))
-                                    } else {
-                                        Err(RuntimeError::TypeMismatch(
-                                            format!("Element '{}' not found in HashSet", elem)
-                                        ))
-                                    }
-                                }
-                            }
-                            Value::Stack(stack) => {
-                                let removed = stack.pop().ok_or_else(|| RuntimeError::TypeMismatch(
-                                    "Cannot pop from empty Stack".to_string()
-                                ))?;
-                                self.store_arrow_value(&root_name, &field_path, Value::Stack(stack.clone()));
-                                Ok(removed)
-                            }
-                            Value::Queue(queue) => {
-                                let removed = queue.pop_front().ok_or_else(|| RuntimeError::TypeMismatch(
-                                    "Cannot dequeue from empty Queue".to_string()
-                                ))?;
-                                self.store_arrow_value(&root_name, &field_path, Value::Queue(queue.clone()));
-                                Ok(removed)
-                            }
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "ArrowMut Pop requires a compatible collection type".to_string()
-                            )),
-                        }
-                    }
-                }
-            }
-            Expr::ArrowDiscard { target, index } => {
-                let (root_name, field_path) = self.extract_arrow_root(target)?;
-                let mut collection = self.resolve_arrow_value(&root_name, &field_path)?;
-                match &mut collection {
-                    Value::List(list) => {
-                        let pos = self.eval_arrow_pos(list, index)?;
-                        match pos {
-                            Some(p) if p < list.len() => { list.remove(p); }
-                            _ => { list.pop(); }
-                        }
-                        self.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
-                    }
-                    Value::HashMap(map) => {
-                        let key_val = self.eval_expr(index)?;
-                        let key = self.value_to_string(&key_val)?;
-                        map.remove(&key);
-                        self.store_arrow_value(&root_name, &field_path, Value::HashMap(map.clone()));
-                    }
-                    Value::HashSet(set) => {
-                        if let Expr::Term = index.as_ref() {
-                            let elem = set.iter().next().cloned();
-                            if let Some(e) = elem {
-                                set.remove(&e);
-                            }
-                        } else {
-                            let key_val = self.eval_expr(index)?;
-                            let elem = self.value_to_string(&key_val)?;
-                            if !set.remove(&elem) {
-                                return Err(RuntimeError::TypeMismatch(
-                                    format!("Element '{}' not found in HashSet", elem)
-                                ));
-                            }
-                        }
-                        self.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
-                    }
-                    Value::Stack(stack) => { stack.pop(); self.store_arrow_value(&root_name, &field_path, Value::Stack(stack.clone())); }
-                    Value::Queue(queue) => { queue.pop_front(); self.store_arrow_value(&root_name, &field_path, Value::Queue(queue.clone())); }
-                    _ => return Err(RuntimeError::TypeMismatch(
-                        "ArrowDiscard requires a compatible collection type".to_string()
-                    )),
-                }
-                Ok(Value::Void)
-            }
-            Expr::ArrowTransfer { dest, source, filter } => {
-                let (dest_root, dest_path) = self.extract_arrow_root(dest)?;
-                let (source_root, source_path) = self.extract_arrow_root(source)?;
-                let mut src_val = self.resolve_arrow_value(&source_root, &source_path)?;
-                let mut dest_val = self.resolve_arrow_value(&dest_root, &dest_path)?;
-                // Transfer matching elements from source to dest
-                match (&mut src_val, &mut dest_val) {
-                    (Value::List(src), Value::List(dest)) => {
-                        if let Some(f) = filter {
-                            let mut remaining = std::mem::take(src);
-                            let mut i = 0;
-                            while i < remaining.len() {
-                                let prev = self.state.insert("_".to_string(), remaining[i].clone());
-                                let cond = self.eval_expr(f)?;
-                                if prev.is_some() {
-                                    self.state.insert("_".to_string(), prev.unwrap());
-                                } else {
-                                    self.state.remove("_");
-                                }
-                                if cond == Value::Bool(true) {
-                                    dest.push(remaining.remove(i));
-                                } else {
-                                    i += 1;
-                                }
-                            }
-                            *src = remaining;
-                        } else {
-                            dest.extend(src.drain(..));
-                        }
-                    }
-                    (Value::HashMap(src), Value::HashMap(dest)) => {
-                        if let Some(f) = filter {
-                            let mut remaining = std::mem::take(src);
-                            let keys: Vec<String> = remaining.keys().cloned().collect();
-                            for key in keys {
-                                if let Some(val) = remaining.remove(&key) {
-                                    let prev = self.state.insert("_".to_string(), val.clone());
-                                    let cond = self.eval_expr(f)?;
-                                    if prev.is_some() {
-                                        self.state.insert("_".to_string(), prev.unwrap());
-                                    } else {
-                                        self.state.remove("_");
-                                    }
-                                    if cond == Value::Bool(true) {
-                                        dest.insert(key, val);
-                                    } else {
-                                        src.insert(key, val);
-                                    }
-                                }
-                            }
-                        } else {
-                            dest.extend(src.drain());
-                        }
-                    }
-                    _ => {
-                        return Err(RuntimeError::TypeMismatch(
-                            "ArrowTransfer requires matching collection types".to_string()
-                        ));
-                    }
-                }
-                self.store_arrow_value(&dest_root, &dest_path, dest_val);
-                self.store_arrow_value(&source_root, &source_path, src_val);
-                Ok(Value::Void)
-            }
-            Expr::SigCall { modifier, expr } => {
-                let inner = self.eval_expr(expr)?;
-                match modifier {
-                    crate::ast::SigModifier::Out => {
-                        // sig #out: treat as observable — pass through value
-                        Ok(inner)
-                    }
-                    crate::ast::SigModifier::Inline => {
-                        // sig #inline: treat as pure — pass through value
-                        Ok(inner)
-                    }
-                }
-            }
-            Expr::Ellipsis => {
-                Err(RuntimeError::TypeMismatch(
-                    "Ellipsis (...) must be resolved at parse time in bracket context".to_string(),
-                ))
-            }
-            Expr::Call(name, args) => {
-                let fn_name = name.clone();
-
-                // Evaluate arguments — used by clone, to_json, from_json, len, etc.
-                let mut arg_values = Vec::new();
-                for arg in args.iter() {
-                    arg_values.push(self.eval_expr(arg)?);
-                }
-
-                // Check built-in Result methods BEFORE user definitions, so that
-                // Result::Ok → unwrap doesn't get intercepted by Option::unwrap.
-                if self.definitions.contains_key(&fn_name) {
-                    return self.call_defn(&fn_name, args);
-                }
-
-                // Check callable transactions (non-reactive txns with convergence loops)
-                if self.callable_txns.contains_key(&fn_name) {
-                    return self.call_txn(&fn_name, args);
-                }
-
-                // Check dynamically linked FFI (frgn declarations with from "lib.so")
-                if self.frgn_registry.declarations.contains_key(&fn_name) {
-                    return self.frgn_registry.call(&fn_name, &arg_values);
-                }
-
-                // Check for Value::Defn from state (registered defn aliases)
-                let defn_call = self.state.get(&fn_name).and_then(|v| {
-                    if let Value::Defn(n) = v {
-                        Some(n.clone())
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some(defn_name) = defn_call {
-                    return self.call_defn(&defn_name, args);
-                }
-
-                // 4a. Check if fn_name is an enum variant constructor (registered during load_program)
-                let enum_construction = self.enum_variants.get(&fn_name).cloned();
-                if let Some(variant_info) = enum_construction {
-                    let mut fields = std::collections::HashMap::new();
-                    for (i, arg) in args.iter().enumerate() {
-                        let val = self.eval_expr(arg)?;
-                        if i < variant_info.field_names.len() {
-                            fields.insert(variant_info.field_names[i].clone(), val);
-                        }
-                    }
-                    return Ok(Value::Enum(
-                        variant_info.enum_name,
-                        variant_info.variant_name,
-                        fields,
-                    ));
-                }
-
-                // 5. Delegate to FFI registry: check if this name has a registered location.
-                if let Some(location) = self.ffi_name_to_location.get(&fn_name) {
-                    if let Some(frgn_fn) = self.foreign_functions.get(location) {
-                        if let Some(sig) = self.ffi_bindings.get(&fn_name) {
-                            // Only use orchestrator if layouts are defined (v2)
-                            if sig.input_layout.is_some() || sig.output_layout.is_some() {
-                                let binding = ForeignBinding::from_signature(sig);
-                                return self.orchestrator.call(&binding, arg_values, *frgn_fn);
-                            }
-                        }
-                        let result = frgn_fn(arg_values)?;
-                        return self.handle_ffi_result(&fn_name, result);
-                    }
-                }
-
-                Err(RuntimeError::UndefinedForeignFunction(fn_name))
-            }
-            Expr::ListLiteral(elements) => {
-                let mut values = Vec::new();
-                for elem in elements {
-                    values.push(self.eval_expr(elem)?);
-                }
-                Ok(Value::List(values))
-            }
-            Expr::MapLiteral(entries) => {
-                let mut map = std::collections::HashMap::new();
-                for (key_expr, val_expr) in entries {
-                    let key_val = self.eval_expr(&key_expr)?;
-                    let key = self.value_to_string(&key_val)?;
-                    let val = self.eval_expr(&val_expr)?;
-                    map.insert(key, val);
-                }
-                Ok(Value::HashMap(map))
-            }
-            Expr::SetLiteral(entries) => {
-                let mut set = std::collections::HashSet::new();
-                for elem in entries {
-                    let val = self.eval_expr(&elem)?;
-                    let s = self.value_to_string(&val)?;
-                    set.insert(s);
-                }
-                Ok(Value::HashSet(set))
-            }
-            Expr::ListIndex(list_expr, index_expr) => {
-                let list_val = self.eval_expr(list_expr)?;
-                let index_val = self.eval_expr(index_expr)?;
-                match (list_val, index_val) {
-                    (Value::List(items), Value::Int(idx)) => {
-                        if idx < 0 || idx as usize >= items.len() {
-                            Err(RuntimeError::TypeMismatch(
-                                "Index out of bounds".to_string(),
-                            ))
-                        } else {
-                            Ok(items[idx as usize].clone())
-                        }
-                    }
-                    (Value::DbvlTable(table), Value::String(key)) => {
-                        let results = self.resolve_dbvl_key(&table, &key)?;
-                        if results.len() == 1 {
-                            Ok(results.into_iter().next().unwrap())
-                        } else if results.is_empty() {
-                            Err(RuntimeError::TypeMismatch(
-                                format!("Key '{}' not found in DBVL table", key),
-                            ))
-                        } else {
-                            // Multiple matching lines → return as List
-                            Ok(Value::List(results))
-                        }
-                    }
-                    _ => Err(RuntimeError::TypeMismatch(
-                        "List indexing requires List and Int".to_string(),
-                    )),
-                }
-            }
-                        Expr::Projection { source, target } => {
-                let source_val = self.eval_expr(source)?;
-                match target {
-                    ProjectionTarget::Size => match source_val {
-                        Value::List(items) => Ok(Value::Int(items.len() as i64)),
-                        Value::Tuple(items) => Ok(Value::Int(items.len() as i64)),
-                        Value::String(s) => Ok(Value::Int(s.len() as i64)),
-                        Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
-                        Value::HashSet(s) => Ok(Value::Int(s.len() as i64)),
-                        Value::Stack(v) => Ok(Value::Int(v.len() as i64)),
-                        Value::Queue(q) => Ok(Value::Int(q.len() as i64)),
-                        Value::StringBuilder(sb) => Ok(Value::Int(sb.len() as i64)),
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "Size projection requires List, String, or collection type".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::Bytes => {
-                        let size = match &source_val {
-                            Value::Int(_) => 8,
-                            Value::Float(_) => 8,
-                            Value::Bool(_) => 1,
-                            Value::Char(_) => 4,
-                            Value::String(s) => s.len() as i64,
-                            Value::List(items) => items.len() as i64 * 8,
-                            Value::Instance { fields, .. } => fields.len() as i64 * 8,
-                            _ => 0,
-                        };
-                        Ok(Value::Int(size))
-                    }
-                    ProjectionTarget::Ptr => {
-                        // In the interpreter, pointer addresses are simulated
-                        Ok(Value::Int(0))
-                    }
-                    ProjectionTarget::Alignment => {
-                        // Default alignment is 8 bytes
-                        Ok(Value::Int(8))
-                    }
-                    ProjectionTarget::Range => {
-                        // Range projection requires compile-time analysis;
-                        // in the interpreter, return full i64 range
-                        Ok(Value::List(vec![
-                            Value::Int(i64::MIN),
-                            Value::Int(i64::MAX),
-                        ]))
-                    }
-                    ProjectionTarget::Popcount => {
-                        match source_val {
-                            Value::Int(n) => Ok(Value::Int(n.count_ones() as i64)),
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "Popcount projection requires Int".to_string(),
-                            )),
-                        }
-                    }
-                    ProjectionTarget::LeadingZeros => {
-                        match source_val {
-                            Value::Int(n) => Ok(Value::Int(n.leading_zeros() as i64)),
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "LeadingZeros projection requires Int".to_string(),
-                            )),
-                        }
-                    }
-                    ProjectionTarget::TrailingZeros => {
-                        match source_val {
-                            Value::Int(n) => Ok(Value::Int(n.trailing_zeros() as i64)),
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "TrailingZeros projection requires Int".to_string(),
-                            )),
-                        }
-                    }
-                    ProjectionTarget::Absolute => {
-                        match source_val {
-                            Value::Int(n) => Ok(Value::Int(n.abs())),
-                            Value::Float(f) => Ok(Value::Float(f.abs())),
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "Absolute projection requires Int or Float".to_string(),
-                            )),
-                        }
-                    }
-                    ProjectionTarget::BitReverse => {
-                        match source_val {
-                            Value::Int(n) => Ok(Value::Int(n.reverse_bits())),
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "BitReverse projection requires Int".to_string(),
-                            )),
-                        }
-                    }
-                    ProjectionTarget::Type => {
-                        // Return type discriminant as Int
-                        let discriminant = match &source_val {
-                            Value::Int(_) => 1i64,
-                            Value::Float(_) => 2,
-                            Value::Bool(_) => 3,
-                            Value::Char(_) => 4,
-                            Value::String(_) => 5,
-                            Value::List(_) => 6,
-                            Value::Tuple(_) => 7,
-                            Value::Data(_) => 8,
-                            Value::HashMap(_) => 9,
-                            Value::HashSet(_) => 10,
-                            Value::StringBuilder(_) => 11,
-                            Value::Stack(_) => 12,
-                            Value::Queue(_) => 13,
-                            Value::Instance { .. } => 14,
-                            Value::Enum { .. } => 15,
-                            Value::Defn(_) => 16,
-                            Value::DbvlTable(_) => 17,
-                            Value::Void => 0,
-                        };
-                        Ok(Value::Int(discriminant))
-                    }
-                    ProjectionTarget::PtrBang => {
-                        // Raw pointer — same as Ptr, returns simulated address
-                        Ok(Value::Int(0))
-                    }
-                    ProjectionTarget::Keys => match &source_val {
-                        Value::HashMap(m) => {
-                            let mut keys: Vec<Value> = m.keys().cloned().map(Value::String).collect();
-                            keys.sort_by(|a, b| {
-                                if let (Value::String(a), Value::String(b)) = (a, b) {
-                                    a.cmp(b)
-                                } else {
-                                    std::cmp::Ordering::Equal
-                                }
-                            });
-                            Ok(Value::List(keys))
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "Keys projection requires HashMap".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::Values => match &source_val {
-                        Value::HashMap(m) => {
-                            let vals: Vec<Value> = m.values().cloned().collect();
-                            Ok(Value::List(vals))
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "Values projection requires HashMap".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::Contains(key_expr) => {
-                        let key = self.eval_expr(key_expr)?;
-                        match &source_val {
-                            Value::HashMap(m) => {
-                                let key_str = self.value_to_string(&key)?;
-                                Ok(Value::Bool(m.contains_key(&key_str)))
-                            }
-                            Value::HashSet(s) => {
-                                let elem = self.value_to_string(&key)?;
-                                Ok(Value::Bool(s.contains(&elem)))
-                            }
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "Contains projection requires HashMap or HashSet".to_string(),
-                            )),
-                        }
-                    }
-                    ProjectionTarget::Pop => match source_val {
-                        Value::HashSet(mut s) => {
-                            let elem = s.iter().next().cloned()
-                                .ok_or_else(|| RuntimeError::TypeMismatch(
-                                    "Pop projection requires non-empty HashSet".to_string(),
-                                ))?;
-                            s.remove(&elem);
-                            // Pop projection is a query + mutation — store back
-                            // We need root name. For projection, we don't have it here.
-                            // Pop as projection is a design issue — use arrow syntax instead.
-                            Err(RuntimeError::TypeMismatch(
-                                "Pop projection not yet supported — use '<- &set' instead".to_string(),
-                            ))
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "Pop projection requires HashSet".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::Index(n) => match &source_val {
-                        Value::Tuple(items) => {
-                            if *n < items.len() {
-                                Ok(items[*n].clone())
-                            } else {
-                                Err(RuntimeError::TypeMismatch(
-                                    format!("Index {} out of bounds for tuple of length {}", n, items.len()),
-                                ))
-                            }
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "Index projection requires Tuple".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::Get(key_expr) => {
-                        let key = self.eval_expr(key_expr)?;
-                        let key_str = self.value_to_string(&key)?;
-                        match &source_val {
-                            Value::HashMap(m) => {
-                                match m.get(&key_str) {
-                                    Some(val) => {
-                                        let mut fields = std::collections::HashMap::new();
-                                        fields.insert("field_0".to_string(), val.clone());
-                                        Ok(Value::Enum("Option".to_string(), "Some".to_string(), fields))
-                                    }
-                                    None => Ok(Value::Enum("Option".to_string(), "None".to_string(),
-                                        std::collections::HashMap::new())),
-                                }
-                            }
-                            _ => Err(RuntimeError::TypeMismatch(
-                                "Get projection requires HashMap".to_string(),
-                            )),
-                        }
-                    }
-                    ProjectionTarget::Top => match &source_val {
-                        Value::Stack(s) => {
-                            match s.last() {
-                                Some(val) => {
-                                    let mut fields = std::collections::HashMap::new();
-                                    fields.insert("field_0".to_string(), val.clone());
-                                    Ok(Value::Enum("Option".to_string(), "Some".to_string(), fields))
-                                }
-                                None => Ok(Value::Enum("Option".to_string(), "None".to_string(),
-                                    std::collections::HashMap::new())),
-                            }
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "Top projection requires Stack".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::Front => match &source_val {
-                        Value::Queue(q) => {
-                            match q.front() {
-                                Some(val) => {
-                                    let mut fields = std::collections::HashMap::new();
-                                    fields.insert("field_0".to_string(), val.clone());
-                                    Ok(Value::Enum("Option".to_string(), "Some".to_string(), fields))
-                                }
-                                None => Ok(Value::Enum("Option".to_string(), "None".to_string(),
-                                    std::collections::HashMap::new())),
-                            }
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "Front projection requires Queue".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::Elements => match &source_val {
-                        Value::HashSet(s) => {
-                            let mut elems: Vec<Value> = s.iter().cloned().map(Value::String).collect();
-                            elems.sort_by(|a, b| {
-                                if let (Value::String(a), Value::String(b)) = (a, b) {
-                                    a.cmp(b)
-                                } else {
-                                    std::cmp::Ordering::Equal
-                                }
-                            });
-                            Ok(Value::List(elems))
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "Elements projection requires HashSet".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::AsStack => match &source_val {
-                        Value::List(items) => {
-                            Ok(Value::Stack(items.clone()))
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "AsStack projection requires List".to_string(),
-                        )),
-                    },
-                    ProjectionTarget::AsQueue => match &source_val {
-                        Value::List(items) => {
-                            Ok(Value::Queue(std::collections::VecDeque::from(items.clone())))
-                        }
-                        _ => Err(RuntimeError::TypeMismatch(
-                            "AsQueue projection requires List".to_string(),
-                        )),
-                    },
-                }
-            }
-            Expr::FieldAccess(obj_expr, field_name) => {
-                let obj_val = self.eval_expr(obj_expr)?;
-                match obj_val {
-                    Value::Instance {
-                        typename: _,
-                        fields,
-                    } => fields.get(field_name).cloned().ok_or_else(|| {
-                        RuntimeError::UndefinedVariable(format!("field '{}'", field_name))
-                    }),
-                    _ => Err(RuntimeError::TypeMismatch(
-                        "field access requires Instance".to_string(),
-                    )),
-                }
-            }
-            Expr::StructInstance(typename, fields) => {
-                let mut instance_fields = HashMap::new();
-                for (field_name, field_expr) in fields {
-                    instance_fields.insert(field_name.clone(), self.eval_expr(field_expr)?);
-                }
-                Ok(Value::Instance {
-                    typename: typename.clone(),
-                    fields: instance_fields,
-                })
-            }
-            Expr::ObjectLiteral(fields) => {
-                let mut instance_fields = HashMap::new();
-                for (field_name, field_expr) in fields {
-                    instance_fields.insert(field_name.clone(), self.eval_expr(field_expr)?);
-                }
-                Ok(Value::Instance {
-                    typename: String::from("ObjectLiteral"),
-                    fields: instance_fields,
-                })
-            }
-            Expr::PatternMatch {
-                value,
-                variant,
-                fields,
-            } => {
-                let matched_value = self.eval_expr(value)?;
-                match matched_value {
-                    Value::Enum(_, matched_variant, enum_fields) => {
-                        if matched_variant == *variant {
-                            let mut keys: Vec<&String> = enum_fields.keys().collect();
-                            keys.sort();
-                            let vals: Vec<&Value> = keys.iter()
-                                .filter_map(|k| enum_fields.get(*k)).collect();
-                            let all_matched = fields.iter().zip(vals.iter()).all(|(pat, val)| {
-                                Self::pattern_match(pat, val, &mut self.state)
-                            });
-                            Ok(Value::Bool(all_matched))
-                        } else {
-                            Ok(Value::Bool(false))
-                        }
-                    }
-                    _ => Ok(Value::Bool(false)),
-                }
-            }
+            // Legacy binary op variants — delegate through feature struct
+            Expr::Add(l, r) => BinaryOpExpr::new(BinaryOpKind::Add, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Sub(l, r) => BinaryOpExpr::new(BinaryOpKind::Sub, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Mul(l, r) => BinaryOpExpr::new(BinaryOpKind::Mul, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Div(l, r) => BinaryOpExpr::new(BinaryOpKind::Div, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Mod(l, r) => BinaryOpExpr::new(BinaryOpKind::Mod, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Eq(l, r) => BinaryOpExpr::new(BinaryOpKind::Eq, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Ne(l, r) => BinaryOpExpr::new(BinaryOpKind::Ne, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Lt(l, r) => BinaryOpExpr::new(BinaryOpKind::Lt, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Le(l, r) => BinaryOpExpr::new(BinaryOpKind::Le, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Gt(l, r) => BinaryOpExpr::new(BinaryOpKind::Gt, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Ge(l, r) => BinaryOpExpr::new(BinaryOpKind::Ge, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Or(l, r) => BinaryOpExpr::new(BinaryOpKind::Or, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::And(l, r) => BinaryOpExpr::new(BinaryOpKind::And, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::BitAnd(l, r) => BinaryOpExpr::new(BinaryOpKind::BitAnd, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::BitOr(l, r) => BinaryOpExpr::new(BinaryOpKind::BitOr, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::BitXor(l, r) => BinaryOpExpr::new(BinaryOpKind::BitXor, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Shl(l, r) => BinaryOpExpr::new(BinaryOpKind::Shl, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::Shr(l, r) => BinaryOpExpr::new(BinaryOpKind::Shr, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            // Legacy unary op variants — delegate through feature struct
+            Expr::Not(inner) => UnaryOpExpr::new(UnaryOpKind::Not, *inner.clone()).evaluate(self, &ExprDispatch),
+            Expr::Neg(inner) => UnaryOpExpr::new(UnaryOpKind::Neg, *inner.clone()).evaluate(self, &ExprDispatch),
+            Expr::BitNot(inner) => UnaryOpExpr::new(UnaryOpKind::BitNot, *inner.clone()).evaluate(self, &ExprDispatch),
+            // Legacy Arrow variants — delegate through feature structs
+            Expr::ArrowMut { dir, target, index, value } => ArrowMutExpr {
+                dir: dir.clone(), target: target.clone(), index: index.clone(), value: value.clone(),
+            }.evaluate(self, &ExprDispatch),
+            Expr::ArrowDiscard { target, index } => ArrowDiscardExpr {
+                target: target.clone(), index: index.clone(),
+            }.evaluate(self, &ExprDispatch),
+            Expr::ArrowTransfer { dest, source, filter } => ArrowTransferExpr {
+                dest: dest.clone(), source: source.clone(), filter: filter.clone(),
+            }.evaluate(self, &ExprDispatch),
+            Expr::SigCall { modifier, expr } => SigCallExpr { modifier: *modifier, expr: expr.clone() }.evaluate(self, &ExprDispatch),
+            Expr::Ellipsis => EllipsisExpr.evaluate(self, &ExprDispatch),
+            Expr::Call(name, args) =>
+                crate::features::call::CallExpr::new(name.clone(), args.clone()).evaluate(self, &ExprDispatch),
+            // Legacy collection variants — delegate through feature structs
+            Expr::ListLiteral(elements) =>
+                ListLiteralExpr { elements: elements.clone() }.evaluate(self, &ExprDispatch),
+            Expr::MapLiteral(entries) =>
+                MapLiteralExpr { entries: entries.clone() }.evaluate(self, &ExprDispatch),
+            Expr::SetLiteral(entries) =>
+                SetLiteralExpr { entries: entries.clone() }.evaluate(self, &ExprDispatch),
+            Expr::ListIndex(list_expr, index_expr) =>
+                ListIndexExpr { list: list_expr.clone(), index: index_expr.clone() }.evaluate(self, &ExprDispatch),
+            Expr::Projection { source, target } =>
+                ProjectionExpr::new(*source.clone(), target.clone()).evaluate(self, &ExprDispatch),
+            Expr::FieldAccess(obj_expr, field_name) =>
+                FieldAccessExpr { obj: obj_expr.clone(), field: field_name.clone() }.evaluate(self, &ExprDispatch),
+            Expr::StructInstance(typename, fields) =>
+                StructInstanceExpr { typename: typename.clone(), fields: fields.clone() }.evaluate(self, &ExprDispatch),
+            Expr::ObjectLiteral(fields) =>
+                ObjectLiteralExpr { fields: fields.clone() }.evaluate(self, &ExprDispatch),
+            Expr::PatternMatch { value, variant, fields } =>
+                PatternMatchExpr { value: value.clone(), variant: variant.clone(), fields: fields.clone() }.evaluate(self, &ExprDispatch),
             Expr::Concat(l, r) => {
                 let left = self.eval_expr(l)?;
                 let right = self.eval_expr(r)?;
                 match (left, right) {
-                    (Value::List(mut a), Value::List(b)) => {
-                        a.extend(b);
-                        Ok(Value::List(a))
-                    }
-                    _ => Err(RuntimeError::TypeMismatch("list concat".to_string())),
+                    (Value::List(mut a), Value::List(b)) => { a.extend(b); Ok(Value::List(a)) }
+                    _ => Err(RuntimeError::TypeMismatch("list concat".into())),
                 }
             }
-            Expr::Slice { value, start, end, stride, mask } => {
-                let list_val = self.eval_expr(value)?;
-                // String slicing
-                if let Value::String(ref s) = list_val {
-                    let len = s.len();
-                    let start_idx = match start {
-                        Some(s_expr) => match self.eval_expr(s_expr)? {
-                            Value::Int(n) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize },
-                            _ => return Err(RuntimeError::TypeMismatch("Slice start must be integer".to_string())),
-                        },
-                        None => 0,
-                    };
-                    let end_idx = match end {
-                        Some(e_expr) => match self.eval_expr(e_expr)? {
-                            Value::Int(n) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize },
-                            _ => return Err(RuntimeError::TypeMismatch("Slice end must be integer".to_string())),
-                        },
-                        None => len,
-                    };
-                    let lo = start_idx.min(len);
-                    let hi = end_idx.min(len);
-                    return Ok(Value::String(if lo < hi { s[lo..hi].to_string() } else { String::new() }));
-                }
-                let list = match list_val {
-                    Value::List(vec) => vec,
-                    _ => return Err(RuntimeError::TypeMismatch("Cannot slice non-list".to_string())),
-                };
-                
-                let len = list.len();
-                
-                let start_idx = match start {
-                    Some(s) => {
-let s_val = self.eval_expr(s)?;
-                        match s_val {
-                            Value::Int(n) => {
-                                if n < 0 { (len as i64 + n) as usize } else { n as usize }
-                            }
-                            _ => return Err(RuntimeError::TypeMismatch("Slice start must be integer".to_string())),
-                        }
-                    }
-                    None => 0,
-                };
-                
-                let end_idx = match end {
-                    Some(e) => {
-                        let e_val = self.eval_expr(e)?;
-                        match e_val {
-                            Value::Int(n) => {
-                                if n < 0 { (len as i64 + n) as usize } else { n as usize }
-                            }
-                            _ => return Err(RuntimeError::TypeMismatch("Slice end must be integer".to_string())),
-                        }
-                    }
-                    None => len,
-                };
-                
-                let stride_val = stride.as_ref().map(|s| {
-                    let s_val = self.eval_expr(s)?;
-                    match s_val {
-                        Value::Int(n) => Ok(n as usize),
-                        _ => Err(RuntimeError::TypeMismatch("Stride must be integer".to_string())),
-                    }
-                }).transpose()?;
-                
-                let stride = stride_val.unwrap_or(1);
-                
-                let mut result = Vec::new();
-                let mut idx = start_idx;
-                
-                while idx < end_idx && idx < len {
-                    result.push(list[idx].clone());
-                    if stride == 0 {
-                        break;
-                    }
-                    idx += stride;
-                }
-
-                // Apply mask filter if present
-                if let Some(mask_expr) = mask {
-                    let mut filtered = Vec::new();
-                    for item in result {
-                        let prev = self.state.insert("_".to_string(), item.clone());
-                        let cond = self.eval_expr(mask_expr)?;
-                        if prev.is_some() {
-                            self.state.insert("_".to_string(), prev.unwrap());
-                        } else {
-                            self.state.remove("_");
-                        }
-                        if cond == Value::Bool(true) {
-                            filtered.push(item);
-                        }
-                    }
-                    result = filtered;
-                }
-                
-                Ok(Value::List(result))
-            }
-            Expr::Block(stmts, last) => {
-                let old_state = self.state.clone();
-                for stmt in stmts {
-                    self.exec_stmt(stmt)?;
-                }
-                let result = self.eval_expr(last)?;
-                self.state = old_state;
-                Ok(result)
-            }
-            Expr::Tuple(exprs) => {
-                let mut values = Vec::new();
-                for e in exprs {
-                    values.push(self.eval_expr(e)?);
-                }
-                Ok(Value::Tuple(values))
-            }
-            Expr::TupleDestructure(names, expr) => {
-                let value = self.eval_expr(expr)?;
-                match value {
-                    Value::Tuple(items) | Value::List(items) => {
-                        for (i, name) in names.iter().enumerate() {
-                            if i < items.len() {
-                                self.state.insert(name.clone(), items[i].clone());
-                            }
-                        }
-                        Ok(Value::Void)
-                    }
-                    _ => Err(RuntimeError::TypeMismatch(
-                        "Tuple destructure requires a list value".to_string(),
-                    )),
-                }
-            }
-            Expr::MultiSlice { value, ops } => {
-                let base = self.eval_expr(value)?;
-
-                // Step 1: collect and apply all Coord ops together (multi-dimensional)
-                let coords: Vec<SliceCoordinate> = ops.iter().filter_map(|op| {
-                    if let BracketOp::Coord(c) = op { Some(c.clone()) } else { None }
-                }).collect();
-
-                let mut current = if coords.is_empty() {
-                    base
-                } else {
-                    let has_ellipsis = coords.iter().any(|c| matches!(c, SliceCoordinate::Ellipsis));
-                    if has_ellipsis {
-                        let dims = Self::list_nesting_depth(&base);
-                        let expanded = Self::expand_coordinates(&coords, dims)?;
-                        self.apply_multi_slice_coords(&base, &expanded)?
-                    } else {
-                        self.apply_multi_slice_coords(&base, &coords)?
-                    }
-                };
-
-                // Step 2: apply Mask and Stride ops sequentially
-                for op in ops {
-                    match op {
-                        BracketOp::Coord(_) => {}
-                        BracketOp::Stride(stride_expr) => {
-                            let list = match current {
-                                Value::List(ref items) => items.clone(),
-                                _ => return Err(RuntimeError::TypeMismatch(
-                                    "Stride requires a list value".to_string(),
-                                )),
-                            };
-                            let s_val = self.eval_expr(stride_expr)?;
-                            let s = match s_val {
-                                Value::Int(n) if n > 0 => n as usize,
-                                Value::Int(_) => {
-                                    return Err(RuntimeError::TypeMismatch(
-                                        "Stride must be positive".to_string(),
-                                    ));
-                                }
-                                _ => {
-                                    return Err(RuntimeError::TypeMismatch(
-                                        "Stride must be an integer".to_string(),
-                                    ));
-                                }
-                            };
-                            current = Value::List(list.into_iter().step_by(s).collect());
-                        }
-                        BracketOp::Mask(mask_expr) => {
-                            let list = match current {
-                                Value::List(ref items) => items.clone(),
-                                _ => return Err(RuntimeError::TypeMismatch(
-                                    "Mask requires a list value".to_string(),
-                                )),
-                            };
-                            let mut filtered = Vec::new();
-                            for item in list {
-                                let prev = self.state.insert("_".to_string(), item.clone());
-                                let cond = self.eval_expr(mask_expr)?;
-                                if prev.is_some() {
-                                    self.state.insert("_".to_string(), prev.unwrap());
-                                } else {
-                                    self.state.remove("_");
-                                }
-                                if cond == Value::Bool(true) {
-                                    filtered.push(item);
-                                }
-                            }
-                            current = Value::List(filtered);
-                        }
-                    }
-                }
-
-                Ok(current)
-            }
+            Expr::Slice { value, start, end, stride, mask } =>
+                SliceExpr { value: value.clone(), start: start.clone(), end: end.clone(), stride: stride.clone(), mask: mask.clone() }.evaluate(self, &ExprDispatch),
+            Expr::Block(stmts, last) =>
+                BlockExpr { stmts: stmts.clone(), last: last.clone() }.evaluate(self, &ExprDispatch),
+            Expr::Tuple(exprs) =>
+                TupleExpr { exprs: exprs.clone() }.evaluate(self, &ExprDispatch),
+            Expr::TupleDestructure(names, expr) =>
+                TupleDestructureExpr { names: names.clone(), expr: expr.clone() }.evaluate(self, &ExprDispatch),
+            Expr::MultiSlice { value, ops } =>
+                MultiSliceExpr { value: value.clone(), ops: ops.clone() }.evaluate(self, &ExprDispatch),
             Expr::Cast(inner, _) => self.eval_expr(inner),
-            Expr::SubtypeProjection { source, ops } => {
-                let source_val = self.eval_expr(source)?;
-                self.eval_subtype_projection(source_val, ops)
-            }
-            Expr::DbvlTable { path, field_names, key_offsets, schema_name } => {
-                Ok(Value::DbvlTable(Arc::new(DbvlTableInner {
-                    path: path.clone(),
-                    key_offsets: key_offsets.clone(),
-                    field_names: field_names.clone(),
-                    schema_name: schema_name.clone(),
-                    schema_key_index: Some(0),
-                })))
-            }
+            Expr::SubtypeProjection { source, ops } =>
+                SubtypeProjectionExpr { source: source.clone(), ops: ops.clone() }.evaluate(self, &ExprDispatch),
+            Expr::DbvlTable { path, field_names, key_offsets, schema_name } =>
+                DbvlTableExpr { path: path.clone(), field_names: field_names.clone(), key_offsets: key_offsets.clone(), schema_name: schema_name.clone() }.evaluate(self, &ExprDispatch),
             Expr::Match { value, arms } => {
-                let target = self.eval_expr(value)?;
-                for arm in arms {
-                    let matched = match &arm.pattern {
-                        MatchPattern::Wildcard => true,
-                        MatchPattern::Variant { name, fields } => {
-                            match &target {
-                                Value::Enum(_, variant, enum_fields) if variant == name => {
-                                    let mut keys: Vec<&String> = enum_fields.keys().collect();
-                                    keys.sort();
-                                    let vals: Vec<&Value> = keys.iter()
-                                        .filter_map(|k| enum_fields.get(*k)).collect();
-                                    fields.iter().zip(vals.iter()).all(|(pat, val)| {
-                                        Self::pattern_match(pat, val, &mut self.state)
-                                    })
-                                }
-                                _ => false,
-                            }
-                        }
-                    };
-                    if matched {
-                        if let Some(guard) = &arm.guard {
-                            let guard_val = self.eval_expr(guard)?;
-                            if guard_val != Value::Bool(true) {
-                                continue;
-                            }
-                        }
-                        return self.eval_expr(&arm.body);
-                    }
-                }
-Err(RuntimeError::TypeMismatch(
-                    "Non-exhaustive match: no arm matched".to_string(),
-                ))
+                let match_arms: Vec<crate::features::pattern::MatchArm> = arms.iter().map(|a| crate::features::pattern::MatchArm {
+                    pattern: a.pattern.clone(),
+                    guard: a.guard.clone(),
+                    body: a.body.clone(),
+                }).collect();
+                MatchExpr { value: value.clone(), arms: match_arms }.evaluate(self, &ExprDispatch)
             }
             // ── Pattern B routing ────────────────────────────────
             Expr::BinaryOp(bop) => bop.evaluate(self, &ExprDispatch),
@@ -2537,7 +1433,7 @@ Err(RuntimeError::TypeMismatch(
     }
 
     /// Evaluate a `<:` subtype projection: applies a sequence of ops to a source value.
-    fn eval_subtype_projection(&mut self, mut source: Value, ops: &[crate::ast::SubtypeOp]) -> Result<Value, RuntimeError> {
+    pub(crate) fn eval_subtype_projection(&mut self, mut source: Value, ops: &[crate::ast::SubtypeOp]) -> Result<Value, RuntimeError> {
         // Check for string match projection
         if let Value::String(ref s) = source {
             for op in ops {
@@ -2802,7 +1698,7 @@ Err(RuntimeError::TypeMismatch(
 
     /// Resolve a key in a lazy-loaded DbvlTable.
     /// Checks cache first, then seeks + parses the line from the file.
-    fn resolve_dbvl_key(&mut self, table: &DbvlTableInner, key: &str) -> Result<Vec<Value>, RuntimeError> {
+    pub(crate) fn resolve_dbvl_key(&mut self, table: &DbvlTableInner, key: &str) -> Result<Vec<Value>, RuntimeError> {
         // Check cache
         if let Some(entry_cache) = self.dbvl_cache.get(&table.path) {
             if let Some(values) = entry_cache.get(key) {
@@ -5548,7 +4444,7 @@ mod tests {
 #[cfg(all(kani, feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
-    use crate::features::literal::LiteralExpr;
+
 
     #[kani::proof]
     fn verify_eval_expr_literal_integer() {
