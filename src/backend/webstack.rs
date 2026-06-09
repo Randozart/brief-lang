@@ -21,6 +21,7 @@
 // or embeds the Work.
 
 use crate::ast::{BitRange, BracketOp, Contract, Expr, ForeignTarget, Program, Statement, TopLevel, Transaction, Type};
+use crate::features::traits::{ExprCodegenWebstack, ExprDispatch};
 use crate::view_compiler::{Binding, Directive};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1762,6 +1763,7 @@ impl WebstackGenerator {
                     arr
                 }
             }
+            Expr::Literal(lit) => lit.emit_js(self, &ExprDispatch),
             _ => "JsValue::TRUE".to_string(),
         }
     }
@@ -2226,5 +2228,67 @@ use crate::ast::*;
         let output = backend.generate(&program, &bindings, "rust_mod");
         assert!(!output.rust_code.is_empty(), "Should generate Rust code");
         assert!(output.rust_code.contains("State"), "Should generate State struct");
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_webstack_expr_literal_integer() {
+        let backend = WebstackGenerator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = backend.expr_to_js_value(&expr);
+        assert_eq!(result, "JsValue::from(42)");
+    }
+
+    #[kani::proof]
+    fn verify_webstack_expr_literal_bool() {
+        let backend = WebstackGenerator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let result = backend.expr_to_js_value(&expr);
+        assert_eq!(result, "JsValue::TRUE");
+    }
+
+    #[kani::proof]
+    fn verify_webstack_expr_literal_bool_false() {
+        let backend = WebstackGenerator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(false)));
+        let result = backend.expr_to_js_value(&expr);
+        assert_eq!(result, "JsValue::FALSE");
+    }
+
+    #[kani::proof]
+    fn verify_webstack_expr_literal_float() {
+        let backend = WebstackGenerator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
+        let result = backend.expr_to_js_value(&expr);
+        assert_eq!(result, "JsValue::from(3.14)");
+    }
+
+    #[kani::proof]
+    fn verify_webstack_expr_literal_string() {
+        let backend = WebstackGenerator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("test".to_string())));
+        let result = backend.expr_to_js_value(&expr);
+        assert_eq!(result, "JsValue::from(\"test\")");
+    }
+
+    #[kani::proof]
+    fn verify_webstack_expr_literal_char() {
+        let backend = WebstackGenerator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
+        let result = backend.expr_to_js_value(&expr);
+        assert!(result.contains("A"));
+    }
+
+    #[kani::proof]
+    fn verify_webstack_expr_literal_term() {
+        let backend = WebstackGenerator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
+        let result = backend.expr_to_js_value(&expr);
+        assert_eq!(result, "JsValue::undefined");
     }
 }

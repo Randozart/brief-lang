@@ -22,6 +22,7 @@
 
 use crate::ast::*;
 use crate::errors::{Span, SyntaxError};
+use crate::features::literal::LiteralExpr;
 use crate::lexer::Token;
 use logos::{Lexer, Logos};
 use std::path::Path;
@@ -3500,7 +3501,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             self.expect(Token::LBracket)?;
             let cond = self.parse_expression()?;
             self.expect(Token::RBracket)?;
-            if matches!(cond, Expr::Bool(true)) {
+            if cond.as_bool() == Some(true) {
                 return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
             }
             watchdog = Some(WatchdogSpec {
@@ -3511,7 +3512,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
         // [true][true] is always an error when the user wrote brackets — defeats contract-first
         // Bracketless (count == 0) is deliberate omission, not a contract claim.
-        if count > 0 && matches!(&pre_condition, Expr::Bool(true)) && matches!(&post_condition, Expr::Bool(true)) {
+        if count > 0 && pre_condition.as_bool() == Some(true) && post_condition.as_bool() == Some(true) {
             return self.spanned_err(
                 "both precondition and postcondition are [true] — at least one side must specify meaningful constraints".to_string()
             );
@@ -3545,7 +3546,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
                 let cond = self.parse_expression()?;
 
-                if matches!(cond, Expr::Bool(true)) {
+                if cond.as_bool() == Some(true) {
                     return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
                 }
 
@@ -3562,7 +3563,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         }
 
         // [true][n >= 0] is always an error — defeats contract-first programming
-        if matches!(&pre_condition, Expr::Bool(true)) && matches!(&post_condition, Expr::Bool(true)) {
+        if pre_condition.as_bool() == Some(true) && post_condition.as_bool() == Some(true) {
             return self.spanned_err(
                 "both precondition and postcondition are [true] — at least one side must specify meaningful constraints".to_string()
             );
@@ -3575,12 +3576,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     "Strict mode requires both [precondition] and [postcondition]".to_string()
                 );
             }
-            if matches!(&pre_condition, Expr::Bool(true)) {
+            if pre_condition.as_bool() == Some(true) {
                 return self.spanned_err(
                     "Strict mode: precondition [true] is not allowed - specify actual state requirements".to_string()
                 );
             }
-            if matches!(&post_condition, Expr::Bool(true)) {
+            if post_condition.as_bool() == Some(true) {
                 return self.spanned_err(
                     "Strict mode: postcondition [true] is not allowed - specify actual state guarantees".to_string()
                 );
@@ -3823,9 +3824,9 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     if let Some(Ok(Token::At)) = self.current_token() {
                         self.advance();
                         let addr_expr = self.parse_expression()?;
-                        match &addr_expr {
-                            Expr::Integer(n) => { address = Some(*n as u64); }
-                            _ => { address_expr = Some(Box::new(addr_expr)); }
+                        match addr_expr.as_integer() {
+                            Some(n) => { address = Some(n as u64); }
+                            None => { address_expr = Some(Box::new(addr_expr)); }
                         }
                     } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                         self.advance();
@@ -3845,9 +3846,9 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         if let Some(Ok(Token::At)) = self.current_token() {
                             self.advance();
                             let addr_expr = self.parse_expression()?;
-                            match &addr_expr {
-                                Expr::Integer(n) => { address = Some(*n as u64); }
-                                _ => { address_expr = Some(Box::new(addr_expr)); }
+                            match addr_expr.as_integer() {
+                                Some(n) => { address = Some(n as u64); }
+                                None => { address_expr = Some(Box::new(addr_expr)); }
                             }
                             if let Some(Ok(Token::Slash)) = self.current_token() {
                                 self.advance();
@@ -5187,34 +5188,34 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             Some(Ok(Token::Integer(val))) => {
                 let val = *val;
                 self.advance();
-                Ok(Expr::Integer(val))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Integer(val))))
             }
             Some(Ok(Token::Float(val))) => {
                 let val = *val;
                 self.advance();
-                Ok(Expr::Float(val))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Float(val))))
             }
             Some(Ok(Token::String(val))) => {
                 let val = val.clone();
                 self.advance();
-                Ok(Expr::String(val))
+                Ok(Expr::Literal(Box::new(LiteralExpr::String(val))))
             }
             Some(Ok(Token::Char(val))) => {
                 let val = *val;
                 self.advance();
-                Ok(Expr::Char(val))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Char(val))))
             }
             Some(Ok(Token::BoolTrue)) => {
                 self.advance();
-                Ok(Expr::Bool(true))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Bool(true))))
             }
             Some(Ok(Token::BoolFalse)) => {
                 self.advance();
-                Ok(Expr::Bool(false))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Bool(false))))
             }
             Some(Ok(Token::Term)) => {
                 self.advance();
-                Ok(Expr::Term)
+                Ok(Expr::Literal(Box::new(LiteralExpr::Term)))
             }
             Some(Ok(Token::Match)) => {
                 self.advance();
@@ -5594,13 +5595,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         // Parse the scrutinee — explicitly without the struct-literal lookahead
         // that parse_primary() does for `Ident { ... }`.
         let mut value = match self.current_token() {
-            Some(Ok(Token::Integer(n))) => { let n = *n; self.advance(); Expr::Integer(n) }
-            Some(Ok(Token::Float(f))) => { let f = *f; self.advance(); Expr::Float(f) }
-            Some(Ok(Token::String(s))) => { let s = s.clone(); self.advance(); Expr::String(s) }
-            Some(Ok(Token::Char(c))) => { let c = *c; self.advance(); Expr::Char(c) }
-            Some(Ok(Token::BoolTrue)) => { self.advance(); Expr::Bool(true) }
-            Some(Ok(Token::BoolFalse)) => { self.advance(); Expr::Bool(false) }
-            Some(Ok(Token::Term)) => { self.advance(); Expr::Term }
+            Some(Ok(Token::Integer(n))) => { let n = *n; self.advance(); Expr::Literal(Box::new(LiteralExpr::Integer(n))) }
+            Some(Ok(Token::Float(f))) => { let f = *f; self.advance(); Expr::Literal(Box::new(LiteralExpr::Float(f))) }
+            Some(Ok(Token::String(s))) => { let s = s.clone(); self.advance(); Expr::Literal(Box::new(LiteralExpr::String(s))) }
+            Some(Ok(Token::Char(c))) => { let c = *c; self.advance(); Expr::Literal(Box::new(LiteralExpr::Char(c))) }
+            Some(Ok(Token::BoolTrue)) => { self.advance(); Expr::Literal(Box::new(LiteralExpr::Bool(true))) }
+            Some(Ok(Token::BoolFalse)) => { self.advance(); Expr::Literal(Box::new(LiteralExpr::Bool(false))) }
+            Some(Ok(Token::Term)) => { self.advance(); Expr::Literal(Box::new(LiteralExpr::Term)) }
             Some(Ok(Token::Underscore)) => { self.advance(); Expr::Identifier("_".to_string()) }
             Some(Ok(Token::Match)) => {
                 self.advance();
@@ -6921,7 +6922,7 @@ mod parser_tests {
                 assert_eq!(name, "uni");
                 assert_eq!(variant, "x");
                 assert!(fields.is_empty());
-                assert!(matches!(expr, Expr::Integer(42)));
+                assert_eq!(expr.as_integer(), Some(42));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -6938,7 +6939,7 @@ mod parser_tests {
                 assert_eq!(variant, "Some");
                 assert_eq!(fields.len(), 1);
                 assert!(matches!(&fields[0], Pattern::Var(f) if f == "v"));
-                assert!(matches!(expr, Expr::Integer(42)));
+                assert_eq!(expr.as_integer(), Some(42));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -6954,7 +6955,7 @@ mod parser_tests {
                 assert_eq!(name, "val");
                 assert_eq!(variant, "_");
                 assert!(fields.is_empty());
-                assert!(matches!(expr, Expr::Integer(99)));
+                assert_eq!(expr.as_integer(), Some(99));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -6978,7 +6979,7 @@ mod parser_tests {
                     }
                     other => panic!("Expected Tuple pattern, got {:?}", other),
                 }
-                assert!(matches!(expr, Expr::Integer(0)));
+                assert_eq!(expr.as_integer(), Some(0));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -6995,7 +6996,7 @@ mod parser_tests {
                 assert_eq!(variant, "Some");
                 assert_eq!(fields.len(), 1);
                 assert!(matches!(&fields[0], Pattern::LitInt(42)));
-                assert!(matches!(expr, Expr::Integer(0)));
+                assert_eq!(expr.as_integer(), Some(0));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -7012,7 +7013,7 @@ mod parser_tests {
                 assert_eq!(variant, "Msg");
                 assert_eq!(fields.len(), 1);
                 assert!(matches!(&fields[0], Pattern::LitString(s) if s == "hello"));
-                assert!(matches!(expr, Expr::Integer(0)));
+                assert_eq!(expr.as_integer(), Some(0));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -7030,7 +7031,7 @@ mod parser_tests {
                 assert_eq!(fields.len(), 2);
                 assert!(matches!(&fields[0], Pattern::Var(f) if f == "a"));
                 assert!(matches!(&fields[1], Pattern::Var(f) if f == "b"));
-                assert!(matches!(expr, Expr::Integer(1)));
+                assert_eq!(expr.as_integer(), Some(1));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -7079,7 +7080,7 @@ mod parser_tests {
                 assert!(matches!(*value, Expr::Identifier(n) if n == "x"));
                 assert_eq!(arms.len(), 1);
                 assert!(matches!(arms[0].pattern, MatchPattern::Wildcard));
-                assert!(matches!(*arms[0].body, Expr::Integer(0)));
+                assert_eq!(arms[0].body.as_integer(), Some(0));
             }
             _ => panic!("Expected Match, got {:?}", expr),
         }
@@ -7246,7 +7247,7 @@ mod parser_tests {
             "let result <: items { MAP(x * 2); };",
             &[crate::ast::SubtypeOp::Map(Box::new(Expr::Mul(
                 Box::new(Expr::Identifier("x".into())),
-                Box::new(Expr::Integer(2)),
+                Box::new(Expr::Literal(Box::new(LiteralExpr::Integer(2)))),
             )))],
         );
     }
@@ -7346,7 +7347,7 @@ mod parser_tests {
     fn test_parse_subtype_match() {
         check_subtype_ops(
             r#"let result <: email["^(.+)@(.+)$"];"#,
-            &[crate::ast::SubtypeOp::Match(Box::new(Expr::String("^(.+)@(.+)$".into())))],
+            &[crate::ast::SubtypeOp::Match(Box::new(Expr::Literal(Box::new(LiteralExpr::String("^(.+)@(.+)$".into())))))],
         );
     }
 
@@ -7358,7 +7359,7 @@ mod parser_tests {
                 crate::ast::SubtypeOp::Filter(Box::new(Expr::Identifier("active".into()))),
                 crate::ast::SubtypeOp::Map(Box::new(Expr::Mul(
                     Box::new(Expr::Identifier("x".into())),
-                    Box::new(Expr::Integer(2)),
+                    Box::new(Expr::Literal(Box::new(LiteralExpr::Integer(2)))),
                 ))),
                 crate::ast::SubtypeOp::Limit(5),
             ],
@@ -7386,4 +7387,66 @@ enum BracketContents {
         stride: Option<Box<Expr>>,
         mask: Option<Box<Expr>>,
     },
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_parse_literal_integer() {
+        let mut parser = Parser::new("42");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert!(matches!(expr, Expr::Literal(_)));
+        assert_eq!(expr.as_integer(), Some(42));
+    }
+
+    #[kani::proof]
+    fn verify_parse_literal_bool_true() {
+        let mut parser = Parser::new("true");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert_eq!(expr.as_bool(), Some(true));
+    }
+
+    #[kani::proof]
+    fn verify_parse_literal_bool_false() {
+        let mut parser = Parser::new("false");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert_eq!(expr.as_bool(), Some(false));
+    }
+
+    #[kani::proof]
+    fn verify_parse_literal_float() {
+        let mut parser = Parser::new("3.14");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert!(matches!(expr, Expr::Literal(_)));
+    }
+
+    #[kani::proof]
+    fn verify_parse_literal_string() {
+        let mut parser = Parser::new("\"hello\"");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert!(matches!(expr, Expr::Literal(_)));
+        assert_eq!(expr.as_string(), Some(&"hello".to_string()));
+    }
+
+    #[kani::proof]
+    fn verify_parse_contract_validation_uses_as_bool() {
+        // Contract syntax: [true][true] should fail at parse time
+        // because as_bool() == Some(true) detects trivial contracts
+        let mut parser = Parser::new("defn foo()[true][true] { } ;");
+        let result = parser.parse_definition();
+        assert!(result.is_err());
+    }
 }

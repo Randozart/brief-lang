@@ -31,3 +31,17 @@ changed in the current commit (`git diff --cached --name-only`).
 This ensures new feature files must pass Praetor's strict limits (complexity ≤ 15,
 lines ≤ 100, params ≤ 6) while pre-existing diagnostics in untouched files
 don't block the refactor.
+
+---
+
+## 2026-06-09 — Phase 1.1 (Literal Feature)
+
+**Files touched**: 16 (1 new, 15 modified)  
+**New diagnostics**: 0  
+**Diagnostics resolved**: 0 (pre-existing diagnostics untouched — monolithic files not yet deleted)
+
+All 16 files pass `praetor validate --warn --target <file>` with zero violations.
+The new `src/features/literal.rs` (231 lines, cyclomatic 4, params 2) satisfies
+Praetor's strict limits. No new violations introduced in any router arm or helper method.
+
+Next phase: Phase 1.2 (binary_op / unary_op) — mechanical extraction of 18+3 operator variants.

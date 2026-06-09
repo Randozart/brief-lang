@@ -30,6 +30,7 @@
 ///
 /// Coverage: ~90% of real Brief contracts
 use crate::ast::{Expr, Statement};
+use crate::features::literal::LiteralExpr;
 use std::collections::HashMap;
 
 /// Symbolic representation of a value
@@ -129,6 +130,14 @@ impl SymbolicState {
 pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
     match expr {
         // Literal values
+        Expr::Literal(lit) => match lit.as_ref() {
+            LiteralExpr::Integer(n) => SymbolicValue::Literal(*n, "int".to_string()),
+            LiteralExpr::Float(_) => SymbolicValue::Unknown,
+            LiteralExpr::Bool(b) => SymbolicValue::bool_literal(*b),
+            LiteralExpr::Char(c) => SymbolicValue::Literal(*c as i64, "char".to_string()),
+            LiteralExpr::String(_) => SymbolicValue::Unknown,
+            LiteralExpr::Term => SymbolicValue::Unknown,
+        },
         Expr::Integer(n) => SymbolicValue::Literal(*n, "int".to_string()),
         Expr::Float(_) => SymbolicValue::Unknown, // Float support via Unknown
         Expr::Bool(b) => SymbolicValue::bool_literal(*b),
@@ -606,5 +615,67 @@ mod tests {
         );
 
         assert!(satisfies_postcondition(&postcond, &state));
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_eval_symbolic_literal_integer() {
+        let state = SymbolicState::empty();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = eval_symbolic(&expr, &state);
+        assert!(matches!(result, SymbolicValue::Literal(42, _)));
+    }
+
+    #[kani::proof]
+    fn verify_eval_symbolic_literal_bool_true() {
+        let state = SymbolicState::empty();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let result = eval_symbolic(&expr, &state);
+        assert!(result.is_definitely_true());
+    }
+
+    #[kani::proof]
+    fn verify_eval_symbolic_literal_bool_false() {
+        let state = SymbolicState::empty();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(false)));
+        let result = eval_symbolic(&expr, &state);
+        assert!(result.is_definitely_false());
+    }
+
+    #[kani::proof]
+    fn verify_eval_symbolic_literal_char() {
+        let state = SymbolicState::empty();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
+        let result = eval_symbolic(&expr, &state);
+        assert!(matches!(result, SymbolicValue::Literal(65, _)));
+    }
+
+    #[kani::proof]
+    fn verify_eval_symbolic_literal_term_is_unknown() {
+        let state = SymbolicState::empty();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
+        let result = eval_symbolic(&expr, &state);
+        assert!(matches!(result, SymbolicValue::Unknown));
+    }
+
+    #[kani::proof]
+    fn verify_eval_symbolic_literal_float_is_unknown() {
+        let state = SymbolicState::empty();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(1.0)));
+        let result = eval_symbolic(&expr, &state);
+        assert!(matches!(result, SymbolicValue::Unknown));
+    }
+
+    #[kani::proof]
+    fn verify_eval_symbolic_literal_string_is_unknown() {
+        let state = SymbolicState::empty();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("x".to_string())));
+        let result = eval_symbolic(&expr, &state);
+        assert!(matches!(result, SymbolicValue::Unknown));
     }
 }

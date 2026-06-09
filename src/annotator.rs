@@ -21,6 +21,7 @@
 // or embeds the Work.
 
 use crate::ast::*;
+use crate::features::literal::LiteralExpr;
 use std::collections::{HashMap, HashSet};
 
 pub struct Annotator {
@@ -380,6 +381,15 @@ impl Annotator {
 
     fn format_expr(&self, expr: &Expr) -> String {
         match expr {
+            // Pattern B: destructure feature struct
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Integer(n) => n.to_string(),
+                LiteralExpr::Float(f) => f.to_string(),
+                LiteralExpr::String(s) => format!("\"{}\"", s),
+                LiteralExpr::Char(c) => format!("'{}'", c),
+                LiteralExpr::Bool(b) => b.to_string(),
+                LiteralExpr::Term => "term".to_string(),
+            },
             Expr::Integer(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::String(s) => format!("\"{}\"", s),
@@ -590,7 +600,7 @@ impl Annotator {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::*;
+use crate::ast::*;
     use super::*;
 
     fn make_defn(name: &str, body: Vec<Statement>) -> TopLevel {
@@ -681,5 +691,59 @@ mod tests {
         ann.analyze(&prog);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["calc".to_string()]);
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_annotator_format_expr_literal_integer() {
+        let ann = Annotator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = ann.format_expr(&expr);
+        assert_eq!(result, "42");
+    }
+
+    #[kani::proof]
+    fn verify_annotator_format_expr_literal_bool() {
+        let ann = Annotator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let result = ann.format_expr(&expr);
+        assert_eq!(result, "true");
+    }
+
+    #[kani::proof]
+    fn verify_annotator_format_expr_literal_float() {
+        let ann = Annotator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
+        let result = ann.format_expr(&expr);
+        assert!(!result.is_empty());
+    }
+
+    #[kani::proof]
+    fn verify_annotator_format_expr_literal_string() {
+        let ann = Annotator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("hello".to_string())));
+        let result = ann.format_expr(&expr);
+        assert_eq!(result, "\"hello\"");
+    }
+
+    #[kani::proof]
+    fn verify_annotator_format_expr_literal_char() {
+        let ann = Annotator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
+        let result = ann.format_expr(&expr);
+        assert_eq!(result, "'A'");
+    }
+
+    #[kani::proof]
+    fn verify_annotator_format_expr_literal_term() {
+        let ann = Annotator::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
+        let result = ann.format_expr(&expr);
+        assert_eq!(result, "term");
     }
 }

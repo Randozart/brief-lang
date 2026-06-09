@@ -32,7 +32,7 @@
 pub mod traits;
 
 // Expression features (to be populated during migration)
-// pub mod literal;
+pub mod literal;
 // pub mod identifier;
 // pub mod binary_op;
 // pub mod unary_op;
@@ -59,3 +59,16 @@ pub mod traits;
 
 // TopLevel features
 // pub mod toplevel;
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+
+    #[kani::proof]
+    fn verify_features_modules_accessible() {
+        let _disp = traits::ExprDispatch;
+        let _lit = literal::LiteralExpr::Integer(42);
+        let _ = _disp;
+        let _ = _lit;
+    }
+}

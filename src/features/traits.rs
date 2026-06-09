@@ -75,20 +75,61 @@ pub trait ExprCodegenLLVM {
     ) -> crate::backend::llvm::TypedRegister;
 }
 
-/// VHDL Codegen.
+/// VHDL Codegen. VHDL codegen is stateless — takes `&VhdlGenerator`.
 pub trait ExprCodegenVHDL {
     fn emit_vhdl(
         &self,
-        ctx: &mut crate::backend::vhdl::VhdlGenerator,
+        ctx: &crate::backend::vhdl::VhdlGenerator,
         dispatch: &ExprDispatch,
     ) -> String;
 }
 
-/// Webstack Codegen.
+/// Webstack Codegen. Stateless string builder — takes `&WebstackGenerator`.
 pub trait ExprCodegenWebstack {
     fn emit_js(
         &self,
-        ctx: &mut crate::backend::webstack::WebstackGenerator,
+        ctx: &crate::backend::webstack::WebstackGenerator,
         dispatch: &ExprDispatch,
     ) -> String;
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+
+    #[kani::proof]
+    fn verify_expr_dispatch_constructable() {
+        let d = ExprDispatch;
+        let _ = &d;
+    }
+
+    #[kani::proof]
+    fn verify_expr_codegen_llvm_trait_satisfied() {
+        fn assert_trait<T: ExprCodegenLLVM>() {}
+        assert_trait::<crate::features::literal::LiteralExpr>();
+    }
+
+    #[kani::proof]
+    fn verify_expr_codegen_vhdl_trait_satisfied() {
+        fn assert_trait<T: ExprCodegenVHDL>() {}
+        assert_trait::<crate::features::literal::LiteralExpr>();
+    }
+
+    #[kani::proof]
+    fn verify_expr_codegen_webstack_trait_satisfied() {
+        fn assert_trait<T: ExprCodegenWebstack>() {}
+        assert_trait::<crate::features::literal::LiteralExpr>();
+    }
+
+    #[kani::proof]
+    fn verify_expr_eval_trait_satisfied() {
+        fn assert_trait<T: ExprEval>() {}
+        assert_trait::<crate::features::literal::LiteralExpr>();
+    }
+
+    #[kani::proof]
+    fn verify_expr_typecheck_trait_satisfied() {
+        fn assert_trait<T: ExprTypecheck>() {}
+        assert_trait::<crate::features::literal::LiteralExpr>();
+    }
 }

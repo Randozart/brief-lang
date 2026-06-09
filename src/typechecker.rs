@@ -22,6 +22,7 @@
 
 use crate::ast::*;
 use crate::errors::{Diagnostic, Severity, Span};
+use crate::features::literal::LiteralExpr;
 use crate::ffi;
 use crate::symbolic;
 use std::cell::RefCell;
@@ -1650,6 +1651,14 @@ Expr::ObjectLiteral(fields) => {
                 fields.first().map(|(_, v)| self.infer_expression(v)).unwrap_or(Type::Custom("Object".to_string()))
             },
             Expr::Cast(..) => Type::Custom("unknown".to_string()),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Integer(_) => Type::Int,
+                LiteralExpr::Float(_) => Type::Float,
+                LiteralExpr::String(_) => Type::String,
+                LiteralExpr::Char(_) => Type::Char,
+                LiteralExpr::Bool(_) => Type::Bool,
+                LiteralExpr::Term => Type::Void,
+            },
             _ => Type::Custom("unknown".to_string()),
         }
     }
@@ -2153,5 +2162,59 @@ mod tests {
         let _ = tc.check_program(&mut prog);
         let diags = tc.get_diagnostics();
         assert!(!diags.is_empty(), "Should have at least one diagnostic for uninitialized");
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_infer_literal_integer() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = ctx.infer_expression(&expr);
+        assert_eq!(result, Type::Int);
+    }
+
+    #[kani::proof]
+    fn verify_infer_literal_bool() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let result = ctx.infer_expression(&expr);
+        assert_eq!(result, Type::Bool);
+    }
+
+    #[kani::proof]
+    fn verify_infer_literal_float() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(1.5)));
+        let result = ctx.infer_expression(&expr);
+        assert_eq!(result, Type::Float);
+    }
+
+    #[kani::proof]
+    fn verify_infer_literal_string() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("x".to_string())));
+        let result = ctx.infer_expression(&expr);
+        assert_eq!(result, Type::String);
+    }
+
+    #[kani::proof]
+    fn verify_infer_literal_char() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Char('a')));
+        let result = ctx.infer_expression(&expr);
+        assert_eq!(result, Type::Char);
+    }
+
+    #[kani::proof]
+    fn verify_infer_literal_term() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
+        let result = ctx.infer_expression(&expr);
+        assert_eq!(result, Type::Void);
     }
 }

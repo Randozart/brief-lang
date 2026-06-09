@@ -21,6 +21,7 @@
 // or embeds the Work.
 
 use crate::errors::Span;
+use crate::features::literal::LiteralExpr;
 use crate::ffi::types::MemoryLayout;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -372,6 +373,8 @@ pub enum Expr {
     Char(char),  // NEW: Char literal
     Bool(bool),
     Term,
+    /// Pattern B feature struct: wraps Integer, Float, String, Char, Bool, Term
+    Literal(Box<LiteralExpr>),
     Identifier(String),
     OwnedRef(String),
     PriorState(String),
@@ -493,6 +496,59 @@ impl Expr {
         if let Self::DbvlTable { path, .. } = self {
             path.clone_from(&file_path.to_string());
         }
+    }
+
+    /// Extract integer value, handling both old variant and new Literal wrapper.
+    pub fn as_integer(&self) -> Option<i64> {
+        match self {
+            Expr::Integer(n) => Some(*n),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Integer(n) => Some(*n),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Extract float value, handling both old variant and new Literal wrapper.
+    pub fn as_float(&self) -> Option<f64> {
+        match self {
+            Expr::Float(f) => Some(*f),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Float(f) => Some(*f),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Extract string value, handling both old variant and new Literal wrapper.
+    pub fn as_string(&self) -> Option<&str> {
+        match self {
+            Expr::String(s) => Some(s.as_str()),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::String(s) => Some(s.as_str()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Extract bool value, handling both old variant and new Literal wrapper.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Expr::Bool(b) => Some(*b),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Bool(b) => Some(*b),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Check if expression is Term, handling both old variant and new Literal wrapper.
+    pub fn is_term(&self) -> bool {
+        matches!(self, Expr::Term) || matches!(self, Expr::Literal(lit) if matches!(lit.as_ref(), LiteralExpr::Term))
     }
 }
 
@@ -1237,4 +1293,130 @@ pub struct SigProjection {
 
     /// The source defn this sig casts from
     pub source_defn: String,
+}
+
+#[cfg(kani)]
+mod kani_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_as_integer_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        assert_eq!(e.as_integer(), Some(42));
+    }
+
+    #[kani::proof]
+    fn verify_as_integer_old_variant() {
+        let e = Expr::Integer(42);
+        assert_eq!(e.as_integer(), Some(42));
+    }
+
+    #[kani::proof]
+    fn verify_as_bool_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        assert_eq!(e.as_bool(), Some(true));
+    }
+
+    #[kani::proof]
+    fn verify_as_bool_old_variant() {
+        let e = Expr::Bool(false);
+        assert_eq!(e.as_bool(), Some(false));
+    }
+
+    #[kani::proof]
+    fn verify_is_term_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Term));
+        assert!(e.is_term());
+    }
+
+    #[kani::proof]
+    fn verify_is_term_old_variant() {
+        let e = Expr::Term;
+        assert!(e.is_term());
+    }
+
+    #[kani::proof]
+    fn verify_as_integer_none_for_non_int() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        assert_eq!(e.as_integer(), None);
+    }
+
+    #[kani::proof]
+    fn verify_as_bool_none_for_non_bool() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert_eq!(e.as_bool(), None);
+    }
+
+    #[kani::proof]
+    fn verify_is_term_false_for_non_term() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert!(!e.is_term());
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_as_integer_none_for_non_int() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        assert_eq!(e.as_integer(), None);
+        let f = Expr::Bool(false);
+        assert_eq!(f.as_integer(), None);
+    }
+
+    #[kani::proof]
+    fn verify_as_bool_none_for_non_bool() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert_eq!(e.as_bool(), None);
+        let f = Expr::Integer(0);
+        assert_eq!(f.as_bool(), None);
+    }
+
+    #[kani::proof]
+    fn verify_is_term_false_for_non_term() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert!(!e.is_term());
+        let f = Expr::Integer(0);
+        assert!(!f.is_term());
+    }
+
+    #[kani::proof]
+    fn verify_as_float_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
+        let v = e.as_float();
+        assert!(v.is_some());
+        let vv = v.unwrap();
+        assert!((vv - 3.14).abs() < 1e-10);
+    }
+
+    #[kani::proof]
+    fn verify_as_float_old_variant() {
+        let e = Expr::Float(3.14);
+        let v = e.as_float();
+        assert!(v.is_some());
+    }
+
+    #[kani::proof]
+    fn verify_as_string_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::String("hello".to_string())));
+        assert_eq!(e.as_string(), Some(&"hello".to_string()));
+    }
+
+    #[kani::proof]
+    fn verify_as_string_old_variant() {
+        let e = Expr::String("hello".to_string());
+        assert_eq!(e.as_string(), Some(&"hello".to_string()));
+    }
+
+    #[kani::proof]
+    fn verify_as_string_none_for_non_string() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert_eq!(e.as_string(), None);
+        let f = Expr::Integer(0);
+        assert_eq!(f.as_string(), None);
+    }
 }

@@ -21,6 +21,7 @@
 // or embeds the Work.
 
 use crate::ast::*;
+use crate::features::traits::{ExprDispatch, ExprEval};
 use crate::ffi::orchestrator::Orchestrator;
 use crate::ffi::FFI_REGISTRY;
 use regex::Regex;
@@ -1271,6 +1272,8 @@ impl Interpreter {
 
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
         match expr {
+            // Pattern B: delegate to feature struct
+            Expr::Literal(lit) => lit.evaluate(self, &ExprDispatch),
             Expr::Integer(v) => Ok(Value::Int(*v)),
             Expr::Float(v) => Ok(Value::Float(*v)),
             Expr::String(v) => Ok(Value::String(v.clone())),
@@ -5500,5 +5503,55 @@ mod tests {
         }
 
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_eval_expr_literal_integer() {
+        let mut ctx = Interpreter::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = ctx.eval_expr(&expr);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::Int(42));
+    }
+
+    #[kani::proof]
+    fn verify_eval_expr_literal_bool() {
+        let mut ctx = Interpreter::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let result = ctx.eval_expr(&expr);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::Bool(true));
+    }
+
+    #[kani::proof]
+    fn verify_eval_expr_literal_float() {
+        let mut ctx = Interpreter::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
+        let result = ctx.eval_expr(&expr);
+        assert!(result.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_eval_expr_literal_string() {
+        let mut ctx = Interpreter::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("test".to_string())));
+        let result = ctx.eval_expr(&expr);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::String("test".to_string()));
+    }
+
+    #[kani::proof]
+    fn verify_eval_expr_literal_char() {
+        let mut ctx = Interpreter::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
+        let result = ctx.eval_expr(&expr);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::Char('A'));
     }
 }

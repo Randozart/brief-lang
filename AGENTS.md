@@ -445,6 +445,12 @@ workflow. All new safety-critical code must include Kani proof harnesses.
 4. **Proof goals**: Prove absence of panics, overflows, out-of-bounds access, and
    undefined behavior under all possible symbolic inputs.
 5. **CI-gated**: `cargo kani` must pass before merging.
+6. **Coverage requirement**: Every function modified during refactoring must have a
+   Kani proof harness, regardless of whether it is "safety-critical." The refactor
+   touches code across the entire compiler — Kani verifies that the new routing
+   logic, enum variant conversions, and helper methods are correct under all
+   possible symbolic inputs. `unsafe`-free code can still overflow, panic on
+   `unreachable!()`, or miss edge cases in match arms. Proof harnesses catch these.
 
 ### Reference harness pattern
 
@@ -472,4 +478,4 @@ Before every commit:
 3. Run Praetor on new/changed files — verify complexity ≤ 15, lines ≤ 100, params ≤ 6
 4. Update architecture docs if API contracts changed
 5. Log bugs/gotchas in BUGS.md or docs/architecture/praetor-log.md
-6. Add Kani harnesses for any new safety-critical code
+6. Add Kani harnesses for all newly written or modified functions

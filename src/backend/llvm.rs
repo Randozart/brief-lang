@@ -14,7 +14,7 @@ fn escape_llvm_string(s: &str) -> String {
     out
 }
 
-fn float_to_llvm_hex(f: f64) -> String {
+pub(crate) fn float_to_llvm_hex(f: f64) -> String {
     let f32_val = f as f32;
     let bits = f32_val.to_bits();
     format!("{}", bits)
@@ -44,6 +44,7 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
 use crate::ast::{
     ArrowDir, BracketOp, DispatchMode, Expr, ForeignSignature, MatchArm, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
 };
+use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
 
 #[derive(Debug, Clone)]
 pub struct TypedRegister {
@@ -274,7 +275,7 @@ pub struct LlvmBackend {
     schema_aliases: HashMap<String, crate::dbrief::DbriefType>,
     pgo_profile: Option<crate::analysis::pgo::PgoProfile>,
     pgo_guard_idx: usize,
-    txn_counter: usize,
+    pub(crate) txn_counter: usize,
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
@@ -301,7 +302,7 @@ pub struct LlvmBackend {
     program_txns: Vec<String>,
     frgn_map: HashMap<String, ForeignSignature>,
     defn_params: HashMap<String, Vec<Type>>,
-    string_constants: Vec<String>,
+    pub(crate) string_constants: Vec<String>,
     constants: HashMap<String, (Type, Expr)>,
     fused_to_first: HashMap<String, String>,
     sampled_triggers: HashMap<String, String>,
@@ -321,7 +322,7 @@ pub struct LlvmBackend {
     ssa_state_reg: Option<String>,
     llvm_extra_flags: Vec<String>,
     slp_hazard_fns: HashSet<String>,
-    reg_float_cache: HashMap<String, String>,
+    pub(crate) reg_float_cache: HashMap<String, String>,
     /// Type of each emitted register — used for pointer-vs-list dispatch, etc.
     reg_type_cache: HashMap<String, Type>,
     state_reg_name: String,
@@ -2957,6 +2958,7 @@ self.emit_declares(&mut out);
                 return TypedRegister { name: v, ty: Type::Char };
             }
             Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+            Expr::Literal(lit) => return lit.emit_llvm(self, out, &ExprDispatch),
             Expr::Identifier(name) => {
                 // SSA body mode: prefer pre-extracted old-value register
                 // for int fields so all body ops are independent.
@@ -7795,5 +7797,66 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         assert!(!output.is_empty());
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_integer() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Int);
+        assert!(out.contains("add i64 0, 42"));
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_bool() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Bool);
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_term() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Int);
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_float() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(1.5)));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Float);
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_string() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("s".to_string())));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::String);
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_char() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Char);
     }
 }
