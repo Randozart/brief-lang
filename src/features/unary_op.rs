@@ -31,8 +31,15 @@ impl ExprTypecheck for UnaryOpExpr {
 }
 
 impl ExprEval for UnaryOpExpr {
-    fn evaluate(&self, _ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
-        Err(RuntimeError::TypeMismatch(String::new()))
+    fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
+        let v = ctx.eval_expr(&self.operand)?;
+        use UnaryOpKind::*;
+        Ok(match (self.kind, v) {
+            (Neg,    Value::Int(a)) => Value::Int(-a),
+            (Not,    Value::Bool(a)) => Value::Bool(!a),
+            (BitNot, Value::Int(a)) => Value::Int(!a),
+            _ => return Err(RuntimeError::TypeMismatch(format!("unary op {:?}", self.kind))),
+        })
     }
 }
 

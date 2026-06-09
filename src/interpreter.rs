@@ -2500,8 +2500,22 @@ Err(RuntimeError::TypeMismatch(
                     "Non-exhaustive match: no arm matched".to_string(),
                 ))
             }
-            _ => {
-                Err(RuntimeError::TypeMismatch("Expr variant not yet handled in interpreter".to_string()))
+            // ── Pattern B routing ────────────────────────────────
+            Expr::BinaryOp(bop) => bop.evaluate(self, &ExprDispatch),
+            Expr::UnaryOp(uop) => uop.evaluate(self, &ExprDispatch),
+            // DEFERRED: Pattern B variants below are not yet evaluated.
+            // They exist in the enum but the feature files have stub evaluate
+            // methods. Old variants still handle all cases.
+            Expr::ProjectionExpr(_) | Expr::CallExpr(_)
+            | Expr::ListLiteralExpr(_) | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_)
+            | Expr::SliceExpr(_) | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_)
+            | Expr::StructInstanceExpr(_) | Expr::ObjectLiteralExpr(_)
+            | Expr::TupleExpr(_) | Expr::TupleDestructureExpr(_) | Expr::EllipsisExpr(_)
+            | Expr::ArrowMutExpr(_) | Expr::ArrowDiscardExpr(_) | Expr::ArrowTransferExpr(_)
+            | Expr::PatternMatchExpr(_) | Expr::MatchExpr(_) | Expr::BlockExpr(_)
+            | Expr::SigCallExpr(_) | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_)
+            | Expr::TypeRef(_) => {
+                Err(RuntimeError::TypeMismatch("Pattern B variant not yet evaluated".into()))
             }
         }
     }

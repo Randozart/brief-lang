@@ -34,8 +34,31 @@ impl ExprTypecheck for BinaryOpExpr {
 }
 
 impl ExprEval for BinaryOpExpr {
-    fn evaluate(&self, _ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
-        Err(RuntimeError::TypeMismatch(String::new()))
+    fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
+        let l = ctx.eval_expr(&self.left)?;
+        let r = ctx.eval_expr(&self.right)?;
+        use BinaryOpKind::*;
+        Ok(match (self.kind, &l, &r) {
+            (Add,  Value::Int(a), Value::Int(b)) => Value::Int(a + b),
+            (Sub,  Value::Int(a), Value::Int(b)) => Value::Int(a - b),
+            (Mul,  Value::Int(a), Value::Int(b)) => Value::Int(a * b),
+            (Div,  Value::Int(a), Value::Int(b)) => Value::Int(a / b),
+            (Mod,  Value::Int(a), Value::Int(b)) => Value::Int(a % b),
+            (Eq,   Value::Int(a), Value::Int(b)) => Value::Bool(a == b),
+            (Ne,   Value::Int(a), Value::Int(b)) => Value::Bool(a != b),
+            (Lt,   Value::Int(a), Value::Int(b)) => Value::Bool(a < b),
+            (Le,   Value::Int(a), Value::Int(b)) => Value::Bool(a <= b),
+            (Gt,   Value::Int(a), Value::Int(b)) => Value::Bool(a > b),
+            (Ge,   Value::Int(a), Value::Int(b)) => Value::Bool(a >= b),
+            (And,  Value::Bool(a), Value::Bool(b)) => Value::Bool(*a && *b),
+            (Or,   Value::Bool(a), Value::Bool(b)) => Value::Bool(*a || *b),
+            (BitAnd, Value::Int(a), Value::Int(b)) => Value::Int(a & b),
+            (BitOr,  Value::Int(a), Value::Int(b)) => Value::Int(a | b),
+            (BitXor, Value::Int(a), Value::Int(b)) => Value::Int(a ^ b),
+            (Shl,  Value::Int(a), Value::Int(b)) => Value::Int(a << b),
+            (Shr,  Value::Int(a), Value::Int(b)) => Value::Int(a >> b),
+            _ => return Err(RuntimeError::TypeMismatch(format!("binary op {:?}", self.kind))),
+        })
     }
 }
 
