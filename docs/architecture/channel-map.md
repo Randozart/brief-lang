@@ -14,6 +14,9 @@ Lexer ──────────► Vec<Token>
 Parser ─────────► Program { items: Vec<TopLevel>, comments, attrs, ... }
   │
   ▼
+Type-Universe ────► TypeUniverse (frozen map of resolved type metadata)
+  │                 TypeDef declarations validated, chain-resolved
+  ▼
 Import Resolver ──► Program (resolved paths, validated imports)
   │
   ▼
@@ -40,6 +43,8 @@ Codegen ───────────► String (target code)
 
 ## Data Contracts Between Passes
 
+*Parse → Type-Universe*: Program — TypeDef items collected, chain-resolved, frozen
+*Type-Universe → Import*: Program + TypeUniverse (read-only reference for all subsequent passes)
 *Parse → Import*: Program with unresolved imports marked
 *Import → Desugar*: Fully resolved module graph
 *Desugar → Typecheck*: Core-level AST (no sugar)

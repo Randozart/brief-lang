@@ -56,3 +56,15 @@ Full group (`--features kani_full`) may relax these rules for CI-only execution.
 
 Previously, 110 harnesses were written without this constraint, causing 15-minute
 timeouts. After enforcing the rules: 14 fast harnesses complete in 2.5s.
+
+---
+
+## 2026-06-09 — Phase 1.5 (TypeDef Feature)
+
+**Files checked:**
+- `src/features/toplevel/typedef.rs` — 235 lines, 0 diagnostics
+- `src/type_universe.rs` — 463 lines, 0 diagnostics
+
+**New diagnostics**: 0
+
+**Kani note**: `TypeProperty` uses `Box<Expr>` for all 13 variants, which violates the fast-group no-heap-allocation rule. All Kani harnesses for TypeDef are gated behind `#[cfg(all(kani, feature = "kani_full"))]`. Fast group retains 11 harnesses (ast.rs + literal.rs).

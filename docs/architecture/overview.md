@@ -12,7 +12,8 @@ follows a layered pass architecture:
 flowchart LR
     Source --> Lexer
     Lexer --> Parser
-    Parser --> ImportResolver
+    Parser --> TypeUniverse
+    TypeUniverse --> ImportResolver
     ImportResolver --> Desugarer
     Desugarer --> Typechecker
     Typechecker --> ProofEngine
@@ -28,6 +29,7 @@ flowchart LR
 |--------|------|----------------|
 | Lexer | `lexer.rs` | Tokenizes source text into `Token` stream using `logos` |
 | Parser | `parser.rs` | Pratt-style precedence climbing, produces `Program` AST |
+| Type-Universe | `type_universe.rs` | **NEW (Phase 1.5)** — Pass 1: collect/resolve/freeze `Type Name <: Base` declarations before executable passes |
 | Import Resolver | `import_resolver.rs` | Resolves `import` paths, builds module graph |
 | Desugarer | `desugarer.rs` | Lowers sugar syntax to core AST |
 | Typechecker | `typechecker.rs` | Infers and checks types, validates contracts |

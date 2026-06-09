@@ -1,8 +1,12 @@
 # Brief 3.0 Specification
 
 **Version:** 3.0  
-**Date:** 2026-06-05  
-**Status:** DEPRECATED — see `spec/SPEC.md` for the current specification
+**Date:** 2026-06-09  
+**Status:** Active — supplements `spec/SPEC.md`
+
+> **2026-06-09 Addendum — Phase 1.5: Type Derivation System**
+> 
+> Brief now supports `Type Name <: Base { ... }` declarations. See §10 below.
 
 ---
 
@@ -384,6 +388,140 @@ Vector operations synthesize using SystemVerilog `generate` blocks: N elements =
 | `escape` | `escape` | Rollback all changes |
 | `trg` | `trigger` | Top-level trigger / hardware input |
 | `trg!` | `trigger!` | Local trigger with async rollback |
+
+---
+
+## 10. Type Derivation (`type` Keyword)
+
+> **Added 2026-06-09 (Phase 1.5)**
+
+Brief types are defined using the `Type Name <: Base { ... }` declaration. The `<:` operator (read as "derives from" or "is a refinement of") connects a new type to its base type. Properties and constraints within the `{ }` body define how the new type differs from the base.
+
+### 10.1 Primitive Kernel
+
+The compiler natively understands a small set of ~13 type properties. These are the only hardcoded type concepts in the Rust compiler — everything else (`String`, `Stack`, `Queue`, `HashMap`, etc.) is defined in user-space Brief in `lib/std/`.
+
+| Property | Type | Default | Meaning |
+|----------|------|---------|---------|
+| `Bytes` | `Int` | _required_ | Physical width in bytes — LLVM `alloca`, VHDL width |
+| `Alignment` | `Int` | `= Bytes` | Alignment boundary — LLVM `align` |
+| `Endian` | `Enum` | `Little` | Byte order — LLVM `bswap`/load-store order |
+| `Volatile` | `Bool` | `false` | LLVM `load volatile`/`store volatile` |
+| `Atomic` | `Bool` | `false` | LLVM atomic operations |
+| `ElementType` | `Type` | _(none)_ | Unlocks `[]` and slicing — compiler synthesizes GEP/address-decoding |
+| `FixedSize` | `Bool` | _(none)_ | `false` unlocks `<-` / `->` — heap/circular buffer strategy |
+| `InsertAt` | `Expr` | _(none)_ | Index expression for insertion position |
+| `ExtractFrom` | `Expr` | _(none)_ | Index or `<:{}` query for extraction position |
+| `AllowIndex` | `Bool` | `true` | Override to `false` to block `[]` |
+| `AllowSlice` | `Bool` | `true` | Override to `false` to block slicing |
+| `AllowArrow` | `Bool` | `true` | Override to `false` to block `<-`/`->` |
+| `Codec` | `Struct` | _(none)_ | Struct with `encode`/`decode` — literal translation at compile-time |
+
+### 10.2 Expressing InsertAt / ExtractFrom
+
+`InsertAt` and `ExtractFrom` accept index expressions that the compiler recognizes in Pass 1:
+
+| Expression | Strategy | Example |
+|---|---|---|
+| `0` | Constant front, head-pointer advance | Queue pop |
+| `:> Size` | Append position, pointer increments | List/Queue push |
+| `:> Size - N` | Offset from end, pointer decrements | Stack pop |
+| `<: { MIN(.key) }` | Maintain heap by key | Priority queue |
+| `<: { MAX(.key) }` | Maintain heap by key | Priority queue |
+
+Any unrecognized expression form is a compile-time error.
+
+### 10.3 Example: Scalar Type Derivation
+
+```brief
+Type U8  <: Bits { Bytes = 1; Alignment = 1; };
+Type U16 <: Bits { Bytes = 2; Alignment = 2; };
+Type U32 <: Bits { Bytes = 4; Alignment = 4; };
+Type U64 <: Bits { Bytes = 8; Alignment = 8; };
+Type Int <: U64;
+Type Float <: Bits { Bytes = 8; Alignment = 8; };
+Type MmioReg <: U32 { Volatile = true; };
+```
+
+### 10.4 Example: Collection Type Derivation
+
+```brief
+Type List<T> <: Bits {
+    ElementType = T;
+    FixedSize = false;
+    InsertAt = :> Size;
+    ExtractFrom = :> Size - 1;
+};
+
+Type Stack<T> <: List<T> {
+    AllowIndex = false;
+};
+
+Type Queue<T> <: List<T> {
+    ExtractFrom = 0;
+    AllowIndex = false;
+};
+```
+
+Properties not overridden are inherited from the base type. `Stack` inherits `ElementType`, `FixedSize`, `InsertAt`, and `AllowSlice` from `List`.
+
+### 10.5 Example: Codec-Bearing Types
+
+Codecs are imported structs with `encode`/`decode` signatures, validated in Pass 1:
+
+```brief
+import { Utf8 } from "std/utf8.bv";
+
+Type String <: List<U8> {
+    Codec = Utf8;
+};
+```
+
+The compiler uses the codec to translate string literals at compile time — `"Hello"` stored as `String` runs `Utf8::encode("Hello")` during compilation, emitting the encoded bytes directly into the binary.
+
+### 10.6 Refinement Constraints
+
+Inline constraints with implicit `_` subject can appear in the type body:
+
+```brief
+Type PositiveInt <: Int {
+    [ > 0 && < 100 ]
+};
+```
+
+Pass 1 validates literals against these constraints. The backend synthesizes runtime guards for dynamic values.
+
+### 10.7 The Two-Pass Pipeline
+
+```
+PASS 1: Type-Universe Pass
+  - Collect all Type Name <: Base { ... } declarations
+  - Resolve derivation chain to Bits
+  - Inherit + override metadata properties
+  - Validate Bytes required on all Bits-derived types
+  - Validate InsertAt/ExtractFrom expression forms
+  - Validate Codec has encode/decode
+  - Evaluate refinement constraints
+  - FREEZE: type universe immutable for Pass 2
+
+PASS 2: Executable Pass
+  - Parse and typecheck defn/txn/rct
+  - Resolve let x: Stack<T> against the universe
+  - Validate :> projections against defined metadata
+  - Synthesize bracket/arrow from AllowIndex/AllowArrow gates
+  - Encode literals via Codec
+  - Emit LLVM IR / VHDL with frozen metadata
+```
+
+### 10.8 Comparison with Other Languages
+
+| Language | Type definition mechanism | User-space control |
+|----------|--------------------------|--------------------|
+| **C** | `typedef`, `struct` | Layout only, no semantics |
+| **Rust** | `struct`, `enum + impl` | Trait implementations, no layout control |
+| **Ada** | `subtype`, representation clauses | Layout control, no programmable codecs |
+| **Zig** | `comptime` + struct generation | Powerful but no formal refinement |
+| **Brief** | `Type ... <: ... { ... }` | Layout, codecs, access gates, all in user-space |
 
 ---
 
