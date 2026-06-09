@@ -802,7 +802,8 @@ impl SymbolicExecutor {
                     err.proof_chain.push("2. Path constraints:".to_string());
                     for (i, constraint) in path_state.constraints.iter().enumerate() {
                         let cond_str = format_expr(&constraint.condition);
-                        err.proof_chain.push(format!("   {}. {}", i + 1, cond_str));
+                        let neg = if constraint.is_negated { "¬" } else { "" };
+                        err.proof_chain.push(format!("   {}. {}{}", i + 1, neg, cond_str));
                     }
                 }
 
@@ -840,7 +841,7 @@ impl SymbolicExecutor {
         let mut terminated = false;
         let mut path_kind: PathKind = PathKind::Term(Vec::new());
 
-        for stmt in body {
+        for (i, stmt) in body.iter().enumerate() {
             if terminated {
                 break;
             }
@@ -880,10 +881,19 @@ impl SymbolicExecutor {
                         .with_constraint(condition.clone(), true);
 
                     let mut true_paths = Vec::new();
-                    self.enumerate_paths_recursive(statements, true_state, &mut true_paths);
+                    self.enumerate_paths_recursive(statements, true_state.clone(), &mut true_paths);
+
+                    // If the guard body didn't terminate (no term inside),
+                    // continue exploring the remaining body after the guard
+                    // so the guard-taken path reaches term.
+                    if true_paths.is_empty() && i + 1 < body.len() {
+                        self.enumerate_paths_recursive(&body[i + 1..], true_state, &mut true_paths);
+                    }
 
                     let mut false_paths = Vec::new();
-                    self.enumerate_paths_recursive(&body[1..], false_state, &mut false_paths);
+                    if i + 1 < body.len() {
+                        self.enumerate_paths_recursive(&body[i + 1..], false_state, &mut false_paths);
+                    }
 
                     for (s, pk) in true_paths.into_iter().chain(false_paths.into_iter()) {
                         paths.push((s, pk));
@@ -1096,6 +1106,16 @@ impl SymbolicExecutor {
                 let a = self.eval_numeric(l, state)?;
                 let b = self.eval_numeric(r, state)?;
                 Some(a * b)
+            }
+            Expr::Div(l, r) => {
+                let a = self.eval_numeric(l, state)?;
+                let b = self.eval_numeric(r, state)?;
+                if b == 0 { None } else { Some(a / b) }
+            }
+            Expr::Mod(l, r) => {
+                let a = self.eval_numeric(l, state)?;
+                let b = self.eval_numeric(r, state)?;
+                if b == 0 { None } else { Some(a % b) }
             }
             _ => None,
         }

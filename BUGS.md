@@ -704,3 +704,50 @@ Concrete changes:
 
 **Fix**: Replaced `parse_expression()` with `parse_projection_source()` in both `<:` let-statement paths (tuple and non-tuple). This new function parses an identifier + postfix operations but stops before `{` and `[`, leaving them for `parse_subtype_ops()` to handle as the ops block or MATCH bracket syntax.
 
+## 2026-06-09 — Proof engine guard path three-bug cascade
+
+**Symptoms**: Benchmarks with a `[guard] { __print_*(...); };` inside an `rct txn` fail P008 contract verification with 14+ identical-looking `guard` constraints in the path state.
+
+**Root Cause**: Three interacting bugs in `enumerate_paths_recursive` and `is_truthy`:
+
+### Bug A — Guard-taken path never reaches `term` (proof_engine.rs:883)
+
+When `enumerate_paths_recursive` encounters a `Statement::Guarded`, the true branch recurses into `statements` (the guard body). The guard body is typically just a print expression — no `term`. So `terminated` remains `false`, and NO path is pushed for the true branch. The false branch correctly recurses into `body[1..]` (remaining body after guard, which includes `term`) and pushes a valid path. But the true branch path is lost — its continuation to `term` is never explored.
+
+**Line 883**: `self.enumerate_paths_recursive(statements, true_state, &mut true_paths);`
+
+**Fix**: After recursing into the guard body, check if `true_paths` is empty. If so, the guard body didn't terminate — continue exploring `body[1..]` with the `true_state` to reach `term`.
+
+### Bug B — `eval_numeric` missing `Mod` and `Div` (proof_engine.rs:1064)
+
+`eval_numeric` handles `Add`, `Sub`, `Mul` but falls through to `_ => None` for `Mod` and `Div`. Since guard conditions like `count % 5000000 == 0` use modulo arithmetic, `is_truthy` always returns `false` for these conditions. This makes non-negated guard constraints appear infeasible in the `implies` check.
+
+**Fix**: Add `Expr::Mod` and `Expr::Div` cases to `eval_numeric` for concrete integer operands.
+
+### Bug C — `format_expr` hides `is_negated` (proof_engine.rs:804)
+
+The error printer at line 803-805 only renders `format_expr(&constraint.condition)`. The `is_negated` flag is silently dropped. Negated constraints (`!guard_condition`) print identically to non-negated ones, making the error output deeply misleading — 14 guard-looking constraints may all be different but look the same.
+
+**Fix**: Include `is_negated` in the display: `if constraint.is_negated { "¬" } else { "" }` prefix.
+
+**Lesson**: The third finding (Bug C) is a debugging-jit — it's serious because it hides the distinction between guard-taken and guard-not-taken paths, making P008 errors nearly impossible to diagnose from the output alone. The guard-taken path being dropped (Bug A) means the proof engine currently does NOT fully verify contracts for paths that take guarded branches — it sees only the guard-not-taken path and judges correctness on that alone. Where the guard body has side effects (like FFI calls), this is unsound.
+
+**Fix (same commit)**: 
+1. Guard-taken path now continues to remaining body after guard via `body[i+1..]` tail recursion.
+2. `eval_numeric` now handles `Expr::Mod` and `Expr::Div` for concrete operands.
+3. Error output shows `¬` prefix for negated path constraints.
+4. Body index `body[1..]` → `body[i+1..]` using `.enumerate()` — fixes exponential path explosion when guards were followed by more guarded statements.
+
+### Pre-existing: convergence analysis gaps (NOT caused by Pattern B)
+
+After the above fixes, these benchmarks still fail P008 — all are convergence analysis gaps in `check_convergence` in `proof_engine.rs`, NOT regressions:
+
+| Benchmark | Root cause | 
+|-----------|------------|
+| `*_runtime.bv` | Precondition is `AND(relation, relation)` — `check_convergence` expects bare `count < bound`, not `bound > 0 && count < bound`. No AND-handling exists. |
+| `bit_clear.bv` | `reg = reg & (reg - 1)` is popcount decay — `check_convergence` only detects `Add`/`Sub` increments. `detect_popcount_decay` exists in `transition_graph.rs` but is never called by the proof engine. |
+| `cancel_math.bv` | `count = count + (R + 1 - R)` — algebraic simplification reduces this to `count + 1` in `transition_graph.rs::simplify_expr`, but `check_convergence` scans the ORIGINAL unsimplified body. |
+| `interval_step.bv` | `count = (count + R1) - R2` — outer `Sub` wraps `Add(count, R1)`. `check_convergence` only detects `Sub(count, N)` with bare count on left. |
+
+**Fix status**: Each requires structural improvement to `check_convergence` — AND-pre extraction, integration with `detect_popcount_decay`, simplified-body scanning, and compound increment pattern matching. Deferred — not caused by Pattern B, and the non-runtime benchmarks (which are the ones `build_and_bench.sh` actually measures) all pass.
+
