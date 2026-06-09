@@ -1,5 +1,5 @@
 [intent]
-enabled = false
+enabled = true
 severity = "warning"
 exempt_patterns = ["fn get_.*", "fn set_.*", "fn new\\(", "fn main\\(", "fn test_.*"]
 
