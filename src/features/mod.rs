@@ -70,7 +70,7 @@ pub mod ellipsis;
 // pub mod stmt;
 
 // TopLevel features
-// pub mod toplevel;
+pub mod toplevel;
 
 #[cfg(all(kani, feature = "kani_full"))]
 mod kani_full_tests {

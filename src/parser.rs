@@ -295,11 +295,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Check if the next two tokens are `<` followed by `:` (the `<:` operator)
-    /// Check if the next two tokens are `<` followed by `:` (the `<:` operator)
+    /// Check if the next token is `<:` (subtype projection / type derivation operator)
     fn check_lt_colon(&self) -> bool {
-        matches!(self.current_token(), Some(Ok(Token::Lt)))
-            && matches!(self.peek_token(), Some(Ok(Token::Colon)))
+        matches!(self.current_token(), Some(Ok(Token::LtColon)))
     }
 
     fn parse_hashtag_modifiers(&mut self) -> Result<Vec<Hashtag>, SyntaxError> {
@@ -919,6 +917,10 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Enum)) => {
                 let enum_def = self.parse_enum()?;
                 Ok(TopLevel::Enum(enum_def))
+            }
+            Some(Ok(Token::Type)) => {
+                let type_def = self.parse_type_def()?;
+                Ok(TopLevel::TypeDef(Box::new(type_def)))
             }
             Some(Ok(Token::Render)) => {
                 let render_block = self.parse_render_block()?;
@@ -2146,6 +2148,154 @@ impl<'a> Parser<'a> {
             variants,
             span: self.current_span(),
         })
+    }
+
+    /// Parse a `Type Name <: Base { ... }` declaration.
+    ///
+    /// Grammar:
+    ///   type_decl  ::= "type" ident ("<" type_params ">")? "<:" type_expr "{" property* constraint* "}" ";"
+    ///   property   ::= ident "=" expr ";"
+    ///   constraint ::= "[" expr "]"
+    ///
+    /// Supported properties: Bytes, Alignment, Endian, Volatile, Atomic,
+    /// ElementType, FixedSize, InsertAt, ExtractFrom, AllowIndex, AllowSlice, AllowArrow, Codec.
+    fn parse_type_def(&mut self) -> Result<TypeDef, SyntaxError> {
+        self.expect(Token::Type)?;
+        let name = self.expect_identifier()?;
+
+        // Parse optional type parameters: <T, K>
+        let mut type_params = Vec::new();
+        if let Some(Ok(Token::Lt)) = self.current_token() {
+            self.expect(Token::Lt)?;
+            loop {
+                let param_name = self.expect_identifier()?;
+                type_params.push(param_name);
+                match self.current_token() {
+                    Some(Ok(Token::Comma)) => { self.advance(); }
+                    Some(Ok(Token::Gt)) => { self.advance(); break; }
+                    _ => return self.spanned_err(
+                        "Expected ',' or '>' in type parameters".to_string(),
+                    ),
+                }
+            }
+        }
+
+        // Parse `<:` operator
+        self.expect(Token::LtColon)?;
+
+        // Parse base type expression
+        let base = self.parse_type_expr_for_typedef()?;
+
+        // Parse body `{ ... }`
+        self.expect(Token::LBrace)?;
+
+        let mut properties = Vec::new();
+        let mut constraints = Vec::new();
+
+        // Parse properties and constraints until `}`
+        loop {
+            // Early exit for `}`
+            if let Some(Ok(Token::RBrace)) = self.current_token() {
+                self.advance();
+                break;
+            }
+
+            // Check for constraint: `[ expr ]`
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance(); // consume `[`
+                let constraint = self.parse_expression()?;
+                self.expect(Token::RBracket)?;
+                constraints.push(constraint);
+                continue;
+            }
+
+            // Otherwise parse a property: ident = expr ;
+            let prop_name = self.expect_identifier()?;
+            self.expect(Token::Eq)?;
+            let prop = match prop_name.as_str() {
+                "Bytes" => TypeProperty::Bytes(Box::new(self.parse_expression()?)),
+                "Alignment" => TypeProperty::Alignment(Box::new(self.parse_expression()?)),
+                "Endian" => TypeProperty::Endian(Box::new(self.parse_expression()?)),
+                "Volatile" => TypeProperty::Volatile(Box::new(self.parse_expression()?)),
+                "Atomic" => TypeProperty::Atomic(Box::new(self.parse_expression()?)),
+                "ElementType" => TypeProperty::ElementType(Box::new(self.parse_expression()?)),
+                "FixedSize" => TypeProperty::FixedSize(Box::new(self.parse_expression()?)),
+                "InsertAt" => TypeProperty::InsertAt(Box::new(self.parse_expression()?)),
+                "ExtractFrom" => TypeProperty::ExtractFrom(Box::new(self.parse_expression()?)),
+                "AllowIndex" => TypeProperty::AllowIndex(Box::new(self.parse_expression()?)),
+                "AllowSlice" => TypeProperty::AllowSlice(Box::new(self.parse_expression()?)),
+                "AllowArrow" => TypeProperty::AllowArrow(Box::new(self.parse_expression()?)),
+                "Codec" => {
+                    let codec_name = self.expect_identifier()?;
+                    // Consume optional semicolon (expression parser handles this for expr-based props)
+                    TypeProperty::Codec(codec_name)
+                }
+                other => return self.spanned_err(
+                    format!("Unknown type property '{}'. Expected: Bytes, Alignment, Endian, Volatile, Atomic, ElementType, FixedSize, InsertAt, ExtractFrom, AllowIndex, AllowSlice, AllowArrow, or Codec", other),
+                ),
+            };
+            properties.push(prop);
+
+            // Expect semicolon after property (but not after Codec since it's already consumed)
+            if prop_name != "Codec" {
+                if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                    self.advance();
+                } else {
+                    return self.spanned_err("Expected ';' after type property".to_string());
+                }
+            } else {
+                // Codec may or may not have semicolon — handle both
+                if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                    self.advance();
+                }
+            }
+        }
+
+        // Expect optional semicolon after `}`
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
+
+        Ok(TypeDef {
+            name,
+            type_params,
+            base,
+            body: TypeDefBody {
+                properties,
+                constraints,
+                span: self.current_span(),
+            },
+            span: self.current_span(),
+        })
+    }
+
+    /// Parse a type expression used as the base in `Type Name <: Base { ... }`.
+    /// This is a restricted subset of parse_expression — currently handles:
+    ///   - TypeRef identifiers (e.g. `Bits`, `List`)
+    ///   - Generic applications (e.g. `List<T>`, `KeyedQueue<T, K>`)
+    /// DEFERRED (D-1): Full type expression support for complex base types.
+    fn parse_type_expr_for_typedef(&mut self) -> Result<Box<Expr>, SyntaxError> {
+        let name = self.expect_identifier()?;
+
+        // Check for generic application: Name<T, K>
+        if let Some(Ok(Token::Lt)) = self.current_token() {
+            // We can't fully parse a generic type expression here without adding
+            // type info to Expr. For now, store as TypeRef and handle in Pass 1.
+            // DEFERRED (D-1): Proper generic type expression parsing.
+            self.advance(); // consume `<`
+            // Consume everything until `>`
+            let mut depth = 1;
+            while depth > 0 {
+                match self.current_token() {
+                    Some(Ok(Token::Gt)) => { self.advance(); depth -= 1; }
+                    Some(Ok(Token::Lt)) => { self.advance(); depth += 1; }
+                    Some(Ok(Token::LtColon)) => { self.advance(); }
+                    _ => { self.advance(); }
+                }
+            }
+        }
+
+        Ok(Box::new(Expr::TypeRef(name)))
     }
 
     fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), SyntaxError> {
@@ -3749,8 +3899,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
                     // Check for `<:` subtype projection (string match destructuring)
                     if self.check_lt_colon() {
-                        self.advance(); // consume `<`
-                        self.advance(); // consume `:`
+                        self.advance(); // consume `<:`
                         let source = self.parse_projection_source()?;
                         let ops = self.parse_subtype_ops()?;
                         self.expect(Token::Semicolon)?;
@@ -3791,8 +3940,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
                     // Check for `<:` subtype projection
                     if self.check_lt_colon() {
-                        self.advance(); // consume `<`
-                        self.advance(); // consume `:`
+                        self.advance(); // consume `<:`
                         // Parse source expression, but stop before `{` (struct literal)
                         // parse_expression would consume `{...}` as struct literal fields
                         let source = self.parse_projection_source()?;

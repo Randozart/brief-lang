@@ -340,6 +340,64 @@ pub enum BracketOp {
     Stride(Box<Expr>),
 }
 
+/// A property assignment inside a `Type Name <: Base { ... }` block.
+/// Each property is either a metadata constraint or a syntax gate.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeProperty {
+    /// Physical width in bytes. Required for all Bits-derived types.
+    Bytes(Box<Expr>),
+    /// Alignment boundary. Defaults to Bytes if unset.
+    Alignment(Box<Expr>),
+    /// Byte order: Big or Little. Defaults to Little.
+    Endian(Box<Expr>),
+    /// LLVM `load volatile`/`store volatile`. Defaults to false.
+    Volatile(Box<Expr>),
+    /// LLVM atomic operations. Defaults to false.
+    Atomic(Box<Expr>),
+    /// The element type — unlocks `[]` and slicing.
+    ElementType(Box<Expr>),
+    /// Whether size is fixed at compile time. false unlocks `<-`/`->`.
+    FixedSize(Box<Expr>),
+    /// Index expression for insertion position: `0`, `:> Size`, `:> Size - N`.
+    InsertAt(Box<Expr>),
+    /// Index or `<:{}` query for extraction position.
+    ExtractFrom(Box<Expr>),
+    /// Override: block `[]` access. Defaults to true.
+    AllowIndex(Box<Expr>),
+    /// Override: block slicing. Defaults to true.
+    AllowSlice(Box<Expr>),
+    /// Override: block `<-`/`->`. Defaults to true.
+    AllowArrow(Box<Expr>),
+    /// Codec struct name — must have encode/decode.
+    Codec(String),
+}
+
+/// Body of a `Type Name <: Base { ... }` declaration.
+#[derive(Debug, Clone)]
+pub struct TypeDefBody {
+    /// Metadata property assignments.
+    pub properties: Vec<TypeProperty>,
+    /// Refinement constraints with implicit self: `[ > 0 ]`.
+    pub constraints: Vec<Expr>,
+    /// Source span for error reporting.
+    pub span: Option<Span>,
+}
+
+/// A `Type Name <: Base { ... }` declaration — Pass 1: type universe.
+#[derive(Debug, Clone)]
+pub struct TypeDef {
+    /// The new type's name.
+    pub name: String,
+    /// Type parameters (e.g. `T`, `K` in `List<T, K>`).
+    pub type_params: Vec<String>,
+    /// The base type expression (e.g. `Bits`, `List<T>`).
+    pub base: Box<Expr>,
+    /// Property body.
+    pub body: TypeDefBody,
+    /// Source span.
+    pub span: Option<Span>,
+}
+
 /// Target of a `:>` projection: `expr :> Size`
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectionTarget {
@@ -396,6 +454,9 @@ pub enum Expr {
     Ellipsis,
     // Pattern B — packed ellipsis
     EllipsisExpr(EllipsisExpr),
+    /// Reference to a named type: `Bits`, `Int`, `U32`, etc. Used as the base
+    /// expression in a `Type Name <: Base { ... }` declaration.
+    TypeRef(String),
     /// Collection structural mutation: `&list <- x`, `x <- &list`, or `&list[i] <- x`
     /// `index` is `Expr::Term` for full-range (end operations)
     ArrowMut {
@@ -1145,6 +1206,8 @@ pub enum TopLevel {
     Struct(StructDefinition),
     RStruct(RStructDefinition),
     Enum(EnumDefinition),
+    /// `Type Name <: Base { ... }` — type derivation system (Phase 1.5)
+    TypeDef(Box<TypeDef>),
     RenderBlock(RenderBlock),
     Stylesheet(String),
     SvgComponent {

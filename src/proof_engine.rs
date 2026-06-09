@@ -2357,7 +2357,7 @@ impl ProofEngine {
             | Expr::ObjectLiteralExpr(_) | Expr::TupleExpr(_) | Expr::TupleDestructureExpr(_)
             | Expr::EllipsisExpr(_) | Expr::ArrowMutExpr(_) | Expr::ArrowDiscardExpr(_) | Expr::ArrowTransferExpr(_)
             | Expr::PatternMatchExpr(_) | Expr::MatchExpr(_) | Expr::BlockExpr(_) | Expr::SigCallExpr(_)
-            | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_) => {}
+            | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_) | Expr::TypeRef(_) => {}
             Expr::ListLiteral(elements) => {
                 for elem in elements {
                     self.collect_identifiers(elem, vars);

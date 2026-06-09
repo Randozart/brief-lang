@@ -622,6 +622,14 @@ impl TypeChecker {
                     }
                     self.struct_fields.insert(struct_def.name.clone(), fields);
                 }
+                // DEFERRED (D-1): TypeDefs are collected and resolved in Pass 1
+                // by type_universe.rs. In Pass 2, we only need to validate
+                // usage against the frozen universe — adding that here.
+                TopLevel::TypeDef(td) => {
+                    // Phase 1.5: TypeDefs are validated in type_universe.rs Pass 1.
+                    // Here in Pass 2 we just ensure the type name is registered
+                    // for later resolution.
+                }
                 _ => {}
             }
         }

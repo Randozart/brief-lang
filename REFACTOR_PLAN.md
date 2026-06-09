@@ -396,23 +396,115 @@ Deleted only in Phase 8 after full test parity is confirmed.
 
 ---
 
-### Phase 1.5 — `TopLevel::TypeDef` (Type Derivation)
+### Phase 1.5 — `TopLevel::TypeDef` (Type Derivation via Primitive Kernel)
 
-**Rationale**: Unifies type aliasing, refinement types, bit-width declarations, fixed-size collections, and behavioral type constraints (Queue/Stack) under a single `<:` derivation operator. `List<T>` becomes the only primitive sequential collection; `Queue`, `Stack`, `OrderedSet`, etc. become `<:` derivations with behavioral constraints.
+> ⚠️ **Supersedes prior 1.5 design.** The original—hardcoded `ProjectionTarget` variants (Volatile, Atomic, Endian, etc.) as settable type properties—is preserved as-is below under **"Superseded Design"** for reference. The new design drastically shrinks the primitive kernel. Old content is non-destructively retained.
+
+**Rationale**: "What is the smallest set of primitives the Rust compiler must hardcode so that everything else can be defined in Brief?"
+
+The answer: **~10 primitives.** `Bytes`, `Alignment`, `Endian`, `Volatile`, `Atomic` describe physical layout. `ElementType`, `FixedSize`, `InsertAt`, `ExtractFrom`, `AllowIndex`, `AllowSlice`, `AllowArrow` describe collection behavior. Codecs provide encoding/decoding. Everything else (`String`, `Stack`, `Queue`, `HashMap`, etc.) is user-space Brief in `std/core.bv`.
+
+#### Primitive Kernel (compiler natively understands these)
+
+| Property | Type | Default | Meaning |
+|----------|------|---------|---------|
+| `Bytes` | `Int` | _required_ | Physical width in memory — LLVM `alloca`, VHDL width |
+| `Alignment` | `Int` | `= Bytes` | Alignment boundary — LLVM `align` |
+| `Endian` | `Enum` | `Little` | Byte order — LLVM `bswap`/load-store order |
+| `Volatile` | `Bool` | `false` | LLVM `load volatile`/`store volatile` |
+| `Atomic` | `Bool` | `false` | LLVM atomic operations |
+| `ElementType` | `Type` | _(none)_ | Unlocks `[]` and slicing — compiler synthesizes GEP/address-decoding |
+| `FixedSize` | `Bool` | _(none)_ | `false` unlocks `<-` / `->` — heap/circular buffer strategy |
+| `InsertAt` | `Expr` | _(none)_ | Index expression for insertion position: `0`, `:> Size`, `:> Size - N` |
+| `ExtractFrom` | `Expr` | _(none)_ | Index or `<: {}` query for extraction position |
+| `AllowIndex` | `Bool` | `true` | Override to `false` to block `[]` (Stack, Queue) |
+| `AllowSlice` | `Bool` | `true` | Override to `false` to block slicing |
+| `AllowArrow` | `Bool` | `true` | Override to `false` to block `<-`/`->` |
+| `Codec` | `Struct` | _(none)_ | Struct with `encode`/`decode` — literal translation at compile-time |
+
+`InsertAt`/`ExtractFrom` **expression forms the compiler recognizes:**
+
+| Expression | Strategy | Example |
+|---|---|---|
+| `0` | Constant front, head-pointer advance | `Queue` pop |
+| `:> Size` | Append position, pointer increments | `List`/`Queue` push |
+| `:> Size - N` | Offset from end, pointer decrements | `Stack` pop |
+| `<: { MIN(.k) }` | Maintain heap by key `k` | Priority queue |
+| `<: { MAX(.k) }` | Maintain heap by key `k` | Priority queue |
+
+Any other expression form is a **compile-time error** in Pass 1.
+
+#### Two-Pass Pipeline
+
+```
+┌─────────────────────────────────────────────┐
+│ PASS 1: Type-Universe Pass                  │
+│  - Collect all TopLevel::TypeDef            │
+│  - Resolve derivation chain to Bits         │
+│  - Inherit + override metadata              │
+│  - Validate Bytes required on all Bits types│
+│  - Validate InsertAt/ExtractFrom forms      │
+│  - Validate Codec has encode/decode         │
+│  - Evaluate refinement constraints [> 0]   │
+│  - FREEZE: type universe immutable          │
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│ PASS 2: Executable Pass                     │
+│  - Parse defn/txn/rct                       │
+│  - Resolve let x: Stack<T> against universe │
+│  - Validate :> projections against metadata │
+│  - Synthesize bracket/arrow from gates      │
+│  - Encode literals via Codec                │
+│  - Emit LLIR/VHDL with frozen metadata      │
+└─────────────────────────────────────────────┘
+```
+
+**What lives in `std/core.bv` (user-space, not in Rust compiler):**
+
+```brief
+Type U8    <: Bits { Bytes = 1; Alignment = 1; };
+Type U16   <: Bits { Bytes = 2; Alignment = 2; };
+Type U32   <: Bits { Bytes = 4; Alignment = 4; };
+Type U64   <: Bits { Bytes = 8; Alignment = 8; };
+Type Int   <: U64;
+Type Float <: Bits { Bytes = 8; Alignment = 8; };
+
+Type List<T> <: Bits {
+    ElementType = T;
+    FixedSize = false;
+    InsertAt = :> Size;
+    ExtractFrom = :> Size - 1;
+};
+Type Stack<T> <: List<T> { AllowIndex = false; };
+Type Queue<T> <: List<T> { ExtractFrom = 0; AllowIndex = false; };
+
+import { Utf8 } from "std/utf8.bv";
+Type String <: List<U8> { Codec = Utf8; };
+```
+
+#### Implementation Steps
 
 | Step | Action | Files |
 |------|--------|-------|
-| 1.5.1 | Add `TypeDef` keyword to lexer | `lexer.rs` |
-| 1.5.2 | Add `TopLevel::TypeDef` variant + new `ProjectionTarget` variants (Volatile, Atomic, Endian, ClockDomain, BitWidth, Access, IndexAccess, Push, Pop, Unique, SIMD, Width) | `ast.rs` |
-| 1.5.3 | Implement `parse_type_def()` + constraint target validation in parser | `parser.rs` |
-| 1.5.4 | Create `features/toplevel/typedef.rs` with typecheck + codegen | NEW |
-| 1.5.5 | Router arm in typechecker (constraint type validation + compile-time regex enforcement) | `typechecker.rs` |
-| 1.5.6 | Router arms in backends (LLVM: emit width/volatile/atomic/endian/bswap; VHDL: clock domain/width) | `llvm.rs`, `vhdl.rs`, `webstack.rs` |
-| 1.5.7 | Skip arm in interpreter (type defs are compile-time only) | `interpreter.rs` |
-| 1.5.8 | Tests: parser (6+), typechecker (5+), Kani fast harnesses (pure match dispatch) | `parser.rs`, `typechecker.rs`, + kani |
+| 1.5.1 | Add `TopLevel::TypeDef`, `TypeProperty` enum, `Expr::TypeRef` | `ast.rs` |
+| 1.5.2 | Create `src/type_universe.rs` — Pass 1 resolver | NEW |
+| 1.5.3 | Implement `parse_type_def()` in parser | `parser.rs` |
+| 1.5.4 | Create `features/toplevel/typedef.rs` with 5 stub impls + TypeProperty processing | NEW |
+| 1.5.5 | Router arms: typechecker, interpreter, annotator (skip — compile-time only) | `typechecker.rs`, `interpreter.rs`, `annotator.rs` |
+| 1.5.6 | Router arms: LLVM synthesize load/store from metadata; VHDL width | `llvm.rs`, `vhdl.rs`, `webstack.rs` |
+| 1.5.7 | Tests: parse typedef, resolve U8/Bytes, verify AllowIndex=false blocks access | various |
+| 1.5.8 | Kani fast harnesses for TypeProperty dispatch | `typedef.rs` |
 | 1.5.9 | Architecture docs | `docs/architecture/features/typedef.md` |
 
-**Constraint grammar**:
+**Gate**: `cargo test --lib` + `cargo kani --lib` (fast group).
+
+---
+
+#### Superseded Design (Original Phase 1.5 — preserved for reference)
+
+The original plan hardcoded a fixed set of `ProjectionTarget` variants as settable type properties within `<:` blocks:
 
 ```brief
 Type Queue<T> <: List<T> {
@@ -423,17 +515,93 @@ Type Queue<T> <: List<T> {
 };
 ```
 
-**Settable vs query-only targets**:
+**Settable targets** (removed in new design): `Volatile`, `Atomic`, `Endian`, `ClockDomain`, `BitWidth`, `Access`, `IndexAccess`, `Push`, `Pop`, `Unique`, `SIMD`, `Width`.
 
-| Category | Targets |
-|----------|---------|
-| **Layout constraints** (set + read) | `Size`, `Bytes`, `Alignment`, `Range`, `BitWidth`, `Volatile`, `Atomic`, `Endian`, `ClockDomain`, `Match` |
-| **Behavioral constraints** (set + read) | `Access`, `IndexAccess`, `Push`, `Pop`, `Unique`, `SIMD`, `Width` |
-| **Query only (`:>`) — rejected in `<:` constraint block** | `Keys`, `Values`, `Contains`, `Pop`, `Index`, `Get`, `Top`, `Front`, `Elements`, `AsStack`, `AsQueue`, `Ptr`, `PtrBang`, `Type`, `Offset`, `Popcount`, `LeadingZeros`, `TrailingZeros`, `Absolute`, `BitReverse` |
+**Deleted from code**: These were never added to `ast.rs` — the design was superseded before implementation. No cleanup needed.
 
-**Future (Phase 6+)**: After TypeDef infrastructure is mature, deprecate `Value::Stack`/`Value::Queue` variants in the interpreter. Arrow dispatch checks type constraints instead of matching on enum variants. `AsStack`/`AsQueue` projection targets deprecated with migration warning.
+**Deprecation warning**: `AsStack`/`AsQueue` projection targets remain in the codebase but will be deprecated in Phase 6+ once behavioral type constraints (`InsertAt`/`ExtractFrom`/`AllowIndex`) provide equivalent functionality via `<:` derivation.
 
-**Total estimate**: ~600–800 lines. **Gate**: `cargo test --lib` + `cargo kani --lib` (fast group).
+---
+
+### Phase 1.5+ — Deferred Design (Important, Not Yet Implemented)
+
+The Phase 1.5 design conversation surfaced several profound ideas that are **NOT implemented yet** but must be preserved for future phases. They are documented here and marked `DEFERRED` in code.
+
+#### D-1: Expression Type Parameters (Universal Ordering)
+
+Instead of hardcoding `KeyExpr` or field names like `.priority`, a generic type like `KeyedQueue<T, K>` receives the ordering expression as a type parameter. The compiler validates at instantiation that `T → K` is a valid projection.
+
+```brief
+// DEFERRED — syntax and instantiation rules TBD
+Type KeyedQueue<T, K: Ordered> <: List<T> {
+    ExtractFrom = <: { MAX(K) };
+};
+```
+
+**Blockers**: Need a way to pass expressions as type parameters (not just types). The mechanism for binding `T →`→ `K` at instantiation is unresolved.
+
+#### D-2: Full Codec Signature Validation
+
+Codecs are structs imported from `std/` files. Pass 1 validates they have `encode`/`decode`.
+
+**Future scope**:
+- Duck-typing vs strict signature (`encode(self, LogicalType) -> StorageType`)
+- Generic codecs that work across multiple type pairs
+- Codec-defined `:>` targets (e.g., `:> Graphemes` for string character count)
+- Compile-time literal encoding via internal interpreter
+
+**Current implementation**: Minimal — just checks the struct has `encode` and `decode` fields. Full validation deferred.
+
+#### D-3: InsertAt/ExtractFrom Synthesized Strategies
+
+The compiler recognizes expression forms (`0`, `:> Size`, etc.) and validates them in Pass 1, but **does not yet synthesize**:
+- Shift strategies for `InsertAt = 1`
+- Circular buffer strategies for `InsertAt = 0` (prepend)
+- Heap maintenance for `ExtractFrom = <: { MAX(.k) }`
+
+**Current implementation**: Pass 1 validates the expression form. Strategy synthesis is a stub.
+
+#### D-4: Deprecation of AsStack/AsQueue Projection Targets
+
+Once `InsertAt`/`ExtractFrom`/`AllowIndex` are feature-complete, `ProjectionTarget::AsStack` and `ProjectionTarget::AsQueue` should be deprecated with a migration warning. Arrow dispatch should check type metadata instead of matching on `Value::Stack`/`Value::Queue`.
+
+**Current implementation**: Both variants still live in `ProjectionTarget` enum. Not yet deprecated.
+
+#### D-5: Bits Codec + :> Size Uniformity
+
+The relationship between `Bytes` (physical width) and `Size` (element count) for scalar types needs resolution:
+
+- `Int :> Size` currently errors ("requires collection type")
+- `String :> Size` returns byte count, not character count
+- Codecs should define codec-specific projections (`:> Runes`, `:> Graphemes`)
+
+**Current implementation**: Projection target matching is still hardcoded per value type in interpreter. Not yet codec-extensible.
+
+#### D-6: Volatile/Atomic as Both Pragma and Metadata
+
+The design decision: `#volatile` pragma on field declarations for ergonomics, `Volatile = true` on `Type` blocks for structural queries. The pragma sets the metadata. Implemented as a desugaring pass.
+
+**Current implementation**: Neither exists yet — both are deferred.
+
+#### D-7: Constraint-to-Self Refinement Syntax
+
+Refinement constraints in type bodies use implicit self:
+
+```brief
+Type PositiveInt <: Int {
+    [ > 0 && < 100 ]
+};
+```
+
+Pass 1 validates literals at compile time. Backend synthesizes runtime guards for dynamic values. The implicit self binding is `_` (consistent with `<:` query element binding).
+
+**Current implementation**: Syntax exists (`[ expr ]` within `TypeDefBody`), but runtime guard synthesis is deferred.
+
+#### D-8: CFG Files for Field-Level Metadata Matching
+
+Discussion touched on using `.` prefix expressions (`FILTER(.active)`) inside `<:` query blocks. `_` binds the current element; `.active` desugars to `_.active` for field access.
+
+**Current implementation**: `_` binding works in `<:` queries. `.active` field access on `_` works via existing FieldAccess desugaring. No special logic needed — already works.
 
 ### Phase 2 — Statement Features (13 files)
 

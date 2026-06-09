@@ -889,6 +889,9 @@ impl Interpreter {
                             self.callable_txns.insert(txn.name.clone(), txn.clone());
                         }
                     }
+                    TopLevel::TypeDef(_) => {
+                        // TypeDefs are compile-time only — skip.
+                    }
                     _ => {}
                 }
             }
@@ -938,7 +941,10 @@ impl Interpreter {
                             // If escaped, state is already restored and we continue
                         }
                     }
-                } else if let TopLevel::SyncGroup { item: inner, .. } = item {
+            } else if let TopLevel::TypeDef(_) = item {
+                // TypeDefs are compile-time only — skip at runtime.
+                // Phase 1.5: type_universe.rs handles resolution in Pass 1.
+            } else if let TopLevel::SyncGroup { item: inner, .. } = item {
                     if let TopLevel::Transaction(txn) = &**inner {
                         if txn.is_reactive {
                             let pre_val = self.eval_expr(&txn.contract.pre_condition)?;
