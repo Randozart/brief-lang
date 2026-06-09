@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::ast::*;
+use crate::features::traits::{ExprCodegenVHDL, ExprDispatch};
 use crate::linkage::LinkageConfig;
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -1176,6 +1177,9 @@ impl VhdlGenerator {
                 let f: Vec<String> = items.iter().map(|e| self.expr_to_string(e)).collect();
                 format!("({})", f.join(", "))
             }
+            Expr::BinaryOp(bop) => bop.emit_vhdl(self, &ExprDispatch),
+            Expr::UnaryOp(uop) => uop.emit_vhdl(self, &ExprDispatch),
+            Expr::Literal(lit) => lit.emit_vhdl(self, &ExprDispatch),
             _ => "'0'".to_string(),
         }
     }
@@ -1257,5 +1261,78 @@ use crate::ast::*;
         let files = backend.generate(&program);
         let output = files.iter().map(|(_, s)| s.as_str()).collect::<Vec<&str>>().join("\n");
         assert!(output.contains("signal_test"), "Should contain entity name");
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    fn make_vhdl_backend() -> VhdlGenerator {
+        let hw_config = HardwareConfig {
+            project: ProjectConfig { name: "kani".to_string(), version: "1.0".to_string() },
+            target: TargetConfig { fpga: "test".to_string(), clock_hz: 100_000_000, platform: None, synthesis: None },
+            interface: InterfaceConfig { name: "none".to_string(), address_width: None, data_width: None, controller: None, situs: None },
+            io: None,
+            memory: HashMap::new(),
+        };
+        VhdlGenerator::new("kani_test", hw_config)
+    }
+
+    #[kani::proof]
+    fn verify_vhdl_expr_literal_integer() {
+        let backend = make_vhdl_backend();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = backend.expr_to_string(&expr);
+        assert_eq!(result, "42");
+    }
+
+    #[kani::proof]
+    fn verify_vhdl_expr_literal_bool() {
+        let backend = make_vhdl_backend();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let result = backend.expr_to_string(&expr);
+        assert_eq!(result, "'1'");
+    }
+
+    #[kani::proof]
+    fn verify_vhdl_expr_literal_bool_false() {
+        let backend = make_vhdl_backend();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(false)));
+        let result = backend.expr_to_string(&expr);
+        assert_eq!(result, "'0'");
+    }
+
+    #[kani::proof]
+    fn verify_vhdl_expr_literal_float() {
+        let backend = make_vhdl_backend();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
+        let result = backend.expr_to_string(&expr);
+        assert!(!result.is_empty());
+    }
+
+    #[kani::proof]
+    fn verify_vhdl_expr_literal_string() {
+        let backend = make_vhdl_backend();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("hello".to_string())));
+        let result = backend.expr_to_string(&expr);
+        assert_eq!(result, "\"hello\"");
+    }
+
+    #[kani::proof]
+    fn verify_vhdl_expr_literal_char() {
+        let backend = make_vhdl_backend();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
+        let result = backend.expr_to_string(&expr);
+        assert!(result.contains("character"));
+    }
+
+    #[kani::proof]
+    fn verify_vhdl_expr_literal_term() {
+        let backend = make_vhdl_backend();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
+        let result = backend.expr_to_string(&expr);
+        assert_eq!(result, "true");
     }
 }

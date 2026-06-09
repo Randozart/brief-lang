@@ -120,6 +120,10 @@ pub enum Token {
     #[token("registry")]
     #[token("REGISTRY")]
     Registry,
+    #[token("type")]
+    #[token("TYPE")]
+    Type,
+
     #[token("struct")]
     #[token("STRUCT")]
     Struct,
@@ -282,6 +286,9 @@ pub enum Token {
     HashBang,
     #[token(";")]
     Semicolon,
+    #[token("<:")]
+    LtColon,
+
     #[token(":>")]
     ColonGreaterThan,
     #[token(":")]

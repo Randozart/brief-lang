@@ -7,6 +7,9 @@ edition = "2024"
 name = "brief_compiler"
 path = "src/lib.rs"
 
+[features]
+kani_full = []
+
 [[bin]]
 name = "brief-compiler"
 path = "src/main.rs"

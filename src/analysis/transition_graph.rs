@@ -951,7 +951,6 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
         Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => {
             out.insert(name.clone());
         }
-        Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term => {}
         // Self-identity operations (x == x, x >= x, x <= x) are tautologies that
         // don't actually observe the field's value. Skip them to avoid keeping
         // fields artificially alive in dead-field analysis.
@@ -1071,6 +1070,7 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
             Expr::SubtypeProjection { source, .. } => {
                 collect_identifiers(source, out);
             }
+            _ => {}
         }
     }
 
@@ -1371,5 +1371,34 @@ mod tests {
         assert!(node.bounded_pre.is_some());
         assert!(node.increments.is_some());
         assert!(node.is_pure_body);
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+
+    #[kani::proof]
+    fn verify_collect_identifiers_literal_integer() {
+        let mut out = HashSet::new();
+        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Integer(42)));
+        collect_identifiers(&expr, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[kani::proof]
+    fn verify_collect_identifiers_literal_bool() {
+        let mut out = HashSet::new();
+        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Bool(true)));
+        collect_identifiers(&expr, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[kani::proof]
+    fn verify_collect_identifiers_literal_term() {
+        let mut out = HashSet::new();
+        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Term));
+        collect_identifiers(&expr, &mut out);
+        assert!(out.is_empty());
     }
 }

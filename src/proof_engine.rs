@@ -23,6 +23,7 @@
 use crate::analysis::call_graph::CallGraph;
 use crate::analysis::region::RegionAnalyzer;
 use crate::ast::*;
+use crate::features::literal::LiteralExpr;
 use crate::errors::{Diagnostic, Severity, Span};
 use crate::sig_casting;
 use std::collections::{HashMap, HashSet};
@@ -119,6 +120,14 @@ pub enum SymbolicValue {
 impl SymbolicValue {
     fn from_expr(expr: &Expr, vars: &HashMap<String, SymbolicValue>) -> Self {
         match expr {
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Integer(n) => SymbolicValue::Concrete(*n),
+                LiteralExpr::Float(f) => SymbolicValue::ConcreteFloat(*f),
+                LiteralExpr::Bool(b) => SymbolicValue::Concrete(if *b { 1 } else { 0 }),
+                LiteralExpr::Char(c) => SymbolicValue::Concrete(*c as i64),
+                LiteralExpr::String(_) => SymbolicValue::Unknown,
+                LiteralExpr::Term => SymbolicValue::Unknown,
+            },
             Expr::Integer(n) => SymbolicValue::Concrete(*n),
             Expr::Float(f) => SymbolicValue::ConcreteFloat(*f),
             Expr::Bool(b) => SymbolicValue::Concrete(if *b { 1 } else { 0 }),
@@ -657,6 +666,10 @@ impl SymbolicExecutor {
 
     fn negate_expr(&self, expr: &Expr) -> Option<Expr> {
         match expr {
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Bool(b) => Some(Expr::Literal(Box::new(LiteralExpr::Bool(!b)))),
+                _ => None,
+            },
             Expr::Bool(b) => Some(Expr::Bool(!b)),
             Expr::Identifier(name) => Some(Expr::Not(Box::new(Expr::Identifier(name.clone())))),
             Expr::Eq(l, r) => Some(Expr::Ne(l.clone(), r.clone())),
@@ -688,6 +701,7 @@ impl SymbolicExecutor {
 
         match pre {
             Expr::Bool(true) => {}
+            Expr::Literal(lit) if matches!(lit.as_ref(), LiteralExpr::Bool(true)) => {}
             Expr::And(l, r) | Expr::Or(l, r) => {
                 let left_vars = self.extract_vars(l);
                 let right_vars = self.extract_vars(r);
@@ -709,7 +723,7 @@ impl SymbolicExecutor {
 
         // Add precondition as a path constraint so the symbolic executor
         // can use it to prune infeasible paths.
-        if !matches!(pre, Expr::Bool(true)) {
+        if !matches!(pre, Expr::Bool(true)) && pre.as_bool() != Some(true) {
             state.constraints.push(PathConstraint {
                 condition: pre.clone(),
                 is_negated: false,
@@ -788,7 +802,8 @@ impl SymbolicExecutor {
                     err.proof_chain.push("2. Path constraints:".to_string());
                     for (i, constraint) in path_state.constraints.iter().enumerate() {
                         let cond_str = format_expr(&constraint.condition);
-                        err.proof_chain.push(format!("   {}. {}", i + 1, cond_str));
+                        let neg = if constraint.is_negated { "¬" } else { "" };
+                        err.proof_chain.push(format!("   {}. {}{}", i + 1, neg, cond_str));
                     }
                 }
 
@@ -826,7 +841,7 @@ impl SymbolicExecutor {
         let mut terminated = false;
         let mut path_kind: PathKind = PathKind::Term(Vec::new());
 
-        for stmt in body {
+        for (i, stmt) in body.iter().enumerate() {
             if terminated {
                 break;
             }
@@ -866,10 +881,19 @@ impl SymbolicExecutor {
                         .with_constraint(condition.clone(), true);
 
                     let mut true_paths = Vec::new();
-                    self.enumerate_paths_recursive(statements, true_state, &mut true_paths);
+                    self.enumerate_paths_recursive(statements, true_state.clone(), &mut true_paths);
+
+                    // If the guard body didn't terminate (no term inside),
+                    // continue exploring the remaining body after the guard
+                    // so the guard-taken path reaches term.
+                    if true_paths.is_empty() && i + 1 < body.len() {
+                        self.enumerate_paths_recursive(&body[i + 1..], true_state, &mut true_paths);
+                    }
 
                     let mut false_paths = Vec::new();
-                    self.enumerate_paths_recursive(&body[1..], false_state, &mut false_paths);
+                    if i + 1 < body.len() {
+                        self.enumerate_paths_recursive(&body[i + 1..], false_state, &mut false_paths);
+                    }
 
                     for (s, pk) in true_paths.into_iter().chain(false_paths.into_iter()) {
                         paths.push((s, pk));
@@ -983,6 +1007,10 @@ impl SymbolicExecutor {
 
     fn is_truthy(&self, expr: &Expr, state: &SymbolicState) -> bool {
         match expr {
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Bool(b) => *b,
+                _ => true,
+            },
             Expr::Bool(b) => *b,
             Expr::Identifier(name) => {
                 // Volatile (trigger) variables are never provably truthy
@@ -1045,6 +1073,10 @@ impl SymbolicExecutor {
 
     fn eval_numeric(&self, expr: &Expr, state: &SymbolicState) -> Option<i64> {
         match expr {
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Integer(n) => Some(*n),
+                _ => None,
+            },
             Expr::Integer(n) => Some(*n),
             Expr::Identifier(name) => {
                 // Volatile (trigger) variables are never concretely evaluable
@@ -1075,6 +1107,16 @@ impl SymbolicExecutor {
                 let b = self.eval_numeric(r, state)?;
                 Some(a * b)
             }
+            Expr::Div(l, r) => {
+                let a = self.eval_numeric(l, state)?;
+                let b = self.eval_numeric(r, state)?;
+                if b == 0 { None } else { Some(a / b) }
+            }
+            Expr::Mod(l, r) => {
+                let a = self.eval_numeric(l, state)?;
+                let b = self.eval_numeric(r, state)?;
+                if b == 0 { None } else { Some(a % b) }
+            }
             _ => None,
         }
     }
@@ -1083,6 +1125,7 @@ impl SymbolicExecutor {
 
 fn format_expr(expr: &Expr) -> String {
     match expr {
+        Expr::Literal(lit) => lit.format(),
         Expr::Integer(n) => n.to_string(),
         Expr::Float(f) => f.to_string(),
         Expr::String(s) => format!("\"{}\"", s),
@@ -1114,6 +1157,76 @@ fn format_expr(expr: &Expr) -> String {
         }
         _ => "<expr>".to_string(),
     }
+}
+
+/// Check if a compound expression tree involves a variable by name.
+fn contains_var(expr: &Expr, var: &str) -> bool {
+    match expr {
+        Expr::Identifier(v) | Expr::PriorState(v) => v == var,
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r)
+        | Expr::Div(l, r) | Expr::Mod(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
+        | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
+        | Expr::And(l, r) | Expr::Or(l, r)
+        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+        | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
+            contains_var(l, var) || contains_var(r, var)
+        }
+        Expr::Not(i) | Expr::Neg(i) | Expr::BitNot(i) => contains_var(i, var),
+        _ => false,
+    }
+}
+
+/// Extract the sub-expression from AND that involves `var`.
+fn extract_var_relation<'a>(expr: &'a Expr, var: &str) -> Option<&'a Expr> {
+    match expr {
+        Expr::And(l, r) => {
+            if contains_var(l, var) {
+                extract_var_relation(l, var).or(Some(l))
+            } else if contains_var(r, var) {
+                extract_var_relation(r, var).or(Some(r))
+            } else {
+                None
+            }
+        }
+        Expr::Or(_, _) => None,
+        other => {
+            if contains_var(other, var) { Some(other) } else { None }
+        }
+    }
+}
+
+/// Evaluate a pure-integer constant expression. Returns None for non-constants.
+/// Resolves const identifiers from `initial_values`.
+fn eval_const_expr(expr: &Expr, initial_values: &HashMap<String, Expr>) -> Option<i64> {
+    match expr {
+        Expr::Integer(n) => Some(*n),
+        Expr::Literal(lit) => match lit.as_ref() {
+            crate::features::literal::LiteralExpr::Integer(n) => Some(*n),
+            _ => None,
+        },
+        Expr::Add(l, r) => Some(eval_const_expr(l, initial_values)? + eval_const_expr(r, initial_values)?),
+        Expr::Sub(l, r) => Some(eval_const_expr(l, initial_values)? - eval_const_expr(r, initial_values)?),
+        Expr::Mul(l, r) => Some(eval_const_expr(l, initial_values)? * eval_const_expr(r, initial_values)?),
+        Expr::Identifier(name) => {
+            let resolved = initial_values.get(name)?;
+            eval_const_expr(resolved, initial_values)
+        }
+        _ => None,
+    }
+}
+
+/// Check for `var & (var - 1)` popcount decay pattern.
+/// Handles both `Expr::Integer(1)` and `Expr::Literal(Boolean(1))` variants.
+fn is_self_minus_one(a: &Expr, b: &Expr, var: &str) -> bool {
+    let is_one = |e: &Expr| -> bool {
+        matches!(e, Expr::Integer(1))
+            || matches!(e, Expr::Literal(lit) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Integer(1)))
+    };
+    matches!(a, Expr::Identifier(v) if v == var)
+        && matches!(b, Expr::Sub(inner, val)
+            if matches!(inner.as_ref(), Expr::Identifier(v) if v == var)
+                && is_one(val.as_ref()))
 }
 
 /// Extract the variable name and bound expression from a comparison.
@@ -1191,19 +1304,21 @@ fn check_convergence(
     };
 
     // Step 2: Validate post → ¬pre
+    // Extract var-involving sub-expression from AND/OR preconditions
+    let pre_for_var = extract_var_relation(pre_condition, &var).unwrap_or(pre_condition);
     let pre_valid = match post_condition {
         // post: var == bound → pre must be <, >, or !=
-        Expr::Eq(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<", ">", "!="]),
+        Expr::Eq(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &["<", ">", "!="]),
         // post: var >= bound → pre must be <
-        Expr::Ge(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<"]),
+        Expr::Ge(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &["<"]),
         // post: var > bound → pre must be <=
-        Expr::Gt(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<="]),
+        Expr::Gt(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &["<="]),
         // post: var <= bound → pre must be >
-        Expr::Le(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &[">"]),
+        Expr::Le(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &[">"]),
         // post: var < bound → pre must be >=
-        Expr::Lt(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &[">="]),
+        Expr::Lt(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &[">="]),
         // post: var != bound → pre must be ==
-        Expr::Ne(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["=="]),
+        Expr::Ne(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &["=="]),
         _ => false,
     };
     if !pre_valid {
@@ -1224,25 +1339,66 @@ fn check_convergence(
             }
             match expr {
                 Expr::Add(a, b) => {
-                    if let (Expr::Identifier(v), Expr::Integer(d)) = (a.as_ref(), b.as_ref()) {
-                        if v == &var && *d > 0 {
-                            step = *d;
-                            direction = 1;
+                    if let Expr::Identifier(v) = a.as_ref() {
+                        if v == &var {
+                            if let Some(d) = b.as_integer() {
+                                if d > 0 {
+                                    step = d;
+                                    direction = 1;
+                                }
+                            }
+                            // Compound: count = count + Sub(N, M) → count + (N-M)
+                            if step == 0 {
+                                if let Expr::Sub(oa, ob) = b.as_ref() {
+                                    if let (Some(n), Some(m)) = (eval_const_expr(oa, initial_values), eval_const_expr(ob, initial_values)) {
+                                        let net = n - m;
+                                        if net > 0 { step = net; direction = 1; }
+                                    }
+                                }
+                            }
                         }
                     }
-                    if let (Expr::Integer(d), Expr::Identifier(v)) = (a.as_ref(), b.as_ref()) {
-                        if v == &var && *d > 0 {
-                            step = *d;
-                            direction = 1;
+                    if let Expr::Identifier(v) = b.as_ref() {
+                        if v == &var {
+                            if let Some(d) = a.as_integer() {
+                                if d > 0 {
+                                    step = d;
+                                    direction = 1;
+                                }
+                            }
                         }
                     }
                 }
                 Expr::Sub(a, b) => {
-                    if let (Expr::Identifier(v), Expr::Integer(d)) = (a.as_ref(), b.as_ref()) {
-                        if v == &var && *d > 0 {
-                            step = *d;
-                            direction = -1;
+                    if let Expr::Identifier(v) = a.as_ref() {
+                        if v == &var {
+                            if let Some(d) = b.as_integer() {
+                                if d > 0 {
+                                    step = d;
+                                    direction = -1;
+                                }
+                            }
                         }
+                    }
+                    // Compound: count = (count + N) - M → count + (N-M)
+                    if step == 0 {
+                        if let Expr::Add(inner, offset) = a.as_ref() {
+                            if let Expr::Identifier(v) = inner.as_ref() {
+                                if *v == var {
+                                    if let (Some(n), Some(m)) = (eval_const_expr(offset, initial_values), eval_const_expr(b, initial_values)) {
+                                        let net = n - m;
+                                        if net > 0 { step = net; direction = 1; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // popcount decay: reg & (reg - 1) → clears one bit per iteration
+                Expr::BitAnd(a, b) => {
+                    if is_self_minus_one(a, b, &var) || is_self_minus_one(b, a, &var) {
+                        step = 1;
+                        direction = -1;
                     }
                 }
                 _ => {}
@@ -1272,17 +1428,11 @@ fn check_convergence(
     // Step 5: Overshoot detection — only matters for exact-equality postcondition
     // when the step size is greater than 1 (e.g., count = count + 5 could skip past bound).
     if matches!(post_condition, Expr::Eq(_, _)) && step > 1 {
-        let init_val = initial_values.get(&var).and_then(|e| match e {
-            Expr::Integer(n) => Some(*n),
-            _ => None,
-        });
+        let init_val = initial_values.get(&var).and_then(|e| e.as_integer());
         // Bound value: could be from initial_values, or a literal integer in bound_expr
         let bound_val = match &bound_expr {
-            Expr::Integer(n) => Some(*n),
-            Expr::Identifier(name) => initial_values.get(name).and_then(|e| match e {
-                Expr::Integer(n) => Some(*n),
-                _ => None,
-            }),
+            e if e.as_integer().is_some() => e.as_integer(),
+            Expr::Identifier(name) => initial_values.get(name).and_then(|e| e.as_integer()),
             _ => None,
         };
 
@@ -1384,6 +1534,23 @@ impl ProofEngine {
             }
         }
 
+        // Build definition and transaction lookup maps for assertion chains
+        let mut initial_definitions: HashMap<&str, &Definition> = HashMap::new();
+        let mut initial_txns: HashMap<&str, &Transaction> = HashMap::new();
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                initial_definitions.insert(&defn.name, defn);
+            } else if let TopLevel::Transaction(txn) = item {
+                initial_txns.insert(&txn.name, txn);
+            } else if let TopLevel::Test { item: inner, .. } = item {
+                match inner.as_ref() {
+                    TopLevel::Definition(defn) => { initial_definitions.insert(&defn.name, defn); }
+                    TopLevel::Transaction(txn) => { initial_txns.insert(&txn.name, txn); }
+                    _ => {}
+                }
+            }
+        }
+
         let mut sym_exec = SymbolicExecutor::new().with_volatile_vars(volatile_vars);
 
         for item in &program.items {
@@ -1409,6 +1576,43 @@ impl ProofEngine {
                 TopLevel::Definition(defn) => {
                     let errs = sym_exec.verify_definition(defn);
                     self.errors.extend(errs);
+                }
+                TopLevel::Assertion { pre, chain } => {
+                    // Verify assertion chain: pre → fn_a → fn_b → ... → post
+                    let mut current_pre = pre.clone();
+                    for fn_name in chain {
+                        if let Some(defn) = initial_definitions.get(fn_name.as_str()) {
+                            let st = sym_exec.init_state_from_precondition(&current_pre);
+                            sym_exec.verify_contract_implication(
+                                &current_pre,
+                                &defn.contract.post_condition,
+                                &defn.body,
+                                st,
+                                format!("assertion chain '{:?}' step '{}'", chain, fn_name),
+                                false,
+                            );
+                            current_pre = defn.contract.post_condition.clone();
+                        } else if let Some(txn) = initial_txns.get(fn_name.as_str()) {
+                            let st = sym_exec.init_state_from_precondition(&current_pre);
+                            sym_exec.verify_contract_implication(
+                                &current_pre,
+                                &txn.contract.post_condition,
+                                &txn.body,
+                                st,
+                                format!("assertion chain '{:?}' step '{}'", chain, fn_name),
+                                false,
+                            );
+                            current_pre = txn.contract.post_condition.clone();
+                        } else {
+                            let err = ProofError::new("P012", "assertion chain: function not found")
+                                .with_explanation(&format!(
+                                    "Function '{}' in assertion chain not found", fn_name
+                                ));
+                            self.errors.push(err);
+                        }
+                    }
+                    // Transfer assertion verification errors from sym_exec to self
+                    self.errors.append(&mut sym_exec.errors);
                 }
                 _ => {}
             }
@@ -1739,8 +1943,8 @@ impl ProofEngine {
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
-                    let pre_is_trivial = matches!(&txn.contract.pre_condition, Expr::Bool(true));
-                    let post_is_trivial = matches!(&txn.contract.post_condition, Expr::Bool(true));
+                    let pre_is_trivial = txn.contract.pre_condition.as_bool() == Some(true);
+                    let post_is_trivial = txn.contract.post_condition.as_bool() == Some(true);
 
                     if pre_is_trivial && post_is_trivial && txn.contract.span.is_some() {
                         // BOTH trivial and explicitly written - hard error
@@ -1816,8 +2020,8 @@ impl ProofEngine {
                     }
                 }
                 TopLevel::Definition(defn) => {
-                    let pre_is_trivial = matches!(&defn.contract.pre_condition, Expr::Bool(true));
-                    let post_is_trivial = matches!(&defn.contract.post_condition, Expr::Bool(true));
+                    let pre_is_trivial = defn.contract.pre_condition.as_bool() == Some(true);
+                    let post_is_trivial = defn.contract.post_condition.as_bool() == Some(true);
 
                     if pre_is_trivial && post_is_trivial && defn.contract.span.is_some() {
                         let mut err = ProofError::new("P009", "trivial precondition");
@@ -2168,55 +2372,56 @@ impl ProofEngine {
 
     /// Extract (variable_name, comparison_op, value) from a comparison expression.
     fn extract_bound(&self, expr: &Expr) -> Option<(String, &str, i64)> {
+        fn bind_val(e: &Expr) -> Option<i64> { e.as_integer() }
         match expr {
             Expr::Gt(l, r) => {
                 if let Expr::Identifier(var) = l.as_ref() {
-                    if let Expr::Integer(val) = r.as_ref() {
-                        return Some((var.clone(), "gt", *val));
+                    if let Some(val) = bind_val(r) {
+                        return Some((var.clone(), "gt", val));
                     }
                 }
                 if let Expr::Identifier(var) = r.as_ref() {
-                    if let Expr::Integer(val) = l.as_ref() {
-                        return Some((var.clone(), "lt", *val));
+                    if let Some(val) = bind_val(l) {
+                        return Some((var.clone(), "lt", val));
                     }
                 }
                 None
             }
             Expr::Ge(l, r) => {
                 if let Expr::Identifier(var) = l.as_ref() {
-                    if let Expr::Integer(val) = r.as_ref() {
-                        return Some((var.clone(), "ge", *val));
+                    if let Some(val) = bind_val(r) {
+                        return Some((var.clone(), "ge", val));
                     }
                 }
                 if let Expr::Identifier(var) = r.as_ref() {
-                    if let Expr::Integer(val) = l.as_ref() {
-                        return Some((var.clone(), "le", *val));
+                    if let Some(val) = bind_val(l) {
+                        return Some((var.clone(), "le", val));
                     }
                 }
                 None
             }
             Expr::Lt(l, r) => {
                 if let Expr::Identifier(var) = l.as_ref() {
-                    if let Expr::Integer(val) = r.as_ref() {
-                        return Some((var.clone(), "lt", *val));
+                    if let Some(val) = bind_val(r) {
+                        return Some((var.clone(), "lt", val));
                     }
                 }
                 if let Expr::Identifier(var) = r.as_ref() {
-                    if let Expr::Integer(val) = l.as_ref() {
-                        return Some((var.clone(), "gt", *val));
+                    if let Some(val) = bind_val(l) {
+                        return Some((var.clone(), "gt", val));
                     }
                 }
                 None
             }
             Expr::Le(l, r) => {
                 if let Expr::Identifier(var) = l.as_ref() {
-                    if let Expr::Integer(val) = r.as_ref() {
-                        return Some((var.clone(), "le", *val));
+                    if let Some(val) = bind_val(r) {
+                        return Some((var.clone(), "le", val));
                     }
                 }
                 if let Expr::Identifier(var) = r.as_ref() {
-                    if let Expr::Integer(val) = l.as_ref() {
-                        return Some((var.clone(), "ge", *val));
+                    if let Some(val) = bind_val(l) {
+                        return Some((var.clone(), "ge", val));
                     }
                 }
                 None
@@ -2228,8 +2433,8 @@ impl ProofEngine {
     /// Extract (variable_name, value) from an equality expression.
     fn extract_eq_pair(&self, a: &Expr, b: &Expr) -> Option<(String, i64)> {
         match (a, b) {
-            (Expr::Identifier(name), Expr::Integer(val)) => Some((name.clone(), *val)),
-            (Expr::Integer(val), Expr::Identifier(name)) => Some((name.clone(), *val)),
+            (Expr::Identifier(name), b) => b.as_integer().map(|val| (name.clone(), val)),
+            (a, Expr::Identifier(name)) => a.as_integer().map(|val| (name.clone(), val)),
             _ => None,
         }
     }
@@ -2319,7 +2524,15 @@ impl ProofEngine {
                     self.collect_identifiers(arg, vars);
                 }
             }
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term => {}
+            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
+            | Expr::BinaryOp(_) | Expr::UnaryOp(_)
+            | Expr::ProjectionExpr(_) | Expr::CallExpr(_) | Expr::ListLiteralExpr(_)
+            | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_) | Expr::SliceExpr(_)
+            | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_) | Expr::StructInstanceExpr(_)
+            | Expr::ObjectLiteralExpr(_) | Expr::TupleExpr(_) | Expr::TupleDestructureExpr(_)
+            | Expr::EllipsisExpr(_) | Expr::ArrowMutExpr(_) | Expr::ArrowDiscardExpr(_) | Expr::ArrowTransferExpr(_)
+            | Expr::PatternMatchExpr(_) | Expr::MatchExpr(_) | Expr::BlockExpr(_) | Expr::SigCallExpr(_)
+            | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_) | Expr::TypeRef(_) => {}
             Expr::ListLiteral(elements) => {
                 for elem in elements {
                     self.collect_identifiers(elem, vars);
@@ -3018,17 +3231,11 @@ impl ProofEngine {
         for (i, values) in term_values.iter().enumerate() {
             let bool_outputs: Vec<&Option<Expr>> = values
                 .iter()
-                .filter(|v| {
-                    if let Some(Expr::Bool(_)) = v {
-                        true
-                    } else {
-                        false
-                    }
-                })
+                .filter(|v| v.as_ref().and_then(|e| e.as_bool()).is_some())
                 .collect();
 
             for (j, val) in bool_outputs.iter().enumerate() {
-                if let Some(Expr::Bool(false)) = val {
+                if val.as_ref().and_then(|e| e.as_bool()) == Some(false) {
                     let mut err = ProofError::new("P006", "true assertion failed");
                     err.explanation = format!(
                         "signature '{}' declares '-> true' but exit path {} returns false",
@@ -3651,5 +3858,263 @@ mod tests {
         // Convergence proven — no errors expected
         let has_error = errors.iter().any(|e| e.code == "P008" || e.code == "P005");
         assert!(!has_error, "!= postcondition convergence should produce no errors: {:?}", errors);
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_tests_fast {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    fn make_executor() -> SymbolicExecutor {
+        SymbolicExecutor::new()
+    }
+
+    fn make_engine() -> ProofEngine {
+        ProofEngine::new()
+    }
+
+    // ── SymbolicValue::from_expr ──
+
+    #[kani::proof]
+    fn verify_from_expr_literal_integer() {
+        let vars = HashMap::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = SymbolicValue::from_expr(&expr, &vars);
+        assert_eq!(result, SymbolicValue::Concrete(42));
+    }
+
+    #[kani::proof]
+    fn verify_from_expr_literal_bool_true() {
+        let vars = HashMap::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let result = SymbolicValue::from_expr(&expr, &vars);
+        assert_eq!(result, SymbolicValue::Concrete(1));
+    }
+
+    #[kani::proof]
+    fn verify_from_expr_literal_bool_false() {
+        let vars = HashMap::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(false)));
+        let result = SymbolicValue::from_expr(&expr, &vars);
+        assert_eq!(result, SymbolicValue::Concrete(0));
+    }
+
+    #[kani::proof]
+    fn verify_from_expr_literal_float() {
+        let vars = HashMap::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
+        let result = SymbolicValue::from_expr(&expr, &vars);
+        assert!(matches!(result, SymbolicValue::ConcreteFloat(_)));
+    }
+
+    #[kani::proof]
+    fn verify_from_expr_literal_string_is_unknown() {
+        let vars = HashMap::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("x".to_string())));
+        let result = SymbolicValue::from_expr(&expr, &vars);
+        assert_eq!(result, SymbolicValue::Unknown);
+    }
+
+    #[kani::proof]
+    fn verify_from_expr_literal_term_is_unknown() {
+        let vars = HashMap::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
+        let result = SymbolicValue::from_expr(&expr, &vars);
+        assert_eq!(result, SymbolicValue::Unknown);
+    }
+
+    // ── NegateExpr (on SymbolicExecutor) ──
+
+    #[kani::proof]
+    fn verify_negate_expr_literal_bool_true() {
+        let exec = make_executor();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let result = exec.negate_expr(&expr);
+        assert_eq!(result, Some(Expr::Literal(Box::new(LiteralExpr::Bool(false)))));
+    }
+
+    #[kani::proof]
+    fn verify_negate_expr_literal_bool_false() {
+        let exec = make_executor();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(false)));
+        let result = exec.negate_expr(&expr);
+        assert_eq!(result, Some(Expr::Literal(Box::new(LiteralExpr::Bool(true)))));
+    }
+
+    #[kani::proof]
+    fn verify_negate_expr_literal_non_bool_returns_none() {
+        let exec = make_executor();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = exec.negate_expr(&expr);
+        assert_eq!(result, None);
+    }
+
+    #[kani::proof]
+    fn verify_negate_expr_old_bool() {
+        let exec = make_executor();
+        let expr = Expr::Bool(true);
+        let result = exec.negate_expr(&expr);
+        assert_eq!(result, Some(Expr::Bool(false)));
+    }
+
+    // ── InitStateFromPrecondition (on SymbolicExecutor) ──
+
+    #[kani::proof]
+    fn verify_init_state_literal_bool_true() {
+        let exec = make_executor();
+        let pre = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let state = exec.init_state_from_precondition(&pre);
+        let _ = state;
+    }
+
+    #[kani::proof]
+    fn verify_init_state_old_bool_true() {
+        let exec = make_executor();
+        let pre = Expr::Bool(true);
+        let state = exec.init_state_from_precondition(&pre);
+        let _ = state;
+    }
+
+    // ── IsTruthy (on SymbolicExecutor) ──
+
+    #[kani::proof]
+    fn verify_is_truthy_literal_bool_true() {
+        let exec = make_executor();
+        let state = SymbolicState::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        assert!(exec.is_truthy(&expr, &state));
+    }
+
+    #[kani::proof]
+    fn verify_is_truthy_literal_bool_false() {
+        let exec = make_executor();
+        let state = SymbolicState::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(false)));
+        assert!(!exec.is_truthy(&expr, &state));
+    }
+
+    #[kani::proof]
+    fn verify_is_truthy_literal_non_bool() {
+        let exec = make_executor();
+        let state = SymbolicState::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        assert!(exec.is_truthy(&expr, &state));
+    }
+
+    // ── EvalNumeric (on SymbolicExecutor) ──
+
+    #[kani::proof]
+    fn verify_eval_numeric_literal_integer() {
+        let exec = make_executor();
+        let state = SymbolicState::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(99)));
+        let result = exec.eval_numeric(&expr, &state);
+        assert_eq!(result, Some(99));
+    }
+
+    #[kani::proof]
+    fn verify_eval_numeric_old_integer() {
+        let exec = make_executor();
+        let state = SymbolicState::new();
+        let expr = Expr::Integer(99);
+        let result = exec.eval_numeric(&expr, &state);
+        assert_eq!(result, Some(99));
+    }
+}
+
+// ── FULL: ProofEngine-based harnesses (bigger state) ──
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    fn make_engine() -> ProofEngine {
+        ProofEngine::new()
+    }
+
+    // ── ExtractBound (on ProofEngine) ──
+
+    #[kani::proof]
+    fn verify_extract_bound_gt_with_literal() {
+        let engine = make_engine();
+        let expr = Expr::Gt(
+            Box::new(Expr::Identifier("x".to_string())),
+            Box::new(Expr::Literal(Box::new(LiteralExpr::Integer(5)))),
+        );
+        let result = engine.extract_bound(&expr);
+        assert_eq!(result, Some(("x".to_string(), "gt", 5)));
+    }
+
+    #[kani::proof]
+    fn verify_extract_bound_lt_with_literal() {
+        let engine = make_engine();
+        let expr = Expr::Lt(
+            Box::new(Expr::Identifier("x".to_string())),
+            Box::new(Expr::Literal(Box::new(LiteralExpr::Integer(10)))),
+        );
+        let result = engine.extract_bound(&expr);
+        assert_eq!(result, Some(("x".to_string(), "lt", 10)));
+    }
+
+    #[kani::proof]
+    fn verify_extract_eq_pair_with_literal() {
+        let engine = make_engine();
+        let a = Expr::Identifier("x".to_string());
+        let b = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let result = engine.extract_eq_pair(&a, &b);
+        assert_eq!(result, Some(("x".to_string(), 42)));
+    }
+
+    #[kani::proof]
+    fn verify_extract_eq_pair_reversed_literal() {
+        let engine = make_engine();
+        let a = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let b = Expr::Identifier("x".to_string());
+        let result = engine.extract_eq_pair(&a, &b);
+        assert_eq!(result, Some(("x".to_string(), 42)));
+    }
+
+    // ── CheckTrivialContracts (on ProofEngine) ──
+
+    #[kani::proof]
+    fn verify_check_trivial_contracts_empty_program() {
+        let mut engine = make_engine();
+        let program = Program {
+            items: vec![],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: crate::ast::StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        engine.check_trivial_contracts(&program);
+        assert!(engine.errors.is_empty());
+    }
+
+    // ── ExtractBound with old-style Integer too ──
+
+    #[kani::proof]
+    fn verify_extract_bound_gt_old_style() {
+        let engine = make_engine();
+        let expr = Expr::Gt(
+            Box::new(Expr::Identifier("x".to_string())),
+            Box::new(Expr::Integer(5)),
+        );
+        let result = engine.extract_bound(&expr);
+        assert_eq!(result, Some(("x".to_string(), "gt", 5)));
+    }
+
+    #[kani::proof]
+    fn verify_extract_eq_pair_old_style() {
+        let engine = make_engine();
+        let a = Expr::Identifier("x".to_string());
+        let b = Expr::Integer(42);
+        let result = engine.extract_eq_pair(&a, &b);
+        assert_eq!(result, Some(("x".to_string(), 42)));
     }
 }

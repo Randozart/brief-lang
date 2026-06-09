@@ -1,0 +1,1125 @@
+# Brief Compiler Refactor: Pattern B Architecture
+
+**Date**: 2026-06-09  
+**Branch**: `refactor/pattern-b` (from `main`)  
+**Status**: Plan — awaiting execution signal
+
+---
+
+## Overview
+
+Refactor the ~78K-line Brief compiler from monolithic match-arm dispatching to a **Pattern B (Struct-Variant Delegation)** architecture, where each AST construct lives in its own feature file with co-located parsing, typechecking, evaluation, and codegen logic.
+
+This eliminates ~232 Praetor complexity violations, makes the codebase navigable by feature ("open one file, see one concept"), and prepares the compiler for self-hosting.
+
+---
+
+## Pragmas
+
+### `#test("group1", "group2")` — Per-item decoration, no semicolon
+
+```brief
+#test("config")
+txn test_parse_config() [true][true] { ... };
+
+#test("vars", "config")
+txn test_validate_vars() [true][true] { ... };
+```
+
+- Parsed via extended `parse_hashtag_modifiers`
+- `Hashtag` gets new field `groups: Vec<String>`
+- Wraps next item as `TopLevel::Test { item: Box<TopLevel>, groups: Vec<String> }`
+
+### `#assert [pre] -> fnY -> fnZ` — Inline assertion, no semicolon
+
+```brief
+#assert [number == 5] -> funcY -> funcZ
+txn my_func() [true][true] { ... };
+```
+
+- The item's own name is implicit start of the transition chain
+- Proof engine verifies the chain at compile time
+
+### `#!assert [pre] fnX -> fnY -> fnZ;` — Global assertion, semicolon required
+
+```brief
+#!assert [trigger == true] funcX -> funcY -> funcZ;
+```
+
+- Parsed in the `#!` directive loop (parallel to `#!exit`)
+- Stored as `TopLevel::Assertion { pre: Expr, chain: Vec<String> }`
+
+### Compilation modes
+
+| Mode | Tests compiled? | Folding budget |
+|------|----------------|----------------|
+| `--dev` (default) | ✅ Included | 256 |
+| `--prod` | ❌ Excluded | `u64::MAX` |
+| `--prod --include-tests` | ✅ Included | `u64::MAX` |
+| `--dev --exclude-tests` | ❌ Excluded | 256 |
+
+CLI: `brief run --test --group config` runs only tests tagged with `"config"`.
+
+---
+
+## Directory Structure
+
+```
+src/
+  features/
+    mod.rs                   # Module declarations, re-exports
+    traits.rs                # Trait definitions
+
+    # Expression features
+    literal.rs               # Integer, Float, String, Char, Bool, Term
+    identifier.rs            # Identifier, OwnedRef, PriorState
+    binary_op.rs             # 18 arithmetic/comparison/logical/bitwise ops
+    unary_op.rs              # Not, Neg, BitNot
+    call.rs                  # Call
+    projection.rs            # Projection + 18 ProjectionTarget variants
+    collection.rs            # ListLiteral, ListIndex, Slice, MultiSlice
+    map.rs                   # MapLiteral
+    set.rs                   # SetLiteral
+    tuple.rs                 # Tuple, TupleDestructure
+    field.rs                 # FieldAccess, StructInstance, ObjectLiteral
+    pattern_match.rs         # PatternMatch
+    match_expr.rs            # Match
+    block.rs                 # Block
+    arrow.rs                 # ArrowMut, ArrowDiscard, ArrowTransfer
+    subtype.rs               # SubtypeProjection + 14 SubtypeOp variants
+    cast.rs                  # Cast
+    concat.rs                # Concat
+    sig_call.rs              # SigCall
+    dbvl.rs                  # DbvlTable
+    ellipsis.rs              # Ellipsis
+
+    # Statement features
+    stmt/
+      mod.rs
+      assignment.rs
+      let_binding.rs
+      guarded.rs
+      term.rs
+      escape.rs
+      expression.rs
+      unification.rs
+      inline_asm.rs
+      local_trigger.rs
+      alka.rs
+      on_exit.rs
+      sync_block.rs
+
+    # TopLevel features
+    toplevel/
+      mod.rs
+      signature.rs
+      definition.rs
+      transaction.rs
+      state_decl.rs
+      trigger.rs
+      constant.rs
+      import_lnk.rs          # Import + LinkDependency
+      foreign.rs
+      resource.rs
+      struct_def.rs
+      rstruct.rs
+      enum_def.rs
+      render.rs
+      svg.rs
+      sync_group.rs
+      typedef.rs             # Type derivation via `<:` constraints
+      test.rs                # #test pragma
+      assertion.rs           # #!assert / #assert pragma
+
+  backend/
+    router.rs                # Central backend dispatch
+    llvm.rs                  # Slimmed to ~3,000 lines (see LLVM strategy)
+    llvm_optimizer.rs        # NEW — folded loop, SSA, decision tree
+    vhdl.rs                  # Slimmed to ~400 lines
+    webstack.rs              # Slimmed to ~800 lines
+    ...                      # Other backends unchanged
+
+  ast.rs                     # ~400 lines (enum variants → boxed feature structs)
+  interpreter.rs             # ~500 lines (pure router)
+  typechecker.rs             # ~400 lines (pure router)
+  parser.rs                  # ~2,000 lines (token dispatch + precedence climbing)
+  proof_engine.rs            # ~800 lines (symbolic engine)
+
+  _monolithic/               # Old files, Praetor-ignored, deleted in Phase 8
+```
+
+---
+
+## Trait Definitions (`features/traits.rs`)
+
+One trait per concern, per backend. Separate traits = separate compilation units (changing VHDL emission doesn't recompile LLVM).
+
+```rust
+/// Parse: Parser routes tokens to feature struct constructors
+pub trait ExprParse {
+    type Output;
+    fn parse(parser: &mut Parser) -> Self::Output;
+}
+
+/// Typecheck: Typechecker routes each Expr variant to its feature
+pub trait ExprTypecheck {
+    fn typecheck(
+        &self,
+        ctx: &mut TypecheckContext,
+        dispatch: &ExprDispatch,
+    ) -> Result<Type, TypeError>;
+}
+
+/// Eval: Interpreter routes each Expr variant to its feature
+pub trait ExprEval {
+    fn evaluate(
+        &self,
+        ctx: &mut EvalContext,
+        dispatch: &ExprDispatch,
+    ) -> Result<Value, RuntimeError>;
+}
+
+/// LLVM Codegen — feature structs reference &mut LlvmBackend directly
+pub trait ExprCodegenLLVM {
+    fn emit_llvm(
+        &self,
+        ctx: &mut LlvmBackend,
+        out: &mut String,
+        dispatch: &ExprDispatch,
+    ) -> TypedRegister;
+}
+
+/// VHDL Codegen
+pub trait ExprCodegenVHDL {
+    fn emit_vhdl(
+        &self,
+        ctx: &mut VHDLContext,
+        dispatch: &ExprDispatch,
+    ) -> String;
+}
+
+/// Webstack Codegen
+pub trait ExprCodegenWebstack {
+    fn emit_js(
+        &self,
+        ctx: &mut WebstackContext,
+        dispatch: &ExprDispatch,
+    ) -> String;
+}
+```
+
+Each feature struct implements only the traits relevant to it. Missing backend impls fall through to the router's default stub (existing behavior: `add i64 0, 0` for LLVM, `'0'` for VHDL, etc.).
+
+---
+
+## AST Transformation (`ast.rs`)
+
+Each enum variant wraps a boxed feature struct:
+
+```rust
+pub enum Expr {
+    Literal(Box<features::literal::LiteralExpr>),
+    Add(Box<features::binary_op::BinaryOpExpr>),
+    Sub(Box<features::binary_op::BinaryOpExpr>),
+    Call(Box<features::call::CallExpr>),
+    Projection(Box<features::projection::ProjectionExpr>),
+    // ... 54 variants total
+}
+
+pub enum Statement {
+    Assignment(Box<features::stmt::assignment::AssignmentStmt>),
+    Let(Box<features::stmt::let_binding::LetStmt>),
+    // ... 13 variants total
+}
+
+pub enum TopLevel {
+    Definition(Box<features::toplevel::definition::DefinitionItem>),
+    Transaction(Box<features::toplevel::transaction::TransactionItem>),
+    Struct(Box<features::toplevel::struct_def::StructItem>),
+    Test { item: Box<TopLevel>, groups: Vec<String> },
+    Assertion { pre: Expr, chain: Vec<String> },
+    // ... 17 variants total
+}
+```
+
+---
+
+## Router Pattern
+
+Each main pass becomes a pure dispatch function. Feature structs call `dispatch` for sub-expression recursion.
+
+```rust
+// interpreter.rs — ~500 lines
+pub fn eval_expr(expr: &Expr, ctx: &mut EvalContext, dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
+    match expr {
+        Expr::Literal(n) => n.evaluate(ctx, dispatch),
+        Expr::Add(n) => n.evaluate(ctx, dispatch),
+        Expr::Call(n) => n.evaluate(ctx, dispatch),
+        // 54 variants, 1 line each
+    }
+}
+```
+
+---
+
+## Feature File Template (`features/literal.rs`)
+
+```rust
+// ── Struct ──────────────────────────────────────────────
+pub enum LiteralExpr {
+    Integer(i64),
+    Float(f64),
+    String(String),
+    Char(char),
+    Bool(bool),
+    Term,
+}
+
+// ── Parse ───────────────────────────────────────────────
+impl ExprParse for LiteralExpr { ... }
+
+// ── Typecheck ───────────────────────────────────────────
+impl ExprTypecheck for LiteralExpr { ... }
+
+// ── Eval ────────────────────────────────────────────────
+impl ExprEval for LiteralExpr { ... }
+
+// ── LLVM Codegen ────────────────────────────────────────
+impl ExprCodegenLLVM for LiteralExpr {
+    fn emit_llvm(&self, ctx: &mut LlvmBackend, out: &mut String, dispatch: &ExprDispatch) -> TypedRegister {
+        match self {
+            LiteralExpr::Integer(n) => { ctx.writeln!(out, "..."); }
+            // ...
+        }
+    }
+}
+
+// ── VHDL Codegen ────────────────────────────────────────
+impl ExprCodegenVHDL for LiteralExpr { ... }
+
+// ── Webstack Codegen ────────────────────────────────────
+impl ExprCodegenWebstack for LiteralExpr { ... }
+
+// ── Unit tests ──────────────────────────────────────────
+#[cfg(test)]
+mod tests { ... }
+```
+
+---
+
+## LLVM Backend Strategy — Pragmatic Extraction
+
+The LLVM backend (7,799 lines) has optimizations deeply interwoven with codegen:
+
+| Optimization | Location | Strategy |
+|---|---|---|
+| `simplify()` pre-pass | Inline in `emit_expr` | ✅ Hoist to pre-pass on `Program` before codegen |
+| Peephole folding | Inline in `emit_binop`/`emit_fcmp` | ✅ Move to pre-pass or keep in helpers |
+| `emit_expr` match arms (22 variants) | `emit_expr` (622 lines) | ✅ Extract into feature `ExprCodegenLLVM` impls |
+| `emit_stmt` match arms (13 variants) | `emit_stmt` (385 lines) | ✅ Extract into statement feature files |
+| Optimization decision tree | `generate()` (898 lines) | ⚠️ Extract to `backend/llvm_optimizer.rs` (self-contained) |
+| Folded loop engine (4 functions) | 700 lines | ⛔ Keep centralized — spans features, manages phi/SSA state |
+| SSA mode + pre-extraction | 150 lines | ⛔ Keep centralized |
+| Parallel reactor + dispatch chain | 260 lines | ⛔ Keep centralized |
+| Perfect hashing | 30 lines | ✅ Extract to separate helper |
+| SLP hazard analysis | 100 lines | ✅ Already separate |
+| `LlvmBackend` struct (48 fields) | 78 lines | ⛔ Keep as-is — context object shared by all feature impls |
+| Tests (86 tests) | 2,837 lines | ⛔ Keep intact — integration tests |
+
+**Result**: `llvm.rs` shrinks from 7,799 to ~3,000 lines. The struct stays. The tests stay. The folded loop engine stays. The match arms move to feature files.
+
+Feature files reference `&mut LlvmBackend` directly:
+
+```rust
+impl ExprCodegenLLVM for LiteralExpr {
+    fn emit_llvm(&self, ctx: &mut LlvmBackend, out: &mut String, dispatch: &ExprDispatch) -> TypedRegister {
+        // ctx.txn_counter, ctx.let_bindings, ctx.writeln!() — all available
+    }
+}
+```
+
+**Why this works**: Each match arm is self-contained — takes `expr`, produces `TypedRegister`, uses `&mut self` for shared state. Moving them to feature files is pure mechanical extraction with zero behavioral change.
+
+---
+
+## VHDL and Webstack Backends
+
+Same treatment: expression/statement codegen moves into feature files. Their optimization strategies are deferred — developed after the main refactor, using LLVM as the testing ground.
+
+---
+
+## Old File Retention (`_monolithic/`)
+
+Old files move to `_monolithic/` as they are superseded. Praetor ignores the directory:
+
+```toml
+# .praetor.toml
+[files]
+ignore = ["src/_monolithic/**"]
+```
+
+Deleted only in Phase 8 after full test parity is confirmed.
+
+---
+
+## Migration Phases
+
+### Phase 0 — Scaffolding
+
+| Step | Action |
+|------|--------|
+| 0.1 | Create branch `refactor/pattern-b` |
+| 0.2 | Create `src/features/mod.rs`, `features/traits.rs` |
+| 0.3 | Create `src/backend/router.rs` (empty dispatch) |
+| 0.4 | Create `src/_monolithic/` with `.gitkeep`, update `.praetor.toml` |
+| 0.5 | Update `src/lib.rs` to declare `pub mod features;` |
+
+**Gate**: `cargo build` succeeds.
+
+### Phase 1 — Expr Features (28 files, 4 sub-steps)
+
+| Step | Feature | Rationale | Status |
+|------|---------|-----------|--------|
+| 1.1 | literal | Simplest — proof of concept | ✅ **Done** |
+| 1.2 | binary_op, unary_op | Mechanical extraction (18+3 variants) | 🔜 Next |
+| 1.3 | call, projection, collection, map, set, tuple, field | Medium complexity | ⏳ |
+| 1.4 | pattern_match, match, block, arrow, subtype, cast, concat, sig_call, dbvl, ellipsis | Higher complexity | ⏳ |
+
+**Per sub-step**:
+1. Create feature file with struct + trait impls
+2. Add new variant to `Expr` enum in `ast.rs`
+3. Add delegation arm in all 38 router methods
+4. `cargo test --lib` ✅
+5. Remove old inline match arm logic
+6. `cargo test --lib` ✅
+7. Move old code to `_monolithic/`
+
+---
+
+### Phase 1.5 — `TopLevel::TypeDef` (Type Derivation via Primitive Kernel)
+
+> ⚠️ **Supersedes prior 1.5 design.** The original—hardcoded `ProjectionTarget` variants (Volatile, Atomic, Endian, etc.) as settable type properties—is preserved as-is below under **"Superseded Design"** for reference. The new design drastically shrinks the primitive kernel. Old content is non-destructively retained.
+
+**Rationale**: "What is the smallest set of primitives the Rust compiler must hardcode so that everything else can be defined in Brief?"
+
+The answer: **~10 primitives.** `Bytes`, `Alignment`, `Endian`, `Volatile`, `Atomic` describe physical layout. `ElementType`, `FixedSize`, `InsertAt`, `ExtractFrom`, `AllowIndex`, `AllowSlice`, `AllowArrow` describe collection behavior. Codecs provide encoding/decoding. Everything else (`String`, `Stack`, `Queue`, `HashMap`, etc.) is user-space Brief in `std/core.bv`.
+
+#### Primitive Kernel (compiler natively understands these)
+
+| Property | Type | Default | Meaning |
+|----------|------|---------|---------|
+| `Bytes` | `Int` | _required_ | Physical width in memory — LLVM `alloca`, VHDL width |
+| `Alignment` | `Int` | `= Bytes` | Alignment boundary — LLVM `align` |
+| `Endian` | `Enum` | `Little` | Byte order — LLVM `bswap`/load-store order |
+| `Volatile` | `Bool` | `false` | LLVM `load volatile`/`store volatile` |
+| `Atomic` | `Bool` | `false` | LLVM atomic operations |
+| `ElementType` | `Type` | _(none)_ | Unlocks `[]` and slicing — compiler synthesizes GEP/address-decoding |
+| `FixedSize` | `Bool` | _(none)_ | `false` unlocks `<-` / `->` — heap/circular buffer strategy |
+| `InsertAt` | `Expr` | _(none)_ | Index expression for insertion position: `0`, `:> Size`, `:> Size - N` |
+| `ExtractFrom` | `Expr` | _(none)_ | Index or `<: {}` query for extraction position |
+| `AllowIndex` | `Bool` | `true` | Override to `false` to block `[]` (Stack, Queue) |
+| `AllowSlice` | `Bool` | `true` | Override to `false` to block slicing |
+| `AllowArrow` | `Bool` | `true` | Override to `false` to block `<-`/`->` |
+| `Codec` | `Struct` | _(none)_ | Struct with `encode`/`decode` — literal translation at compile-time |
+
+`InsertAt`/`ExtractFrom` **expression forms the compiler recognizes:**
+
+| Expression | Strategy | Example |
+|---|---|---|
+| `0` | Constant front, head-pointer advance | `Queue` pop |
+| `:> Size` | Append position, pointer increments | `List`/`Queue` push |
+| `:> Size - N` | Offset from end, pointer decrements | `Stack` pop |
+| `<: { MIN(.k) }` | Maintain heap by key `k` | Priority queue |
+| `<: { MAX(.k) }` | Maintain heap by key `k` | Priority queue |
+
+Any other expression form is a **compile-time error** in Pass 1.
+
+#### Two-Pass Pipeline
+
+```
+┌─────────────────────────────────────────────┐
+│ PASS 1: Type-Universe Pass                  │
+│  - Collect all TopLevel::TypeDef            │
+│  - Resolve derivation chain to Bits         │
+│  - Inherit + override metadata              │
+│  - Validate Bytes required on all Bits types│
+│  - Validate InsertAt/ExtractFrom forms      │
+│  - Validate Codec has encode/decode         │
+│  - Evaluate refinement constraints [> 0]   │
+│  - FREEZE: type universe immutable          │
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│ PASS 2: Executable Pass                     │
+│  - Parse defn/txn/rct                       │
+│  - Resolve let x: Stack<T> against universe │
+│  - Validate :> projections against metadata │
+│  - Synthesize bracket/arrow from gates      │
+│  - Encode literals via Codec                │
+│  - Emit LLIR/VHDL with frozen metadata      │
+└─────────────────────────────────────────────┘
+```
+
+**What lives in `std/core.bv` (user-space, not in Rust compiler):**
+
+```brief
+Type U8    <: Bits { Bytes = 1; Alignment = 1; };
+Type U16   <: Bits { Bytes = 2; Alignment = 2; };
+Type U32   <: Bits { Bytes = 4; Alignment = 4; };
+Type U64   <: Bits { Bytes = 8; Alignment = 8; };
+Type Int   <: U64;
+Type Float <: Bits { Bytes = 8; Alignment = 8; };
+
+Type List<T> <: Bits {
+    ElementType = T;
+    FixedSize = false;
+    InsertAt = :> Size;
+    ExtractFrom = :> Size - 1;
+};
+Type Stack<T> <: List<T> { AllowIndex = false; };
+Type Queue<T> <: List<T> { ExtractFrom = 0; AllowIndex = false; };
+
+import { Utf8 } from "std/utf8.bv";
+Type String <: List<U8> { Codec = Utf8; };
+```
+
+#### Implementation Steps
+
+| Step | Action | Files |
+|------|--------|-------|
+| 1.5.1 | Add `TopLevel::TypeDef`, `TypeProperty` enum, `Expr::TypeRef` | `ast.rs` |
+| 1.5.2 | Create `src/type_universe.rs` — Pass 1 resolver | NEW |
+| 1.5.3 | Implement `parse_type_def()` in parser | `parser.rs` |
+| 1.5.4 | Create `features/toplevel/typedef.rs` with 5 stub impls + TypeProperty processing | NEW |
+| 1.5.5 | Router arms: typechecker, interpreter, annotator (skip — compile-time only) | `typechecker.rs`, `interpreter.rs`, `annotator.rs` |
+| 1.5.6 | Router arms: LLVM synthesize load/store from metadata; VHDL width | `llvm.rs`, `vhdl.rs`, `webstack.rs` |
+| 1.5.7 | Tests: parse typedef, resolve U8/Bytes, verify AllowIndex=false blocks access | various |
+| 1.5.8 | Kani fast harnesses for TypeProperty dispatch | `typedef.rs` |
+| 1.5.9 | Architecture docs | `docs/architecture/features/typedef.md` |
+
+**Gate**: `cargo test --lib` + `cargo kani --lib` (fast group).
+
+---
+
+#### Superseded Design (Original Phase 1.5 — preserved for reference)
+
+The original plan hardcoded a fixed set of `ProjectionTarget` variants as settable type properties within `<:` blocks:
+
+```brief
+Type Queue<T> <: List<T> {
+    Access = "FIFO";
+    IndexAccess = false;
+    Push = "back";
+    Pop = "front";
+};
+```
+
+**Settable targets** (removed in new design): `Volatile`, `Atomic`, `Endian`, `ClockDomain`, `BitWidth`, `Access`, `IndexAccess`, `Push`, `Pop`, `Unique`, `SIMD`, `Width`.
+
+**Deleted from code**: These were never added to `ast.rs` — the design was superseded before implementation. No cleanup needed.
+
+**Deprecation warning**: `AsStack`/`AsQueue` projection targets remain in the codebase but will be deprecated in Phase 6+ once behavioral type constraints (`InsertAt`/`ExtractFrom`/`AllowIndex`) provide equivalent functionality via `<:` derivation.
+
+---
+
+### Phase 1.5+ — Deferred Design (Important, Not Yet Implemented)
+
+The Phase 1.5 design conversation surfaced several profound ideas that are **NOT implemented yet** but must be preserved for future phases. They are documented here and marked `DEFERRED` in code.
+
+#### D-1: Expression Type Parameters (Universal Ordering)
+
+Instead of hardcoding `KeyExpr` or field names like `.priority`, a generic type like `KeyedQueue<T, K>` receives the ordering expression as a type parameter. The compiler validates at instantiation that `T → K` is a valid projection.
+
+```brief
+// DEFERRED — syntax and instantiation rules TBD
+Type KeyedQueue<T, K: Ordered> <: List<T> {
+    ExtractFrom = <: { MAX(K) };
+};
+```
+
+**Blockers**: Need a way to pass expressions as type parameters (not just types). The mechanism for binding `T →`→ `K` at instantiation is unresolved.
+
+#### D-2: Full Codec Signature Validation
+
+Codecs are structs imported from `std/` files. Pass 1 validates they have `encode`/`decode`.
+
+**Future scope**:
+- Duck-typing vs strict signature (`encode(self, LogicalType) -> StorageType`)
+- Generic codecs that work across multiple type pairs
+- Codec-defined `:>` targets (e.g., `:> Graphemes` for string character count)
+- Compile-time literal encoding via internal interpreter
+
+**Current implementation**: Minimal — just checks the struct has `encode` and `decode` fields. Full validation deferred.
+
+#### D-3: InsertAt/ExtractFrom Synthesized Strategies
+
+The compiler recognizes expression forms (`0`, `:> Size`, etc.) and validates them in Pass 1, but **does not yet synthesize**:
+- Shift strategies for `InsertAt = 1`
+- Circular buffer strategies for `InsertAt = 0` (prepend)
+- Heap maintenance for `ExtractFrom = <: { MAX(.k) }`
+
+**Current implementation**: Pass 1 validates the expression form. Strategy synthesis is a stub.
+
+#### D-4: Deprecation of AsStack/AsQueue Projection Targets
+
+Once `InsertAt`/`ExtractFrom`/`AllowIndex` are feature-complete, `ProjectionTarget::AsStack` and `ProjectionTarget::AsQueue` should be deprecated with a migration warning. Arrow dispatch should check type metadata instead of matching on `Value::Stack`/`Value::Queue`.
+
+**Current implementation**: Both variants still live in `ProjectionTarget` enum. Not yet deprecated.
+
+#### D-5: Bits Codec + :> Size Uniformity
+
+The relationship between `Bytes` (physical width) and `Size` (element count) for scalar types needs resolution:
+
+- `Int :> Size` currently errors ("requires collection type")
+- `String :> Size` returns byte count, not character count
+- Codecs should define codec-specific projections (`:> Runes`, `:> Graphemes`)
+
+**Current implementation**: Projection target matching is still hardcoded per value type in interpreter. Not yet codec-extensible.
+
+#### D-6: Volatile/Atomic as Both Pragma and Metadata
+
+The design decision: `#volatile` pragma on field declarations for ergonomics, `Volatile = true` on `Type` blocks for structural queries. The pragma sets the metadata. Implemented as a desugaring pass.
+
+**Current implementation**: Neither exists yet — both are deferred.
+
+#### D-7: Constraint-to-Self Refinement Syntax
+
+Refinement constraints in type bodies use implicit self:
+
+```brief
+Type PositiveInt <: Int {
+    [ > 0 && < 100 ]
+};
+```
+
+Pass 1 validates literals at compile time. Backend synthesizes runtime guards for dynamic values. The implicit self binding is `_` (consistent with `<:` query element binding).
+
+**Current implementation**: Syntax exists (`[ expr ]` within `TypeDefBody`), but runtime guard synthesis is deferred.
+
+#### D-8: CFG Files for Field-Level Metadata Matching
+
+Discussion touched on using `.` prefix expressions (`FILTER(.active)`) inside `<:` query blocks. `_` binds the current element; `.active` desugars to `_.active` for field access.
+
+**Current implementation**: `_` binding works in `<:` queries. `.active` field access on `_` works via existing FieldAccess desugaring. No special logic needed — already works.
+
+### Phase 2 — Statement Features (13 files)
+
+| Step | Feature |
+|------|---------|
+| 2.1 | assignment |
+| 2.2 | let_binding |
+| 2.3 | guarded |
+| 2.4 | term (Term + TermBang) |
+| 2.5 | escape, expression |
+| 2.6 | unification, inline_asm, local_trigger, alka, on_exit, sync_block |
+
+Same per-step workflow. **Gate**: `cargo test --lib` after each.
+
+### Phase 3 — TopLevel Features (17 files)
+
+| Step | Feature |
+|------|---------|
+| 3.1 | signature, definition, transaction |
+| 3.2 | struct_def, rstruct, enum_def |
+| 3.3 | state_decl, trigger, constant |
+| 3.4 | import_lnk, foreign, resource |
+| 3.5 | render, svg, sync_group |
+
+**Gate**: `cargo test --lib` after each.
+
+### Phase 4 — Router Pass Simplification
+
+| File | Before | After | Change |
+|------|--------|-------|--------|
+| `interpreter.rs` | 5,504 | ~500 | Inline logic → pure router |
+| `typechecker.rs` | 2,157 | ~400 | 450-line `infer_expression` → pure router |
+| `parser.rs` | 7,389 | ~2,000 | Token dispatch + precedence remains; constructors delegate |
+| `proof_engine.rs` | 3,655 | ~800 | `SymbolicValue::from_expr` → router; feature files handle symbolic conversion |
+| `ast.rs` | 1,240 | ~400 | Enum variants → boxed feature structs |
+| `backend/mod.rs` | 841 | ~200 | Tree-walk helpers → feature files |
+| `backend/llvm.rs` | 7,799 | ~3,000 | `emit_expr`/`emit_stmt` → routers; `simplify` hoisted; decision tree extracted |
+| `backend/router.rs` | 0 | ~200 | NEW — central backend dispatch |
+| `backend/vhdl.rs` | 1,261 | ~400 | `expr_to_string` → router |
+| `backend/webstack.rs` | 2,230 | ~800 | `expr_to_js_value` → router |
+
+**Gate**: `cargo test --lib` + verify 0 new Praetor violations.
+
+### Phase 5 — `#test("group")` Pragma
+
+| File | Change |
+|------|--------|
+| `ast.rs` | Add `TopLevel::Test { item, groups }`, `groups` field on `Hashtag` |
+| `parser.rs` | Extend `parse_hashtag_modifiers` for `#test(...)` |
+| `features/toplevel/test.rs` | New: `TestItem` struct with typecheck/eval/codegen |
+| `interpreter.rs` | Skip `TopLevel::Test` in prod; include in test mode |
+| `typechecker.rs` | Typecheck inner item normally |
+| `backend/*.rs` | Omit `TopLevel::Test` in prod output |
+| `main.rs` | Add `--test`, `--group`, `--include-tests`, `--exclude-tests` flags |
+
+**Test**: `#test("group") txn test_a() ...;` compiles only under `--dev` or `--prod --include-tests`. `--group config` filters to matching groups.
+
+### Phase 6 — `#!assert` / `#assert` Pragma
+
+| File | Change |
+|------|--------|
+| `ast.rs` | Add `TopLevel::Assertion { pre, chain }` |
+| `parser.rs` | Add `#!assert` arm in `#!` directive loop; `#assert` in `parse_hashtag_modifiers` |
+| `features/toplevel/assertion.rs` | New: symbolic chain verification |
+| `proof_engine.rs` | Integrate assertion verification into `verify_program` |
+| `typechecker.rs` | Validate chain element names exist as functions/transactions |
+
+**Test**: `#!assert [x > 0] fnA -> fnB -> fnC;` triggers symbolic chain at compile time.
+
+### Phase 7 — Backend Optimization Prep
+
+| File | Change |
+|------|--------|
+| `backend/llvm_optimizer.rs` | NEW — extract decision tree from `generate()`, reference folded loop engine |
+| `backend/llvm.rs` | Remove decision tree; keep `emit_*` routers + struct + tests |
+
+**Nothing behavioral changes**. Pure file reorganization.
+
+**Gate**: `cargo test --lib`
+
+### Phase 8 — Praetor Baseline + Trash Folder Setup
+
+**File size targets** (agreed 2026-06-09):
+- **Feature files (leaf nodes)**: 100–500 lines — one concept, fits in working memory
+- **Coordinator files (routers)**: 1,000–2,000 lines — dispatch only, no execution logic
+- **`_monolithic/`**: trash folder, Praetor-ignored, old code goes here after replacement
+
+#### Steps
+
+| Step | Action |
+|------|--------|
+| 8.1 | Configure `.praetor.toml` to ignore `src/_monolithic/**` |
+| 8.2 | Run Praetor on all of `src/` (minus `_monolithic/`) — capture baseline |
+| 8.3 | Set CI gate: "0 new diagnostics outside `_monolithic/`" |
+| 8.4 | `cargo test --lib` — all tests pass |
+| 8.5 | Run benchmark suite — no regression vs `main` |
+| 8.6 | Commit baseline state |
+
+**Outcome**: Clear contract from this point — every commit keeps Praetor clean.
+
+---
+
+### Phase 9 — Interpreter Migration (~30 cycles)
+
+**Goal**: `interpreter.rs` from 5,590 → ~800 lines.
+
+**Strategy**: Each cycle moves one expression or statement variant's evaluation from `eval_expr`/`exec_stmt` inline match arms into the feature file's `ExprEval` / `StmtEval` impl. Old arm code goes to `_monolithic/interpreter_old.rs`.
+
+#### Per-cycle workflow
+
+```
+1. Identify next unsolved feature (e.g. CallExpr → ExprEval for call.rs)
+2. Read the current inline match arm in interpreter.rs
+3. Implement the feature file's evaluate() method (real logic, not stub)
+4. Add routing arm in eval_expr for the Pattern B variant
+5. cargo test --lib + benchmarks ✅
+6. Move old arm code to _monolithic/interpreter_old.rs section
+7. Write/update docs/architecture/features/<name>.md
+   - Syntax, typechecking, evaluation, codegen notes
+   - Kani/Praetor notes
+8. Commit
+```
+
+#### Priority order (most-used first)
+
+| Cycle | Feature | Status |
+|-------|---------|--------|
+| 9.1–9.3 | Literal, BinaryOp, UnaryOp | ✅ done in Phase 4 |
+| 9.4 | **CallExpr** — function calls | 🔜 |
+| 9.5 | **ProjectionExpr** — `:>` operator | ⏳ |
+| 9.6 | **FieldAccessExpr** — `.` field access | ⏳ |
+| 9.7 | **StructInstanceExpr / ObjectLiteralExpr** — struct/tuple construction | ⏳ |
+| 9.8 | **ListLiteralExpr / MapLiteralExpr / SetLiteralExpr** — collection literals | ⏳ |
+| 9.9 | **TupleExpr / TupleDestructureExpr** — tuple operations | ⏳ |
+| 9.10 | **SliceExpr / MultiSliceExpr** — slicing | ⏳ |
+| 9.11 | **ArrowMutExpr / ArrowDiscardExpr / ArrowTransferExpr** — `<-` mutation | ⏳ |
+| 9.12 | **MatchExpr / PatternMatchExpr** — pattern matching | ⏳ |
+| 9.13 | **BlockExpr** — block expressions | ⏳ |
+| 9.14–9.17 | Remaining Expr features | ⏳ |
+| 9.18–9.30 | All 13 Statement features (StmtEval) | ⏳ |
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 10 — Typechecker Migration (~15 cycles)
+
+**Goal**: `typechecker.rs` from 2,265 → ~500 lines.
+
+**Strategy**: Move `infer_expression` match arms into `ExprTypecheck` trait impls. The `infer_expression` becomes `pub` (or uses `ExprDispatch`) so feature files can call it for sub-expression typechecking.
+
+#### Per-cycle workflow
+
+Same as Phase 9, but for `ExprTypecheck` trait impls.
+
+#### Challenges
+
+- `infer_expression` is currently private — feature files cannot call it
+- Solution: Add an `infer_type` method to `ExprDispatch` that calls back into the typechecker
+- Or: make `infer_expression` `pub(crate)` so feature files can call it directly
+
+| Cycle | Feature | Status |
+|-------|---------|--------|
+| 10.1–10.3 | BinaryOp, UnaryOp typecheck | ⏳ |
+| 10.4–10.15 | Remaining 12 Expr features | ⏳ |
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 11 — Parser Migration (~20 cycles)
+
+**Goal**: `parser.rs` from 7,639 → ~2,000 lines.
+
+**Strategy**: Each `parse_*` function moves to its feature file's parse helper. The parser retains: token dispatch, precedence climbing, error recovery.
+
+| Cycle | Feature | Status |
+|-------|---------|--------|
+| 11.1–11.15 | Expr parse functions (15) | ⏳ |
+| 11.6–11.8 | Statement parse functions (3) | ⏳ |
+| 11.9–11.14 | TopLevel parse functions (6) | ⏳ |
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 12 — LLVM Backend Migration (~20 cycles)
+
+**Goal**: `backend/llvm.rs` from 7,675 → ~2,500 lines.
+
+**Strategy**: Move `emit_expr` and `emit_stmt` match arms into `ExprCodegenLLVM` / `StmtCodegenLLVM` trait impls. The folded loop engine, SSA mode, async dispatch infrastructure, and the decision tree (already in `llvm_optimizer.rs`) stay centralized.
+
+#### What stays in `llvm.rs`
+- `LlvmBackend` struct (48 fields)
+- `generate()` entry point
+- `emit_header()`, `emit_declares()` — global IR infrastructure
+- `emit_folded_loop()` + `emit_folded_main()` — loop engine
+- `emit_reactor()` / `emit_parallel_reactor()` — dispatch chain
+- SSA state management
+- `emit_main()` — program entry
+- All 86 integration tests
+
+#### What moves to feature files
+- `emit_expr` arms (22 Expr variants)
+- `emit_stmt` arms (13 Statement variants)
+- `emit_*` helpers used only by individual variants
+
+#### Per-cycle workflow
+
+```
+1. Identify next Expr/Statement variant in emit_expr/emit_stmt
+2. Clone the match arm logic into the feature file's ExprCodegenLLVM impl
+3. Replace the inline arm with a delegate call
+4. cargo test --lib + benchmarks ✅
+5. Move old arm code to _monolithic/llvm_old.rs
+6. Write/update feature doc with codegen details
+7. Commit
+```
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 13 — Proof Engine Extraction (~10 cycles)
+
+**Goal**: `proof_engine.rs` from 4,120 → ~1,000 lines.
+
+**Strategy**: Move `SymbolicValue::from_expr` pattern matching into feature files' symbolic conversion helpers. The path exploration (`enumerate_paths_recursive`), convergence analysis (`check_convergence`), and contract verification stay centralized.
+
+#### What stays in `proof_engine.rs`
+- `check_convergence()` — syntactic convergence detection
+- `enumerate_paths_recursive()` — path exploration
+- `verify_contract_implication()` — symbolic post-condition check
+- `verify_transaction()` / `verify_definition()` — entry points
+- `SymbolicExecutor` struct + `SymbolicValue` enum
+
+#### What moves to feature files
+- `SymbolicValue::from_expr()` pattern matching per Expr variant
+- `implies()` could be partially extracted for per-variant logic
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 14 — AST Cleanup + Old Variant Removal
+
+**Trigger**: Only after ALL dispatch has been migrated to feature files.
+
+**Goal**: `ast.rs` from 1,544 → ~500 lines. No old enum variants remain.
+
+| Step | Action |
+|------|--------|
+| 14.1 | Verify 0 old-variant references in imports across the codebase |
+| 14.2 | Remove old Expr variants from `ast.rs` enum |
+| 14.3 | Remove old Statement variants from `ast.rs` enum |
+| 14.4 | Move removed enum definitions to `_monolithic/ast_old.rs` |
+| 14.5 | Remove `_monolithic/ast_old.rs` entirely (safety net no longer needed) |
+| 14.6 | `cargo test --lib` — final verification |
+| 14.7 | `bash benchmarks/build_and_bench.sh` — **full benchmark regression check** |
+| 14.8 | If any benchmark shows regression, investigate and fix before merge |
+
+#### Benchmark Sensitivity
+
+After old variant removal, the compiler's dispatch is 100% through feature trait methods. This changes nothing about the generated code — the trait methods emit the same LLVM IR as the old inline arms. But there are two areas of risk:
+
+1. **Inlining**: The old dispatch was direct (match arm → inline code). The new dispatch goes through a trait method. LLVM's inliner handles this fine, but verify with `build_and_bench.sh`.
+2. **Precomputation budget**: The `--optimize-budget` flag controls how many iterations the compiler precomputes. If a benchmark shows implausible results (0.001s for real work), the budget or the precomputation logic may need adjustment.
+
+Both risks are detected by the benchmark harness, not unit tests.
+
+---
+
+### Final File Size Targets
+
+| File | Starting | Target | After Phase |
+|------|----------|--------|-------------|
+| `interpreter.rs` | 5,590 | ~800 | Phase 9 |
+| `typechecker.rs` | 2,265 | ~500 | Phase 10 |
+| `parser.rs` | 7,639 | ~2,000 | Phase 11 |
+| `backend/llvm.rs` | 7,675 | ~2,500 | Phase 12 |
+| `proof_engine.rs` | 4,120 | ~1,000 | Phase 13 |
+| `ast.rs` | 1,544 | ~500 | Phase 14 |
+| `features/*` (45 files) | 0 | 100–500 each | Phases 1–13 |
+| `_monolithic/` | empty | grows then deleted | Phases 9–14 |
+
+---
+
+## Documentation Strategy — Every Cycle Ships Docs
+
+**Key principle**: Architectural documentation is written in the SAME commit as the code change, not in a separate documentation phase.
+
+### What each feature file needs
+
+| Doc section | Content | Length |
+|-------------|---------|--------|
+| Header | Purpose, date added, which phase | 2 lines |
+| Syntax | Brief syntax for the construct, with examples | 10–30 lines |
+| Typechecking | How types are inferred/checked | 5–15 lines |
+| Evaluation | How it evaluates in the interpreter | 5–15 lines |
+| Codegen | Per-backend codegen notes (LLVM, VHDL, Webstack) | 10–30 lines |
+| Kani/Praetor | Any special considerations | 3–5 lines |
+
+### File: `docs/architecture/features/<name>.md`
+
+**53 feature docs total** (15 Expr + 13 Stmt + 17 TopLevel + 5 backend + 5 coordinator = partially done).
+
+| Category | Count | Status | When written |
+|----------|-------|--------|-------------|
+| Expr features | 15 | 2 done (literal, typedef) | During Phase 9 eval migration |
+| Stmt features | 13 | 0 done | During Phase 9 eval migration |
+| TopLevel features | 17 | 0 done | During Phase 3/5/6 (already shipped) |
+| Coordinators | 5 | 0 done | As each coordinator shrinks |
+| Backends | 5 | 0 done | As each backend extracts |
+
+**Coordinator docs** cover: how the dispatcher works, what stays centralized, error handling, and interaction patterns. These are written as the coordinator's size drops to ~2,000 lines.
+
+### File: `docs/architecture/features/<coordinator>.md`
+
+For example, `docs/architecture/features/parser.md` would cover:
+- Token dispatch strategy
+- Precedence climbing algorithm
+- Error recovery
+- Each `parse_*` function's feature file location
+
+---
+
+## Praetor Enforcement Model
+
+```
+src/features/          → 0 diagnostics (strict gate, blocks commit)
+src/ (rest, no trash)  → baseline captured in Phase 8, must not increase
+src/_monolithic/       → ignored entirely by Praetor
+```
+
+### `.praetor.toml`
+
+```toml
+[files]
+ignore = ["src/_monolithic/**"]
+
+[rules]
+cyclomatic_limit = 15
+cognitive_limit = 15
+lines_limit = 100
+params_limit = 6
+nesting_limit = 6
+```
+
+### CI gate (via `scripts/verify.sh`)
+
+```bash
+# 1. Check new diagnostics outside _monolithic/
+praetor validate --baseline praetor-baseline.json --target ./src --ignore src/_monolithic/
+
+# 2. Full strict validation on feature files
+praetor validate --warn --target ./src/features
+
+# 3. Unit tests
+cargo test --lib
+
+# 4. Kani fast group
+cargo kani --lib
+```
+
+---
+
+## Key Principles
+
+| Principle | Rationale |
+|-----------|-----------|
+| **One file, one concept** | Open `features/call.rs` → see parse/typecheck/eval/LLVM/VHDL/Webstack/tests for `Call` in one place |
+| **LLVM: pragmatic extraction** | Extract match arms into features; keep folded loop / SSA / decision tree centralized. 80% benefit, 20% risk. |
+| **Backend-independent** | Separate traits per backend. Missing trait = router's default stub. Backend work is purely additive. |
+| **Incremental, test-gated** | `cargo test --lib` after every sub-step. Never more than one migration away from green. |
+| **Doc-per-cycle** | Architecture docs ship in the same commit as the code change. No batch documentation phases. |
+| **Praetor-clean from day one** | Every new function ≤ 100 lines, complexity ≤ 15, params ≤ 6. Old code quarantined in `_monolithic/`. |
+| **Semicolon rule** | `#!` global directives get `;`. `#` decorations do not — they belong to the item they prepend. |
+| **Benchmark as guard** | `build_and_bench.sh` after every phase — if Brief beats C by an implausible margin, something is wrong. |
+| **Feature files 100–500 lines** | Leaf nodes fit in working memory. Coordinators 1,000–2,000 lines. |
+
+---
+
+## Comprehensive Architecture Documentation Index
+
+| Path | Content | Status |
+|------|---------|--------|
+| `docs/architecture/overview.md` | System architecture, module responsibilities, pass flow | ✅ Updated 2026-06-09 |
+| `docs/architecture/channel-map.md` | Data flow between passes, Pattern B integration | ✅ Updated 2026-06-09 |
+| `docs/architecture/glossary.md` | All compiler terms defined | ✅ Updated 2026-06-09 |
+| `docs/architecture/praetor-log.md` | Running log of diagnostics found/resolved | ✅ Updated 2026-06-09 |
+| `docs/architecture/backend-strategy.md` | Per-backend design notes | ⏳ |
+| `docs/architecture/features/literal.md` | LiteralExpr — integer, float, string, char, bool, term | ✅ Done |
+| `docs/architecture/features/typedef.md` | TypeDef — type derivation system | ✅ Done |
+| `docs/architecture/features/statement.md` | Statement feature files (grouped) | ✅ Done |
+| `docs/architecture/features/toplevel.md` | TopLevel feature files (grouped) | ✅ Done |
+| `docs/architecture/features/proof-engine-convergence.md` | Proof engine convergence analysis | ✅ Done |
+| `docs/architecture/features/binary_op.md` | Binary op expressions | 📝 Phase 9 |
+| `docs/architecture/features/unary_op.md` | Unary op expressions | 📝 Phase 9 |
+| `docs/architecture/features/call.md` | Function calls | 📝 Phase 9 |
+| `docs/architecture/features/projection.md` | `:>` projection operator | 📝 Phase 9 |
+| `docs/architecture/features/collection.md` | Collection literals (List, Map, Set) | 📝 Phase 9 |
+| `docs/architecture/features/tuple.md` | Tuple operations | 📝 Phase 9 |
+| `docs/architecture/features/field.md` | Field access, struct/object construction | 📝 Phase 9 |
+| `docs/architecture/features/pattern.md` | Pattern matching, match expressions | 📝 Phase 9 |
+| `docs/architecture/features/block.md` | Block expressions | 📝 Phase 9 |
+| `docs/architecture/features/arrow.md` | Arrow mutation (`<-`) | 📝 Phase 9 |
+| `docs/architecture/features/subtype.md` | Subtype projections | 📝 Phase 9 |
+| `docs/architecture/features/sigcall.md` | SigCall expressions | 📝 Phase 9 |
+| `docs/architecture/features/dbvl.md` | DbvlTable expressions | 📝 Phase 9 |
+| `docs/architecture/features/ellipsis.md` | Ellipsis expressions | 📝 Phase 9 |
+| `docs/architecture/features/assignment.md` | Assignment statements | 📝 Phase 9 |
+| `docs/architecture/features/let_binding.md` | Let binding statements | 📝 Phase 9 |
+| `docs/architecture/features/guarded.md` | Guarded statements | 📝 Phase 9 |
+| `docs/architecture/features/term.md` | Term/TermBang statements | 📝 Phase 9 |
+| `docs/architecture/features/escape.md` | Escape statements | 📝 Phase 9 |
+| `docs/architecture/features/expression.md` | Expression statements | 📝 Phase 9 |
+| `docs/architecture/features/unification.md` | Unification statements | 📝 Phase 9 |
+| `docs/architecture/features/inline_asm.md` | Inline assembly | 📝 Phase 9 |
+| `docs/architecture/features/local_trigger.md` | Local trigger statements | 📝 Phase 9 |
+| `docs/architecture/features/alka.md` | Alka statements | 📝 Phase 9 |
+| `docs/architecture/features/on_exit.md` | On-exit handlers | 📝 Phase 9 |
+| `docs/architecture/features/sync_block.md` | Sync block statements | 📝 Phase 9 |
+| `docs/architecture/features/signature.md` | Signature declarations | 📝 Phase 11 parser |
+| `docs/architecture/features/definition.md` | Function definitions | 📝 Phase 11 |
+| `docs/architecture/features/transaction.md` | Transaction declarations | 📝 Phase 11 |
+| `docs/architecture/features/state_decl.md` | State variable declarations | 📝 Phase 11 |
+| `docs/architecture/features/trigger.md` | Trigger declarations | 📝 Phase 11 |
+| `docs/architecture/features/constant.md` | Constant declarations | 📝 Phase 11 |
+| `docs/architecture/features/import_lnk.md` | Import, link dependency | 📝 Phase 11 |
+| `docs/architecture/features/foreign.md` | Foreign bindings (FFI) | 📝 Phase 11 |
+| `docs/architecture/features/resource.md` | Resource declarations | 📝 Phase 11 |
+| `docs/architecture/features/struct_def.md` | Struct definitions | 📝 Phase 11 |
+| `docs/architecture/features/rstruct.md` | RStruct definitions | 📝 Phase 11 |
+| `docs/architecture/features/enum_def.md` | Enum definitions | 📝 Phase 11 |
+| `docs/architecture/features/render.md` | Render blocks | 📝 Phase 11 |
+| `docs/architecture/features/svg.md` | SVG components | 📝 Phase 11 |
+| `docs/architecture/features/sync_group.md` | Sync group declarations | 📝 Phase 11 |
+| `docs/architecture/features/test.md` | Test pragmas | 📝 Phase 5 |
+| `docs/architecture/features/assertion.md` | Assertion directives | 📝 Phase 6 |
+| `docs/architecture/interpreter.md` | Interpreter router architecture | 📝 Phase 9 |
+| `docs/architecture/typechecker.md` | Typechecker router architecture | 📝 Phase 10 |
+| `docs/architecture/parser.md` | Parser router architecture | 📝 Phase 11 |
+| `docs/architecture/llvm.md` | LLVM backend architecture | 📝 Phase 12 |
+| `docs/architecture/llvm_optimizer.md` | Optimization decision tree | 📝 Phase 7 |
+| `docs/architecture/vhdl.md` | VHDL backend architecture | 📝 Phase 12 |
+| `docs/architecture/webstack.md` | Webstack backend architecture | 📝 Phase 12 |
+| `docs/architecture/proof_engine.md` | Full proof engine architecture | 📝 Phase 13 |
+
+---
+
+---
+
+### Phase 15 — LLVM Backend Refactor (2026-06-09)
+
+**Goal**: Split `backend/llvm.rs` (7,675 lines) into `backend/llvm/` subdirectory with ~6 focused files. Then move `emit_expr` arms into feature files' `ExprCodegenLLVM` impls.
+
+**Branch**: `refactor/llvm` — created from `main` after Phase 1–9 merge.
+
+#### Step 1: Baseline
+
+Run `bash benchmarks/build_and_bench.sh` on `refactor/pattern-b` before merge. Save results as baseline. Confirm identical numbers after merge.
+
+#### Step 2: Merge to main
+
+Merge `refactor/pattern-b` into `main` via `--no-ff` merge commit. Re-run benchmarks to confirm no regression from merge.
+
+#### Step 3: Directory split (no behavioral change)
+
+```
+src/backend/llvm.rs       → src/backend/llvm/
+  mod.rs                    Re-exports from sub-modules
+  backend.rs                LlvmBackend struct (48 fields), generate()
+  emit_expr.rs              emit_expr router + centralized emit helpers
+  emit_stmt.rs              emit_stmt router
+  folded_loop.rs            Folded loop engine (emit_folded_loop, SSA state, phi)
+  optimizer.rs              Already extracted (llvm_optimizer.rs, decision tree)
+  tests.rs                  86 integration tests
+```
+
+#### Step 4: Emit_expr → feature files (~20 cycles)
+
+Same pattern as interpreter migration: each `emit_expr` arm moves to the feature file's `ExprCodegenLLVM` impl. Each cycle:
+1. Move arm → feature file
+2. `cargo test --lib` + benchmarks
+3. Move old arm to `_monolithic/llvm_emits_old.rs`
+4. Commit
+
+#### Step 5: Final verification
+
+```bash
+bash benchmarks/build_and_bench.sh | diff - baseline.txt
+```
+
+Zero change expected — emit functions are pure string builders.
+
+#### File size targets after Phase 15
+
+| File | Before | Target |
+|------|--------|--------|
+| `backend/llvm.rs` (→ `backend/llvm/`) | 7,675 | split into ~6 files, most < 1,000 |
+| `emit_expr.rs` | N/A | ~800 (router + centralized helpers) |
+| `folded_loop.rs` | ~700 | ~700 (unchanged) |
+| `optimizer.rs` | ~200 | ~200 (unchanged) |
+
+---
+
+## Total Impact
+
+| Metric | Before refactor | Current | Target |
+|--------|----------------|---------|--------|
+| Feature files | 0 | 47 | ~60 |
+| Files dispatching `Expr::` | 38 | ~30 | 1 (the router) |
+| `interpreter.rs` | 5,507 lines | 5,590 | ~800 |
+| `parser.rs` | 7,452 lines | 7,639 | ~2,000 |
+| `typechecker.rs` | 2,166 lines | 2,265 | ~500 |
+| `llvm.rs` | 7,861 lines | 7,675 | ~2,500 |
+| `proof_engine.rs` | 3,655 lines | 4,120 | ~1,000 |
+| `ast.rs` | 1,422 lines | 1,544 | ~500 |
+| Architecture docs | 4 | 11 | ~60 |
+| Praetor violations | ~232 | TBD (Phase 8) | 0 |
+| Kani fast harnesses | 14 | 11 | 20–30 |

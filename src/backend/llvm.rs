@@ -14,7 +14,7 @@ fn escape_llvm_string(s: &str) -> String {
     out
 }
 
-fn float_to_llvm_hex(f: f64) -> String {
+pub(crate) fn float_to_llvm_hex(f: f64) -> String {
     let f32_val = f as f32;
     let bits = f32_val.to_bits();
     format!("{}", bits)
@@ -44,6 +44,7 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
 use crate::ast::{
     ArrowDir, BracketOp, DispatchMode, Expr, ForeignSignature, MatchArm, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
 };
+use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
 
 #[derive(Debug, Clone)]
 pub struct TypedRegister {
@@ -176,19 +177,7 @@ fn trg_llvm_storage_ty(ty: &Type) -> &str {
 
 /// Returns true if the expression is a direct reference to one of the given
 /// trigger names (i.e., the precondition is `trg_name` with no operators).
-fn is_trigger_gated(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> bool {
-    match pre {
-        Expr::Identifier(name) => trigger_names.contains(name.as_str()),
-        Expr::Eq(l, r) => {
-            matches!(l.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
-                || matches!(r.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
-        }
-        Expr::And(l, r) => {
-            is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names)
-        }
-        _ => false,
-    }
-}
+
 
 fn extract_trigger_keys(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> Option<Vec<i64>> {
     let mut keys = Vec::new();
@@ -267,14 +256,14 @@ pub struct LlvmBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     field_index_map: HashMap<String, usize>,
     field_types: Vec<String>,
-    field_initializers: HashMap<String, Option<Expr>>,
+    pub(crate) field_initializers: HashMap<String, Option<Expr>>,
     mmio_fields: HashMap<String, u64>,
     mmio_initializers: HashMap<String, Option<Expr>>,
     mmio_prepopulated: bool,
     schema_aliases: HashMap<String, crate::dbrief::DbriefType>,
     pgo_profile: Option<crate::analysis::pgo::PgoProfile>,
     pgo_guard_idx: usize,
-    txn_counter: usize,
+    pub(crate) txn_counter: usize,
     has_cycles: bool,
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
@@ -296,24 +285,24 @@ pub struct LlvmBackend {
     param_slots: HashMap<String, String>,
     range_bounds: HashMap<String, (i64, i64)>,
     field_to_meta_idx: HashMap<String, usize>,
-    triggers: HashMap<String, crate::ast::TriggerDeclaration>,
-    trigger_names: Vec<String>,
+    pub(crate) triggers: HashMap<String, crate::ast::TriggerDeclaration>,
+    pub(crate) trigger_names: Vec<String>,
     program_txns: Vec<String>,
     frgn_map: HashMap<String, ForeignSignature>,
     defn_params: HashMap<String, Vec<Type>>,
-    string_constants: Vec<String>,
-    constants: HashMap<String, (Type, Expr)>,
+    pub(crate) string_constants: Vec<String>,
+    pub(crate) constants: HashMap<String, (Type, Expr)>,
     fused_to_first: HashMap<String, String>,
     sampled_triggers: HashMap<String, String>,
     txn_write_masks: HashMap<String, u64>,
-    optimize_budget: u64,
+    pub(crate) optimize_budget: u64,
     optimize_report: bool,
     optimize_size: Option<u64>,
     report_lines: Vec<String>,
-    has_async_txns: bool,
-    async_txn_names: Vec<String>,
-    async_thread_pool_size: u32,
-    is_lightweight_async: bool,
+    pub(crate) has_async_txns: bool,
+    pub(crate) async_txn_names: Vec<String>,
+    pub(crate) async_thread_pool_size: u32,
+    pub(crate) is_lightweight_async: bool,
     exit_condition: Option<Box<Expr>>,
     has_natural_exit: bool,
     dead_info_disabled: bool,
@@ -321,7 +310,7 @@ pub struct LlvmBackend {
     ssa_state_reg: Option<String>,
     llvm_extra_flags: Vec<String>,
     slp_hazard_fns: HashSet<String>,
-    reg_float_cache: HashMap<String, String>,
+    pub(crate) reg_float_cache: HashMap<String, String>,
     /// Type of each emitted register — used for pointer-vs-list dispatch, etc.
     reg_type_cache: HashMap<String, Type>,
     state_reg_name: String,
@@ -557,190 +546,13 @@ impl LlvmBackend {
             }
         }
 
-        // Auto-select Parallel dispatch when all reactive transactions
-        // are proven conflict-free. The proof engine's check_mutual_exclusion
-        // already validates this for async txns; here we extend the check to
-        // ALL reactive txns. If no pair has read/write or write/write conflicts
-        // with overlapping preconditions, parallel dispatch is safe.
-        let dispatch_mode = if program.dispatch_mode == crate::ast::DispatchMode::Sequential {
-            let reactive_txns: Vec<&crate::ast::Transaction> = txns.iter()
-                .filter(|(_, t)| t.is_reactive)
-                .map(|(_, t)| *t)
-                .collect();
-            let mut cf = true;
-            for i in 0..reactive_txns.len() {
-                for j in (i + 1)..reactive_txns.len() {
-                    let a = reactive_txns[i];
-                    let b = reactive_txns[j];
-                    let a_writes: std::collections::HashSet<String> =
-                        crate::backend::collect_assigned_identifiers(&a.body)
-                            .into_iter().collect();
-                    let b_writes: std::collections::HashSet<String> =
-                        crate::backend::collect_assigned_identifiers(&b.body)
-                            .into_iter().collect();
-                    let a_reads = crate::backend::collect_read_identifiers(&a.body);
-                    let b_reads = crate::backend::collect_read_identifiers(&b.body);
-                    // Write/write conflict?
-                    if !a_writes.is_disjoint(&b_writes) { cf = false; break; }
-                    // Write/read conflict?
-                    let mut a_pre_ids = std::collections::HashSet::new();
-                    crate::backend::collect_expr_identifiers(&a.contract.pre_condition, &mut a_pre_ids);
-                    let mut b_pre_ids = std::collections::HashSet::new();
-                    crate::backend::collect_expr_identifiers(&b.contract.pre_condition, &mut b_pre_ids);
-                    if !a_pre_ids.is_disjoint(&b_pre_ids) {
-                        if !a_writes.is_disjoint(&b_reads) { cf = false; break; }
-                        if !b_writes.is_disjoint(&a_reads) { cf = false; break; }
-                    }
-                }
-                if !cf { break; }
-            }
-            if cf {
-                crate::ast::DispatchMode::Parallel
-            } else {
-                program.dispatch_mode
-            }
-        } else {
-            program.dispatch_mode
-        };
-
-        // Auto-categorize reactive transactions for dispatch path:
-        //   - enum_txns: trigger-gated + bounded value sets → switch dispatch
-        //   - async_txns: conflict-free pairwise → concurrent thread pool
-        //   - sequential_txns: everything else → main-thread sequential
-        // Priority: enum > async > sequential (enum is O(1) folded loops)
-        let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
-        // Try region-analyzer first; fall back to key extraction for triggers
-        // whose value sets aren't known to the region analyzer but are used
-        // in precondition Eq/Or comparisons (e.g. `sensor == 101 || sensor == 204`).
-        let (enumerable, enum_keys): (Option<Vec<(String, Option<u64>)>>, HashMap<String, Vec<i64>>) = {
-            let region = &analysis.region_analyzer;
-            if !self.trigger_names.is_empty() {
-                let mut sizes = Vec::new();
-                let mut total: u64 = 1;
-                let mut ok = true;
-                let mut fallback_triggers = Vec::new();
-                for tn in &self.trigger_names {
-                    let sz = region.value_set_size_of(tn);
-                    if let Some(s) = sz {
-                        total = total.saturating_mul(s);
-                        if total > self.optimize_budget { ok = false; break; }
-                        sizes.push((tn.clone(), sz));
-                    } else {
-                        fallback_triggers.push(tn.clone());
-                    }
-                }
-                if ok && sizes.len() == self.trigger_names.len() {
-                    (Some(sizes), HashMap::new())
-                } else if !fallback_triggers.is_empty() {
-                    // Fallback: try key extraction from all reactive txns' preconditions
-                    let trigger_set: std::collections::HashSet<&str> =
-                        self.trigger_names.iter().map(|s| s.as_str()).collect();
-                    let mut keys_map = HashMap::new();
-                    for tn in &fallback_triggers {
-                        for (_, txn) in &txns {
-                            if !txn.is_reactive { continue; }
-                            if let Some(keys) = extract_trigger_keys(
-                                &txn.contract.pre_condition, &trigger_set
-                            ) {
-                                keys_map.insert(tn.clone(), keys);
-                                break;
-                            }
-                        }
-                    }
-                    if !keys_map.is_empty() {
-                        let mut combined_sizes = sizes;
-                        let mut combined_total = total;
-                        let mut all_ok = true;
-                        for tn in &self.trigger_names {
-                            if combined_sizes.iter().any(|(n, _)| n == tn) { continue; }
-                            if let Some(keys) = keys_map.get(tn) {
-                                let s = keys.len() as u64;
-                                combined_total = combined_total.saturating_mul(s);
-                                if combined_total > self.optimize_budget { all_ok = false; break; }
-                                combined_sizes.push((tn.clone(), Some(s)));
-                            } else {
-                                all_ok = false; break;
-                            }
-                        }
-                        if all_ok { (Some(combined_sizes), keys_map) } else { (None, HashMap::new()) }
-                    } else {
-                        (None, HashMap::new())
-                    }
-                } else {
-                    (None, HashMap::new())
-                }
-            } else { (None, HashMap::new()) }
-        };
-        // Determine which txns are enum candidates based on trigger data
-        let enum_txn_names: std::collections::HashSet<String> = if let Some(ref en) = enumerable {
-            let enum_trigger_names: std::collections::HashSet<&str> =
-                en.iter().map(|(n, _)| n.as_str()).collect();
-            txns.iter()
-                .filter(|(_, t)| {
-                    t.is_reactive
-                        && is_trigger_gated(&t.contract.pre_condition, &enum_trigger_names)
-                })
-                .map(|(n, _)| n.clone())
-                .collect()
-        } else { std::collections::HashSet::new() };
-        // Async candidates: conflict-free reactive txns not claimed by enum dispatch
-        let async_candidates: Vec<&crate::ast::Transaction> = txns.iter()
-            .filter(|(n, t)| t.is_reactive && !enum_txn_names.contains(n.as_str()))
-            .map(|(_, t)| *t)
-            .collect();
-        let ac_writes: Vec<std::collections::HashSet<String>> = async_candidates.iter()
-            .map(|t| crate::backend::collect_assigned_identifiers(&t.body).into_iter().collect())
-            .collect();
-        let ac_reads: Vec<std::collections::HashSet<String>> = async_candidates.iter()
-            .map(|t| crate::backend::collect_read_identifiers(&t.body))
-            .collect();
-        let mut is_async_eligible: Vec<bool> = vec![true; async_candidates.len()];
-        for i in 0..async_candidates.len() {
-            for j in (i + 1)..async_candidates.len() {
-                let has_conflict = !ac_writes[i].is_disjoint(&ac_writes[j])
-                    || !ac_writes[i].is_disjoint(&ac_reads[j])
-                    || !ac_writes[j].is_disjoint(&ac_reads[i]);
-                if has_conflict {
-                    is_async_eligible[i] = false;
-                    is_async_eligible[j] = false;
-                }
-            }
-        }
-        let all_async_eligible = async_candidates.len() >= 2 && is_async_eligible.iter().all(|&x| x);
-        let mut async_txn_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-        if all_async_eligible {
-            for ac in &async_candidates {
-                async_txn_names.insert(ac.name.clone());
-            }
-        }
-        // Store for use by emit_main / emit_enum_main / metadata
-        self.has_async_txns = !async_txn_names.is_empty();
-        self.async_txn_names = async_txn_names.iter().cloned().collect();
-        self.async_thread_pool_size = self.async_txn_names.len() as u32;
-
-        // Lightweight async: all async txns are effectively pure with runtime-
-        // variable bounds.  Skip thread pool + barriers; use sequential
-        // reactor_tick() instead.  The barrier is always a net loss when the
-        // txn body is a single add+store (~2ns) and the barrier costs ~1µs.
-        if !async_txn_names.is_empty() {
-            let all_lightweight = async_txn_names.iter().all(|name| {
-                analysis.transition_graph.nodes.iter().find(|n| n.name == *name).map_or(false, |node| {
-                    let is_pure = node.is_pure_body || node.is_effectively_pure;
-                    if !is_pure { return false; }
-                    if let Some(ref bp) = node.bounded_pre {
-                        let is_const = self.field_initializers.get(&bp.bound_var)
-                            .and_then(|e| e.as_ref())
-                            .map_or(false, |e| matches!(e, Expr::Integer(_)))
-                            || self.constants.get(&bp.bound_var)
-                                .map_or(false, |(_, e)| matches!(e, Expr::Integer(_)));
-                        !is_const
-                    } else { false }
-                })
-            });
-            if all_lightweight {
-                self.is_lightweight_async = true;
-            }
-        }
+        // Select optimization strategy via extracted decision tree
+        let strategy = self.select_optimization_strategy(program, &analysis, &txns);
+        let dispatch_mode = strategy.dispatch_mode;
+        let has_wake_triggers = strategy.has_wake_triggers;
+        let enumerable = strategy.enumerable;
+        let enum_keys = strategy.enum_keys;
+        let enum_txn_names = strategy.enum_txn_names;
 
         let mut out = String::new();
         self.emit_header(&mut out);
@@ -901,7 +713,7 @@ self.emit_declares(&mut out);
         }
         // Async body functions — simple pre→fire wrapper for worker threads
         for (name, txn) in &txns {
-            if async_txn_names.contains(name.as_str()) && !self.is_lightweight_async {
+            if self.async_txn_names.iter().any(|n| n.as_str() == name.as_str()) && !self.is_lightweight_async {
                 self.emit_async_body(&mut out, txn, name);
                 writeln!(out).ok();
             }
@@ -1079,8 +891,8 @@ self.emit_declares(&mut out);
                 // bodies, fold them into a single register-pipeline main loop.
                 let multi_foldable = enumerable.is_none()
                     && !has_wake_triggers
-                    && !async_txn_names.is_empty()
-                    && async_txn_names.iter().all(|name| {
+                    && !self.async_txn_names.is_empty()
+                    && self.async_txn_names.iter().all(|name| {
                         graph.nodes.iter().find(|n| n.name == *name).map_or(false, |node| {
                             (node.is_pure_body || node.is_effectively_pure)
                             && node.bounded_pre.is_some()
@@ -1089,7 +901,7 @@ self.emit_declares(&mut out);
                     });
                 let mut multi_fold_params: HashMap<String, FoldParam> = HashMap::new();
                 if multi_foldable {
-                    for txn_name in &async_txn_names {
+                    for txn_name in &self.async_txn_names {
                         if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
                             if let Some(ref bp) = node.bounded_pre {
                                 if let Some(&cidx) = self.field_index_map.get(&bp.var) {
@@ -2921,7 +2733,7 @@ self.emit_declares(&mut out);
     }
 
     // ── EXPRESSIONS ───────────────────────────────────────────
-    fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> TypedRegister {
+    pub(crate) fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> TypedRegister {
         let expr = if self.optimize_budget > 0 {
             crate::analysis::equality_saturation::simplify(expr)
         } else {
@@ -2957,6 +2769,9 @@ self.emit_declares(&mut out);
                 return TypedRegister { name: v, ty: Type::Char };
             }
             Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+            Expr::BinaryOp(bop) => return bop.emit_llvm(self, out, &ExprDispatch),
+            Expr::UnaryOp(uop) => return uop.emit_llvm(self, out, &ExprDispatch),
+            Expr::Literal(lit) => return lit.emit_llvm(self, out, &ExprDispatch),
             Expr::Identifier(name) => {
                 // SSA body mode: prefer pre-extracted old-value register
                 // for int fields so all body ops are independent.
@@ -7795,5 +7610,66 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         assert!(!output.is_empty());
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_integer() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Int);
+        assert!(out.contains("add i64 0, 42"));
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_bool() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Bool);
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_term() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Int);
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_float() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Float(1.5)));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Float);
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_string() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::String("s".to_string())));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::String);
+    }
+
+    #[kani::proof]
+    fn verify_llvm_emit_expr_literal_char() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
+        let reg = backend.emit_expr(&mut out, &expr, "");
+        assert_eq!(reg.ty, Type::Char);
     }
 }

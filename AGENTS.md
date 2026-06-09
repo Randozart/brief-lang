@@ -284,6 +284,9 @@ Preserve contract information in codegen so the optimizer can reason about it.
 9. **Interpreter IS the reference**: Add to interpreter first, then codegen.
 10. **Benchmarks on our own terms**: End-to-end results. Features for benchmarks must add language value.
 11. **NEVER discard staged or uncommitted work without asking.** The git index (staging area) holds work-in-progress from prior sessions that may be uncommitted but critical. Before any destructive action (`git checkout --`, `git restore`, `rm -f`, `git reset --hard`), inspect everything that will be destroyed. If in doubt, `git stash` instead of discard — stashes are recoverable, `git checkout --` is not. A single `git restore --staged .` followed by `git checkout -- <files>` can erase hours of uncommitted work with no recovery path.
+12. **Architecture docs**: Update `docs/architecture/` in the same commit as structural changes.
+13. **Kani**: Add proof harnesses for all new safety-critical code.
+14. **Praetor**: Run on new/changed files; verify complexity ≤ 15, lines ≤ 100, params ≤ 6.
 
 ## Self-Hosting Pipeline
 
@@ -331,7 +334,9 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 526 tests pass, 0 fail
+- 713 tests pass, 0 fail
+- Phase 1.1 (LiteralExpr) complete — committed to `refactor/pattern-b`
+- Kani: 14 fast-group harnesses proven (2.5s), 96 full-group pass with `--features kani_full`
 - Interpreter is the reference — if it runs a program, the backend should eventually compile it
 - All additions are additive (new match arms) — never modify existing optimization paths
 - Phases 11–13 (sync domains, HashMap/HashSet, Stack/Queue/Tuple) complete
@@ -391,3 +396,149 @@ The compiler has two optimization budget modes:
 **Implementation note**: The budget flag is set before codegen, not in the codegen itself. The `--optimize-budget` CLI flag overrides both defaults. If neither `--dev`/`--prod` nor `--optimize-budget` is set, `--dev` (budget=256) is the implicit default.
 
 See `plans/2026-06-06-universal-ffi-no-magic-architecture.md` for the full master plan.
+
+## Architecture Documentation (Permanent Practice)
+
+Maintain `docs/architecture/` as a living record of the compiler's design.
+Updated in the same commit as any API or structural change.
+
+### Directory structure
+
+```
+docs/architecture/
+  overview.md              # System architecture, module responsibilities, data flow
+  features/                # One file per feature group
+    literal.md
+    call.md
+    projection.md
+    ...                    # Updated when new features are added
+  optimization-pipeline.md # Decision tree, folded loop, SSA, SLP hazard
+  backend-strategy.md      # Per-backend design notes (LLVM, VHDL, Webstack, etc.)
+  channel-map.md           # Data flow: parse → resolve → desugar → typecheck →
+                           #   proof → analyze → codegen
+  praetor-log.md           # Running log of diagnostics found/resolved (datestamped)
+  kani-harnesses.md        # Inventory of formal verification proofs
+  glossary.md              # Brief-specific terminology
+```
+
+### Rules
+
+1. Every new feature file (`features/*.rs`) gets a corresponding doc entry when created.
+2. **Doc-per-cycle**: Every migration cycle ships its architecture doc in the same commit
+   as the code change. The doc is written immediately after the code, while it's fresh.
+   No batch documentation phases — they drift from reality.
+3. Architecture changes are documented in the same commit that makes them.
+4. Praetor violations discovered during development are logged in `praetor-log.md` with
+   datetime, file, root cause, and resolution.
+5. Any commit that changes an API contract between passes must update `channel-map.md`.
+
+### Coordinator docs
+
+Coordinator files (interpreter, typechecker, parser, proof_engine, backends) get their
+own architecture doc as they shrink toward their target size (1,000–2,000 lines). Each
+doc explains: how the dispatcher works, what stays centralized, error handling, and
+interaction patterns.
+
+### What each feature doc covers
+
+| Section | Content | Length |
+|---------|---------|--------|
+| Header | Purpose, date added, phase | 2 lines |
+| Syntax | Brief syntax for the construct with examples | 10–30 lines |
+| Typechecking | How types are inferred/checked | 5–15 lines |
+| Evaluation | How it evaluates in the interpreter | 5–15 lines |
+| Codegen | Per-backend notes (LLVM, VHDL, Webstack) | 10–30 lines |
+| Kani/Praetor | Special considerations | 3–5 lines |
+
+Feature docs target 50–150 lines — compact enough to fit in working memory.
+
+## Formal Verification with Kani
+
+Integrate AWS's `kani` bounded model checker as a permanent part of the development
+workflow. All new safety-critical code must include Kani proof harnesses.
+
+### Rules
+
+1. **All new modules** created during the refactor must include Kani proof harnesses
+   for any unsafe code, FFI boundary code, or functions with non-trivial safety
+   invariants.
+2. **Targets**: `ffi/native_mapper.rs` (byte slicing, endian conversion) and
+   `reactor.rs` (state rollback, step counter) — the two most safety-critical modules
+   today. Expand to all new safety-critical code going forward.
+3. **Harnesses** live in `#[cfg(kani)] mod kani_tests {}` blocks at the bottom of each
+   module file, co-located with unit tests.
+4. **Proof goals**: Prove absence of panics, overflows, out-of-bounds access, and
+   undefined behavior under all possible symbolic inputs.
+5. **CI-gated**: `cargo kani` must pass before merging.
+6. **Coverage requirement**: Every function modified during refactoring must have a
+   Kani proof harness, regardless of whether it is "safety-critical." The refactor
+   touches code across the entire compiler — Kani verifies that the new routing
+   logic, enum variant conversions, and helper methods are correct under all
+   possible symbolic inputs. `unsafe`-free code can still overflow, panic on
+   `unreachable!()`, or miss edge cases in match arms. Proof harnesses catch these.
+
+### Kani Harness Requirements (never hang again)
+
+A Kani harness MUST only contain:
+
+1. **Pure match dispatch only** — `match self { A => B, C => D }` returning a concrete result
+2. **Concrete inputs only** — no `kani::any()`, no symbolic values (they trigger unbounded exploration)
+3. **No formatting** — no `.to_string()`, `format!()`, `writeln!()`, string concatenation, or any `Display` impl
+4. **No heap allocation** — no `Box::new()`, `Vec::new()`, `String::new()`, `HashMap::new()`
+5. **No struct construction** unless the struct has ≤ 3 fields and no heap-allocated fields
+6. **No loops or recursion** in the function being verified OR any function it transitively calls
+
+A harness is **unprovable** (will timeout) if it transitively calls ANY function that:
+- Converts integers to strings (`.to_string()`, `format!("{}", n)`) — **division loop**
+- Formats output (`format!`, `writeln!`) — **allocation + formatting loop**
+- Constructs `Box`, `Vec`, `String`, `HashMap`, `HashSet` — **heap allocation path explosion**
+- Constructs any struct with >3 fields — **state space explosion**
+- Iterates with loops or recurses — **unbounded path exploration**
+
+**Fast group** (`#[cfg(kani)] mod kani_tests`): only provable harnesses per above rules. Runs in <5s.
+
+**Full group** (`#[cfg(all(kani, feature = "kani_full"))] mod kani_full_tests`): anything that relaxes these rules (formatting, allocation, loops). Runs on CI only with `--features kani_full`.
+
+### Reference harness patterns
+
+Fast (provable match dispatch):
+```rust
+#[cfg(kani)]
+mod kani_tests {
+    use super::*;
+
+    #[kani::proof]
+    fn verify_as_integer_dual_path() {
+        let old = Expr::Integer(42);
+        let new = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        assert_eq!(old.as_integer(), new.as_integer());
+    }
+}
+```
+
+Full (uses formatting — `kani_full` feature only):
+```rust
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+
+    #[kani::proof]
+    fn verify_literal_format_no_panic() {
+        let lit = LiteralExpr::Integer(42);
+        let s = lit.format();
+        assert!(!s.is_empty());
+    }
+}
+```
+
+## Per-Commit Checklist
+
+Before every commit:
+1. `cargo test --lib` — all tests pass
+2. `cargo build` — no warnings
+3. Run Praetor on new/changed files — verify complexity ≤ 15, lines ≤ 100, params ≤ 6
+4. Update architecture docs if API contracts changed
+5. **Doc-per-cycle**: If this commit includes a new or migrated feature, write/update
+   `docs/architecture/features/<name>.md` in the same commit. Never batch documentation.
+6. Log bugs/gotchas in BUGS.md or docs/architecture/praetor-log.md
+7. Add Kani harnesses for all newly written or modified functions

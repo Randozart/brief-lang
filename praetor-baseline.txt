@@ -1,0 +1,2 @@
+[2m2026-06-09T17:23:27.409350Z[0m [32m INFO[0m [2mpraetor::ast[0m[2m:[0m initialized 32 language parsers
+[PASS] Praetor validation passed — no unproven diagnostics found

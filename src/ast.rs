@@ -21,6 +21,21 @@
 // or embeds the Work.
 
 use crate::errors::Span;
+use crate::features::binary_op::BinaryOpExpr;
+use crate::features::call::CallExpr;
+use crate::features::collection::*;
+use crate::features::field::*;
+use crate::features::literal::LiteralExpr;
+use crate::features::projection::ProjectionExpr;
+use crate::features::arrow::*;
+use crate::features::block::BlockExpr;
+use crate::features::dbvl::DbvlTableExpr;
+use crate::features::ellipsis::EllipsisExpr;
+use crate::features::pattern::*;
+use crate::features::sigcall::SigCallExpr;
+use crate::features::subtype::SubtypeProjectionExpr;
+use crate::features::tuple::*;
+use crate::features::unary_op::UnaryOpExpr;
 use crate::ffi::types::MemoryLayout;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -325,6 +340,64 @@ pub enum BracketOp {
     Stride(Box<Expr>),
 }
 
+/// A property assignment inside a `Type Name <: Base { ... }` block.
+/// Each property is either a metadata constraint or a syntax gate.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeProperty {
+    /// Physical width in bytes. Required for all Bits-derived types.
+    Bytes(Box<Expr>),
+    /// Alignment boundary. Defaults to Bytes if unset.
+    Alignment(Box<Expr>),
+    /// Byte order: Big or Little. Defaults to Little.
+    Endian(Box<Expr>),
+    /// LLVM `load volatile`/`store volatile`. Defaults to false.
+    Volatile(Box<Expr>),
+    /// LLVM atomic operations. Defaults to false.
+    Atomic(Box<Expr>),
+    /// The element type — unlocks `[]` and slicing.
+    ElementType(Box<Expr>),
+    /// Whether size is fixed at compile time. false unlocks `<-`/`->`.
+    FixedSize(Box<Expr>),
+    /// Index expression for insertion position: `0`, `:> Size`, `:> Size - N`.
+    InsertAt(Box<Expr>),
+    /// Index or `<:{}` query for extraction position.
+    ExtractFrom(Box<Expr>),
+    /// Override: block `[]` access. Defaults to true.
+    AllowIndex(Box<Expr>),
+    /// Override: block slicing. Defaults to true.
+    AllowSlice(Box<Expr>),
+    /// Override: block `<-`/`->`. Defaults to true.
+    AllowArrow(Box<Expr>),
+    /// Codec struct name — must have encode/decode.
+    Codec(String),
+}
+
+/// Body of a `Type Name <: Base { ... }` declaration.
+#[derive(Debug, Clone)]
+pub struct TypeDefBody {
+    /// Metadata property assignments.
+    pub properties: Vec<TypeProperty>,
+    /// Refinement constraints with implicit self: `[ > 0 ]`.
+    pub constraints: Vec<Expr>,
+    /// Source span for error reporting.
+    pub span: Option<Span>,
+}
+
+/// A `Type Name <: Base { ... }` declaration — Pass 1: type universe.
+#[derive(Debug, Clone)]
+pub struct TypeDef {
+    /// The new type's name.
+    pub name: String,
+    /// Type parameters (e.g. `T`, `K` in `List<T, K>`).
+    pub type_params: Vec<String>,
+    /// The base type expression (e.g. `Bits`, `List<T>`).
+    pub base: Box<Expr>,
+    /// Property body.
+    pub body: TypeDefBody,
+    /// Source span.
+    pub span: Option<Span>,
+}
+
 /// Target of a `:>` projection: `expr :> Size`
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectionTarget {
@@ -372,11 +445,18 @@ pub enum Expr {
     Char(char),  // NEW: Char literal
     Bool(bool),
     Term,
+    /// Pattern B feature struct: wraps Integer, Float, String, Char, Bool, Term
+    Literal(Box<LiteralExpr>),
     Identifier(String),
     OwnedRef(String),
     PriorState(String),
     /// `...` — ellipsis, expands to fill unspecified dimensions in bracket context
     Ellipsis,
+    // Pattern B — packed ellipsis
+    EllipsisExpr(EllipsisExpr),
+    /// Reference to a named type: `Bits`, `Int`, `U32`, etc. Used as the base
+    /// expression in a `Type Name <: Base { ... }` declaration.
+    TypeRef(String),
     /// Collection structural mutation: `&list <- x`, `x <- &list`, or `&list[i] <- x`
     /// `index` is `Expr::Term` for full-range (end operations)
     ArrowMut {
@@ -398,6 +478,10 @@ pub enum Expr {
         source: Box<Expr>,
         filter: Option<Box<Expr>>,
     },
+    // Pattern B — packed arrow variants
+    ArrowMutExpr(ArrowMutExpr),
+    ArrowDiscardExpr(ArrowDiscardExpr),
+    ArrowTransferExpr(ArrowTransferExpr),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
     Mul(Box<Expr>, Box<Expr>),
@@ -419,6 +503,9 @@ pub enum Expr {
     BitXor(Box<Expr>, Box<Expr>),
     Shl(Box<Expr>, Box<Expr>),
     Shr(Box<Expr>, Box<Expr>),
+    // Pattern B — packed binary/unary operations
+    BinaryOp(Box<BinaryOpExpr>),
+    UnaryOp(Box<UnaryOpExpr>),
     Concat(Box<Expr>, Box<Expr>),
     /// Type cast: expr as Type
     Cast(Box<Expr>, Type),
@@ -427,12 +514,22 @@ pub enum Expr {
         source: Box<Expr>,
         target: ProjectionTarget,
     },
+    // Pattern B — packed projection
+    ProjectionExpr(ProjectionExpr),
     Call(String, Vec<Expr>),
+    // Pattern B — packed call
+    CallExpr(CallExpr),
     ListLiteral(Vec<Expr>),
+    // Pattern B — packed list literal
+    ListLiteralExpr(ListLiteralExpr),
     /// HashMap literal: `{"a": 1, "b": 2}`
     MapLiteral(Vec<(Expr, Expr)>),
+    // Pattern B — packed map literal
+    MapLiteralExpr(MapLiteralExpr),
     /// HashSet literal: `{1, 2, 3}`
     SetLiteral(Vec<Expr>),
+    // Pattern B — packed set literal
+    SetLiteralExpr(SetLiteralExpr),
     ListIndex(Box<Expr>, Box<Expr>),
     Slice {
         value: Box<Expr>,
@@ -441,42 +538,66 @@ pub enum Expr {
         stride: Option<Box<Expr>>,
         mask: Option<Box<Expr>>,
     },
+    // Pattern B — packed slice
+    SliceExpr(SliceExpr),
     // Multidimensional slice: vec[coord1, coord2, ...; mask :: stride]
     MultiSlice {
         value: Box<Expr>,
         ops: Vec<BracketOp>,
     },
+    // Pattern B — packed multi-slice
+    MultiSliceExpr(MultiSliceExpr),
 
     FieldAccess(Box<Expr>, String),
+    // Pattern B — packed field access
+    FieldAccessExpr(FieldAccessExpr),
     StructInstance(String, Vec<(String, Expr)>),
+    // Pattern B — packed struct instance
+    StructInstanceExpr(StructInstanceExpr),
     ObjectLiteral(Vec<(String, Expr)>),
+    // Pattern B — packed object literal
+    ObjectLiteralExpr(ObjectLiteralExpr),
 // Pattern matching in guards: [value Variant(field1, field2)] { ... }
     PatternMatch {
         value: Box<Expr>,
         variant: String,
         fields: Vec<Pattern>,
     },
+    // Pattern B — packed pattern match
+    PatternMatchExpr(PatternMatchExpr),
     // Match expression: match value { Variant(f1) => body, _ => default }
     Match {
         value: Box<Expr>,
         arms: Vec<MatchArm>,
     },
+    // Pattern B — packed match
+    MatchExpr(MatchExpr),
     // Block expression: { stmts...; last_expr }
     Block(Vec<Statement>, Box<Expr>),
+    // Pattern B — packed block
+    BlockExpr(BlockExpr),
     // Tuple destructuring: let (a, b) = expr;
     TupleDestructure(Vec<String>, Box<Expr>),
+    // Pattern B — packed tuple destructure
+    TupleDestructureExpr(TupleDestructureExpr),
     // Tuple literal: (a, b, c)
     Tuple(Vec<Expr>),
+    // Pattern B — packed tuple literal
+    TupleExpr(TupleExpr),
     /// Sig call modifier: `sig #out expr` or `sig #inline expr`
     SigCall {
         modifier: SigModifier,
         expr: Box<Expr>,
     },
+    // Pattern B — packed sig call
+    SigCallExpr(SigCallExpr),
     /// `<:` subtype projection: `let result <: items { FILTER(.active); COUNT; };`
     SubtypeProjection {
         source: Box<Expr>,
         ops: Vec<SubtypeOp>,
     },
+    // Pattern B — packed subtype projection
+    SubtypeProjectionExpr(SubtypeProjectionExpr),
     /// Lazy-loaded DBVL table for large-file imports.
     /// Evaluates to Value::DbvlTable — users see it as a Map.
     DbvlTable {
@@ -485,6 +606,8 @@ pub enum Expr {
         key_offsets: HashMap<String, Vec<usize>>,
         schema_name: Option<String>,
     },
+    // Pattern B — packed dbvl table
+    DbvlTableExpr(DbvlTableExpr),
 }
 
 impl Expr {
@@ -493,6 +616,59 @@ impl Expr {
         if let Self::DbvlTable { path, .. } = self {
             path.clone_from(&file_path.to_string());
         }
+    }
+
+    /// Extract integer value, handling both old variant and new Literal wrapper.
+    pub fn as_integer(&self) -> Option<i64> {
+        match self {
+            Expr::Integer(n) => Some(*n),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Integer(n) => Some(*n),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Extract float value, handling both old variant and new Literal wrapper.
+    pub fn as_float(&self) -> Option<f64> {
+        match self {
+            Expr::Float(f) => Some(*f),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Float(f) => Some(*f),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Extract string value, handling both old variant and new Literal wrapper.
+    pub fn as_string(&self) -> Option<&str> {
+        match self {
+            Expr::String(s) => Some(s.as_str()),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::String(s) => Some(s.as_str()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Extract bool value, handling both old variant and new Literal wrapper.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Expr::Bool(b) => Some(*b),
+            Expr::Literal(lit) => match lit.as_ref() {
+                LiteralExpr::Bool(b) => Some(*b),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Check if expression is Term, handling both old variant and new Literal wrapper.
+    pub fn is_term(&self) -> bool {
+        matches!(self, Expr::Term) || matches!(self, Expr::Literal(lit) if matches!(lit.as_ref(), LiteralExpr::Term))
     }
 }
 
@@ -1030,6 +1206,19 @@ pub enum TopLevel {
     Struct(StructDefinition),
     RStruct(RStructDefinition),
     Enum(EnumDefinition),
+    /// `Type Name <: Base { ... }` — type derivation system (Phase 1.5)
+    TypeDef(Box<TypeDef>),
+    /// `#test("group")` pragma — wraps an item with test group membership.
+    /// Skipped in production; included in test mode.
+    Test {
+        item: Box<TopLevel>,
+        groups: Vec<String>,
+    },
+    /// `#!assert` directive — compile-time assertion chain.
+    Assertion {
+        pre: Expr,
+        chain: Vec<String>,
+    },
     RenderBlock(RenderBlock),
     Stylesheet(String),
     SvgComponent {
@@ -1237,4 +1426,130 @@ pub struct SigProjection {
 
     /// The source defn this sig casts from
     pub source_defn: String,
+}
+
+#[cfg(kani)]
+mod kani_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_as_integer_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        assert_eq!(e.as_integer(), Some(42));
+    }
+
+    #[kani::proof]
+    fn verify_as_integer_old_variant() {
+        let e = Expr::Integer(42);
+        assert_eq!(e.as_integer(), Some(42));
+    }
+
+    #[kani::proof]
+    fn verify_as_bool_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        assert_eq!(e.as_bool(), Some(true));
+    }
+
+    #[kani::proof]
+    fn verify_as_bool_old_variant() {
+        let e = Expr::Bool(false);
+        assert_eq!(e.as_bool(), Some(false));
+    }
+
+    #[kani::proof]
+    fn verify_is_term_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Term));
+        assert!(e.is_term());
+    }
+
+    #[kani::proof]
+    fn verify_is_term_old_variant() {
+        let e = Expr::Term;
+        assert!(e.is_term());
+    }
+
+    #[kani::proof]
+    fn verify_as_integer_none_for_non_int() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        assert_eq!(e.as_integer(), None);
+    }
+
+    #[kani::proof]
+    fn verify_as_bool_none_for_non_bool() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert_eq!(e.as_bool(), None);
+    }
+
+    #[kani::proof]
+    fn verify_is_term_false_for_non_term() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert!(!e.is_term());
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_as_integer_none_for_non_int() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        assert_eq!(e.as_integer(), None);
+        let f = Expr::Bool(false);
+        assert_eq!(f.as_integer(), None);
+    }
+
+    #[kani::proof]
+    fn verify_as_bool_none_for_non_bool() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert_eq!(e.as_bool(), None);
+        let f = Expr::Integer(0);
+        assert_eq!(f.as_bool(), None);
+    }
+
+    #[kani::proof]
+    fn verify_is_term_false_for_non_term() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert!(!e.is_term());
+        let f = Expr::Integer(0);
+        assert!(!f.is_term());
+    }
+
+    #[kani::proof]
+    fn verify_as_float_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
+        let v = e.as_float();
+        assert!(v.is_some());
+        let vv = v.unwrap();
+        assert!((vv - 3.14).abs() < 1e-10);
+    }
+
+    #[kani::proof]
+    fn verify_as_float_old_variant() {
+        let e = Expr::Float(3.14);
+        let v = e.as_float();
+        assert!(v.is_some());
+    }
+
+    #[kani::proof]
+    fn verify_as_string_new_variant() {
+        let e = Expr::Literal(Box::new(LiteralExpr::String("hello".to_string())));
+        assert_eq!(e.as_string(), Some(&"hello".to_string()));
+    }
+
+    #[kani::proof]
+    fn verify_as_string_old_variant() {
+        let e = Expr::String("hello".to_string());
+        assert_eq!(e.as_string(), Some(&"hello".to_string()));
+    }
+
+    #[kani::proof]
+    fn verify_as_string_none_for_non_string() {
+        let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
+        assert_eq!(e.as_string(), None);
+        let f = Expr::Integer(0);
+        assert_eq!(f.as_string(), None);
+    }
 }

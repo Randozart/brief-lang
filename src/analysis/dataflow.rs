@@ -95,7 +95,8 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::OwnedRef(name) => { ids.insert(name.clone()); }
             Expr::PriorState(name) => { ids.insert(name.clone()); }
             Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_)
-            | Expr::Bool(_) | Expr::Term => {}
+            | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
+            | Expr::BinaryOp(_) | Expr::UnaryOp(_) => {}
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
             | Expr::Mod(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
                 self.extract_ids_recursive(l, ids);
@@ -205,6 +206,7 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::SubtypeProjection { source, .. } => {
                 self.extract_ids_recursive(source, ids);
             }
+            _ => {}
         }
     }
 
@@ -426,5 +428,48 @@ mod tests {
     #[test]
     fn test_dataflow_analysis() {
         assert!(true);
+    }
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+
+    fn empty_program() -> Program {
+        Program {
+            items: vec![], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: crate::ast::StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        }
+    }
+
+    #[kani::proof]
+    fn verify_extract_ids_recursive_literal_leaf() {
+        let prog = empty_program();
+        let analyzer = DataflowAnalyzer::new(&prog);
+        let mut ids = HashSet::new();
+        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Integer(42)));
+        analyzer.extract_ids_recursive(&expr, &mut ids);
+        assert!(ids.is_empty());
+    }
+
+    #[kani::proof]
+    fn verify_extract_ids_recursive_literal_term() {
+        let prog = empty_program();
+        let analyzer = DataflowAnalyzer::new(&prog);
+        let mut ids = HashSet::new();
+        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Term));
+        analyzer.extract_ids_recursive(&expr, &mut ids);
+        assert!(ids.is_empty());
+    }
+
+    #[kani::proof]
+    fn verify_extract_ids_recursive_literal_bool() {
+        let prog = empty_program();
+        let analyzer = DataflowAnalyzer::new(&prog);
+        let mut ids = HashSet::new();
+        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Bool(true)));
+        analyzer.extract_ids_recursive(&expr, &mut ids);
+        assert!(ids.is_empty());
     }
 }

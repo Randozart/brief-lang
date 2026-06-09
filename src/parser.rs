@@ -22,6 +22,7 @@
 
 use crate::ast::*;
 use crate::errors::{Span, SyntaxError};
+use crate::features::literal::LiteralExpr;
 use crate::lexer::Token;
 use logos::{Lexer, Logos};
 use std::path::Path;
@@ -294,11 +295,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Check if the next two tokens are `<` followed by `:` (the `<:` operator)
-    /// Check if the next two tokens are `<` followed by `:` (the `<:` operator)
+    /// Check if the next token is `<:` (subtype projection / type derivation operator)
     fn check_lt_colon(&self) -> bool {
-        matches!(self.current_token(), Some(Ok(Token::Lt)))
-            && matches!(self.peek_token(), Some(Ok(Token::Colon)))
+        matches!(self.current_token(), Some(Ok(Token::LtColon)))
     }
 
     fn parse_hashtag_modifiers(&mut self) -> Result<Vec<Hashtag>, SyntaxError> {
@@ -705,8 +704,32 @@ impl<'a> Parser<'a> {
                             out_pragmas.push(var_name);
                             continue;
                         }
+                        if kw == "assert" {
+                            self.advance(); // consume #!
+                            self.advance(); // consume "assert"
+                            let pre = self.parse_expression()?;
+                            self.expect(Token::Semicolon)?;
+                            // Chain: fn_a -> fn_b -> fn_c
+                            let mut chain = Vec::new();
+                            loop {
+                                let fn_name = self.expect_identifier()?;
+                                chain.push(fn_name);
+                                match self.current_token() {
+                                    Some(Ok(Token::Arrow)) => { self.advance(); }
+                                    Some(Ok(Token::Semicolon)) => { self.advance(); break; }
+                                    _ => return self.spanned_err(
+                                        "Expected '->' or ';' in assertion chain".to_string(),
+                                    ),
+                                }
+                            }
+                            items.push(TopLevel::Assertion {
+                                pre,
+                                chain,
+                            });
+                            continue;
+                        }
                     }
-                    // Not #!exit or #!out — treat as legacy #! attribues
+                    // Not #!exit, #!out, or #!assert — treat as legacy #! attribues
                     file_attrs.append(&mut self.parse_attributes()?);
                     continue;
                 }
@@ -836,22 +859,34 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
+        // Check for #test("group") modifiers
+        let test_groups: Vec<String> = modifiers.iter()
+            .filter(|h| h.name == "test")
+            .filter_map(|h| h.value.clone())
+            .collect();
+
+        // Helper to wrap an item in TopLevel::Test if #test modifiers are present
+        let wrap_test = |item: TopLevel, groups: &[String]| -> TopLevel {
+            if groups.is_empty() { item }
+            else { TopLevel::Test { item: Box::new(item), groups: groups.to_vec() } }
+        };
+
         match self.current_token() {
             Some(Ok(Token::Import)) => {
-                return self.parse_import();
+                return self.parse_import().map(|item| wrap_test(item, &test_groups));
             }
             Some(Ok(Token::Sig)) => {
                 let sig = self.parse_signature()?;
-                Ok(TopLevel::Signature(sig))
+                Ok(wrap_test(TopLevel::Signature(sig), &test_groups))
             }
             Some(Ok(Token::Let)) => {
                 let mut state = self.parse_state_decl()?;
                 state.attrs = attrs;
-                Ok(TopLevel::StateDecl(state))
+                Ok(wrap_test(TopLevel::StateDecl(state), &test_groups))
             }
             Some(Ok(Token::Const)) => {
                 let constant = self.parse_constant()?;
-                Ok(TopLevel::Constant(constant))
+                Ok(wrap_test(TopLevel::Constant(constant), &test_groups))
             }
             Some(Ok(Token::Sync)) => {
                 self.advance();
@@ -867,61 +902,65 @@ impl<'a> Parser<'a> {
                     self.expect(Token::Comma)?;
                 }
                 let item = self.parse_top_level()?;
-                Ok(TopLevel::SyncGroup {
+                Ok(wrap_test(TopLevel::SyncGroup {
                     domains,
                     item: Box::new(item),
-                })
+                }, &test_groups))
             }
             Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Async)) => {
                 let mut txn = self.parse_transaction()?;
                 txn.attrs = attrs;
                 txn.modifiers = modifiers;
-                Ok(TopLevel::Transaction(txn))
+                Ok(wrap_test(TopLevel::Transaction(txn), &test_groups))
             }
 
             Some(Ok(Token::Defn)) => {
                 let defn = self.parse_definition()?;
-                Ok(TopLevel::Definition(defn))
+                Ok(wrap_test(TopLevel::Definition(defn), &test_groups))
             }
             Some(Ok(Token::Trg)) => {
                 let trg = self.parse_trigger()?;
-                Ok(TopLevel::Trigger(trg))
+                Ok(wrap_test(TopLevel::Trigger(trg), &test_groups))
             }
             Some(Ok(Token::Frgn)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
-                Ok(frgn_binding)
+                Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::FrgnBang)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
-                Ok(frgn_binding)
+                Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::Syscall)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
-                Ok(frgn_binding)
+                Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::SyscallBang)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
-                Ok(frgn_binding)
+                Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) | Some(Ok(Token::Registry)) => {
                 let resource = self.parse_resource()?;
-                Ok(resource)
+                Ok(wrap_test(resource, &test_groups))
             }
             Some(Ok(Token::Struct)) => {
                 let struct_def = self.parse_struct()?;
-                Ok(TopLevel::Struct(struct_def))
+                Ok(wrap_test(TopLevel::Struct(struct_def), &test_groups))
             }
             Some(Ok(Token::Rstruct)) => {
                 let rstruct_def = self.parse_rstruct()?;
-                Ok(TopLevel::RStruct(rstruct_def))
+                Ok(wrap_test(TopLevel::RStruct(rstruct_def), &test_groups))
             }
             Some(Ok(Token::Enum)) => {
                 let enum_def = self.parse_enum()?;
-                Ok(TopLevel::Enum(enum_def))
+                Ok(wrap_test(TopLevel::Enum(enum_def), &test_groups))
+            }
+            Some(Ok(Token::Type)) => {
+                let type_def = self.parse_type_def()?;
+                Ok(wrap_test(TopLevel::TypeDef(Box::new(type_def)), &test_groups))
             }
             Some(Ok(Token::Render)) => {
                 let render_block = self.parse_render_block()?;
-                Ok(TopLevel::RenderBlock(render_block))
+                Ok(wrap_test(TopLevel::RenderBlock(render_block), &test_groups))
             }
             Some(Ok(tok)) => Err(SyntaxError::UnexpectedToken {
                 expected: "top-level declaration".to_string(),
@@ -2145,6 +2184,154 @@ impl<'a> Parser<'a> {
             variants,
             span: self.current_span(),
         })
+    }
+
+    /// Parse a `Type Name <: Base { ... }` declaration.
+    ///
+    /// Grammar:
+    ///   type_decl  ::= "type" ident ("<" type_params ">")? "<:" type_expr "{" property* constraint* "}" ";"
+    ///   property   ::= ident "=" expr ";"
+    ///   constraint ::= "[" expr "]"
+    ///
+    /// Supported properties: Bytes, Alignment, Endian, Volatile, Atomic,
+    /// ElementType, FixedSize, InsertAt, ExtractFrom, AllowIndex, AllowSlice, AllowArrow, Codec.
+    fn parse_type_def(&mut self) -> Result<TypeDef, SyntaxError> {
+        self.expect(Token::Type)?;
+        let name = self.expect_identifier()?;
+
+        // Parse optional type parameters: <T, K>
+        let mut type_params = Vec::new();
+        if let Some(Ok(Token::Lt)) = self.current_token() {
+            self.expect(Token::Lt)?;
+            loop {
+                let param_name = self.expect_identifier()?;
+                type_params.push(param_name);
+                match self.current_token() {
+                    Some(Ok(Token::Comma)) => { self.advance(); }
+                    Some(Ok(Token::Gt)) => { self.advance(); break; }
+                    _ => return self.spanned_err(
+                        "Expected ',' or '>' in type parameters".to_string(),
+                    ),
+                }
+            }
+        }
+
+        // Parse `<:` operator
+        self.expect(Token::LtColon)?;
+
+        // Parse base type expression
+        let base = self.parse_type_expr_for_typedef()?;
+
+        // Parse body `{ ... }`
+        self.expect(Token::LBrace)?;
+
+        let mut properties = Vec::new();
+        let mut constraints = Vec::new();
+
+        // Parse properties and constraints until `}`
+        loop {
+            // Early exit for `}`
+            if let Some(Ok(Token::RBrace)) = self.current_token() {
+                self.advance();
+                break;
+            }
+
+            // Check for constraint: `[ expr ]`
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance(); // consume `[`
+                let constraint = self.parse_expression()?;
+                self.expect(Token::RBracket)?;
+                constraints.push(constraint);
+                continue;
+            }
+
+            // Otherwise parse a property: ident = expr ;
+            let prop_name = self.expect_identifier()?;
+            self.expect(Token::Eq)?;
+            let prop = match prop_name.as_str() {
+                "Bytes" => TypeProperty::Bytes(Box::new(self.parse_expression()?)),
+                "Alignment" => TypeProperty::Alignment(Box::new(self.parse_expression()?)),
+                "Endian" => TypeProperty::Endian(Box::new(self.parse_expression()?)),
+                "Volatile" => TypeProperty::Volatile(Box::new(self.parse_expression()?)),
+                "Atomic" => TypeProperty::Atomic(Box::new(self.parse_expression()?)),
+                "ElementType" => TypeProperty::ElementType(Box::new(self.parse_expression()?)),
+                "FixedSize" => TypeProperty::FixedSize(Box::new(self.parse_expression()?)),
+                "InsertAt" => TypeProperty::InsertAt(Box::new(self.parse_expression()?)),
+                "ExtractFrom" => TypeProperty::ExtractFrom(Box::new(self.parse_expression()?)),
+                "AllowIndex" => TypeProperty::AllowIndex(Box::new(self.parse_expression()?)),
+                "AllowSlice" => TypeProperty::AllowSlice(Box::new(self.parse_expression()?)),
+                "AllowArrow" => TypeProperty::AllowArrow(Box::new(self.parse_expression()?)),
+                "Codec" => {
+                    let codec_name = self.expect_identifier()?;
+                    // Consume optional semicolon (expression parser handles this for expr-based props)
+                    TypeProperty::Codec(codec_name)
+                }
+                other => return self.spanned_err(
+                    format!("Unknown type property '{}'. Expected: Bytes, Alignment, Endian, Volatile, Atomic, ElementType, FixedSize, InsertAt, ExtractFrom, AllowIndex, AllowSlice, AllowArrow, or Codec", other),
+                ),
+            };
+            properties.push(prop);
+
+            // Expect semicolon after property (but not after Codec since it's already consumed)
+            if prop_name != "Codec" {
+                if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                    self.advance();
+                } else {
+                    return self.spanned_err("Expected ';' after type property".to_string());
+                }
+            } else {
+                // Codec may or may not have semicolon — handle both
+                if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                    self.advance();
+                }
+            }
+        }
+
+        // Expect optional semicolon after `}`
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
+
+        Ok(TypeDef {
+            name,
+            type_params,
+            base,
+            body: TypeDefBody {
+                properties,
+                constraints,
+                span: self.current_span(),
+            },
+            span: self.current_span(),
+        })
+    }
+
+    /// Parse a type expression used as the base in `Type Name <: Base { ... }`.
+    /// This is a restricted subset of parse_expression — currently handles:
+    ///   - TypeRef identifiers (e.g. `Bits`, `List`)
+    ///   - Generic applications (e.g. `List<T>`, `KeyedQueue<T, K>`)
+    /// DEFERRED (D-1): Full type expression support for complex base types.
+    fn parse_type_expr_for_typedef(&mut self) -> Result<Box<Expr>, SyntaxError> {
+        let name = self.expect_identifier()?;
+
+        // Check for generic application: Name<T, K>
+        if let Some(Ok(Token::Lt)) = self.current_token() {
+            // We can't fully parse a generic type expression here without adding
+            // type info to Expr. For now, store as TypeRef and handle in Pass 1.
+            // DEFERRED (D-1): Proper generic type expression parsing.
+            self.advance(); // consume `<`
+            // Consume everything until `>`
+            let mut depth = 1;
+            while depth > 0 {
+                match self.current_token() {
+                    Some(Ok(Token::Gt)) => { self.advance(); depth -= 1; }
+                    Some(Ok(Token::Lt)) => { self.advance(); depth += 1; }
+                    Some(Ok(Token::LtColon)) => { self.advance(); }
+                    _ => { self.advance(); }
+                }
+            }
+        }
+
+        Ok(Box::new(Expr::TypeRef(name)))
     }
 
     fn scan_html_block(&mut self, start: usize) -> Result<(String, usize), SyntaxError> {
@@ -3500,7 +3687,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             self.expect(Token::LBracket)?;
             let cond = self.parse_expression()?;
             self.expect(Token::RBracket)?;
-            if matches!(cond, Expr::Bool(true)) {
+            if cond.as_bool() == Some(true) {
                 return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
             }
             watchdog = Some(WatchdogSpec {
@@ -3511,7 +3698,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
         // [true][true] is always an error when the user wrote brackets — defeats contract-first
         // Bracketless (count == 0) is deliberate omission, not a contract claim.
-        if count > 0 && matches!(&pre_condition, Expr::Bool(true)) && matches!(&post_condition, Expr::Bool(true)) {
+        if count > 0 && pre_condition.as_bool() == Some(true) && post_condition.as_bool() == Some(true) {
             return self.spanned_err(
                 "both precondition and postcondition are [true] — at least one side must specify meaningful constraints".to_string()
             );
@@ -3545,7 +3732,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
                 let cond = self.parse_expression()?;
 
-                if matches!(cond, Expr::Bool(true)) {
+                if cond.as_bool() == Some(true) {
                     return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
                 }
 
@@ -3562,7 +3749,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         }
 
         // [true][n >= 0] is always an error — defeats contract-first programming
-        if matches!(&pre_condition, Expr::Bool(true)) && matches!(&post_condition, Expr::Bool(true)) {
+        if pre_condition.as_bool() == Some(true) && post_condition.as_bool() == Some(true) {
             return self.spanned_err(
                 "both precondition and postcondition are [true] — at least one side must specify meaningful constraints".to_string()
             );
@@ -3575,12 +3762,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     "Strict mode requires both [precondition] and [postcondition]".to_string()
                 );
             }
-            if matches!(&pre_condition, Expr::Bool(true)) {
+            if pre_condition.as_bool() == Some(true) {
                 return self.spanned_err(
                     "Strict mode: precondition [true] is not allowed - specify actual state requirements".to_string()
                 );
             }
-            if matches!(&post_condition, Expr::Bool(true)) {
+            if post_condition.as_bool() == Some(true) {
                 return self.spanned_err(
                     "Strict mode: postcondition [true] is not allowed - specify actual state guarantees".to_string()
                 );
@@ -3748,8 +3935,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
                     // Check for `<:` subtype projection (string match destructuring)
                     if self.check_lt_colon() {
-                        self.advance(); // consume `<`
-                        self.advance(); // consume `:`
+                        self.advance(); // consume `<:`
                         let source = self.parse_projection_source()?;
                         let ops = self.parse_subtype_ops()?;
                         self.expect(Token::Semicolon)?;
@@ -3790,8 +3976,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
 
                     // Check for `<:` subtype projection
                     if self.check_lt_colon() {
-                        self.advance(); // consume `<`
-                        self.advance(); // consume `:`
+                        self.advance(); // consume `<:`
                         // Parse source expression, but stop before `{` (struct literal)
                         // parse_expression would consume `{...}` as struct literal fields
                         let source = self.parse_projection_source()?;
@@ -3823,9 +4008,9 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     if let Some(Ok(Token::At)) = self.current_token() {
                         self.advance();
                         let addr_expr = self.parse_expression()?;
-                        match &addr_expr {
-                            Expr::Integer(n) => { address = Some(*n as u64); }
-                            _ => { address_expr = Some(Box::new(addr_expr)); }
+                        match addr_expr.as_integer() {
+                            Some(n) => { address = Some(n as u64); }
+                            None => { address_expr = Some(Box::new(addr_expr)); }
                         }
                     } else if let Some(Ok(Token::LBracket)) = self.current_token() {
                         self.advance();
@@ -3845,9 +4030,9 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         if let Some(Ok(Token::At)) = self.current_token() {
                             self.advance();
                             let addr_expr = self.parse_expression()?;
-                            match &addr_expr {
-                                Expr::Integer(n) => { address = Some(*n as u64); }
-                                _ => { address_expr = Some(Box::new(addr_expr)); }
+                            match addr_expr.as_integer() {
+                                Some(n) => { address = Some(n as u64); }
+                                None => { address_expr = Some(Box::new(addr_expr)); }
                             }
                             if let Some(Ok(Token::Slash)) = self.current_token() {
                                 self.advance();
@@ -5187,34 +5372,34 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             Some(Ok(Token::Integer(val))) => {
                 let val = *val;
                 self.advance();
-                Ok(Expr::Integer(val))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Integer(val))))
             }
             Some(Ok(Token::Float(val))) => {
                 let val = *val;
                 self.advance();
-                Ok(Expr::Float(val))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Float(val))))
             }
             Some(Ok(Token::String(val))) => {
                 let val = val.clone();
                 self.advance();
-                Ok(Expr::String(val))
+                Ok(Expr::Literal(Box::new(LiteralExpr::String(val))))
             }
             Some(Ok(Token::Char(val))) => {
                 let val = *val;
                 self.advance();
-                Ok(Expr::Char(val))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Char(val))))
             }
             Some(Ok(Token::BoolTrue)) => {
                 self.advance();
-                Ok(Expr::Bool(true))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Bool(true))))
             }
             Some(Ok(Token::BoolFalse)) => {
                 self.advance();
-                Ok(Expr::Bool(false))
+                Ok(Expr::Literal(Box::new(LiteralExpr::Bool(false))))
             }
             Some(Ok(Token::Term)) => {
                 self.advance();
-                Ok(Expr::Term)
+                Ok(Expr::Literal(Box::new(LiteralExpr::Term)))
             }
             Some(Ok(Token::Match)) => {
                 self.advance();
@@ -5594,13 +5779,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         // Parse the scrutinee — explicitly without the struct-literal lookahead
         // that parse_primary() does for `Ident { ... }`.
         let mut value = match self.current_token() {
-            Some(Ok(Token::Integer(n))) => { let n = *n; self.advance(); Expr::Integer(n) }
-            Some(Ok(Token::Float(f))) => { let f = *f; self.advance(); Expr::Float(f) }
-            Some(Ok(Token::String(s))) => { let s = s.clone(); self.advance(); Expr::String(s) }
-            Some(Ok(Token::Char(c))) => { let c = *c; self.advance(); Expr::Char(c) }
-            Some(Ok(Token::BoolTrue)) => { self.advance(); Expr::Bool(true) }
-            Some(Ok(Token::BoolFalse)) => { self.advance(); Expr::Bool(false) }
-            Some(Ok(Token::Term)) => { self.advance(); Expr::Term }
+            Some(Ok(Token::Integer(n))) => { let n = *n; self.advance(); Expr::Literal(Box::new(LiteralExpr::Integer(n))) }
+            Some(Ok(Token::Float(f))) => { let f = *f; self.advance(); Expr::Literal(Box::new(LiteralExpr::Float(f))) }
+            Some(Ok(Token::String(s))) => { let s = s.clone(); self.advance(); Expr::Literal(Box::new(LiteralExpr::String(s))) }
+            Some(Ok(Token::Char(c))) => { let c = *c; self.advance(); Expr::Literal(Box::new(LiteralExpr::Char(c))) }
+            Some(Ok(Token::BoolTrue)) => { self.advance(); Expr::Literal(Box::new(LiteralExpr::Bool(true))) }
+            Some(Ok(Token::BoolFalse)) => { self.advance(); Expr::Literal(Box::new(LiteralExpr::Bool(false))) }
+            Some(Ok(Token::Term)) => { self.advance(); Expr::Literal(Box::new(LiteralExpr::Term)) }
             Some(Ok(Token::Underscore)) => { self.advance(); Expr::Identifier("_".to_string()) }
             Some(Ok(Token::Match)) => {
                 self.advance();
@@ -6921,7 +7106,7 @@ mod parser_tests {
                 assert_eq!(name, "uni");
                 assert_eq!(variant, "x");
                 assert!(fields.is_empty());
-                assert!(matches!(expr, Expr::Integer(42)));
+                assert_eq!(expr.as_integer(), Some(42));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -6938,7 +7123,7 @@ mod parser_tests {
                 assert_eq!(variant, "Some");
                 assert_eq!(fields.len(), 1);
                 assert!(matches!(&fields[0], Pattern::Var(f) if f == "v"));
-                assert!(matches!(expr, Expr::Integer(42)));
+                assert_eq!(expr.as_integer(), Some(42));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -6954,7 +7139,7 @@ mod parser_tests {
                 assert_eq!(name, "val");
                 assert_eq!(variant, "_");
                 assert!(fields.is_empty());
-                assert!(matches!(expr, Expr::Integer(99)));
+                assert_eq!(expr.as_integer(), Some(99));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -6978,7 +7163,7 @@ mod parser_tests {
                     }
                     other => panic!("Expected Tuple pattern, got {:?}", other),
                 }
-                assert!(matches!(expr, Expr::Integer(0)));
+                assert_eq!(expr.as_integer(), Some(0));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -6995,7 +7180,7 @@ mod parser_tests {
                 assert_eq!(variant, "Some");
                 assert_eq!(fields.len(), 1);
                 assert!(matches!(&fields[0], Pattern::LitInt(42)));
-                assert!(matches!(expr, Expr::Integer(0)));
+                assert_eq!(expr.as_integer(), Some(0));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -7012,7 +7197,7 @@ mod parser_tests {
                 assert_eq!(variant, "Msg");
                 assert_eq!(fields.len(), 1);
                 assert!(matches!(&fields[0], Pattern::LitString(s) if s == "hello"));
-                assert!(matches!(expr, Expr::Integer(0)));
+                assert_eq!(expr.as_integer(), Some(0));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -7030,7 +7215,7 @@ mod parser_tests {
                 assert_eq!(fields.len(), 2);
                 assert!(matches!(&fields[0], Pattern::Var(f) if f == "a"));
                 assert!(matches!(&fields[1], Pattern::Var(f) if f == "b"));
-                assert!(matches!(expr, Expr::Integer(1)));
+                assert_eq!(expr.as_integer(), Some(1));
             }
             _ => panic!("Expected Unification, got {:?}", stmt),
         }
@@ -7079,7 +7264,7 @@ mod parser_tests {
                 assert!(matches!(*value, Expr::Identifier(n) if n == "x"));
                 assert_eq!(arms.len(), 1);
                 assert!(matches!(arms[0].pattern, MatchPattern::Wildcard));
-                assert!(matches!(*arms[0].body, Expr::Integer(0)));
+                assert_eq!(arms[0].body.as_integer(), Some(0));
             }
             _ => panic!("Expected Match, got {:?}", expr),
         }
@@ -7246,7 +7431,7 @@ mod parser_tests {
             "let result <: items { MAP(x * 2); };",
             &[crate::ast::SubtypeOp::Map(Box::new(Expr::Mul(
                 Box::new(Expr::Identifier("x".into())),
-                Box::new(Expr::Integer(2)),
+                Box::new(Expr::Literal(Box::new(LiteralExpr::Integer(2)))),
             )))],
         );
     }
@@ -7346,7 +7531,7 @@ mod parser_tests {
     fn test_parse_subtype_match() {
         check_subtype_ops(
             r#"let result <: email["^(.+)@(.+)$"];"#,
-            &[crate::ast::SubtypeOp::Match(Box::new(Expr::String("^(.+)@(.+)$".into())))],
+            &[crate::ast::SubtypeOp::Match(Box::new(Expr::Literal(Box::new(LiteralExpr::String("^(.+)@(.+)$".into())))))],
         );
     }
 
@@ -7358,7 +7543,7 @@ mod parser_tests {
                 crate::ast::SubtypeOp::Filter(Box::new(Expr::Identifier("active".into()))),
                 crate::ast::SubtypeOp::Map(Box::new(Expr::Mul(
                     Box::new(Expr::Identifier("x".into())),
-                    Box::new(Expr::Integer(2)),
+                    Box::new(Expr::Literal(Box::new(LiteralExpr::Integer(2)))),
                 ))),
                 crate::ast::SubtypeOp::Limit(5),
             ],
@@ -7386,4 +7571,66 @@ enum BracketContents {
         stride: Option<Box<Expr>>,
         mask: Option<Box<Expr>>,
     },
+}
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    use crate::features::literal::LiteralExpr;
+
+    #[kani::proof]
+    fn verify_parse_literal_integer() {
+        let mut parser = Parser::new("42");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert!(matches!(expr, Expr::Literal(_)));
+        assert_eq!(expr.as_integer(), Some(42));
+    }
+
+    #[kani::proof]
+    fn verify_parse_literal_bool_true() {
+        let mut parser = Parser::new("true");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert_eq!(expr.as_bool(), Some(true));
+    }
+
+    #[kani::proof]
+    fn verify_parse_literal_bool_false() {
+        let mut parser = Parser::new("false");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert_eq!(expr.as_bool(), Some(false));
+    }
+
+    #[kani::proof]
+    fn verify_parse_literal_float() {
+        let mut parser = Parser::new("3.14");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert!(matches!(expr, Expr::Literal(_)));
+    }
+
+    #[kani::proof]
+    fn verify_parse_literal_string() {
+        let mut parser = Parser::new("\"hello\"");
+        let result = parser.parse_expression();
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        assert!(matches!(expr, Expr::Literal(_)));
+        assert_eq!(expr.as_string(), Some(&"hello".to_string()));
+    }
+
+    #[kani::proof]
+    fn verify_parse_contract_validation_uses_as_bool() {
+        // Contract syntax: [true][true] should fail at parse time
+        // because as_bool() == Some(true) detects trivial contracts
+        let mut parser = Parser::new("defn foo()[true][true] { } ;");
+        let result = parser.parse_definition();
+        assert!(result.is_err());
+    }
 }
