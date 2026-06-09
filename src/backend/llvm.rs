@@ -2733,7 +2733,7 @@ self.emit_declares(&mut out);
     }
 
     // ── EXPRESSIONS ───────────────────────────────────────────
-    fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> TypedRegister {
+    pub(crate) fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> TypedRegister {
         let expr = if self.optimize_budget > 0 {
             crate::analysis::equality_saturation::simplify(expr)
         } else {

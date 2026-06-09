@@ -1227,7 +1227,7 @@ impl TypeChecker {
         }
     }
 
-    fn infer_expression(&self, expr: &Expr) -> Type {
+    pub(crate) fn infer_expression(&self, expr: &Expr) -> Type {
         match expr {
             Expr::Integer(_) => Type::Int,
             Expr::Float(_) => {

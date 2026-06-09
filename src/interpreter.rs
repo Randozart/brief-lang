@@ -410,7 +410,7 @@ impl Interpreter {
         functions
     }
 
-    fn call_defn(&mut self, name: &str, args: &[Expr]) -> Result<Value, RuntimeError> {
+    pub(crate) fn call_defn(&mut self, name: &str, args: &[Expr]) -> Result<Value, RuntimeError> {
         let defn = match self.definitions.get(name) {
             Some(d) => d.clone(),
             None => return Err(RuntimeError::UndefinedForeignFunction(name.to_string())),
@@ -485,7 +485,7 @@ impl Interpreter {
         Ok(result)
     }
 
-    fn call_txn(&mut self, name: &str, args: &[Expr]) -> Result<Value, RuntimeError> {
+    pub(crate) fn call_txn(&mut self, name: &str, args: &[Expr]) -> Result<Value, RuntimeError> {
         let txn = match self.callable_txns.get(name) {
             Some(t) => t.clone(),
             None => return Err(RuntimeError::UndefinedForeignFunction(name.to_string())),
@@ -1200,7 +1200,7 @@ impl Interpreter {
         Ok(())
     }
 
-    fn handle_ffi_result(&self, fn_name: &str, mut result: Value) -> Result<Value, RuntimeError> {
+    pub(crate) fn handle_ffi_result(&self, fn_name: &str, mut result: Value) -> Result<Value, RuntimeError> {
         let sig = match self.ffi_bindings.get(fn_name) {
             Some(s) => s,
             None => return Ok(result),
@@ -2518,6 +2518,7 @@ Err(RuntimeError::TypeMismatch(
             // ── Pattern B routing ────────────────────────────────
             Expr::BinaryOp(bop) => bop.evaluate(self, &ExprDispatch),
             Expr::UnaryOp(uop) => uop.evaluate(self, &ExprDispatch),
+            Expr::CallExpr(ce) => ce.evaluate(self, &ExprDispatch),
             // DEFERRED: Pattern B variants below are not yet evaluated.
             // They exist in the enum but the feature files have stub evaluate
             // methods. Old variants still handle all cases.
