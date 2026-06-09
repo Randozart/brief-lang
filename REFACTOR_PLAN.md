@@ -682,16 +682,289 @@ Same per-step workflow. **Gate**: `cargo test --lib` after each.
 
 **Gate**: `cargo test --lib`
 
-### Phase 8 — Final Cleanup
+### Phase 8 — Praetor Baseline + Trash Folder Setup
+
+**File size targets** (agreed 2026-06-09):
+- **Feature files (leaf nodes)**: 100–500 lines — one concept, fits in working memory
+- **Coordinator files (routers)**: 1,000–2,000 lines — dispatch only, no execution logic
+- **`_monolithic/`**: trash folder, Praetor-ignored, old code goes here after replacement
+
+#### Steps
 
 | Step | Action |
 |------|--------|
-| 8.1 | Verify zero old-file references in imports |
-| 8.2 | Delete `src/_monolithic/` |
-| 8.3 | Run Praetor: 0 diagnostics on all new feature files |
-| 8.4 | `cargo test --lib` — all 526+ tests pass |
+| 8.1 | Configure `.praetor.toml` to ignore `src/_monolithic/**` |
+| 8.2 | Run Praetor on all of `src/` (minus `_monolithic/`) — capture baseline |
+| 8.3 | Set CI gate: "0 new diagnostics outside `_monolithic/`" |
+| 8.4 | `cargo test --lib` — all tests pass |
 | 8.5 | Run benchmark suite — no regression vs `main` |
-| 8.6 | Commit final state |
+| 8.6 | Commit baseline state |
+
+**Outcome**: Clear contract from this point — every commit keeps Praetor clean.
+
+---
+
+### Phase 9 — Interpreter Migration (~30 cycles)
+
+**Goal**: `interpreter.rs` from 5,590 → ~800 lines.
+
+**Strategy**: Each cycle moves one expression or statement variant's evaluation from `eval_expr`/`exec_stmt` inline match arms into the feature file's `ExprEval` / `StmtEval` impl. Old arm code goes to `_monolithic/interpreter_old.rs`.
+
+#### Per-cycle workflow
+
+```
+1. Identify next unsolved feature (e.g. CallExpr → ExprEval for call.rs)
+2. Read the current inline match arm in interpreter.rs
+3. Implement the feature file's evaluate() method (real logic, not stub)
+4. Add routing arm in eval_expr for the Pattern B variant
+5. cargo test --lib + benchmarks ✅
+6. Move old arm code to _monolithic/interpreter_old.rs section
+7. Write/update docs/architecture/features/<name>.md
+   - Syntax, typechecking, evaluation, codegen notes
+   - Kani/Praetor notes
+8. Commit
+```
+
+#### Priority order (most-used first)
+
+| Cycle | Feature | Status |
+|-------|---------|--------|
+| 9.1–9.3 | Literal, BinaryOp, UnaryOp | ✅ done in Phase 4 |
+| 9.4 | **CallExpr** — function calls | 🔜 |
+| 9.5 | **ProjectionExpr** — `:>` operator | ⏳ |
+| 9.6 | **FieldAccessExpr** — `.` field access | ⏳ |
+| 9.7 | **StructInstanceExpr / ObjectLiteralExpr** — struct/tuple construction | ⏳ |
+| 9.8 | **ListLiteralExpr / MapLiteralExpr / SetLiteralExpr** — collection literals | ⏳ |
+| 9.9 | **TupleExpr / TupleDestructureExpr** — tuple operations | ⏳ |
+| 9.10 | **SliceExpr / MultiSliceExpr** — slicing | ⏳ |
+| 9.11 | **ArrowMutExpr / ArrowDiscardExpr / ArrowTransferExpr** — `<-` mutation | ⏳ |
+| 9.12 | **MatchExpr / PatternMatchExpr** — pattern matching | ⏳ |
+| 9.13 | **BlockExpr** — block expressions | ⏳ |
+| 9.14–9.17 | Remaining Expr features | ⏳ |
+| 9.18–9.30 | All 13 Statement features (StmtEval) | ⏳ |
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 10 — Typechecker Migration (~15 cycles)
+
+**Goal**: `typechecker.rs` from 2,265 → ~500 lines.
+
+**Strategy**: Move `infer_expression` match arms into `ExprTypecheck` trait impls. The `infer_expression` becomes `pub` (or uses `ExprDispatch`) so feature files can call it for sub-expression typechecking.
+
+#### Per-cycle workflow
+
+Same as Phase 9, but for `ExprTypecheck` trait impls.
+
+#### Challenges
+
+- `infer_expression` is currently private — feature files cannot call it
+- Solution: Add an `infer_type` method to `ExprDispatch` that calls back into the typechecker
+- Or: make `infer_expression` `pub(crate)` so feature files can call it directly
+
+| Cycle | Feature | Status |
+|-------|---------|--------|
+| 10.1–10.3 | BinaryOp, UnaryOp typecheck | ⏳ |
+| 10.4–10.15 | Remaining 12 Expr features | ⏳ |
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 11 — Parser Migration (~20 cycles)
+
+**Goal**: `parser.rs` from 7,639 → ~2,000 lines.
+
+**Strategy**: Each `parse_*` function moves to its feature file's parse helper. The parser retains: token dispatch, precedence climbing, error recovery.
+
+| Cycle | Feature | Status |
+|-------|---------|--------|
+| 11.1–11.15 | Expr parse functions (15) | ⏳ |
+| 11.6–11.8 | Statement parse functions (3) | ⏳ |
+| 11.9–11.14 | TopLevel parse functions (6) | ⏳ |
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 12 — LLVM Backend Migration (~20 cycles)
+
+**Goal**: `backend/llvm.rs` from 7,675 → ~2,500 lines.
+
+**Strategy**: Move `emit_expr` and `emit_stmt` match arms into `ExprCodegenLLVM` / `StmtCodegenLLVM` trait impls. The folded loop engine, SSA mode, async dispatch infrastructure, and the decision tree (already in `llvm_optimizer.rs`) stay centralized.
+
+#### What stays in `llvm.rs`
+- `LlvmBackend` struct (48 fields)
+- `generate()` entry point
+- `emit_header()`, `emit_declares()` — global IR infrastructure
+- `emit_folded_loop()` + `emit_folded_main()` — loop engine
+- `emit_reactor()` / `emit_parallel_reactor()` — dispatch chain
+- SSA state management
+- `emit_main()` — program entry
+- All 86 integration tests
+
+#### What moves to feature files
+- `emit_expr` arms (22 Expr variants)
+- `emit_stmt` arms (13 Statement variants)
+- `emit_*` helpers used only by individual variants
+
+#### Per-cycle workflow
+
+```
+1. Identify next Expr/Statement variant in emit_expr/emit_stmt
+2. Clone the match arm logic into the feature file's ExprCodegenLLVM impl
+3. Replace the inline arm with a delegate call
+4. cargo test --lib + benchmarks ✅
+5. Move old arm code to _monolithic/llvm_old.rs
+6. Write/update feature doc with codegen details
+7. Commit
+```
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 13 — Proof Engine Extraction (~10 cycles)
+
+**Goal**: `proof_engine.rs` from 4,120 → ~1,000 lines.
+
+**Strategy**: Move `SymbolicValue::from_expr` pattern matching into feature files' symbolic conversion helpers. The path exploration (`enumerate_paths_recursive`), convergence analysis (`check_convergence`), and contract verification stay centralized.
+
+#### What stays in `proof_engine.rs`
+- `check_convergence()` — syntactic convergence detection
+- `enumerate_paths_recursive()` — path exploration
+- `verify_contract_implication()` — symbolic post-condition check
+- `verify_transaction()` / `verify_definition()` — entry points
+- `SymbolicExecutor` struct + `SymbolicValue` enum
+
+#### What moves to feature files
+- `SymbolicValue::from_expr()` pattern matching per Expr variant
+- `implies()` could be partially extracted for per-variant logic
+
+**Gate**: `cargo test --lib` + benchmarks pass after each cycle.
+
+---
+
+### Phase 14 — AST Cleanup + Old Variant Removal
+
+**Trigger**: Only after ALL dispatch has been migrated to feature files.
+
+**Goal**: `ast.rs` from 1,544 → ~500 lines. No old enum variants remain.
+
+| Step | Action |
+|------|--------|
+| 14.1 | Verify 0 old-variant references in imports across the codebase |
+| 14.2 | Remove old Expr variants from `ast.rs` enum |
+| 14.3 | Remove old Statement variants from `ast.rs` enum |
+| 14.4 | Move removed enum definitions to `_monolithic/ast_old.rs` |
+| 14.5 | Remove `_monolithic/ast_old.rs` entirely (safety net no longer needed) |
+| 14.6 | `cargo test --lib` — final verification |
+| 14.7 | `bash benchmarks/build_and_bench.sh` — **full benchmark regression check** |
+| 14.8 | If any benchmark shows regression, investigate and fix before merge |
+
+#### Benchmark Sensitivity
+
+After old variant removal, the compiler's dispatch is 100% through feature trait methods. This changes nothing about the generated code — the trait methods emit the same LLVM IR as the old inline arms. But there are two areas of risk:
+
+1. **Inlining**: The old dispatch was direct (match arm → inline code). The new dispatch goes through a trait method. LLVM's inliner handles this fine, but verify with `build_and_bench.sh`.
+2. **Precomputation budget**: The `--optimize-budget` flag controls how many iterations the compiler precomputes. If a benchmark shows implausible results (0.001s for real work), the budget or the precomputation logic may need adjustment.
+
+Both risks are detected by the benchmark harness, not unit tests.
+
+---
+
+### Final File Size Targets
+
+| File | Starting | Target | After Phase |
+|------|----------|--------|-------------|
+| `interpreter.rs` | 5,590 | ~800 | Phase 9 |
+| `typechecker.rs` | 2,265 | ~500 | Phase 10 |
+| `parser.rs` | 7,639 | ~2,000 | Phase 11 |
+| `backend/llvm.rs` | 7,675 | ~2,500 | Phase 12 |
+| `proof_engine.rs` | 4,120 | ~1,000 | Phase 13 |
+| `ast.rs` | 1,544 | ~500 | Phase 14 |
+| `features/*` (45 files) | 0 | 100–500 each | Phases 1–13 |
+| `_monolithic/` | empty | grows then deleted | Phases 9–14 |
+
+---
+
+## Documentation Strategy — Every Cycle Ships Docs
+
+**Key principle**: Architectural documentation is written in the SAME commit as the code change, not in a separate documentation phase.
+
+### What each feature file needs
+
+| Doc section | Content | Length |
+|-------------|---------|--------|
+| Header | Purpose, date added, which phase | 2 lines |
+| Syntax | Brief syntax for the construct, with examples | 10–30 lines |
+| Typechecking | How types are inferred/checked | 5–15 lines |
+| Evaluation | How it evaluates in the interpreter | 5–15 lines |
+| Codegen | Per-backend codegen notes (LLVM, VHDL, Webstack) | 10–30 lines |
+| Kani/Praetor | Any special considerations | 3–5 lines |
+
+### File: `docs/architecture/features/<name>.md`
+
+**53 feature docs total** (15 Expr + 13 Stmt + 17 TopLevel + 5 backend + 5 coordinator = partially done).
+
+| Category | Count | Status | When written |
+|----------|-------|--------|-------------|
+| Expr features | 15 | 2 done (literal, typedef) | During Phase 9 eval migration |
+| Stmt features | 13 | 0 done | During Phase 9 eval migration |
+| TopLevel features | 17 | 0 done | During Phase 3/5/6 (already shipped) |
+| Coordinators | 5 | 0 done | As each coordinator shrinks |
+| Backends | 5 | 0 done | As each backend extracts |
+
+**Coordinator docs** cover: how the dispatcher works, what stays centralized, error handling, and interaction patterns. These are written as the coordinator's size drops to ~2,000 lines.
+
+### File: `docs/architecture/features/<coordinator>.md`
+
+For example, `docs/architecture/features/parser.md` would cover:
+- Token dispatch strategy
+- Precedence climbing algorithm
+- Error recovery
+- Each `parse_*` function's feature file location
+
+---
+
+## Praetor Enforcement Model
+
+```
+src/features/          → 0 diagnostics (strict gate, blocks commit)
+src/ (rest, no trash)  → baseline captured in Phase 8, must not increase
+src/_monolithic/       → ignored entirely by Praetor
+```
+
+### `.praetor.toml`
+
+```toml
+[files]
+ignore = ["src/_monolithic/**"]
+
+[rules]
+cyclomatic_limit = 15
+cognitive_limit = 15
+lines_limit = 100
+params_limit = 6
+nesting_limit = 6
+```
+
+### CI gate (via `scripts/verify.sh`)
+
+```bash
+# 1. Check new diagnostics outside _monolithic/
+praetor validate --baseline praetor-baseline.json --target ./src --ignore src/_monolithic/
+
+# 2. Full strict validation on feature files
+praetor validate --warn --target ./src/features
+
+# 3. Unit tests
+cargo test --lib
+
+# 4. Kani fast group
+cargo kani --lib
+```
 
 ---
 
@@ -703,21 +976,94 @@ Same per-step workflow. **Gate**: `cargo test --lib` after each.
 | **LLVM: pragmatic extraction** | Extract match arms into features; keep folded loop / SSA / decision tree centralized. 80% benefit, 20% risk. |
 | **Backend-independent** | Separate traits per backend. Missing trait = router's default stub. Backend work is purely additive. |
 | **Incremental, test-gated** | `cargo test --lib` after every sub-step. Never more than one migration away from green. |
+| **Doc-per-cycle** | Architecture docs ship in the same commit as the code change. No batch documentation phases. |
 | **Praetor-clean from day one** | Every new function ≤ 100 lines, complexity ≤ 15, params ≤ 6. Old code quarantined in `_monolithic/`. |
 | **Semicolon rule** | `#!` global directives get `;`. `#` decorations do not — they belong to the item they prepend. |
+| **Benchmark as guard** | `build_and_bench.sh` after every phase — if Brief beats C by an implausible margin, something is wrong. |
+| **Feature files 100–500 lines** | Leaf nodes fit in working memory. Coordinators 1,000–2,000 lines. |
+
+---
+
+## Comprehensive Architecture Documentation Index
+
+| Path | Content | Status |
+|------|---------|--------|
+| `docs/architecture/overview.md` | System architecture, module responsibilities, pass flow | ✅ Updated 2026-06-09 |
+| `docs/architecture/channel-map.md` | Data flow between passes, Pattern B integration | ✅ Updated 2026-06-09 |
+| `docs/architecture/glossary.md` | All compiler terms defined | ✅ Updated 2026-06-09 |
+| `docs/architecture/praetor-log.md` | Running log of diagnostics found/resolved | ✅ Updated 2026-06-09 |
+| `docs/architecture/backend-strategy.md` | Per-backend design notes | ⏳ |
+| `docs/architecture/features/literal.md` | LiteralExpr — integer, float, string, char, bool, term | ✅ Done |
+| `docs/architecture/features/typedef.md` | TypeDef — type derivation system | ✅ Done |
+| `docs/architecture/features/statement.md` | Statement feature files (grouped) | ✅ Done |
+| `docs/architecture/features/toplevel.md` | TopLevel feature files (grouped) | ✅ Done |
+| `docs/architecture/features/proof-engine-convergence.md` | Proof engine convergence analysis | ✅ Done |
+| `docs/architecture/features/binary_op.md` | Binary op expressions | 📝 Phase 9 |
+| `docs/architecture/features/unary_op.md` | Unary op expressions | 📝 Phase 9 |
+| `docs/architecture/features/call.md` | Function calls | 📝 Phase 9 |
+| `docs/architecture/features/projection.md` | `:>` projection operator | 📝 Phase 9 |
+| `docs/architecture/features/collection.md` | Collection literals (List, Map, Set) | 📝 Phase 9 |
+| `docs/architecture/features/tuple.md` | Tuple operations | 📝 Phase 9 |
+| `docs/architecture/features/field.md` | Field access, struct/object construction | 📝 Phase 9 |
+| `docs/architecture/features/pattern.md` | Pattern matching, match expressions | 📝 Phase 9 |
+| `docs/architecture/features/block.md` | Block expressions | 📝 Phase 9 |
+| `docs/architecture/features/arrow.md` | Arrow mutation (`<-`) | 📝 Phase 9 |
+| `docs/architecture/features/subtype.md` | Subtype projections | 📝 Phase 9 |
+| `docs/architecture/features/sigcall.md` | SigCall expressions | 📝 Phase 9 |
+| `docs/architecture/features/dbvl.md` | DbvlTable expressions | 📝 Phase 9 |
+| `docs/architecture/features/ellipsis.md` | Ellipsis expressions | 📝 Phase 9 |
+| `docs/architecture/features/assignment.md` | Assignment statements | 📝 Phase 9 |
+| `docs/architecture/features/let_binding.md` | Let binding statements | 📝 Phase 9 |
+| `docs/architecture/features/guarded.md` | Guarded statements | 📝 Phase 9 |
+| `docs/architecture/features/term.md` | Term/TermBang statements | 📝 Phase 9 |
+| `docs/architecture/features/escape.md` | Escape statements | 📝 Phase 9 |
+| `docs/architecture/features/expression.md` | Expression statements | 📝 Phase 9 |
+| `docs/architecture/features/unification.md` | Unification statements | 📝 Phase 9 |
+| `docs/architecture/features/inline_asm.md` | Inline assembly | 📝 Phase 9 |
+| `docs/architecture/features/local_trigger.md` | Local trigger statements | 📝 Phase 9 |
+| `docs/architecture/features/alka.md` | Alka statements | 📝 Phase 9 |
+| `docs/architecture/features/on_exit.md` | On-exit handlers | 📝 Phase 9 |
+| `docs/architecture/features/sync_block.md` | Sync block statements | 📝 Phase 9 |
+| `docs/architecture/features/signature.md` | Signature declarations | 📝 Phase 11 parser |
+| `docs/architecture/features/definition.md` | Function definitions | 📝 Phase 11 |
+| `docs/architecture/features/transaction.md` | Transaction declarations | 📝 Phase 11 |
+| `docs/architecture/features/state_decl.md` | State variable declarations | 📝 Phase 11 |
+| `docs/architecture/features/trigger.md` | Trigger declarations | 📝 Phase 11 |
+| `docs/architecture/features/constant.md` | Constant declarations | 📝 Phase 11 |
+| `docs/architecture/features/import_lnk.md` | Import, link dependency | 📝 Phase 11 |
+| `docs/architecture/features/foreign.md` | Foreign bindings (FFI) | 📝 Phase 11 |
+| `docs/architecture/features/resource.md` | Resource declarations | 📝 Phase 11 |
+| `docs/architecture/features/struct_def.md` | Struct definitions | 📝 Phase 11 |
+| `docs/architecture/features/rstruct.md` | RStruct definitions | 📝 Phase 11 |
+| `docs/architecture/features/enum_def.md` | Enum definitions | 📝 Phase 11 |
+| `docs/architecture/features/render.md` | Render blocks | 📝 Phase 11 |
+| `docs/architecture/features/svg.md` | SVG components | 📝 Phase 11 |
+| `docs/architecture/features/sync_group.md` | Sync group declarations | 📝 Phase 11 |
+| `docs/architecture/features/test.md` | Test pragmas | 📝 Phase 5 |
+| `docs/architecture/features/assertion.md` | Assertion directives | 📝 Phase 6 |
+| `docs/architecture/interpreter.md` | Interpreter router architecture | 📝 Phase 9 |
+| `docs/architecture/typechecker.md` | Typechecker router architecture | 📝 Phase 10 |
+| `docs/architecture/parser.md` | Parser router architecture | 📝 Phase 11 |
+| `docs/architecture/llvm.md` | LLVM backend architecture | 📝 Phase 12 |
+| `docs/architecture/llvm_optimizer.md` | Optimization decision tree | 📝 Phase 7 |
+| `docs/architecture/vhdl.md` | VHDL backend architecture | 📝 Phase 12 |
+| `docs/architecture/webstack.md` | Webstack backend architecture | 📝 Phase 12 |
+| `docs/architecture/proof_engine.md` | Full proof engine architecture | 📝 Phase 13 |
 
 ---
 
 ## Total Impact
 
-| Metric | Current | Target |
-|--------|---------|--------|
-| Feature files | 1 (literal) | ~60 |
-| Files dispatching `Expr::` | 38 | 1 (the router) |
-| `interpreter.rs` | 5,507 lines | ~500 |
-| `parser.rs` | 7,452 lines | ~2,000 |
-| `typechecker.rs` | 2,166 lines | ~400 |
-| `llvm.rs` | 7,861 lines | ~3,000 |
-| `ast.rs` | 1,422 lines | ~400 |
-| Praetor violations | ~232 | 0 |
-| Kani fast harnesses | 14 | 20–30 |
+| Metric | Before refactor | Current | Target |
+|--------|----------------|---------|--------|
+| Feature files | 0 | 47 | ~60 |
+| Files dispatching `Expr::` | 38 | ~30 | 1 (the router) |
+| `interpreter.rs` | 5,507 lines | 5,590 | ~800 |
+| `parser.rs` | 7,452 lines | 7,639 | ~2,000 |
+| `typechecker.rs` | 2,166 lines | 2,265 | ~500 |
+| `llvm.rs` | 7,861 lines | 7,675 | ~2,500 |
+| `proof_engine.rs` | 3,655 lines | 4,120 | ~1,000 |
+| `ast.rs` | 1,422 lines | 1,544 | ~500 |
+| Architecture docs | 4 | 11 | ~60 |
+| Praetor violations | ~232 | TBD (Phase 8) | 0 |
+| Kani fast harnesses | 14 | 11 | 20–30 |
