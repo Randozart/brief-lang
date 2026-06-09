@@ -1052,6 +1052,62 @@ cargo kani --lib
 
 ---
 
+---
+
+### Phase 15 — LLVM Backend Refactor (2026-06-09)
+
+**Goal**: Split `backend/llvm.rs` (7,675 lines) into `backend/llvm/` subdirectory with ~6 focused files. Then move `emit_expr` arms into feature files' `ExprCodegenLLVM` impls.
+
+**Branch**: `refactor/llvm` — created from `main` after Phase 1–9 merge.
+
+#### Step 1: Baseline
+
+Run `bash benchmarks/build_and_bench.sh` on `refactor/pattern-b` before merge. Save results as baseline. Confirm identical numbers after merge.
+
+#### Step 2: Merge to main
+
+Merge `refactor/pattern-b` into `main` via `--no-ff` merge commit. Re-run benchmarks to confirm no regression from merge.
+
+#### Step 3: Directory split (no behavioral change)
+
+```
+src/backend/llvm.rs       → src/backend/llvm/
+  mod.rs                    Re-exports from sub-modules
+  backend.rs                LlvmBackend struct (48 fields), generate()
+  emit_expr.rs              emit_expr router + centralized emit helpers
+  emit_stmt.rs              emit_stmt router
+  folded_loop.rs            Folded loop engine (emit_folded_loop, SSA state, phi)
+  optimizer.rs              Already extracted (llvm_optimizer.rs, decision tree)
+  tests.rs                  86 integration tests
+```
+
+#### Step 4: Emit_expr → feature files (~20 cycles)
+
+Same pattern as interpreter migration: each `emit_expr` arm moves to the feature file's `ExprCodegenLLVM` impl. Each cycle:
+1. Move arm → feature file
+2. `cargo test --lib` + benchmarks
+3. Move old arm to `_monolithic/llvm_emits_old.rs`
+4. Commit
+
+#### Step 5: Final verification
+
+```bash
+bash benchmarks/build_and_bench.sh | diff - baseline.txt
+```
+
+Zero change expected — emit functions are pure string builders.
+
+#### File size targets after Phase 15
+
+| File | Before | Target |
+|------|--------|--------|
+| `backend/llvm.rs` (→ `backend/llvm/`) | 7,675 | split into ~6 files, most < 1,000 |
+| `emit_expr.rs` | N/A | ~800 (router + centralized helpers) |
+| `folded_loop.rs` | ~700 | ~700 (unchanged) |
+| `optimizer.rs` | ~200 | ~200 (unchanged) |
+
+---
+
 ## Total Impact
 
 | Metric | Before refactor | Current | Target |
