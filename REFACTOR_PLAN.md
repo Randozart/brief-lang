@@ -127,6 +127,7 @@ src/
       render.rs
       svg.rs
       sync_group.rs
+      typedef.rs             # Type derivation via `<:` constraints
       test.rs                # #test pragma
       assertion.rs           # #!assert / #assert pragma
 
@@ -377,12 +378,12 @@ Deleted only in Phase 8 after full test parity is confirmed.
 
 ### Phase 1 — Expr Features (28 files, 4 sub-steps)
 
-| Step | Feature | Rationale |
-|------|---------|-----------|
-| 1.1 | literal, identifier | Simplest — proof of concept |
-| 1.2 | binary_op, unary_op | Mechanical extraction (18+3 variants) |
-| 1.3 | call, projection, collection, map, set, tuple, field | Medium complexity |
-| 1.4 | pattern_match, match, block, arrow, subtype, cast, concat, sig_call, dbvl, ellipsis | Higher complexity |
+| Step | Feature | Rationale | Status |
+|------|---------|-----------|--------|
+| 1.1 | literal | Simplest — proof of concept | ✅ **Done** |
+| 1.2 | binary_op, unary_op | Mechanical extraction (18+3 variants) | 🔜 Next |
+| 1.3 | call, projection, collection, map, set, tuple, field | Medium complexity | ⏳ |
+| 1.4 | pattern_match, match, block, arrow, subtype, cast, concat, sig_call, dbvl, ellipsis | Higher complexity | ⏳ |
 
 **Per sub-step**:
 1. Create feature file with struct + trait impls
@@ -392,6 +393,47 @@ Deleted only in Phase 8 after full test parity is confirmed.
 5. Remove old inline match arm logic
 6. `cargo test --lib` ✅
 7. Move old code to `_monolithic/`
+
+---
+
+### Phase 1.5 — `TopLevel::TypeDef` (Type Derivation)
+
+**Rationale**: Unifies type aliasing, refinement types, bit-width declarations, fixed-size collections, and behavioral type constraints (Queue/Stack) under a single `<:` derivation operator. `List<T>` becomes the only primitive sequential collection; `Queue`, `Stack`, `OrderedSet`, etc. become `<:` derivations with behavioral constraints.
+
+| Step | Action | Files |
+|------|--------|-------|
+| 1.5.1 | Add `TypeDef` keyword to lexer | `lexer.rs` |
+| 1.5.2 | Add `TopLevel::TypeDef` variant + new `ProjectionTarget` variants (Volatile, Atomic, Endian, ClockDomain, BitWidth, Access, IndexAccess, Push, Pop, Unique, SIMD, Width) | `ast.rs` |
+| 1.5.3 | Implement `parse_type_def()` + constraint target validation in parser | `parser.rs` |
+| 1.5.4 | Create `features/toplevel/typedef.rs` with typecheck + codegen | NEW |
+| 1.5.5 | Router arm in typechecker (constraint type validation + compile-time regex enforcement) | `typechecker.rs` |
+| 1.5.6 | Router arms in backends (LLVM: emit width/volatile/atomic/endian/bswap; VHDL: clock domain/width) | `llvm.rs`, `vhdl.rs`, `webstack.rs` |
+| 1.5.7 | Skip arm in interpreter (type defs are compile-time only) | `interpreter.rs` |
+| 1.5.8 | Tests: parser (6+), typechecker (5+), Kani fast harnesses (pure match dispatch) | `parser.rs`, `typechecker.rs`, + kani |
+| 1.5.9 | Architecture docs | `docs/architecture/features/typedef.md` |
+
+**Constraint grammar**:
+
+```brief
+Type Queue<T> <: List<T> {
+    Access = "FIFO";
+    IndexAccess = false;
+    Push = "back";
+    Pop = "front";
+};
+```
+
+**Settable vs query-only targets**:
+
+| Category | Targets |
+|----------|---------|
+| **Layout constraints** (set + read) | `Size`, `Bytes`, `Alignment`, `Range`, `BitWidth`, `Volatile`, `Atomic`, `Endian`, `ClockDomain`, `Match` |
+| **Behavioral constraints** (set + read) | `Access`, `IndexAccess`, `Push`, `Pop`, `Unique`, `SIMD`, `Width` |
+| **Query only (`:>`) — rejected in `<:` constraint block** | `Keys`, `Values`, `Contains`, `Pop`, `Index`, `Get`, `Top`, `Front`, `Elements`, `AsStack`, `AsQueue`, `Ptr`, `PtrBang`, `Type`, `Offset`, `Popcount`, `LeadingZeros`, `TrailingZeros`, `Absolute`, `BitReverse` |
+
+**Future (Phase 6+)**: After TypeDef infrastructure is mature, deprecate `Value::Stack`/`Value::Queue` variants in the interpreter. Arrow dispatch checks type constraints instead of matching on enum variants. `AsStack`/`AsQueue` projection targets deprecated with migration warning.
+
+**Total estimate**: ~600–800 lines. **Gate**: `cargo test --lib` + `cargo kani --lib` (fast group).
 
 ### Phase 2 — Statement Features (13 files)
 
@@ -502,11 +544,12 @@ Same per-step workflow. **Gate**: `cargo test --lib` after each.
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Feature files | 0 | ~58 |
+| Feature files | 1 (literal) | ~60 |
 | Files dispatching `Expr::` | 38 | 1 (the router) |
-| `interpreter.rs` | 5,504 lines | ~500 |
-| `parser.rs` | 7,389 lines | ~2,000 |
-| `typechecker.rs` | 2,157 lines | ~400 |
-| `llvm.rs` | 7,799 lines | ~3,000 |
-| `ast.rs` | 1,240 lines | ~400 |
+| `interpreter.rs` | 5,507 lines | ~500 |
+| `parser.rs` | 7,452 lines | ~2,000 |
+| `typechecker.rs` | 2,166 lines | ~400 |
+| `llvm.rs` | 7,861 lines | ~3,000 |
+| `ast.rs` | 1,422 lines | ~400 |
 | Praetor violations | ~232 | 0 |
+| Kani fast harnesses | 14 | 20–30 |

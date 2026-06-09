@@ -45,3 +45,14 @@ The new `src/features/literal.rs` (231 lines, cyclomatic 4, params 2) satisfies
 Praetor's strict limits. No new violations introduced in any router arm or helper method.
 
 Next phase: Phase 1.2 (binary_op / unary_op) — mechanical extraction of 18+3 operator variants.
+
+---
+
+## 2026-06-09 — Kani Harness Rules
+
+Added permanent Kani Harness Requirements to AGENTS.md. Fast group harnesses must be
+pure match dispatch only (no formatting, no allocation, no loops, no recursion).
+Full group (`--features kani_full`) may relax these rules for CI-only execution.
+
+Previously, 110 harnesses were written without this constraint, causing 15-minute
+timeouts. After enforcing the rules: 14 fast harnesses complete in 2.5s.
