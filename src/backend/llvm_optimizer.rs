@@ -1,0 +1,280 @@
+// ── LLVM Optimization Decision Tree ────────────────────────────────
+//
+// Phase 7: Extracted from src/backend/llvm.rs generate() to keep the
+// main codegen file focused on emission. This module handles:
+//   - Dispatch mode auto-selection (sequential vs parallel)
+//   - Transaction categorization (enum / async / sequential)
+//   - Lightweight async detection
+//
+// Zero behavioral changes — pure code reorganization.
+
+use std::collections::{HashMap, HashSet};
+use crate::ast::{DispatchMode, Expr, Program, Transaction};
+use crate::backend::AnalysisResults;
+
+use crate::backend::llvm::LlvmBackend;
+
+/// Result of the optimization strategy selection.
+pub struct OptimizationStrategy {
+    pub dispatch_mode: DispatchMode,
+    pub has_wake_triggers: bool,
+    pub enumerable: Option<Vec<(String, Option<u64>)>>,
+    pub enum_keys: HashMap<String, Vec<i64>>,
+    pub enum_txn_names: HashSet<String>,
+}
+
+impl LlvmBackend {
+    /// Select the optimization strategy: dispatch mode, txn categorization,
+    /// and async/lightweight classification. Fills self.has_async_txns,
+    /// self.is_lightweight_async, self.async_txn_names.
+    pub fn select_optimization_strategy(
+        &mut self,
+        program: &Program,
+        analysis: &AnalysisResults,
+        txns: &[(String, &Transaction)],
+    ) -> OptimizationStrategy {
+        let dispatch_mode = Self::select_dispatch_mode(program, txns);
+        let (has_wake_triggers, enumerable, enum_keys, enum_txn_names) =
+            Self::classify_txns(self, analysis, txns);
+        OptimizationStrategy {
+            dispatch_mode,
+            has_wake_triggers,
+            enumerable,
+            enum_keys,
+            enum_txn_names,
+        }
+    }
+
+    /// Auto-select Parallel dispatch when all reactive transactions
+    /// are proven conflict-free.
+    fn select_dispatch_mode(
+        program: &Program,
+        txns: &[(String, &Transaction)],
+    ) -> DispatchMode {
+        if program.dispatch_mode == DispatchMode::Sequential {
+            let reactive: Vec<&Transaction> = txns.iter()
+                .filter(|(_, t)| t.is_reactive).map(|(_, t)| *t).collect();
+            let mut cf = true;
+            for i in 0..reactive.len() {
+                for j in (i + 1)..reactive.len() {
+                    let a = reactive[i];
+                    let b = reactive[j];
+                    let a_writes: HashSet<String> =
+                        crate::backend::collect_assigned_identifiers(&a.body)
+                            .into_iter().collect();
+                    let b_writes: HashSet<String> =
+                        crate::backend::collect_assigned_identifiers(&b.body)
+                            .into_iter().collect();
+                    let a_reads = crate::backend::collect_read_identifiers(&a.body);
+                    let b_reads = crate::backend::collect_read_identifiers(&b.body);
+                    if !a_writes.is_disjoint(&b_writes) { cf = false; break; }
+                    let mut a_pre_ids = HashSet::new();
+                    crate::backend::collect_expr_identifiers(
+                        &a.contract.pre_condition, &mut a_pre_ids);
+                    let mut b_pre_ids = HashSet::new();
+                    crate::backend::collect_expr_identifiers(
+                        &b.contract.pre_condition, &mut b_pre_ids);
+                    if !a_pre_ids.is_disjoint(&b_pre_ids) {
+                        if !a_writes.is_disjoint(&b_reads) { cf = false; break; }
+                        if !b_writes.is_disjoint(&a_reads) { cf = false; break; }
+                    }
+                }
+                if !cf { break; }
+            }
+            if cf { DispatchMode::Parallel } else { program.dispatch_mode }
+        } else {
+            program.dispatch_mode
+        }
+    }
+
+    /// Categorize reactive transactions into enum/async/sequential dispatch paths.
+    /// Sets self.has_async_txns, self.async_txn_names, self.is_lightweight_async.
+    fn classify_txns(
+        &mut self,
+        analysis: &AnalysisResults,
+        txns: &[(String, &Transaction)],
+    ) -> (bool, Option<Vec<(String, Option<u64>)>>, HashMap<String, Vec<i64>>, HashSet<String>) {
+        let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
+
+        let (enumerable, enum_keys): (Option<Vec<(String, Option<u64>)>>, HashMap<String, Vec<i64>>) = {
+            let region = &analysis.region_analyzer;
+            if !self.trigger_names.is_empty() {
+                let mut sizes = Vec::new();
+                let mut total: u64 = 1;
+                let mut ok = true;
+                let mut fallback_triggers = Vec::new();
+                for tn in &self.trigger_names {
+                    let sz = region.value_set_size_of(tn);
+                    if let Some(s) = sz {
+                        total = total.saturating_mul(s);
+                        if total > self.optimize_budget { ok = false; break; }
+                        sizes.push((tn.clone(), sz));
+                    } else {
+                        fallback_triggers.push(tn.clone());
+                    }
+                }
+                if ok && sizes.len() == self.trigger_names.len() {
+                    (Some(sizes), HashMap::new())
+                } else if !fallback_triggers.is_empty() {
+                    let trigger_set: HashSet<&str> =
+                        self.trigger_names.iter().map(|s| s.as_str()).collect();
+                    let mut keys_map = HashMap::new();
+                    for tn in &fallback_triggers {
+                        for (_, txn) in txns {
+                            if !txn.is_reactive { continue; }
+                            if let Some(keys) = extract_trigger_keys(
+                                &txn.contract.pre_condition, &trigger_set,
+                            ) {
+                                keys_map.insert(tn.clone(), keys);
+                                break;
+                            }
+                        }
+                    }
+                    if !keys_map.is_empty() {
+                        let mut combined_sizes = sizes;
+                        let mut combined_total = total;
+                        let mut all_ok = true;
+                        for tn in &self.trigger_names {
+                            if combined_sizes.iter().any(|(n, _)| n == tn) { continue; }
+                            if let Some(keys) = keys_map.get(tn) {
+                                let s = keys.len() as u64;
+                                combined_total = combined_total.saturating_mul(s);
+                                if combined_total > self.optimize_budget { all_ok = false; break; }
+                                combined_sizes.push((tn.clone(), Some(s)));
+                            } else {
+                                all_ok = false; break;
+                            }
+                        }
+                        if all_ok { (Some(combined_sizes), keys_map) } else { (None, HashMap::new()) }
+                    } else {
+                        (None, HashMap::new())
+                    }
+                } else {
+                    (None, HashMap::new())
+                }
+            } else { (None, HashMap::new()) }
+        };
+
+        let enum_trigger_names: HashSet<&str> = enumerable.as_ref()
+            .map(|en| en.iter().map(|(n, _)| n.as_str()).collect())
+            .unwrap_or_default();
+        let enum_txn_names: HashSet<String> = txns.iter()
+            .filter(|(_, t)| {
+                t.is_reactive && is_trigger_gated(&t.contract.pre_condition, &enum_trigger_names)
+            })
+            .map(|(n, _)| n.clone())
+            .collect();
+
+        let async_candidates: Vec<&Transaction> = txns.iter()
+            .filter(|(n, t)| t.is_reactive && !enum_txn_names.contains(n.as_str()))
+            .map(|(_, t)| *t)
+            .collect();
+        let ac_writes: Vec<HashSet<String>> = async_candidates.iter()
+            .map(|t| crate::backend::collect_assigned_identifiers(&t.body).into_iter().collect())
+            .collect();
+        let ac_reads: Vec<HashSet<String>> = async_candidates.iter()
+            .map(|t| crate::backend::collect_read_identifiers(&t.body))
+            .collect();
+        let mut is_async_eligible: Vec<bool> = vec![true; async_candidates.len()];
+        for i in 0..async_candidates.len() {
+            for j in (i + 1)..async_candidates.len() {
+                let has_conflict = !ac_writes[i].is_disjoint(&ac_writes[j])
+                    || !ac_writes[i].is_disjoint(&ac_reads[j])
+                    || !ac_writes[j].is_disjoint(&ac_reads[i]);
+                if has_conflict {
+                    is_async_eligible[i] = false;
+                    is_async_eligible[j] = false;
+                }
+            }
+        }
+        let all_async_eligible = async_candidates.len() >= 2
+            && is_async_eligible.iter().all(|&x| x);
+        let mut async_txn_names: HashSet<String> = HashSet::new();
+        if all_async_eligible {
+            for ac in &async_candidates {
+                async_txn_names.insert(ac.name.clone());
+            }
+        }
+
+        self.has_async_txns = !async_txn_names.is_empty();
+        self.async_txn_names = async_txn_names.iter().cloned().collect();
+        self.async_thread_pool_size = self.async_txn_names.len() as u32;
+
+        if !async_txn_names.is_empty() {
+            let all_lightweight = async_txn_names.iter().all(|name| {
+                analysis.transition_graph.nodes.iter().find(|n| n.name == *name)
+                    .map_or(false, |node| {
+                        let is_pure = node.is_pure_body || node.is_effectively_pure;
+                        if !is_pure { return false; }
+                        if let Some(ref bp) = node.bounded_pre {
+                            let is_const = self.field_initializers.get(&bp.bound_var)
+                                .and_then(|e| e.as_ref())
+                                .map_or(false, |e| matches!(e, Expr::Integer(_)))
+                                || self.constants.get(&bp.bound_var)
+                                    .map_or(false, |(_, e)| matches!(e, Expr::Integer(_)));
+                            !is_const
+                        } else { false }
+                    })
+            });
+            if all_lightweight {
+                self.is_lightweight_async = true;
+            }
+        }
+
+        (has_wake_triggers, enumerable, enum_keys, enum_txn_names)
+    }
+}
+
+/// Check if a precondition is gated on any of the named triggers.
+fn is_trigger_gated(pre: &Expr, trigger_names: &HashSet<&str>) -> bool {
+    match pre {
+        Expr::Identifier(name) => trigger_names.contains(name.as_str()),
+        Expr::Eq(l, r) => {
+            matches!(l.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
+                || matches!(r.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
+        }
+        Expr::And(l, r) => {
+            is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names)
+        }
+        _ => false,
+    }
+}
+
+/// Extract trigger keys from a precondition.
+fn extract_trigger_keys(
+    pre: &Expr,
+    trigger_names: &HashSet<&str>,
+) -> Option<Vec<i64>> {
+    let mut keys = Vec::new();
+    match pre {
+        Expr::Eq(l, r) => {
+            let (ident, val) = if let (Expr::Identifier(name), Expr::Integer(n)) = (l.as_ref(), r.as_ref()) {
+                (name.clone(), *n)
+            } else if let (Expr::Integer(n), Expr::Identifier(name)) = (l.as_ref(), r.as_ref()) {
+                (name.clone(), *n)
+            } else {
+                return None;
+            };
+            if trigger_names.contains(ident.as_str()) {
+                keys.push(val);
+            } else {
+                return None;
+            }
+        }
+        Expr::Or(l, r) => {
+            keys.extend(extract_trigger_keys(l, trigger_names)?);
+            keys.extend(extract_trigger_keys(r, trigger_names)?);
+        }
+        Expr::And(l, r) => {
+            if let Some(k) = extract_trigger_keys(l, trigger_names) {
+                keys.extend(k);
+            } else if let Some(k) = extract_trigger_keys(r, trigger_names) {
+                keys.extend(k);
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    }
+    Some(keys)
+}
