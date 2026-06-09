@@ -45,8 +45,8 @@ impl ExprCodegenWebstack for ProjectionExpr {
     }
 }
 
-#[cfg(kani)]
-mod kani_tests {
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
     use super::*;
 
     #[kani::proof]

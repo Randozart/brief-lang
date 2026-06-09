@@ -27,6 +27,13 @@ use crate::features::collection::*;
 use crate::features::field::*;
 use crate::features::literal::LiteralExpr;
 use crate::features::projection::ProjectionExpr;
+use crate::features::arrow::*;
+use crate::features::block::BlockExpr;
+use crate::features::dbvl::DbvlTableExpr;
+use crate::features::ellipsis::EllipsisExpr;
+use crate::features::pattern::*;
+use crate::features::sigcall::SigCallExpr;
+use crate::features::subtype::SubtypeProjectionExpr;
 use crate::features::tuple::*;
 use crate::features::unary_op::UnaryOpExpr;
 use crate::ffi::types::MemoryLayout;
@@ -387,6 +394,8 @@ pub enum Expr {
     PriorState(String),
     /// `...` — ellipsis, expands to fill unspecified dimensions in bracket context
     Ellipsis,
+    // Pattern B — packed ellipsis
+    EllipsisExpr(EllipsisExpr),
     /// Collection structural mutation: `&list <- x`, `x <- &list`, or `&list[i] <- x`
     /// `index` is `Expr::Term` for full-range (end operations)
     ArrowMut {
@@ -408,6 +417,10 @@ pub enum Expr {
         source: Box<Expr>,
         filter: Option<Box<Expr>>,
     },
+    // Pattern B — packed arrow variants
+    ArrowMutExpr(ArrowMutExpr),
+    ArrowDiscardExpr(ArrowDiscardExpr),
+    ArrowTransferExpr(ArrowTransferExpr),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
     Mul(Box<Expr>, Box<Expr>),
@@ -489,13 +502,19 @@ pub enum Expr {
         variant: String,
         fields: Vec<Pattern>,
     },
+    // Pattern B — packed pattern match
+    PatternMatchExpr(PatternMatchExpr),
     // Match expression: match value { Variant(f1) => body, _ => default }
     Match {
         value: Box<Expr>,
         arms: Vec<MatchArm>,
     },
+    // Pattern B — packed match
+    MatchExpr(MatchExpr),
     // Block expression: { stmts...; last_expr }
     Block(Vec<Statement>, Box<Expr>),
+    // Pattern B — packed block
+    BlockExpr(BlockExpr),
     // Tuple destructuring: let (a, b) = expr;
     TupleDestructure(Vec<String>, Box<Expr>),
     // Pattern B — packed tuple destructure
@@ -509,11 +528,15 @@ pub enum Expr {
         modifier: SigModifier,
         expr: Box<Expr>,
     },
+    // Pattern B — packed sig call
+    SigCallExpr(SigCallExpr),
     /// `<:` subtype projection: `let result <: items { FILTER(.active); COUNT; };`
     SubtypeProjection {
         source: Box<Expr>,
         ops: Vec<SubtypeOp>,
     },
+    // Pattern B — packed subtype projection
+    SubtypeProjectionExpr(SubtypeProjectionExpr),
     /// Lazy-loaded DBVL table for large-file imports.
     /// Evaluates to Value::DbvlTable — users see it as a Map.
     DbvlTable {
@@ -522,6 +545,8 @@ pub enum Expr {
         key_offsets: HashMap<String, Vec<usize>>,
         schema_name: Option<String>,
     },
+    // Pattern B — packed dbvl table
+    DbvlTableExpr(DbvlTableExpr),
 }
 
 impl Expr {

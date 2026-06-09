@@ -59,8 +59,8 @@ macro_rules! stub_impls {
 stub_impls!(TupleExpr);
 stub_impls!(TupleDestructureExpr);
 
-#[cfg(kani)]
-mod kani_tests {
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
     use super::*;
 
     #[kani::proof]

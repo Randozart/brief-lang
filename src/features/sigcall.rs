@@ -1,0 +1,20 @@
+use crate::ast::{Expr, SigModifier, Type};
+use crate::features::traits::*;
+use crate::interpreter::{Interpreter, RuntimeError, Value};
+use crate::typechecker::TypeChecker;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SigCallExpr { pub modifier: SigModifier, pub expr: Box<Expr> }
+
+impl ExprTypecheck for SigCallExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Void) } }
+impl ExprEval for SigCallExpr { fn evaluate(&self, _: &mut Interpreter, _: &ExprDispatch) -> Result<Value, RuntimeError> { Err(RuntimeError::TypeMismatch(String::new())) } }
+impl ExprCodegenLLVM for SigCallExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%sig".into(), ty: Type::Void } } }
+impl ExprCodegenVHDL for SigCallExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
+impl ExprCodegenWebstack for SigCallExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }
+
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
+    use super::*;
+    #[kani::proof]
+    fn verify_sig_call_construct() { let _ = SigCallExpr { modifier: SigModifier::Out, expr: Box::new(Expr::Integer(0)) }; }
+}

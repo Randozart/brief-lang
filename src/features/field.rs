@@ -72,8 +72,8 @@ stub_impls!(FieldAccessExpr);
 stub_impls!(StructInstanceExpr);
 stub_impls!(ObjectLiteralExpr);
 
-#[cfg(kani)]
-mod kani_tests {
+#[cfg(all(kani, feature = "kani_full"))]
+mod kani_full_tests {
     use super::*;
 
     #[kani::proof]
