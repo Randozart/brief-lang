@@ -29,6 +29,8 @@ impl BinaryOpExpr {
 
 impl ExprTypecheck for BinaryOpExpr {
     fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> {
+        // DEFERRED (Phase 4): infer_expression is private. Router arms
+        // in typechecker.rs destructure sub-expressions directly.
         Ok(Type::Int)
     }
 }

@@ -1659,6 +1659,21 @@ Expr::ObjectLiteral(fields) => {
                 fields.first().map(|(_, v)| self.infer_expression(v)).unwrap_or(Type::Custom("Object".to_string()))
             },
             Expr::Cast(..) => Type::Custom("unknown".to_string()),
+            // ── Pattern B routing (direct destructure, not through trait) ──
+            Expr::BinaryOp(bop) => {
+                let l_ty = self.infer_expression(&bop.left);
+                let r_ty = self.infer_expression(&bop.right);
+                if l_ty == Type::Int && r_ty == Type::Int { Type::Int }
+                else if l_ty == Type::Float && r_ty == Type::Float { Type::Float }
+                else { Type::Int }
+            }
+            Expr::UnaryOp(uop) => {
+                let inner = self.infer_expression(&uop.operand);
+                match uop.kind {
+                    crate::features::unary_op::UnaryOpKind::Not => Type::Bool,
+                    _ => inner,
+                }
+            }
             Expr::Literal(lit) => match lit.as_ref() {
                 LiteralExpr::Integer(_) => Type::Int,
                 LiteralExpr::Float(_) => Type::Float,
@@ -1667,6 +1682,15 @@ Expr::ObjectLiteral(fields) => {
                 LiteralExpr::Bool(_) => Type::Bool,
                 LiteralExpr::Term => Type::Void,
             },
+            Expr::ProjectionExpr(_) | Expr::CallExpr(_)
+            | Expr::ListLiteralExpr(_) | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_)
+            | Expr::SliceExpr(_) | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_)
+            | Expr::StructInstanceExpr(_) | Expr::ObjectLiteralExpr(_)
+            | Expr::TupleExpr(_) | Expr::TupleDestructureExpr(_) | Expr::EllipsisExpr(_)
+            | Expr::ArrowMutExpr(_) | Expr::ArrowDiscardExpr(_) | Expr::ArrowTransferExpr(_)
+            | Expr::PatternMatchExpr(_) | Expr::MatchExpr(_) | Expr::BlockExpr(_)
+            | Expr::SigCallExpr(_) | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_)
+            | Expr::TypeRef(_) => Type::Custom("unknown".to_string()),
             _ => Type::Custom("unknown".to_string()),
         }
     }
@@ -2176,7 +2200,7 @@ mod tests {
 #[cfg(all(kani, feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
-    use crate::features::literal::LiteralExpr;
+
 
     #[kani::proof]
     fn verify_infer_literal_integer() {
