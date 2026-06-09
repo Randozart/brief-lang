@@ -951,7 +951,7 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
         Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => {
             out.insert(name.clone());
         }
-        Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_) => {}
+        Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_) | Expr::BinaryOp(_) | Expr::UnaryOp(_) => {}
         // Self-identity operations (x == x, x >= x, x <= x) are tautologies that
         // don't actually observe the field's value. Skip them to avoid keeping
         // fields artificially alive in dead-field analysis.

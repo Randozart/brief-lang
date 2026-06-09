@@ -21,7 +21,9 @@
 // or embeds the Work.
 
 use crate::errors::Span;
+use crate::features::binary_op::BinaryOpExpr;
 use crate::features::literal::LiteralExpr;
+use crate::features::unary_op::UnaryOpExpr;
 use crate::ffi::types::MemoryLayout;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -422,6 +424,9 @@ pub enum Expr {
     BitXor(Box<Expr>, Box<Expr>),
     Shl(Box<Expr>, Box<Expr>),
     Shr(Box<Expr>, Box<Expr>),
+    // Pattern B — packed binary/unary operations
+    BinaryOp(Box<BinaryOpExpr>),
+    UnaryOp(Box<UnaryOpExpr>),
     Concat(Box<Expr>, Box<Expr>),
     /// Type cast: expr as Type
     Cast(Box<Expr>, Type),

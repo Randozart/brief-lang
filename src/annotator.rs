@@ -576,6 +576,7 @@ impl Annotator {
             Expr::SubtypeProjection { source, .. } => {
                 format!("<: {}", self.format_expr(source))
             }
+            Expr::BinaryOp(_) | Expr::UnaryOp(_) => String::new(),
         }
     }
 

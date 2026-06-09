@@ -95,7 +95,8 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::OwnedRef(name) => { ids.insert(name.clone()); }
             Expr::PriorState(name) => { ids.insert(name.clone()); }
             Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_)
-            | Expr::Bool(_) | Expr::Term | Expr::Literal(_) => {}
+            | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
+            | Expr::BinaryOp(_) | Expr::UnaryOp(_) => {}
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
             | Expr::Mod(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
                 self.extract_ids_recursive(l, ids);

@@ -2349,7 +2349,8 @@ impl ProofEngine {
                     self.collect_identifiers(arg, vars);
                 }
             }
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_) => {}
+            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
+            | Expr::BinaryOp(_) | Expr::UnaryOp(_) => {}
             Expr::ListLiteral(elements) => {
                 for elem in elements {
                     self.collect_identifiers(elem, vars);

@@ -34,8 +34,8 @@ pub mod traits;
 // Expression features (to be populated during migration)
 pub mod literal;
 // pub mod identifier;
-// pub mod binary_op;
-// pub mod unary_op;
+pub mod binary_op;
+pub mod unary_op;
 // pub mod call;
 // pub mod projection;
 // pub mod collection;
