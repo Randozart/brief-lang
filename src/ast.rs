@@ -1208,6 +1208,17 @@ pub enum TopLevel {
     Enum(EnumDefinition),
     /// `Type Name <: Base { ... }` — type derivation system (Phase 1.5)
     TypeDef(Box<TypeDef>),
+    /// `#test("group")` pragma — wraps an item with test group membership.
+    /// Skipped in production; included in test mode.
+    Test {
+        item: Box<TopLevel>,
+        groups: Vec<String>,
+    },
+    /// `#!assert` directive — compile-time assertion chain.
+    Assertion {
+        pre: Expr,
+        chain: Vec<String>,
+    },
     RenderBlock(RenderBlock),
     Stylesheet(String),
     SvgComponent {

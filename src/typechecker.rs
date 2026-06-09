@@ -630,6 +630,19 @@ impl TypeChecker {
                     // Here in Pass 2 we just ensure the type name is registered
                     // for later resolution.
                 }
+                TopLevel::Test { item: inner, .. } => {
+                    // Unwrap Test items — process the inner item's declarations
+                    // in Pass 1 so signatures/definitions are registered.
+                    match inner.as_ref() {
+                        TopLevel::Definition(defn) => {
+                            self.definitions.insert(defn.name.clone(), defn.clone());
+                        }
+                        _ => {}
+                    }
+                }
+                TopLevel::Assertion { .. } => {
+                    // Assertions are compile-time only — skip in Pass 1.
+                }
                 _ => {}
             }
         }
@@ -706,6 +719,17 @@ impl TypeChecker {
                         stored_sig.wasm_impl = signature.wasm_impl.clone();
                         stored_sig.wasm_setup = signature.wasm_setup.clone();
                     }
+                }
+                TopLevel::Test { item: inner, .. } => {
+                    // Unwrap Test items — typecheck the inner item
+                    match inner.as_ref() {
+                        TopLevel::Definition(defn) => self.check_definition(defn),
+                        TopLevel::Transaction(txn) => self.check_transaction(txn),
+                        _ => {}
+                    }
+                }
+                TopLevel::Assertion { .. } => {
+                    // Assertions are compile-time only — skip in typechecker.
                 }
                 _ => {}
             }

@@ -704,8 +704,32 @@ impl<'a> Parser<'a> {
                             out_pragmas.push(var_name);
                             continue;
                         }
+                        if kw == "assert" {
+                            self.advance(); // consume #!
+                            self.advance(); // consume "assert"
+                            let pre = self.parse_expression()?;
+                            self.expect(Token::Semicolon)?;
+                            // Chain: fn_a -> fn_b -> fn_c
+                            let mut chain = Vec::new();
+                            loop {
+                                let fn_name = self.expect_identifier()?;
+                                chain.push(fn_name);
+                                match self.current_token() {
+                                    Some(Ok(Token::Arrow)) => { self.advance(); }
+                                    Some(Ok(Token::Semicolon)) => { self.advance(); break; }
+                                    _ => return self.spanned_err(
+                                        "Expected '->' or ';' in assertion chain".to_string(),
+                                    ),
+                                }
+                            }
+                            items.push(TopLevel::Assertion {
+                                pre,
+                                chain,
+                            });
+                            continue;
+                        }
                     }
-                    // Not #!exit or #!out — treat as legacy #! attribues
+                    // Not #!exit, #!out, or #!assert — treat as legacy #! attribues
                     file_attrs.append(&mut self.parse_attributes()?);
                     continue;
                 }
@@ -835,22 +859,34 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
+        // Check for #test("group") modifiers
+        let test_groups: Vec<String> = modifiers.iter()
+            .filter(|h| h.name == "test")
+            .filter_map(|h| h.value.clone())
+            .collect();
+
+        // Helper to wrap an item in TopLevel::Test if #test modifiers are present
+        let wrap_test = |item: TopLevel, groups: &[String]| -> TopLevel {
+            if groups.is_empty() { item }
+            else { TopLevel::Test { item: Box::new(item), groups: groups.to_vec() } }
+        };
+
         match self.current_token() {
             Some(Ok(Token::Import)) => {
-                return self.parse_import();
+                return self.parse_import().map(|item| wrap_test(item, &test_groups));
             }
             Some(Ok(Token::Sig)) => {
                 let sig = self.parse_signature()?;
-                Ok(TopLevel::Signature(sig))
+                Ok(wrap_test(TopLevel::Signature(sig), &test_groups))
             }
             Some(Ok(Token::Let)) => {
                 let mut state = self.parse_state_decl()?;
                 state.attrs = attrs;
-                Ok(TopLevel::StateDecl(state))
+                Ok(wrap_test(TopLevel::StateDecl(state), &test_groups))
             }
             Some(Ok(Token::Const)) => {
                 let constant = self.parse_constant()?;
-                Ok(TopLevel::Constant(constant))
+                Ok(wrap_test(TopLevel::Constant(constant), &test_groups))
             }
             Some(Ok(Token::Sync)) => {
                 self.advance();
@@ -866,65 +902,65 @@ impl<'a> Parser<'a> {
                     self.expect(Token::Comma)?;
                 }
                 let item = self.parse_top_level()?;
-                Ok(TopLevel::SyncGroup {
+                Ok(wrap_test(TopLevel::SyncGroup {
                     domains,
                     item: Box::new(item),
-                })
+                }, &test_groups))
             }
             Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Async)) => {
                 let mut txn = self.parse_transaction()?;
                 txn.attrs = attrs;
                 txn.modifiers = modifiers;
-                Ok(TopLevel::Transaction(txn))
+                Ok(wrap_test(TopLevel::Transaction(txn), &test_groups))
             }
 
             Some(Ok(Token::Defn)) => {
                 let defn = self.parse_definition()?;
-                Ok(TopLevel::Definition(defn))
+                Ok(wrap_test(TopLevel::Definition(defn), &test_groups))
             }
             Some(Ok(Token::Trg)) => {
                 let trg = self.parse_trigger()?;
-                Ok(TopLevel::Trigger(trg))
+                Ok(wrap_test(TopLevel::Trigger(trg), &test_groups))
             }
             Some(Ok(Token::Frgn)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
-                Ok(frgn_binding)
+                Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::FrgnBang)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
-                Ok(frgn_binding)
+                Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::Syscall)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
-                Ok(frgn_binding)
+                Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::SyscallBang)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
-                Ok(frgn_binding)
+                Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) | Some(Ok(Token::Registry)) => {
                 let resource = self.parse_resource()?;
-                Ok(resource)
+                Ok(wrap_test(resource, &test_groups))
             }
             Some(Ok(Token::Struct)) => {
                 let struct_def = self.parse_struct()?;
-                Ok(TopLevel::Struct(struct_def))
+                Ok(wrap_test(TopLevel::Struct(struct_def), &test_groups))
             }
             Some(Ok(Token::Rstruct)) => {
                 let rstruct_def = self.parse_rstruct()?;
-                Ok(TopLevel::RStruct(rstruct_def))
+                Ok(wrap_test(TopLevel::RStruct(rstruct_def), &test_groups))
             }
             Some(Ok(Token::Enum)) => {
                 let enum_def = self.parse_enum()?;
-                Ok(TopLevel::Enum(enum_def))
+                Ok(wrap_test(TopLevel::Enum(enum_def), &test_groups))
             }
             Some(Ok(Token::Type)) => {
                 let type_def = self.parse_type_def()?;
-                Ok(TopLevel::TypeDef(Box::new(type_def)))
+                Ok(wrap_test(TopLevel::TypeDef(Box::new(type_def)), &test_groups))
             }
             Some(Ok(Token::Render)) => {
                 let render_block = self.parse_render_block()?;
-                Ok(TopLevel::RenderBlock(render_block))
+                Ok(wrap_test(TopLevel::RenderBlock(render_block), &test_groups))
             }
             Some(Ok(tok)) => Err(SyntaxError::UnexpectedToken {
                 expected: "top-level declaration".to_string(),

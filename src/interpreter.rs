@@ -905,7 +905,12 @@ impl Interpreter {
             iterations += 1;
             executed = false;
             for item in &program.items {
-                if let TopLevel::Transaction(txn) = item {
+                // Unwrap Test items to access the inner transaction
+                let inner_item = match item {
+                    TopLevel::Test { item: inner, .. } => inner.as_ref(),
+                    other => other,
+                };
+                if let TopLevel::Transaction(txn) = inner_item {
                     if txn.is_reactive {
                         let pre_val = self.eval_expr(&txn.contract.pre_condition)?;
                         if pre_val == Value::Bool(true) {
@@ -944,6 +949,16 @@ impl Interpreter {
             } else if let TopLevel::TypeDef(_) = item {
                 // TypeDefs are compile-time only — skip at runtime.
                 // Phase 1.5: type_universe.rs handles resolution in Pass 1.
+            } else if let TopLevel::Test { item: inner, groups: _ } = item {
+                // Test wrapper — unwrap and register the inner item's definitions
+                match inner.as_ref() {
+                    TopLevel::Definition(defn) => {
+                        self.definitions.insert(defn.name.clone(), defn.clone());
+                    }
+                    _ => {}
+                }
+            } else if let TopLevel::Assertion { .. } = item {
+                // Assertions are compile-time only — skip at runtime.
             } else if let TopLevel::SyncGroup { item: inner, .. } = item {
                     if let TopLevel::Transaction(txn) = &**inner {
                         if txn.is_reactive {

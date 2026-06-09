@@ -1534,6 +1534,23 @@ impl ProofEngine {
             }
         }
 
+        // Build definition and transaction lookup maps for assertion chains
+        let mut initial_definitions: HashMap<&str, &Definition> = HashMap::new();
+        let mut initial_txns: HashMap<&str, &Transaction> = HashMap::new();
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                initial_definitions.insert(&defn.name, defn);
+            } else if let TopLevel::Transaction(txn) = item {
+                initial_txns.insert(&txn.name, txn);
+            } else if let TopLevel::Test { item: inner, .. } = item {
+                match inner.as_ref() {
+                    TopLevel::Definition(defn) => { initial_definitions.insert(&defn.name, defn); }
+                    TopLevel::Transaction(txn) => { initial_txns.insert(&txn.name, txn); }
+                    _ => {}
+                }
+            }
+        }
+
         let mut sym_exec = SymbolicExecutor::new().with_volatile_vars(volatile_vars);
 
         for item in &program.items {
@@ -1559,6 +1576,43 @@ impl ProofEngine {
                 TopLevel::Definition(defn) => {
                     let errs = sym_exec.verify_definition(defn);
                     self.errors.extend(errs);
+                }
+                TopLevel::Assertion { pre, chain } => {
+                    // Verify assertion chain: pre → fn_a → fn_b → ... → post
+                    let mut current_pre = pre.clone();
+                    for fn_name in chain {
+                        if let Some(defn) = initial_definitions.get(fn_name.as_str()) {
+                            let st = sym_exec.init_state_from_precondition(&current_pre);
+                            sym_exec.verify_contract_implication(
+                                &current_pre,
+                                &defn.contract.post_condition,
+                                &defn.body,
+                                st,
+                                format!("assertion chain '{:?}' step '{}'", chain, fn_name),
+                                false,
+                            );
+                            current_pre = defn.contract.post_condition.clone();
+                        } else if let Some(txn) = initial_txns.get(fn_name.as_str()) {
+                            let st = sym_exec.init_state_from_precondition(&current_pre);
+                            sym_exec.verify_contract_implication(
+                                &current_pre,
+                                &txn.contract.post_condition,
+                                &txn.body,
+                                st,
+                                format!("assertion chain '{:?}' step '{}'", chain, fn_name),
+                                false,
+                            );
+                            current_pre = txn.contract.post_condition.clone();
+                        } else {
+                            let err = ProofError::new("P012", "assertion chain: function not found")
+                                .with_explanation(&format!(
+                                    "Function '{}' in assertion chain not found", fn_name
+                                ));
+                            self.errors.push(err);
+                        }
+                    }
+                    // Transfer assertion verification errors from sym_exec to self
+                    self.errors.append(&mut sym_exec.errors);
                 }
                 _ => {}
             }
