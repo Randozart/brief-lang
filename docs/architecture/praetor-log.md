@@ -68,3 +68,74 @@ timeouts. After enforcing the rules: 14 fast harnesses complete in 2.5s.
 **New diagnostics**: 0
 
 **Kani note**: `TypeProperty` uses `Box<Expr>` for all 13 variants, which violates the fast-group no-heap-allocation rule. All Kani harnesses for TypeDef are gated behind `#[cfg(all(kani, feature = "kani_full"))]`. Fast group retains 11 harnesses (ast.rs + literal.rs).
+
+---
+
+## 2026-06-09 — Phase 2 (Statement Features)
+
+**Files checked:**
+- `src/features/stmt/*.rs` — 14 files (mod.rs + 13 feature files)
+
+**New diagnostics**: 0
+
+**Note**: All feature files use `Vec`, `Box`, `Option` in struct definitions.
+Kani harnesses gated behind `kani_full`.
+
+---
+
+## 2026-06-09 — Phase 3 (TopLevel Features)
+
+**Files checked:**
+- `src/features/toplevel/*.rs` — 19 files (mod.rs + 17 feature files + typedef.rs)
+
+**New diagnostics**: 0
+
+---
+
+## 2026-06-09 — Phase 4a-c (Router Routing, BinaryOp/UnaryOp evaluate)
+
+**Files changed:**
+- `src/features/binary_op.rs` — 27-line evaluate impl (non-stub)
+- `src/features/unary_op.rs` — 11-line evaluate impl (non-stub)
+- `src/interpreter.rs` — Pattern B routing arms for `eval_expr`
+- `src/typechecker.rs` — Pattern B routing arms for `infer_expression`
+- `src/backend/llvm.rs`, `vhdl.rs`, `webstack.rs` — Pattern B routing arms
+
+**New diagnostics**: 0
+
+---
+
+## 2026-06-09 — Proof Engine Bug Fixes (Phase 4d)
+
+**Files changed:**
+- `src/proof_engine.rs` — +107 lines
+
+**Bug A** — Guard-taken path dropped in `enumerate_paths_recursive`.
+Fix: continue exploring remaining body after guard body.
+Also fixed `body[1..]` → `body[i+1..]` (exponential path explosion).
+
+**Bug B** — `eval_numeric` missing `Mod`/`Div`. Fix: added match arms.
+
+**Bug C** — `is_negated` hidden in error output. Fix: added `¬` prefix.
+
+**New diagnostics**: 0
+
+**Praetor note**: `is_self_minus_one` uses closure for `is_one` check.
+Clarity 15 nesting. Well within limits.
+
+---
+
+## 2026-06-09 — Convergence Analysis Fixes (Phase 4e)
+
+**Files changed:**
+- `src/proof_engine.rs` — +107 lines (check_convergence improvements)
+
+**Changes**:
+- AND-precondition extraction (`extract_var_relation`)
+- Popcount decay detection (`is_self_minus_one`)
+- Algebraic cancellation (`eval_const_expr` with `initial_values` map)
+- Compound increment pattern (`(count + N) - M`)
+
+**New diagnostics**: 0
+
+**Result**: 24/24 benchmarks pass check (up from 16).
