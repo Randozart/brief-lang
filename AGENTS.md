@@ -424,10 +424,33 @@ docs/architecture/
 ### Rules
 
 1. Every new feature file (`features/*.rs`) gets a corresponding doc entry when created.
-2. Architecture changes are documented in the same commit that makes them.
-3. Praetor violations discovered during development are logged in `praetor-log.md` with
+2. **Doc-per-cycle**: Every migration cycle ships its architecture doc in the same commit
+   as the code change. The doc is written immediately after the code, while it's fresh.
+   No batch documentation phases — they drift from reality.
+3. Architecture changes are documented in the same commit that makes them.
+4. Praetor violations discovered during development are logged in `praetor-log.md` with
    datetime, file, root cause, and resolution.
-4. Any commit that changes an API contract between passes must update `channel-map.md`.
+5. Any commit that changes an API contract between passes must update `channel-map.md`.
+
+### Coordinator docs
+
+Coordinator files (interpreter, typechecker, parser, proof_engine, backends) get their
+own architecture doc as they shrink toward their target size (1,000–2,000 lines). Each
+doc explains: how the dispatcher works, what stays centralized, error handling, and
+interaction patterns.
+
+### What each feature doc covers
+
+| Section | Content | Length |
+|---------|---------|--------|
+| Header | Purpose, date added, phase | 2 lines |
+| Syntax | Brief syntax for the construct with examples | 10–30 lines |
+| Typechecking | How types are inferred/checked | 5–15 lines |
+| Evaluation | How it evaluates in the interpreter | 5–15 lines |
+| Codegen | Per-backend notes (LLVM, VHDL, Webstack) | 10–30 lines |
+| Kani/Praetor | Special considerations | 3–5 lines |
+
+Feature docs target 50–150 lines — compact enough to fit in working memory.
 
 ## Formal Verification with Kani
 
@@ -515,5 +538,7 @@ Before every commit:
 2. `cargo build` — no warnings
 3. Run Praetor on new/changed files — verify complexity ≤ 15, lines ≤ 100, params ≤ 6
 4. Update architecture docs if API contracts changed
-5. Log bugs/gotchas in BUGS.md or docs/architecture/praetor-log.md
-6. Add Kani harnesses for all newly written or modified functions
+5. **Doc-per-cycle**: If this commit includes a new or migrated feature, write/update
+   `docs/architecture/features/<name>.md` in the same commit. Never batch documentation.
+6. Log bugs/gotchas in BUGS.md or docs/architecture/praetor-log.md
+7. Add Kani harnesses for all newly written or modified functions
