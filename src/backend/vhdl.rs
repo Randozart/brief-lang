@@ -1177,6 +1177,8 @@ impl VhdlGenerator {
                 let f: Vec<String> = items.iter().map(|e| self.expr_to_string(e)).collect();
                 format!("({})", f.join(", "))
             }
+            Expr::BinaryOp(bop) => bop.emit_vhdl(self, &ExprDispatch),
+            Expr::UnaryOp(uop) => uop.emit_vhdl(self, &ExprDispatch),
             Expr::Literal(lit) => lit.emit_vhdl(self, &ExprDispatch),
             _ => "'0'".to_string(),
         }

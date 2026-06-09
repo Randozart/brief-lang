@@ -1763,6 +1763,8 @@ impl WebstackGenerator {
                     arr
                 }
             }
+            Expr::BinaryOp(bop) => bop.emit_js(self, &ExprDispatch),
+            Expr::UnaryOp(uop) => uop.emit_js(self, &ExprDispatch),
             Expr::Literal(lit) => lit.emit_js(self, &ExprDispatch),
             _ => "JsValue::TRUE".to_string(),
         }

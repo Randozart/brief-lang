@@ -2958,6 +2958,8 @@ self.emit_declares(&mut out);
                 return TypedRegister { name: v, ty: Type::Char };
             }
             Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+            Expr::BinaryOp(bop) => return bop.emit_llvm(self, out, &ExprDispatch),
+            Expr::UnaryOp(uop) => return uop.emit_llvm(self, out, &ExprDispatch),
             Expr::Literal(lit) => return lit.emit_llvm(self, out, &ExprDispatch),
             Expr::Identifier(name) => {
                 // SSA body mode: prefer pre-extracted old-value register
