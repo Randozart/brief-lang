@@ -1,3 +1,5 @@
+pub mod optimizer;
+
 fn escape_llvm_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for byte in s.bytes() {

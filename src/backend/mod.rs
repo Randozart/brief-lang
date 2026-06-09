@@ -1,7 +1,7 @@
 pub mod aarch64;
 pub mod c;
 pub mod llvm;
-pub mod llvm_optimizer;
+// llvm_optimizer moved into llvm/ as llvm::optimizer
 pub mod rust;
 pub mod verilog;
 pub mod vhdl;
