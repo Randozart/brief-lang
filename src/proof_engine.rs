@@ -1159,6 +1159,76 @@ fn format_expr(expr: &Expr) -> String {
     }
 }
 
+/// Check if a compound expression tree involves a variable by name.
+fn contains_var(expr: &Expr, var: &str) -> bool {
+    match expr {
+        Expr::Identifier(v) | Expr::PriorState(v) => v == var,
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r)
+        | Expr::Div(l, r) | Expr::Mod(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
+        | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
+        | Expr::And(l, r) | Expr::Or(l, r)
+        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+        | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
+            contains_var(l, var) || contains_var(r, var)
+        }
+        Expr::Not(i) | Expr::Neg(i) | Expr::BitNot(i) => contains_var(i, var),
+        _ => false,
+    }
+}
+
+/// Extract the sub-expression from AND that involves `var`.
+fn extract_var_relation<'a>(expr: &'a Expr, var: &str) -> Option<&'a Expr> {
+    match expr {
+        Expr::And(l, r) => {
+            if contains_var(l, var) {
+                extract_var_relation(l, var).or(Some(l))
+            } else if contains_var(r, var) {
+                extract_var_relation(r, var).or(Some(r))
+            } else {
+                None
+            }
+        }
+        Expr::Or(_, _) => None,
+        other => {
+            if contains_var(other, var) { Some(other) } else { None }
+        }
+    }
+}
+
+/// Evaluate a pure-integer constant expression. Returns None for non-constants.
+/// Resolves const identifiers from `initial_values`.
+fn eval_const_expr(expr: &Expr, initial_values: &HashMap<String, Expr>) -> Option<i64> {
+    match expr {
+        Expr::Integer(n) => Some(*n),
+        Expr::Literal(lit) => match lit.as_ref() {
+            crate::features::literal::LiteralExpr::Integer(n) => Some(*n),
+            _ => None,
+        },
+        Expr::Add(l, r) => Some(eval_const_expr(l, initial_values)? + eval_const_expr(r, initial_values)?),
+        Expr::Sub(l, r) => Some(eval_const_expr(l, initial_values)? - eval_const_expr(r, initial_values)?),
+        Expr::Mul(l, r) => Some(eval_const_expr(l, initial_values)? * eval_const_expr(r, initial_values)?),
+        Expr::Identifier(name) => {
+            let resolved = initial_values.get(name)?;
+            eval_const_expr(resolved, initial_values)
+        }
+        _ => None,
+    }
+}
+
+/// Check for `var & (var - 1)` popcount decay pattern.
+/// Handles both `Expr::Integer(1)` and `Expr::Literal(Boolean(1))` variants.
+fn is_self_minus_one(a: &Expr, b: &Expr, var: &str) -> bool {
+    let is_one = |e: &Expr| -> bool {
+        matches!(e, Expr::Integer(1))
+            || matches!(e, Expr::Literal(lit) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Integer(1)))
+    };
+    matches!(a, Expr::Identifier(v) if v == var)
+        && matches!(b, Expr::Sub(inner, val)
+            if matches!(inner.as_ref(), Expr::Identifier(v) if v == var)
+                && is_one(val.as_ref()))
+}
+
 /// Extract the variable name and bound expression from a comparison.
 /// Returns `(var, bound)` where `var` is always an identifier and `bound`
 /// can be an identifier, integer literal, or other expression.
@@ -1234,19 +1304,21 @@ fn check_convergence(
     };
 
     // Step 2: Validate post → ¬pre
+    // Extract var-involving sub-expression from AND/OR preconditions
+    let pre_for_var = extract_var_relation(pre_condition, &var).unwrap_or(pre_condition);
     let pre_valid = match post_condition {
         // post: var == bound → pre must be <, >, or !=
-        Expr::Eq(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<", ">", "!="]),
+        Expr::Eq(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &["<", ">", "!="]),
         // post: var >= bound → pre must be <
-        Expr::Ge(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<"]),
+        Expr::Ge(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &["<"]),
         // post: var > bound → pre must be <=
-        Expr::Gt(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["<="]),
+        Expr::Gt(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &["<="]),
         // post: var <= bound → pre must be >
-        Expr::Le(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &[">"]),
+        Expr::Le(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &[">"]),
         // post: var < bound → pre must be >=
-        Expr::Lt(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &[">="]),
+        Expr::Lt(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &[">="]),
         // post: var != bound → pre must be ==
-        Expr::Ne(_, _) => check_pre_matches(pre_condition, &var, &bound_expr, &["=="]),
+        Expr::Ne(_, _) => check_pre_matches(pre_for_var, &var, &bound_expr, &["=="]),
         _ => false,
     };
     if !pre_valid {
@@ -1275,6 +1347,15 @@ fn check_convergence(
                                     direction = 1;
                                 }
                             }
+                            // Compound: count = count + Sub(N, M) → count + (N-M)
+                            if step == 0 {
+                                if let Expr::Sub(oa, ob) = b.as_ref() {
+                                    if let (Some(n), Some(m)) = (eval_const_expr(oa, initial_values), eval_const_expr(ob, initial_values)) {
+                                        let net = n - m;
+                                        if net > 0 { step = net; direction = 1; }
+                                    }
+                                }
+                            }
                         }
                     }
                     if let Expr::Identifier(v) = b.as_ref() {
@@ -1298,6 +1379,26 @@ fn check_convergence(
                                 }
                             }
                         }
+                    }
+                    // Compound: count = (count + N) - M → count + (N-M)
+                    if step == 0 {
+                        if let Expr::Add(inner, offset) = a.as_ref() {
+                            if let Expr::Identifier(v) = inner.as_ref() {
+                                if *v == var {
+                                    if let (Some(n), Some(m)) = (eval_const_expr(offset, initial_values), eval_const_expr(b, initial_values)) {
+                                        let net = n - m;
+                                        if net > 0 { step = net; direction = 1; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // popcount decay: reg & (reg - 1) → clears one bit per iteration
+                Expr::BitAnd(a, b) => {
+                    if is_self_minus_one(a, b, &var) || is_self_minus_one(b, a, &var) {
+                        step = 1;
+                        direction = -1;
                     }
                 }
                 _ => {}
