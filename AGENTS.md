@@ -152,6 +152,23 @@ If Brief beats C by an implausible margin, suspect the C reference has been hobb
 | spectral-norm | Float arrays at contract-proven scale = allocation strategy |
 | binary-trees | Struct pool allocation + index-based tree walk = memory model |
 
+### Two benchmark categories — runtime vs optimizer
+
+Every benchmark is tagged as either `--runtime` or `--optimizer` in the harness.
+
+| Category | Tag | What it measures | Criteria |
+|----------|-----|------------------|----------|
+| **Runtime** | `--runtime` | Throughput of compiled code | FFI call in the hot loop body. LLVM cannot eliminate the loop. |
+| **Optimizer** | `--optimizer` | Compile-time folding power | All `const` inputs + no FFI in hot loop. LLVM may eliminate the loop. |
+
+A benchmark cannot be both. If it has no observable side effects in its hot loop, it is an optimizer benchmark — runtime timing is meaningless.
+
+The harness detects precomputed binaries by `.text` size ratio (< 25% of C → `precompute_ok`, skip timing). Correctness (same input → same output) is checked for all benchmarks.
+
+`bash benchmarks/build_and_bench.sh --runtime` to test only runtime benchmarks.
+`bash benchmarks/build_and_bench.sh --optimizer` to test only optimizer benchmarks.
+`bash benchmarks/build_and_bench.sh --correctness` to verify output only.
+
 ### The C reference is symmetric, always
 
 Both get `-O3 -ffast-math` from the same clang. No `volatile`, no unused variables. Any asymmetry is a signal of a missing Brief optimization — fix the compiler, not the C code.

@@ -751,3 +751,71 @@ After the above fixes, these benchmarks still fail P008 — all are convergence 
 
 **Fix status**: Each requires structural improvement to `check_convergence` — AND-pre extraction, integration with `detect_popcount_decay`, simplified-body scanning, and compound increment pattern matching. Deferred — not caused by Pattern B, and the non-runtime benchmarks (which are the ones `build_and_bench.sh` actually measures) all pass.
 
+---
+
+## 2026-06-09 — fasta LCG broken in rct txn (all output chars same)
+
+**Issue**: `benchmarks/fasta.bv` outputs `qqqqq` instead of `xqjqf` (C reference). All iterations produce the same character `q` (ASCII 113), meaning the LCG seed never changes.
+
+**Root Cause**: `rct txn` atomically batches all state writes until `term;`. Inside a single tick, `&seed = seed * IA` reads the original seed (42), then `&seed = seed + IC` ALSO reads the original seed (42), and `&seed = seed % IM` also reads 42. The three writes commit at `term;` — the last one wins: `seed = 42 % 139968 = 42`. Seed stays 42 forever.
+
+The LLVM backend treats reactive writes as deferred (all reads see pre-tick state), consistent with the reactive semantics. But `fasta.bv` was written assuming sequential in-tick execution, which is incorrect for `rct txn`.
+
+**Fix**: Convert to callable `txn` (not `rct txn`) so writes take effect immediately within the body iteration. Or restructure as a single assignment: `&seed = (seed * IA + IC) % IM;`.
+
+**Lesson**: `rct txn` has deferred write semantics — all state reads within a tick see pre-tick values. Sequential `&field = ...` chains like `&seed = seed * IA; &seed = seed + IC; &seed = seed % IM;` do NOT accumulate — each reads the same original seed. Use callable `txn` for sequential state mutations within a single body iteration.
+
+---
+
+## 2026-06-09 — LLVM backend emits `constant float 0` (needs `0.0`)
+
+**Issue**: `benchmarks/iir_filter.ll` contains `@b2 = constant float 0`. Clang rejects: `error: integer constant must have integer type`.
+
+**Root Cause**: The float constant emission path for zero-valued floats uses `constant float 0` instead of `constant float 0.0`. LLVM's textual IR requires a floating-point literal for `float` type, not an integer `0`.
+
+**Affected files**: LLVM backend's float constant emission (`emit_expr.rs` or `mod.rs`). All zero-initialized `Float` state fields and `const Float = 0.0` declarations.
+
+**Fix**: Change the float literal LLVM emission to use `0.0` (or `0.0e+0`) instead of `0` when the value is zero.
+
+**Lesson**: LLVM IR types must match their literal formats — `float` requires a floating-point literal, not an integer. The `i64` path was correct (`add i64 0, N`), but `float 0` should be `float 0.0`.
+
+---
+
+## 2026-06-09 — LLVM backend emits undefined `@str.0` reference
+
+**Issue**: `benchmarks/fasta.ll` contains `getelementptr inbounds [6 x i8], [6 x i8]* @str.0` but `@str.0` is never defined. Clang rejects: `use of undefined value '@str.0'`.
+
+**Root Cause**: The string constant emission path creates references to `@str.N` globals but doesn't emit their definitions. The `collect_strings()` function extracts string constants but the definition pass in `emit_global_strings()` (or equivalent) is missing or buggy.
+
+**Affected files**: All benchmarks using string constants (`fasta`, `ring_buffer`, and any benchmark with `__get_env_int("BOUND")` or similar string arguments).
+
+**Fix**: Ensure `@str.N` globals have corresponding definitions (type, initializer, alignment) emitted before their first use in the IR module.
+
+**Lesson**: LLVM IR globals must be declared (`@str.0 = private unnamed_addr constant [6 x i8] c"BOUND\00"`) before being referenced in instructions. Use-before-definition is not forward-declared in LLVM IR — every reference must have a matching definition earlier in the module.
+
+---
+
+## 2026-06-09 — `precompute_sum.bv` emits infinite tick loop (no observable output)
+
+**Issue**: `benchmarks/precompute_sum` binary never exits (timeout at BOUND=5). LLVM IR shows an infinite tick loop: `br label %tick` → `reactor_tick` → `br label %tick`. No observable side effect exists to prevent LLVM from eliminating the loop, but the loop remains because the `.o` linking path uses `cc -O2` (not `-O3`) and may not run the full SROA/mem2reg pipeline.
+
+**Root Cause**: `const total: Int = 500` with budget=256. 500 > 256, so the compiler can't fully precompute. The `rct txn` body is pure (no FFI, no IO), so the reactor loop has no observable effect. At `-O3`, LLVM should eliminate the loop entirely, but the linking path (`cc -O2` on `.o` file) may not be aggressive enough.
+
+**Fix**: Either (a) increase budget to >= 500, (b) decrease total to <= 256, or (c) add an FFI output to make the loop observable. The benchmark's purpose is to test compile-time precomputation — it should use `total <= 256` so the budget covers it, or use `--optimize-budget 2048`.
+
+**Lesson**: A benchmark that tests precomputation must have its bound within the optimization budget. `const total = 500` with default budget 256 produces a silent infinite loop — the worst failure mode. Add `#!exit` or keep bounds within budget.
+
+---
+
+## 2026-06-09 — C reference benchmarks fail at BOUND=5 (exit code 6)
+
+**Issue**: Several C reference binaries (`float_math_c`, `float_math_nonzero_c`, `const_heavy_c`) exit with code 6 and produce no output when run with `BOUND=5`.
+
+**Root Cause**: Unknown — likely missing `-lm` link flag or a crash in the C code when `BOUND` is small. `float_math_c` uses `__print_float` which writes to stderr via the runtime; if the runtime function is `fprintf` and no `-lm` is needed, the crash may be a null pointer or assertion in the runtime init path.
+
+**Affected**: `float_math_c`, `float_math_nonzero_c`, `const_heavy_c`. Also `precompute_sum_c` outputs nothing (expected — it has no FFI output, just internal arithmetic).
+
+**Fix**: Investigate the C reference binaries individually. Likely solutions: add `-lm` to all C builds, or fix runtime init to handle `BOUND`=5 correctly.
+
+**Lesson**: C reference correctness must be verified at small BOUND values before trusting them as reference outputs. A C binary that crashes on `BOUND=5` is not a valid reference.
+
