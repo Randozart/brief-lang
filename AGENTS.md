@@ -284,6 +284,9 @@ Preserve contract information in codegen so the optimizer can reason about it.
 9. **Interpreter IS the reference**: Add to interpreter first, then codegen.
 10. **Benchmarks on our own terms**: End-to-end results. Features for benchmarks must add language value.
 11. **NEVER discard staged or uncommitted work without asking.** The git index (staging area) holds work-in-progress from prior sessions that may be uncommitted but critical. Before any destructive action (`git checkout --`, `git restore`, `rm -f`, `git reset --hard`), inspect everything that will be destroyed. If in doubt, `git stash` instead of discard — stashes are recoverable, `git checkout --` is not. A single `git restore --staged .` followed by `git checkout -- <files>` can erase hours of uncommitted work with no recovery path.
+12. **Architecture docs**: Update `docs/architecture/` in the same commit as structural changes.
+13. **Kani**: Add proof harnesses for all new safety-critical code.
+14. **Praetor**: Run on new/changed files; verify complexity ≤ 15, lines ≤ 100, params ≤ 6.
 
 ## Self-Hosting Pipeline
 
@@ -391,3 +394,82 @@ The compiler has two optimization budget modes:
 **Implementation note**: The budget flag is set before codegen, not in the codegen itself. The `--optimize-budget` CLI flag overrides both defaults. If neither `--dev`/`--prod` nor `--optimize-budget` is set, `--dev` (budget=256) is the implicit default.
 
 See `plans/2026-06-06-universal-ffi-no-magic-architecture.md` for the full master plan.
+
+## Architecture Documentation (Permanent Practice)
+
+Maintain `docs/architecture/` as a living record of the compiler's design.
+Updated in the same commit as any API or structural change.
+
+### Directory structure
+
+```
+docs/architecture/
+  overview.md              # System architecture, module responsibilities, data flow
+  features/                # One file per feature group
+    literal.md
+    call.md
+    projection.md
+    ...                    # Updated when new features are added
+  optimization-pipeline.md # Decision tree, folded loop, SSA, SLP hazard
+  backend-strategy.md      # Per-backend design notes (LLVM, VHDL, Webstack, etc.)
+  channel-map.md           # Data flow: parse → resolve → desugar → typecheck →
+                           #   proof → analyze → codegen
+  praetor-log.md           # Running log of diagnostics found/resolved (datestamped)
+  kani-harnesses.md        # Inventory of formal verification proofs
+  glossary.md              # Brief-specific terminology
+```
+
+### Rules
+
+1. Every new feature file (`features/*.rs`) gets a corresponding doc entry when created.
+2. Architecture changes are documented in the same commit that makes them.
+3. Praetor violations discovered during development are logged in `praetor-log.md` with
+   datetime, file, root cause, and resolution.
+4. Any commit that changes an API contract between passes must update `channel-map.md`.
+
+## Formal Verification with Kani
+
+Integrate AWS's `kani` bounded model checker as a permanent part of the development
+workflow. All new safety-critical code must include Kani proof harnesses.
+
+### Rules
+
+1. **All new modules** created during the refactor must include Kani proof harnesses
+   for any unsafe code, FFI boundary code, or functions with non-trivial safety
+   invariants.
+2. **Targets**: `ffi/native_mapper.rs` (byte slicing, endian conversion) and
+   `reactor.rs` (state rollback, step counter) — the two most safety-critical modules
+   today. Expand to all new safety-critical code going forward.
+3. **Harnesses** live in `#[cfg(kani)] mod kani_tests {}` blocks at the bottom of each
+   module file, co-located with unit tests.
+4. **Proof goals**: Prove absence of panics, overflows, out-of-bounds access, and
+   undefined behavior under all possible symbolic inputs.
+5. **CI-gated**: `cargo kani` must pass before merging.
+
+### Reference harness pattern
+
+```rust
+#[cfg(kani)]
+mod kani_tests {
+    use super::*;
+
+    #[kani::proof]
+    fn verify_fetch_field_safe() {
+        let buf: Vec<u8> = kani::vec::any_vec::<u8>(kani::any());
+        let offset: usize = kani::any();
+        let size: usize = kani::any();
+        let result = fetch_field_by_size(&buf, offset, size);
+        // Must never panic — either Ok or controlled Err
+    }
+}
+```
+
+## Per-Commit Checklist
+
+Before every commit:
+1. `cargo test --lib` — all tests pass
+2. `cargo build` — no warnings
+3. Run Praetor on new/changed files — verify complexity ≤ 15, lines ≤ 100, params ≤ 6
+4. Update architecture docs if API contracts changed
+5. Log bugs/gotchas in BUGS.md or docs/architecture/praetor-log.md
+6. Add Kani harnesses for any new safety-critical code

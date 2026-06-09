@@ -15,6 +15,9 @@ max_params = 6
 enabled = false
 path = ".praetor/state-graph.json"
 
+[files]
+ignore = ["src/_monolithic/**"]
+
 [datalog]
 auth_functions = ["authenticate", "authorize", "login"]
 private_data_labels = ["private", "secret", "password"]

@@ -1,5 +1,3 @@
-#![allow(unused)]
-#![allow(unused_variables)]
 // Copyright 2026 Randy Smits-Schreuder Goedheijt
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,40 +20,14 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-pub mod annotator;
-pub mod assertion_verify;
-pub mod ast;
-pub mod analysis;
-pub mod backend;
-pub mod features;
-pub mod cache;
-pub mod dbrief;
-pub mod desugarer;
-pub mod errors;
-pub mod ffi;
-#[cfg(test)]
-pub mod fuzzing;
-pub mod hardware;
-pub mod hardware_validator;
-pub mod import_resolver;
-pub mod interpreter;
-pub mod lexer;
-pub mod linkage;
-pub mod lsp;
-pub mod manifest;
-pub mod memory_spec;
-pub mod parser;
-pub mod proof_engine;
-pub mod rbv;
-pub mod reactor;
-pub mod resolver;
-pub mod scheduler;
-pub mod sig_casting;
-pub mod signal_graph;
-pub mod symbolic;
-pub mod target_spec;
-pub mod typechecker;
-pub mod view_compiler;
-pub mod watch;
-pub mod wrapper;
+// ── Central Backend Router ────────────────────────────────────────────
+//
+// Dispatches codegen calls from backend entry points to the appropriate
+// feature struct's codegen trait implementation.
+//
+// As features are migrated, their backend methods move here. Each backend
+// (LLVM, VHDL, Webstack) gets its own dispatch method:
+//
+//   router.codegen_expr_llvm(ctx, expr)  →   feature.emit_llvm(ctx, out, dispatch)
 
+// Placeholder — populated during backend migration (Phase 7).
