@@ -37,6 +37,13 @@ pub(crate) fn float_to_llvm_hex(f: f64) -> String {
 fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Option<f64> {
     match expr {
         Expr::Float(f) => Some(*f),
+        Expr::Literal(lit) => {
+            if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                Some(*f)
+            } else {
+                None
+            }
+        }
         Expr::Identifier(name) => {
             if let Some((Type::Float, inner)) = constants.get(name) {
                 try_eval_cfloat(inner, constants)
@@ -108,52 +115,167 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             for s in statements { collect_strings_stmt(s, seen, out); }
         }
         Statement::Unification { expr, .. } => { collect_strings_expr(expr, seen, out); }
-        _ => {}
+        Statement::Escape(Some(e)) => { collect_strings_expr(e, seen, out); }
+        Statement::Escape(None) => {}
+        Statement::LocalTrigger { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
+        Statement::SyncBlock { body } => { for s in body { collect_strings_stmt(s, seen, out); } }
+        Statement::Alka { .. } | Statement::OnExit { .. } | Statement::InlineAsm { .. } => {}
     }
 }
+
+fn collect_strings_from_subtype_ops(ops: &[crate::ast::SubtypeOp], seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
+    for op in ops {
+        match op {
+            crate::ast::SubtypeOp::Filter(e) | crate::ast::SubtypeOp::Map(e) | crate::ast::SubtypeOp::Sort(e)
+            | crate::ast::SubtypeOp::Group(e) | crate::ast::SubtypeOp::Sum(e) | crate::ast::SubtypeOp::Avg(e)
+            | crate::ast::SubtypeOp::Min(e) | crate::ast::SubtypeOp::Max(e) | crate::ast::SubtypeOp::Match(e) => {
+                collect_strings_expr(e, seen, out);
+            }
+            crate::ast::SubtypeOp::Join(a, b) => {
+                collect_strings_expr(a, seen, out);
+                collect_strings_expr(b, seen, out);
+            }
+            crate::ast::SubtypeOp::Limit(_) | crate::ast::SubtypeOp::Skip(_) | crate::ast::SubtypeOp::Unique
+            | crate::ast::SubtypeOp::Count => {}
+        }
+    }
+}
+
+fn collect_strings_from_bracket_ops(ops: &[crate::ast::BracketOp], seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
+    for op in ops {
+        match op {
+            crate::ast::BracketOp::Coord(_) => {}
+            crate::ast::BracketOp::Mask(e) | crate::ast::BracketOp::Stride(e) => {
+                collect_strings_expr(e, seen, out);
+            }
+        }
+    }
+}
+
 fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
-    use Expr::*;
     match expr {
-        String(s) => {
+        Expr::String(s) => {
             if !seen.contains(s) {
                 seen.insert(s.clone());
                 out.push(s.clone());
             }
         }
-        Add(l, r) | Sub(l, r) | Mul(l, r) | Div(l, r) | Mod(l, r) | Eq(l, r) | Ne(l, r)
-        | Lt(l, r) | Le(l, r) | Gt(l, r) | Ge(l, r) | And(l, r) | Or(l, r)
-        | BitAnd(l, r) | BitOr(l, r) | BitXor(l, r) | Shl(l, r) | Shr(l, r)
-        | Concat(l, r) => {
+        Expr::Literal(lit) => {
+            if let crate::features::literal::LiteralExpr::String(s) = lit.as_ref() {
+                if !seen.contains(s) {
+                    seen.insert(s.clone());
+                    out.push(s.clone());
+                }
+            }
+        }
+        // Binary/unary ops
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
+        | Expr::And(l, r) | Expr::Or(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+        | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
             collect_strings_expr(l, seen, out);
             collect_strings_expr(r, seen, out);
         }
-        Not(e) | Neg(e) | BitNot(e) | Cast(e, _) => {
+        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
             collect_strings_expr(e, seen, out);
         }
-        Block(stmts, last) => {
+        Expr::OwnedRef(_) | Expr::PriorState(_) => {}
+        // Collections
+        Expr::ListLiteral(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
+        Expr::MapLiteral(pairs) => { for (k, v) in pairs { collect_strings_expr(k, seen, out); collect_strings_expr(v, seen, out); } }
+        Expr::SetLiteral(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
+        Expr::ListIndex(l, i) => { collect_strings_expr(l, seen, out); collect_strings_expr(i, seen, out); }
+        // Slice/MultiSlice
+        Expr::Slice { value, start, end, stride, mask } => {
+            collect_strings_expr(value, seen, out);
+            for opt in [start, end, stride, mask].into_iter().flatten() { collect_strings_expr(opt, seen, out); }
+        }
+        Expr::MultiSlice { value, ops } => {
+            collect_strings_expr(value, seen, out);
+            collect_strings_from_bracket_ops(ops, seen, out);
+        }
+        // Tuple
+        Expr::Tuple(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
+        Expr::TupleDestructure(_, e) => { collect_strings_expr(e, seen, out); }
+        // Arrow ops
+        Expr::ArrowMut { target, index, value, .. } => {
+            collect_strings_expr(target, seen, out);
+            collect_strings_expr(index, seen, out);
+            if let Some(v) = value { collect_strings_expr(v, seen, out); }
+        }
+        Expr::ArrowDiscard { target, index } => {
+            collect_strings_expr(target, seen, out);
+            collect_strings_expr(index, seen, out);
+        }
+        Expr::ArrowTransfer { dest, source, filter } => {
+            collect_strings_expr(dest, seen, out);
+            collect_strings_expr(source, seen, out);
+            if let Some(f) = filter { collect_strings_expr(f, seen, out); }
+        }
+        // Field/object
+        Expr::FieldAccess(o, _) => { collect_strings_expr(o, seen, out); }
+        Expr::StructInstance(_, fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
+        Expr::ObjectLiteral(fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
+        // Call, Match, Pattern
+        Expr::Call(_, args) => { for a in args { collect_strings_expr(a, seen, out); } }
+        Expr::Match { value, arms } => { collect_strings_expr(value, seen, out); for arm in arms { collect_strings_expr(&arm.body, seen, out); } }
+        Expr::PatternMatch { value, .. } => { collect_strings_expr(value, seen, out); }
+        // Block
+        Expr::Block(stmts, last) => {
             for s in stmts { collect_strings_stmt(s, seen, out); }
             collect_strings_expr(last, seen, out);
         }
-        Match { value, arms } => {
-            collect_strings_expr(value, seen, out);
-            for arm in arms { collect_strings_expr(&arm.body, seen, out); }
+        // Projection/Sig/Subtype
+        Expr::Projection { source, .. } => { collect_strings_expr(source, seen, out); }
+        Expr::SubtypeProjection { source, ops } => {
+            collect_strings_expr(source, seen, out);
+            collect_strings_from_subtype_ops(ops, seen, out);
         }
-        PatternMatch { value, .. } => { collect_strings_expr(value, seen, out); }
-        Call(_, args) => { for a in args { collect_strings_expr(a, seen, out); } }
-        ListLiteral(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
-        ListIndex(l, i) => { collect_strings_expr(l, seen, out); collect_strings_expr(i, seen, out); }
-        Slice { value, start, .. } => {
-            collect_strings_expr(value, seen, out);
-            if let Some(s) = start { collect_strings_expr(s, seen, out); }
+        Expr::SigCall { expr, .. } => { collect_strings_expr(expr, seen, out); }
+        // Pattern B packed variants
+        Expr::ArrowMutExpr(e) => {
+            collect_strings_expr(e.target.as_ref(), seen, out);
+            collect_strings_expr(e.index.as_ref(), seen, out);
+            if let Some(v) = e.value.as_ref() { collect_strings_expr(v, seen, out); }
         }
-        MultiSlice { value, .. } => { collect_strings_expr(value, seen, out); }
-        Tuple(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
-        TupleDestructure(_, e) => { collect_strings_expr(e, seen, out); }
-        StructInstance(_, fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
-        ObjectLiteral(fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
-        SigCall { expr, .. } => { collect_strings_expr(expr, seen, out); }
-        FieldAccess(o, _) => { collect_strings_expr(o, seen, out); }
-        _ => {}
+        Expr::ArrowDiscardExpr(e) => {
+            collect_strings_expr(e.target.as_ref(), seen, out);
+            collect_strings_expr(e.index.as_ref(), seen, out);
+        }
+        Expr::ArrowTransferExpr(e) => {
+            collect_strings_expr(e.dest.as_ref(), seen, out);
+            collect_strings_expr(e.source.as_ref(), seen, out);
+            if let Some(f) = e.filter.as_ref() { collect_strings_expr(f, seen, out); }
+        }
+        Expr::ListLiteralExpr(e) => { for el in &e.elements { collect_strings_expr(el, seen, out); } }
+        Expr::MapLiteralExpr(e) => { for (k, v) in &e.entries { collect_strings_expr(k, seen, out); collect_strings_expr(v, seen, out); } }
+        Expr::SetLiteralExpr(e) => { for el in &e.entries { collect_strings_expr(el, seen, out); } }
+        Expr::MultiSliceExpr(e) => { collect_strings_expr(e.value.as_ref(), seen, out); collect_strings_from_bracket_ops(&e.ops, seen, out); }
+        Expr::FieldAccessExpr(e) => { collect_strings_expr(e.obj.as_ref(), seen, out); }
+        Expr::ObjectLiteralExpr(e) => { for (_, v) in &e.fields { collect_strings_expr(v, seen, out); } }
+        Expr::SubtypeProjectionExpr(e) => {
+            collect_strings_expr(e.source.as_ref(), seen, out);
+            collect_strings_from_subtype_ops(&e.ops, seen, out);
+        }
+        Expr::BinaryOp(e) => { collect_strings_expr(e.left.as_ref(), seen, out); collect_strings_expr(e.right.as_ref(), seen, out); }
+        Expr::UnaryOp(e) => { collect_strings_expr(e.operand.as_ref(), seen, out); }
+        Expr::CallExpr(e) => { for a in &e.args { collect_strings_expr(a, seen, out); } }
+        Expr::ProjectionExpr(e) => { collect_strings_expr(e.source.as_ref(), seen, out); }
+        Expr::BlockExpr(e) => { for s in &e.stmts { collect_strings_stmt(s, seen, out); } collect_strings_expr(e.last.as_ref(), seen, out); }
+        Expr::MatchExpr(e) => { collect_strings_expr(e.value.as_ref(), seen, out); for arm in &e.arms { collect_strings_expr(&arm.body, seen, out); } }
+        Expr::PatternMatchExpr(e) => { collect_strings_expr(e.value.as_ref(), seen, out); }
+        Expr::TupleDestructureExpr(e) => { collect_strings_expr(e.expr.as_ref(), seen, out); }
+        Expr::TupleExpr(e) => { for el in &e.exprs { collect_strings_expr(el, seen, out); } }
+        Expr::SigCallExpr(e) => { collect_strings_expr(e.expr.as_ref(), seen, out); }
+        Expr::SliceExpr(e) => {
+            collect_strings_expr(e.value.as_ref(), seen, out);
+            for opt in [&e.start, &e.end, &e.stride, &e.mask].into_iter().flatten() { collect_strings_expr(opt, seen, out); }
+        }
+        Expr::StructInstanceExpr(e) => { for (_, v) in &e.fields { collect_strings_expr(v, seen, out); } }
+        Expr::EllipsisExpr(_) | Expr::DbvlTable { .. } | Expr::DbvlTableExpr(_) => {}
+        // Terminals
+        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
+        | Expr::Ellipsis | Expr::TypeRef(_) => {}
     }
 }
 
@@ -630,15 +752,29 @@ self.emit_declares(&mut out);
             };
             let key = match expr {
                 Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
+                Expr::Literal(lit) => match lit.as_ref() {
+                    crate::features::literal::LiteralExpr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
+                    crate::features::literal::LiteralExpr::Integer(n) => format!("{}:{}", llvm_ty, n),
+                    crate::features::literal::LiteralExpr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
+                    crate::features::literal::LiteralExpr::String(_) => format!("{}:null", llvm_ty),
+                    crate::features::literal::LiteralExpr::Char(_) | crate::features::literal::LiteralExpr::Term => format!("{}:{}", llvm_ty, name),
+                },
                 Expr::Integer(n) => format!("{}:{}", llvm_ty, n),
                 Expr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
                 Expr::Neg(inner) => match inner.as_ref() {
                     Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f)),
+                    Expr::Literal(lit) => {
+                        if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                            format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f))
+                        } else {
+                            format!("{}:neg:{}", llvm_ty, name)
+                        }
+                    }
                     Expr::Integer(n) => format!("{}:-{}", llvm_ty, n),
-                    _ => format!("{}:0", llvm_ty),
+                    _ => format!("{}:neg:{}", llvm_ty, name),
                 },
                 Expr::String(_) => format!("{}:null", llvm_ty),
-                _ => format!("{}:0", llvm_ty),
+                _ => format!("{}:unresolved:{}", llvm_ty, name),
             };
             if let Some(canonical) = dedup_map.get(&key) {
                 alias_map.insert(name.clone(), canonical.clone());
@@ -664,21 +800,38 @@ self.emit_declares(&mut out);
             };
             let val_str = match expr {
                 Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
+                Expr::Literal(lit) => match lit.as_ref() {
+                    crate::features::literal::LiteralExpr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
+                    crate::features::literal::LiteralExpr::Integer(n) => n.to_string(),
+                    crate::features::literal::LiteralExpr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
+                    crate::features::literal::LiteralExpr::String(_) => "null".to_string(),
+                    crate::features::literal::LiteralExpr::Char(c) => format!("{}", *c as i64),
+                    crate::features::literal::LiteralExpr::Term => "0".to_string(),
+                },
                 Expr::Integer(n) => n.to_string(),
                 Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
                 Expr::Neg(inner) => match inner.as_ref() {
                     Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f)),
+                    Expr::Literal(lit) => {
+                        if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                            format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f))
+                        } else {
+                            if *ty == Type::Float { "0.0".to_string() } else { "0".to_string() }
+                        }
+                    }
                     Expr::Integer(n) => format!("-{}", n),
-                    _ => "0".to_string(),
+                    _ => if *ty == Type::Float { "0.0".to_string() } else { "0".to_string() },
                 },
                 Expr::String(_) => "null".to_string(),
-                _ => "0".to_string(),
+                _ => {
+                    if *ty == Type::Float {
+                        "0.0".to_string()
+                    } else {
+                        "0".to_string()
+                    }
+                },
             };
-            if *ty == Type::Float {
-                writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
-            } else {
-                writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
-            }
+            writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
         }
         if !self.constants.is_empty() { writeln!(out).ok(); }
 
