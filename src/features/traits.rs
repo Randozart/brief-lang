@@ -93,6 +93,61 @@ pub trait ExprCodegenWebstack {
     ) -> String;
 }
 
+// ── Statement Feature Traits ───────────────────────────────────────
+
+/// Router handle for sub-statement and sub-expression dispatch.
+pub struct StmtDispatch;
+
+/// Typecheck: Typechecker routes each Statement variant to its feature.
+pub trait StmtTypecheck {
+    fn typecheck(
+        &self,
+        ctx: &mut crate::typechecker::TypeChecker,
+        dispatch: &StmtDispatch,
+    ) -> Result<(), crate::errors::TypeError>;
+}
+
+/// Eval: Interpreter routes each Statement variant to its feature.
+pub trait StmtEval {
+    fn evaluate(
+        &self,
+        ctx: &mut crate::interpreter::Interpreter,
+        dispatch: &StmtDispatch,
+    ) -> Result<(), crate::interpreter::RuntimeError>;
+}
+
+/// LLVM Codegen — feature structs reference &mut LlvmBackend directly.
+pub trait StmtCodegenLLVM {
+    fn emit_llvm(
+        &self,
+        ctx: &mut crate::backend::llvm::LlvmBackend,
+        out: &mut String,
+        dispatch: &StmtDispatch,
+        indent: &str,
+    );
+}
+
+/// VHDL Codegen.
+pub trait StmtCodegenVHDL {
+    fn emit_vhdl(
+        &self,
+        ctx: &mut crate::backend::vhdl::VhdlGenerator,
+        out: &mut String,
+        dispatch: &StmtDispatch,
+        indent: &str,
+    );
+}
+
+/// Webstack Codegen.
+pub trait StmtCodegenWebstack {
+    fn emit_js(
+        &self,
+        ctx: &mut crate::backend::webstack::WebstackGenerator,
+        out: &mut String,
+        dispatch: &StmtDispatch,
+    );
+}
+
 #[cfg(all(kani, feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;

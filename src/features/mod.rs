@@ -67,7 +67,7 @@ pub mod ellipsis;
 // pub mod ellipsis;
 
 // Statement features
-// pub mod stmt;
+pub mod stmt;
 
 // TopLevel features
 pub mod toplevel;
