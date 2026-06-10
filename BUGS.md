@@ -807,6 +807,67 @@ The LLVM backend treats reactive writes as deferred (all reads see pre-tick stat
 
 ---
 
+## 2026-06-10 — LLVM backend: negative float constants in init_state stored as i64 (8 bytes) instead of float (4 bytes)
+
+**Issue**: `nbody_newton.bv` produced `-nan` instead of `-0.169203` at BOUND=5. All outer planets' Y and Z positions were zero instead of their correct negative values (by1=-1.16, bz1=-0.1036, by3=-15.11, etc.).
+
+**Root Cause**: In `src/backend/llvm/mod.rs:2110-2117`, the `emit_init_state` function had this code for `Expr::Neg` initializers:
+```rust
+Some(Expr::Neg(ref inner)) => {
+    let s = match inner.as_ref() {
+        Expr::Float(f) => float_to_llvm_hex(-*f),
+        ...
+    };
+    writeln!(out, "  store i64 {}, i64* {}, align {}", s, p, self.align_of("i64")).ok();
+}
+```
+When a `let` field had a negative float literal (e.g., `let by1: Float = -1.1603`), the parser stored it as `Neg(Literal(Float(1.1603)))`. The `Expr::Neg` arm computed the correct hex bit pattern but stored it as `i64` (8 bytes) instead of `float` (4 bytes). This wrote 8 bytes of zero into a 4-byte float slot, corrupting the adjacent float field.
+
+Additionally, the match arm only matched `Expr::Float(f)` inside Neg, but the actual AST stores `Expr::Literal(LiteralExpr::Float(f))` inside Neg. The catch-all `_` branch stored `i64 0`.
+
+**Fix** (`src/backend/llvm/mod.rs`): Updated `Expr::Neg` arm to match both `Expr::Float` and `Expr::Literal` with `LiteralExpr::Float`, and emit `store float` (4 bytes) instead of `store i64` (8 bytes):
+```rust
+Some(Expr::Neg(ref inner)) => {
+    match inner.as_ref() {
+        Expr::Float(f) | Expr::Literal(lit) if matches!(lit.as_ref(), LiteralExpr::Float(_)) => {
+            let f = /* extract value */;
+            let h = float_to_llvm_hex(-*f);
+            let bits_reg = format!("%ip{}b", reg - 1);
+            writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
+            writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
+        }
+        ...
+    }
+}
+```
+
+**Lesson**: Always match the correct type when storing initial values. The LLVM IR must use `store float` for float fields — `store i64` writes 8 bytes, corrupting adjacent fields. Also, verify the AST uses `Literal(Float(…))` not bare `Float(…)` — the feature dispatch layer adds an `Expr::Literal` wrapper.
+
+## 2026-06-10 — LLVM backend: non-SSA state field loads return Type::Int for float fields
+
+**Issue**: In non-SSA transaction mode (the default), float arithmetic on state fields used `add i64` on boxed bit patterns instead of `fadd` on native floats. This caused float computations like `sum + a + b` to produce garbage results when all operands were state fields (no Float-type constant in the expression tree).
+
+**Root Cause**: In `src/backend/llvm/emit_expr.rs:178`, the non-SSA state field load for float types:
+```rust
+s if s == "float" => { 
+    let i = format!("%if{}", self.txn_counter); 
+    ...
+    self.reg_float_cache.insert(v.clone(), ld.clone()); 
+    // NO RETURN — falls through to default
+}
+```
+...did not return a `TypedRegister`. The function's default return (line 631) treated the value as `Type::Int`:
+```rust
+TypedRegister { name: v, ty: Type::Int }
+```
+Then in `emit_binop` (emit_expr.rs:845), the check `a.ty == Type::Float || b.ty == Type::Float` was false, so it emitted `add i64` instead of `fadd fast float`. The `reg_float_cache` had the correct native float register, but `emit_binop` checked the type first and never reached the cache lookup.
+
+This worked in `float_math.bv` because constant globals (like `A00`, `Q00`) had type `Type::Float`, so at least one operand in each arithmetic expression triggered the native float path.
+
+**Fix** (`src/backend/llvm/emit_expr.rs`): Added `return TypedRegister { name: v.to_string(), ty: Type::Float };` to the float state field load arm.
+
+**Lesson**: Every code path in `emit_expr` must return the correct `TypedRegister::ty`. The default `Type::Int` fallthrough is a trap for non-int types. When adding new type-aware paths, verify the return type propagates to consumers like `emit_binop`.
+
 ## 2026-06-09 — C reference benchmarks fail at BOUND=5 (exit code 6)
 
 **Issue**: Several C reference binaries (`float_math_c`, `float_math_nonzero_c`, `const_heavy_c`) exit with code 6 and produce no output when run with `BOUND=5`.

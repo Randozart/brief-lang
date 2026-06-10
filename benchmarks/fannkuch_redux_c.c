@@ -1,8 +1,10 @@
 // Fannkuch-Redux C reference — symmetric with Brief benchmark.
 // 12 flat fields, clockwise rotation, checksum via modulo-13.
+// Output via stderr to match Brief's __print_int convention.
 // Compile: clang -O3 -march=native -o fannkuch_redux_c fannkuch_redux_c.c
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #define IM 139968
 #define IA 3877
@@ -34,5 +36,6 @@ int main(void) {
 
         count++;
     }
-    return (int)(checksum & 0xFF);
+    fprintf(stderr, "%ld\n", checksum);
+    return 0;
 }

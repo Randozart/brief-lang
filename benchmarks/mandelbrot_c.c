@@ -1,8 +1,10 @@
 // Mandelbrot C reference — symmetric with Brief benchmark.
 // Complex integer arithmetic (fixed-point), LCG, escape tracking.
+// Periodic output via stderr to match Brief's __print_int convention.
 // Compile: clang -O3 -march=native -o mandelbrot_c mandelbrot_c.c
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #define IM 139968
 #define IA 3877
@@ -36,7 +38,15 @@ int main(void) {
         // Track norm
         escapes = escapes + zr * zr / SCALE + zi * zi / SCALE;
 
+        // Periodic output — same timing as Brief's [count % 5000000 == 0] guard
+        // (fires on pre-increment count, matching Brief's pre-tick guard)
+        if (count % 5000000 == 0)
+            fprintf(stderr, "%ld\n", escapes);
+
         count++;
     }
-    return (int)(escapes & 0xFF);
+
+    // Final output — same as Brief's [count == N] -> __print_int(escapes)
+    fprintf(stderr, "%ld\n", escapes);
+    return 0;
 }

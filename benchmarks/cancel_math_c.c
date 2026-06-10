@@ -16,9 +16,9 @@ int main(void) {
 
     while (count < N) {
         acc += count;
+        count++;
         if (count % 5000000 == 0)
             fprintf(stderr, "%ld\n", acc);
-        count++;
     }
 
     return (int)(acc + count);

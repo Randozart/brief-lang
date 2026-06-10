@@ -12,7 +12,8 @@ int main(void) {
     long N = env ? atol(env) : 50000000L;
     long count = 0;
 
-    for (; count < N; count++) {
+    for (; count < N; ) {
+        count++;
         if (count % 5000000 == 0)
             fprintf(stderr, "%ld\n", count);
     }

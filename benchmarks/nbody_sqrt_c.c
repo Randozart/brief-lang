@@ -105,5 +105,5 @@ int main(void) {
     for (int i = 0; i < 5; i++) {
         energy += 0.5f * m[i] * (vx[i]*vx[i] + vy[i]*vy[i] + vz[i]*vz[i]);
     }
-    fprintf(stderr, "%.6f\n", energy);
+    fprintf(stderr, "%.9f\n", energy);
 }

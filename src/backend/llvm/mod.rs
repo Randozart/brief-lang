@@ -2108,12 +2108,30 @@ self.emit_declares(&mut out);
                     writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
                 }
                 Some(Expr::Neg(ref inner)) => {
-                    let s = match inner.as_ref() {
-                        Expr::Float(f) => float_to_llvm_hex(-*f),
-                        Expr::Integer(n) => format!("-{}", n),
-                        _ => "0".to_string(),
-                    };
-                    writeln!(out, "  store i64 {}, i64* {}, align {}", s, p, self.align_of("i64")).ok();
+                    match inner.as_ref() {
+                        Expr::Float(f) => {
+                            let h = float_to_llvm_hex(-*f);
+                            let bits_reg = format!("%ip{}b", reg - 1);
+                            writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
+                            writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
+                        }
+                        Expr::Literal(lit) => {
+                            if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                                let h = float_to_llvm_hex(-*f);
+                                let bits_reg = format!("%ip{}b", reg - 1);
+                                writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
+                                writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
+                            } else {
+                                writeln!(out, "  store i64 0, i64* {}, align {}", p, self.align_of("i64")).ok();
+                            }
+                        }
+                        Expr::Integer(n) => {
+                            writeln!(out, "  store i64 -{}, i64* {}, align {}", n, p, self.align_of("i64")).ok();
+                        }
+                        _ => {
+                            writeln!(out, "  store i64 0, i64* {}, align {}", p, self.align_of("i64")).ok();
+                        }
+                    }
                 }
                 Some(Expr::Bool(b)) => {
                     let v = if b { "1" } else { "0" };

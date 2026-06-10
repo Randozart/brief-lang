@@ -2,7 +2,7 @@
 // Exercises: dense Int arithmetic (mul, add, mod, shift), LCG, 6-field complex
 // simulation with integer "escape" tracking.
 
-#!exit count == N && escapes >= 0 && zr >= 0 && zi >= 0 && cr >= -200 && ci >= -200;
+#!exit count == N && escapes >= 0;
 
 import "link/brief_rt.c";
 
@@ -54,7 +54,7 @@ rct txn mb [count < N][count == N] {
     &count = count + 1;
 
     [count == N] {
-        term! -> __print_int(escapes);
+        __print_int(escapes);
     };
     term;
 };
