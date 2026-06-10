@@ -25,5 +25,5 @@ int main(void) {
             fprintf(stderr, "%ld\n", acc);
     }
 
-    return (int)(acc + count);
+    return 0;
 }

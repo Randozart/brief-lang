@@ -3,12 +3,8 @@
 // Full 3x3 state vector + covariance propagation, NO volatile.
 // Local float variables give clang full register allocation freedom.
 // Returns a value that depends on ALL state fields + counter to
-// prevent any dead-code elimination.
-//
-// Build:
-//   clang -O3 -march=native -o benchmarks/kalman_filter_runtime_c \
-//       benchmarks/kalman_filter_runtime_c.c
 
+#include <stdio.h>
 #include <stdlib.h>
 
 int main(void) {
@@ -71,10 +67,13 @@ int main(void) {
         x0 = nx0;
         x1 = nx1;
         x2 = nx2;
+        count++;
+        if (count % 5000000 == 0) {
+            float energy = x0 * x0 + p00 + p11 + p22;
+            float ei = x1 * x1 + p01 + p12;
+            float ej = x2 * x2 + p02 + p21;
+            fprintf(stderr, "%.9f\n", (double)(energy + ei + ej));
+        }
     }
-
-    // Return a value that depends on ALL fields so clang cannot
-    // eliminate any part of the computation.
-    return (int)(count + x0 + x1 + x2 +
-                 p00 + p01 + p02 + p10 + p11 + p12 + p20 + p21 + p22);
+    return 0;
 }

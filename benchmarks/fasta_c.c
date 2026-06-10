@@ -17,7 +17,7 @@ int main(void) {
 
     while (count-- > 0) {
         seed = (seed * IA + IC) % IM;
-        putchar(seed % 26 + 'a');
+        fprintf(stderr, "%c", (int)(seed % 26 + 'a'));
     }
     return 0;
 }

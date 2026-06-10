@@ -21,6 +21,9 @@ int main(int argc, char **argv) {
             default: break;
         }
         count++;
+        if (count % 5000000 == 0) {
+            fprintf(stderr, "%ld\n", count);
+        }
     }
-    return (int)count;
+    return 0;
 }
