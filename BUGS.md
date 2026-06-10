@@ -889,16 +889,16 @@ If the C binary exits non-zero, `|| echo "__FAIL__"` fires and `c_out="__FAIL__"
 
 ## 2026-06-10: Benchmark Investigation After R2+R3
 
-### Results
+### Final Results (after all R2+R3 + copy elimination)
 
-| Benchmark | Before | After | Gap | Status |
+| Benchmark | Before | After | Gap | Why |
 |---|---|---|---|---|
-| nbody_newton | 1.69× | 1.10× | Near parity | Float boxing elimination (R2) worked |
-| nbody_sqrt | 2.81× | 2.41× | Improved | LLVM intrinsic + sqrt wrapper helped |
-| fannkuch_redux | 5.06× | 4.63× | Improved | R3 enabled SROA, but 15 dead-field phi nodes remain |
-| float_math_nonzero | 2.43× | 2.41× | Unchanged | Not a boxing issue |
-| knucleotide | 1.21× | 1.28× | Unchanged | Not a boxing issue |
-| kalman_filter_runtime | ? | 3.62× | New gap | Multiple causes |
+| nbody_newton | 1.69× | **1.08×** | Near parity | Float boxing elimination + copy elimination |
+| nbody_sqrt | 2.81× | **2.41×** | Unchanged | C gets vsqrtps (SIMD sqrt), Brief has scalar sqrt |
+| fannkuch_redux | 5.06× | **4.36×** | Improved | R3 (SROA) + copy elimination, but 15 dead-field phi nodes remain |
+| float_math_nonzero | 2.43× | **2.42×** | Unchanged | Register scheduling — C keeps all in XMM |
+| knucleotide | 1.21× | **1.24×** | Unchanged | Guard dispatch overhead |
+| kalman_filter_runtime | ? | **3.48×** | Improved | Copy elimination + LTO, but still structural memory overhead |
 
 ### Root Causes
 
@@ -932,5 +932,6 @@ If the C binary exits non-zero, `|| echo "__FAIL__"` fires and `c_out="__FAIL__"
 1. **Dead-field elimination**: fannkuch's 12 rotation fields are only rotated, never observed — liveness analysis should eliminate them. Currently Brief's field elimination only drops fields whose ASSIGNMENTS are never read; it doesn't trace the full def-use chain to check for observable output.
 2. **`-march=native`**: Adding `-march=native` to `llc` in the benchmark harness would give Brief the same ISA as C (AVX, FMA, etc.). Currently `llc` uses the host triple without `-march=native`.
 3. **SLP hazard over-conservatism**: For straight-line float code (kalman's matrix arithmetic), the peak register estimate (line 178 in hazard.rs) counts `shuffle_pressure` as `min(cross_ops, n*2)` which overestimates for tree-shaped computation where values are consumed and released quickly.
-4. **`add i64 0, %src` noise**: The uniform register model emits a copy instruction for every value reference. This adds ~30% IR instruction overhead across ALL benchmarks. Could be cleaned up by tracking when a register is already in the right type.
+4. **`add i64 0, %src` noise**: Fixed for non-SSA field loads and MMIO reads in commit 5ab6bb0. Copies reduced from 18% to 2% of IR instructions (fannkuch), 18% to 3% (knucleotide). Remaining copies are from `let_binding` lookups, SSA extractvalue path, and trivial expression results. Full elimination would require refactoring `emit_expr` to reuse its allocated `v` register more aggressively.
+5. **SSA atomicity overhead**: The %State-based GEP load/store model forces memory round-trips for every field access. For benchmarks like kalman (132 loads for 145 arith ops), this is ~1:1 memory:compute ratio vs C's ~0:1. Fixing this would require Brief-specific LLVM passes or a different codegen model (e.g., rewrite entire loop body with %State register).
 
