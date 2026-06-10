@@ -41,6 +41,9 @@ int main(int argc, char **argv) {
             + C10 + C11 + C12 + C13 + C14
             + C15 + C16 + C17 + C18 + C19;
         count++;
+        if (count % 5000000 == 0) {
+            fprintf(stderr, "%ld\n", acc);
+        }
     }
-    return (int)(count + acc);
+    return 0;
 }

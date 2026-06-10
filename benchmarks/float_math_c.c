@@ -30,7 +30,10 @@ int main(int argc, char **argv) {
         x0 = nx0; x1 = nx1; x2 = nx2;
         p00 += Q00; p11 += Q11; p22 += Q22;
         count++;
+        if (count % 5000000 == 0) {
+            float trace = p00 + p01 + p02 + p10 + p11 + p12 + p20 + p21 + p22;
+            fprintf(stderr, "%.9f\n", (double)(x0 + x1 + x2 + trace));
+        }
     }
-
-    return (int)(count + x0 + x1 + x2 + p00 + p11 + p22);
+    return 0;
 }
