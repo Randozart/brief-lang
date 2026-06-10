@@ -30,14 +30,13 @@ int main(void) {
     const float q20 = 0.0f,   q21 = 0.0f,   q22 = 0.001f;
 
     long count = 0;
-    for (; count < total; count++) {
+    while (count < total) {
         // State propagation: x_new = A * x
         float nx0 = a00 * x0 + a01 * x1 + a02 * x2;
         float nx1 = a10 * x0 + a11 * x1 + a12 * x2;
         float nx2 = a20 * x0 + a21 * x1 + a22 * x2;
 
         // Covariance propagation: P_new = A * P * A^T + Q
-        // Step 1: AP = A * P
         float ap00 = a00 * p00 + a01 * p10 + a02 * p20;
         float ap01 = a00 * p01 + a01 * p11 + a02 * p21;
         float ap02 = a00 * p02 + a01 * p12 + a02 * p22;
@@ -50,7 +49,6 @@ int main(void) {
         float ap21 = a20 * p01 + a21 * p11 + a22 * p21;
         float ap22 = a20 * p02 + a21 * p12 + a22 * p22;
 
-        // Step 2: P_new = AP * A^T + Q
         p00 = ap00 * a00 + ap01 * a10 + ap02 * a20 + q00;
         p01 = ap00 * a01 + ap01 * a11 + ap02 * a21 + q01;
         p02 = ap00 * a02 + ap01 * a12 + ap02 * a22 + q02;
@@ -63,7 +61,6 @@ int main(void) {
         p21 = ap20 * a01 + ap21 * a11 + ap22 * a21 + q21;
         p22 = ap20 * a02 + ap21 * a12 + ap22 * a22 + q22;
 
-        // Update state vector
         x0 = nx0;
         x1 = nx1;
         x2 = nx2;
