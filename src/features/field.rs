@@ -62,9 +62,21 @@ impl ExprEval for ObjectLiteralExpr {
     }
 }
 
-impl ExprCodegenLLVM for FieldAccessExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%fld".into(), ty: Type::Void } } }
-impl ExprCodegenLLVM for StructInstanceExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%str".into(), ty: Type::Void } } }
-impl ExprCodegenLLVM for ObjectLiteralExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%obj".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for FieldAccessExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::FieldAccess(self.obj.clone(), self.field.clone()), "")
+    }
+}
+impl ExprCodegenLLVM for StructInstanceExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::StructInstance(self.typename.clone(), self.fields.clone()), "")
+    }
+}
+impl ExprCodegenLLVM for ObjectLiteralExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::ObjectLiteral(self.fields.clone()), "")
+    }
+}
 impl ExprCodegenVHDL for FieldAccessExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenVHDL for StructInstanceExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenVHDL for ObjectLiteralExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }

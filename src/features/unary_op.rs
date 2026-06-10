@@ -44,9 +44,13 @@ impl ExprEval for UnaryOpExpr {
 }
 
 impl ExprCodegenLLVM for UnaryOpExpr {
-    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        let v = format!("%uz");
-        crate::backend::llvm::TypedRegister { name: v, ty: Type::Int }
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        let old_expr = match self.kind {
+            UnaryOpKind::Neg => Expr::Neg(self.operand.clone()),
+            UnaryOpKind::Not => Expr::Not(self.operand.clone()),
+            UnaryOpKind::BitNot => Expr::BitNot(self.operand.clone()),
+        };
+        ctx.emit_expr(out, &old_expr, "")
     }
 }
 

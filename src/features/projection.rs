@@ -166,8 +166,8 @@ impl ExprEval for ProjectionExpr {
 }
 
 impl ExprCodegenLLVM for ProjectionExpr {
-    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        crate::backend::llvm::TypedRegister { name: "%proj".into(), ty: Type::Void }
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::Projection { source: self.source.clone(), target: self.target.clone() }, "")
     }
 }
 

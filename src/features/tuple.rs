@@ -46,8 +46,16 @@ impl ExprEval for TupleDestructureExpr {
     }
 }
 
-impl ExprCodegenLLVM for TupleExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%tup".into(), ty: Type::Void } } }
-impl ExprCodegenLLVM for TupleDestructureExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%tds".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for TupleExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::Tuple(self.exprs.clone()), "")
+    }
+}
+impl ExprCodegenLLVM for TupleDestructureExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::TupleDestructure(self.names.clone(), self.expr.clone()), "")
+    }
+}
 impl ExprCodegenVHDL for TupleExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenVHDL for TupleDestructureExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenWebstack for TupleExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

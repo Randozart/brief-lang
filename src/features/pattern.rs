@@ -76,7 +76,11 @@ impl ExprEval for MatchExpr {
     }
 }
 
-impl ExprCodegenLLVM for PatternMatchExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%pat".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for PatternMatchExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::PatternMatch { value: self.value.clone(), variant: self.variant.clone(), fields: self.fields.clone() }, "")
+    }
+}
 impl ExprCodegenLLVM for MatchExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%mtc".into(), ty: Type::Void } } }
 impl ExprCodegenVHDL for PatternMatchExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenVHDL for MatchExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }

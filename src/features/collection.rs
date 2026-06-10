@@ -173,8 +173,16 @@ impl ExprCodegenLLVM for ListIndexExpr {
         ctx.emit_expr(out, &Expr::ListIndex(self.list.clone(), self.index.clone()), "")
     }
 }
-impl ExprCodegenLLVM for SliceExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%slc".into(), ty: Type::Void } } }
-impl ExprCodegenLLVM for MultiSliceExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%msl".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for SliceExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::Slice { value: self.value.clone(), start: self.start.clone(), end: self.end.clone(), stride: self.stride.clone(), mask: self.mask.clone() }, "")
+    }
+}
+impl ExprCodegenLLVM for MultiSliceExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::MultiSlice { value: self.value.clone(), ops: self.ops.clone() }, "")
+    }
+}
 impl ExprCodegenVHDL for ListLiteralExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenVHDL for MapLiteralExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenVHDL for SetLiteralExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
