@@ -1320,7 +1320,7 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
     }
 }
 
-fn has_ffi_or_trigger_stmt_in_chain(body: &[Statement]) -> bool {
+pub(crate) fn has_ffi_or_trigger_stmt_in_chain(body: &[Statement]) -> bool {
     body.iter().any(|s| has_ffi_or_terminator_stmt(s))
 }
 

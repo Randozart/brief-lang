@@ -585,7 +585,22 @@ impl LlvmBackend {
 
         let precomputed_final_values = if analysis.region_analyzer.is_fully_precomputable(self.optimize_budget) {
             analysis.region_analyzer.collect_final_values(program)
-        } else { None };
+        } else if !analysis.region_analyzer.composed_chains.is_empty() {
+            // A002 already covers empty-chains case: no precomputable program.
+            // Only emit A001 when chains exist but budget/FFI prevents evaluation.
+            let has_ffi = analysis.region_analyzer.composed_chains.iter().any(|cc|
+                crate::analysis::region::has_ffi_or_trigger_stmt_in_chain(&cc.composed_body));
+            if has_ffi {
+                self.warnings.push("info: program not fully precomputed — FFI calls in transaction body prevent compile-time evaluation".into());
+            } else {
+                self.warnings.push(format!(
+                    "info: program not fully precomputed — budget {} exceeded by composed chain product. Emitting runtime loop.",
+                    self.optimize_budget));
+            }
+            None
+        } else {
+            None
+        };
 
         let cg = &analysis.call_graph;
         self.has_cycles = cg.has_cycle();
@@ -1025,15 +1040,21 @@ self.emit_declares(&mut out);
                                     })
                                 });
                             if let Some(tv) = total_val {
+                                // A005: pure counter fold
+                                self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
                                 // Compile-time constant total — emit O(1) store
                                 self.emit_folded_pure_counter(&mut out, counter_idx, tv);
                                 true
                             } else {
+                                // A005: folded SSA (phi pipeline)
+                                self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (runtime-variable bound)", node.name));
                                 // Pure body + runtime-variable bound → phi-node register pipeline
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, true, None);
                                 true
                             }
                         } else {
+                            // A005: folded SSA (non-pure body)
+                            self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (non-pure body, inline)", node.name));
                             // Non-pure body → SSA mode (load/store state once, emit body inline)
                             self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&txns[0].1.body));
                             true
@@ -1045,11 +1066,24 @@ self.emit_declares(&mut out);
 
         if !folded {
             let precomputed = if let Some(ref final_values) = precomputed_final_values {
+                // A000: fully precomputed — no runtime loop emitted
+                self.warnings.push("info: program fully precomputed — no runtime loop emitted. If this is unexpected, increase --optimize-budget or add frgn calls for observability.".into());
                 self.emit_precomputed_main(&mut out, final_values);
                 true
             } else { false };
 
             if !precomputed {
+                // A004: warn when a runtime loop has zero observability
+                if !txns.is_empty() {
+                    let any_has_ffi = txns.iter().any(|(_, t)|
+                        t.body.iter().any(|s| crate::analysis::transition_graph::statement_contains_ffi(s)));
+                    if !any_has_ffi {
+                        self.warnings.push(
+                            "warning: emitted runtime loop has no observable side effects — \
+                             LLVM may eliminate it entirely. Add frgn calls for output, \
+                             or this program may run without producing results.".into());
+                    }
+                }
                 // Multi-txn all-pure folding: when NO triggers exist and ALL
                 // reactive async txns have bounded_pre + increments with pure
                 // bodies, fold them into a single register-pipeline main loop.
@@ -1088,6 +1122,9 @@ self.emit_declares(&mut out);
                     }
                 }
                 if !multi_fold_params.is_empty() {
+                    // A005: multi-txn pure fold
+                    let txn_list: Vec<&str> = multi_fold_params.keys().map(|s| s.as_str()).collect();
+                    self.warnings.push(format!("info: txns [{}] dispatched via multi-txn pure fold (all-internal, async)", txn_list.join(", ")));
                     self.emit_folded_multi_main(&mut out, &txns, &[], &HashMap::new(), &multi_fold_params,
                         &HashMap::new(), 0, None, None, None, None, None, false);
                     self.emit_thread_pool_metadata(&mut out);
@@ -1098,6 +1135,8 @@ self.emit_declares(&mut out);
                             .map_or(false, |n| n.bounded_pre.is_some() && n.increments.is_some())
                     })
                 {
+                    // A005: SSA register pipeline
+                    self.warnings.push("info: program dispatched via SSA register pipeline (sequential, bounded txns)".into());
                     self.emit_ssa_main(&mut out, &txns);
                 } else if let Some(ref enum_sizes) = enumerable {
                 // Enumerable triggers — emit switch-dispatch main
@@ -1201,6 +1240,8 @@ self.emit_declares(&mut out);
                 };
                 // Declare __rt_wait for wake-triggered programs.
                 // trg owns its runtime — the compiler emits the declare implicitly.
+                // A005: enum dispatch
+                self.warnings.push(format!("info: program dispatched via enum trigger dispatch ({} trigger keys)", enum_keys.len()));
                 if has_wake_triggers {
                     writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
                 }
@@ -1225,6 +1266,11 @@ self.emit_declares(&mut out);
                 }
                 self.emit_thread_pool_metadata(&mut out);
             } else if !txns.is_empty() {
+                // A005: reactor loop (fallback)
+                self.warnings.push(format!("info: program dispatched via reactor loop ({})", match dispatch_mode {
+                    DispatchMode::Parallel => "parallel thread pool",
+                    DispatchMode::Sequential => "sequential tick loop",
+                }));
                 match dispatch_mode {
                     DispatchMode::Parallel => {
                         self.build_write_masks(program);

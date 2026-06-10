@@ -920,7 +920,7 @@ fn statement_has_swan_song(stmt: &Statement) -> bool {
     }
 }
 
-fn statement_contains_ffi(stmt: &Statement) -> bool {
+pub(crate) fn statement_contains_ffi(stmt: &Statement) -> bool {
     match stmt {
         Statement::Assignment { expr, .. } => references_triggers_or_ffi(expr),
         Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| references_triggers_or_ffi(e)),
