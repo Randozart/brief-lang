@@ -2,13 +2,11 @@
 //
 // Tests: the optimization framework's ability to detect that the entire
 // state space fits within the --optimize-budget and precompute all final
-// values at compile time. The emitted main() contains only stores and
-// has zero runtime loops, switches, or reactor_tick calls.
+// values at compile time.
 //
-// Path 3 trigger: fully-precomputable chain with all_internal counters.
-// Default budget is 256; this 2-chain program uses 2 entries.
-//
-// Expected LLVM: init_state() + stores + ret i32 0. No while loops.
+// Uses term! -> __print_int at convergence so the program always produces
+// observable output — LLVM cannot eliminate the loop, and the benchmark
+// can verify correctness against the C reference.
 //
 // Build:
 //   cargo run --bin brief-compiler -- llvm benchmarks/precompute_sum.bv --out benchmarks --optimize-budget 256
@@ -17,19 +15,22 @@
 // C reference: precompute_sum_c.c
 //   clang -O3 -march=native -o benchmarks/precompute_c benchmarks/precompute_sum_c.c
 
+import "link/brief_rt.c";
+
+frgn __print_int(n: Int) -> Bool ;
+
 const total: Int = 500;
 
 let count: Int = 0;
 let acc_a: Int = 0;
 let acc_b: Int = 0;
 
-rct txn step_a [count < total][count == total] {
+rct txn compute [count < total][count == total] {
     &acc_a = acc_a + count;
-    &count = count + 1;
-    term;
-};
-rct txn step_b [count < total][count == total] {
     &acc_b = acc_b + count;
     &count = count + 1;
+    [count == total] {
+        term! -> __print_int(acc_a + acc_b);
+    };
     term;
 };

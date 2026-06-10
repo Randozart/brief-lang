@@ -182,6 +182,27 @@ When a benchmark produces a general-purpose helper (rolling hash, vector math, f
 - `UndefinedForeignFunction("is_digit")` → `import char from "std/char.bv"`
 - Import resolver can't find file → fix search path, not interpreter
 
+### Symmetric by Default
+
+Every Brief benchmark must compute the **same output** as its C reference for
+the same input. If Brief's idiomatic approach differs fundamentally from C's
+(different data structures, control flow, or algorithm), create **two**
+benchmarks:
+
+| Variant | Intent |
+|---------|--------|
+| **Symmetric** (`_sym`) | Mirrors C step-for-step using Brief features. Answers: "Given the same algorithm, does Brief's throughput match C's?" |
+| **Idiomatic** (`_idio`) | Uses Brief-native patterns (contract-proven loops, reactive transactions) for the same semantic result. Answers: "Can Brief's optimizer find a better path?" |
+
+Both must produce identical output for the same input. Neither claims to be
+the single "fair" comparison. When fixing a broken benchmark (wrong output,
+wrong algorithm), fix the bug — do not split into two variants unless the
+approaches genuinely differ.
+
+See also: Hillel Wayne's observation about `queue_drain` — C and Brief
+were computing the same result through different algorithms. The fix is
+not to hobble either version but to create a symmetric pair.
+
 ### Precomputation is Correct, Not a Bug
 
 If the compiler folds your entire hot loop to `store i64 N, main` is `ret`, **the compiler is right.** It had all information at compile time and correctly precomputed the result.

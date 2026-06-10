@@ -16,10 +16,11 @@ const IA: Int = 3877;
 const IC: Int = 29573;
 
 // ── Transaction ──────────────────────────────────────────────────────
+// Note: rct txn atomically batches writes — all &seed = ... assignments
+// would read pre-tick state. The three steps are combined into one
+// expression so the LCG advances correctly each tick.
 rct txn fasta [count < N][count == N] {
-    &seed = seed * IA;
-    &seed = seed + IC;
-    &seed = seed % IM;
+    &seed = (seed * IA + IC) % IM;
     __putchar(seed % 26 + 97);
     &count = count + 1;
     term;

@@ -1,27 +1,26 @@
 // Precompute Sum — C reference for Brief LLVM backend Path 3 benchmark
 //
-// Computes pairwise sum 0..500. Brief precomputes final values at compile time
-// and emits only stores. C gets the same optimization: clang O3 eliminates
-// the entire loop and stores the resulting constants.
+// Computes 0..500 sum (twin accumulators). Both C and Brief produce the
+// same output: 249500.
 //
 // Build:
 //   clang -O3 -march=native -o benchmarks/precompute_c benchmarks/precompute_sum_c.c
 
+#include <stdio.h>
+#include <stdlib.h>
+
 int main(void) {
-    long count = 500;
+    long count = 0;
+    long total = 500;
     long acc_a = 0;
     long acc_b = 0;
 
-    for (; count < 500;) {
+    while (count < total) {
         acc_a += count;
-        count++;
-        if (count >= 500) break;
         acc_b += count;
         count++;
     }
 
-    (void)count;
-    (void)acc_a;
-    (void)acc_b;
+    printf("%ld\n", acc_a + acc_b);
     return 0;
 }

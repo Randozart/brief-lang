@@ -10,6 +10,28 @@ A benchmark that reports `0.0002s vs 0.088s` (440x Brief win) is a diagnostic
 signal — it tells you the compiler folded the loop. The compiler is correct.
 The benchmark is measuring the wrong thing.
 
+### Symmetric by Default
+
+Every Brief benchmark must compute the **same output** as its C reference for
+the same input. If Brief's idiomatic approach to a problem differs
+fundamentally from C's (different data structures, different control flow,
+different algorithm), create **two** benchmarks:
+
+| Variant | Intent |
+|---------|--------|
+| **Symmetric** (`_sym`) | Mirrors C's approach step-for-step using Brief features. Answers: "Given the same algorithm, does Brief's throughput match C's?" |
+| **Idiomatic** (`_idio`) | Uses Brief-native patterns (contract-proven loops, reactive transactions, etc.) to achieve the same semantic result. Answers: "Given the same semantic goal, can Brief's optimizer find a better path?" |
+
+Both must produce identical output for the same input. Neither claims to be
+the single "fair" comparison — both are tagged with their intent.
+
+When a bug is discovered in a benchmark (e.g. wrong output), fix the bug.
+Do not create two variants unless the approaches genuinely differ. Hillel
+Wayne's observation about `queue_drain` is the canonical example: the C
+and Brief versions were computing the same result through different
+algorithms, making the comparison asymmetric. The fix is not to hobble
+either version, but to create a symmetric pair and label them.
+
 ## The Two Categories
 
 Every benchmark belongs to exactly one category:
