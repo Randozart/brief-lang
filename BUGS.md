@@ -887,3 +887,50 @@ If the C binary exits non-zero, `|| echo "__FAIL__"` fires and `c_out="__FAIL__"
 
 **Lesson**: C references for optimizer benchmarks must match Brief's output pattern exactly — if Brief uses periodic `__print_*` inside `[count % N == 0]`, the C reference must use the same periodic `fprintf` with the same format. Return-path-only results confuse the harness. Exit codes are truncated to 8 bits on Linux.
 
+## 2026-06-10: Benchmark Investigation After R2+R3
+
+### Results
+
+| Benchmark | Before | After | Gap | Status |
+|---|---|---|---|---|
+| nbody_newton | 1.69× | 1.10× | Near parity | Float boxing elimination (R2) worked |
+| nbody_sqrt | 2.81× | 2.41× | Improved | LLVM intrinsic + sqrt wrapper helped |
+| fannkuch_redux | 5.06× | 4.63× | Improved | R3 enabled SROA, but 15 dead-field phi nodes remain |
+| float_math_nonzero | 2.43× | 2.41× | Unchanged | Not a boxing issue |
+| knucleotide | 1.21× | 1.28× | Unchanged | Not a boxing issue |
+| kalman_filter_runtime | ? | 3.62× | New gap | Multiple causes |
+
+### Root Causes
+
+**kalman_filter_runtime (3.62×)**
+- State field memory round-trips: 12 float loads + 12 float stores per tick via GEP
+- LLVM SROA demotes the `@propagate` function's GEP accesses but can't fully eliminate them due to `%State` alloca aliasing through `@reactor_tick` and `@pre_propagate`
+- Constant loads from globals instead of immediates (a00, a01, etc.)
+- `add i64 0, %src` noise adds ~30 redundant instructions
+- Periodic `srem` + branch for the `% 5000000` print condition
+- No `-march=native` in the LLVM pipeline (C uses it, Brief doesn't)
+
+**fannkuch_redux (4.63×)**
+- R3 enabled SROA: 17 fields → 17 phi nodes in the loop
+- 12 rotation fields are DEAD (only rotate among themselves, never observed)
+- Brief's liveness analysis doesn't eliminate them → 15 dangling phi nodes at the loop back edge
+- LLVM can't eliminate these phis because they're structurally part of the loop (each phi's output feeds the next tick's phi input)
+- Results in register pressure for 17 `i64` values per tick when only 3-4 are actually used
+- Full 12-field rotation compiles to ~6 scalar ops but carries 15 dead phi values
+
+**nbody_sqrt (2.41×)**
+- LLVM intrinsic replaced `call @sqrtf` but C uses `-ffast-math -march=native` for `vsqrtps`
+- Brief's `float` = 32-bit, C's `float` = 32-bit — same type, but C gets SIMD sqrt
+
+**float_math_nonzero (2.41×)**
+- Float arithmetic matches C instruction-for-instruction size
+- Probable cause: register scheduling — C keeps all floats in XMM registers, Brief's phi structure forces round-trips
+- Not a boxing issue (already fixed in R2)
+
+### Open Questions for Future Work
+
+1. **Dead-field elimination**: fannkuch's 12 rotation fields are only rotated, never observed — liveness analysis should eliminate them. Currently Brief's field elimination only drops fields whose ASSIGNMENTS are never read; it doesn't trace the full def-use chain to check for observable output.
+2. **`-march=native`**: Adding `-march=native` to `llc` in the benchmark harness would give Brief the same ISA as C (AVX, FMA, etc.). Currently `llc` uses the host triple without `-march=native`.
+3. **SLP hazard over-conservatism**: For straight-line float code (kalman's matrix arithmetic), the peak register estimate (line 178 in hazard.rs) counts `shuffle_pressure` as `min(cross_ops, n*2)` which overestimates for tree-shaped computation where values are consumed and released quickly.
+4. **`add i64 0, %src` noise**: The uniform register model emits a copy instruction for every value reference. This adds ~30% IR instruction overhead across ALL benchmarks. Could be cleaned up by tracking when a register is already in the right type.
+

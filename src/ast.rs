@@ -232,6 +232,7 @@ pub struct ForeignSignature {
     pub buffer_mode: Option<String>, // stack | heap | static
     pub ffi_kind: Option<FfiKind>,   // NEW: frgn, frgn!, syscall, syscall!
     pub is_out: bool,                // #out modifier — function has observable output
+    pub intrinsic_name: Option<String>, // LLVM intrinsic name (e.g. "llvm.sqrt.f32")
     pub span: Option<Span>,
 }
 

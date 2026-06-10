@@ -1405,6 +1405,24 @@ impl<'a> Parser<'a> {
             String::new()
         };
 
+        // Parse optional as intrinsic "symbol_name" clause
+        let intrinsic_name = if let Some(Ok(Token::As)) = self.current_token() {
+            self.advance();
+            let ident = self.expect_identifier()?;
+            if ident != "intrinsic" {
+                return self.spanned_err(format!("Expected 'intrinsic' after 'as', got '{}'", ident));
+            }
+            if let Some(Ok(Token::String(s))) = self.current_token() {
+                let name = s.clone();
+                self.advance();
+                Some(name)
+            } else {
+                return self.spanned_err("Expected string literal for intrinsic name".to_string());
+            }
+        } else {
+            None
+        };
+
         self.expect(Token::Semicolon)?;
 
         let result_type = if success_output.is_empty() {
@@ -1429,6 +1447,7 @@ impl<'a> Parser<'a> {
             result_type,
             ffi_kind: Some(ffi_kind),
             is_out,
+            intrinsic_name,
             span: None,
         };
 

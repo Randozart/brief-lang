@@ -1,6 +1,6 @@
 // nbody_sqrt — 5-body gravity sim with libm sqrtf (FFI)
 // Compares Brief vs C on identical algorithm: libm sqrtf, unrolled pairs.
-// The __sqrtf FFI call inside the hot body prevents pure-counter fold
+// The sqrt FFI call inside the hot body prevents pure-counter fold
 // via statement_contains_ffi, keeping all field stores live.
 //
 // Build:
@@ -10,9 +10,9 @@
 #!exit count == bound;
 
 import { __get_env_int } from "std/env.bv";
+import { sqrt } from "std/math";
 import "link/brief_rt.c";
 
-frgn __sqrtf(val: Float) -> Float;
 frgn #out __print_float(val: Float) -> Bool;
 
 let bound: Int = __get_env_int("BOUND");
@@ -71,7 +71,7 @@ rct txn simulate [
     let dy01: Float = by0 - by1;
     let dz01: Float = bz0 - bz1;
     let dsq01: Float = dx01 * dx01 + dy01 * dy01 + dz01 * dz01;
-    let dist01: Float = __sqrtf(dsq01);
+    let dist01: Float = sqrt(dsq01);
     let mag01: Float = dt / (dsq01 * dist01);
     &vx0 = vx0 - dx01 * m1 * mag01;
     &vy0 = vy0 - dy01 * m1 * mag01;
@@ -84,7 +84,7 @@ rct txn simulate [
     let dy02: Float = by0 - by2;
     let dz02: Float = bz0 - bz2;
     let dsq02: Float = dx02 * dx02 + dy02 * dy02 + dz02 * dz02;
-    let dist02: Float = __sqrtf(dsq02);
+    let dist02: Float = sqrt(dsq02);
     let mag02: Float = dt / (dsq02 * dist02);
     &vx0 = vx0 - dx02 * m2 * mag02;
     &vy0 = vy0 - dy02 * m2 * mag02;
@@ -97,7 +97,7 @@ rct txn simulate [
     let dy03: Float = by0 - by3;
     let dz03: Float = bz0 - bz3;
     let dsq03: Float = dx03 * dx03 + dy03 * dy03 + dz03 * dz03;
-    let dist03: Float = __sqrtf(dsq03);
+    let dist03: Float = sqrt(dsq03);
     let mag03: Float = dt / (dsq03 * dist03);
     &vx0 = vx0 - dx03 * m3 * mag03;
     &vy0 = vy0 - dy03 * m3 * mag03;
@@ -110,7 +110,7 @@ rct txn simulate [
     let dy04: Float = by0 - by4;
     let dz04: Float = bz0 - bz4;
     let dsq04: Float = dx04 * dx04 + dy04 * dy04 + dz04 * dz04;
-    let dist04: Float = __sqrtf(dsq04);
+    let dist04: Float = sqrt(dsq04);
     let mag04: Float = dt / (dsq04 * dist04);
     &vx0 = vx0 - dx04 * m4 * mag04;
     &vy0 = vy0 - dy04 * m4 * mag04;
@@ -123,7 +123,7 @@ rct txn simulate [
     let dy12: Float = by1 - by2;
     let dz12: Float = bz1 - bz2;
     let dsq12: Float = dx12 * dx12 + dy12 * dy12 + dz12 * dz12;
-    let dist12: Float = __sqrtf(dsq12);
+    let dist12: Float = sqrt(dsq12);
     let mag12: Float = dt / (dsq12 * dist12);
     &vx1 = vx1 - dx12 * m2 * mag12;
     &vy1 = vy1 - dy12 * m2 * mag12;
@@ -136,7 +136,7 @@ rct txn simulate [
     let dy13: Float = by1 - by3;
     let dz13: Float = bz1 - bz3;
     let dsq13: Float = dx13 * dx13 + dy13 * dy13 + dz13 * dz13;
-    let dist13: Float = __sqrtf(dsq13);
+    let dist13: Float = sqrt(dsq13);
     let mag13: Float = dt / (dsq13 * dist13);
     &vx1 = vx1 - dx13 * m3 * mag13;
     &vy1 = vy1 - dy13 * m3 * mag13;
@@ -149,7 +149,7 @@ rct txn simulate [
     let dy14: Float = by1 - by4;
     let dz14: Float = bz1 - bz4;
     let dsq14: Float = dx14 * dx14 + dy14 * dy14 + dz14 * dz14;
-    let dist14: Float = __sqrtf(dsq14);
+    let dist14: Float = sqrt(dsq14);
     let mag14: Float = dt / (dsq14 * dist14);
     &vx1 = vx1 - dx14 * m4 * mag14;
     &vy1 = vy1 - dy14 * m4 * mag14;
@@ -162,7 +162,7 @@ rct txn simulate [
     let dy23: Float = by2 - by3;
     let dz23: Float = bz2 - bz3;
     let dsq23: Float = dx23 * dx23 + dy23 * dy23 + dz23 * dz23;
-    let dist23: Float = __sqrtf(dsq23);
+    let dist23: Float = sqrt(dsq23);
     let mag23: Float = dt / (dsq23 * dist23);
     &vx2 = vx2 - dx23 * m3 * mag23;
     &vy2 = vy2 - dy23 * m3 * mag23;
@@ -175,7 +175,7 @@ rct txn simulate [
     let dy24: Float = by2 - by4;
     let dz24: Float = bz2 - bz4;
     let dsq24: Float = dx24 * dx24 + dy24 * dy24 + dz24 * dz24;
-    let dist24: Float = __sqrtf(dsq24);
+    let dist24: Float = sqrt(dsq24);
     let mag24: Float = dt / (dsq24 * dist24);
     &vx2 = vx2 - dx24 * m4 * mag24;
     &vy2 = vy2 - dy24 * m4 * mag24;
@@ -188,7 +188,7 @@ rct txn simulate [
     let dy34: Float = by3 - by4;
     let dz34: Float = bz3 - bz4;
     let dsq34: Float = dx34 * dx34 + dy34 * dy34 + dz34 * dz34;
-    let dist34: Float = __sqrtf(dsq34);
+    let dist34: Float = sqrt(dsq34);
     let mag34: Float = dt / (dsq34 * dist34);
     &vx3 = vx3 - dx34 * m4 * mag34;
     &vy3 = vy3 - dy34 * m4 * mag34;
@@ -215,16 +215,16 @@ rct txn simulate [
 
     &count = count + 1;
 
-    let edist01: Float = __sqrtf((bx0 - bx1) * (bx0 - bx1) + (by0 - by1) * (by0 - by1) + (bz0 - bz1) * (bz0 - bz1));
-    let edist02: Float = __sqrtf((bx0 - bx2) * (bx0 - bx2) + (by0 - by2) * (by0 - by2) + (bz0 - bz2) * (bz0 - bz2));
-    let edist03: Float = __sqrtf((bx0 - bx3) * (bx0 - bx3) + (by0 - by3) * (by0 - by3) + (bz0 - bz3) * (bz0 - bz3));
-    let edist04: Float = __sqrtf((bx0 - bx4) * (bx0 - bx4) + (by0 - by4) * (by0 - by4) + (bz0 - bz4) * (bz0 - bz4));
-    let edist12: Float = __sqrtf((bx1 - bx2) * (bx1 - bx2) + (by1 - by2) * (by1 - by2) + (bz1 - bz2) * (bz1 - bz2));
-    let edist13: Float = __sqrtf((bx1 - bx3) * (bx1 - bx3) + (by1 - by3) * (by1 - by3) + (bz1 - bz3) * (bz1 - bz3));
-    let edist14: Float = __sqrtf((bx1 - bx4) * (bx1 - bx4) + (by1 - by4) * (by1 - by4) + (bz1 - bz4) * (bz1 - bz4));
-    let edist23: Float = __sqrtf((bx2 - bx3) * (bx2 - bx3) + (by2 - by3) * (by2 - by3) + (bz2 - bz3) * (bz2 - bz3));
-    let edist24: Float = __sqrtf((bx2 - bx4) * (bx2 - bx4) + (by2 - by4) * (by2 - by4) + (bz2 - bz4) * (bz2 - bz4));
-    let edist34: Float = __sqrtf((bx3 - bx4) * (bx3 - bx4) + (by3 - by4) * (by3 - by4) + (bz3 - bz4) * (bz3 - bz4));
+    let edist01: Float = sqrt((bx0 - bx1) * (bx0 - bx1) + (by0 - by1) * (by0 - by1) + (bz0 - bz1) * (bz0 - bz1));
+    let edist02: Float = sqrt((bx0 - bx2) * (bx0 - bx2) + (by0 - by2) * (by0 - by2) + (bz0 - bz2) * (bz0 - bz2));
+    let edist03: Float = sqrt((bx0 - bx3) * (bx0 - bx3) + (by0 - by3) * (by0 - by3) + (bz0 - bz3) * (bz0 - bz3));
+    let edist04: Float = sqrt((bx0 - bx4) * (bx0 - bx4) + (by0 - by4) * (by0 - by4) + (bz0 - bz4) * (bz0 - bz4));
+    let edist12: Float = sqrt((bx1 - bx2) * (bx1 - bx2) + (by1 - by2) * (by1 - by2) + (bz1 - bz2) * (bz1 - bz2));
+    let edist13: Float = sqrt((bx1 - bx3) * (bx1 - bx3) + (by1 - by3) * (by1 - by3) + (bz1 - bz3) * (bz1 - bz3));
+    let edist14: Float = sqrt((bx1 - bx4) * (bx1 - bx4) + (by1 - by4) * (by1 - by4) + (bz1 - bz4) * (bz1 - bz4));
+    let edist23: Float = sqrt((bx2 - bx3) * (bx2 - bx3) + (by2 - by3) * (by2 - by3) + (bz2 - bz3) * (bz2 - bz3));
+    let edist24: Float = sqrt((bx2 - bx4) * (bx2 - bx4) + (by2 - by4) * (by2 - by4) + (bz2 - bz4) * (bz2 - bz4));
+    let edist34: Float = sqrt((bx3 - bx4) * (bx3 - bx4) + (by3 - by4) * (by3 - by4) + (bz3 - bz4) * (bz3 - bz4));
 
     let e01: Float = m0 * m1 / edist01;
     let e02: Float = m0 * m2 / edist02;

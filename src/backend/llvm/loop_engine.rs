@@ -204,6 +204,29 @@ impl LlvmBackend {
         }
     }
 
+    /// Load all state fields into old-value registers via GEP loads.
+    /// Used by emit_ssa_main when ssa_state_reg is None (per-field GEP mode).
+    /// Mirrors pre_extract_float/int_fields but loads from memory instead of
+    /// extractvalue from the SSA %State register.
+    fn pre_load_all_fields(&mut self, out: &mut String, state_ptr: &str) {
+        self.ssa_old_float_regs.clear();
+        self.ssa_old_int_regs.clear();
+        for (field_name, &field_idx) in &self.field_index_map {
+            let ty_str = &self.field_types[field_idx];
+            let gc = self.txn_counter; self.txn_counter += 1;
+            let gep = format!("%gep_{}_{}", field_name, gc);
+            writeln!(out, "  {} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", gep, state_ptr, field_idx).ok();
+            let old_reg = format!("%{}_old_{}", field_name, self.txn_counter);
+            self.txn_counter += 1;
+            writeln!(out, "  {} = load {}, {}* {}, align {}", old_reg, ty_str, ty_str, gep, self.align_of(ty_str)).ok();
+            if ty_str == "float" {
+                self.ssa_old_float_regs.insert(field_name.clone(), old_reg);
+            } else {
+                self.ssa_old_int_regs.insert(field_name.clone(), old_reg);
+            }
+        }
+    }
+
     /// Emit the folded while-loop body (without `@init_state()` or the enclosing
     /// `define` / `ret`).  Used by both `emit_folded_main` and the enum dispatch path.
     ///
@@ -490,11 +513,10 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
-    /// Emit a `main()` that uses struct-SSA for all-convergent programs.
-    /// Loads %State once per tick, runs each reactive txn's precondition check
-    /// and body inline with extractvalue/insertvalue, stores %State once.
-    /// For multi-txn programs where ALL reactive txns have bounded_pre + increments
-    /// but are NOT foldable/precomputable/enum/async-pipeline (e.g. precompute_sum_runtime).
+    /// Emit a `main()` that uses per-field GEP loads/stores for all-convergent
+    /// programs. Loads each field via GEP at tick entry, runs each reactive txn's
+    /// precondition and body inline with direct GEP stores for modifications,
+    /// avoiding the wide %State load/store + extractvalue/insertvalue pattern.
     pub(crate) fn emit_ssa_main(
         &mut self,
         out: &mut String,
@@ -507,13 +529,12 @@ impl LlvmBackend {
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
-        let ss0 = format!("%ss{}", self.txn_counter); self.txn_counter += 1; // line 3277 in ssa_main
-        writeln!(out, "  {} = load %State, %State* %state, align 8", ss0).ok();
-        self.ssa_state_reg = Some(ss0.clone());
+        self.ssa_state_reg = None;
         for (name, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             let pre = &txn.contract.pre_condition;
             if !matches!(pre, Expr::Bool(true)) {
-                let pre_ssa = self.ssa_state_reg.clone().unwrap_or_else(|| ss0.clone());
+                // Load all fields from memory via GEP for precondition eval
+                self.pre_load_all_fields(out, "%state");
                 let cond = self.emit_expr(out, pre, "  ");
                 let i1 = format!("%pi{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
@@ -524,31 +545,22 @@ impl LlvmBackend {
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
-                self.pre_extract_float_fields(out);
-                self.pre_extract_int_fields(out);
+                self.pre_load_all_fields(out, "%state");
                 for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) { self.emit_stmt(out, s, "  "); }
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
-                let after_body = self.ssa_state_reg.clone().unwrap_or_else(|| pre_ssa.clone());
                 writeln!(out, "  br label %{}", skip_l).ok();
                 writeln!(out, "  {}:", skip_l).ok();
-                let merge = format!("%me{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "  {} = phi %State [ {}, %{} ], [ {}, %{} ]",
-                    merge, after_body, body_l, pre_ssa, skip_l).ok();
-                self.ssa_state_reg = Some(merge);
             } else {
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
-                self.pre_extract_float_fields(out);
-                self.pre_extract_int_fields(out);
+                self.pre_load_all_fields(out, "%state");
                 for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) { self.emit_stmt(out, s, "  "); }
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
             }
         }
-        let final_reg = self.ssa_state_reg.take().unwrap_or(ss0);
-        writeln!(out, "  store %State {}, %State* %state, align 8", final_reg).ok();
         if let Some(ref cond) = self.exit_condition.clone() {
             let val = self.emit_exit_expr(out, cond, "  ");
             let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;

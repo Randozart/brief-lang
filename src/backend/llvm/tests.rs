@@ -774,10 +774,12 @@ fn empty_program() -> Program {
         default_sig_modifier: None,
         };
         let output = backend.generate(&program);
-        assert!(output.contains("bitcast float"),
-            "Float expression should emit bitcast float to i32");
+        // Float literal emits bitcast i32 <hex> to float directly (no i64 boxing)
         assert!(output.contains("bitcast i32"),
-            "Float literal should appear as bitcast i32 to float in IR");
+            "Float literal should emit bitcast i32 to float: {}", output);
+        // The float value should NOT be boxed through i32->i64
+        assert!(!output.contains("zext i32"),
+            "Float should not be boxed to i64: {}", output);
     }
 
     #[test]
@@ -1104,8 +1106,8 @@ fn empty_program() -> Program {
         let output = LlvmBackend::new().with_optimize_budget(0).generate(&program);
         assert!(!output.contains("switch i64"),
             "No enum dispatch without triggers");
-        assert!(output.contains("load %State, %State* %state"),
-            "All-convergent program should use struct-SSA main");
+        assert!(output.contains("getelementptr inbounds %State, %State* %state, i32 0, i32"),
+            "All-convergent program should use per-field GEP loads");
         assert!(!output.contains("@reactor_tick"),
             "All-convergent program should not emit reactor_tick");
     }
@@ -2879,4 +2881,121 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         assert!(!output.is_empty());
+    }
+
+    #[test]
+    fn test_as_intrinsic_declare() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::ForeignBinding {
+                    name: "sqrt_f32".to_string(),
+                    toml_path: String::new(),
+                    target: ForeignTarget::Native,
+                    signature: ForeignSignature {
+                        name: "sqrt_f32".to_string(),
+                        location: String::new(),
+                        wasm_impl: None,
+                        wasm_setup: None,
+                        inputs: vec![("x".to_string(), Type::Float)],
+                        success_output: vec![("result".to_string(), Type::Float)],
+                        result_type: ResultType::Projection(vec![Type::Float]),
+                        error_type_name: String::new(),
+                        error_fields: vec![],
+                        input_layout: None,
+                        output_layout: None,
+                        precondition: None,
+                        postcondition: None,
+                        buffer_mode: None,
+                        ffi_kind: None,
+                        is_out: false,
+                        intrinsic_name: Some("llvm.sqrt.f32".to_string()),
+                        span: None,
+                    },
+                    span: None,
+                },
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("declare float @llvm.sqrt.f32(float)"),
+            "Expected declare for llvm.sqrt.f32 intrinsic, got:\n{}", output);
+    }
+
+    #[test]
+    fn test_normal_frgn_no_intrinsic() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::ForeignBinding {
+                    name: "my_func".to_string(),
+                    toml_path: String::new(),
+                    target: ForeignTarget::Native,
+                    signature: ForeignSignature {
+                        name: "my_func".to_string(),
+                        location: String::new(),
+                        wasm_impl: None,
+                        wasm_setup: None,
+                        inputs: vec![("x".to_string(), Type::Int)],
+                        success_output: vec![("result".to_string(), Type::Int)],
+                        result_type: ResultType::Projection(vec![Type::Int]),
+                        error_type_name: String::new(),
+                        error_fields: vec![],
+                        input_layout: None,
+                        output_layout: None,
+                        precondition: None,
+                        postcondition: None,
+                        buffer_mode: None,
+                        ffi_kind: None,
+                        is_out: false,
+                        intrinsic_name: None,
+                        span: None,
+                    },
+                    span: None,
+                },
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("declare i64 @my_func(i64)"),
+            "Expected normal declare for my_func, got:\n{}", output);
+    }
+
+    #[test]
+    fn test_as_intrinsic_with_from_copath() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::ForeignBinding {
+                    name: "fabs_f64".to_string(),
+                    toml_path: String::new(),
+                    target: ForeignTarget::Native,
+                    signature: ForeignSignature {
+                        name: "fabs_f64".to_string(),
+                        location: "std::f64::fabs".to_string(),
+                        wasm_impl: None,
+                        wasm_setup: None,
+                        inputs: vec![("x".to_string(), Type::Float)],
+                        success_output: vec![("result".to_string(), Type::Float)],
+                        result_type: ResultType::Projection(vec![Type::Float]),
+                        error_type_name: String::new(),
+                        error_fields: vec![],
+                        input_layout: None,
+                        output_layout: None,
+                        precondition: None,
+                        postcondition: None,
+                        buffer_mode: None,
+                        ffi_kind: None,
+                        is_out: false,
+                        intrinsic_name: Some("llvm.fabs.f64".to_string()),
+                        span: None,
+                    },
+                    span: None,
+                },
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("declare float @llvm.fabs.f64(float)"),
+            "Expected declare for llvm.fabs.f64, got:\n{}", output);
     }

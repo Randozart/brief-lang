@@ -2189,7 +2189,7 @@ mod tests {
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
-            span: None,
+            intrinsic_name: None, span: None,
         };
         tc.foreign_bindings.insert("my_fn".into(), sig.clone());
         assert!(tc.foreign_bindings.contains_key("my_fn"));

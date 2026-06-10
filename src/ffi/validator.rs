@@ -151,6 +151,7 @@ mod tests {
             buffer_mode: None,
             ffi_kind: None,
             is_out: false,
+            intrinsic_name: None,
             span: None,
         };
 
@@ -199,6 +200,7 @@ mod tests {
             buffer_mode: None,
             ffi_kind: None,
             is_out: false,
+            intrinsic_name: None,
             span: None,
         };
 

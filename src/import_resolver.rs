@@ -460,6 +460,11 @@ self.loaded_modules.insert(
             .items
             .iter()
             .filter(|item| {
+                if matches!(item, TopLevel::ForeignBinding { .. }) {
+                    // Always include foreign declarations — they are zero-cost
+                    // type declarations that a kept defn/txn body may reference.
+                    return true;
+                }
                 if matches!(item, TopLevel::LinkDependency(_)) {
                     return true;
                 }

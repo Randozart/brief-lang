@@ -1,5 +1,5 @@
 use crate::ast::{Expr, Statement, TopLevel, Type};
-use crate::backend::llvm::{float_to_llvm_hex, LlvmBackend};
+use crate::backend::llvm::{float_to_llvm_hex, LlvmBackend, TypedRegister};
 use std::fmt::Write;
 
 impl LlvmBackend {
@@ -13,12 +13,17 @@ impl LlvmBackend {
     pub(super) fn emit_declares(&self, out: &mut String) {
         writeln!(out).ok();
         writeln!(out, "declare void @llvm.assume(i1) #1").ok();
+        // LLVM intrinsics with signatures that can't be expressed via Brief's
+        // type system (extra i1 parameter for poison/zero-undef). These are
+        // always declared — the float-math intrinsics (sqrt, fabs, ceil, floor)
+        // come from std/llvm.bv via as intrinsic in the frgn_map declare loop.
         writeln!(out, "declare i64 @llvm.ctpop.i64(i64) #1").ok();
         writeln!(out, "declare i64 @llvm.ctlz.i64(i64, i1) #1").ok();
         writeln!(out, "declare i64 @llvm.cttz.i64(i64, i1) #1").ok();
         writeln!(out, "declare i64 @llvm.abs.i64(i64, i1) #1").ok();
         writeln!(out, "declare double @llvm.fabs.f64(double) #1").ok();
         writeln!(out, "declare i64 @llvm.bitreverse.i64(i64) #1").ok();
+        // Runtime support functions (not declared in std/llvm.bv)
         writeln!(out, "declare void @brief_barrier_release()").ok();
         writeln!(out, "declare void @brief_barrier_wait()").ok();
         writeln!(out, "declare void @brief_thread_pool_init(i32, i8**)").ok();
@@ -45,6 +50,18 @@ impl LlvmBackend {
         writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val_reg).ok();
         writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
         fl
+    }
+
+    pub(super) fn ensure_float_reg(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
+        // Check cache first — even float-typed registers may have their
+        // native float counterpart cached (e.g. FFI return value boxed as i64).
+        if let Some(cached) = self.reg_float_cache.get(&reg.name) {
+            return cached.clone();
+        }
+        if reg.ty == Type::Float {
+            return reg.name.clone();
+        }
+        self.native_float_or_box(out, indent, &reg.name)
     }
 
     pub(super) fn emit_trg_load(&mut self, out: &mut String, indent: &str, dst: &str, addr_src: &str, addr_is_ptr: bool, trg_ty: &Type) {

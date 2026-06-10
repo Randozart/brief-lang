@@ -20,11 +20,8 @@ impl LlvmBackend {
                 let bits = float_to_llvm_hex(*f);
                 let fl = format!("%ff{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, bits).ok();
-                let i32 = format!("%fi{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast float {} to i32", indent, i32, fl).ok();
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i32).ok();
-                self.reg_float_cache.insert(v.clone(), fl.clone());
-                return TypedRegister { name: v, ty: Type::Float };
+                self.reg_float_cache.insert(fl.clone(), fl.clone());
+                return TypedRegister { name: fl, ty: Type::Float };
             }
             Expr::String(s) => {
                 let si = self.string_constants.iter().position(|x| x == s).unwrap_or(0);
@@ -54,11 +51,8 @@ impl LlvmBackend {
                 // SSA body mode: prefer pre-extracted old-value register
                 // for float fields so all body ops are independent.
                 if let Some(old_reg) = self.ssa_old_float_regs.get(name) {
-                    let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = bitcast float {} to i32", indent, i, old_reg).ok();
-                    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
-                    self.reg_float_cache.insert(v.clone(), old_reg.clone());
-                    return TypedRegister { name: v, ty: Type::Float };
+                    self.reg_float_cache.insert(old_reg.clone(), old_reg.clone());
+                    return TypedRegister { name: old_reg.clone(), ty: Type::Float };
                 }
                 if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
                 if let Some(&addr) = self.mmio_fields.get(name) {
@@ -81,11 +75,8 @@ impl LlvmBackend {
                                 let fc = self.txn_counter; self.txn_counter += 1;
                                 let float_reg = format!("%flt_{}_{}", name, fc);
                                 writeln!(out, "{}{} = extractvalue %State {}, {}", indent, float_reg, ssa_reg, idx).ok();
-                                let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = bitcast float {} to i32", indent, i, float_reg).ok();
-                                writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
-                                self.reg_float_cache.insert(v.clone(), float_reg);
-                                Type::Float
+                                self.reg_float_cache.insert(float_reg.clone(), float_reg.clone());
+                                return TypedRegister { name: float_reg, ty: Type::Float };
                             }
                             "i8*" => {
                                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
@@ -100,6 +91,11 @@ impl LlvmBackend {
                     }
                 }
                 if let Some(reg) = self.let_bindings.get(name) {
+                    if let Some(ty) = self.let_binding_types.get(name) {
+                        if *ty == Type::Float {
+                            return TypedRegister { name: reg.clone(), ty: Type::Float };
+                        }
+                    }
                     writeln!(out, "{}{} = add i64 0, {}", indent, v, reg).ok();
                     if let Some(ty) = self.let_binding_types.get(name) {
                         return TypedRegister { name: v, ty: ty.clone() };
@@ -141,10 +137,8 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = load {}, {}* @{}, align {}", indent, ld, ll_ty, ll_ty, name, self.align_of(ll_ty)).ok();
                             let ret_ty = match ty {
                                 Type::Float => {
-                                    let i = format!("%if{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ld).ok();
-                                    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
-                                    Type::Float
+                                    self.reg_float_cache.insert(ld.clone(), ld.clone());
+                                    return TypedRegister { name: ld.clone(), ty: Type::Float };
                                 }
                                 Type::Bool => {
                                     let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1;
@@ -175,7 +169,7 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = load {}, {}* {}, align {}{}", indent, ld, ty, ty, p, self.align_of(&ty), rng).ok();
                     match ty {
                         s if s == "i8" => { let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ld).ok(); writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok(); }
-                        s if s == "float" => { let i = format!("%if{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = bitcast float {} to i32", indent, i, ld).ok(); writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok(); self.reg_float_cache.insert(v.clone(), ld.clone()); return TypedRegister { name: v.to_string(), ty: Type::Float }; }
+                        s if s == "float" => { self.reg_float_cache.insert(ld.clone(), ld.clone()); return TypedRegister { name: ld.clone(), ty: Type::Float }; }
                         s if s == "i8*" => { writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ld).ok(); }
                         _ => { writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok(); }
                     }
@@ -189,18 +183,18 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, 0 ; @{}", indent, v, name).ok();
             }
             // Binary ops
-            Expr::Add(l, r) => { let ty = self.emit_binop(out, indent, &v, l, r, "add", "fadd"); return TypedRegister { name: v, ty }; }
-            Expr::Sub(l, r) => { let ty = self.emit_binop(out, indent, &v, l, r, "sub", "fsub"); return TypedRegister { name: v, ty }; }
-            Expr::Mul(l, r) => { let ty = self.emit_binop(out, indent, &v, l, r, "mul", "fmul"); return TypedRegister { name: v, ty }; }
-            Expr::Div(l, r) => { let ty = self.emit_binop(out, indent, &v, l, r, "sdiv", "fdiv"); return TypedRegister { name: v, ty }; }
+            Expr::Add(l, r) => { return self.emit_binop(out, indent, l, r, "add", "fadd"); }
+            Expr::Sub(l, r) => { return self.emit_binop(out, indent, l, r, "sub", "fsub"); }
+            Expr::Mul(l, r) => { return self.emit_binop(out, indent, l, r, "mul", "fmul"); }
+            Expr::Div(l, r) => { return self.emit_binop(out, indent, l, r, "sdiv", "fdiv"); }
             Expr::Mod(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = srem i64 {}, {}", indent, v, a, b).ok(); }
             // Comparisons
-            Expr::Eq(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "oeq"); return TypedRegister { name: v, ty: Type::Bool }; }
-            Expr::Ne(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "one"); return TypedRegister { name: v, ty: Type::Bool }; }
-            Expr::Lt(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "olt"); return TypedRegister { name: v, ty: Type::Bool }; }
-            Expr::Le(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "ole"); return TypedRegister { name: v, ty: Type::Bool }; }
-            Expr::Gt(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "ogt"); return TypedRegister { name: v, ty: Type::Bool }; }
-            Expr::Ge(l, r) => { self.emit_fcmp(out, indent, &v, l, r, "oge"); return TypedRegister { name: v, ty: Type::Bool }; }
+            Expr::Eq(l, r) => { return self.emit_fcmp(out, indent, l, r, "oeq"); }
+            Expr::Ne(l, r) => { return self.emit_fcmp(out, indent, l, r, "one"); }
+            Expr::Lt(l, r) => { return self.emit_fcmp(out, indent, l, r, "olt"); }
+            Expr::Le(l, r) => { return self.emit_fcmp(out, indent, l, r, "ole"); }
+            Expr::Gt(l, r) => { return self.emit_fcmp(out, indent, l, r, "ogt"); }
+            Expr::Ge(l, r) => { return self.emit_fcmp(out, indent, l, r, "oge"); }
             // Logical
             Expr::And(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = and i64 {}, {}", indent, v, a, b).ok(); }
             Expr::Or(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = or i64 {}, {}", indent, v, a, b).ok(); }
@@ -208,14 +202,11 @@ impl LlvmBackend {
             Expr::Neg(e) => {
                 let inner = self.emit_expr(out, e, indent);
                 if inner.ty == Type::Float {
-                    let fl = self.native_float_or_box(out, indent, &inner.to_string());
+                    let fl = self.ensure_float_reg(out, indent, &inner);
                     let fs = format!("%nfs{}", self.txn_counter); self.txn_counter += 1;
-                    let fi = format!("%nfi{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = fsub fast float -0.0, {}", indent, fs, fl).ok();
-                    writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fs).ok();
-                    writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
-                    self.reg_float_cache.insert(v.clone(), fs.clone());
-                    return TypedRegister { name: v, ty: Type::Float };
+                    self.reg_float_cache.insert(fs.clone(), fs.clone());
+                    return TypedRegister { name: fs, ty: Type::Float };
                 } else {
                     writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner.name).ok();
                     return TypedRegister { name: v, ty: Type::Int };
@@ -232,8 +223,8 @@ impl LlvmBackend {
             // Call
             Expr::Call(name, args) => {
                 // Clone foreign info upfront to avoid borrow conflict with emit_expr
-                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType)> = self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone()));
-                if let Some((inputs, ret_type)) = frgn_sig {
+                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType, Option<String>)> = self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone(), s.intrinsic_name.clone()));
+                if let Some((inputs, ret_type, intrinsic_name)) = frgn_sig {
                     let mut marshaled: Vec<String> = Vec::new();
                     for (i, (_, arg_ty)) in inputs.iter().enumerate() {
                         if i < args.len() {
@@ -243,7 +234,7 @@ impl LlvmBackend {
                                 Type::Bool => { let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = trunc i64 {} to i32", indent, z, raw).ok(); marshaled.push(format!("i32 {}", z)); }
                                 Type::Char => { let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = trunc i64 {} to i32", indent, z, raw).ok(); marshaled.push(format!("i32 {}", z)); }
                                 Type::Float => {
-                                    let fl = self.native_float_or_box(out, indent, &raw.to_string());
+                                    let fl = self.ensure_float_reg(out, indent, &raw);
                                     marshaled.push(format!("float {}", fl));
                                 }
                                 Type::String | Type::Data => { let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, raw).ok(); marshaled.push(format!("i8* {}", p)); }
@@ -258,7 +249,8 @@ impl LlvmBackend {
                     };
                     let call_ret = if is_float_ret { "float" } else { "i64" };
                     let args_str = marshaled.join(", ");
-                    writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, name, args_str).ok();
+                    let call_target = intrinsic_name.as_deref().unwrap_or(name);
+                    writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, call_target, args_str).ok();
                     if is_float_ret {
                         let bi = format!("%fbi{}", self.txn_counter); self.txn_counter += 1;
                         let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
@@ -270,6 +262,7 @@ impl LlvmBackend {
                 } else {
                     // Internal call — marshal i64 back to real types per definition
                     let def_tys: Option<Vec<Type>> = self.defn_params.get(name).cloned();
+                    let def_rets: Option<Vec<Type>> = self.defn_return_types.get(name).cloned();
                     let mut a_strs = Vec::new();
                     for (ai, arg) in args.iter().enumerate() {
                         let raw = self.emit_expr(out, arg, indent);
@@ -285,6 +278,10 @@ impl LlvmBackend {
                                         let p = format!("%cip{}", self.txn_counter); self.txn_counter += 1;
                                         writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, raw).ok();
                                         a_strs.push(format!("i8* {}", p));
+                                    }
+                                    Type::Float => {
+                                        let fl = self.ensure_float_reg(out, indent, &raw);
+                                        a_strs.push(format!("float {}", fl));
                                     }
                                     _ => a_strs.push(format!("i64 {}", raw)),
                                 }
@@ -314,7 +311,12 @@ impl LlvmBackend {
                         }
                         writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
                     } else {
-                        writeln!(out, "{}{} = call i64 @{}({})", indent, v, name, a_strs.join(", ")).ok();
+                        let is_float_ret = def_rets.as_ref().map_or(false, |rets| rets.iter().any(|t| matches!(t, Type::Float)));
+                        let call_ret = if is_float_ret { "float" } else { "i64" };
+                        writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, name, a_strs.join(", ")).ok();
+                        if is_float_ret {
+                            return TypedRegister { name: v, ty: Type::Float };
+                        }
                 }
             }
         }
@@ -390,6 +392,19 @@ impl LlvmBackend {
                         let lp = format!("%plp{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
                         writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, lp).ok();
+                    }
+                    ProjectionTarget::Bytes => {
+                        let bs = match &src_val.ty {
+                            Type::Float => 4,
+                            Type::Int | Type::UInt => 8,
+                            Type::Bool => 1,
+                            Type::Char => 4,
+                            _ => {
+                                writeln!(out, "{}{} = add i64 0, 0 ; bytes", indent, v).ok();
+                                return TypedRegister { name: v, ty: Type::Int };
+                            }
+                        };
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, bs).ok();
                     }
                     _ => {
                         writeln!(out, "{}{} = add i64 0, 0 ; projection", indent, v).ok();
@@ -821,7 +836,7 @@ impl LlvmBackend {
         fl
     }
 
-    pub(crate) fn emit_binop(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) -> Type {
+    pub(crate) fn emit_binop(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) -> TypedRegister {
         // Peephole: constant-fold integer binops at compile time
         if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
             let result = match int_op {
@@ -837,28 +852,27 @@ impl LlvmBackend {
                 _ => None,
             };
             if let Some(folded) = result {
+                let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 0, {}", indent, v, folded).ok();
-                return Type::Int;
+                return TypedRegister { name: v, ty: Type::Int };
             }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         if a.ty == Type::Float || b.ty == Type::Float {
-            let fa = self.i64_to_float_reg(out, &a.name, indent);
-            let fb = self.i64_to_float_reg(out, &b.name, indent);
+            let fa = self.ensure_float_reg(out, indent, &a);
+            let fb = self.ensure_float_reg(out, indent, &b);
             let fr = format!("%bfr{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = {} fast float {}, {}", indent, fr, float_op, fa, fb).ok();
-            let fi = format!("%bfi{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fr).ok();
-            writeln!(out, "{}{} = zext i32 {} to i64", indent, v, fi).ok();
-            self.reg_float_cache.insert(v.to_string(), fr.clone());
-            Type::Float
+            self.reg_float_cache.insert(fr.clone(), fr.clone());
+            TypedRegister { name: fr, ty: Type::Float }
         } else {
+            let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a.name, b.name).ok();
-            Type::Int
+            TypedRegister { name: v, ty: Type::Int }
         }
     }
 
-    pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, v: &str, l: &Expr, r: &Expr, cond: &str) -> Type {
+    pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, cond: &str) -> TypedRegister {
         // Peephole: constant-fold integer comparisons at compile time
         if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
             let result = match cond {
@@ -870,14 +884,15 @@ impl LlvmBackend {
                 "oge" => li >= ri,
                 _ => false,
             };
+            let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = add i64 0, {}", indent, v, if result { 1 } else { 0 }).ok();
-            return Type::Bool;
+            return TypedRegister { name: v, ty: Type::Bool };
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
         if a.ty == Type::Float || b.ty == Type::Float {
-            let fa = self.i64_to_float_reg(out, &a.name, indent);
-            let fb = self.i64_to_float_reg(out, &b.name, indent);
+            let fa = self.ensure_float_reg(out, indent, &a);
+            let fb = self.ensure_float_reg(out, indent, &b);
             writeln!(out, "{}{} = fcmp fast {} float {}, {}", indent, c, cond, fa, fb).ok();
         } else {
             let icmp_cond = match cond {
@@ -891,7 +906,8 @@ impl LlvmBackend {
             };
             writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a.name, b.name).ok();
         }
+        let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok();
-        Type::Bool
+        TypedRegister { name: v, ty: Type::Bool }
     }
 }

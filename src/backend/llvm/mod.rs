@@ -305,6 +305,7 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type) -> &str {
     match ty {
         Type::Bool => "i8",
         Type::Int | Type::UInt => "i64",
+        Type::Float => "float",
         Type::Char => "i32",
         Type::String | Type::Data => "i8*",
         _ => "i8", // fallback for unsupported types
@@ -450,6 +451,7 @@ pub struct LlvmBackend {
     program_txns: Vec<String>,
     frgn_map: HashMap<String, ForeignSignature>,
     defn_params: HashMap<String, Vec<Type>>,
+    defn_return_types: HashMap<String, Vec<Type>>,
     fused_to_first: HashMap<String, String>,
     sampled_triggers: HashMap<String, String>,
     txn_write_masks: HashMap<String, u64>,
@@ -500,6 +502,7 @@ impl LlvmBackend {
             program_txns: Vec::new(),
             frgn_map: HashMap::new(),
             defn_params: HashMap::new(),
+            defn_return_types: HashMap::new(),
             string_constants: Vec::new(),
             constants: HashMap::new(),
             fused_to_first: HashMap::new(),
@@ -616,6 +619,7 @@ impl LlvmBackend {
         self.trigger_names.clear();
         self.program_txns.clear();
         self.defn_params.clear();
+        self.defn_return_types.clear();
         self.constants.clear();
         self.string_constants = collect_strings(program);
 
@@ -633,6 +637,7 @@ impl LlvmBackend {
                     if !t.is_reactive && (!t.parameters.is_empty() || has_output) {
                         let tys: Vec<Type> = t.parameters.iter().map(|(_, ty)| ty.clone()).collect();
                         self.defn_params.insert(t.name.clone(), tys);
+                        self.defn_return_types.insert(t.name.clone(), t.outputs.clone());
                     }
                 }
                 TopLevel::Trigger(t) => {
@@ -642,6 +647,7 @@ impl LlvmBackend {
                 TopLevel::Definition(d) => {
                     let tys: Vec<Type> = d.parameters.iter().map(|(_, t)| t.clone()).collect();
                     self.defn_params.insert(d.name.clone(), tys);
+                    self.defn_return_types.insert(d.name.clone(), d.outputs.clone());
                 }
                 TopLevel::ForeignBinding { name, signature, .. } => {
                     self.frgn_map.insert(name.clone(), signature.clone());
@@ -728,7 +734,8 @@ self.emit_declares(&mut out);
                 Type::String | Type::Data => "i8*",
                 _ => "i64",
             }).collect();
-            write!(out, "declare {} @{}(", ret_ty, name).ok();
+            let llvm_name = sig.intrinsic_name.as_deref().unwrap_or(name);
+            write!(out, "declare {} @{}(", ret_ty, llvm_name).ok();
             for (pi, pt) in param_tys.iter().enumerate() {
                 if pi > 0 { write!(out, ", ").ok(); }
                 write!(out, "{}", pt).ok();

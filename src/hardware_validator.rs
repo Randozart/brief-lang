@@ -755,7 +755,7 @@ mod tests {
                     error_type_name: "Error".to_string(), error_fields: vec![],
                     input_layout: None, output_layout: None,
                     precondition: None, postcondition: None,
-                    buffer_mode: None, ffi_kind: None, is_out: false, span: None,
+                    buffer_mode: None, ffi_kind: None, is_out: false, intrinsic_name: None, span: None,
                 },
                 span: None,
             },
