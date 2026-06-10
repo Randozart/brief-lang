@@ -1276,6 +1276,19 @@ self.emit_declares(&mut out);
                     self.emit_wake_metadata(&mut out);
                 }
                 self.emit_thread_pool_metadata(&mut out);
+            } else if txns.len() == 1
+                && !has_wake_triggers
+                && enumerable.is_none()
+                && self.async_txn_names.is_empty()
+                && self.mmio_fields.is_empty()
+            {
+                // A006: Direct phi-based loop — single txn, no triggers.
+                // Inline txn body in main() instead of reactor_tick, letting
+                // LLVM promote %State fields to phi nodes (zero memory ops).
+                self.warnings.push(
+                    "info: program dispatched via direct SSA loop (single txn, no triggers)".into()
+                );
+                self.emit_ssa_main(&mut out, &txns);
             } else if !txns.is_empty() {
                 // A005: reactor loop (fallback)
                 self.warnings.push(format!("info: program dispatched via reactor loop ({})", match dispatch_mode {
