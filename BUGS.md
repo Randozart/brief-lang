@@ -935,3 +935,52 @@ If the C binary exits non-zero, `|| echo "__FAIL__"` fires and `c_out="__FAIL__"
 4. **`add i64 0, %src` noise**: Fixed for non-SSA field loads and MMIO reads in commit 5ab6bb0. Copies reduced from 18% to 2% of IR instructions (fannkuch), 18% to 3% (knucleotide). Remaining copies are from `let_binding` lookups, SSA extractvalue path, and trivial expression results. Full elimination would require refactoring `emit_expr` to reuse its allocated `v` register more aggressively.
 5. **SSA atomicity overhead**: The %State-based GEP load/store model forces memory round-trips for every field access. For benchmarks like kalman (132 loads for 145 arith ops), this is ~1:1 memory:compute ratio vs C's ~0:1. Fixing this would require Brief-specific LLVM passes or a different codegen model (e.g., rewrite entire loop body with %State register).
 
+
+### Clang IR Comparison (2026-06-10)
+
+Compiled C reference for each benchmark with `clang -O3 -ffast-math -march=native -S -emit-llvm`.
+Brief compiled with `opt -O3 -ffast-math -mtriple=x86_64-pc-linux-gnu; llc -O3 --mcpu=native`.
+
+| Metric | Clang | Brief | Factor |
+|---|---|---|---|
+| **Kalman loads/stores** | 1 (stderr) | 132 loads + 29 stores | ~160× |
+| **Kalman GEPs** | 0 | 87 | ∞ |
+| **Kalman IR size** | 102 lines | 379 lines | 3.7× |
+| **Nbody_sqrt loads/stores** | 1 (stderr) | 433 loads + 110 stores | ~540× |
+| **Nbody_sqrt phi nodes** | 35 | 0 | 35× |
+| **Nbody_sqrt sqrt calls** | `@llvm.sqrt.v2f32` (vectorized) | `llvm.sqrt.f32` (scalar) | vector vs scalar |
+| **Fannkuch loads/stores** | 1 (stderr) | 36 loads + 38 stores | ~74× |
+| **Fannkuch phi nodes** | 29 | 0 | 29× |
+
+### Root Cause
+
+Clang keeps ALL state in **SSA phi nodes** across the loop back-edge. Zero memory traffic
+in the hot path except the periodic `fprintf`. Brief emits every field access as
+`getelementptr %State → load/store`, creating 100-500× more memory operations.
+
+Clang's C code uses local variables which LLVM promotes to phi nodes. Brief's state
+machine uses a `%State` struct which forces GEP + load/store on every access.
+
+### Fix: Skip reactor_tick for single-txn runtime programs
+
+Currently: `main → call @reactor_tick → call @propagate(alwaysinline→inlined) → body`
+Problem: `@reactor_tick` contains `fired_mask` alloca that prevents LLVM from promoting
+the `%state` alloca in `main()` to phi nodes.
+
+Fix: For single-txn reactive programs with no parallel dispatch needed, emit txn body
+directly in `main()` as phi-node-based codegen (like `emit_ssa_main`). This eliminates
+the function call boundary and lets LLVM promote all state fields to phi nodes,
+matching Clang's IR structure.
+
+### Instruction Count Comparison (fannkuch_redux)
+
+Operation | Clang (phi) | Brief (struct) | Ratio
+--- | --- | --- | ---
+phi nodes | 29 | 0 | Clang 29× better
+load/store | 1 | 74 | Brief 74× worse
+getelementptr | 0 | 69 | Brief infinite
+arithmetic | ~50 | ~50 | Equal
+
+The arithmetic ops are the same between C and Brief for fannkuch. All the overhead is
+from memory (load/store/GEP). If Brief used phi nodes like Clang, the gap would close
+to ~1.0×.
