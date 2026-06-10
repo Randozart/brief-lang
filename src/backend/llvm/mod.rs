@@ -388,82 +388,83 @@ fn find_perfect_hash(keys: &[i64]) -> Option<(u64, u32)> {
 }
 
 pub struct LlvmBackend {
+    // ── Target & Spec ──────────────────────────────────────
     spec: Option<crate::target_spec::TargetSpec>,
+    explain: bool,
+
+    // ── State Fields ───────────────────────────────────────
     field_index_map: HashMap<String, usize>,
     field_types: Vec<String>,
     pub(crate) field_initializers: HashMap<String, Option<Expr>>,
+    range_bounds: HashMap<String, (i64, i64)>,
+    field_to_meta_idx: HashMap<String, usize>,
+    exit_condition: Option<Box<Expr>>,
+    has_natural_exit: bool,
+
+    // ── MMIO & Schema ──────────────────────────────────────
     mmio_fields: HashMap<String, u64>,
     mmio_initializers: HashMap<String, Option<Expr>>,
     mmio_prepopulated: bool,
     schema_aliases: HashMap<String, crate::dbrief::DbriefType>,
-    pgo_profile: Option<crate::analysis::pgo::PgoProfile>,
-    pgo_guard_idx: usize,
+
+    // ── Codegen State (per-function) ───────────────────────
     pub(crate) txn_counter: usize,
-    has_cycles: bool,
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
-    /// Types of let-bound expressions — needed so FieldAccess can GEP into
-    /// struct instances held in local variables.
     let_binding_types: HashMap<String, Type>,
     terminated: bool,
     returns_i64: bool,
-    /// Return type of the enclosing function for term/termbang/escape emission.
-    /// "void" by default; set to "i32" inside emit_folded_main / emit_ssa_main / etc.
     fn_ret_ty: String,
-    /// When set, Term/TermBang store values to this alloca and branch to
-    /// callable_txn_post_label instead of emitting `ret`. Used by callable txns.
     callable_txn_result: Option<String>,
     callable_txn_post_label: Option<String>,
     in_callable_txn: bool,
-    /// Maps parameter name → alloca slot name for callable txns.
-    /// Used by Statement::Assignment to store updated values to mutable param slots.
     param_slots: HashMap<String, String>,
-    range_bounds: HashMap<String, (i64, i64)>,
-    field_to_meta_idx: HashMap<String, usize>,
+    state_reg_name: String,
+
+    // ── SSA State ──────────────────────────────────────────
+    ssa_state_reg: Option<String>,
+    ssa_old_float_regs: HashMap<String, String>,
+    ssa_old_int_regs: HashMap<String, String>,
+    pub(crate) reg_float_cache: HashMap<String, String>,
+    reg_type_cache: HashMap<String, Type>,
+
+    // ── Optimization ───────────────────────────────────────
+    pub(crate) optimize_budget: u64,
+    optimize_report: bool,
+    optimize_size: Option<u64>,
+    pgo_profile: Option<crate::analysis::pgo::PgoProfile>,
+    pgo_guard_idx: usize,
+    has_cycles: bool,
+    slp_hazard_fns: HashSet<String>,
+
+    // ── Async / Thread Pool ────────────────────────────────
+    pub(crate) has_async_txns: bool,
+    pub(crate) async_txn_names: Vec<String>,
+    pub(crate) async_thread_pool_size: u32,
+    pub(crate) is_lightweight_async: bool,
+
+    // ── FFI Registry ───────────────────────────────────────
     pub(crate) triggers: HashMap<String, crate::ast::TriggerDeclaration>,
     pub(crate) trigger_names: Vec<String>,
     program_txns: Vec<String>,
     frgn_map: HashMap<String, ForeignSignature>,
     defn_params: HashMap<String, Vec<Type>>,
-    pub(crate) string_constants: Vec<String>,
-    pub(crate) constants: HashMap<String, (Type, Expr)>,
     fused_to_first: HashMap<String, String>,
     sampled_triggers: HashMap<String, String>,
     txn_write_masks: HashMap<String, u64>,
-    pub(crate) optimize_budget: u64,
-    optimize_report: bool,
-    optimize_size: Option<u64>,
-    report_lines: Vec<String>,
-    pub(crate) has_async_txns: bool,
-    pub(crate) async_txn_names: Vec<String>,
-    pub(crate) async_thread_pool_size: u32,
-    pub(crate) is_lightweight_async: bool,
-    exit_condition: Option<Box<Expr>>,
-    has_natural_exit: bool,
-    dead_info_disabled: bool,
-    warnings: Vec<String>,
-    ssa_state_reg: Option<String>,
-    llvm_extra_flags: Vec<String>,
-    slp_hazard_fns: HashSet<String>,
-    pub(crate) reg_float_cache: HashMap<String, String>,
-    /// Type of each emitted register — used for pointer-vs-list dispatch, etc.
-    reg_type_cache: HashMap<String, Type>,
-    state_reg_name: String,
-    ssa_old_float_regs: HashMap<String, String>,
-    ssa_old_int_regs: HashMap<String, String>,
-    /// User-defined struct types: name → Vec<(field_name, field_type)>.
-    /// Used by StructInstance to emit field layout and FieldAccess to GEP into instances.
+
+    // ── Constants & Strings ────────────────────────────────
+    pub(crate) string_constants: Vec<String>,
+    pub(crate) constants: HashMap<String, (Type, Expr)>,
     struct_types: HashMap<String, Vec<(String, Type)>>,
-    /// User-defined enum types: name → EnumDefinition.
-    /// Used to resolve discriminant values and variant field counts for constructors,
-    /// PatternMatch guards, and Match arm dispatch.
     enum_types: HashMap<String, crate::ast::EnumDefinition>,
-    /// Reverse mapping: variant name → (enum_name, discriminant_index, field_count).
-    /// Built during generate() from enum_types. Used by Expr::Call to look up
-    /// discriminant values without scanning all enums.
     variant_disc: HashMap<String, (String, u64, usize)>,
-    /// --explain flag: print detailed compilation decisions
-    explain: bool,
+
+    // ── Reporting ──────────────────────────────────────────
+    report_lines: Vec<String>,
+    warnings: Vec<String>,
+    llvm_extra_flags: Vec<String>,
+    dead_info_disabled: bool,
 }
 
 impl LlvmBackend {
