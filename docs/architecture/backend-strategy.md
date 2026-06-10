@@ -17,12 +17,14 @@ original monolithic `llvm.rs` was ~7,800 lines).
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 2,361 | `LlvmBackend` struct (38 fields), `generate()` entry point, builder methods, emit helpers (`emit_header`, `emit_declares`, `emit_init_state`, `emit_definition`, `emit_transaction`, `emit_callable_txn`, `emit_precondition_check`, `emit_pre_function`, `emit_async_body`, `emit_fused`, `emit_shape_guarded_body`, `emit_fused_composed`), SLP hazard analysis, trigger/extraction helpers, `sparsity_ratio`/`find_perfect_hash` |
+| `mod.rs` | 1,698 | `LlvmBackend` struct (45 fields in 9 groups), `generate()` entry point, builder methods, `build_field_index`, `validate_schema_types`, `is_ptr_expr`, `trg_llvm_storage_ty`, `sparsity_ratio`/`find_perfect_hash` |
+| `emit_toplevel.rs` | 550 | Top-level emission: `emit_header`, `emit_declares`, `emit_init_state`, `emit_definition`, `emit_transaction`, `emit_callable_txn`, `emit_precondition_check`, `emit_pre_function`, `emit_async_body`, `emit_fused`, `emit_shape_guarded_body`, `emit_fused_composed`, `emit_trg_load`, `native_float_or_box`, `llvm_type`, `align_of`, `declare_state_type` |
 | `emit_expr.rs` | 897 | `emit_expr()` router — all 20+ Expr variant arms including ProjectionTarget (18 targets), BracketOp (MultiSlice), Slice, collection emissions, field access, match/pattern, tuple |
 | `emit_stmt.rs` | 394 | `emit_stmt()` router — all Statement variant arms including Let, Assignment, Guarded, Term/TermBang, Unification, Escape, InlineAsm |
 | `folded_loop.rs` | 1,158 | Reactor dispatch (sequential + parallel), folded loop SSA engine, `emit_folded_main`, `emit_ssa_main`, `emit_folded_multi_main`, `emit_folded_pure_counter`, `emit_precomputed_main`, `emit_wake_metadata`, `emit_thread_pool_metadata`, `check_exit_condition_idents` |
 | `optimizer.rs` | 280 | Decision tree: `select_optimization_strategy`, `classify_txns`, `is_trigger_gated`, `extract_trigger_keys`, `extract_enum_keys`, `select_dispatch_mode` |
-| `tests.rs` | 2,834 | 80+ unit tests — backend correctness, wake triggers, SLP hazard, chain composition, exit conditions, natural death, struct/enum, collections, projections |
+| `hazard.rs` | 249 | SLP vectorization hazard analysis: `estimate_slp_hazard`, `slp_attr`, `is_float_field`, `is_float_expr_pre_cg`, `count_cross_float_ops`, `collect_local_floats_and_temps`, `target_hardware`, `count_all_float_ops`, `count_float_arith_ops` |
+| `tests.rs` | 2,882 | 80+ unit tests — backend correctness, wake triggers, SLP hazard, chain composition, exit conditions, natural death, struct/enum, collections, projections |
 | `kani.rs` | 57 | 6 Kani proof harnesses (fast group — pure match dispatch, no heap allocation, no loops) |
 
 ### Emit Functions Remain Centralized
