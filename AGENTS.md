@@ -120,6 +120,10 @@ before the backend ships — it is the canonical way to produce observable termi
 
 ## Benchmark Philosophy
 
+See `docs/architecture/benchmark-strategy.md` for the full benchmark design —
+tag system, size-gated detection, correctness verification, and tagging
+conventions. This section summarizes the key rules.
+
 ### Benchmarks test semantic goals, not syntactic features
 
 Brief benchmarks answer: **"Can Brief compute X with competitive performance vs C?"** — not "Does Brief have feature Y?" Implement the semantic goal using Brief's idioms, not a line-by-line port.
