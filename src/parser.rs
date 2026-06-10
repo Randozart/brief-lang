@@ -2668,6 +2668,25 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // `<: [lo..hi]` range constraint after type
+        let mut range_constraint: Option<RangeConstraint> = None;
+        if self.check_lt_colon() {
+            self.advance();
+            if let Some(Ok(Token::LBracket)) = self.current_token() {
+                self.advance();
+                let lo = self.parse_expression()?;
+                if let Some(Ok(Token::DotDot)) = self.current_token() {
+                    self.advance();
+                    let hi = self.parse_expression()?;
+                    self.expect(Token::RBracket)?;
+                    range_constraint = Some(RangeConstraint::Range(Box::new(lo), Box::new(hi)));
+                } else {
+                    self.expect(Token::RBracket)?;
+                    range_constraint = Some(RangeConstraint::Regex(Box::new(lo)));
+                }
+            }
+        }
+
         let expr = if let Some(Ok(Token::Eq)) = self.current_token() {
             self.advance();
             Some(self.parse_expression()?)
@@ -2682,6 +2701,7 @@ let span = self.current_span();
             expr,
             address,
             bit_range,
+            range_constraint,
             is_override,
             os_mode: false,
             span,
@@ -3951,6 +3971,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                             bit_range: None,
                             is_override: false,
                             modifiers: Vec::new(),
+                            range_constraint: None,
                         });
                     }
                     
@@ -3970,6 +3991,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         bit_range: None,
                         is_override: false,
                         modifiers: Vec::new(),
+                        range_constraint: None,
                     })
                 } else {
                     let name = self.expect_identifier()?;
@@ -3994,6 +4016,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                             bit_range: None,
                             is_override: false,
                             modifiers: Vec::new(),
+                            range_constraint: None,
                         });
                     }
 
@@ -4051,6 +4074,27 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     None
                 };
 
+                // `<: [lo..hi]` range constraint after type
+                let mut range_constraint: Option<RangeConstraint> = None;
+                if self.check_lt_colon() {
+                    self.advance();
+                    if let Some(Ok(Token::LBracket)) = self.current_token() {
+                        self.advance();
+                        // Check for double-dot range: lo..hi
+                        let lo = self.parse_expression()?;
+                        if let Some(Ok(Token::DotDot)) = self.current_token() {
+                            self.advance();
+                            let hi = self.parse_expression()?;
+                            self.expect(Token::RBracket)?;
+                            range_constraint = Some(RangeConstraint::Range(Box::new(lo), Box::new(hi)));
+                        } else {
+                            // Single expression — regex or exact value constraint
+                            self.expect(Token::RBracket)?;
+                            range_constraint = Some(RangeConstraint::Regex(Box::new(lo)));
+                        }
+                    }
+                }
+
                 // Modifiers after type before =
                 let mods_after = self.parse_hashtag_modifiers()?;
                 modifiers.extend(mods_after);
@@ -4069,6 +4113,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     address,
                     address_expr,
                     bit_range,
+                    range_constraint,
                     is_override,
                     modifiers,
                 })

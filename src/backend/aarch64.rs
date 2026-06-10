@@ -988,6 +988,7 @@ mod tests {
                     os_mode: false,
                     span: None,
                     attrs: Vec::new(),
+                range_constraint: None,
                 }),
             ],
             comments: vec![],

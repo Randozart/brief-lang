@@ -155,10 +155,27 @@ impl RegionAnalyzer {
             match item {
                 TopLevel::StateDecl(decl) => {
                     let interval = decl.expr.as_ref().and_then(|e| Self::expr_to_interval(e));
+                    // Check for `<: [lo..hi]` range constraint
+                    let mut range_interval: Option<Interval> = None;
+                    let mut range_size: Option<u64> = None;
+                    if let Some(rc) = &decl.range_constraint {
+                        if let crate::ast::RangeConstraint::Range(lo_expr, hi_expr) = rc {
+                            if let (Some(lo), Some(hi)) = (
+                                Self::eval_expr_simple(lo_expr, &HashMap::new()),
+                                Self::eval_expr_simple(hi_expr, &HashMap::new()),
+                            ) {
+                                if lo <= hi {
+                                    range_interval = Some(Interval { lo, hi });
+                                    let sz = (hi as i128 - lo as i128).unsigned_abs() + 1;
+                                    range_size = Some(if sz > u64::MAX as u128 { u64::MAX } else { sz as u64 });
+                                }
+                            }
+                        }
+                    }
                     let vc = VarInfo {
-                        classification: VarClass::Pure,
-                        interval,
-                        value_set_size: None,
+                        classification: if range_interval.is_some() { VarClass::Bounded } else { VarClass::Pure },
+                        interval: range_interval.or(interval),
+                        value_set_size: range_size,
                         region_id: 0,
                     };
                     self.var_info.entry(decl.name.clone()).or_insert(vc);
@@ -1457,7 +1474,7 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
                 modifiers: modifiers.clone(),
             }
         }
-        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers } => {
+        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers, .. } => {
             Statement::Let {
                 name: name.clone(),
                 ty: ty.clone(),
@@ -1467,6 +1484,7 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
                 bit_range: bit_range.clone(),
                 is_override: *is_override,
                 modifiers: modifiers.clone(),
+                range_constraint: None,
             }
         }
         Statement::Guarded { condition, statements } => {
@@ -1681,6 +1699,7 @@ mod tests {
             os_mode: false,
             span: None,
             attrs: vec![],
+            range_constraint: None,
         })
     }
 

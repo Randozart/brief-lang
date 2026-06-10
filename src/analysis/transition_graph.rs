@@ -460,7 +460,7 @@ fn simplify_stmt(stmt: &Statement) -> Statement {
             timeout: timeout.clone(),
             modifiers: modifiers.clone(),
         },
-        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers } => Statement::Let {
+        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers, .. } => Statement::Let {
             name: name.clone(),
             ty: ty.clone(),
             expr: expr.as_ref().map(|e| simplify_expr(e)),
@@ -469,6 +469,7 @@ fn simplify_stmt(stmt: &Statement) -> Statement {
             bit_range: bit_range.clone(),
             is_override: *is_override,
             modifiers: modifiers.clone(),
+            range_constraint: None,
         },
         Statement::Expression(e) => Statement::Expression(simplify_expr(e)),
         Statement::Guarded { condition, statements } => Statement::Guarded {
@@ -1123,6 +1124,7 @@ mod tests {
             os_mode: false,
             span: None,
             attrs: vec![],
+        range_constraint: None,
         })
     }
 

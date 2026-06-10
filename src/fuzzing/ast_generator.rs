@@ -78,6 +78,7 @@ pub fn arb_state_decl(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             os_mode: false,
             span: None,
             attrs: Vec::new(),
+        range_constraint: None,
         })
     })
 }
@@ -288,6 +289,7 @@ fn arb_let_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
             bit_range: None,
             is_override: false,
             modifiers: vec![],
+            range_constraint: None,
         }
     })
 }

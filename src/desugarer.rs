@@ -159,6 +159,7 @@ impl Desugarer {
                                 os_mode: false,
                                 span: None,
                                 attrs: Vec::new(),
+                            range_constraint: None,
                             });
                         }
                     }
@@ -209,6 +210,7 @@ impl Desugarer {
                                 is_override: false,
                                 os_mode: false,
                                 span: None,
+                            range_constraint: None,
                             });
                         }
                     }
@@ -256,6 +258,7 @@ impl Desugarer {
                                 is_override: false,
                                 os_mode: false,
                                 span: None,
+                            range_constraint: None,
                             });
                         }
                     }
@@ -296,6 +299,7 @@ impl Desugarer {
                         );
                         items.push(TopLevel::StateDecl(StateDecl {
                             expr: Some(new_expr),
+                            range_constraint: None,
                             ..state.clone()
                         }));
                     } else {
@@ -391,6 +395,7 @@ impl Desugarer {
             is_override: false,
             os_mode: false,
             span: None,
+            range_constraint: None,
         });
 
         let mut new_body_items = Vec::new();

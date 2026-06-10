@@ -429,7 +429,7 @@ fn peephole_optimize_stmt(stmt: &Statement) -> Option<Statement> {
                 modifiers: modifiers.clone(),
             })
         }
-        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers } => {
+        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers, .. } => {
             Some(Statement::Let {
                 name: name.clone(),
                 ty: ty.clone(),
@@ -439,6 +439,7 @@ fn peephole_optimize_stmt(stmt: &Statement) -> Option<Statement> {
                 bit_range: bit_range.clone(),
                 is_override: *is_override,
                 modifiers: modifiers.clone(),
+                range_constraint: None,
             })
         }
         Statement::Expression(expr) => {

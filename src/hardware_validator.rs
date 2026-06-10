@@ -722,6 +722,7 @@ mod tests {
         TopLevel::StateDecl(StateDecl {
             name: name.to_string(), ty, expr: None, address: None,
             bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
+        range_constraint: None,
         })
     }
 

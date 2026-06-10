@@ -941,6 +941,7 @@ mod tests {
                 bit_range: None,
                 is_override: false,
                 modifiers: vec![],
+                range_constraint: None,
             },
         );
         assert!(output.contains("i32.const 7"));
