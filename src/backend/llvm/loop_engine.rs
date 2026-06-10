@@ -517,13 +517,17 @@ impl LlvmBackend {
     /// programs. Loads each field via GEP at tick entry, runs each reactive txn's
     /// precondition and body inline with direct GEP stores for modifications,
     /// avoiding the wide %State load/store + extractvalue/insertvalue pattern.
+    /// Handles trigger sampling inline (via lazy emit_trg_load in emit_expr),
+    /// and the wake path (__rt_wait) when has_wake_triggers is set.
     pub(crate) fn emit_ssa_main(
         &mut self,
         out: &mut String,
         txns: &[(String, &crate::ast::Transaction)],
+        has_wake_triggers: bool,
     ) {
         self.fn_ret_ty = "i32".to_string();
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        let attr = self.slp_attr("main", "#3");
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
@@ -533,7 +537,6 @@ impl LlvmBackend {
         for (name, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             let pre = &txn.contract.pre_condition;
             if !matches!(pre, Expr::Bool(true)) {
-                // Load all fields from memory via GEP for precondition eval
                 self.pre_load_all_fields(out, "%state");
                 let cond = self.emit_expr(out, pre, "  ");
                 let i1 = format!("%pi{}", self.txn_counter); self.txn_counter += 1;
@@ -565,8 +568,18 @@ impl LlvmBackend {
             let val = self.emit_exit_expr(out, cond, "  ");
             let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
-            writeln!(out, "  br i1 {}, label %done, label %tick", tr).ok();
+            if has_wake_triggers {
+                writeln!(out, "  br i1 {}, label %done, label %wait", tr).ok();
+                writeln!(out, "  wait:").ok();
+                writeln!(out, "  call void @__rt_wait()").ok();
+                writeln!(out, "  br label %tick").ok();
+            } else {
+                writeln!(out, "  br i1 {}, label %done, label %tick", tr).ok();
+            }
             writeln!(out, "  done:").ok();
+        } else if has_wake_triggers {
+            writeln!(out, "  call void @__rt_wait()").ok();
+            writeln!(out, "  br label %tick").ok();
         } else {
             writeln!(out, "  br label %tick").ok();
         }

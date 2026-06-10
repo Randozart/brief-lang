@@ -843,16 +843,17 @@ fn empty_program() -> Program {
     fn test_main_and_reactor_use_non_willreturn_attr() {
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, true);
         let output = LlvmBackend::new().generate(&program);
-        assert!(output.contains("attributes #2"),
-            "Should emit attributes #2 for reactor_tick");
-        assert!(output.contains("attributes #3"),
-            "Should emit attributes #3 for main (no mustprogress)");
-        assert!(!output.contains("define i32 @main() local_unnamed_addr #2"),
-            "main() should NOT use mustprogress attribute #2");
-        assert!(output.contains("define i32 @main() local_unnamed_addr #3"),
-            "main() should use non-mustprogress attribute #3");
-        assert!(output.contains("define void @reactor_tick(%State* noalias nocapture %state) local_unnamed_addr #2"),
-            "reactor_tick() should use non-willreturn attribute #2");
+        // With A006, wake-trigger programs go through direct SSA loop (emit_ssa_main)
+        // or enumerable dispatch (emit_folded_multi_main) — both use #3 for wake.
+        // The pre_t and t functions still use #0.
+        let has_correct_main = output.contains("define i32 @main() local_unnamed_addr #3")
+            || output.contains("define i32 @main() local_unnamed_addr #5");
+        assert!(has_correct_main,
+            "main() should use #3 (or #5 if SLP-disabled), got: {:?}",
+            output.lines().find(|l| l.contains("define i32 @main")).unwrap_or("(not found)"));
+        // No reactor_tick with A006 path — triggers sampled inline
+        assert!(!output.contains("define void @reactor_tick("),
+            "reactor_tick should not be emitted (A006 direct SSA loop)");
         assert!(output.contains("attributes #0"),
             "attributes #0 should still be present for terminating functions");
         assert!(output.contains("define void @init_state(%State* noalias nocapture %state) local_unnamed_addr #0"),

@@ -1148,7 +1148,7 @@ self.emit_declares(&mut out);
                 {
                     // A005: SSA register pipeline
                     self.warnings.push("info: program dispatched via SSA register pipeline (sequential, bounded txns)".into());
-                    self.emit_ssa_main(&mut out, &txns);
+                    self.emit_ssa_main(&mut out, &txns, false);
                 } else if let Some(ref enum_sizes) = enumerable {
                 // Enumerable triggers — emit switch-dispatch main
                 // This path handles triggers with small compile-time-known value sets.
@@ -1276,21 +1276,24 @@ self.emit_declares(&mut out);
                     self.emit_wake_metadata(&mut out);
                 }
                 self.emit_thread_pool_metadata(&mut out);
-            } else if txns.len() == 1
-                && !has_wake_triggers
-                && enumerable.is_none()
+            } else if !txns.is_empty()
                 && self.async_txn_names.is_empty()
                 && self.mmio_fields.is_empty()
             {
-                // A006: Direct phi-based loop — single txn, no triggers.
-                // Inline txn body in main() instead of reactor_tick, letting
-                // LLVM promote %State fields to phi nodes (zero memory ops).
+                // A006: Direct phi-based loop — no async, no MMIO.
+                // Inline all txn bodies directly in main() instead of reactor_tick.
+                // Triggers are sampled inline via lazy emit_trg_load, wake path uses
+                // __rt_wait between ticks. LLVM promotes %State fields to phi nodes.
+                if has_wake_triggers {
+                    writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
+                }
                 self.warnings.push(
-                    "info: program dispatched via direct SSA loop (single txn, no triggers)".into()
+                    "info: program dispatched via direct SSA loop".into()
                 );
-                self.emit_ssa_main(&mut out, &txns);
+                self.emit_ssa_main(&mut out, &txns, has_wake_triggers);
             } else if !txns.is_empty() {
-                // A005: reactor loop (fallback)
+                // reactor loop fallback — only reached for async dispatch or MMIO
+                // (all other programs go through A006 direct SSA loop above)
                 self.warnings.push(format!("info: program dispatched via reactor loop ({})", match dispatch_mode {
                     DispatchMode::Parallel => "parallel thread pool",
                     DispatchMode::Sequential => "sequential tick loop",
