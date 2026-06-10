@@ -161,10 +161,18 @@ impl ExprEval for MultiSliceExpr {
     }
 }
 
-impl ExprCodegenLLVM for ListLiteralExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%lst".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for ListLiteralExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::ListLiteral(self.elements.clone()), "")
+    }
+}
 impl ExprCodegenLLVM for MapLiteralExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%map".into(), ty: Type::Void } } }
 impl ExprCodegenLLVM for SetLiteralExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%set".into(), ty: Type::Void } } }
-impl ExprCodegenLLVM for ListIndexExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%idx".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for ListIndexExpr {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        ctx.emit_expr(out, &Expr::ListIndex(self.list.clone(), self.index.clone()), "")
+    }
+}
 impl ExprCodegenLLVM for SliceExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%slc".into(), ty: Type::Void } } }
 impl ExprCodegenLLVM for MultiSliceExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%msl".into(), ty: Type::Void } } }
 impl ExprCodegenVHDL for ListLiteralExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
