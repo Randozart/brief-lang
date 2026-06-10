@@ -1,8 +1,7 @@
-// queue_drain_c — C reference for queue_drain.bv
-// Symmetric loop: 50M iterations, push and pop via counter manipulations.
-// Counter goes up then down, matching Brief's push/pop cycle per tick.
+// queue_drain_sym_c — C reference for queue_drain_sym.bv.
+// Symmetric counter-only loop. No collection ops.
 //
-// clang -O3 -march=native -ffast-math -o benchmarks/queue_drain_c benchmarks/queue_drain_c.c
+// clang -O3 -march=native -ffast-math -o benchmarks/queue_drain_sym_c benchmarks/queue_drain_sym_c.c
 
 #include <stdlib.h>
 #include <stdio.h>

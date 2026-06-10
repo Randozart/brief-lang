@@ -147,6 +147,8 @@ benchmarks/kalman_filter_runtime_c
 /nbody_newton
 /nbody_sqrt
 /queue_drain
+/queue_drain_sym
+/queue_drain_idio
 /cancel_math
 /ring_buffer
 /precompute_sum
@@ -201,6 +203,9 @@ benchmarks/nbody_sqrt_c
 scratch/
 
 # Benchmark binaries
+benchmarks/queue_drain_sym
+benchmarks/queue_drain_sym_c
+benchmarks/queue_drain_idio
 benchmarks/fasta
 benchmarks/fasta_c
 benchmarks/fasta.bc

@@ -59,6 +59,8 @@ TAG[knucleotide]=runtime
 TAG[cancel_math]=runtime
 TAG[bit_clear]=runtime
 TAG[queue_drain]=runtime
+TAG[queue_drain_sym]=runtime
+TAG[queue_drain_idio]=runtime
 TAG[interval_step]=runtime
 TAG[iir_filter_runtime]=runtime
 TAG[ring_buffer_runtime]=runtime
@@ -85,6 +87,8 @@ BENCHMARKS=(
     "cancel_math"
     "bit_clear"
     "queue_drain"
+    "queue_drain_sym"
+    "queue_drain_idio"
     "interval_step"
 )
 
@@ -126,8 +130,14 @@ build_bench() {
 
 build_c() {
     local name="$1"
-    local extra_flags=""
+    local src="benchmarks/${name}_c.c"
 
+    if [ ! -f "$src" ]; then
+        echo "  (no C reference — skipping)"
+        return
+    fi
+
+    local extra_flags=""
     case "$name" in
         iir_filter)      extra_flags="-lm" ;;
         nbody_sqrt)      extra_flags="-lm" ;;
@@ -138,7 +148,7 @@ build_c() {
         knucleotide)      extra_flags="-lm" ;;
     esac
 
-    clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "benchmarks/${name}_c.c" ${extra_flags} 2>&1
+    clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "$src" ${extra_flags} 2>&1
     echo "  C binary ready."
 }
 
