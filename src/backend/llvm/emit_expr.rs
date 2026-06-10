@@ -157,21 +157,32 @@ impl LlvmBackend {
                 } else if let Some(&addr) = self.mmio_fields.get(name) {
                     let p = format!("%mio{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
-                    let ld = format!("%mil{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = load volatile i64, i64* {}, align 1", indent, ld, p).ok();
-                    writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok();
+                    writeln!(out, "{}{} = load volatile i64, i64* {}, align 1", indent, v, p).ok();
                 } else if let Some(&idx) = self.field_index_map.get(name) {
                     let ty = &self.field_types[idx];
                     let p = format!("%fdp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
-                    let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
                     let rng = self.field_to_meta_idx.get(name).map(|m| format!(", !range !{}", m)).unwrap_or_default();
-                    writeln!(out, "{}{} = load {}, {}* {}, align {}{}", indent, ld, ty, ty, p, self.align_of(&ty), rng).ok();
                     match ty {
-                        s if s == "i8" => { let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = zext i8 {} to i64", indent, z, ld).ok(); writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok(); }
-                        s if s == "float" => { self.reg_float_cache.insert(ld.clone(), ld.clone()); return TypedRegister { name: ld.clone(), ty: Type::Float }; }
-                        s if s == "i8*" => { writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ld).ok(); }
-                        _ => { writeln!(out, "{}{} = add i64 0, {}", indent, v, ld).ok(); }
+                        s if s == "i8" => {
+                            let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, ld, p, self.align_of("i8")).ok();
+                            writeln!(out, "{}{} = zext i8 {} to i64", indent, v, ld).ok();
+                        }
+                        s if s == "float" => {
+                            let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load float, float* {}, align 4", indent, ld, p).ok();
+                            self.reg_float_cache.insert(ld.clone(), ld.clone());
+                            return TypedRegister { name: ld.clone(), ty: Type::Float };
+                        }
+                        s if s == "i8*" => {
+                            let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, ld, p).ok();
+                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ld).ok();
+                        }
+                        _ => {
+                            writeln!(out, "{}{} = load {}, {}* {}, align {}{}", indent, v, ty, ty, p, self.align_of(ty), rng).ok();
+                        }
                     }
                 }
             }
