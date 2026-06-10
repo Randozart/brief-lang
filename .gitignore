@@ -129,6 +129,35 @@ benchmarks/kalman_filter_runtime_c
 /iir_filter.c
 /float_math.c
 
+# Root-level LLVM IR and object files from compiler runs
+/*.ll
+/*.o
+/*.bc
+/*.opt.ll
+
+# Root-level benchmark executables (compiler outputs to CWD)
+/float_math
+/float_math_nonzero
+/const_heavy
+/fasta
+/fannkuch_redux
+/mandelbrot
+/kalman_filter
+/kalman_filter_runtime
+/nbody_newton
+/nbody_sqrt
+/queue_drain
+/cancel_math
+/ring_buffer
+/precompute_sum
+/async_counters
+/async_counters_runtime
+/sparse_dispatch
+/iir_filter
+/iir_filter_runtime
+/bit_clear
+/print_loop
+
 # Generated LLVM IR processed by opt
 *.opt.ll
 
