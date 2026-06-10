@@ -1,6 +1,7 @@
 // cancel_math_c — C reference for cancel_math.bv
 // Symmetric loop: accumulates acc with count, increments count.
-// No algebraic rewrite needed — count++ is already atomic in C.
+// Guard fires when count % 5M == 0 (pre-increment), matching Brief's
+// rct txn atomic pre-tick read semantics.
 //
 // clang -O3 -march=native -ffast-math -o benchmarks/cancel_math_c benchmarks/cancel_math_c.c
 
@@ -13,10 +14,11 @@ int main(void) {
     long count = 0;
     long acc = 0;
 
-    for (; count < N; count++) {
+    while (count < N) {
         acc += count;
         if (count % 5000000 == 0)
             fprintf(stderr, "%ld\n", acc);
+        count++;
     }
 
     return (int)(acc + count);
