@@ -1,0 +1,18 @@
+#!exit count == bound;
+
+frgn __get_env_int(name: String) -> Int;
+frgn #out __print_float(val: Float) -> Bool;
+
+let count: Int = 0;
+let bound: Int = __get_env_int("BOUND");
+
+rct txn compute [count < bound][count == bound] {
+    let x: Float = 3.0;
+    let y: Float = 4.0;
+    let dsq: Float = x * x + y * y;
+    let d: Float = sqrt#(dsq);
+    let _p: Bool = __print_float(d);
+    &count = count + 1;
+    term;
+};
+term! -> __print_float(sqrt#(2.0));

@@ -1,0 +1,17 @@
+#!exit true;
+
+frgn #out __print_int(val: Int) -> Bool;
+frgn #out __print_float(val: Float) -> Bool;
+
+// Universal Bracket: every type decomposes to visual Char fragments
+let num: Int = 15561;
+// Filter for digits 1 or 5 -> "1551" -> Int(1551)
+let filtered: Int = num[; @"[15]"];
+// Stride: every other digit -> "151" -> Int(151)
+let every_other: Int = num[::2];
+// Explicit regex filter in bracket
+let matched: Int = num[; @"[15]"];
+
+let _p1: Bool = __print_int(filtered);
+let _p2: Bool = __print_int(every_other);
+let _p3: Bool = __print_int(matched);

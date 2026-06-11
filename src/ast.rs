@@ -1533,8 +1533,8 @@ impl Program {
         // Create state declaration: let __booted_N: Bool = false;
         let state_decl = TopLevel::StateDecl(StateDecl {
             name: booted_name.clone(),
-            ty: Type::Bool,
-            expr: Some(Expr::Bool(false)),
+            ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
             address: None,
             bit_range: None,
             range_constraint: None,
@@ -1547,7 +1547,7 @@ impl Program {
         // Add &__booted_N = true; before term
         body.push(Statement::Assignment {
             lhs: Expr::OwnedRef(booted_name.clone()),
-            expr: Expr::Bool(true),
+            expr: Expr::Integer(1),
             timeout: None,
             modifiers: vec![],
         });

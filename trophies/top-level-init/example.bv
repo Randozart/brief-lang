@@ -1,0 +1,11 @@
+// Top-level __init: executable statements at global scope
+// The compiler wraps these in rct txn __init [!__booted][__booted]
+// which fires once on program start, then exits.
+
+frgn #out __print_int(val: Int) -> Bool;
+
+let x: Int = 0;
+
+__print_int(x);
+&x = 42;
+__print_int(x);

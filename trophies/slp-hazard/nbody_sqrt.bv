@@ -1,0 +1,253 @@
+// nbody_sqrt — 5-body gravity sim with libm sqrtf (FFI)
+// Compares Brief vs C on identical algorithm: libm sqrtf, unrolled pairs.
+// The sqrt FFI call inside the hot body prevents pure-counter fold
+// via statement_contains_ffi, keeping all field stores live.
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/nbody_sqrt.bv \
+//       --out benchmarks --optimize-budget 2048
+
+#!exit count == bound;
+
+import { __get_env_int } from "std/env.bv";
+import "link/brief_rt.c";
+
+frgn #out __print_float(val: Float) -> Bool;
+
+let bound: Int = __get_env_int("BOUND");
+let count: Int = 0;
+
+const pi: Float = 3.141592653589793;
+const solar_mass: Float = 4.0 * pi * pi;
+const dpy: Float = 365.24;
+const dt: Float = 0.01;
+
+// Body 0 (Sun)
+let bx0: Float = 0.0;         let by0: Float = 0.0;         let bz0: Float = 0.0;
+let vx0: Float = 0.0;         let vy0: Float = 0.0;         let vz0: Float = 0.0;
+const m0: Float = 1.0 * solar_mass;
+
+// Body 1 (Jupiter)
+let bx1: Float = 4.84143144246472090;
+let by1: Float = -1.16032004402742839;
+let bz1: Float = -0.103622044471123109;
+let vx1: Float = 0.00166007664274403694 * dpy;
+let vy1: Float = 0.00769901118419740425 * dpy;
+let vz1: Float = -0.0000690460016972063023 * dpy;
+const m1: Float = 0.000954791938424326609 * solar_mass;
+
+// Body 2 (Saturn)
+let bx2: Float = 8.34336671824457987;
+let by2: Float = 4.12479856412430479;
+let bz2: Float = -0.403523417114321381;
+let vx2: Float = -0.00276742510726862411 * dpy;
+let vy2: Float = 0.00499852801234917238 * dpy;
+let vz2: Float = 0.0000230417297573763929 * dpy;
+const m2: Float = 0.000285885980666130812 * solar_mass;
+
+// Body 3 (Uranus)
+let bx3: Float = 12.8943695621309110;
+let by3: Float = -15.1111514016986312;
+let bz3: Float = -0.223307578892655734;
+let vx3: Float = 0.00296460137564761618 * dpy;
+let vy3: Float = 0.00237847173959480950 * dpy;
+let vz3: Float = -0.0000296589568540237556 * dpy;
+const m3: Float = 0.0000436624404335156298 * solar_mass;
+
+// Body 4 (Neptune)
+let bx4: Float = 15.3796971148509165;
+let by4: Float = -25.9193146099879641;
+let bz4: Float = 0.179258772950371181;
+let vx4: Float = 0.00268067772490389322 * dpy;
+let vy4: Float = 0.00162824170038242295 * dpy;
+let vz4: Float = -0.0000951592254519715870 * dpy;
+const m4: Float = 0.0000515138902046611451 * solar_mass;
+
+rct txn simulate [
+    count < bound
+][count == bound] {
+    let dx01: Float = bx0 - bx1;
+    let dy01: Float = by0 - by1;
+    let dz01: Float = bz0 - bz1;
+    let dsq01: Float = dx01 * dx01 + dy01 * dy01 + dz01 * dz01;
+    let dist01: Float = sqrt#(dsq01);
+    let mag01: Float = dt / (dsq01 * dist01);
+    &vx0 = vx0 - dx01 * m1 * mag01;
+    &vy0 = vy0 - dy01 * m1 * mag01;
+    &vz0 = vz0 - dz01 * m1 * mag01;
+    &vx1 = vx1 + dx01 * m0 * mag01;
+    &vy1 = vy1 + dy01 * m0 * mag01;
+    &vz1 = vz1 + dz01 * m0 * mag01;
+
+    let dx02: Float = bx0 - bx2;
+    let dy02: Float = by0 - by2;
+    let dz02: Float = bz0 - bz2;
+    let dsq02: Float = dx02 * dx02 + dy02 * dy02 + dz02 * dz02;
+    let dist02: Float = sqrt#(dsq02);
+    let mag02: Float = dt / (dsq02 * dist02);
+    &vx0 = vx0 - dx02 * m2 * mag02;
+    &vy0 = vy0 - dy02 * m2 * mag02;
+    &vz0 = vz0 - dz02 * m2 * mag02;
+    &vx2 = vx2 + dx02 * m0 * mag02;
+    &vy2 = vy2 + dy02 * m0 * mag02;
+    &vz2 = vz2 + dz02 * m0 * mag02;
+
+    let dx03: Float = bx0 - bx3;
+    let dy03: Float = by0 - by3;
+    let dz03: Float = bz0 - bz3;
+    let dsq03: Float = dx03 * dx03 + dy03 * dy03 + dz03 * dz03;
+    let dist03: Float = sqrt#(dsq03);
+    let mag03: Float = dt / (dsq03 * dist03);
+    &vx0 = vx0 - dx03 * m3 * mag03;
+    &vy0 = vy0 - dy03 * m3 * mag03;
+    &vz0 = vz0 - dz03 * m3 * mag03;
+    &vx3 = vx3 + dx03 * m0 * mag03;
+    &vy3 = vy3 + dy03 * m0 * mag03;
+    &vz3 = vz3 + dz03 * m0 * mag03;
+
+    let dx04: Float = bx0 - bx4;
+    let dy04: Float = by0 - by4;
+    let dz04: Float = bz0 - bz4;
+    let dsq04: Float = dx04 * dx04 + dy04 * dy04 + dz04 * dz04;
+    let dist04: Float = sqrt#(dsq04);
+    let mag04: Float = dt / (dsq04 * dist04);
+    &vx0 = vx0 - dx04 * m4 * mag04;
+    &vy0 = vy0 - dy04 * m4 * mag04;
+    &vz0 = vz0 - dz04 * m4 * mag04;
+    &vx4 = vx4 + dx04 * m0 * mag04;
+    &vy4 = vy4 + dy04 * m0 * mag04;
+    &vz4 = vz4 + dz04 * m0 * mag04;
+
+    let dx12: Float = bx1 - bx2;
+    let dy12: Float = by1 - by2;
+    let dz12: Float = bz1 - bz2;
+    let dsq12: Float = dx12 * dx12 + dy12 * dy12 + dz12 * dz12;
+    let dist12: Float = sqrt#(dsq12);
+    let mag12: Float = dt / (dsq12 * dist12);
+    &vx1 = vx1 - dx12 * m2 * mag12;
+    &vy1 = vy1 - dy12 * m2 * mag12;
+    &vz1 = vz1 - dz12 * m2 * mag12;
+    &vx2 = vx2 + dx12 * m1 * mag12;
+    &vy2 = vy2 + dy12 * m1 * mag12;
+    &vz2 = vz2 + dz12 * m1 * mag12;
+
+    let dx13: Float = bx1 - bx3;
+    let dy13: Float = by1 - by3;
+    let dz13: Float = bz1 - bz3;
+    let dsq13: Float = dx13 * dx13 + dy13 * dy13 + dz13 * dz13;
+    let dist13: Float = sqrt#(dsq13);
+    let mag13: Float = dt / (dsq13 * dist13);
+    &vx1 = vx1 - dx13 * m3 * mag13;
+    &vy1 = vy1 - dy13 * m3 * mag13;
+    &vz1 = vz1 - dz13 * m3 * mag13;
+    &vx3 = vx3 + dx13 * m1 * mag13;
+    &vy3 = vy3 + dy13 * m1 * mag13;
+    &vz3 = vz3 + dz13 * m1 * mag13;
+
+    let dx14: Float = bx1 - bx4;
+    let dy14: Float = by1 - by4;
+    let dz14: Float = bz1 - bz4;
+    let dsq14: Float = dx14 * dx14 + dy14 * dy14 + dz14 * dz14;
+    let dist14: Float = sqrt#(dsq14);
+    let mag14: Float = dt / (dsq14 * dist14);
+    &vx1 = vx1 - dx14 * m4 * mag14;
+    &vy1 = vy1 - dy14 * m4 * mag14;
+    &vz1 = vz1 - dz14 * m4 * mag14;
+    &vx4 = vx4 + dx14 * m1 * mag14;
+    &vy4 = vy4 + dy14 * m1 * mag14;
+    &vz4 = vz4 + dz14 * m1 * mag14;
+
+    let dx23: Float = bx2 - bx3;
+    let dy23: Float = by2 - by3;
+    let dz23: Float = bz2 - bz3;
+    let dsq23: Float = dx23 * dx23 + dy23 * dy23 + dz23 * dz23;
+    let dist23: Float = sqrt#(dsq23);
+    let mag23: Float = dt / (dsq23 * dist23);
+    &vx2 = vx2 - dx23 * m3 * mag23;
+    &vy2 = vy2 - dy23 * m3 * mag23;
+    &vz2 = vz2 - dz23 * m3 * mag23;
+    &vx3 = vx3 + dx23 * m2 * mag23;
+    &vy3 = vy3 + dy23 * m2 * mag23;
+    &vz3 = vz3 + dz23 * m2 * mag23;
+
+    let dx24: Float = bx2 - bx4;
+    let dy24: Float = by2 - by4;
+    let dz24: Float = bz2 - bz4;
+    let dsq24: Float = dx24 * dx24 + dy24 * dy24 + dz24 * dz24;
+    let dist24: Float = sqrt#(dsq24);
+    let mag24: Float = dt / (dsq24 * dist24);
+    &vx2 = vx2 - dx24 * m4 * mag24;
+    &vy2 = vy2 - dy24 * m4 * mag24;
+    &vz2 = vz2 - dz24 * m4 * mag24;
+    &vx4 = vx4 + dx24 * m2 * mag24;
+    &vy4 = vy4 + dy24 * m2 * mag24;
+    &vz4 = vz4 + dz24 * m2 * mag24;
+
+    let dx34: Float = bx3 - bx4;
+    let dy34: Float = by3 - by4;
+    let dz34: Float = bz3 - bz4;
+    let dsq34: Float = dx34 * dx34 + dy34 * dy34 + dz34 * dz34;
+    let dist34: Float = sqrt#(dsq34);
+    let mag34: Float = dt / (dsq34 * dist34);
+    &vx3 = vx3 - dx34 * m4 * mag34;
+    &vy3 = vy3 - dy34 * m4 * mag34;
+    &vz3 = vz3 - dz34 * m4 * mag34;
+    &vx4 = vx4 + dx34 * m3 * mag34;
+    &vy4 = vy4 + dy34 * m3 * mag34;
+    &vz4 = vz4 + dz34 * m3 * mag34;
+
+    &bx0 = bx0 + dt * vx0;
+    &by0 = by0 + dt * vy0;
+    &bz0 = bz0 + dt * vz0;
+    &bx1 = bx1 + dt * vx1;
+    &by1 = by1 + dt * vy1;
+    &bz1 = bz1 + dt * vz1;
+    &bx2 = bx2 + dt * vx2;
+    &by2 = by2 + dt * vy2;
+    &bz2 = bz2 + dt * vz2;
+    &bx3 = bx3 + dt * vx3;
+    &by3 = by3 + dt * vy3;
+    &bz3 = bz3 + dt * vz3;
+    &bx4 = bx4 + dt * vx4;
+    &by4 = by4 + dt * vy4;
+    &bz4 = bz4 + dt * vz4;
+
+    &count = count + 1;
+
+    let edist01: Float = sqrt#((bx0 - bx1) * (bx0 - bx1) + (by0 - by1) * (by0 - by1) + (bz0 - bz1) * (bz0 - bz1));
+    let edist02: Float = sqrt#((bx0 - bx2) * (bx0 - bx2) + (by0 - by2) * (by0 - by2) + (bz0 - bz2) * (bz0 - bz2));
+    let edist03: Float = sqrt#((bx0 - bx3) * (bx0 - bx3) + (by0 - by3) * (by0 - by3) + (bz0 - bz3) * (bz0 - bz3));
+    let edist04: Float = sqrt#((bx0 - bx4) * (bx0 - bx4) + (by0 - by4) * (by0 - by4) + (bz0 - bz4) * (bz0 - bz4));
+    let edist12: Float = sqrt#((bx1 - bx2) * (bx1 - bx2) + (by1 - by2) * (by1 - by2) + (bz1 - bz2) * (bz1 - bz2));
+    let edist13: Float = sqrt#((bx1 - bx3) * (bx1 - bx3) + (by1 - by3) * (by1 - by3) + (bz1 - bz3) * (bz1 - bz3));
+    let edist14: Float = sqrt#((bx1 - bx4) * (bx1 - bx4) + (by1 - by4) * (by1 - by4) + (bz1 - bz4) * (bz1 - bz4));
+    let edist23: Float = sqrt#((bx2 - bx3) * (bx2 - bx3) + (by2 - by3) * (by2 - by3) + (bz2 - bz3) * (bz2 - bz3));
+    let edist24: Float = sqrt#((bx2 - bx4) * (bx2 - bx4) + (by2 - by4) * (by2 - by4) + (bz2 - bz4) * (bz2 - bz4));
+    let edist34: Float = sqrt#((bx3 - bx4) * (bx3 - bx4) + (by3 - by4) * (by3 - by4) + (bz3 - bz4) * (bz3 - bz4));
+
+    let e01: Float = m0 * m1 / edist01;
+    let e02: Float = m0 * m2 / edist02;
+    let e03: Float = m0 * m3 / edist03;
+    let e04: Float = m0 * m4 / edist04;
+    let e12: Float = m1 * m2 / edist12;
+    let e13: Float = m1 * m3 / edist13;
+    let e14: Float = m1 * m4 / edist14;
+    let e23: Float = m2 * m3 / edist23;
+    let e24: Float = m2 * m4 / edist24;
+    let e34: Float = m3 * m4 / edist34;
+    let ep: Float = -(e01 + e02 + e03 + e04 + e12 + e13 + e14 + e23 + e24 + e34);
+    let ek0: Float = 0.5 * m0 * (vx0 * vx0 + vy0 * vy0 + vz0 * vz0);
+    let ek1: Float = 0.5 * m1 * (vx1 * vx1 + vy1 * vy1 + vz1 * vz1);
+    let ek2: Float = 0.5 * m2 * (vx2 * vx2 + vy2 * vy2 + vz2 * vz2);
+    let ek3: Float = 0.5 * m3 * (vx3 * vx3 + vy3 * vy3 + vz3 * vz3);
+    let ek4: Float = 0.5 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
+    let energy: Float = ep + ek0 + ek1 + ek2 + ek3 + ek4;
+
+    [count % 5000000 == 0] {
+        let __printed: Bool = __print_float(energy);
+    };
+    [count == bound] {
+        term! -> __print_float(energy);
+    };
+    term;
+};
