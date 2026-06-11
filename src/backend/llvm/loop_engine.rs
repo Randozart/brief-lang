@@ -550,7 +550,9 @@ impl LlvmBackend {
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_load_all_fields(out, "%state");
+                self.loop_exit_label = Some("done".into());
                 for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) { self.emit_stmt(out, s, "  "); }
+                self.loop_exit_label = None;
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
                 writeln!(out, "  br label %{}", skip_l).ok();
@@ -562,7 +564,9 @@ impl LlvmBackend {
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_load_all_fields(out, "%state");
+                self.loop_exit_label = Some("done".into());
                 for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) { self.emit_stmt(out, s, "  "); }
+                self.loop_exit_label = None;
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
             }

@@ -62,6 +62,15 @@ impl LlvmBackend {
                     if let Some(ref pl) = self.callable_txn_post_label {
                         writeln!(out, "{}br label %{}", indent, pl).ok();
                     }
+                } else if let Some(exit_label) = self.loop_exit_label.clone() {
+                    // Inside a reactive transaction loop — branch to exit label
+                    // instead of ret, so LLVM can unroll the loop.
+                    if let Some(Some(v)) = values.first() {
+                        let r = self.emit_expr(out, v, indent);
+                        writeln!(out, "{}store i64 {}, i64* %state, align 8 ; term! value", indent, r).ok();
+                    }
+                    writeln!(out, "{}br label %{}", indent, exit_label).ok();
+                    self.terminated = true;
                 } else {
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);

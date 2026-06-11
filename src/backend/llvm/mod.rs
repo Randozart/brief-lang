@@ -420,6 +420,7 @@ pub struct LlvmBackend {
     callable_txn_result: Option<String>,
     callable_txn_post_label: Option<String>,
     in_callable_txn: bool,
+    loop_exit_label: Option<String>,
     param_slots: HashMap<String, String>,
     state_reg_name: String,
 
@@ -494,6 +495,7 @@ impl LlvmBackend {
             callable_txn_result: None,
             callable_txn_post_label: None,
             in_callable_txn: false,
+            loop_exit_label: None,
             param_slots: HashMap::new(),
             range_bounds: HashMap::new(),
             field_to_meta_idx: HashMap::new(),
