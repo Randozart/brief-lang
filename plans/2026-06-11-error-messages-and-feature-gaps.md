@@ -236,6 +236,36 @@ version.
 **Change**: Show the actual filesystem paths searched (prefixed with `source_dir`) instead
 of the ambiguous `lib/{path}.bv, imports/{path}.bv, ./{path}.bv` message.
 
+### 4.4 Support relative imports (`"./core"`)
+
+**Problem**: `import "./core"` should resolve relative to the importing file's directory, but
+the parser's `trim_start_matches("./")` strips the prefix and the resolver treats it as an
+absolute (project-root-relative) path. The user has no way to express "this file's sibling."
+
+**File**: `src/import_resolver.rs`
+
+**Fix**:
+1. Preserve a flag when the import path starts with `"./"`: treat it as a relative path hint.
+2. When resolving a relative import, use the importing file's directory as the base search
+   path instead of (or in addition to) the standard search paths.
+3. This also gives users a way to disambiguate local imports from library imports, which
+   would have avoided confusion during the officina session.
+
+---
+
+## Cross-cutting: File/Directory Naming Conflicts
+
+**Problem**: A file named `officina.bv` in the same directory as `officina/` (a subdirectory)
+creates an ambiguity. When resolving `import "officina.core"`, the module resolver searches:
+- `officina.bv` matched as a module namespace → then looks for `core` inside the parsed file
+- `officina/core.bv` matched as a subdirectory → the intended target
+
+The resolver could pick the wrong one, or error on ambiguity. In practice, the `.bv` extension
+triggers a different code path than the directory search, but the overlap is a footgun.
+
+**Status**: Documented, not yet fixed. A candidate fix would be to prefer directory matches
+over file matches when both exist (the directory is more likely to contain submodules).
+
 ---
 
 ## Already Completed (These Session Fixes)
