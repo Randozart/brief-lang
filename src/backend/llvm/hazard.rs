@@ -110,13 +110,21 @@ fn compute_peak_live_floats(body: &[Statement], float_names: &[String]) -> u32 {
     if float_names.is_empty() {
         return 0;
     }
-    // For each float temp, find (def_index, last_use_index)
+    // For each float name, find (def_point, last_use) interval.
+    // - If the name is let-bound in this body, def = that statement index.
+    // - Otherwise (field read or const), def = first statement that references it.
     let mut intervals: Vec<(usize, usize)> = Vec::with_capacity(float_names.len());
-    for (j, name) in float_names.iter().enumerate() {
-        // def point is the statement where the Let binding appears
-        let def_idx = body.iter().position(|s| matches!(s, Statement::Let { name: n, .. } if n == name))
-            .unwrap_or(0);
-        // last use: scan forward from def
+    for name in float_names.iter() {
+        // Is this name let-bound in this body?
+        let let_idx = body.iter().position(|s| matches!(s, Statement::Let { name: n, .. } if n == name));
+        let def_idx = match let_idx {
+            Some(idx) => idx,
+            None => {
+                // Field or const — first reference is the def point
+                body.iter().position(|s| stmt_refs_name(s, name)).unwrap_or(0)
+            }
+        };
+        // last use: scan forward from def+1
         let mut last_use = def_idx;
         for (i, stmt) in body.iter().enumerate().skip(def_idx + 1) {
             if stmt_refs_name(stmt, name) {
@@ -381,5 +389,127 @@ impl LlvmBackend {
             Expr::Block(_, last) => self.count_float_arith_ops(last, local_floats),
             _ => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+    use crate::ast::Statement::*;
+
+    fn float_expr(val: f64) -> Expr {
+        Expr::Float(val)
+    }
+
+    fn ident(n: &str) -> Expr {
+        Expr::Identifier(n.to_string())
+    }
+
+    fn let_stmt(name: &str, expr: Expr) -> Statement {
+        Let {
+            name: name.to_string(),
+            ty: Some(Type::Float),
+            expr: Some(expr),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            range_constraint: None,
+            is_override: false,
+            modifiers: vec![],
+        }
+    }
+
+    fn assign_stmt(name: &str, expr: Expr) -> Statement {
+        Assignment {
+            lhs: Expr::FieldAccess(Box::new(ident("state")), name.to_string()),
+            expr,
+            timeout: None,
+            modifiers: vec![],
+        }
+    }
+
+    fn add_expr(a: Expr, b: Expr) -> Expr {
+        Expr::Add(Box::new(a), Box::new(b))
+    }
+
+    fn mul_expr(a: Expr, b: Expr) -> Expr {
+        Expr::Mul(Box::new(a), Box::new(b))
+    }
+
+    /// Simple sequential: t0 defined, used immediately, then t1 defined.
+    /// Peak should be 2 (t0 and t1 overlap at the mul statement).
+    #[test]
+    fn test_peak_two_sequential() {
+        let body = vec![
+            let_stmt("t0", float_expr(1.0)),                               // def t0
+            let_stmt("t1", float_expr(2.0)),                               // def t1
+            assign_stmt("f0", add_expr(ident("t0"), ident("t1"))),         // uses t0, t1
+        ];
+        let names = vec!["t0".to_string(), "t1".to_string()];
+        // t0: def=0, last_use=2; t1: def=1, last_use=2
+        // sweep: i=0 → 1 active (t0), i=1 → 2 active (t0,t1), i=2 → 2 active (t0,t1)
+        assert_eq!(compute_peak_live_floats(&body, &names), 2);
+    }
+
+    /// Non-overlapping: t0 defined and used before t1 is defined.
+    /// Peak should be 1.
+    #[test]
+    fn test_peak_no_overlap() {
+        let body = vec![
+            let_stmt("t0", float_expr(1.0)),                   // def t0
+            assign_stmt("f0", ident("t0")),                    // last use of t0
+            let_stmt("t1", float_expr(2.0)),                   // def t1
+            assign_stmt("f1", ident("t1")),                    // last use of t1
+        ];
+        let names = vec!["t0".to_string(), "t1".to_string()];
+        // t0: def=0, last_use=1; t1: def=2, last_use=3
+        // sweep: i=0→1, i=1→1, i=2→1, i=3→1
+        assert_eq!(compute_peak_live_floats(&body, &names), 1);
+    }
+
+    /// Three temps, all overlapping at the final expression.
+    #[test]
+    fn test_peak_three_overlapping() {
+        let body = vec![
+            let_stmt("t0", float_expr(1.0)),
+            let_stmt("t1", float_expr(2.0)),
+            let_stmt("t2", float_expr(3.0)),
+            assign_stmt("f0", add_expr(add_expr(ident("t0"), ident("t1")), ident("t2"))),
+        ];
+        let names = vec!["t0".to_string(), "t1".to_string(), "t2".to_string()];
+        // All defined at 0,1,2, all used at 3
+        // sweep: i=0→1, i=1→2, i=2→3, i=3→3
+        assert_eq!(compute_peak_live_floats(&body, &names), 3);
+    }
+
+    /// Field read (not let-bound): first use determines def point.
+    #[test]
+    fn test_peak_field_read_def_at_first_use() {
+        let body = vec![
+            let_stmt("t0", float_expr(1.0)),
+            assign_stmt("f0", add_expr(ident("field_a"), ident("t0"))),   // first use of field_a, last use of t0
+            assign_stmt("f1", add_expr(ident("field_a"), float_expr(5.0))), // last use of field_a
+        ];
+        let names = vec!["t0".to_string(), "field_a".to_string()];
+        // t0: def=0, last_use=1; field_a: first_use=1, last_use=2
+        // sweep: i=0→1, i=1→2, i=2→1
+        assert_eq!(compute_peak_live_floats(&body, &names), 2);
+    }
+
+    /// Empty body → peak 0.
+    #[test]
+    fn test_peak_empty_body() {
+        let body: Vec<Statement> = vec![];
+        let names: Vec<String> = vec![];
+        assert_eq!(compute_peak_live_floats(&body, &names), 0);
+    }
+
+    /// Empty names → peak 0.
+    #[test]
+    fn test_peak_no_floats() {
+        let body = vec![let_stmt("x", float_expr(1.0))];
+        let names: Vec<String> = vec![];
+        assert_eq!(compute_peak_live_floats(&body, &names), 0);
     }
 }
