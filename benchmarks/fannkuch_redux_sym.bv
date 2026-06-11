@@ -1,0 +1,70 @@
+// fannkuch_redux_sym — Permutation operations (Brief-idiomatic flat fields)
+// Symmetric variant: adds periodic checksum print every 5M iterations.
+// Prevents LLVM precomputation by adding hot-loop FFI.
+//
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/fannkuch_redux_sym.bv \
+//       --out benchmarks --optimize-budget 256
+
+#!exit count == N && checksum >= 0 && max_flips >= 0;
+
+import "link/brief_rt.c";
+
+frgn #out __print_int(n: Int) -> Bool ;
+frgn __get_env_int(name: String) -> Int ;
+
+let count: Int = 0;
+let N: Int = __get_env_int("BOUND");
+let seed: Int = 42;
+let max_flips: Int = 0;
+let checksum: Int = 0;
+
+let p0: Int = 0;
+let p1: Int = 1;
+let p2: Int = 2;
+let p3: Int = 3;
+let p4: Int = 4;
+let p5: Int = 5;
+let p6: Int = 6;
+let p7: Int = 7;
+let p8: Int = 8;
+let p9: Int = 9;
+let p10: Int = 10;
+let p11: Int = 11;
+
+const IM: Int = 139968;
+const IA: Int = 3877;
+const IC: Int = 29573;
+
+rct txn fan [count < N][count == N] {
+    &seed = seed * IA;
+    &seed = seed + IC;
+    &seed = seed % IM;
+
+    &seed = p0;
+    &p0 = p1;
+    &p1 = p2;
+    &p2 = p3;
+    &p3 = p4;
+    &p4 = p5;
+    &p5 = p6;
+    &p6 = p7;
+    &p7 = p8;
+    &p8 = p9;
+    &p9 = p10;
+    &p10 = p11;
+    &p11 = seed;
+
+    &checksum = checksum + seed % 13;
+    &max_flips = max_flips + checksum % 17;
+
+    &count = count + 1;
+
+    [count % 5000000 == 0] {
+        __print_int(checksum);
+    };
+    [count == N] {
+        term! -> __print_int(checksum);
+    };
+    term;
+};
