@@ -149,3 +149,36 @@ During body emission, TermBang handler checks loop_exit_label:
   If set: emit br label %done (instead of ret)
   If None: emit ret (original behavior, for non-loop contexts)
 ```
+
+## Reactor / Async / Trigger Flow (2026-06-11)
+
+```
+Program with rct async txn @NHz or trg declarations
+  │
+  ▼
+Reactor::build_from_program()
+  ├── ReactiveTransaction constructed per rct txn:
+  │     name, contract, body, is_async, reactor_speed, dependencies
+  │     is_async and reactor_speed copied directly from parsed Transaction
+  ├── TopLevel::Trigger stored in triggers map:
+  │     HashMap<String, TriggerDeclaration>
+  └── last_fired timestamps initialized: vec![Instant::now(); N_transactions]
+
+  │
+  ├── run_reactor (convergent, existing):
+  │     Loop on dirty_preconditions → convergence → break
+  │     Used for programs without async/triggers
+  │
+  └── run_reactor_continuous (event-driven, new):
+        Loop:
+          (1) reactor.run(interp)         — responsive convergence
+          (2) reactor.fire_due_async_txns  — polled @Hz transactions
+          (3) reactor.run(interp)         — catch cascades from (2)
+          (4) sleep 1ms                   — yield to OS
+
+fire_due_async_txns logic:
+  for each transaction with is_async && reactor_speed.is_some():
+    interval_ms = 1000 / hz
+    if last_fired[idx].elapsed() >= interval_ms:
+      mark dirty, fire transaction, update last_fired[idx]
+```

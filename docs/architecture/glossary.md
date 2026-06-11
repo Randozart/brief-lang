@@ -29,3 +29,10 @@
 | **SLP hazard** | Analysis that estimates register pressure from SLP vectorization candidates and disables SLP when spills would occur. |
 | **Precomputation budget** | `--optimize-budget` flag (default 256). Programs with all-const inputs are fully precomputed up to this budget. `--prod` sets budget to `u64::MAX`. |
 | **TermBang (term!)** | Program exit statement. With swan song: `term! -> fn();`. In reactive loops, emits `br %done` (not `ret`), enabling LLVM loop unrolling. |
+| **ReactiveTransaction** | Struct representing a single reactive transaction in the reactor. Contains `name`, `contract`, `body`, `is_async`, `reactor_speed`, `dependencies`. Built from `TopLevel::Transaction` at reactor construction time. |
+| **Reactor** | Event-driven execution engine for reactive transactions. Maintains `transactions` list, `dirty_preconditions` set, `dependency_map`, `triggers` map, and `last_fired` timestamps. |
+| **fire_due_async_txns** | Reactor method that fires transactions whose `@Hz` interval has elapsed. Checks `is_async && reactor_speed.is_some()`, compares `last_fired[idx]` elapsed against `1000/hz` ms. Only fires in continuous mode. |
+| **run_reactor_continuous** | Event-driven loop that interleaves responsive convergence (Reactor::run) with polled async firing (fire_due_async_txns). Sleeps 1ms between cycles. Used when any transaction has `is_async = true` or `reactor_speed` is set. |
+| **Responsive transaction** | `rct txn` — fires immediately when its preconditions become dirty. No tick, no timer. Existing convergence loop behavior. |
+| **Polled transaction** | `rct async txn @NHz` — fires at N Hz regardless of dirty state. The `@Hz` annotates a timer-backed trigger. Pre/post conditions still enforced. |
+| **Event-driven trigger** | `trg name: Type @ link <ffi_fn>` — FFI-backed trigger. When the linked FFI function returns a non-void value, the trigger variable is marked dirty and convergence runs. |
