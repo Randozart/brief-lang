@@ -4146,6 +4146,57 @@ mod tests {
     }
 
     #[test]
+    fn test_multislice_regex_mask_on_list() {
+        let mut i = Interpreter::new();
+        let list = Value::List(vec![Value::String("hello".into()), Value::String("world".into()),
+            Value::String("abc".into()), Value::String("wow".into())]);
+        i.state.insert("xs".to_string(), list);
+        // xs[;@\"^[hw]\"] — keep strings starting with 'h' or 'w' -> hello, world, wow
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![BracketOp::Mask(Box::new(
+                Expr::RegexLiteral("^[hw]".to_string())
+            ))],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::String("hello".into()), Value::String("world".into()),
+            Value::String("wow".into()),
+        ]));
+    }
+
+    #[test]
+    fn test_multislice_regex_mask_on_atomic_int() {
+        let mut i = Interpreter::new();
+        i.state.insert("xs".to_string(), Value::Int(15561));
+        // xs[;@\"[15]\"] — keep chars '1' or '5' -> "1551" -> Int(1551)
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![BracketOp::Mask(Box::new(
+                Expr::RegexLiteral("[15]".to_string())
+            ))],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1551));
+    }
+
+    #[test]
+    fn test_slice_regex_mask_on_atomic_int() {
+        let mut i = Interpreter::new();
+        i.state.insert("xs".to_string(), Value::Int(15561));
+        // xs[0..5;@\"[15]\"] — slice [0..5] then keep chars '1' or '5' -> "1551" -> Int(1551)
+        let expr = Expr::Slice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            start: Some(Box::new(Expr::Integer(0))),
+            end: Some(Box::new(Expr::Integer(5))),
+            stride: None,
+            mask: Some(Box::new(Expr::RegexLiteral("[15]".to_string()))),
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1551));
+    }
+
+    #[test]
     fn test_sync_block_executes_statements_in_order() {
         let mut i = Interpreter::new();
         i.state.insert("x".to_string(), Value::Int(0));

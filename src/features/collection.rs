@@ -2,6 +2,22 @@ use crate::ast::{BracketOp, Expr, SliceCoordinate, Type};
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
 
+/// Evaluate a mask condition against an item value.
+/// Supports both Bool predicates and Regex matching.
+fn eval_mask_condition(ctx: &mut Interpreter, mask_expr: &Expr, item_value: &Value) -> Result<bool, RuntimeError> {
+    let prev = ctx.state.insert("_".into(), item_value.clone());
+    let cond = ctx.eval_expr(mask_expr)?;
+    if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
+    match cond {
+        Value::Bool(b) => Ok(b),
+        Value::Regex(ref dfa) => {
+            let s = ctx.value_to_string(item_value)?;
+            Ok(crate::analysis::dfa::execute_dfa(dfa, &s).is_some())
+        }
+        _ => Err(RuntimeError::TypeMismatch("Mask expression must evaluate to Bool or Regex".into())),
+    }
+}
+
 /// Decompose an atomic value to its visual `Char` fragments.
 /// `Int(15561)` → `['1', '5', '5', '6', '1']`
 fn decompose_atomic_to_chars(val: &Value) -> Option<Vec<char>> {
@@ -164,10 +180,7 @@ impl ExprEval for SliceExpr {
             if let Some(mask_expr) = &self.mask {
                 let mut filtered = Vec::new();
                 for item in result {
-                    let prev = ctx.state.insert("_".into(), Value::Char(item));
-                    let cond = ctx.eval_expr(mask_expr)?;
-                    if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
-                    if cond == Value::Bool(true) { filtered.push(item); }
+                    if eval_mask_condition(ctx, mask_expr, &Value::Char(item))? { filtered.push(item); }
                 }
                 result = filtered;
             }
@@ -186,10 +199,7 @@ impl ExprEval for SliceExpr {
         if let Some(mask_expr) = &self.mask {
             let mut filtered = Vec::new();
             for item in result {
-                let prev = ctx.state.insert("_".into(), item.clone());
-                let cond = ctx.eval_expr(mask_expr)?;
-                if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
-                if cond == Value::Bool(true) { filtered.push(item); }
+                if eval_mask_condition(ctx, mask_expr, &item)? { filtered.push(item); }
             }
             result = filtered;
         }
@@ -215,10 +225,7 @@ impl ExprEval for MultiSliceExpr {
                     BracketOp::Mask(mask_expr) => {
                         let mut filtered = Vec::new();
                         for item in current {
-                            let prev = ctx.state.insert("_".into(), item.clone());
-                            let cond = ctx.eval_expr(mask_expr)?;
-                            if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
-                            if cond == Value::Bool(true) { filtered.push(item); }
+                            if eval_mask_condition(ctx, mask_expr, &item)? { filtered.push(item); }
                         }
                         current = filtered;
                     }
@@ -253,10 +260,7 @@ impl ExprEval for MultiSliceExpr {
                     let list = match current { Value::List(ref items) => items.clone(), _ => return Err(RuntimeError::TypeMismatch("Mask requires list".into())) };
                     let mut filtered = Vec::new();
                     for item in list {
-                        let prev = ctx.state.insert("_".into(), item.clone());
-                        let cond = ctx.eval_expr(mask_expr)?;
-                        if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
-                        if cond == Value::Bool(true) { filtered.push(item); }
+                        if eval_mask_condition(ctx, mask_expr, &item)? { filtered.push(item); }
                     }
                     current = Value::List(filtered);
                 }
