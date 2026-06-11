@@ -157,7 +157,7 @@ fn collect_strings_from_bracket_ops(ops: &[crate::ast::BracketOp], seen: &mut st
 
 fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match expr {
-        Expr::String(s) => {
+        Expr::String(s) | Expr::RegexLiteral(s) => {
             if !seen.contains(s) {
                 seen.insert(s.clone());
                 out.push(s.clone());
@@ -182,7 +182,6 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
             collect_strings_expr(e, seen, out);
         }
-        Expr::OwnedRef(_) | Expr::PriorState(_) => {}
         // Collections
         Expr::ListLiteral(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
         Expr::MapLiteral(pairs) => { for (k, v) in pairs { collect_strings_expr(k, seen, out); collect_strings_expr(v, seen, out); } }
@@ -279,7 +278,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::EllipsisExpr(_) | Expr::DbvlTable { .. } | Expr::DbvlTableExpr(_) => {}
         // Terminals
         Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
-        | Expr::Ellipsis | Expr::TypeRef(_) => {}
+        | Expr::Ellipsis | Expr::TypeRef(_) | Expr::OwnedRef(_) | Expr::PriorState(_) => {}
     }
 }
 

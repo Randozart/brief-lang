@@ -23,7 +23,7 @@ impl LlvmBackend {
                 self.reg_float_cache.insert(fl.clone(), fl.clone());
                 return TypedRegister { name: fl, ty: Type::Float };
             }
-            Expr::String(s) => {
+            Expr::String(s) | Expr::RegexLiteral(s) => {
                 let si = self.string_constants.iter().position(|x| x == s).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let p = format!("%sp{}", self.txn_counter); self.txn_counter += 1;
@@ -374,6 +374,36 @@ impl LlvmBackend {
                     }
                     Intrinsic::Keys | Intrinsic::Values => {
                         writeln!(out, "{}{} = add i64 0, 0 ; keys/values stub", indent, v).ok();
+                    }
+                    // System I/O intrinsics (stubs)
+                    Intrinsic::Println => {
+                        writeln!(out, "{}{} = add i64 0, 1 ; println stub (returns true)", indent, v).ok();
+                    }
+                    Intrinsic::Readln => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; readln stub", indent, v).ok();
+                    }
+                    Intrinsic::Exit => {
+                        writeln!(out, "{}call void @exit(i64 0) ; exit stub", indent).ok();
+                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                    }
+                    Intrinsic::Time => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; time stub", indent, v).ok();
+                    }
+                    Intrinsic::ReadFile => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; read_file stub", indent, v).ok();
+                    }
+                    Intrinsic::WriteFile => {
+                        writeln!(out, "{}{} = add i64 0, 1 ; write_file stub (returns true)", indent, v).ok();
+                    }
+                    Intrinsic::Sleep => {
+                        writeln!(out, "{}{} = add i64 0, 1 ; sleep stub (returns true)", indent, v).ok();
+                    }
+                    Intrinsic::Socket | Intrinsic::Bind | Intrinsic::Listen | Intrinsic::Accept => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; socket/bind/listen/accept stub", indent, v).ok();
+                    }
+                    // Data intrinsics (stubs)
+                    Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();
                     }
                 }
             }

@@ -1314,6 +1314,7 @@ impl Interpreter {
             Expr::Integer(v) => Ok(Value::Int(*v)),
             Expr::Float(v) => Ok(Value::Float(*v)),
             Expr::String(v) => Ok(Value::String(v.clone())),
+            Expr::RegexLiteral(v) => Ok(Value::String(v.clone())),
             Expr::Char(v) => Ok(Value::Char(*v)),
             Expr::Bool(v) => Ok(Value::Bool(*v)),
             Expr::Term => self.state.get("term").cloned()
@@ -1505,6 +1506,79 @@ impl Interpreter {
                             Value::HashMap(m) => Ok(Value::List(m.into_values().collect())),
                             v => Err(RuntimeError::TypeMismatch(format!("values requires HashMap, got {:?}", v))),
                         }
+                    }
+                    // System I/O intrinsics
+                    Intrinsic::Println => {
+                        let v = values.remove(0);
+                        println!("{}", v);
+                        Ok(Value::Bool(true))
+                    }
+                    Intrinsic::Readln => {
+                        let mut buf = String::new();
+                        let _ = std::io::stdin().read_line(&mut buf);
+                        Ok(Value::String(buf.trim_end().to_string()))
+                    }
+                    Intrinsic::Exit => {
+                        let code = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            _ => 0,
+                        };
+                        std::process::exit(code);
+                    }
+                    Intrinsic::Time => {
+                        use std::time::{SystemTime, UNIX_EPOCH};
+                        let nanos = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos() as i64;
+                        Ok(Value::Int(nanos))
+                    }
+                    Intrinsic::ReadFile => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("read_file requires String, got {:?}", v))),
+                        };
+                        match std::fs::read_to_string(&path) {
+                            Ok(contents) => Ok(Value::String(contents)),
+                            Err(e) => Err(RuntimeError::TypeMismatch(format!("{}", e))),
+                        }
+                    }
+                    Intrinsic::WriteFile => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("write_file requires String, got {:?}", v))),
+                        };
+                        let data = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("write_file requires String, got {:?}", v))),
+                        };
+                        match std::fs::write(&path, &data) {
+                            Ok(_) => Ok(Value::Bool(true)),
+                            Err(e) => Err(RuntimeError::TypeMismatch(format!("{}", e))),
+                        }
+                    }
+                    Intrinsic::Sleep => {
+                        let ms = match values.remove(0) {
+                            Value::Int(n) => n as u64,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sleep requires Int, got {:?}", v))),
+                        };
+                        std::thread::sleep(std::time::Duration::from_millis(ms));
+                        Ok(Value::Bool(true))
+                    }
+                    Intrinsic::Socket => Ok(Value::Int(-1)),
+                    Intrinsic::Bind => Ok(Value::Bool(false)),
+                    Intrinsic::Listen => Ok(Value::Bool(false)),
+                    Intrinsic::Accept => Ok(Value::Int(-1)),
+                    // Data intrinsics
+                    Intrinsic::Sort => Ok(values.remove(0)),
+                    Intrinsic::Reverse => Ok(values.remove(0)),
+                    Intrinsic::Range => {
+                        let end = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("range requires Int, got {:?}", v))),
+                        };
+                        let list: Vec<Value> = (0..end).map(Value::Int).collect();
+                        Ok(Value::List(list))
                     }
                 }
             }

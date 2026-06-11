@@ -1275,6 +1275,12 @@ impl TypeChecker {
                     Intrinsic::Pop => Type::Int,
                     Intrinsic::Contains => Type::Bool,
                     Intrinsic::Keys | Intrinsic::Values => Type::Custom("List".to_string()),
+                    Intrinsic::Println | Intrinsic::WriteFile | Intrinsic::Sleep | Intrinsic::Bind | Intrinsic::Listen => Type::Bool,
+                    Intrinsic::Readln | Intrinsic::ReadFile => Type::String,
+                    Intrinsic::Exit => Type::Bool,
+                    Intrinsic::Time | Intrinsic::Socket | Intrinsic::Accept => Type::Int,
+                    Intrinsic::Sort | Intrinsic::Reverse => Type::Bool,
+                    Intrinsic::Range => Type::Custom("List".to_string()),
                 }
             }
             Expr::Call(name, args) => {

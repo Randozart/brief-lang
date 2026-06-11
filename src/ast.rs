@@ -462,6 +462,22 @@ pub enum Intrinsic {
     Contains,
     Keys,
     Values,
+    // System I/O intrinsics (Pass A - 2026-06-11)
+    Println,
+    Readln,
+    Exit,
+    Time,
+    ReadFile,
+    WriteFile,
+    Sleep,
+    Socket,
+    Bind,
+    Listen,
+    Accept,
+    // Data intrinsics (Pass A - 2026-06-11)
+    Sort,
+    Reverse,
+    Range,
 }
 
 impl Intrinsic {
@@ -482,6 +498,20 @@ impl Intrinsic {
             "contains" => Some(Intrinsic::Contains),
             "keys" => Some(Intrinsic::Keys),
             "values" => Some(Intrinsic::Values),
+            "println" => Some(Intrinsic::Println),
+            "readln" => Some(Intrinsic::Readln),
+            "exit" => Some(Intrinsic::Exit),
+            "time" => Some(Intrinsic::Time),
+            "read_file" => Some(Intrinsic::ReadFile),
+            "write_file" => Some(Intrinsic::WriteFile),
+            "sleep" => Some(Intrinsic::Sleep),
+            "socket" => Some(Intrinsic::Socket),
+            "bind" => Some(Intrinsic::Bind),
+            "listen" => Some(Intrinsic::Listen),
+            "accept" => Some(Intrinsic::Accept),
+            "sort" => Some(Intrinsic::Sort),
+            "reverse" => Some(Intrinsic::Reverse),
+            "range" => Some(Intrinsic::Range),
             _ => None,
         }
     }
@@ -503,6 +533,20 @@ impl Intrinsic {
             Intrinsic::Contains => "contains",
             Intrinsic::Keys => "keys",
             Intrinsic::Values => "values",
+            Intrinsic::Println => "println",
+            Intrinsic::Readln => "readln",
+            Intrinsic::Exit => "exit",
+            Intrinsic::Time => "time",
+            Intrinsic::ReadFile => "read_file",
+            Intrinsic::WriteFile => "write_file",
+            Intrinsic::Sleep => "sleep",
+            Intrinsic::Socket => "socket",
+            Intrinsic::Bind => "bind",
+            Intrinsic::Listen => "listen",
+            Intrinsic::Accept => "accept",
+            Intrinsic::Sort => "sort",
+            Intrinsic::Reverse => "reverse",
+            Intrinsic::Range => "range",
         }
     }
 }
@@ -512,6 +556,7 @@ pub enum Expr {
     Integer(i64),
     Float(f64),
     String(String),
+    RegexLiteral(String), // @"..." — regex pattern literal
     Char(char),  // NEW: Char literal
     Bool(bool),
     Term,
