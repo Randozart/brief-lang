@@ -234,8 +234,8 @@ impl LlvmBackend {
             // Call
             Expr::Call(name, args) => {
                 // Clone foreign info upfront to avoid borrow conflict with emit_expr
-                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType, Option<String>)> = self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone(), s.intrinsic_name.clone()));
-                if let Some((inputs, ret_type, intrinsic_name)) = frgn_sig {
+                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType)> = self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone()));
+                if let Some((inputs, ret_type)) = frgn_sig {
                     let mut marshaled: Vec<String> = Vec::new();
                     for (i, (_, arg_ty)) in inputs.iter().enumerate() {
                         if i < args.len() {
@@ -260,8 +260,7 @@ impl LlvmBackend {
                     };
                     let call_ret = if is_float_ret { "float" } else { "i64" };
                     let args_str = marshaled.join(", ");
-                    let call_target = intrinsic_name.as_deref().unwrap_or(name);
-                    writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, call_target, args_str).ok();
+                    writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, name, args_str).ok();
                     if is_float_ret {
                         let bi = format!("%fbi{}", self.txn_counter); self.txn_counter += 1;
                         let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;

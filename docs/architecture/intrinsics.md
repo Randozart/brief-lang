@@ -1,7 +1,7 @@
 # Intrinsics: `name#()` Syntax
 
 **Date added:** 2026-06-11
-**Status:** Design — not yet implemented
+**Status:** Implementation complete (Phase 4 cleanup done)
 
 ## Motivation
 
@@ -138,19 +138,19 @@ pub enum Expr {
 }
 ```
 
-## Migration from `as intrinsic`
+## Migration from `as intrinsic` (completed 2026-06-11)
 
-| Step | What |
-|---|---|
-| 1 | Add `Expr::IntrinsicCall` + `Intrinsic` enum to AST |
-| 2 | Add parser support for `name#(...)` |
-| 3 | Add `emit_intrinsic` to LLVM backend, interpreter, C backend |
-| 4 | Remove `ForeignSignature.intrinsic_name` field |
-| 5 | Remove `as intrinsic` parser code |
-| 6 | Update `lib/std/llvm.bv` users to use `name#()` |
-| 7 | Delete `lib/std/llvm.bv` |
-| 8 | Delete `lib/std/math.bv` |
-| 9 | Update `nbody_sqrt.bv` to use `sqrt#()` |
+| Step | What | Status |
+|---|---|---|
+| 1 | Add `Expr::IntrinsicCall` + `Intrinsic` enum to AST | ✅ |
+| 2 | Add parser support for `name#(...)` | ✅ |
+| 3 | Add `emit_intrinsic` to LLVM backend, interpreter | ✅ |
+| 4 | Remove `ForeignSignature.intrinsic_name` field | ✅ |
+| 5 | Remove `as intrinsic` parser code | ✅ |
+| 6 | Update `lib/std/llvm.bv` users to use `name#()` | ✅ |
+| 7 | Delete `lib/std/llvm.bv` | ✅ |
+| 8 | Delete `lib/std/math.bv` | ✅ |
+| 9 | Update `nbody_sqrt.bv` to use `sqrt#()` | ✅ |
 
 ## Method-style sugar
 

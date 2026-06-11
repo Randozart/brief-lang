@@ -4,7 +4,6 @@
 // Import this module to access all foreign functions.
 
 import "std/io";
-import "std/math";
 import "std/string";
 import "std/time";
 import "std/collections";

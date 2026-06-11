@@ -735,8 +735,7 @@ self.emit_declares(&mut out);
                 Type::String | Type::Data => "i8*",
                 _ => "i64",
             }).collect();
-            let llvm_name = sig.intrinsic_name.as_deref().unwrap_or(name);
-            write!(out, "declare {} @{}(", ret_ty, llvm_name).ok();
+            write!(out, "declare {} @{}(", ret_ty, name).ok();
             for (pi, pt) in param_tys.iter().enumerate() {
                 if pi > 0 { write!(out, ", ").ok(); }
                 write!(out, "{}", pt).ok();
