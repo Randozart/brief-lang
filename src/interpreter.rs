@@ -4133,14 +4133,16 @@ mod tests {
     }
 
     #[test]
-    fn test_multislice_stride_on_non_list_error() {
+    fn test_multislice_stride_on_int() {
         let mut i = Interpreter::new();
         i.state.insert("xs".to_string(), Value::Int(42));
         let expr = Expr::MultiSlice {
             value: Box::new(Expr::Identifier("xs".to_string())),
             ops: vec![BracketOp::Stride(Box::new(Expr::Integer(2)))],
         };
-        assert!(i.eval_expr(&expr).is_err());
+        // Int(42) decomposes to ['4', '2'], stride 2 gives ['4'], reconstructs to Int(4)
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(4));
     }
 
     #[test]

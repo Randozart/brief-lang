@@ -1393,6 +1393,9 @@ impl TypeChecker {
                 }
                 self.infer_expression(value)
             },
+            Expr::MultiSlice { value, .. } => {
+                self.infer_expression(value)
+            },
             Expr::FieldAccess(obj, field) => {
                 // Look up the field type from the struct definition
                 let obj_ty = self.infer_expression(obj);
@@ -1734,13 +1737,14 @@ Expr::ObjectLiteral(fields) => {
             },
             Expr::ProjectionExpr(_) | Expr::CallExpr(_)
             | Expr::ListLiteralExpr(_) | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_)
-            | Expr::SliceExpr(_) | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_)
+            | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_)
             | Expr::StructInstanceExpr(_) | Expr::ObjectLiteralExpr(_)
             | Expr::TupleExpr(_) | Expr::TupleDestructureExpr(_) | Expr::EllipsisExpr(_)
             | Expr::ArrowMutExpr(_) | Expr::ArrowDiscardExpr(_) | Expr::ArrowTransferExpr(_)
             | Expr::PatternMatchExpr(_) | Expr::MatchExpr(_) | Expr::BlockExpr(_)
             | Expr::SigCallExpr(_) | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_)
             | Expr::TypeRef(_) => Type::Custom("unknown".to_string()),
+            Expr::SliceExpr(e) => self.infer_expression(&e.value),
             _ => Type::Custom("unknown".to_string()),
         }
     }

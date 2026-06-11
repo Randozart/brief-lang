@@ -1,6 +1,52 @@
 use crate::ast::{BracketOp, Expr, SliceCoordinate, Type};
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
+
+/// Decompose an atomic value to its visual `Char` fragments.
+/// `Int(15561)` → `['1', '5', '5', '6', '1']`
+fn decompose_atomic_to_chars(val: &Value) -> Option<Vec<char>> {
+    match val {
+        Value::Int(n) => Some(n.to_string().chars().collect()),
+        Value::Float(f) => Some({
+            let s = format!("{:.}", f);
+            // Format without trailing zeros for cleaner reconstruction
+            if s.contains('.') {
+                let trimmed = s.trim_end_matches('0');
+                if trimmed.ends_with('.') { format!("{}0", trimmed) } else { trimmed.to_string() }
+            } else { s }
+            .chars().collect()
+        }),
+        Value::Bool(b) => Some(b.to_string().chars().collect()),
+        Value::Char(c) => Some(vec![*c]),
+        _ => None,
+    }
+}
+
+/// Reconstruct an atomic value from `Char` fragments.
+/// `['1', '6', '1']` from original `Int(15561)` → `Int(161)`
+fn reconstruct_from_chars(chars: &[char], original: &Value) -> Option<Value> {
+    match original {
+        Value::Int(_) => {
+            let s: String = chars.iter().collect();
+            s.parse::<i64>().ok().map(Value::Int)
+        }
+        Value::Float(_) => {
+            let s: String = chars.iter().collect();
+            s.parse::<f64>().ok().map(Value::Float)
+        }
+        Value::Bool(_) => {
+            let s: String = chars.iter().collect();
+            match s.as_str() {
+                "true" => Some(Value::Bool(true)),
+                "false" => Some(Value::Bool(false)),
+                _ => None,
+            }
+        }
+        Value::Char(_) => chars.first().copied().map(Value::Char),
+        _ => None,
+    }
+}
+
 use crate::typechecker::TypeChecker;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,12 +143,38 @@ impl ExprEval for ListIndexExpr {
 impl ExprEval for SliceExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _: &ExprDispatch) -> Result<Value, RuntimeError> {
         let list_val = ctx.eval_expr(&self.value)?;
+
+        // Handle String atomically (existing behavior)
         if let Value::String(ref s) = list_val {
             let len = s.len();
             let start_idx = self.start.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }, _ => len }).unwrap_or(0);
             let end_idx = self.end.as_ref().map(|e| match ctx.eval_expr(e) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }, _ => len }).unwrap_or(len);
             return Ok(Value::String(if start_idx < end_idx { s[start_idx..end_idx.min(len)].to_string() } else { String::new() }));
         }
+
+        // Handle atomic types (Int, Float, Bool, Char) via visual char decomposition
+        if let Some(chars) = decompose_atomic_to_chars(&list_val) {
+            let len = chars.len();
+            let start_idx = self.start.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }, _ => len }).unwrap_or(0);
+            let end_idx = self.end.as_ref().map(|e| match ctx.eval_expr(e) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }, _ => len }).unwrap_or(len);
+            let stride = self.stride.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => n as usize, _ => 1 }).unwrap_or(1);
+            let mut result: Vec<char> = Vec::new();
+            let mut idx = start_idx;
+            while idx < end_idx && idx < len { result.push(chars[idx]); if stride == 0 { break; } idx += stride; }
+            if let Some(mask_expr) = &self.mask {
+                let mut filtered = Vec::new();
+                for item in result {
+                    let prev = ctx.state.insert("_".into(), Value::Char(item));
+                    let cond = ctx.eval_expr(mask_expr)?;
+                    if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
+                    if cond == Value::Bool(true) { filtered.push(item); }
+                }
+                result = filtered;
+            }
+            return reconstruct_from_chars(&result, &list_val)
+                .ok_or_else(|| RuntimeError::TypeMismatch("Empty slice result".into()));
+        }
+
         let list = match list_val { Value::List(vec) => vec, _ => return Err(RuntimeError::TypeMismatch("Cannot slice non-list".into())) };
         let len = list.len();
         let start_idx = self.start.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n) as usize } else { n as usize }, _ => 0 }).unwrap_or(0);
@@ -128,6 +200,38 @@ impl ExprEval for SliceExpr {
 impl ExprEval for MultiSliceExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _: &ExprDispatch) -> Result<Value, RuntimeError> {
         let base = ctx.eval_expr(&self.value)?;
+
+        // Atomic types (Int, Float, Bool, Char): decompose, apply ops, reconstruct
+        if matches!(base, Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_)) {
+            let chars = decompose_atomic_to_chars(&base).ok_or_else(|| RuntimeError::TypeMismatch("Cannot decompose atomic value".into()))?;
+            let mut current: Vec<Value> = chars.iter().map(|&c| Value::Char(c)).collect();
+
+            for op in &self.ops {
+                match op {
+                    BracketOp::Coord(_) => {}
+                    BracketOp::Stride(stride_expr) => {
+                        match ctx.eval_expr(stride_expr)? { Value::Int(n) if n > 0 => current = current.into_iter().step_by(n as usize).collect(), _ => return Err(RuntimeError::TypeMismatch("Stride must be positive Int".into())) }
+                    }
+                    BracketOp::Mask(mask_expr) => {
+                        let mut filtered = Vec::new();
+                        for item in current {
+                            let prev = ctx.state.insert("_".into(), item.clone());
+                            let cond = ctx.eval_expr(mask_expr)?;
+                            if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
+                            if cond == Value::Bool(true) { filtered.push(item); }
+                        }
+                        current = filtered;
+                    }
+                }
+            }
+
+            let result_chars: Vec<char> = current.iter().filter_map(|v| if let Value::Char(c) = v { Some(*c) } else { None }).collect();
+            return reconstruct_from_chars(&result_chars, &base)
+                .ok_or_else(|| RuntimeError::TypeMismatch("Empty bracket result on atomic value".into()));
+        }
+
+        // Non-atomic: existing behavior
+        use crate::ast::SliceCoordinate;
         let coords: Vec<SliceCoordinate> = self.ops.iter().filter_map(|op| { if let BracketOp::Coord(c) = op { Some(c.clone()) } else { None } }).collect();
         let mut current = if coords.is_empty() { base } else {
             let has_ellipsis = coords.iter().any(|c| matches!(c, SliceCoordinate::Ellipsis));
@@ -137,6 +241,7 @@ impl ExprEval for MultiSliceExpr {
                 ctx.apply_multi_slice_coords(&base, &expanded)?
             } else { ctx.apply_multi_slice_coords(&base, &coords)? }
         };
+
         for op in &self.ops {
             match op {
                 BracketOp::Coord(_) => {}
@@ -157,6 +262,7 @@ impl ExprEval for MultiSliceExpr {
                 }
             }
         }
+
         Ok(current)
     }
 }
