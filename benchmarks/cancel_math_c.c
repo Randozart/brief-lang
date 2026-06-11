@@ -18,7 +18,7 @@ int main(void) {
         acc += count;
         count++;
         if (count % 5000000 == 0)
-            fprintf(stderr, "%ld\n", acc);
+            fprintf(stdout, "%ld\n", acc);
     }
 
     return 0;

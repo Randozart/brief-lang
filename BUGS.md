@@ -984,3 +984,55 @@ arithmetic | ~50 | ~50 | Equal
 The arithmetic ops are the same between C and Brief for fannkuch. All the overhead is
 from memory (load/store/GEP). If Brief used phi nodes like Clang, the gap would close
 to ~1.0×.
+
+## 2026-06-11 — fannkuch_redux: silent correctness failure + 3.85x performance gap
+
+**Issue**: fannkuch_redux benchmark produces no output (empty stdout) while the C
+reference outputs `10` (to stderr). The benchmark harness reports MATCH because
+both stdout captures are empty — C's `fprintf(stderr)` is discarded by `2>/dev/null`.
+
+**Root Cause**: Two independent bugs:
+
+1. **Output guard never fires**: `[count == N] { term! -> __print_int(checksum); }`
+   reads the pre-tick value of `count`, which is always `< N` at body start.
+   The body fires while `count < N` (precondition), and the `#!exit count == N`
+   fires at end-of-tick (after increment). The guard sees `count == N-1` and
+   never fires. This is the SAME issue as nbody_sqrt's `[count == bound]` guard,
+   but nbody_sqrt has an alternate output path `[count % 5000000 == 0]`.
+
+2. **Algorithm mismatch**: The Brief code uses `seed % 13` for the checksum
+   accumulation, while the C reference uses `saved % 13` where `saved = p0`
+   (the first permutation element). These are different values — `seed` is the
+   LCG output (~0-139967), while `saved` / `p0` is always 0-11. The programs
+   compute completely different checksums.
+
+**Fix**:
+1. Changed checksum accumulation to use `p0` (matching C's `saved`):
+   `let saved: Int = p0;` before the rotation, then `&checksum = checksum + saved % 13;`
+   after rotation.
+2. Changed output to compute final checksum into a local `let final_checksum`
+   variable (not subject to prior-state) and fire `term! -> __print_int(final_checksum)`
+   at `[count == N - 1]` — the last body execution before exit.
+3. Changed C reference from `fprintf(stderr, ...)` to `fprintf(stdout, ...)` so
+   the harness captures it correctly.
+
+**Lesson**: Benchmark correctness verification must capture stdout AND stderr,
+or agree on an output channel. Guard conditions in `rct txn` bodies always read
+pre-tick state — `[count == N]` is NEVER true at body start for `[count < N][count == N]`
+contracts. Use local `let` variables to compute values outside prior-state scope.
+
+## 2026-06-11 — float_math_nonzero: 1.09x prior-state overhead (accepted)
+
+**Issue**: float_math_nonzero is 1.09x slower than C (0.183s vs 0.167s).
+
+**Root Cause**: Prior-state bookkeeping for the 3 state variables (x0, x1, x2)
+adds 3 extra loads + 3 extra GEP stores per tick. With 15 ALU operations (9 mul,
+6 add), 6 memory operations add ~9% overhead.
+
+**Decision**: Accepted. The overhead is inherent to Brief's prior-state semantics.
+LLVM's SROA already absorbs most of the cost. Closing this gap would require
+per-field prior-state elision (skip save/restore for fields that are read-only or
+write-only within a tick), which is a future optimization target.
+
+**Before/After**: No fix applied — 1.09x is within acceptable noise for this
+benchmark type.

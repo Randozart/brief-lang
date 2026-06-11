@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
         }
         count++;
         if (count % 5000000 == 0) {
-            fprintf(stderr, "%ld\n", count);
+            fprintf(stdout, "%ld\n", count);
         }
     }
     return 0;

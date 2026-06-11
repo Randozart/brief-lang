@@ -41,12 +41,12 @@ int main(void) {
         // Periodic output — same timing as Brief's [count % 5000000 == 0] guard
         // (fires on pre-increment count, matching Brief's pre-tick guard)
         if (count % 5000000 == 0)
-            fprintf(stderr, "%ld\n", escapes);
+            fprintf(stdout, "%ld\n", escapes);
 
         count++;
     }
 
     // Final output — same as Brief's [count == N] -> __print_int(escapes)
-    fprintf(stderr, "%ld\n", escapes);
+    fprintf(stdout, "%ld\n", escapes);
     return 0;
 }

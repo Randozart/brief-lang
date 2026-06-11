@@ -1,8 +1,6 @@
 // Fannkuch-Redux — Permutation operations (Brief-idiomatic flat fields)
 // Exercises: 16 flat Int fields, LCG, convergence loop.
-// Brief's model: flat fields → SROA → scalar registers. No arrays needed.
-
-#!exit count == N && checksum >= 0 && max_flips >= 0;
+// Symmetric with C reference: saves p0 before rotation for checksum.
 
 import "link/brief_rt.c";
 
@@ -39,8 +37,10 @@ rct txn fan [count < N][count == N] {
     &seed = seed + IC;
     &seed = seed % IM;
 
+    // Save p0 before rotation (matches C: `long saved = p0;`)
+    let saved: Int = p0;
+
     // Rotate: every field gets the value of the next field (cyclically)
-    &seed = p0;
     &p0 = p1;
     &p1 = p2;
     &p2 = p3;
@@ -52,15 +52,19 @@ rct txn fan [count < N][count == N] {
     &p8 = p9;
     &p9 = p10;
     &p10 = p11;
-    &p11 = seed;
+    &p11 = seed;    // old p0 wraps to the end
 
-    &checksum = checksum + seed % 13;
+    // Compute final checksum into a local (not subject to prior-state)
+    // so it can be printed before program exit.
+    let final_checksum: Int = checksum + saved % 13;
+
+    &checksum = checksum + saved % 13;
     &max_flips = max_flips + checksum % 17;
 
     &count = count + 1;
 
-    [count == N] {
-        term! -> __print_int(checksum);
+    [count == N - 1] {
+        term! -> __print_int(final_checksum);
     };
     term;
 };

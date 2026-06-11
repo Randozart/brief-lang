@@ -13,7 +13,7 @@ int main(void) {
     while (reg != 0) {
         reg &= reg - 1;
         if (reg % 1000000 == 0)
-            fprintf(stderr, "%ld\n", (long)reg);
+            fprintf(stdout, "%ld\n", (long)reg);
     }
 
     return (int)reg;

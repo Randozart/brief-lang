@@ -36,6 +36,6 @@ int main(void) {
 
         count++;
     }
-    fprintf(stderr, "%ld\n", checksum);
+    fprintf(stdout, "%ld\n", checksum);
     return 0;
 }

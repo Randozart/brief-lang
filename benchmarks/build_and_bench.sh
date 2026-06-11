@@ -227,8 +227,8 @@ check_correctness() {
     fi
 
     local brief_out c_out
-    brief_out=$(BOUND=5 timeout 10 "$brief_bin" 2>/dev/null || echo "__FAIL__")
-    c_out=$(BOUND=5 timeout 10 "$c_bin" 2>/dev/null || echo "__FAIL__")
+    brief_out=$(BOUND=5 timeout 10 "$brief_bin" 2>&1 || echo "__FAIL__")
+    c_out=$(BOUND=5 timeout 10 "$c_bin" 2>&1 || echo "__FAIL__")
 
     if [ "$brief_out" = "$c_out" ]; then
         echo "  correctness: MATCH (output: \"${brief_out:0:40}\")"

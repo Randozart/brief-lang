@@ -14,7 +14,7 @@ int main(void) {
     for (; count < N; ) {
         count++;
         if (count % 5000000 == 0)
-            fprintf(stderr, "%ld\n", count);
+            fprintf(stdout, "%ld\n", count);
     }
 
     return 0;

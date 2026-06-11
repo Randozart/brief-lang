@@ -22,7 +22,7 @@ int main(void) {
         count = (count + R1) - R2;
 
         if (count % 5000000 == 0)
-            fprintf(stderr, "%ld\n", acc);
+            fprintf(stdout, "%ld\n", acc);
     }
 
     return 0;

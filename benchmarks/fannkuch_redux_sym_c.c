@@ -37,8 +37,8 @@ int main(void) {
         count++;
 
         if (count % 5000000 == 0)
-            fprintf(stderr, "%ld\n", checksum);
+            fprintf(stdout, "%ld\n", checksum);
     }
-    fprintf(stderr, "%ld\n", checksum);
+    fprintf(stdout, "%ld\n", checksum);
     return 0;
 }

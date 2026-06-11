@@ -23,7 +23,7 @@ int main(void) {
         chksum += hash % 13;
 
         if (count % 5000000 == 0)
-            fprintf(stderr, "%lld\n", (long long)chksum);
+            fprintf(stdout, "%lld\n", (long long)chksum);
     }
     return 0;
 }

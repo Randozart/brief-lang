@@ -69,7 +69,7 @@ int main(void) {
             float energy = x0 * x0 + p00 + p11 + p22;
             float ei = x1 * x1 + p01 + p12;
             float ej = x2 * x2 + p02 + p21;
-            fprintf(stderr, "%.9f\n", (double)(energy + ei + ej));
+            fprintf(stdout, "%.9f\n", (double)(energy + ei + ej));
         }
     }
     return 0;

@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
         count++;
         if (count % 5000000 == 0) {
             float trace = p00 + p01 + p02 + p10 + p11 + p12 + p20 + p21 + p22;
-            fprintf(stderr, "%.9f\n", (double)(x0 + x1 + x2 + trace));
+            fprintf(stdout, "%.9f\n", (double)(x0 + x1 + x2 + trace));
         }
     }
     return 0;

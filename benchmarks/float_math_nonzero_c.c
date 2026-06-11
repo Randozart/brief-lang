@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
         count++;
         if (count % 5000000 == 0) {
             float trace = p00 + p11 + p22;
-            fprintf(stderr, "%.9f\n", (double)(x0 + x1 + x2 + trace));
+            fprintf(stdout, "%.9f\n", (double)(x0 + x1 + x2 + trace));
         }
     }
     return 0;

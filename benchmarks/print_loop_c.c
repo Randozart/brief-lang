@@ -12,7 +12,7 @@ int main(void) {
     while (ops < N) {
         ops++;
         if (ops % PRINT_INTERVAL == 0) {
-            fprintf(stderr, "%ld\n", ops);
+            fprintf(stdout, "%ld\n", ops);
         }
     }
 
