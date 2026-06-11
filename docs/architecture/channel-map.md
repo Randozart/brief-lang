@@ -1,4 +1,4 @@
-<!-- 2026-06-09 -->
+<!-- 2026-06-11 -->
 
 # Channel Map — Data Flow Between Compiler Passes
 
@@ -11,86 +11,141 @@ Source text
 Lexer ──────────► Vec<Token>
   │
   ▼
-Parser ─────────► Program { items: Vec<TopLevel>, comments, attrs, ... }
-  │
+Parser ─────────► Program { items: Vec<TopLevel>, comments, attrs, exit_condition }
+  │               TopLevel::Statement(Box<Statement>) — top-level executable stmts
   ▼
 Type-Universe ────► TypeUniverse (frozen map of resolved type metadata)
-  │                 TypeDef declarations validated, chain-resolved
-  ▼
-Import Resolver ──► Program (resolved paths, validated imports)
   │
+  ▼
+Import Resolver ──► Program (resolved paths, validated imports, synthesized imports)
+  │
+  ├──► Program::synthesize_init_txn() — wraps TopLevel::Statement in __init txn
+  │     (called in run_llvm_compile and run_check after import resolution)
   ▼
 Desugarer ────────► Program (sugar constructs lowered to core AST)
-  │
+  │                 @"..." → Expr::RegexLiteral
+  │                 name#() → Expr::IntrinsicCall
   ▼
 Typechecker ──────► Program (annotated with types), TypecheckContext
   │                 Routes Expr variants through ExprTypecheck trait
-  │                 Routes Statement variants inline (infer_expression is private)
+  ▼
+EqSaturation ─────► Program (simplified via 5-pass fixpoint rewrite)
+  │                 9 rules: add-zero, mul-one, sub-self, double-neg, etc.
   ▼
 Proof Engine ──────► Vec<ProofError> (contracts verified symbolically)
-  │                 check_convergence: syntactic convergence detection
-  │                   - AND/OR precondition extraction
-  │                   - Popcount decay (reg & (reg - 1))
-  │                   - Algebraic cancellation (count + (R + 1 - R))
-  │                   - Compound increment ((count + N) - M)
-  │                 enumerate_paths_recursive: path exploration
-  │                   - Guard-taken paths now continue to term
-  ▼
-Annotator ─────────► Program (file attributes processed)
   │
   ▼
-Analysis ──────────► AnalysisResults {
-    call_graph, parameter_ranges, fusable_pairs,
-    dataflow_errors, transition_graph, region_analyzer
-  }
+Annotator ────────► Program (file-level attributes processed)
   │
   ▼
-Codegen ───────────► String (target code)
-  │                 Routes Expr variants through ExprCodegen* traits
-  │                 Routes Statement variants inline (dispatch not yet migrated)
+Analysis ─────────► AnalysisResult
+  │                 ├── CallGraph ──► backend dispatch selection
+  │                 ├── Dataflow ───► prior-state field analysis
+  │                 ├── TransitionGraph ──► dispatch collapse
+  │                 ├── SLP Hazard ──► compute_peak_live_floats → SLP enable/disable
+  │                 ├── RegionAnalyzer ──► precomputation budget
+  │                 └── PGO ──► branch weight annotations for LLVM
+  │
+  ▼
+Codegen ──────────► Output (LLVM IR / VHDL / Webstack / C)
+  │                 ├── Direct SSA loop (A006) — no async, no MMIO
+  │                 ├── Enum dispatch — folded multi-txn
+  │                 └── Reactor tick — async triggers or MMIO
+  │
+  ▼
+LLVM Pipeline ────► Binary
+  ├── llvm-link (LTO merge with brief_rt.c)
+  ├── opt -O3 -ffast-math
+  └── llc -O3 --mcpu=native
 ```
 
-## Data Contracts Between Passes
+## Top::Statement Synthesis Flow
 
-*Parse → Type-Universe*: Program — TypeDef items collected, chain-resolved, frozen
-*Type-Universe → Import*: Program + TypeUniverse (read-only reference for all subsequent passes)
-*Parse → Import*: Program with unresolved imports marked
-*Import → Desugar*: Fully resolved module graph
-*Desugar → Typecheck*: Core-level AST (no sugar)
-*Typecheck → Proof*: Typed AST, inferred types for all expressions
-*Proof → Annotator*: Program with verified contracts
-*Annotator → Analysis*: Fully attributed program
-*Analysis → Codegen*: AnalysisResults + fully analyzed Program
+```
+Parser produces TopLevel::Statement(s)
+  │
+  ▼
+Program::synthesize_init_txn() called after import resolution:
+  1. Collect all TopLevel::Statement indices in order
+  2. Remove from program.items
+  3. Find unique __booted_N name (check N=0..63)
+  4. Create StateDecl { name: "__booted_N", ty: Int, expr: Integer(0) }
+  5. Create synthesized body: [stmts..., &__booted_N = 1, term;]
+  6. Create rct txn __init [!__booted_N][__booted_N] { body }
+  7. Prepend state decl, append __init txn to program.items
+```
 
-## Pattern B Integration
+## IntrinsicCall Routing
 
-### Expr Dispatch
+```
+Parser produces Expr::IntrinsicCall { intrinsic, args }
+  │
+  ▼
+Typechecker: infers return type per intrinsic table (29 entries)
+  │
+  ▼
+Interpreter: dispatches on Intrinsic enum — native Rust implementation
+  │             ├── println# → println!("{}", v)
+  │             ├── read_file# → std::fs::read_to_string
+  │             └── sort# → passthrough (no-op in interpreter)
+  │
+  ▼
+LLVM Backend: dispatches on Intrinsic enum
+                ├── Sqrt → call float @llvm.sqrt.f32
+                ├── Println → printf with per-type format
+                └── Socket → add i64 0, -1 (stub)
+```
 
-Each pass file has a dispatch function (e.g., `eval_expr`, `infer_expression`,
-`emit_expr`) that matches on `Expr` variants. New Pattern B variants route
-through the `Expr*` traits; old variants are handled inline. In Phase 4,
-BinaryOp and UnaryOp feature files received real (non-stub) implementations
-for evaluation. All three backends route Pattern B variants through
-`ExprCodegenLLVM`/`VHDL`/`Webstack` traits.
+## Universal Bracket Routing
 
-### Statement Dispatch
+```
+Bracket expression parsed as:
+  val[start..end]      → Expr::Slice { value, start, end }
+  val[coord...]         → Expr::MultiSlice { value, ops }
+  val; mask             → BracketOp::Mask(predicate)
+  @"pattern"            → Expr::RegexLiteral(String)
 
-Statement features are defined in `src/features/stmt/` with 5 stub trait
-implementations each (StmtTypecheck, StmtEval, StmtCodegenLLVM/VHDL/Webstack).
-The dispatch migration is deferred to Phase 4 — pass files still match on
-old Statement::Assignment { ... } variants directly.
+  │
+  ▼
+DFA Compiler (analysis/dfa.rs):
+  @"pattern" literal → compile_to_dfa() → RegexPattern (DFA table)
+                     → Value::Regex(RegexPattern)
 
-### TopLevel Dispatch
+  │
+  ▼
+Interpreter:
+  SliceExpr::evaluate() → decompose_atomic_to_chars() for atomics
+  MultiSliceExpr::evaluate() → char decomposition + ops + reconstruction
+  eval_mask_condition() → Value::Bool | Value::Regex | Value::String
 
-TopLevel features are defined in `src/features/toplevel/` with stub struct
-definitions referencing the existing AST types. The pass files iterate
-over `program.items` matching on `TopLevel::Transaction`, `TopLevel::Struct`,
-etc. directly. No trait dispatch exists for TopLevel items yet.
+  Type-directed desugar:
+    atomic_val["string"] → coord desugars to regex filter on chars
 
-### Proof Engine
+  │
+  ▼
+LLVM Backend:
+  Expr::Slice / MultiSlice on atomics → passthrough (coord) or stub (stride/mask)
+  Expr::RegexLiteral → string constant pointer
+```
 
-The proof engine uses `check_convergence` for syntactic convergence detection
-and `verify_contract_implication` for symbolic post-condition checking. The
-convergence analysis handles AND/OR preconditions, popcount decay patterns,
-algebraic cancellation, and compound increment patterns. Guard-taken paths
-are fully explored through to `term`. All benchmarks pass type-checking.
+## Self-Loop Elimination (2026-06-11)
+
+```
+Precondition failure in direct SSA loop:
+  Before: br i1 %ok, label %body, label %skip_l → skip_l loops back to tick
+  After:  br i1 %ok, label %body, label %done_{name} → done_{name}: br done
+
+Body completion in direct SSA loop:
+  skip_l: (still loops back to tick for normal iteration)
+```
+
+## loop_exit_label (2026-06-11)
+
+```
+Before body emission:  self.loop_exit_label = Some("done".into())
+After body emission:   self.loop_exit_label = None
+
+During body emission, TermBang handler checks loop_exit_label:
+  If set: emit br label %done (instead of ret)
+  If None: emit ret (original behavior, for non-loop contexts)
+```
