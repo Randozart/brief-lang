@@ -20,9 +20,10 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Contract, Expr, Program, Statement, TopLevel};
+use crate::ast::{Contract, Expr, Program, Statement, TopLevel, TriggerDeclaration};
 use crate::interpreter::{Interpreter, Value};
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct ReactiveTransaction {
@@ -30,6 +31,7 @@ pub struct ReactiveTransaction {
     pub contract: Contract,
     pub body: Vec<Statement>,
     pub is_async: bool,
+    pub reactor_speed: Option<u32>,
     pub dependencies: HashSet<String>,
 }
 
@@ -38,6 +40,8 @@ pub struct Reactor {
     pub transactions: Vec<ReactiveTransaction>,
     pub dirty_preconditions: HashSet<usize>,
     pub dependency_map: HashMap<String, HashSet<usize>>,
+    pub triggers: HashMap<String, TriggerDeclaration>,
+    last_fired: Vec<Instant>,
 }
 
 impl Reactor {
@@ -46,19 +50,22 @@ impl Reactor {
             transactions: Vec::new(),
             dirty_preconditions: HashSet::new(),
             dependency_map: HashMap::new(),
+            triggers: HashMap::new(),
+            last_fired: Vec::new(),
         }
     }
 
     pub fn build_from_program(&mut self, program: &Program) {
         for item in &program.items {
-            if let TopLevel::Transaction(txn) = item {
-                if txn.is_reactive {
+            match item {
+                TopLevel::Transaction(txn) if txn.is_reactive => {
                     let deps: HashSet<String> = txn.dependencies.iter().cloned().collect();
                     let rtxn = ReactiveTransaction {
                         name: txn.name.clone(),
                         contract: txn.contract.clone(),
                         body: txn.body.clone(),
                         is_async: txn.is_async,
+                        reactor_speed: txn.reactor_speed,
                         dependencies: deps.clone(),
                     };
                     self.transactions.push(rtxn);
@@ -71,8 +78,13 @@ impl Reactor {
                     }
                     self.dirty_preconditions.insert(txn_idx);
                 }
+                TopLevel::Trigger(trg) => {
+                    self.triggers.insert(trg.name.clone(), trg.clone());
+                }
+                _ => {}
             }
         }
+        self.last_fired = vec![Instant::now(); self.transactions.len()];
     }
 
     pub fn mark_dirty(&mut self, variable: &str) {
@@ -149,6 +161,50 @@ impl Reactor {
 
     /// Check if an expression contains patterns that would lead to escape
     /// (e.g., error checks on FFI calls)
+    /// Fire async transactions whose @Hz interval has elapsed since last fire.
+    pub fn fire_due_async_txns(&mut self, interp: &mut Interpreter) -> Result<bool, crate::interpreter::RuntimeError> {
+        let mut fired = false;
+        for (idx, txn) in self.transactions.iter().enumerate() {
+            if !txn.is_async || txn.reactor_speed.is_none() {
+                continue;
+            }
+            if let Some(hz) = txn.reactor_speed {
+                let interval_ms = 1000 / hz;
+                if interval_ms == 0 { continue; }
+                let elapsed = self.last_fired.get(idx)
+                    .map(|t| t.elapsed().as_millis() as u64)
+                    .unwrap_or(u64::MAX);
+                if elapsed >= interval_ms as u64 {
+                    self.dirty_preconditions.insert(idx);
+                    // Run this single transaction
+                    if let Some(txn) = self.transactions.get(idx) {
+                        let pre_val = interp.eval_expr(&txn.contract.pre_condition)?;
+                        if pre_val == Value::Bool(true) {
+                            interp.prior_state = interp.state.clone();
+                            for stmt in &txn.body {
+                                if let Err(e) = interp.exec_stmt(stmt) {
+                                    match e {
+                                        crate::interpreter::RuntimeError::Escaped => {
+                                            interp.state = interp.prior_state.clone();
+                                        }
+                                        _ => {
+                                            interp.state = interp.prior_state.clone();
+                                            return Err(e);
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            fired = true;
+                        }
+                    }
+                    self.last_fired[idx] = Instant::now();
+                }
+            }
+        }
+        Ok(fired)
+    }
+
     fn contains_escape_in_expr(&self, _expr: &Expr, _interp: &mut Interpreter) -> bool {
         // TODO: Analyze expressions for error patterns that would trigger escapes
         // For now, conservative: don't skip
@@ -342,6 +398,32 @@ pub fn run_reactor(
     }
 
     Ok(())
+}
+
+/// Run reactor in continuous mode: event-driven loop that handles both
+/// responsive rct txn (convergence) and polled rct async txn @Hz (timer).
+///
+/// This is used when any transaction has `is_async = true` or
+/// `reactor_speed` is set. Exits on RuntimeError.
+pub fn run_reactor_continuous(
+    program: &Program,
+    interp: &mut Interpreter,
+) -> Result<(), crate::interpreter::RuntimeError> {
+    let mut reactor = Reactor::new();
+    reactor.build_from_program(program);
+
+    loop {
+        // (1) Responsive: convergence until quiescence
+        reactor.run(interp)?;
+
+        // (2) Polled: fire due async txns and cascade
+        reactor.fire_due_async_txns(interp)?;
+        reactor.run(interp)?;  // catch cascades
+
+        // (3) Short yield to OS — NOT a tick boundary.
+        //     Responsive txns fire immediately within step (1).
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[cfg(test)]
