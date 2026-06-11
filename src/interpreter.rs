@@ -4197,6 +4197,22 @@ mod tests {
     }
 
     #[test]
+    fn test_type_directed_desugar_int_regex_coord() {
+        let mut i = Interpreter::new();
+        i.state.insert("xs".to_string(), Value::Int(15561));
+        // xs["[15]"] — single string coord on Int, desugars to per-char regex filter
+        // "15561" → chars '1','5','5','6','1' → keep [15] → "1551" → Int(1551)
+        let expr = Expr::MultiSlice {
+            value: Box::new(Expr::Identifier("xs".to_string())),
+            ops: vec![BracketOp::Coord(SliceCoordinate::Index(Box::new(
+                Expr::String("[15]".to_string())
+            )))],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1551));
+    }
+
+    #[test]
     fn test_sync_block_executes_statements_in_order() {
         let mut i = Interpreter::new();
         i.state.insert("x".to_string(), Value::Int(0));

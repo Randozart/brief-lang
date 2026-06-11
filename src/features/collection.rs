@@ -14,6 +14,15 @@ fn eval_mask_condition(ctx: &mut Interpreter, mask_expr: &Expr, item_value: &Val
             let s = ctx.value_to_string(item_value)?;
             Ok(crate::analysis::dfa::execute_dfa(dfa, &s).is_some())
         }
+        Value::String(ref pattern) => {
+            match crate::analysis::dfa::compile_to_dfa(pattern) {
+                Ok(dfa) => {
+                    let s = ctx.value_to_string(item_value)?;
+                    Ok(crate::analysis::dfa::execute_dfa(&dfa, &s).is_some())
+                }
+                Err(e) => Err(RuntimeError::TypeMismatch(format!("Invalid regex: {}", e))),
+            }
+        }
         _ => Err(RuntimeError::TypeMismatch("Mask expression must evaluate to Bool or Regex".into())),
     }
 }
@@ -213,6 +222,31 @@ impl ExprEval for MultiSliceExpr {
 
         // Atomic types (Int, Float, Bool, Char): decompose, apply ops, reconstruct
         if matches!(base, Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_)) {
+            // Type-directed desugar: single string coord -> treat as regex filter
+            // e.g., 15561["[15]"] is equivalent to 15561[;@"[15]"]
+            if self.ops.len() == 1 {
+                if let BracketOp::Coord(crate::ast::SliceCoordinate::Index(coord_expr)) = &self.ops[0] {
+                    if let Ok(Value::String(ref pattern)) = ctx.eval_expr(coord_expr) {
+                        if let Ok(dfa) = crate::analysis::dfa::compile_to_dfa(pattern) {
+                            // Desugar: single string coord on atomic = per-char regex filter
+                            // e.g., 15561["[15]"] → decompose to ['1','5','5','6','1'],
+                            // keep chars matching [15] → ['1','5','5','1'] → Int(1551)
+                            let chars = decompose_atomic_to_chars(&base).unwrap_or_default();
+                            let mut filtered = Vec::new();
+                            for &c in &chars {
+                                let item = Value::Char(c);
+                                let s = ctx.value_to_string(&item)?;
+                                if crate::analysis::dfa::execute_dfa(&dfa, &s).is_some() {
+                                    filtered.push(c);
+                                }
+                            }
+                            return reconstruct_from_chars(&filtered, &base)
+                                .ok_or_else(|| RuntimeError::TypeMismatch("Empty regex filter result".into()));
+                        }
+                    }
+                }
+            }
+
             let chars = decompose_atomic_to_chars(&base).ok_or_else(|| RuntimeError::TypeMismatch("Cannot decompose atomic value".into()))?;
             let mut current: Vec<Value> = chars.iter().map(|&c| Value::Char(c)).collect();
 
