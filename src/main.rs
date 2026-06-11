@@ -811,6 +811,8 @@ fn run_check(
         }
     };
 
+    program.synthesize_init_txn();
+
     if verbose {
         println!("[Desugar] Desugaring...");
     }
@@ -2163,6 +2165,8 @@ fn run_llvm_compile(
     let mut program = import_resolver
         .resolve_imports(&program, file_path)
         .map_err(|e| format!("Import error: {}", e))?;
+
+    program.synthesize_init_txn();
 
     let mut schema_aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
     let mut schema_imports: Vec<String> = Vec::new();

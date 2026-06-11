@@ -1356,6 +1356,8 @@ pub enum TopLevel {
         domains: Vec<String>,
         item: Box<TopLevel>,
     },
+    /// Top-level executable statement — desugared to `__init` transaction at Pass 2.
+    Statement(Box<Statement>),
 }
 
 #[derive(Debug, Clone)]
@@ -1498,6 +1500,107 @@ pub struct Program {
     pub out_pragmas: Vec<String>,         // NEW: #!out(x, y);
     /// Default sig modifier for the file scope: Some(Out) or Some(Inline)
     pub default_sig_modifier: Option<SigModifier>,
+}
+
+impl Program {
+    /// Synthesize an `__init` transaction from top-level `Statement` items.
+    ///
+    /// Collects all `TopLevel::Statement` nodes in program order and wraps them
+    /// in a synthesized `rct txn __init [!__booted_N][__booted_N] { ... }`.
+    /// A collision-avoiding `__booted_N` flag is added as a state declaration.
+    pub fn synthesize_init_txn(&mut self) {
+        let stmt_indices: Vec<usize> = self.items.iter()
+            .enumerate()
+            .filter(|(_, item)| matches!(item, TopLevel::Statement(_)))
+            .map(|(i, _)| i)
+            .collect();
+
+        if stmt_indices.is_empty() {
+            return;
+        }
+
+        // Collect all statements in order
+        let mut body: Vec<Statement> = Vec::new();
+        for &i in stmt_indices.iter().rev() {
+            if let TopLevel::Statement(stmt) = self.items.remove(i) {
+                body.insert(0, *stmt);
+            }
+        }
+
+        // Find a unique booted flag name (collision avoidance)
+        let booted_name = self.find_unique_booted_name();
+
+        // Create state declaration: let __booted_N: Bool = false;
+        let state_decl = TopLevel::StateDecl(StateDecl {
+            name: booted_name.clone(),
+            ty: Type::Bool,
+            expr: Some(Expr::Bool(false)),
+            address: None,
+            bit_range: None,
+            range_constraint: None,
+            is_override: false,
+            os_mode: false,
+            attrs: vec![],
+            span: None,
+        });
+
+        // Add &__booted_N = true; before term
+        body.push(Statement::Assignment {
+            lhs: Expr::OwnedRef(booted_name.clone()),
+            expr: Expr::Bool(true),
+            timeout: None,
+            modifiers: vec![],
+        });
+        body.push(Statement::Term {
+            values: vec![],
+            modifiers: vec![],
+            swan_song: None,
+        });
+
+        // Create the __init transaction
+        let init_txn = TopLevel::Transaction(Transaction {
+            name: "__init".to_string(),
+            is_async: false,
+            is_reactive: true, // rct — fires once when !__booted_N
+            parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Not(Box::new(Expr::OwnedRef(booted_name.clone()))),
+                post_condition: Expr::OwnedRef(booted_name),
+                watchdog: None,
+                span: None,
+            },
+            body,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        });
+
+        // Prepend the state decl (declarations must precede transactions)
+        self.items.insert(0, state_decl);
+        self.items.push(init_txn);
+    }
+
+    fn find_unique_booted_name(&self) -> String {
+        let existing: std::collections::HashSet<&str> = self.items.iter().filter_map(|item| {
+            match item {
+                TopLevel::StateDecl(s) => Some(s.name.as_str()),
+                _ => None,
+            }
+        }).collect();
+        for n in 0..64u32 {
+            let name = format!("__booted_{}", n);
+            if !existing.contains(name.as_str()) {
+                return name;
+            }
+        }
+        "__booted_overflow".to_string()
+    }
 }
 
 /// FFI State captured from file-level attribute

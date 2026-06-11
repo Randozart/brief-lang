@@ -44,6 +44,9 @@ pub struct Parser<'a> {
     /// Track if we consumed a >> that should serve as > for parent generic level
     shr_consumed_as_gt: bool,
     strict_mode: StrictMode,
+    /// Track whether a top-level executable statement has been seen.
+    /// Declarations after the first statement are a compile error.
+    seen_top_level_stmt: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -61,6 +64,7 @@ impl<'a> Parser<'a> {
             current_line: 1,
             shr_consumed_as_gt: false,
             strict_mode: StrictMode::Off,
+            seen_top_level_stmt: false,
         }
     }
 
@@ -749,7 +753,19 @@ impl<'a> Parser<'a> {
         let dispatch_mode = Self::process_dispatch_attribute(&file_attrs);
 
         while self.current_token().is_some() {
-            items.push(self.parse_top_level()?);
+            let item = self.parse_top_level()?;
+            let is_stmt = matches!(&item, TopLevel::Statement(_));
+            if self.seen_top_level_stmt && !is_stmt {
+                let span = self.current_span().unwrap_or(crate::errors::Span { start: 0, end: 0, line: 0, column: 0 });
+                return Err(SyntaxError::InvalidStatement {
+                    reason: "Declarations must precede top-level executable statements".to_string(),
+                    span,
+                });
+            }
+            if is_stmt {
+                self.seen_top_level_stmt = true;
+            }
+            items.push(item);
         }
         Ok(Program {
             items,
@@ -871,7 +887,8 @@ impl<'a> Parser<'a> {
             else { TopLevel::Test { item: Box::new(item), groups: groups.to_vec() } }
         };
 
-        match self.current_token() {
+        let cur_tok = self.current_token().cloned();
+        match cur_tok {
             Some(Ok(Token::Import)) => {
                 return self.parse_import().map(|item| wrap_test(item, &test_groups));
             }
@@ -962,19 +979,44 @@ impl<'a> Parser<'a> {
                 let render_block = self.parse_render_block()?;
                 Ok(wrap_test(TopLevel::RenderBlock(render_block), &test_groups))
             }
-            Some(Ok(tok)) => Err(SyntaxError::UnexpectedToken {
-                expected: "top-level declaration".to_string(),
-                found: format!("{:?}", tok),
-                span,
-            }),
+            Some(Ok(tok)) => {
+                // Try to parse as a top-level executable statement
+                match self.try_parse_exec_statement() {
+                    Some(stmt) => Ok(TopLevel::Statement(Box::new(stmt))),
+                    None => Err(SyntaxError::UnexpectedToken {
+                        expected: "top-level declaration or statement".to_string(),
+                        found: format!("{:?}", tok),
+                        span,
+                    }),
+                }
+            }
             Some(Err(_)) => Err(SyntaxError::InvalidStatement {
                 reason: "Lexer error at top level".to_string(),
                 span,
             }),
             None => Err(SyntaxError::UnexpectedEOF {
-                expected: "top-level declaration".to_string(),
+                expected: "top-level declaration or statement".to_string(),
                 span,
             }),
+        }
+    }
+
+    /// Try to parse a top-level executable statement.
+    /// Returns `None` if the current token doesn't look like a statement start.
+    fn try_parse_exec_statement(&mut self) -> Option<Statement> {
+        let saved_current = self.current.clone();
+        let saved_peek = self.peek.clone();
+        let saved_pos = self.pos;
+        let saved_line = self.current_line;
+        match self.parse_statement() {
+            Ok(stmt) => Some(stmt),
+            Err(_) => {
+                self.current = saved_current;
+                self.peek = saved_peek;
+                self.pos = saved_pos;
+                self.current_line = saved_line;
+                None
+            }
         }
     }
 
