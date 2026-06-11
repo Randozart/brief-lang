@@ -567,24 +567,38 @@ impl LlvmBackend {
             // ── MultiSlice ──────────────────────────────────────
             Expr::MultiSlice { value, ops } => {
                 let src_val = self.emit_expr(out, value, indent);
-                let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
-                let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
-                let de = format!("%mde{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
-                let mut coord_idx = 0i64;
-                for op in ops {
-                    if let BracketOp::Coord(SliceCoordinate::Index(expr)) = op {
-                        let cv = self.emit_expr(out, expr, indent);
-                        coord_idx = cv.name.parse::<i64>().unwrap_or(0);
-                        let ep = format!("%mep{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, cv.name).ok();
-                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, ep).ok();
+                // Atomic value literals: coord returns self, stride/mask return 0
+                // Check by expression kind since LLVM types are ambiguous (Int vs List pointer)
+                let is_atomic_literal = matches!(value.as_ref(), Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_));
+                if is_atomic_literal {
+                    let has_coord = ops.iter().any(|op| matches!(op, BracketOp::Coord(_)));
+                    let has_other = ops.iter().any(|op| matches!(op, BracketOp::Stride(_) | BracketOp::Mask(_)));
+                    if has_coord && !has_other {
+                        writeln!(out, "{}{} = add i64 0, {} ; atomic coord passthrough", indent, v, src_val.name).ok();
+                    } else {
+                        writeln!(out, "{}{} = add i64 0, 0 ; atomic multislice stub", indent, v).ok();
                     }
-                }
-                if !ops.iter().any(|op| matches!(op, BracketOp::Coord(SliceCoordinate::Index(_)))) {
-                    writeln!(out, "{}{} = add i64 0, 0 ; multislice", indent, v).ok();
+                } else {
+                    // List/String: pointer-based list access
+                    let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                    let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                    let de = format!("%mde{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                    let mut coord_idx = 0i64;
+                    for op in ops {
+                        if let BracketOp::Coord(SliceCoordinate::Index(expr)) = op {
+                            let cv = self.emit_expr(out, expr, indent);
+                            coord_idx = cv.name.parse::<i64>().unwrap_or(0);
+                            let ep = format!("%mep{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, cv.name).ok();
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, ep).ok();
+                        }
+                    }
+                    if !ops.iter().any(|op| matches!(op, BracketOp::Coord(SliceCoordinate::Index(_)))) {
+                        writeln!(out, "{}{} = add i64 0, 0 ; multislice", indent, v).ok();
+                    }
                 }
             }
             // ── Match ───────────────────────────────────────────
@@ -647,6 +661,14 @@ impl LlvmBackend {
             // ── Slice ───────────────────────────────────────────
             Expr::Slice { value, start, end, stride, mask } => {
                 let src_val = self.emit_expr(out, value, indent);
+                // Atomic value literals: pass through (single element is itself)
+                let is_atomic_literal = matches!(value.as_ref(), Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_));
+                if is_atomic_literal {
+                    let _ = start; let _ = end; let _ = stride; let _ = mask;
+                    writeln!(out, "{}{} = add i64 0, {} ; atomic slice passthrough", indent, v, src_val.name).ok();
+                    return crate::backend::llvm::TypedRegister { name: v, ty: src_val.ty };
+                }
+                // List: pointer-based list access
                 let hp = format!("%shp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
                 let dp = format!("%sdp{}", self.txn_counter); self.txn_counter += 1;
