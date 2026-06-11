@@ -1,7 +1,7 @@
 # Intrinsics: `name#()` Syntax
 
 **Date added:** 2026-06-11
-**Status:** Implementation complete (Phase 4 cleanup done)
+**Status:** Implementation complete (14 system/data intrinsics added 2026-06-11, 29 total)
 
 ## Motivation
 
@@ -35,7 +35,9 @@ user-defined function or a `frgn` import.
 3. **Type dispatch** — `sqrt#(Float)` → 32-bit sqrt, `sqrt#(Float64)` → 64-bit sqrt
 4. **Replaces `as intrinsic`** — no more `frgn sqrt_f32(x: Float) -> Float as intrinsic "llvm.sqrt.f32"`
 
-## Intrinsic Table
+## Intrinsic Table (29 total)
+
+### Math & Bitwise (10)
 
 | Intrinsic | Args | Returns | Description | LLVM mapping |
 |---|---|---|---|---|
@@ -43,17 +45,51 @@ user-defined function or a `frgn` import.
 | `fabs#(x)` | Float/Float64 | same as input | Absolute value | `llvm.fabs.f32` / `llvm.fabs.f64` |
 | `ceil#(x)` | Float/Float64 | same as input | Ceiling | `llvm.ceil.f32` / `llvm.ceil.f64` |
 | `floor#(x)` | Float/Float64 | same as input | Floor | `llvm.floor.f32` / `llvm.floor.f64` |
-| `pop#(c)` | List/HashMap/Stack/Queue | element type | Remove and return last | ArrowDiscard dispatch |
-| `size#(c)` | List/HashMap/HashSet | Int | Element count | List.len / HashMap.size |
-| `bytes#(v)` | Float/Int/String | Int | Byte width | Constant per type |
-| `contains#(m, k)` | HashMap/HashSet | Bool | Key membership | HashMap.contains |
-| `keys#(m)` | HashMap | List | All keys | HashMap.keys |
-| `values#(m)` | HashMap | List | All values | HashMap.values |
 | `ctpop#(x)` | Int | Int | Population count | `llvm.ctpop.i64` |
 | `cttz#(x)` | Int | Int | Count trailing zeros | `llvm.cttz.i64(i64, i1)` |
 | `ctlz#(x)` | Int | Int | Count leading zeros | `llvm.ctlz.i64(i64, i1)` |
 | `abs#(x)` | Int | Int | Integer absolute value | `llvm.abs.i64(i64, i1)` |
 | `bitreverse#(x)` | Int | Int | Bit-reverse | `llvm.bitreverse.i64` |
+
+### Collection (5)
+
+| Intrinsic | Args | Returns | Description | Backend dispatch |
+|---|---|---|---|---|
+| `pop#(c)` | List/HashMap/Stack/Queue | element type | Remove and return last | ArrowDiscard dispatch |
+| `size#(c)` | List/HashMap/HashSet | Int | Element count | List.len / HashMap.size |
+| `contains#(m, k)` | HashMap/HashSet | Bool | Key membership | HashMap.contains |
+| `keys#(m)` | HashMap | List | All keys | HashMap.keys |
+| `values#(m)` | HashMap | List | All values | HashMap.values |
+
+### Meta (1)
+
+| Intrinsic | Args | Returns | Description | LLVM mapping |
+|---|---|---|---|---|
+| `bytes#(v)` | Float/Int/String | Int | Byte width | Constant per type |
+
+### System I/O (11) [Added 2026-06-11]
+
+| Intrinsic | Args | Returns | Description | LLVM mapping |
+|---|---|---|---|---|
+| `println#(val)` | Any | Bool | Print value with newline | `printf` with per-type format |
+| `readln#()` | — | String | Read line from stdin | `fgets(stdin)` / `syscall read(0)` |
+| `exit#(code)` | Int | ! | Terminate program | `syscall exit(60)` — `noreturn` |
+| `time#()` | — | Int | Nanosecond timestamp | `clock_gettime` / `rdtsc` |
+| `read_file#(path)` | String | String | Read file to string | `open` + `mmap` / `read` |
+| `write_file#(path, data)` | String, String | Bool | Write string to file | `open` + `write` |
+| `sleep#(ms)` | Int | Bool | Sleep for ms | `nanosleep` |
+| `socket#(d, t, p)` | Int, Int, Int | Int | Create socket | `syscall socket(41)` |
+| `bind#(fd, port)` | Int, Int | Bool | Bind socket to port | `syscall bind(49)` |
+| `listen#(fd, backlog)` | Int, Int | Bool | Listen on socket | `syscall listen(50)` |
+| `accept#(fd)` | Int | Int | Accept connection | `syscall accept(43)` |
+
+### Data (3) [Added 2026-06-11]
+
+| Intrinsic | Args | Returns | Description | Backend dispatch |
+|---|---|---|---|---|
+| `sort#(list)` | List\<T\> | List\<T\> | Sort list | `qsort` / SIMD sorting network |
+| `reverse#(list)` | List\<T\> | List\<T\> | Reverse list | Tight in-place swap loop |
+| `range#(end)` | Int | List\<Int\> | `[0..end)` | Constant → `.rodata`; runtime → loop |
 
 ## Interpreter dispatch
 

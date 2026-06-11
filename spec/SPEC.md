@@ -2,7 +2,7 @@
 
 **Version:** v0.16.0  
 **Date:** 2026-06-11  
-**Status:** Development (stable core, experimental backends, **new: Universal FFI via LTO library coupling (C/Rust/Zig), `import "link/..."` with `resolve_link_source()` search, FFI registry eliminating built-in magic, xxHash vendored as stdlib module, `sig` contract projections with `#out`/`#inline` modifiers, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`, Universal Bracket Syntax — SIMD protocol for all types with `@"pattern"` regex literals, DFA-compiled regex at compile time, type-directed desugar for atomic types**)  
+**Status:** Development (stable core, experimental backends, **new: Universal FFI via LTO library coupling (C/Rust/Zig), `import "link/..."` with `resolve_link_source()` search, FFI registry eliminating built-in magic, xxHash vendored as stdlib module, `sig` contract projections with `#out`/`#inline` modifiers, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`, Universal Bracket Syntax — SIMD protocol for all types with `@"pattern"` regex literals, DFA-compiled regex at compile time, type-directed desugar for atomic types, `Expr::RegexLiteral`, 14 new system/data intrinsics (29 total: println, readln, exit, time, read_file, write_file, sleep, socket, bind, listen, accept, sort, reverse, range), Expr::RegexLiteral**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
