@@ -174,6 +174,20 @@ pub enum Expr {
 }
 ```
 
+## Interpreter dispatch update (Pass A — 2026-06-11)
+
+The interpreter implements real system calls for:
+- `println#` — `println!("{}", v)` stdout
+- `readln#` — `std::io::stdin().read_line`
+- `exit#` — `std::process::exit(code)`
+- `time#` — `SystemTime::now().duration_since(UNIX_EPOCH)`
+- `read_file#` — `std::fs::read_to_string(path)`
+- `write_file#` — `std::fs::write(path, data)`
+- `sleep#` — `std::thread::sleep(Duration::from_millis(ms))`
+- `socket#`, `bind#`, `listen#`, `accept#` — return failure stubs in interpreter
+- `sort#`, `reverse#` — passthrough (no-op in interpreter)
+- `range#(end)` — `Value::List((0..end).map(Value::Int).collect())`
+
 ## Migration from `as intrinsic` (completed 2026-06-11)
 
 | Step | What | Status |
