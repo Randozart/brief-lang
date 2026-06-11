@@ -202,6 +202,9 @@ benchmarks/nbody_sqrt_c
 # Scratch
 scratch/
 
+scripts/benchmark-results.sh
+.bench_times
+
 # Benchmark binaries
 benchmarks/queue_drain_sym
 benchmarks/queue_drain_sym_c
@@ -223,4 +226,3 @@ benchmarks/knucleotide
 # Binaries igignore
 benchmarks/mandelbrot
 benchmarks/mandelbrot_c
-!trophies/**/*
