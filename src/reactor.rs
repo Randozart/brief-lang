@@ -603,4 +603,119 @@ mod tests {
         // State unchanged since transaction wasn't executed
         assert_eq!(interp.state.get("x"), Some(&Value::Int(5)));
     }
+
+    #[test]
+    fn test_build_from_program_with_triggers() {
+        let trg = TopLevel::Trigger(TriggerDeclaration {
+            name: "keypress".to_string(),
+            ty: Type::String,
+            address: crate::ast::LinkRef::Explicit(0),
+            bit_range: None,
+            stages: vec![],
+            condition: None,
+            is_wake: false,
+            span: None,
+        });
+        let reactor = build_reactor(&simple_program(vec![trg]));
+        assert!(reactor.triggers.contains_key("keypress"));
+        assert_eq!(reactor.triggers.len(), 1);
+    }
+
+    #[test]
+    fn test_build_from_program_with_async_txn() {
+        let txn = Transaction {
+            name: "polled".to_string(),
+            is_reactive: true,
+            is_async: true,
+            reactor_speed: Some(100),
+            parameters: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        };
+        let reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
+        assert_eq!(reactor.transactions.len(), 1);
+        assert!(reactor.transactions[0].is_async);
+        assert_eq!(reactor.transactions[0].reactor_speed, Some(100));
+        assert_eq!(reactor.last_fired.len(), 1);
+    }
+
+    #[test]
+    fn test_fire_due_async_txns_fires_on_first_call() {
+        let body = vec![
+            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(99), timeout: None, modifiers: vec![] },
+            Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+        ];
+        let txn = Transaction {
+            name: "async_test".to_string(),
+            is_reactive: true,
+            is_async: true,
+            reactor_speed: Some(1000),
+            parameters: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body,
+            span: None,
+            is_lambda: false,
+            dependencies: vec!["x".into()],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        };
+        let mut interp = Interpreter::new();
+        interp.state.insert("x".into(), Value::Int(0));
+        let mut reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
+        // First call should fire immediately (last_fired was set at construction)
+        // The last_fired is set to Instant::now() during build, so we need to
+        // reset it to a very old time to guarantee the interval has elapsed
+        reactor.last_fired = vec![Instant::now().checked_sub(Duration::from_secs(3600)).unwrap()];
+        let fired = reactor.fire_due_async_txns(&mut interp).unwrap();
+        assert!(fired, "async txn should fire when interval has elapsed");
+    }
+
+    #[test]
+    fn test_fire_due_async_txns_skips_before_interval() {
+        let txn = Transaction {
+            name: "slow".to_string(),
+            is_reactive: true,
+            is_async: true,
+            reactor_speed: Some(10),
+            parameters: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        };
+        let mut interp = Interpreter::new();
+        let mut reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
+        // last_fired was set to Instant::now() during build — interval is 100ms
+        // This should NOT fire because the interval hasn't elapsed
+        let fired = reactor.fire_due_async_txns(&mut interp).unwrap();
+        assert!(!fired, "async txn should NOT fire before interval elapses");
+    }
+
+    #[test]
+    fn test_fire_due_async_txns_skips_non_async() {
+        let body = vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }];
+        let txn = make_rct_txn("no_async", Expr::Bool(true), Expr::Bool(true), body);
+        let mut interp = Interpreter::new();
+        let mut reactor = build_reactor(&simple_program(vec![txn]));
+        reactor.last_fired = vec![Instant::now().checked_sub(Duration::from_secs(3600)).unwrap()];
+        let fired = reactor.fire_due_async_txns(&mut interp).unwrap();
+        assert!(!fired, "non-async txn should never fire via fire_due_async_txns");
+    }
 }
