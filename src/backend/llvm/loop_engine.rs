@@ -543,7 +543,8 @@ impl LlvmBackend {
                 writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
                 let body_l = format!("b_{}", name);
                 let skip_l = format!("s_{}", name);
-                writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, skip_l).ok();
+                let done_l = format!("done_{}", name);
+                writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, done_l).ok();
                 writeln!(out, "  {}:", body_l).ok();
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
@@ -553,6 +554,8 @@ impl LlvmBackend {
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
                 writeln!(out, "  br label %{}", skip_l).ok();
+                writeln!(out, "  {}:", done_l).ok();
+                writeln!(out, "  br label %done").ok();
                 writeln!(out, "  {}:", skip_l).ok();
             } else {
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
@@ -582,6 +585,9 @@ impl LlvmBackend {
             writeln!(out, "  br label %tick").ok();
         } else {
             writeln!(out, "  br label %tick").ok();
+        }
+        if self.exit_condition.is_none() {
+            writeln!(out, "  done:").ok();
         }
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
