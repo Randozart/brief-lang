@@ -119,6 +119,23 @@ The `Expr::Sub` arm now checks for `Add(var, N)` on the left side,
 computing `net = N - M`. This handles the `(count + R1) - R2` pattern
 where `R1` and `R2` are compile-time constants.
 
+## 2026-06-11 — Convergence Proof Extended to Callable Txns
+
+**File**: `src/proof_engine.rs:1570`  
+**Date**: 2026-06-11  
+**Root cause**: The structural convergence proof (`check_convergence`) was
+gated behind `txn.is_reactive`, limiting it to `rct txn` only. Callable
+`txn` fell through to symbolic execution, which cannot verify
+projection-based bounds like `i == items:>Size`.
+
+**Fix**: Removed the `txn.is_reactive` guard. `check_convergence` now runs
+for all `txn` types (reactive and callable). The proof (post → ¬pre, step
+detection, bound invariance, overshoot) applies identically to both.
+
+**Impact**: The documented iteration pattern
+`txn f(items, acc, i) [i < items:>Size][i == items:>Size]` can now be
+statically proven for callable txns.
+
 ## Path Exploration Architecture
 
 ```

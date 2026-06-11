@@ -45,6 +45,57 @@ Defined in `src/features/traits.rs`:
 
 `StmtDispatch` is the handle for recursive sub-statement dispatch.
 
+## Tuple Destructuring Assignment `&(a, b) = expr`
+
+**Date:** 2026-06-11  
+**Status:** Implemented directly in parser + interpreter + typechecker
+
+The `&(a, b) = expr;` syntax destructures a `Value::Tuple` or `Value::List`
+into named variables, binding each element to the corresponding name. This
+is the mutable reassignment form of `let (a, b) = expr;`.
+
+### Parsing
+
+In `parser.rs`, the `&` unary prefix handler now checks for `LParen` after
+the `&`. If found, it parses a comma-separated list of identifiers followed
+by `)`, and produces `Expr::TupleDestructure(names, Box::new(Expr::Term))`.
+The `Expr::Term` inner expression is a dummy — it is never evaluated in
+the assignment context (the RHS comes from the `Statement::Assignment`'s
+`expr` field).
+
+### Interpreter
+
+In `interpreter.rs` `exec_stmt`, the `Statement::Assignment` LHS handler
+includes an `Expr::TupleDestructure(names, _)` arm that:
+1. Evaluates the RHS expression to a `Value`
+2. Matches on `Value::Tuple(items)` or `Value::List(items)`
+3. Inserts each element into `self.state` by the corresponding name
+
+### Typechecker
+
+In `typechecker.rs` `check_statement`, the `Statement::Assignment` handler
+has a special `Expr::TupleDestructure` branch that:
+1. Infers the RHS type
+2. Expects `Type::Tuple(elem_types)` — emits `TypeMismatch` otherwise
+3. For each name, looks up the declared variable type and checks
+   compatibility with the corresponding tuple element type
+
+### Backend coverage
+
+| Backend | Status |
+|---------|--------|
+| Interpreter  | ✅ Full implementation |
+| Typechecker  | ✅ Full implementation |
+| LLVM         | ⚠️ Comment stub (tuple codegen incomplete) |
+| Webstack     | ✅ Falls through to `_ =>` wildcard — safe no-op |
+| VHDL         | ✅ No `Statement::Assignment` match — safe no-op |
+| Rust         | ✅ Falls through to `_ => return` — safe no-op |
+
+### Limitations
+
+- Only handles top-level destructuring (no nested `&(a, (b, c)) = expr`)
+- LLVM backend emits only a comment — actual tuple codegen is a known gap
+
 ## Migration Status
 
 All feature files are stubs — the actual dispatch still uses the old
