@@ -201,6 +201,10 @@ impl LlvmBackend {
                         writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val_reg, ep).ok();
                         return;
                     }
+                    Expr::TupleDestructure(names, _) => {
+                        writeln!(out, "{}; tuple destructure: {} names = {}", indent, names.len(), val).ok();
+                        return;
+                    }
                     _ => { writeln!(out, "{}; assign {}", indent, val).ok(); return; }
                 };
                 let is_volatile = modifiers.iter().any(|h| h.name == "volatile");

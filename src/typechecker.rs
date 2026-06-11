@@ -1133,27 +1133,55 @@ impl TypeChecker {
     fn check_statement(&mut self, stmt: &Statement, is_async: Option<&bool>) {
         match stmt {
             Statement::Assignment { lhs, expr, timeout, .. } => {
-                self.check_expr_for_ffi_errors(lhs);
-                self.check_expr_for_ffi_errors(expr);
-                let lhs_ty = self.infer_expression(lhs);
-                let expr_ty = self.infer_expression(expr);
-
-                if let Some((_t_expr, _unit)) = timeout {
-                    if !self.is_error_union(&lhs_ty) {
-                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                            expected: "Union type containing Error".to_string(),
-                            found: self.type_to_string(&lhs_ty),
-                            context: "assignment with timeout".to_string(),
-                        });
+                match lhs {
+                    Expr::TupleDestructure(names, _) => {
+                        // &(a, b) = tuple_expr — destructuring assignment
+                        self.check_expr_for_ffi_errors(expr);
+                        let expr_ty = self.infer_expression(expr);
+                        if let Type::Tuple(elem_types) = &expr_ty {
+                            for (i, name) in names.iter().enumerate() {
+                                if let Some(var_ty) = self.lookup_variable(name) {
+                                    if i < elem_types.len() && !self.types_compatible(&var_ty, &elem_types[i]) {
+                                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                            expected: self.type_to_string(&var_ty),
+                                            found: self.type_to_string(&elem_types[i]),
+                                            context: format!("tuple destructuring assignment for '{}'", name),
+                                        });
+                                    }
+                                }
+                            }
+                        } else {
+                            self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                expected: "Tuple type".to_string(),
+                                found: self.type_to_string(&expr_ty),
+                                context: "tuple destructuring assignment".to_string(),
+                            });
+                        }
                     }
-                }
+                    _ => {
+                        self.check_expr_for_ffi_errors(lhs);
+                        self.check_expr_for_ffi_errors(expr);
+                        let lhs_ty = self.infer_expression(lhs);
+                        let expr_ty = self.infer_expression(expr);
 
-                if !self.check_geometry(&lhs_ty, &expr_ty) {
-                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                        expected: self.type_to_string(&lhs_ty),
-                        found: self.type_to_string(&expr_ty),
-                        context: "assignment".to_string(),
-                    });
+                        if let Some((_t_expr, _unit)) = timeout {
+                            if !self.is_error_union(&lhs_ty) {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Union type containing Error".to_string(),
+                                    found: self.type_to_string(&lhs_ty),
+                                    context: "assignment with timeout".to_string(),
+                                });
+                            }
+                        }
+
+                        if !self.check_geometry(&lhs_ty, &expr_ty) {
+                            self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                expected: self.type_to_string(&lhs_ty),
+                                found: self.type_to_string(&expr_ty),
+                                context: "assignment".to_string(),
+                            });
+                        }
+                    }
                 }
             }
             Statement::Let { name, ty, expr, .. } => {

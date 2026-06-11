@@ -1564,11 +1564,13 @@ impl ProofEngine {
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
-                    // For reactive convergence contracts, skip symbolic execution
-                    // entirely — the structural convergence proof is stronger than
+                    // For convergence contracts, skip symbolic execution entirely
+                    // — the structural convergence proof is stronger than
                     // the per-path postcondition check (P008).
-                    if txn.is_reactive
-                        && check_convergence(
+                    // Applied to all txns (reactive and callable) since the
+                    // structural proof works identically for both — the bound
+                    // variable, step, and convergence semantics are the same.
+                    if check_convergence(
                             &txn.body,
                             &txn.contract.pre_condition,
                             &txn.contract.post_condition,

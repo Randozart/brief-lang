@@ -1036,3 +1036,108 @@ write-only within a tick), which is a future optimization target.
 
 **Before/After**: No fix applied — 1.09x is within acceptable noise for this
 benchmark type.
+
+## 2026-06-11 — Silent postcondition failure in callable txns
+
+**Issue**: `call_txn()` in `interpreter.rs` silently swallowed postcondition
+violations. When a callable `txn` completed its convergence loop but the
+postcondition was not satisfied, the interpreter rolled back state and returned
+`Ok(result)` as if nothing went wrong.
+
+**Root Cause**: At `interpreter.rs:574-578`, the postcondition check returned
+`Ok(result)` instead of an error:
+```rust
+if post_val != Value::Bool(true) {
+    self.state = old_state.clone();
+    self.return_value = old_return;
+    return Ok(result);  // ← BUG: should propagate error
+}
+```
+
+**Fix**: Changed to `return Err(RuntimeError::ContractViolation(...))`.
+Postcondition failures in callable `txn`s now propagate as errors.
+
+**Lesson**: Runtime contract checks must always propagate failures. Silent
+swallowing defeats the purpose of contract verification.
+
+## 2026-06-11 — Convergence proof gated to reactive txns only
+
+**Issue**: `check_convergence()` in `proof_engine.rs:1570` was only applied to
+reactive `rct txn`, not callable `txn`. The documented iteration pattern
+`txn f(items, acc, i) [i < items:>Size][i == items:>Size]` could not be
+statically proven.
+
+**Root Cause**: The gate `if txn.is_reactive && check_convergence(...)` excluded
+callable txns from the structural convergence proof, even though the proof
+(post → ¬pre, step detection, bound invariance) works identically for both.
+
+**Fix**: Removed the `txn.is_reactive` guard. `check_convergence` now runs for
+all txns.
+
+**Lesson**: When adding callable txns, ensure all analysis passes that apply to
+reactive txns are also applied. Don't gate structural proofs behind `is_reactive`
+unless there's a specific semantic reason.
+
+## 2026-06-11 — Tuple destructuring assignment `&(a, b) = expr` missing
+
+**Issue**: `let (a, b) = expr;` worked for declaring new variables but
+`&(a, b) = expr;` failed with parser error "expected identifier, found '('".
+Tuple-returning functions could not be destructured on the receiving end.
+
+**Root Cause**: The parser's `parse_unary` `&` handler called
+`expect_identifier()` after `&`, rejecting `(`. The interpreter's `exec_stmt`
+`Statement::Assignment` LHS handler also had no arm for `Expr::TupleDestructure`.
+
+**Fix**:
+- Parser: `&` handler now checks for `LParen` → parses comma-separated
+  identifiers → returns `Expr::TupleDestructure(names, Expr::Term)`.
+- Interpreter: Added `Expr::TupleDestructure(names, _)` arm in assignment LHS
+  that destructures `Value::Tuple`/`Value::List` into named variables.
+- Typechecker: Added `Expr::TupleDestructure` arm in `check_statement` for
+  assignment — validates RHS is a `Type::Tuple` with matching element types.
+- LLVM backend: Added comment-stub arm in `emit_stmt.rs`.
+
+**Tests**: `test_tuple_destructure_assignment`,
+`test_tuple_destructure_assignment_from_list`,
+`test_tuple_destructure_assignment_wrong_type_errors`.
+
+**Lesson**: Tuple destructuring was only implemented for `let` declarations.
+The `&` assignment case requires parser + interpreter + typechecker changes.
+
+## 2026-06-11 — `<-` on txn parameters (NOT a bug)
+
+**Claim**: Inside a callable `txn`, `result <- items[i]` doesn't work.
+
+**Investigation**: The parser error "Either side of '<-' must be &list" fires
+because `result` is parsed as `Expr::Identifier`, not `Expr::OwnedRef`. The
+`&` prefix is required: `&result <- items[i]`.
+
+Even with `&`, mutations to txn parameters are scoped to the txn's lifetime —
+`call_txn` restores `self.state = old_state` on exit. Both `<-` and `.append()`
+behave identically here; both require `term result;` to return the accumulated
+value.
+
+**Verdict**: Not a compiler bug. Correct usage is `&result <- items[i];`
+followed by `term result;` if the accumulated value must survive the txn.
+
+**Lesson**: The `&` sigil is required for all mutation targets in Brief,
+including `<-` targets. Txn parameters are inputs; outputs flow through
+return values.
+
+## 2026-06-11 — `||` in `term` statements (NOT a bug)
+
+**Claim**: `term word == "the" || word == "a" || word == "an";` gave parse
+error "expected ';', found '}'".
+
+**Investigation**: The `||` operator goes through the standard
+`parse_expression()` → `parse_or()` precedence path — identical to any other
+expression context. The code parses correctly in the current compiler (verified
+by AST construction and existing usage in `lib/compiler/proof_engine.bv`).
+
+**Verdict**: Not a bug in the current codebase. Likely causes for the user's
+error: an older compiler version, a missing `;` elsewhere causing cascaded
+errors, or a typo in the specific file.
+
+**Lesson**: When hitting unexpected parse errors, first verify with a minimal
+reproduction, then check for preceding syntax issues that may cause cascaded
+errors.

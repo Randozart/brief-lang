@@ -5229,9 +5229,27 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
                 Ok(Token::Ampersand) => {
                     self.advance();
-                    match self.expect_identifier() {
-                        Ok(name) => self.parse_postfix_expr(Expr::OwnedRef(name)),
-                        Err(e) => return Err(e),
+                    match self.current_token() {
+                        Some(Ok(Token::LParen)) => {
+                            // &(a, b, ...) — tuple destructuring LHS
+                            self.advance();
+                            let mut names = Vec::new();
+                            loop {
+                                names.push(self.expect_identifier()?);
+                                if let Some(Ok(Token::Comma)) = self.current_token() {
+                                    self.advance();
+                                } else {
+                                    break;
+                                }
+                            }
+                            self.expect(Token::RParen)?;
+                            // No postfix ops on &(a, b) — return directly
+                            Ok(Expr::TupleDestructure(names, Box::new(Expr::Term)))
+                        }
+                        _ => match self.expect_identifier() {
+                            Ok(name) => self.parse_postfix_expr(Expr::OwnedRef(name)),
+                            Err(e) => return Err(e),
+                        },
                     }
                 }
                 Ok(Token::At) => {

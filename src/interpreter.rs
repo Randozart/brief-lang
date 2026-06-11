@@ -575,7 +575,9 @@ impl Interpreter {
         if post_val != Value::Bool(true) {
             self.state = old_state.clone();
             self.return_value = old_return;
-            return Ok(result);
+            return Err(RuntimeError::ContractViolation(format!(
+                "txn '{}' postcondition not satisfied after convergence", name
+            )));
         }
 
         self.state = old_state;
@@ -1087,6 +1089,22 @@ impl Interpreter {
                                         ));
                                     }
                                 }
+                            }
+                        }
+                    }
+                    Expr::TupleDestructure(names, _) => {
+                        match value {
+                            Value::Tuple(items) | Value::List(items) => {
+                                for (i, name) in names.iter().enumerate() {
+                                    if i < items.len() {
+                                        self.state.insert(name.clone(), items[i].clone());
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(RuntimeError::TypeMismatch(
+                                    "Cannot destructure non-tuple/non-list value".to_string(),
+                                ));
                             }
                         }
                     }
@@ -4738,6 +4756,189 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn test_tuple_destructure_assignment() {
+        let mut i = Interpreter::new();
+        i.state.insert("a".to_string(), Value::Int(0));
+        i.state.insert("b".to_string(), Value::Int(0));
+        let stmt = Statement::Assignment {
+            lhs: Expr::TupleDestructure(
+                vec!["a".to_string(), "b".to_string()],
+                Box::new(Expr::Term),
+            ),
+            expr: Expr::Tuple(vec![Expr::Integer(42), Expr::Integer(99)]),
+            timeout: None,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("a"), Some(&Value::Int(42)));
+        assert_eq!(i.state.get("b"), Some(&Value::Int(99)));
+    }
+
+    #[test]
+    fn test_tuple_destructure_assignment_from_list() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        i.state.insert("y".to_string(), Value::Int(0));
+        let stmt = Statement::Assignment {
+            lhs: Expr::TupleDestructure(
+                vec!["x".to_string(), "y".to_string()],
+                Box::new(Expr::Term),
+            ),
+            expr: Expr::ListLiteral(vec![Expr::Integer(7), Expr::Integer(13)]),
+            timeout: None,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("x"), Some(&Value::Int(7)));
+        assert_eq!(i.state.get("y"), Some(&Value::Int(13)));
+    }
+
+    #[test]
+    fn test_tuple_destructure_assignment_wrong_type_errors() {
+        let mut i = Interpreter::new();
+        i.state.insert("a".to_string(), Value::Int(0));
+        let stmt = Statement::Assignment {
+            lhs: Expr::TupleDestructure(
+                vec!["a".to_string()],
+                Box::new(Expr::Term),
+            ),
+            expr: Expr::Integer(42),
+            timeout: None,
+            modifiers: vec![],
+        };
+        let err = i.exec_stmt(&stmt).unwrap_err();
+        match err {
+            RuntimeError::TypeMismatch(ref msg) => {
+                assert!(msg.contains("destructure"), "msg: {}", msg);
+            }
+            _ => panic!("Expected TypeMismatch error, got: {:?}", err),
+        }
+    }
+
+    #[test]
+    fn test_callable_txn_postcondition_failure_returns_error() {
+        let mut i = Interpreter::new();
+        let txn = Transaction {
+            is_async: false,
+            is_reactive: false,
+            name: "bad_post".to_string(),
+            parameters: vec![
+                ("x".to_string(), Type::Int),
+            ],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Eq(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(0)),
+                ),
+                watchdog: None,
+                span: None,
+            },
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("x".to_string()),
+                    expr: Expr::Integer(99),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Term {
+                    values: vec![Some(Expr::Identifier("x".to_string()))],
+                    swan_song: None,
+                    modifiers: vec![],
+                },
+            ],
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        };
+        i.callable_txns.insert("bad_post".to_string(), txn);
+        let result = i.eval_expr(&Expr::Call("bad_post".to_string(), vec![
+            Expr::Integer(0),
+        ]));
+        assert!(result.is_err(), "postcondition violation should return error");
+        match result {
+            Err(RuntimeError::ContractViolation(msg)) => {
+                assert!(msg.contains("bad_post"), "error should name the txn");
+            }
+            _ => panic!("Expected ContractViolation error, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_callable_txn_convergence_satisfies_postcondition() {
+        let mut i = Interpreter::new();
+        let txn = Transaction {
+            is_async: false,
+            is_reactive: false,
+            name: "count_to_n".to_string(),
+            parameters: vec![
+                ("n".to_string(), Type::Int),
+                ("acc".to_string(), Type::Int),
+                ("i".to_string(), Type::Int),
+            ],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Identifier("n".to_string())),
+                ),
+                post_condition: Expr::Eq(
+                    Box::new(Expr::Identifier("i".to_string())),
+                    Box::new(Expr::Identifier("n".to_string())),
+                ),
+                watchdog: None,
+                span: None,
+            },
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("acc".to_string()),
+                    expr: Expr::Add(
+                        Box::new(Expr::Identifier("acc".to_string())),
+                        Box::new(Expr::Identifier("i".to_string())),
+                    ),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("i".to_string()),
+                    expr: Expr::Add(
+                        Box::new(Expr::Identifier("i".to_string())),
+                        Box::new(Expr::Integer(1)),
+                    ),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Term {
+                    values: vec![Some(Expr::Identifier("acc".to_string()))],
+                    swan_song: None,
+                    modifiers: vec![],
+                },
+            ],
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        };
+        i.callable_txns.insert("count_to_n".to_string(), txn);
+        let result = i.eval_expr(&Expr::Call("count_to_n".to_string(), vec![
+            Expr::Integer(5),
+            Expr::Integer(0),
+            Expr::Integer(0),
+        ])).unwrap();
+        assert_eq!(result, Value::Int(10));  // 0+1+2+3+4 = 10
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
@@ -5065,4 +5266,5 @@ mod kani_full_tests {
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "sqrt#(\"hello\") should produce a type error");
     }
+
 }
