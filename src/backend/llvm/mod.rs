@@ -263,6 +263,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::BinaryOp(e) => { collect_strings_expr(e.left.as_ref(), seen, out); collect_strings_expr(e.right.as_ref(), seen, out); }
         Expr::UnaryOp(e) => { collect_strings_expr(e.operand.as_ref(), seen, out); }
         Expr::CallExpr(e) => { for a in &e.args { collect_strings_expr(a, seen, out); } }
+        Expr::IntrinsicCall { intrinsic: _, args } => { for a in args { collect_strings_expr(a, seen, out); } }
         Expr::ProjectionExpr(e) => { collect_strings_expr(e.source.as_ref(), seen, out); }
         Expr::BlockExpr(e) => { for s in &e.stmts { collect_strings_stmt(s, seen, out); } collect_strings_expr(e.last.as_ref(), seen, out); }
         Expr::MatchExpr(e) => { collect_strings_expr(e.value.as_ref(), seen, out); for arm in &e.arms { collect_strings_expr(&arm.body, seen, out); } }

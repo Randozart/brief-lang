@@ -5331,6 +5331,35 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     source: Box::new(expr),
                     target,
                 };
+            } else if let Some(Ok(Token::Hash)) = self.current_token() {
+                // Only treat `#` as intrinsic call if followed by `(`
+                if matches!(self.peek_token(), Some(Ok(Token::LParen))) {
+                    self.advance(); // consume #
+                    self.advance(); // consume (
+                    let mut args = Vec::new();
+                    if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    if let Expr::Identifier(name) = &expr {
+                        if let Some(intrinsic) = Intrinsic::from_name(name) {
+                            expr = Expr::IntrinsicCall { intrinsic, args };
+                        } else {
+                            return self.spanned_err(format!("unknown intrinsic function: {name}"));
+                        }
+                    } else {
+                        return self.spanned_err("intrinsic call requires an identifier".to_string());
+                    }
+                } else {
+                    break; // leave # for outer parser (modifiers)
+                }
             } else {
                 break;
             }
@@ -5424,6 +5453,35 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     source: Box::new(expr),
                     target,
                 };
+            } else if let Some(Ok(Token::Hash)) = self.current_token() {
+                // Only treat `#` as intrinsic call if followed by `(`
+                if matches!(self.peek_token(), Some(Ok(Token::LParen))) {
+                    self.advance(); // consume #
+                    self.advance(); // consume (
+                    let mut args = Vec::new();
+                    if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+                        loop {
+                            args.push(self.parse_expression()?);
+                            if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    if let Expr::Identifier(name) = &expr {
+                        if let Some(intrinsic) = Intrinsic::from_name(name) {
+                            expr = Expr::IntrinsicCall { intrinsic, args };
+                        } else {
+                            return self.spanned_err(format!("unknown intrinsic function: {name}"));
+                        }
+                    } else {
+                        return self.spanned_err("intrinsic call requires an identifier".to_string());
+                    }
+                } else {
+                    break; // leave # for outer parser (modifiers)
+                }
             } else {
                 break;
             }
@@ -7696,5 +7754,140 @@ mod kani_full_tests {
         let mut parser = Parser::new("defn foo()[true][true] { } ;");
         let result = parser.parse_definition();
         assert!(result.is_err());
+    }
+
+    // ── Intrinsic call parsing tests ────────────────────────────
+
+    #[test]
+    fn test_parse_sqrt_intrinsic() {
+        let s = r#"defn f(x: Float) -> Float { term sqrt#(x); };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse sqrt#(x): {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::IntrinsicCall { intrinsic: Intrinsic::Sqrt, .. }));
+                }
+                _ => panic!("Expected Term"),
+            }
+        } else {
+            panic!("Expected Definition");
+        }
+    }
+
+    #[test]
+    fn test_parse_abs_intrinsic() {
+        let s = r#"defn f(x: Int) -> Int { term abs#(x); };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse abs#(x): {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::IntrinsicCall { intrinsic: Intrinsic::Abs, .. }));
+                }
+                _ => panic!("Expected Term"),
+            }
+        } else {
+            panic!("Expected Definition");
+        }
+    }
+
+    #[test]
+    fn test_parse_intrinsic_multiple_args() {
+        let s = r#"defn f(xs: List<Int>, x: Int) -> Bool { term contains#(xs, x); };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse contains#(xs, x): {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    if let Expr::IntrinsicCall { intrinsic, args } = expr {
+                        assert_eq!(intrinsic, &Intrinsic::Contains);
+                        assert_eq!(args.len(), 2);
+                    } else {
+                        panic!("Expected IntrinsicCall");
+                    }
+                }
+                _ => panic!("Expected Term"),
+            }
+        } else {
+            panic!("Expected Definition");
+        }
+    }
+
+    #[test]
+    fn test_parse_unknown_intrinsic_errors() {
+        let s = r#"defn f(x: Int) -> Int { term foobar#(x); };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_err(), "foobar# should produce a parse error");
+    }
+
+    #[test]
+    fn test_parse_hash_not_intrinsic_without_paren() {
+        // `#volatile` after an expression should NOT be consumed as intrinsic
+        let s = r#"txn Foo [true][n >= 0] { let x: Int @ some_ptr #volatile = 0; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse #volatile modifier: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_intrinsic_in_txn_body() {
+        let s = r#"txn Foo [true][true] { let x: Float = sqrt#(9.0); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse sqrt# in txn body: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Let { expr: Some(e), .. } => {
+                    assert!(matches!(e, Expr::IntrinsicCall { intrinsic: Intrinsic::Sqrt, .. }));
+                }
+                _ => panic!("Expected Let with intrinsic"),
+            }
+        } else {
+            panic!("Expected Transaction");
+        }
+    }
+
+    #[test]
+    fn test_parse_intrinsic_all_names() {
+        for (name, intrinsic) in [
+            ("sqrt", Intrinsic::Sqrt),
+            ("fabs", Intrinsic::Fabs),
+            ("ceil", Intrinsic::Ceil),
+            ("floor", Intrinsic::Floor),
+            ("ctpop", Intrinsic::Ctpop),
+            ("ctlz", Intrinsic::Ctlz),
+            ("cttz", Intrinsic::Cttz),
+            ("abs", Intrinsic::Abs),
+            ("bitreverse", Intrinsic::Bitreverse),
+            ("bytes", Intrinsic::Bytes),
+            ("size", Intrinsic::Size),
+            ("pop", Intrinsic::Pop),
+            ("contains", Intrinsic::Contains),
+            ("keys", Intrinsic::Keys),
+            ("values", Intrinsic::Values),
+        ] {
+            let s = format!("defn f() -> Int {{ term {name}#(0); }};");
+            let mut parser = Parser::new(&s);
+            let result = parser.parse();
+            assert!(result.is_ok(), "Should parse {name}#(): {:?}", result.err());
+            if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+                match &defn.body[0] {
+                    Statement::Term { values, .. } => {
+                        let expr = values[0].as_ref().unwrap();
+                        assert!(matches!(expr, Expr::IntrinsicCall { intrinsic: i, .. } if *i == intrinsic),
+                            "Expected {name} intrinsic, got {:?}", expr);
+                    }
+                    _ => panic!("Expected Term for {name}"),
+                }
+            }
+        }
     }
 }

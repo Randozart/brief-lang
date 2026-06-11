@@ -1155,6 +1155,14 @@ fn format_expr(expr: &Expr) -> String {
                 .join(", ");
             format!("{}({})", name, args_str)
         }
+        Expr::IntrinsicCall { intrinsic, args } => {
+            let args_str = args
+                .iter()
+                .map(|a| format_expr(a))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}#({})", intrinsic.name(), args_str)
+        }
         _ => "<expr>".to_string(),
     }
 }
@@ -1820,6 +1828,7 @@ impl ProofEngine {
             Expr::Call(name, args) => {
                 name == "Success" || name == "Ok" || (name == "is_ok" && args.is_empty())
             }
+            Expr::IntrinsicCall { .. } => false,
             _ => false
         }
     }
@@ -1829,6 +1838,7 @@ impl ProofEngine {
             Expr::Call(name, args) => {
                 name == "Error" || name == "Err" || (name == "is_err" && args.is_empty())
             }
+            Expr::IntrinsicCall { .. } => false,
             _ => false
         }
     }
@@ -1895,6 +1905,7 @@ impl ProofEngine {
                     calls.push((name.clone(), "frgn call".to_string()));
                 }
             }
+            Expr::IntrinsicCall { .. } => {}
             Expr::Add(l, r)
             | Expr::Sub(l, r)
             | Expr::Mul(l, r)
@@ -2520,6 +2531,11 @@ impl ProofEngine {
                 self.collect_identifiers(inner, vars);
             }
             Expr::Call(_, args) => {
+                for arg in args {
+                    self.collect_identifiers(arg, vars);
+                }
+            }
+            Expr::IntrinsicCall { intrinsic: _, args } => {
                 for arg in args {
                     self.collect_identifiers(arg, vars);
                 }

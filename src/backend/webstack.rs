@@ -528,6 +528,11 @@ impl WebstackGenerator {
                     self.extract_identifiers(arg, deps);
                 }
             }
+            Expr::IntrinsicCall { intrinsic: _, args } => {
+                for arg in args {
+                    self.extract_identifiers(arg, deps);
+                }
+            }
             Expr::ListLiteral(items) => {
                 for item in items {
                     self.extract_identifiers(item, deps);
@@ -1666,6 +1671,7 @@ impl WebstackGenerator {
                     format!("{}({})", name, args_vals.join(", "))
                 }
             }
+            Expr::IntrinsicCall { .. } => unimplemented!("Webstack IntrinsicCall codegen"),
             Expr::StructInstance(typename, fields) => {
                 let mut sets = String::new();
                 for (field_name, field_value) in fields {

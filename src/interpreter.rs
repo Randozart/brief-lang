@@ -1361,6 +1361,153 @@ impl Interpreter {
             Expr::Ellipsis => EllipsisExpr.evaluate(self, &ExprDispatch),
             Expr::Call(name, args) =>
                 crate::features::call::CallExpr::new(name.clone(), args.clone()).evaluate(self, &ExprDispatch),
+            Expr::IntrinsicCall { intrinsic, args } => {
+                let values: Result<Vec<Value>, _> = args.iter().map(|a| self.eval_expr(a)).collect();
+                let mut values = values?;
+                match intrinsic {
+                    Intrinsic::Sqrt => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Float(f) => Ok(Value::Float(f.sqrt())),
+                            v => Err(RuntimeError::TypeMismatch(format!("sqrt requires Float, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Fabs => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Float(f) => Ok(Value::Float(f.abs())),
+                            v => Err(RuntimeError::TypeMismatch(format!("fabs requires Float, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Ceil => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Float(f) => Ok(Value::Float(f.ceil())),
+                            v => Err(RuntimeError::TypeMismatch(format!("ceil requires Float, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Floor => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Float(f) => Ok(Value::Float(f.floor())),
+                            v => Err(RuntimeError::TypeMismatch(format!("floor requires Float, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Ctpop => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Int(n) => Ok(Value::Int(n.count_ones() as i64)),
+                            v => Err(RuntimeError::TypeMismatch(format!("ctpop requires Int, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Ctlz => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Int(n) => Ok(Value::Int(n.leading_zeros() as i64)),
+                            v => Err(RuntimeError::TypeMismatch(format!("ctlz requires Int, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Cttz => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Int(n) => Ok(Value::Int(n.trailing_zeros() as i64)),
+                            v => Err(RuntimeError::TypeMismatch(format!("cttz requires Int, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Abs => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Int(n) => Ok(Value::Int(n.abs())),
+                            v => Err(RuntimeError::TypeMismatch(format!("abs requires Int, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Bitreverse => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Int(n) => Ok(Value::Int(n.reverse_bits() as i64)),
+                            v => Err(RuntimeError::TypeMismatch(format!("bitreverse requires Int, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Bytes => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Float(_) => Ok(Value::Int(8)),
+                            Value::Int(_) => Ok(Value::Int(8)),
+                            Value::Bool(_) => Ok(Value::Int(1)),
+                            Value::Char(_) => Ok(Value::Int(4)),
+                            Value::String(s) => Ok(Value::Int(s.len() as i64)),
+                            Value::List(l) => Ok(Value::Int((l.len() * 8) as i64)),
+                            v => Err(RuntimeError::TypeMismatch(format!("bytes not implemented for {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Size => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::List(l) => Ok(Value::Int(l.len() as i64)),
+                            Value::String(s) => Ok(Value::Int(s.len() as i64)),
+                            Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
+                            Value::HashSet(s) => Ok(Value::Int(s.len() as i64)),
+                            v => Err(RuntimeError::TypeMismatch(format!("size requires collection, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Pop => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::List(mut l) => l.pop().map(Ok).unwrap_or(Err(RuntimeError::TypeMismatch("pop from empty list".into()))),
+                            v => Err(RuntimeError::TypeMismatch(format!("pop requires List, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Contains => {
+                        if values.len() != 2 {
+                            return Err(RuntimeError::TypeMismatch("contains: expected 2 args (collection, element)".into()));
+                        }
+                        let elem = values.pop().unwrap();
+                        let collection = values.remove(0);
+                        match collection {
+                            Value::List(l) => Ok(Value::Bool(l.contains(&elem))),
+                            Value::String(s) => {
+                                if let Value::Char(c) = elem {
+                                    Ok(Value::Bool(s.contains(c)))
+                                } else {
+                                    Err(RuntimeError::TypeMismatch("contains: string requires Char element".into()))
+                                }
+                            }
+                            Value::HashMap(m) => {
+                                if let Value::String(key) = &elem {
+                                    Ok(Value::Bool(m.contains_key(key)))
+                                } else {
+                                    Ok(Value::Bool(false))
+                                }
+                            }
+                            Value::HashSet(s) => {
+                                if let Value::String(key) = &elem {
+                                    Ok(Value::Bool(s.contains(key)))
+                                } else {
+                                    Ok(Value::Bool(false))
+                                }
+                            }
+                            v => Err(RuntimeError::TypeMismatch(format!("contains requires collection, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Keys => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::HashMap(m) => {
+                                let keys: Vec<Value> = m.into_keys().map(Value::String).collect();
+                                Ok(Value::List(keys))
+                            }
+                            v => Err(RuntimeError::TypeMismatch(format!("keys requires HashMap, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Values => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::HashMap(m) => Ok(Value::List(m.into_values().collect())),
+                            v => Err(RuntimeError::TypeMismatch(format!("values requires HashMap, got {:?}", v))),
+                        }
+                    }
+                }
+            }
             // Legacy collection variants — delegate through feature structs
             Expr::ListLiteral(elements) =>
                 ListLiteralExpr { elements: elements.clone() }.evaluate(self, &ExprDispatch),
@@ -4488,5 +4635,282 @@ mod kani_full_tests {
         let result = ctx.eval_expr(&expr);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::Char('A'));
+    }
+
+    // ── Intrinsic evaluation tests ──────────────────────────────
+
+    #[test]
+    fn test_intrinsic_sqrt() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Sqrt,
+            args: vec![Expr::Float(9.0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Float(3.0));
+    }
+
+    #[test]
+    fn test_intrinsic_fabs() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Fabs,
+            args: vec![Expr::Float(-3.5)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Float(3.5));
+    }
+
+    #[test]
+    fn test_intrinsic_ceil() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Ceil,
+            args: vec![Expr::Float(3.2)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Float(4.0));
+    }
+
+    #[test]
+    fn test_intrinsic_floor() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Floor,
+            args: vec![Expr::Float(3.8)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Float(3.0));
+    }
+
+    #[test]
+    fn test_intrinsic_ctpop() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Ctpop,
+            args: vec![Expr::Integer(255)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(8));
+    }
+
+    #[test]
+    fn test_intrinsic_ctlz() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Ctlz,
+            args: vec![Expr::Integer(1)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(63));
+    }
+
+    #[test]
+    fn test_intrinsic_cttz() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Cttz,
+            args: vec![Expr::Integer(8)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_intrinsic_abs() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Abs,
+            args: vec![Expr::Integer(-42)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_intrinsic_bitreverse() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bitreverse,
+            args: vec![Expr::Integer(1)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1i64.reverse_bits()));
+    }
+
+    #[test]
+    fn test_intrinsic_bytes_int() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bytes,
+            args: vec![Expr::Integer(42)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(8));
+    }
+
+    #[test]
+    fn test_intrinsic_bytes_float() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bytes,
+            args: vec![Expr::Float(3.0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(8));
+    }
+
+    #[test]
+    fn test_intrinsic_bytes_bool() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bytes,
+            args: vec![Expr::Bool(true)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_intrinsic_bytes_char() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bytes,
+            args: vec![Expr::Char('A')],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(4));
+    }
+
+    #[test]
+    fn test_intrinsic_size_list() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Size,
+            args: vec![Expr::ListLiteral(vec![
+                Expr::Integer(1), Expr::Integer(2), Expr::Integer(3),
+            ])],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_intrinsic_size_string() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Size,
+            args: vec![Expr::String("hello".to_string())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(5));
+    }
+
+    #[test]
+    fn test_intrinsic_pop() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Pop,
+            args: vec![Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)])],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(2));
+    }
+
+    #[test]
+    fn test_intrinsic_contains_list() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Contains,
+            args: vec![
+                Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)]),
+                Expr::Integer(1),
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_intrinsic_contains_list_false() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Contains,
+            args: vec![
+                Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)]),
+                Expr::Integer(99),
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_intrinsic_contains_string() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Contains,
+            args: vec![
+                Expr::String("hello".to_string()),
+                Expr::Char('e'),
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_intrinsic_keys() {
+        let mut i = Interpreter::new();
+        let mut map = std::collections::HashMap::new();
+        map.insert("a".to_string(), Value::Int(1));
+        map.insert("b".to_string(), Value::Int(2));
+        i.state.insert("m".to_string(), Value::HashMap(map));
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Keys,
+            args: vec![Expr::OwnedRef("m".to_string())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::List(keys) => {
+                assert_eq!(keys.len(), 2);
+                assert!(keys.contains(&Value::String("a".to_string())));
+                assert!(keys.contains(&Value::String("b".to_string())));
+            }
+            _ => panic!("Expected List"),
+        }
+    }
+
+    #[test]
+    fn test_intrinsic_values() {
+        let mut i = Interpreter::new();
+        let mut map = std::collections::HashMap::new();
+        map.insert("a".to_string(), Value::Int(10));
+        map.insert("b".to_string(), Value::Int(20));
+        i.state.insert("m".to_string(), Value::HashMap(map));
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Values,
+            args: vec![Expr::OwnedRef("m".to_string())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::List(vals) => {
+                assert_eq!(vals.len(), 2);
+                assert!(vals.contains(&Value::Int(10)));
+                assert!(vals.contains(&Value::Int(20)));
+            }
+            _ => panic!("Expected List"),
+        }
+    }
+
+    #[test]
+    fn test_intrinsic_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Sqrt,
+            args: vec![Expr::String("hello".to_string())],
+        };
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err(), "sqrt#(\"hello\") should produce a type error");
     }
 }

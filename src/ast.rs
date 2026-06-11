@@ -447,6 +447,68 @@ pub enum ProjectionTarget {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Intrinsic {
+    Sqrt,
+    Fabs,
+    Ceil,
+    Floor,
+    Ctpop,
+    Ctlz,
+    Cttz,
+    Abs,
+    Bitreverse,
+    Bytes,
+    Size,
+    Pop,
+    Contains,
+    Keys,
+    Values,
+}
+
+impl Intrinsic {
+    pub fn from_name(name: &str) -> Option<Intrinsic> {
+        match name {
+            "sqrt" => Some(Intrinsic::Sqrt),
+            "fabs" => Some(Intrinsic::Fabs),
+            "ceil" => Some(Intrinsic::Ceil),
+            "floor" => Some(Intrinsic::Floor),
+            "ctpop" => Some(Intrinsic::Ctpop),
+            "ctlz" => Some(Intrinsic::Ctlz),
+            "cttz" => Some(Intrinsic::Cttz),
+            "abs" => Some(Intrinsic::Abs),
+            "bitreverse" => Some(Intrinsic::Bitreverse),
+            "bytes" => Some(Intrinsic::Bytes),
+            "size" => Some(Intrinsic::Size),
+            "pop" => Some(Intrinsic::Pop),
+            "contains" => Some(Intrinsic::Contains),
+            "keys" => Some(Intrinsic::Keys),
+            "values" => Some(Intrinsic::Values),
+            _ => None,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Intrinsic::Sqrt => "sqrt",
+            Intrinsic::Fabs => "fabs",
+            Intrinsic::Ceil => "ceil",
+            Intrinsic::Floor => "floor",
+            Intrinsic::Ctpop => "ctpop",
+            Intrinsic::Ctlz => "ctlz",
+            Intrinsic::Cttz => "cttz",
+            Intrinsic::Abs => "abs",
+            Intrinsic::Bitreverse => "bitreverse",
+            Intrinsic::Bytes => "bytes",
+            Intrinsic::Size => "size",
+            Intrinsic::Pop => "pop",
+            Intrinsic::Contains => "contains",
+            Intrinsic::Keys => "keys",
+            Intrinsic::Values => "values",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Integer(i64),
     Float(f64),
@@ -528,6 +590,11 @@ pub enum Expr {
     Call(String, Vec<Expr>),
     // Pattern B — packed call
     CallExpr(CallExpr),
+    /// Compiler-known intrinsic call: `name#(args)` — e.g. `sqrt#(x)`, `pop#(list)`
+    IntrinsicCall {
+        intrinsic: Intrinsic,
+        args: Vec<Expr>,
+    },
     ListLiteral(Vec<Expr>),
     // Pattern B — packed list literal
     ListLiteralExpr(ListLiteralExpr),
@@ -792,6 +859,11 @@ impl Expr {
                 e.extract_deps_recursive(deps);
             }
             Expr::Call(_, args) | Expr::ListLiteral(args) => {
+                for arg in args {
+                    arg.extract_deps_recursive(deps);
+                }
+            }
+            Expr::IntrinsicCall { intrinsic: _, args } => {
                 for arg in args {
                     arg.extract_deps_recursive(deps);
                 }

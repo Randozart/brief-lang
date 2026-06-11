@@ -13,17 +13,19 @@ impl LlvmBackend {
     pub(super) fn emit_declares(&self, out: &mut String) {
         writeln!(out).ok();
         writeln!(out, "declare void @llvm.assume(i1) #1").ok();
-        // LLVM intrinsics with signatures that can't be expressed via Brief's
-        // type system (extra i1 parameter for poison/zero-undef). These are
-        // always declared — the float-math intrinsics (sqrt, fabs, ceil, floor)
-        // come from std/llvm.bv via as intrinsic in the frgn_map declare loop.
+        // Intrinsic declares used by name#() instrinsic calls in emit_expr.
+        // Previously these came from std/llvm.bv via as intrinsic, but the
+        // name#() mechanism emits them directly without frgn_map entries.
+        writeln!(out, "declare float @llvm.sqrt.f32(float) #1").ok();
+        writeln!(out, "declare float @llvm.fabs.f32(float) #1").ok();
+        writeln!(out, "declare float @llvm.ceil.f32(float) #1").ok();
+        writeln!(out, "declare float @llvm.floor.f32(float) #1").ok();
         writeln!(out, "declare i64 @llvm.ctpop.i64(i64) #1").ok();
         writeln!(out, "declare i64 @llvm.ctlz.i64(i64, i1) #1").ok();
         writeln!(out, "declare i64 @llvm.cttz.i64(i64, i1) #1").ok();
         writeln!(out, "declare i64 @llvm.abs.i64(i64, i1) #1").ok();
-        writeln!(out, "declare double @llvm.fabs.f64(double) #1").ok();
         writeln!(out, "declare i64 @llvm.bitreverse.i64(i64) #1").ok();
-        // Runtime support functions (not declared in std/llvm.bv)
+        // Runtime support functions
         writeln!(out, "declare void @brief_barrier_release()").ok();
         writeln!(out, "declare void @brief_barrier_wait()").ok();
         writeln!(out, "declare void @brief_thread_pool_init(i32, i8**)").ok();

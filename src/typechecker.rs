@@ -895,6 +895,11 @@ impl TypeChecker {
                     self.check_expr_for_function_calls(arg);
                 }
             }
+            Expr::IntrinsicCall { intrinsic: _, args } => {
+                for arg in args {
+                    self.check_expr_for_function_calls(arg);
+                }
+            }
             Expr::Add(left, right)
             | Expr::Sub(left, right)
             | Expr::Mul(left, right)
@@ -995,6 +1000,7 @@ impl TypeChecker {
             | Expr::Or(l, r) => self.expr_has_result(l) || self.expr_has_result(r),
             Expr::Not(inner) => self.expr_has_result(inner),
             Expr::Call(_, args) => args.iter().any(|a| self.expr_has_result(a)),
+            Expr::IntrinsicCall { intrinsic: _, args } => args.iter().any(|a| self.expr_has_result(a)),
             _ => false,
         }
     }
@@ -1258,6 +1264,19 @@ impl TypeChecker {
             | Expr::Or(_, _)
             | Expr::And(_, _) => Type::Bool,
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.infer_expression(e),
+            Expr::IntrinsicCall { intrinsic, args } => {
+                for arg in args {
+                    self.infer_expression(arg);
+                }
+                match intrinsic {
+                    Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil | Intrinsic::Floor => Type::Float,
+                    Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz | Intrinsic::Abs | Intrinsic::Bitreverse => Type::Int,
+                    Intrinsic::Bytes | Intrinsic::Size => Type::Int,
+                    Intrinsic::Pop => Type::Int,
+                    Intrinsic::Contains => Type::Bool,
+                    Intrinsic::Keys | Intrinsic::Values => Type::Custom("List".to_string()),
+                }
+            }
             Expr::Call(name, args) => {
                 if let Some(fb) = self.foreign_bindings.get(name) {
                     fb.success_output
@@ -1999,6 +2018,7 @@ Expr::ObjectLiteral(fields) => {
                     }
                 }
             }
+            Expr::IntrinsicCall { .. } => {}
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
                 self.check_expr_for_ffi_errors(l);
                 self.check_expr_for_ffi_errors(r);
@@ -2276,5 +2296,109 @@ mod kani_full_tests {
         let expr = Expr::Literal(Box::new(LiteralExpr::Term));
         let result = ctx.infer_expression(&expr);
         assert_eq!(result, Type::Void);
+    }
+
+    // ── Intrinsic type inference tests ──────────────────────────
+
+    #[test]
+    fn test_check_intrinsic_sqrt_returns_float() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Sqrt,
+            args: vec![Expr::Float(9.0)],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Float, "sqrt# should infer as Float");
+    }
+
+    #[test]
+    fn test_check_intrinsic_abs_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Abs,
+            args: vec![Expr::Integer(-42)],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "abs# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_ctpop_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Ctpop,
+            args: vec![Expr::Integer(255)],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "ctpop# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_contains_returns_bool() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Contains,
+            args: vec![
+                Expr::ListLiteral(vec![Expr::Integer(1)]),
+                Expr::Integer(1),
+            ],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Bool, "contains# should infer as Bool");
+    }
+
+    #[test]
+    fn test_check_intrinsic_size_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Size,
+            args: vec![Expr::ListLiteral(vec![Expr::Integer(1)])],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "size# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_keys_returns_list() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Keys,
+            args: vec![Expr::MapLiteral(vec![])],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Custom("List".to_string()), "keys# should infer as List");
+    }
+
+    #[test]
+    fn test_check_intrinsic_pop_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Pop,
+            args: vec![Expr::ListLiteral(vec![Expr::Integer(1)])],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "pop# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_fabs_returns_float() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Fabs,
+            args: vec![Expr::Float(-1.0)],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Float, "fabs# should infer as Float");
+    }
+
+    #[test]
+    fn test_check_intrinsic_bytes_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bytes,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "bytes# should infer as Int");
     }
 }

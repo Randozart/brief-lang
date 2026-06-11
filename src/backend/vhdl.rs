@@ -1151,6 +1151,10 @@ impl VhdlGenerator {
                 let a: Vec<String> = args.iter().map(|a| self.expr_to_string(a)).collect();
                 format!("{}({})", name, a.join(", "))
             }
+            Expr::IntrinsicCall { intrinsic, args } => {
+                let a: Vec<String> = args.iter().map(|a| self.expr_to_string(a)).collect();
+                format!("{}#({})", intrinsic.name(), a.join(", "))
+            }
             Expr::ListIndex(list, idx) => {
                 format!("{}(to_integer(unsigned({})))", self.expr_to_string(list), self.expr_to_string(idx))
             }

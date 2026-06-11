@@ -93,6 +93,11 @@ impl Annotator {
                     self.collect_calls_from_expr(arg, calls);
                 }
             }
+            Expr::IntrinsicCall { intrinsic: _, args } => {
+                for arg in args {
+                    self.collect_calls_from_expr(arg, calls);
+                }
+            }
             Expr::Add(l, r)
             | Expr::Sub(l, r)
             | Expr::Mul(l, r)
@@ -407,6 +412,14 @@ impl Annotator {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{}({})", name, args_str)
+            }
+            Expr::IntrinsicCall { intrinsic, args } => {
+                let args_str = args
+                    .iter()
+                    .map(|a| self.format_expr(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}#({})", intrinsic.name(), args_str)
             }
             Expr::Add(l, r) => format!("({} + {})", self.format_expr(l), self.format_expr(r)),
             Expr::Sub(l, r) => format!("({} - {})", self.format_expr(l), self.format_expr(r)),

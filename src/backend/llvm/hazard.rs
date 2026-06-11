@@ -1,6 +1,138 @@
-use crate::ast::{Expr, Statement, Type};
+use crate::ast::{Expr, Pattern, Statement, Type};
 use crate::backend::llvm::LlvmBackend;
 use std::collections::HashSet;
+
+fn expr_refs_name(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::Identifier(n) | Expr::OwnedRef(n) => n == name,
+        Expr::PriorState(n) => n == name,
+        Expr::Add(l, r)
+        | Expr::Sub(l, r)
+        | Expr::Mul(l, r)
+        | Expr::Div(l, r)
+        | Expr::Eq(l, r)
+        | Expr::Ne(l, r)
+        | Expr::Lt(l, r)
+        | Expr::Le(l, r)
+        | Expr::Gt(l, r)
+        | Expr::Ge(l, r)
+        | Expr::Or(l, r)
+        | Expr::And(l, r)
+        | Expr::BitAnd(l, r)
+        | Expr::BitOr(l, r)
+        | Expr::BitXor(l, r)
+        | Expr::Shl(l, r)
+        | Expr::Shr(l, r) => expr_refs_name(l, name) || expr_refs_name(r, name),
+        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => expr_refs_name(e, name),
+        Expr::Call(_, args) | Expr::IntrinsicCall { args, .. } => args.iter().any(|a| expr_refs_name(a, name)),
+        Expr::Projection { source, .. } => expr_refs_name(source, name),
+        Expr::ListIndex(l, i) => expr_refs_name(l, name) || expr_refs_name(i, name),
+        Expr::FieldAccess(obj, _) => expr_refs_name(obj, name),
+        Expr::StructInstance(_, fields) => fields.iter().any(|(_, e)| expr_refs_name(e, name)),
+        Expr::Concat(l, r) => expr_refs_name(l, name) || expr_refs_name(r, name),
+        Expr::Tuple(items) => items.iter().any(|e| expr_refs_name(e, name)),
+        Expr::ListLiteral(items) => items.iter().any(|e| expr_refs_name(e, name)),
+        Expr::MapLiteral(entries) => entries.iter().any(|(k, v)| expr_refs_name(k, name) || expr_refs_name(v, name)),
+        Expr::SetLiteral(items) => items.iter().any(|e| expr_refs_name(e, name)),
+        Expr::Block(_, last) => expr_refs_name(last, name),
+        Expr::Match { value, arms } => {
+            expr_refs_name(value, name)
+                || arms.iter().any(|arm| expr_refs_name(&arm.body, name))
+        }
+        Expr::PatternMatch { value, fields, .. } => {
+            expr_refs_name(value, name)
+                || fields.iter().any(|p| pattern_refs_name(p, name))
+        }
+        Expr::Slice { value, start, end, stride, .. } => {
+            expr_refs_name(value, name)
+                || start.as_ref().map_or(false, |e| expr_refs_name(e, name))
+                || end.as_ref().map_or(false, |e| expr_refs_name(e, name))
+                || stride.as_ref().map_or(false, |e| expr_refs_name(e, name))
+        }
+        Expr::ArrowMut { target, index, value, .. } => {
+            expr_refs_name(target, name) || expr_refs_name(index, name)
+                || value.as_ref().map_or(false, |v| expr_refs_name(v, name))
+        }
+        Expr::ArrowDiscard { target, index } => {
+            expr_refs_name(target, name) || expr_refs_name(index, name)
+        }
+        Expr::ArrowTransfer { dest, source, filter, .. } => {
+            expr_refs_name(dest, name) || expr_refs_name(source, name)
+                || filter.as_ref().map_or(false, |e| expr_refs_name(e, name))
+        }
+        Expr::SubtypeProjection { source, .. } => expr_refs_name(source, name),
+        Expr::TupleDestructure(_, expr) => expr_refs_name(expr, name),
+        Expr::MultiSlice { value, .. } => expr_refs_name(value, name),
+        Expr::SigCall { expr: e, .. } => expr_refs_name(e, name),
+        _ => false,
+    }
+}
+
+fn stmt_refs_name(stmt: &Statement, name: &str) -> bool {
+    match stmt {
+        Statement::Let { expr: Some(e), .. } | Statement::Assignment { expr: e, .. } => expr_refs_name(e, name),
+        Statement::Let { expr: None, .. } => false,
+        Statement::Expression(e) => expr_refs_name(e, name),
+        Statement::Term { values, swan_song, .. } => {
+            values.iter().any(|v| v.as_ref().map_or(false, |e| expr_refs_name(e, name)))
+                || swan_song.as_ref().map_or(false, |s| stmt_refs_name(s, name))
+        }
+        Statement::TermBang { values, swan_song, .. } => {
+            values.iter().any(|v| v.as_ref().map_or(false, |e| expr_refs_name(e, name)))
+                || swan_song.as_ref().map_or(false, |s| stmt_refs_name(s, name))
+        }
+        Statement::Guarded { condition, statements, .. } => {
+            expr_refs_name(condition, name)
+                || statements.iter().any(|s| stmt_refs_name(s, name))
+        }
+        Statement::Escape(Some(expr)) => expr_refs_name(expr, name),
+        Statement::Escape(None) => false,
+        Statement::Unification { fields, expr, .. } => {
+            fields.iter().any(|p| pattern_refs_name(p, name))
+                || expr_refs_name(expr, name)
+        }
+        Statement::SyncBlock { body } => body.iter().any(|s| stmt_refs_name(s, name)),
+        Statement::LocalTrigger { expr: Some(e), .. } => expr_refs_name(e, name),
+        Statement::LocalTrigger { expr: None, .. } => false,
+        _ => false,
+    }
+}
+
+fn pattern_refs_name(pattern: &Pattern, name: &str) -> bool {
+    match pattern {
+        Pattern::Var(n) => n == name,
+        Pattern::Tuple(items) => items.iter().any(|p| pattern_refs_name(p, name)),
+        _ => false,
+    }
+}
+
+fn compute_peak_live_floats(body: &[Statement], float_names: &[String]) -> u32 {
+    if float_names.is_empty() {
+        return 0;
+    }
+    // For each float temp, find (def_index, last_use_index)
+    let mut intervals: Vec<(usize, usize)> = Vec::with_capacity(float_names.len());
+    for (j, name) in float_names.iter().enumerate() {
+        // def point is the statement where the Let binding appears
+        let def_idx = body.iter().position(|s| matches!(s, Statement::Let { name: n, .. } if n == name))
+            .unwrap_or(0);
+        // last use: scan forward from def
+        let mut last_use = def_idx;
+        for (i, stmt) in body.iter().enumerate().skip(def_idx + 1) {
+            if stmt_refs_name(stmt, name) {
+                last_use = i;
+            }
+        }
+        intervals.push((def_idx, last_use));
+    }
+    // Sweep program points, count active intervals
+    let mut peak = 0u32;
+    for i in 0..body.len() {
+        let active = intervals.iter().filter(|(def, last)| *def <= i && i <= *last).count() as u32;
+        peak = peak.max(active);
+    }
+    peak
+}
 
 impl LlvmBackend {
     pub(super) fn slp_attr(&self, fn_name: &str, default: &str) -> String {
@@ -116,12 +248,16 @@ impl LlvmBackend {
         let mut float_fields: HashSet<String> = HashSet::new();
         let mut accessed_constants: HashSet<String> = HashSet::new();
         let mut total_cross_ops: u32 = 0;
-        let mut max_float_temps: u32 = 0;
+        let mut peak_live_floats: u32 = 0;
 
         for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             let mut local_floats = HashSet::new();
-            let temps = self.collect_local_floats_and_temps(&txn.body, &mut local_floats);
-            max_float_temps = max_float_temps.max(temps);
+            self.collect_local_floats_and_temps(&txn.body, &mut local_floats);
+            if !local_floats.is_empty() {
+                let float_names: Vec<String> = local_floats.iter().cloned().collect();
+                let active = compute_peak_live_floats(&txn.body, &float_names);
+                peak_live_floats = peak_live_floats.max(active);
+            }
 
             let reads = crate::backend::collect_read_identifiers(&txn.body);
             let writes: HashSet<String> =
@@ -175,7 +311,7 @@ impl LlvmBackend {
         let c = total_cross_ops as usize;
         let shuffle_pressure = std::cmp::min(c, n as usize * 2);
         let const_packed = (accessed_constants.len() + w as usize - 1) / w as usize;
-        let peak = (packed_phis + shuffle_pressure + max_float_temps as usize + const_packed + 2) as u32;
+        let peak = (packed_phis + shuffle_pressure + peak_live_floats as usize + const_packed + 2) as u32;
 
         if peak >= r {
             self.slp_hazard_fns.insert("main".to_string());

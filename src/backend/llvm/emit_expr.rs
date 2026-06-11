@@ -1,4 +1,4 @@
-use crate::ast::{BracketOp, Expr, MatchArm, MatchPattern, Pattern, ProjectionTarget, SliceCoordinate, Statement, Type};
+use crate::ast::{BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, Pattern, ProjectionTarget, SliceCoordinate, Statement, Type};
 use crate::backend::llvm::{float_to_llvm_hex, LlvmBackend, TypedRegister};
 use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
 use std::collections::HashMap;
@@ -331,6 +331,53 @@ impl LlvmBackend {
                 }
             }
         }
+            // ── IntrinsicCall ────────────────────────────────────
+            Expr::IntrinsicCall { intrinsic, args } => {
+                let emit_intrinsic_float_unary = |backend: &mut LlvmBackend, out: &mut String, indent: &str, v: &str, llvm_name: &str, arg: &Expr| -> TypedRegister {
+                    let raw = backend.emit_expr(out, arg, indent);
+                    let fl = backend.ensure_float_reg(out, indent, &raw);
+                    writeln!(out, "{}{} = call float @llvm.{}.f32(float {})", indent, v, llvm_name, fl).ok();
+                    TypedRegister { name: v.to_string(), ty: Type::Float }
+                };
+                match intrinsic {
+                    Intrinsic::Sqrt => { return emit_intrinsic_float_unary(self, out, indent, &v, "sqrt", &args[0]); }
+                    Intrinsic::Fabs => { return emit_intrinsic_float_unary(self, out, indent, &v, "fabs", &args[0]); }
+                    Intrinsic::Ceil => { return emit_intrinsic_float_unary(self, out, indent, &v, "ceil", &args[0]); }
+                    Intrinsic::Floor => { return emit_intrinsic_float_unary(self, out, indent, &v, "floor", &args[0]); }
+                    Intrinsic::Ctpop => {
+                        let raw = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @llvm.ctpop.i64(i64 {})", indent, v, raw).ok();
+                    }
+                    Intrinsic::Ctlz => {
+                        let raw = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @llvm.ctlz.i64(i64 {}, i1 false)", indent, v, raw).ok();
+                    }
+                    Intrinsic::Cttz => {
+                        let raw = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @llvm.cttz.i64(i64 {}, i1 false)", indent, v, raw).ok();
+                    }
+                    Intrinsic::Abs => {
+                        let raw = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @llvm.abs.i64(i64 {}, i1 false)", indent, v, raw).ok();
+                    }
+                    Intrinsic::Bitreverse => {
+                        let raw = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @llvm.bitreverse.i64(i64 {})", indent, v, raw).ok();
+                    }
+                    Intrinsic::Bytes => {
+                        writeln!(out, "{}{} = add i64 0, 8 ; bytes", indent, v).ok();
+                    }
+                    Intrinsic::Size | Intrinsic::Pop => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; size/pop stub", indent, v).ok();
+                    }
+                    Intrinsic::Contains => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; contains stub", indent, v).ok();
+                    }
+                    Intrinsic::Keys | Intrinsic::Values => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; keys/values stub", indent, v).ok();
+                    }
+                }
+            }
             // ── ListLiteral ──────────────────────────────────────
             Expr::ListLiteral(items) => {
                 let n = items.len() as i64;

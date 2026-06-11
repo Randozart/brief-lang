@@ -119,6 +119,11 @@ impl<'a> DataflowAnalyzer<'a> {
                     self.extract_ids_recursive(arg, ids);
                 }
             }
+            Expr::IntrinsicCall { intrinsic: _, args } => {
+                for arg in args {
+                    self.extract_ids_recursive(arg, ids);
+                }
+            }
             Expr::ListIndex(list, idx) => {
                 self.extract_ids_recursive(list, ids);
                 self.extract_ids_recursive(idx, ids);

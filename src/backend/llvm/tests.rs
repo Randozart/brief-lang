@@ -3000,3 +3000,254 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("declare float @llvm.fabs.f64(float)"),
             "Expected declare for llvm.fabs.f64, got:\n{}", output);
     }
+
+    // ── IntrinsicCall codegen tests ─────────────────────────────
+
+    fn make_intrinsic_program(intrinsic: Expr) -> Program {
+        Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Int),
+                            expr: Some(intrinsic),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            ..empty_program()
+        }
+    }
+
+    #[test]
+    fn test_intrinsic_sqrt_emits_llvm_sqrt() {
+        let mut backend = LlvmBackend::new();
+        let program = make_intrinsic_program(
+            Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Sqrt,
+                args: vec![Expr::Float(9.0)],
+            }
+        );
+        let output = backend.generate(&program);
+        assert!(output.contains("call float @llvm.sqrt.f32"),
+            "sqrt# should emit call to llvm.sqrt.f32. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_intrinsic_abs_emits_llvm_abs() {
+        let mut backend = LlvmBackend::new();
+        let program = make_intrinsic_program(
+            Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Abs,
+                args: vec![Expr::Integer(-42)],
+            }
+        );
+        let output = backend.generate(&program);
+        assert!(output.contains("call i64 @llvm.abs.i64"),
+            "abs# should emit call to llvm.abs.i64. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_intrinsic_ctpop_emits_llvm_ctpop() {
+        let mut backend = LlvmBackend::new();
+        let program = make_intrinsic_program(
+            Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Ctpop,
+                args: vec![Expr::Integer(255)],
+            }
+        );
+        let output = backend.generate(&program);
+        assert!(output.contains("call i64 @llvm.ctpop.i64"),
+            "ctpop# should emit call to llvm.ctpop.i64. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_intrinsic_ctlz_emits_llvm_ctlz() {
+        let mut backend = LlvmBackend::new();
+        let program = make_intrinsic_program(
+            Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Ctlz,
+                args: vec![Expr::Integer(1)],
+            }
+        );
+        let output = backend.generate(&program);
+        assert!(output.contains("call i64 @llvm.ctlz.i64"),
+            "ctlz# should emit call to llvm.ctlz.i64. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_intrinsic_cttz_emits_llvm_cttz() {
+        let mut backend = LlvmBackend::new();
+        let program = make_intrinsic_program(
+            Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Cttz,
+                args: vec![Expr::Integer(8)],
+            }
+        );
+        let output = backend.generate(&program);
+        assert!(output.contains("call i64 @llvm.cttz.i64"),
+            "cttz# should emit call to llvm.cttz.i64. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_intrinsic_bitreverse_emits_llvm_bitreverse() {
+        let mut backend = LlvmBackend::new();
+        let program = make_intrinsic_program(
+            Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Bitreverse,
+                args: vec![Expr::Integer(1)],
+            }
+        );
+        let output = backend.generate(&program);
+        assert!(output.contains("call i64 @llvm.bitreverse.i64"),
+            "bitreverse# should emit call to llvm.bitreverse.i64. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_intrinsic_fabs_emits_llvm_fabs() {
+        let mut backend = LlvmBackend::new();
+        // fabs returns float, so we use a float result slot
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Float),
+                            expr: Some(Expr::IntrinsicCall {
+                                intrinsic: Intrinsic::Fabs,
+                                args: vec![Expr::Float(-3.5)],
+                            }),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call float @llvm.fabs.f32"),
+            "fabs# should emit call to llvm.fabs.f32. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_intrinsic_floor_emits_llvm_floor() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Float),
+                            expr: Some(Expr::IntrinsicCall {
+                                intrinsic: Intrinsic::Floor,
+                                args: vec![Expr::Float(3.8)],
+                            }),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call float @llvm.floor.f32"),
+            "floor# should emit call to llvm.floor.f32. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_intrinsic_ceil_emits_llvm_ceil() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Float),
+                            expr: Some(Expr::IntrinsicCall {
+                                intrinsic: Intrinsic::Ceil,
+                                args: vec![Expr::Float(3.2)],
+                            }),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call float @llvm.ceil.f32"),
+            "ceil# should emit call to llvm.ceil.f32. Got:\n{}", output);
+    }

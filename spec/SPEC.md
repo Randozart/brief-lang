@@ -1,8 +1,8 @@
 # Brief Language Specification
 
 **Version:** v0.16.0  
-**Date:** 2026-06-09  
-**Status:** Development (stable core, experimental backends, **new: Universal FFI via LTO library coupling (C/Rust/Zig), `import "link/..."` with `resolve_link_source()` search, FFI registry eliminating built-in magic, xxHash vendored as stdlib module, `sig` contract projections with `#out`/`#inline` modifiers, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`**)  
+**Date:** 2026-06-11  
+**Status:** Development (stable core, experimental backends, **new: Universal FFI via LTO library coupling (C/Rust/Zig), `import "link/..."` with `resolve_link_source()` search, FFI registry eliminating built-in magic, xxHash vendored as stdlib module, `sig` contract projections with `#out`/`#inline` modifiers, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`, Universal Bracket Syntax — SIMD protocol for all types with `@"pattern"` regex literals, DFA-compiled regex at compile time, type-directed desugar for atomic types**)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -1416,6 +1416,121 @@ schema BottleneckConfig {
 The `RooflineAnalyzer` (§6.11) also evaluates arithmetic intensity
 (FLOP/byte) against peak compute and memory bandwidth to determine whether
 an optimization is compute-bound or memory-bound.
+
+### 3.19 Universal Bracket Syntax (SIMD Protocol) \[2026-06-11\]
+
+Bracket syntax (`[]`) works universally on **every type**, not just collections
+and strings. Every value decomposes into its visual fragments. Bracket
+operations select, filter, stride, or transform these fragments. The result
+reconstructs to the original type.
+
+This makes SIMD vectorization a natural consequence of bracket operations:
+uniform element-wise transforms (`&x[;pred] = val`) are trivially vectorizable
+across any contiguous sequence type.
+
+#### Fragment Decomposition
+
+| Type | Fragment type | Source | Assignable? |
+|------|---------------|--------|-------------|
+| `String` | `Char` | Characters | Yes |
+| `List<T>` | `T` | Elements | Yes |
+| `HashMap<K,V>` | `(K,V)` | Entries | Yes |
+| `HashSet<T>` | `T` | Elements | Yes |
+| `Stack<T>` / `Queue<T>` | `T` | Elements | Yes |
+| `Tuple` | element types | Elements | No |
+| `Struct` | `(String, Value)` | Fields | No |
+| `Int` | `Char` | Visual digits | No |
+| `Float` | `Char` | Visual repr | No |
+| `Bool` | `Char` | Visual repr | No |
+| `Char` | `Char` | Itself | No |
+
+For atomic types (Int, Float, Bool, Char), bracket decomposition always yields
+`Char` fragments. `15561` → `[Char('1'), '5', '5', '6', '1']`.
+
+#### Bracket Dispatch Rules
+
+| Form | Collection types | Atomic types |
+|------|-----------------|--------------|
+| `val[coord]` | Element index | Char index |
+| `val[::N]` | Every Nth element | Every Nth Char |
+| `val[;pred]` | Element filter | Char filter |
+| `val[string_or_const]` | Coord (existing) | **Desugars to regex filter** |
+
+**Regex desugar rule**: If brackets contain exactly one argument, that argument
+is a string literal or `const` string variable, and the value type is **not** a
+collection → desugar to `val[;@"string_expr"]` (regex filter on stringified
+value).
+
+**Collection exception**: `map["key"]` on `HashMap<String,V>` remains a key
+lookup. Collection bracket is never implicitly regex.
+
+#### Regex Literal: `@"pattern"`
+
+A new expression form producing a regex value:
+
+```brief
+// Regex literal
+let vowel: Regex = @"[aeiou]";
+
+// In bracket filter (explicit)
+<- &str[;@"\s+"];              // Remove whitespace
+
+// In bracket filter (implicit via desugar)
+let clean = str["[a-z]+"];     // Desugars to str[;@"[a-z]+"]
+
+// As a constraint
+let email: String <: [@"\A[^@]+@[^@]+\z"];
+```
+
+`@"..."` literals known at compile time are compiled to a DFA via the existing
+`analysis::dfa` module at parse time (Thompson NFA → powerset construction).
+Runtime regex becomes O(n) table walk with zero allocation.
+
+The `@` token is already lexed. Parser disambiguation:
+- `@` + identifier → `Expr::PriorState` (existing)
+- `@` + string literal → `Expr::RegexLiteral` (new)
+
+#### Arrow + Bracket (SIMD Assignment)
+
+| Construct | Semantics | Example |
+|-----------|-----------|---------|
+| `&x[;pred] = val` | Replace all matching fragments | `&n[;=='5'] = '7'` on `15561` → `17761` |
+| `<- &x[;pred]` | Remove all matching fragments | `<- &n[;=='5']` on `15561` → `161` |
+| `&x[;@"re"] = val` | Regex-level replace on stringified | `&s[;@"\d+"] = "N"` |
+| `<- &x[;@"re"]` | Remove regex matches | `<- &s[;@"\s+"]` |
+
+The compiler recognizes uniform filter+assign as SIMD candidates when:
+- Target is a contiguous sequence (String, List\<Int\>, digit chars of Int)
+- Predicate is element-wise (scalar comparison, not multi-fragment regex)
+- Assignment value is uniform for all matching elements
+
+#### Result Reconstruction
+
+After filtering or transformation, the remaining fragments are reconstructed
+to the original type:
+
+| Original type | Reconstruction |
+|---------------|---------------|
+| `Int` | Parse remaining `Char` sequence as integer via div/mod |
+| `Float` | Parse remaining `Char` sequence as float |
+| `String` | Join remaining `Char` values |
+| `List<T>` | Already elements — no reconstruction needed |
+| `Bool` | `"true"` or `"false"` parse back |
+
+Reconstruction is defined per type and may fail at compile time if the
+resulting fragment sequence is not valid for the target type (e.g., removing
+the `'.'` from a float leaves a valid integer parse, so it succeeds; removing
+a digit from `"true"` may produce a non-Bool string).
+
+#### Relationship to Existing Syntax
+
+- `str["pattern"]` (existing `SubtypeOp::Match`) is preserved but desugars to
+  `str[;@"pattern"]` — unified through bracket dispatch.
+- `map["key"]` (existing HashMap access) remains Coord — never desugars.
+- Collection mutation via `<- &list[;pred]` extends existing ArrowDiscard
+  semantics from "pop one" to "remove all matches" when a filter is present.
+- `BracketOp::Mask` already evaluates arbitrary expressions — adding
+  `Value::Regex` handling is a new match arm, no structural change.
 
 ---
 

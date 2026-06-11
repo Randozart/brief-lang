@@ -739,7 +739,7 @@ fn is_pure_body(
 
 fn references_triggers_or_ffi(expr: &Expr) -> bool {
     match expr {
-        Expr::Call(_, _) => true,
+        Expr::Call(_, _) | Expr::IntrinsicCall { .. } => true,
         Expr::Identifier(_) | Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) | Expr::Char(_) => false,
         Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b)
         | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b)
@@ -869,6 +869,11 @@ fn collect_ffi_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                 collect_identifiers(arg, out);
             }
         }
+        Expr::IntrinsicCall { intrinsic: _, args } => {
+            for arg in args {
+                collect_identifiers(arg, out);
+            }
+        }
         Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
         | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
         | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
@@ -971,6 +976,11 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
         }
         Expr::Cast(a, _) => collect_identifiers(a, out),
         Expr::Call(_, args) => {
+            for arg in args {
+                collect_identifiers(arg, out);
+            }
+        }
+        Expr::IntrinsicCall { intrinsic: _, args } => {
             for arg in args {
                 collect_identifiers(arg, out);
             }
