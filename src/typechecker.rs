@@ -1247,6 +1247,7 @@ impl TypeChecker {
                 Type::Float
             }
             Expr::String(_) => Type::String,
+            Expr::RegexLiteral(_) => Type::String,
             Expr::Char(_) => Type::Char,
             Expr::Bool(_) => Type::Bool,
             Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => self

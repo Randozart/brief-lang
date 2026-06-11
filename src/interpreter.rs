@@ -85,6 +85,8 @@ pub enum Value {
     /// Lazy-loaded DBVL table with key-offset index.
     /// Users see it as a Map[String, T] — the DbvlTable type is internal.
     DbvlTable(Arc<DbvlTableInner>),
+    /// Compiled regex pattern from `@"..."` literal.
+    Regex(crate::analysis::dfa::RegexPattern),
 }
 
 impl fmt::Display for Value {
@@ -115,6 +117,7 @@ impl fmt::Display for Value {
                 let schema = t.schema_name.as_deref().unwrap_or("?");
                 write!(f, "<DbvlTable {} '{}' ({} entries, lazy)>", schema, t.path, t.key_offsets.len())
             }
+            Value::Regex(r) => write!(f, "<Regex {:?}>", r.pattern),
         }
     }
 }
@@ -182,6 +185,7 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
             map.insert("entries".to_string(), JsonValue::Number(t.key_offsets.len().into()));
             JsonValue::Object(map)
         }
+        Value::Regex(_) => JsonValue::Null,
     }
 }
 
@@ -1314,7 +1318,12 @@ impl Interpreter {
             Expr::Integer(v) => Ok(Value::Int(*v)),
             Expr::Float(v) => Ok(Value::Float(*v)),
             Expr::String(v) => Ok(Value::String(v.clone())),
-            Expr::RegexLiteral(v) => Ok(Value::String(v.clone())),
+            Expr::RegexLiteral(v) => {
+                match crate::analysis::dfa::compile_to_dfa(v) {
+                    Ok(dfa) => Ok(Value::Regex(dfa)),
+                    Err(e) => Err(RuntimeError::TypeMismatch(format!("Invalid regex: {}", e))),
+                }
+            }
             Expr::Char(v) => Ok(Value::Char(*v)),
             Expr::Bool(v) => Ok(Value::Bool(*v)),
             Expr::Term => self.state.get("term").cloned()

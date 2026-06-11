@@ -79,7 +79,7 @@ impl ExprEval for ProjectionExpr {
                     Value::HashSet(_) => 10, Value::StringBuilder(_) => 11,
                     Value::Stack(_) => 12, Value::Queue(_) => 13,
                     Value::Instance { .. } => 14, Value::Enum(..) => 15,
-                    Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Void => 0,
+                    Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Regex(_) => 18, Value::Void => 0,
                 };
                 Ok(Value::Int(discriminant))
             }

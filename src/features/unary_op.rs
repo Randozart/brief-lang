@@ -38,6 +38,9 @@ impl ExprEval for UnaryOpExpr {
             (Neg,    Value::Int(a)) => Value::Int(-a),
             (Not,    Value::Bool(a)) => Value::Bool(!a),
             (BitNot, Value::Int(a)) => Value::Int(!a),
+            (_, Value::Regex(_)) => {
+                return Err(RuntimeError::TypeMismatch(format!("unary op {:?} on Regex", self.kind)))
+            }
             _ => return Err(RuntimeError::TypeMismatch(format!("unary op {:?}", self.kind))),
         })
     }

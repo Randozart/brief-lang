@@ -2616,8 +2616,13 @@ impl<'a> Parser<'a> {
 
         // Optional mapping before colon
         // Supports: @ address / bit-spec, @ / bit-spec, @ stack:offset, @ heap:offset, [bit-spec]
+        // Also: @"..." (regex literal) — let it fall through to expression parser
             loop {
                 if let Some(Ok(Token::At)) = self.current_token() {
+                    // @"..." is a regex literal, not an address — let expression parser handle it
+                    if let Some(Ok(Token::String(_))) = self.peek_token() {
+                        break;
+                    }
                     self.advance();
                     // Check for / immediately after @ (auto-allocate with bit-spec)
                     if let Some(Ok(Token::Slash)) = self.current_token() {
@@ -2673,6 +2678,10 @@ impl<'a> Parser<'a> {
         // Hardware mapping after type (Spec 2.2 / 3.0)
         loop {
             if let Some(Ok(Token::At)) = self.current_token() {
+                // @"..." is a regex literal, not an address — let expression parser handle it
+                if let Some(Ok(Token::String(_))) = self.peek_token() {
+                    break;
+                }
                 self.advance();
                 // Check for / immediately after @ (auto-allocate with bit-spec)
                 if let Some(Ok(Token::Slash)) = self.current_token() {
@@ -5227,6 +5236,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
                 Ok(Token::At) => {
                     self.advance();
+                    // @"..." — regex literal; @ident — prior state
+                    if let Some(Ok(Token::String(s))) = self.current_token() {
+                        let pattern = s.clone();
+                        self.advance();
+                        return Ok(Expr::RegexLiteral(pattern));
+                    }
                     match self.expect_identifier() {
                         Ok(name) => self.parse_postfix_expr(Expr::PriorState(name)),
                         Err(e) => return Err(e),

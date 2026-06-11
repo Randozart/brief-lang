@@ -59,6 +59,9 @@ impl ExprEval for BinaryOpExpr {
             (BitXor, Value::Int(a), Value::Int(b)) => Value::Int(a ^ b),
             (Shl,  Value::Int(a), Value::Int(b)) => Value::Int(a << b),
             (Shr,  Value::Int(a), Value::Int(b)) => Value::Int(a >> b),
+            (_, Value::Regex(_), _) | (_, _, Value::Regex(_)) => {
+                return Err(RuntimeError::TypeMismatch(format!("binary op {:?} on Regex", self.kind)))
+            }
             _ => return Err(RuntimeError::TypeMismatch(format!("binary op {:?}", self.kind))),
         })
     }
