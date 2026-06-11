@@ -202,7 +202,54 @@ impl LlvmBackend {
                         return;
                     }
                     Expr::TupleDestructure(names, _) => {
-                        writeln!(out, "{}; tuple destructure: {} names = {}", indent, names.len(), val).ok();
+                        let hp = format!("%tdh{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, val).ok();
+                        for (i, name) in names.iter().enumerate() {
+                            let ep = format!("%tde{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
+                            let elem = format!("%tdr{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, elem, ep).ok();
+                            // Store to variable — same patterns as single-variable assignment
+                            if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
+                                if let Some(&idx) = self.field_index_map.get(name) {
+                                    let new_reg = format!("%in{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = insertvalue %State {}, i64 {}, {}", indent, new_reg, ssa_reg, elem, idx).ok();
+                                    self.ssa_state_reg = Some(new_reg);
+                                    continue;
+                                }
+                            }
+                            if let Some(&addr) = self.mmio_fields.get(name) {
+                                let p = format!("%mio{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
+                                writeln!(out, "{}store volatile i64 {}, i64* {}, align 1", indent, elem, p).ok();
+                                continue;
+                            }
+                            if let Some(&idx) = self.field_index_map.get(name) {
+                                let ty = self.field_types[idx].clone();
+                                let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
+                                match ty.as_str() {
+                                    "i8" => {
+                                        let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                                        writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, elem).ok();
+                                        writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, tr, p, self.align_of(&ty)).ok();
+                                    }
+                                    "float" => {
+                                        let fl = self.native_float_or_box(out, indent, &elem.to_string());
+                                        writeln!(out, "{}store float {}, float* {}, align {}", indent, fl, p, self.align_of(&ty)).ok();
+                                    }
+                                    _ => {
+                                        writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, elem, ty, p, self.align_of(&ty)).ok();
+                                    }
+                                }
+                            } else if let Some(slot) = self.param_slots.get(name) {
+                                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, elem, slot).ok();
+                                self.let_bindings.insert(name.clone(), elem.clone());
+                            } else {
+                                self.let_bindings.insert(name.clone(), elem.clone());
+                                writeln!(out, "{}; tuple elem assign {} to {}", indent, elem, name).ok();
+                            }
+                        }
                         return;
                     }
                     _ => { writeln!(out, "{}; assign {}", indent, val).ok(); return; }
