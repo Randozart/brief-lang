@@ -211,3 +211,41 @@ Added `root_path: PathBuf` to `ImportResolver`, set on first call from the compi
 
 **Files changed**: `src/import_resolver.rs`
 
+---
+
+## 2026-06-12 — Stdlib Cleanup: Removing Compiler Magic from Result/Option Methods
+
+**Context**: `is_ok`, `is_err`, `unwrap`, `unwrap_or`, `unwrap_err` (for Result) and `is_some`, `is_none`, `unwrap` (for Option) were hardcoded as typechecker signatures and inference arms. These were artifacts of a more magical version of the language where the compiler synthesized these functions rather than defining them in the stdlib.
+
+**Problem**: The stdlib (`lib/std/option.bv`, `lib/std/result.bv`) already defined these functions with `uni`-based pattern matching bodies. But their contracts used `.is_some()` / `.is_ok()` method calls that resolved through the hardcoded typechecker signatures — creating a circular dependency between the compiler and the stdlib. The proof engine's F101/F102 checks (`is_success_variant_check`, `is_error_variant_check`) string-matched `Success`/`Error`/`Ok`/`Err`/`is_ok`/`is_err` in guard expressions, but with `uni` these guard patterns are obsolete — `uni Ok(val) = frgn_call()` is handled structurally by the unification statement, not by guard inspections.
+
+**Fix**:
+1. Remove all contracts from stdlib `defn`s (defns don't need contracts; `uni` bodies guarantee correctness structurally)
+2. Remove hardcoded typechecker signature registrations and inference arms for Result/Option methods
+3. Remove proof engine F101/F102 checks (guard-based success/error detection — obsolete with `uni`)
+4. The stdlib functions remain. Users import them from `"std/option"` and `"std/result"` when needed.
+
+**Files changed**: `lib/std/option.bv`, `lib/std/result.bv`, `src/typechecker.rs`, `src/proof_engine.rs`
+
+---
+
+## 2026-06-12 — Transaction Contract Ordering Bugfix
+
+**Bug**: `parse_transaction()` parsed contracts BEFORE the return type (`-> Type`). Writing `txn f() -> Type [pre][post]` caused `parse_contract()` to see no brackets, return `[true][true]`, and then fire a misleading error ("both precondition and postcondition are [true]") — even though the user wrote proper contracts, just in the wrong position. `parse_definition()` handled both orderings correctly with a soft note; `parse_transaction()` did not.
+
+**Fix**:
+1. `parse_transaction()`: Match `parse_definition()` — check for `LBracket` before parsing return type; check again after parsing return type with a soft note about canonical ordering.
+2. `parse_contract()`: Add `count > 0` guard to the `[true][true]` false-positive check at line 3959 (prevents firing when no brackets were parsed).
+
+**Files changed**: `src/parser.rs`
+
+---
+
+## 2026-06-12 — `defn → txn` Call Resolution Bugfix
+
+**Bug**: The typechecker had no `transactions` map. `TopLevel::Transaction` items were silently discarded during Pass 1 (fell through to `_ => {}` at line 559). Both `check_call_argument_types()` and `infer_expression()` only looked up `self.definitions`, `self.signatures`, and `self.foreign_bindings` — so `defn → txn` calls silently failed to resolve at the type level.
+
+**Fix**: Added `transactions: HashMap<String, Transaction>` to `TypeChecker`, populated during Pass 1, and added as a lookup target in both `check_call_argument_types()` (for arg type validation) and `infer_expression()` (for return type inference).
+
+**Files changed**: `src/typechecker.rs`
+

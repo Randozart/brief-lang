@@ -3337,7 +3337,12 @@ let span = self.current_span();
             return self.spanned_err("rct transactions cannot have parameters".to_string());
         }
 
-        let contract = self.parse_contract()?;
+        // Parse contracts — check before -> Type (canonical) and after (fallback)
+        let mut contract = if let Some(Ok(Token::LBracket)) = self.current_token() {
+            self.parse_contract()?
+        } else {
+            Contract::new(Expr::Bool(true), Expr::Bool(true))
+        };
 
         // Parse optional return type for regular (non-reactive) txns
         let (txn_outputs, txn_output_type) = if !is_reactive && matches!(self.current_token(), Some(Ok(Token::Arrow))) {
@@ -3352,6 +3357,15 @@ let span = self.current_span();
         } else {
             (Vec::new(), None)
         };
+
+        // If contracts weren't before -> Type, check after (with soft hint)
+        if !is_reactive && matches!(self.current_token(), Some(Ok(Token::LBracket))) {
+            let c = self.parse_contract()?;
+            if c.pre_condition != Expr::Bool(true) || c.post_condition != Expr::Bool(true) {
+                eprintln!("note: txn contracts read more clearly before the return type — use `[pre][post] -> Type` instead of `-> Type [pre][post]`");
+            }
+            contract = c;
+        }
 
         // Capture closing-brace span for better error messages on missing ';'
         let closing_brace_span;
@@ -3957,7 +3971,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         }
 
         // [true][n >= 0] is always an error — defeats contract-first programming
-        if pre_condition.as_bool() == Some(true) && post_condition.as_bool() == Some(true) {
+        if count > 0 && pre_condition.as_bool() == Some(true) && post_condition.as_bool() == Some(true) {
             return self.spanned_err(
                 "both precondition and postcondition are [true] — at least one side must specify meaningful constraints".to_string()
             );

@@ -55,6 +55,7 @@ pub struct TypeChecker {
     custom_stdlib_path: Option<PathBuf>,
     signatures: HashMap<String, Signature>,
     definitions: HashMap<String, Definition>,
+    transactions: HashMap<String, Transaction>,
     ffi_results: RefCell<HashMap<String, ResultCheckStatus>>,
     foreign_bindings: HashMap<String, ForeignSignature>,
     pub target: CompilationTarget,
@@ -77,6 +78,7 @@ impl TypeChecker {
             custom_stdlib_path: None,
             signatures: HashMap::new(),
             definitions: HashMap::new(),
+            transactions: HashMap::new(),
             ffi_results: RefCell::new(HashMap::new()),
             foreign_bindings: HashMap::new(),
             target: CompilationTarget::Interpreter,
@@ -293,43 +295,6 @@ impl TypeChecker {
         self.enum_variants.insert("DelimLBracket".to_string(), "Token".to_string());
         self.enum_variants.insert("DelimRBracket".to_string(), "Token".to_string());
 
-        // Option<T> methods
-        self.signatures.insert(
-            "is_some".to_string(),
-            Signature {
-                name: "is_some".to_string(),
-                params: vec![("".to_string(), Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())]))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Bool]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
-        self.signatures.insert(
-            "is_none".to_string(),
-            Signature {
-                name: "is_none".to_string(),
-                params: vec![("".to_string(), Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())]))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Bool]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
-        self.signatures.insert(
-            "unwrap".to_string(),
-            Signature {
-                name: "unwrap".to_string(),
-                params: vec![("".to_string(), Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())]))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
         // Character classification functions
         self.signatures.insert(
             "is_whitespace".to_string(),
@@ -423,67 +388,6 @@ impl TypeChecker {
                 name: "len".to_string(),
                 params: vec![("".to_string(), Type::String)], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Int]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
-        // Result<T, E> methods
-        self.signatures.insert(
-            "is_ok".to_string(),
-            Signature {
-                name: "is_ok".to_string(),
-                params: vec![("".to_string(), Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())]))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Bool]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
-        self.signatures.insert(
-            "is_err".to_string(),
-            Signature {
-                name: "is_err".to_string(),
-                params: vec![("".to_string(), Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())]))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Bool]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
-        self.signatures.insert(
-            "unwrap".to_string(),
-            Signature {
-                name: "unwrap".to_string(),
-                params: vec![("".to_string(), Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())]))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
-        self.signatures.insert(
-            "unwrap_err".to_string(),
-            Signature {
-                name: "unwrap_err".to_string(),
-                params: vec![("".to_string(), Type::Applied("Result".to_string(), vec![Type::TypeVar("T".to_string()), Type::TypeVar("E".to_string())]))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::TypeVar("E".to_string())]),
-                source: None,
-                alias: None,
-                bound_defn: None,
-            },
-        );
-
-        self.signatures.insert(
-            "unwrap_or".to_string(),
-            Signature {
-                name: "unwrap_or".to_string(),
-                params: vec![("".to_string(), Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])), ("".to_string(), Type::TypeVar("T".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::TypeVar("T".to_string())]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -603,6 +507,9 @@ impl TypeChecker {
                 }
                 TopLevel::Definition(defn) => {
                     self.definitions.insert(defn.name.clone(), defn.clone());
+                }
+                TopLevel::Transaction(txn) => {
+                    self.transactions.insert(txn.name.clone(), txn.clone());
                 }
                 TopLevel::ForeignBinding {
                     name, signature, ..
@@ -994,9 +901,11 @@ impl TypeChecker {
     }
 
     fn check_call_argument_types(&mut self, func_name: &str, args: &[Expr]) {
-        // Collect parameter types from definition, signature, or foreign binding
+        // Collect parameter types from definition, transaction, signature, or foreign binding
         let params: Option<Vec<Type>> = if let Some(defn) = self.definitions.get(func_name) {
             Some(defn.parameters.iter().map(|(_, t)| t.clone()).collect())
+        } else if let Some(txn) = self.transactions.get(func_name) {
+            Some(txn.parameters.iter().map(|(_, t)| t.clone()).collect())
         } else if let Some(sig) = self.signatures.get(func_name) {
             Some(sig.params.iter().map(|(_, t)| t.clone()).collect())
         } else if let Some(fb) = self.foreign_bindings.get(func_name) {
@@ -1362,32 +1271,8 @@ impl TypeChecker {
                         .first()
                         .map(|(_, ty)| ty.clone())
                         .unwrap_or(Type::Void)
-                } else if name == "unwrap" && !args.is_empty() {
-                    // Special handling for unwrap: extract inner type from Option/Result
-                    let arg_ty = self.infer_expression(&args[0]);
-                    match &arg_ty {
-                        Type::Applied(inner_name, type_args) if inner_name == "Option" && !type_args.is_empty() => {
-                            type_args[0].clone()
-                        }
-                        Type::Applied(inner_name, type_args) if inner_name == "Result" && !type_args.is_empty() => {
-                            type_args[0].clone()
-                        }
-                        _ => Type::TypeVar("T".to_string()),
-                    }
-                } else if name == "is_some" || name == "is_none" {
-                    Type::Bool
-                } else if name == "is_ok" || name == "is_err" {
-                    Type::Bool
-                } else if name == "unwrap_err" && !args.is_empty() {
-                    let arg_ty = self.infer_expression(&args[0]);
-                    match &arg_ty {
-                        Type::Applied(inner_name, type_args) if inner_name == "Result" && type_args.len() >= 2 => {
-                            type_args[1].clone()
-                        }
-                        _ => Type::TypeVar("E".to_string()),
-                    }
                 } else if let Some(sig) = self.signatures.get(name) {
-                    // Handle generic type substitution for unwrap/is_some/etc
+                    // Handle generic type substitution for signatures
                     let result_types = match &sig.result_type {
                         ResultType::Projection(types) => types.clone(),
                         ResultType::TrueAssertion => vec![Type::Bool],
@@ -1409,6 +1294,14 @@ impl TypeChecker {
                         output_type.all_types().first().cloned().unwrap_or(Type::Void)
                     } else if !defn.outputs.is_empty() {
                         defn.outputs.first().cloned().unwrap_or(Type::Void)
+                    } else {
+                        Type::Void
+                    }
+                } else if let Some(txn) = self.transactions.get(name) {
+                    if let Some(ref output_type) = txn.output_type {
+                        output_type.all_types().first().cloned().unwrap_or(Type::Void)
+                    } else if !txn.outputs.is_empty() {
+                        txn.outputs.first().cloned().unwrap_or(Type::Void)
                     } else {
                         Type::Void
                     }

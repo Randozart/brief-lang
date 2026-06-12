@@ -3,98 +3,57 @@ enum Result<T, E> {
     Err(E)
 };
 
-defn is_ok<T,E>(r: Result<T,E>) [true][term == true || term == false] -> Bool {
+defn is_ok<T,E>(r: Result<T,E>) -> Bool {
     uni r(Ok(_)) = { term true; };
     uni r(Err(_)) = { term false; };
     term false;
 };
-defn is_err<T,E>(r: Result<T,E>) [true][term == true || term == false] -> Bool {
+defn is_err<T,E>(r: Result<T,E>) -> Bool {
     uni r(Ok(_)) = { term false; };
     uni r(Err(_)) = { term true; };
     term false;
 };
-defn unwrap<T,E>(r: Result<T,E>) [r.is_ok()][true] -> T {
+defn unwrap<T,E>(r: Result<T,E>) -> T {
     uni r(Ok(v)) = { term v; };
 };
-defn unwrap_err<T,E>(r: Result<T,E>) [r.is_err()][true] -> E {
+defn unwrap_err<T,E>(r: Result<T,E>) -> E {
     uni r(Err(e)) = { term e; };
 };
-defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E>
-    [f != null][term.is_ok() || term.is_err()]
-{
-    [result.is_ok()] {
-        let val = result.unwrap();
-        term Ok(f(val));
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(err);
-    };
+defn result_map<T, E, U>(result: Result<T, E>, f: T -> U) -> Result<U, E> {
+    uni result(Ok(v)) = { term Ok(f(v)); };
+    uni result(Err(e)) = { term Err(e); };
     term Err("unreachable");
 };
-defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F>
-    [f != null][term.is_ok() || term.is_err()]
-{
-    [result.is_ok()] {
-        let val = result.unwrap();
-        term Ok(val);
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(f(err));
-    };
+defn result_map_err<T, E, F>(result: Result<T, E>, f: E -> F) -> Result<T, F> {
+    uni result(Ok(v)) = { term Ok(v); };
+    uni result(Err(e)) = { term Err(f(e)); };
     term Err("unreachable");
 };
-defn result_and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Result<U, E>
-    [f != null][term.is_ok() || term.is_err()]
-{
-    [result.is_ok()] {
-        let val = result.unwrap();
-        term f(val);
-    };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(err);
-    };
+defn result_and_then<T, E, U>(result: Result<T, E>, f: T -> Result<U, E>) -> Result<U, E> {
+    uni result(Ok(v)) = { term f(v); };
+    uni result(Err(e)) = { term Err(e); };
     term Err("unreachable");
 };
-defn result_or_else<T, E>(result: Result<T, E>, f: E -> Result<T, E>) -> Result<T, E>
-    [f != null][term.is_ok() || term.is_err()]
-{
-    [result.is_ok()] { term result; };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term f(err);
-    };
+defn result_or_else<T, E>(result: Result<T, E>, f: E -> Result<T, E>) -> Result<T, E> {
+    uni result(Ok(v)) = { term Ok(v); };
+    uni result(Err(e)) = { term f(e); };
     term Err("unreachable");
 };
-defn result_and<T, E, U>(result: Result<T, E>, other: Result<U, E>) -> Result<U, E>
-    [true][term.is_ok() || term.is_err()]
-{
-    [result.is_ok()] { term other; };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(err);
-    };
+defn result_and<T, E, U>(result: Result<T, E>, other: Result<U, E>) -> Result<U, E> {
+    uni result(Ok(_)) = { term other; };
+    uni result(Err(e)) = { term Err(e); };
     term Err("unreachable");
 };
-defn result_or<T, E>(result: Result<T, E>, other: Result<T, E>) -> Result<T, E>
-    [true][term.is_ok() || term.is_err()]
-{
-    [result.is_ok()] { term result; };
-    term other;
+defn result_or<T, E>(result: Result<T, E>, other: Result<T, E>) -> Result<T, E> {
+    uni result(Ok(v)) = { term Ok(v); };
+    uni result(Err(_)) = { term other; };
+    term Err(other);
 };
-defn result_filter<T, E>(result: Result<T, E>, pred: T -> Bool) -> Result<T, E>
-    [pred != null][term.is_ok() || term.is_err()]
-{
-    [result.is_ok()] {
-        let val = result.unwrap();
-        [pred(val)] { term Ok(val); };
+defn result_filter<T, E>(result: Result<T, E>, pred: T -> Bool) -> Result<T, E> {
+    uni result(Ok(v)) = {
+        [pred(v)] { term Ok(v); };
         term Err("filtered_out");
     };
-    [result.is_err()] {
-        let err = result.unwrap_err();
-        term Err(err);
-    };
+    uni result(Err(e)) = { term Err(e); };
     term Err("unreachable");
 };

@@ -1719,10 +1719,7 @@ impl ProofEngine {
         let ffi_calls = self.find_ffi_calls_in_body(&defn.body, ffi_bindings);
 
         for (frgn_name, _call_context) in ffi_calls {
-            let result_var = self.find_ffi_result_variable(&defn.body, &frgn_name);
-            if let Some(var_name) = result_var {
-                self.verify_ffi_result_handling(defn, &var_name, &frgn_name);
-            }
+            let _result_var = self.find_ffi_result_variable(&defn.body, &frgn_name);
         }
     }
 
@@ -1754,98 +1751,6 @@ impl ProofEngine {
             }
         }
         None
-    }
-
-    fn verify_ffi_result_handling(&mut self, defn: &Definition, result_var: &str, frgn_name: &str) {
-        let mut has_success_path = false;
-        let mut has_error_path = false;
-        let mut success_terminates = false;
-        let mut error_terminates = false;
-
-        self.check_ffi_branch_handling(&defn.body, result_var, &mut has_success_path, &mut has_error_path, &mut success_terminates, &mut error_terminates);
-
-        if !has_success_path {
-            let mut err = ProofError::new("F101", "FFI call missing success handling");
-            err.explanation = format!(
-                "FFI call '{}' result '{}' has no success branch handling",
-                frgn_name, result_var
-            );
-            err.proof_chain.push(format!("1. '{}' returns Result<T, Error>", frgn_name));
-            err.proof_chain.push(format!("2. caller '{}' must handle both Success and Error", defn.name));
-            err.hints.push("add a success branch (e.g., let Success(val) = result;)".to_string());
-            self.errors.push(err);
-        }
-
-        if !has_error_path {
-            let mut err = ProofError::new("F102", "FFI call missing error handling");
-            err.explanation = format!(
-                "FFI call '{}' result '{}' has no error branch handling",
-                frgn_name, result_var
-            );
-            err.proof_chain.push(format!("1. '{}' returns Result<T, Error>", frgn_name));
-            err.proof_chain.push(format!("2. caller '{}' must handle both Success and Error", defn.name));
-            err.hints.push("add an error branch (e.g., let Error(e) = result;)".to_string());
-            self.errors.push(err);
-        }
-
-        if has_success_path && has_error_path && !success_terminates && !error_terminates {
-            let mut err = self.make_err("F103", "FFI result may not be properly terminated");
-            err.explanation = format!(
-                "FFI call '{}' has both branches but neither terminates (escape/term)",
-                frgn_name
-            );
-            err.proof_chain.push("1. both branches should either escape or return".to_string());
-            err.proof_chain.push("2. otherwise the remaining code may execute unexpectedly".to_string());
-            err.hints.push("ensure each branch either escapes or has a term statement".to_string());
-            self.errors.push(err);
-        }
-    }
-
-    fn check_ffi_branch_handling(
-        &self,
-        body: &[Statement],
-        result_var: &str,
-        has_success: &mut bool,
-        has_error: &mut bool,
-        success_terminates: &mut bool,
-        error_terminates: &mut bool,
-    ) {
-        for stmt in body {
-            match stmt {
-                Statement::Guarded { condition, statements } => {
-                    if self.is_success_variant_check(condition, result_var) {
-                        *has_success = true;
-                        self.check_branch_terminates(statements, success_terminates);
-                    } else if self.is_error_variant_check(condition, result_var) {
-                        *has_error = true;
-                        self.check_branch_terminates(statements, error_terminates);
-                    } else {
-                        self.check_ffi_branch_handling(statements, result_var, has_success, has_error, success_terminates, error_terminates);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn is_success_variant_check(&self, condition: &Expr, _result_var: &str) -> bool {
-        match condition {
-            Expr::Call(name, args) => {
-                name == "Success" || name == "Ok" || (name == "is_ok" && args.is_empty())
-            }
-            Expr::IntrinsicCall { .. } => false,
-            _ => false
-        }
-    }
-
-    fn is_error_variant_check(&self, condition: &Expr, _result_var: &str) -> bool {
-        match condition {
-            Expr::Call(name, args) => {
-                name == "Error" || name == "Err" || (name == "is_err" && args.is_empty())
-            }
-            Expr::IntrinsicCall { .. } => false,
-            _ => false
-        }
     }
 
     fn check_branch_terminates(&self, statements: &[Statement], terminates: &mut bool) {
