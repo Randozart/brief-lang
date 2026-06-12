@@ -891,6 +891,7 @@ impl TypeChecker {
         match expr {
             Expr::Call(func_name, args) => {
                 self.verify_term_function_call(func_name, args);
+                self.check_call_argument_types(func_name, args);
                 for arg in args {
                     self.check_expr_for_function_calls(arg);
                 }
@@ -978,6 +979,38 @@ impl TypeChecker {
                         func_name, func_name, postcond_str
                     )),
             );
+        }
+    }
+
+    fn check_call_argument_types(&mut self, func_name: &str, args: &[Expr]) {
+        // Collect parameter types from definition, signature, or foreign binding
+        let params: Option<Vec<Type>> = if let Some(defn) = self.definitions.get(func_name) {
+            Some(defn.parameters.iter().map(|(_, t)| t.clone()).collect())
+        } else if let Some(sig) = self.signatures.get(func_name) {
+            Some(sig.params.iter().map(|(_, t)| t.clone()).collect())
+        } else if let Some(fb) = self.foreign_bindings.get(func_name) {
+            Some(fb.inputs.iter().map(|(_, t)| t.clone()).collect())
+        } else {
+            None
+        };
+
+        let params = match params {
+            Some(p) => p,
+            None => return,
+        };
+
+        for (i, param_type) in params.iter().enumerate() {
+            if i >= args.len() {
+                break;
+            }
+            let arg_type = self.infer_expression(&args[i]);
+            if !self.types_compatible(&arg_type, param_type) {
+                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                    expected: self.type_to_string(param_type),
+                    found: self.type_to_string(&arg_type),
+                    context: format!("argument {} of call to '{}'", i, func_name),
+                });
+            }
         }
     }
 
@@ -2282,6 +2315,86 @@ mod tests {
         let diags = tc.get_diagnostics();
         assert!(!diags.is_empty(), "Should have at least one diagnostic for uninitialized");
     }
+
+    #[test]
+    fn test_check_call_arg_type_match() {
+        let mut prog = make_program(vec![
+            TopLevel::Definition(Definition {
+                name: "needs_int".into(),
+                type_params: vec![],
+                parameters: vec![("x".into(), Type::Int)],
+                outputs: vec![Type::Int],
+                output_type: None,
+                output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![
+                    Statement::Term { values: vec![Some(Expr::Identifier("x".into()))], modifiers: vec![], swan_song: None },
+                ],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_call_arg_type_mismatch() {
+        let mut prog = make_program(vec![
+            TopLevel::Definition(Definition {
+                name: "needs_int".into(),
+                type_params: vec![],
+                parameters: vec![("x".into(), Type::Int)],
+                outputs: vec![Type::Int],
+                output_type: None,
+                output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![
+                    Statement::Term { values: vec![Some(Expr::Identifier("x".into()))], modifiers: vec![], swan_song: None },
+                ],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+            TopLevel::Definition(Definition {
+                name: "caller".into(),
+                type_params: vec![],
+                parameters: vec![],
+                outputs: vec![Type::Int],
+                output_type: None,
+                output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![
+                    Statement::Term { values: vec![Some(Expr::Call("needs_int".into(), vec![Expr::String("hello".into())]))], modifiers: vec![], swan_song: None },
+                ],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(!errors.is_empty(), "Expected type mismatch error");
+        let found = errors.iter().any(|e| matches!(e, super::TypeError::TypeMismatch { .. }));
+        assert!(found, "Expected TypeMismatch error, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_check_call_arg_unknown_fn_skipped() {
+        // Calling an undeclared function should not crash — silently skipped
+        let mut prog = make_program(vec![
+            TopLevel::Definition(Definition {
+                name: "caller".into(),
+                type_params: vec![],
+                parameters: vec![],
+                outputs: vec![],
+                output_type: None,
+                output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![
+                    Statement::Expression(Expr::Call("undefined_fn".into(), vec![Expr::Integer(42)])),
+                ],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        // Unknown function is silently skipped — no crash
+        assert!(errors.is_empty(), "Expected no errors for unknown fn, got: {:?}", errors);
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
@@ -2432,12 +2545,12 @@ mod kani_full_tests {
 
     #[test]
     fn test_check_intrinsic_bytes_returns_int() {
-        let expr = Expr::IntrinsicCall {
+        let mut prog = make_program(vec![]);
+        let mut tc = super::TypeChecker::new();
+        let ty = tc.infer_expression(&Expr::IntrinsicCall {
             intrinsic: Intrinsic::Bytes,
-            args: vec![Expr::Integer(0)],
-        };
-        let ctx = TypeChecker::new();
-        let ty = ctx.infer_expression(&expr);
+            args: vec![Expr::String("hello".into())],
+        });
         assert_eq!(ty, Type::Int, "bytes# should infer as Int");
     }
 }
