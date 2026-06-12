@@ -503,6 +503,7 @@ impl AArch64Backend {
                 self.generate_expr(output, expr);
                 writeln!(output, "    // unification: {} {} (value in x0)", name, variant).ok();
             }
+            Statement::Foreach { .. } => { /* foreach: not yet implemented in AArch64 backend */ }
         }
     }
     

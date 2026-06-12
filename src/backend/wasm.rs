@@ -126,6 +126,7 @@ impl WasmBackend {
                 self.generate_expr(output, expr);
                 writeln!(output, "    ;; unification: {} {} (value on stack)", name, variant).ok();
             }
+            Statement::Foreach { .. } => { /* foreach: not yet implemented in Wasm backend */ }
         }
     }
 

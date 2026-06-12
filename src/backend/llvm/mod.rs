@@ -123,6 +123,10 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         Statement::LocalTrigger { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
         Statement::SyncBlock { body } => { for s in body { collect_strings_stmt(s, seen, out); } }
         Statement::Alka { .. } | Statement::OnExit { .. } | Statement::InlineAsm { .. } => {}
+        Statement::Foreach { list, body, .. } => {
+            collect_strings_expr(list, seen, out);
+            for s in body { collect_strings_stmt(s, seen, out); }
+        }
     }
 }
 

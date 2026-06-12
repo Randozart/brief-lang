@@ -503,6 +503,7 @@ impl X86_64Backend {
                 self.generate_expr(output, expr);
                 writeln!(output, "    ; unification: {} {} (expr in rax)", name, variant).ok();
             }
+            Statement::Foreach { .. } => { /* foreach: not yet implemented in x86_64 backend */ }
         }
     }
     

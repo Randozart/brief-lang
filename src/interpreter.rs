@@ -1193,6 +1193,22 @@ impl Interpreter {
                     self.exec_stmt(stmt)?;
                 }
             }
+            Statement::Foreach { item, list, body } => {
+                let list_val = self.eval_expr(list)?;
+                match list_val {
+                    Value::List(items) => {
+                        for elem in items {
+                            self.state.insert(item.clone(), elem);
+                            for stmt in body {
+                                self.exec_stmt(stmt)?;
+                            }
+                        }
+                    }
+                    _ => return Err(RuntimeError::TypeMismatch(
+                        "foreach requires a List<T> value".to_string(),
+                    )),
+                }
+            }
             Statement::Unification {
                 name,
                 variant,
@@ -4940,6 +4956,41 @@ mod tests {
             Expr::Integer(0),
         ])).unwrap();
         assert_eq!(result, Value::Int(10));  // 0+1+2+3+4 = 10
+    }
+
+    #[test]
+    fn test_foreach_filter() {
+        let mut i = Interpreter::new();
+        let stmt = Statement::Foreach {
+            item: "x".to_string(),
+            list: Box::new(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)])),
+            body: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        // Just verify no error — basic loop completion
+    }
+
+    #[test]
+    fn test_foreach_accumulates() {
+        let mut i = Interpreter::new();
+        i.state.insert("sum".to_string(), Value::Int(0));
+        let stmt = Statement::Foreach {
+            item: "x".to_string(),
+            list: Box::new(Expr::ListLiteral(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("sum".to_string()),
+                    expr: Expr::Add(
+                        Box::new(Expr::Identifier("sum".to_string())),
+                        Box::new(Expr::Identifier("x".to_string())),
+                    ),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+            ],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("sum"), Some(&Value::Int(60)));
     }
 
     #[test]

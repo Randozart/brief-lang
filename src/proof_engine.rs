@@ -914,6 +914,9 @@ impl SymbolicExecutor {
                 }
                 Statement::Expression(_) | Statement::Unification { .. } | Statement::SyncBlock { .. } | Statement::LocalTrigger { .. } => {}
                 Statement::Alka(_) | Statement::OnExit { .. } => {}
+                Statement::Foreach { body, .. } => {
+                    self.enumerate_paths_recursive(body, current_state.clone(), paths);
+                }
             }
         }
 
@@ -3109,6 +3112,11 @@ impl ProofEngine {
             Statement::Unification { .. } => {}
             Statement::LocalTrigger { .. } => {}
             Statement::Alka(_) | Statement::OnExit { .. } => {}
+            Statement::Foreach { body, .. } => {
+                for stmt in body {
+                    self.collect_write_vars(stmt, vars);
+                }
+            }
         }
     }
 

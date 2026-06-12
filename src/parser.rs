@@ -165,6 +165,7 @@ impl<'a> Parser<'a> {
             Token::BoolTrue => "true".into(),
             Token::BoolFalse => "false".into(),
             Token::Match => "match".into(),
+            Token::Foreach => "foreach".into(),
             Token::Ok => "Ok".into(),
             Token::Err => "Err".into(),
             Token::Some => "Some".into(),
@@ -4234,6 +4235,31 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 };
                 self.expect(Token::Semicolon)?;
                 Ok(Statement::Escape(expr))
+            }
+            Some(Ok(Token::Foreach)) => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let item = self.expect_identifier()?;
+                // expect the `in` keyword
+                if !matches!(self.current_token(), Some(Ok(Token::Identifier(s))) if s == "in") {
+                    return Err(SyntaxError::UnexpectedToken {
+                        expected: "'in'".to_string(),
+                        found: self.fmt_current_token(),
+                        span: self.current_span().unwrap_or_else(Span::dummy),
+                    });
+                }
+                self.advance();
+                let list = self.parse_expression()?;
+                self.expect(Token::RParen)?;
+                self.expect(Token::LBrace)?;
+                let body = self.parse_body()?;
+                self.expect(Token::RBrace)?;
+                self.expect(Token::Semicolon)?;
+                Ok(Statement::Foreach {
+                    item,
+                    list: Box::new(list),
+                    body,
+                })
             }
             Some(Ok(Token::Unification)) => {
                 // Three syntaxes supported:

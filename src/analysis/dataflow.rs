@@ -285,6 +285,12 @@ impl<'a> DataflowAnalyzer<'a> {
             }
             Statement::InlineAsm { .. } | Statement::Alka(_) => {}
             Statement::SyncBlock { .. } => {}
+            Statement::Foreach { list, body, .. } => {
+                self.extract_ids_recursive(list, ids);
+                for s in body {
+                    self.extract_ids_from_statement(s, ids);
+                }
+            }
         }
     }
 

@@ -447,6 +447,12 @@ impl LlvmBackend {
             Statement::OnExit { body, .. } => { self.pending_cleanup.extend(body.iter().cloned()); }
             Statement::Alka(b) => { for l in b.content.lines() { let _ = writeln!(out, "{}{}", indent, l); } }
             Statement::InlineAsm { asm_string, .. } => { writeln!(out, "{}{}", indent, asm_string).ok(); }
+            Statement::Foreach { item, list, body } => {
+                writeln!(out, "{}; foreach {} in ...", indent, item).ok();
+                for s in body {
+                    self.emit_stmt(out, s, &format!("{}  ", indent));
+                }
+            }
         }
     }
 

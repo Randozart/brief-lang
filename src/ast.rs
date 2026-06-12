@@ -1073,6 +1073,16 @@ pub enum Statement {
     SyncBlock {
         body: Vec<Statement>,
     },
+
+    // For-each loop: foreach(item in list) { body };
+    // Valid only inside defn/txn/rct txn bodies. Binds item: T for each
+    // element of list: List<T>. Termination is structural (list is finite),
+    // no convergence contract needed.
+    Foreach {
+        item: String,
+        list: Box<Expr>,
+        body: Vec<Statement>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -516,6 +516,7 @@ impl CobolBackend {
                 let expr_str = self.translate_expr(expr);
                 output.push_str(&format!("    *> unification: {} {} = {}\n", name, variant, expr_str));
             }
+            Statement::Foreach { .. } => { /* foreach: not yet implemented in COBOL backend */ }
         }
     }
 

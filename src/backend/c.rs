@@ -903,6 +903,7 @@ impl CBackend {
                 let val = self.expr_to_c(expr);
                 output.push_str(&format!("    /* unification: {} {} = {} */\n", name, variant, val));
             }
+            Statement::Foreach { .. } => { /* foreach: not yet implemented in C backend */ }
         }
     }
 

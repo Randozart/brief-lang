@@ -176,6 +176,10 @@ pub enum Token {
     #[token("MATCH")]
     Match,
 
+    #[token("foreach")]
+    #[token("FOREACH")]
+    Foreach,
+
     #[token("sync")]
     #[token("SYNC")]
     Sync,
@@ -458,6 +462,7 @@ impl std::fmt::Display for Token {
             Token::Ok => write!(f, "Ok"),
             Token::Err => write!(f, "Err"),
             Token::Match => write!(f, "match"),
+            Token::Foreach => write!(f, "foreach"),
             Token::Sync => write!(f, "sync"),
             Token::Some => write!(f, "some"),
             Token::None => write!(f, "none"),

@@ -1613,6 +1613,7 @@ impl VerilogGenerator {
                 }
                 out.push_str("        end\n");
             }
+            Statement::Foreach { .. } => { /* foreach: not yet implemented */ }
         }
         out
     }
