@@ -96,6 +96,77 @@ has a special `Expr::TupleDestructure` branch that:
 - Only handles top-level destructuring (no nested `&(a, (b, c)) = expr`)
 - LLVM backend emits only a comment — actual tuple codegen is a known gap
 
+## `foreach(item in list) { body }` — Bounded Iteration
+
+**Date:** 2026-06-12  
+**Status:** Implemented (interpreter, parser, all backends)
+
+`foreach` is a statement-level bounded loop. It iterates over a `List<T>`,
+binding `item: T` in each iteration. Unlike `rct txn` loops, `foreach`
+does NOT require a convergence contract — termination is structural (the
+list is finite).
+
+### Syntax
+
+```
+foreach (item in list) { body };
+```
+
+Only valid inside `defn`/`txn`/`rct txn` bodies. Top-level `foreach`
+produces a parse error.
+
+### Desugaring
+
+Not desugared — `foreach` is a first-class statement. The interpreter
+implements it directly as:
+
+```rust
+Statement::Foreach { item, list, body } => {
+    let list_val = self.eval_expr(list)?;
+    if let Value::List(items) = list_val {
+        for elem in items {
+            self.state.insert(item.clone(), elem);
+            for stmt in body {
+                self.exec_stmt(stmt)?;
+            }
+        }
+    }
+}
+```
+
+### Backend coverage
+
+| Backend | Status |
+|---------|--------|
+| Interpreter  | ✅ Direct implementation |
+| LLVM         | ⚠️ Comment stub + recursive body emission |
+| C / COBOL / Verilog / VHDL / Wasm / Webstack / aarch64 / x86_64 | ⚠️ Comment stubs |
+
+The backend stubs emit comments but don't produce executable code yet.
+The interpreter is the reference implementation.
+
+### Comparison to manual iteration
+
+**Before** (manual `txn` convergence loop — 5 lines of scaffolding):
+```
+txn filter_fluff(tokens, result, i) [i < tokens:>Size][i == tokens:>Size] -> List<String> {
+    [not_fluff(tokens[i])] { &result <- tokens[i]; };
+    &i = i + 1;
+    term result;
+};
+```
+
+**After** (`foreach` — 1 line of scaffolding):
+```
+foreach (tok in tokens) {
+    [not_fluff(tok)] { &result <- tok; };
+};
+```
+
+The contract guarantee is preserved — termination is structural (list is
+finite) rather than proven by `check_convergence`, but the same safety
+property (no infinite loop) holds.
+
 ## Migration Status
 
 All feature files are stubs — the actual dispatch still uses the old
