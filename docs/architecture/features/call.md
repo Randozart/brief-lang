@@ -23,10 +23,24 @@ the target function through a priority-ordered chain:
 
 ## Typechecking
 
-Currently a stub — returns `Type::Int`. Full typechecking would:
-- Resolve the function's signature
-- Validate argument types against parameter types
-- Return the declared return type
+Call argument type checking validates that argument types match parameter
+types at call sites. Added in Phase 1 (2026-06-12).
+
+```rust
+fn check_call_argument_types(&mut self, func_name: &str, args: &[Expr]) {
+    // Looks up callee parameter types from definitions, signatures, or foreign bindings
+    // Compares each argument type via infer_expression + types_compatible
+    // Emits TypeError::TypeMismatch on mismatch
+}
+```
+
+The checker handles three callee kinds:
+- `defn`/`txn` definitions → `Definition.parameters`
+- Signatures → `Signature.params`  
+- Foreign bindings → `ForeignSignature.input_layout`
+
+Unknown functions are silently skipped (they may be intrinsics or
+dynamically-resolved FFI calls that the typechecker cannot inspect).
 
 ## Evaluation
 

@@ -139,3 +139,35 @@ Clarity 15 nesting. Well within limits.
 **New diagnostics**: 0
 
 **Result**: 24/24 benchmarks pass check (up from 16).
+
+---
+
+## 2026-06-12 — Visibility System + Struct Derivation
+
+**Files changed:**
+- `src/parser.rs` — +~150 lines (sed tracking, field visibility parsing, struct derivation `<:`, match/uni arrow)
+- `src/import_resolver.rs` — sed filtering in `filter_items`, cache type change
+- `src/typechecker.rs` — `enforce_field_visibility()`, `is_derived_from()`, `struct_parents`, `struct_field_visibility`
+- `src/desugarer.rs` — struct flattening pass (recursive parent resolution, collision detection)
+- `src/ast.rs` — `StructDefinition.parent: Option<Type>`
+- Various — `parent: None` on all `StructDefinition {` constructors
+
+**New code added:**
+| Function | Lines | Cyclomatic | Params |
+|----------|-------|------------|--------|
+| `enforce_field_visibility` | ~25 | ≤5 | 2 |
+| `is_derived_from` | ~20 | ≤8 | 2 |
+| `parse_field_visibility` | ~10 | ≤4 | 1 |
+| `take_sed_item_names` | 4 | ≤1 | 1 |
+| `collect_parent_fields` (nested fn) | ~25 | ≤6 | 4 |
+
+All new functions expected to pass Praetor strict limits (complexity ≤ 15, lines ≤ 100, params ≤ 6). `collect_parent_fields` has 4 params (under the 6-param limit).
+
+**New diagnostics**: 0 expected.
+
+**Key design decisions:**
+- Top-level `sed` uses name-based tracking in Parser (no AST changes to `TopLevel`)
+- Struct derivation flattened in desugarer (all backends see flat structs)
+- Visibility enforcement is additive — only `Sedentary` cross-file check is wired
+- `Private` enforcement stubbed (requires `current_struct` tracking)
+

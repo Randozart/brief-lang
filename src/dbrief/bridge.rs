@@ -115,6 +115,7 @@ fn schema_to_struct(schema: &SchemaDef) -> ast::TopLevel {
     ast::TopLevel::Struct(ast::StructDefinition {
         name: schema.name.clone(),
         type_params: Vec::new(),
+        parent: None,
         fields,
         transactions: Vec::new(),
         view_html: None,

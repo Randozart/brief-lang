@@ -60,6 +60,9 @@ pub struct TypeChecker {
     pub target: CompilationTarget,
     enum_variants: HashMap<String, String>,  // variant_name -> enum_name
     struct_fields: HashMap<String, HashMap<String, Type>>,  // struct_name -> {field_name -> type}
+    struct_field_visibility: HashMap<String, HashMap<String, Visibility>>,  // struct_name -> {field_name -> visibility}
+    struct_files: HashMap<String, PathBuf>,  // struct_name -> defining file
+    struct_parents: HashMap<String, Option<Type>>,  // struct_name -> parent type (for derivation upcast)
 }
 
 impl TypeChecker {
@@ -79,6 +82,9 @@ impl TypeChecker {
             target: CompilationTarget::Interpreter,
             enum_variants: HashMap::new(),
             struct_fields: HashMap::new(),
+            struct_field_visibility: HashMap::new(),
+            struct_files: HashMap::new(),
+            struct_parents: HashMap::new(),
         }
     }
 
@@ -617,10 +623,15 @@ impl TypeChecker {
                 }
                 TopLevel::Struct(struct_def) => {
                     let mut fields = HashMap::new();
+                    let mut vis = HashMap::new();
                     for field in &struct_def.fields {
                         fields.insert(field.name.clone(), field.ty.clone());
+                        vis.insert(field.name.clone(), field.visibility);
                     }
                     self.struct_fields.insert(struct_def.name.clone(), fields);
+                    self.struct_field_visibility.insert(struct_def.name.clone(), vis);
+                    self.struct_files.insert(struct_def.name.clone(), self.current_file.clone());
+                    self.struct_parents.insert(struct_def.name.clone(), struct_def.parent.clone());
                 }
                 // DEFERRED (D-1): TypeDefs are collected and resolved in Pass 1
                 // by type_universe.rs. In Pass 2, we only need to validate
@@ -1463,6 +1474,8 @@ impl TypeChecker {
                 if let Type::Custom(struct_name) = &obj_ty {
                     if let Some(fields) = self.struct_fields.get(struct_name) {
                         if let Some(field_ty) = fields.get(field) {
+                            // Check field visibility
+                            self.enforce_field_visibility(struct_name, field);
                             return field_ty.clone();
                         }
                     }
@@ -1985,6 +1998,60 @@ Expr::ObjectLiteral(fields) => {
         }
     }
 
+    /// Enforce field-level visibility at field access sites.
+    /// `Sedentary` fields are only accessible from the struct's defining file.
+    /// `Private` fields are only accessible from within the struct (TODO).
+    fn enforce_field_visibility(&self, struct_name: &str, field: &str) {
+        if let Some(vis_map) = self.struct_field_visibility.get(struct_name) {
+            if let Some(vis) = vis_map.get(field) {
+                match vis {
+                    Visibility::Public => {}
+                    Visibility::Sedentary => {
+                        // Check if the field is accessed from the same file it was defined in.
+                        if let Some(struct_file) = self.struct_files.get(struct_name) {
+                            if struct_file != &self.current_file {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "field accessible from this file".to_string(),
+                                    found: format!("field '{}' of '{}' is sedentary and cannot be accessed from another file", field, struct_name),
+                                    context: format!("access to '{}'.{}", struct_name, field),
+                                });
+                            }
+                        }
+                    }
+                    Visibility::Private => {
+                        // TODO: enforce Private when current_struct tracking is available
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check if struct `child` derives from (or transitively derives from) `parent`.
+    /// Used for implicit upcast validation: B <: A → B compatible with A.
+    fn is_derived_from(&self, child: &str, parent: &str) -> bool {
+        let mut current = child.to_string();
+        let mut visited = std::collections::HashSet::new();
+        loop {
+            if !visited.insert(current.clone()) {
+                return false; // cycle detected
+            }
+            match self.struct_parents.get(&current) {
+                Some(Some(parent_type)) => {
+                    let parent_name = match parent_type {
+                        Type::Custom(n) => n.clone(),
+                        Type::Applied(n, _) => n.clone(),
+                        _ => return false,
+                    };
+                    if parent_name == parent {
+                        return true;
+                    }
+                    current = parent_name;
+                }
+                Some(None) | None => return false,
+            }
+        }
+    }
+
     fn types_compatible(&self, a: &Type, b: &Type) -> bool {
         match (a, b) {
             (Type::Int, Type::Int)
@@ -2019,14 +2086,15 @@ Expr::ObjectLiteral(fields) => {
                     .map(|parent| parent == enum_name)
                     .unwrap_or(false)
             }
-            // Custom types: exact match or variant-of-enum relationship
+            // Custom types: exact match, variant-of-enum, or struct derivation upcast
             (Type::Custom(a_name), Type::Custom(b_name)) => {
                 if a_name == b_name {
                     true
                 } else if let Some(parent) = self.enum_variants.get(a_name.as_str()) {
                     parent == b_name
                 } else {
-                    false
+                    // Check struct derivation chain: B <: A → B compatible with A
+                    self.is_derived_from(a_name, b_name)
                 }
             }
             // TypeVar is compatible with any type (generic placeholder)
@@ -2552,5 +2620,67 @@ mod kani_full_tests {
             args: vec![Expr::String("hello".into())],
         });
         assert_eq!(ty, Type::Int, "bytes# should infer as Int");
+    }
+
+    #[test]
+    fn test_visibility_sed_same_file_allowed() {
+        // Accessing a sedentary field from the same file should NOT produce an error.
+        // The struct and field access are both registered with current_file = "main.bv".
+        let mut prog = make_program(vec![
+            TopLevel::Struct(StructDefinition {
+                name: "S".into(), type_params: vec![], parent: None,
+                fields: vec![StructField {
+                    name: "x".into(), ty: Type::Int, default: None,
+                    visibility: Visibility::Sedentary,
+                }],
+                transactions: vec![], view_html: None, span: None,
+                modifiers: vec![], variants: vec![],
+            }),
+            TopLevel::Definition(Definition {
+                name: "f".into(), type_params: vec![], parameters: vec![],
+                outputs: vec![Type::Int], output_type: None, output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![Statement::Term {
+                    values: vec![Some(Expr::FieldAccess(
+                        Box::new(Expr::StructInstance("S".into(), vec![])),
+                        "x".into(),
+                    ))],
+                    modifiers: vec![], swan_song: None,
+                }],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Expected no errors for same-file sed field access, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_visibility_public_field_allowed() {
+        let mut prog = make_program(vec![
+            TopLevel::Struct(StructDefinition {
+                name: "S".into(), type_params: vec![], parent: None,
+                fields: vec![StructField {
+                    name: "x".into(), ty: Type::Int, default: None,
+                    visibility: Visibility::Public,
+                }],
+                transactions: vec![], view_html: None, span: None,
+                modifiers: vec![], variants: vec![],
+            }),
+            TopLevel::Definition(Definition {
+                name: "f".into(), type_params: vec![], parameters: vec![],
+                outputs: vec![Type::Int], output_type: None, output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![Statement::Term {
+                    values: vec![Some(Expr::FieldAccess(
+                        Box::new(Expr::StructInstance("S".into(), vec![])),
+                        "x".into(),
+                    ))],
+                    modifiers: vec![], swan_song: None,
+                }],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+            }),
+        ]);
+        let errors = check(&mut prog);
+        assert!(errors.is_empty(), "Expected no errors for public field access, got: {:?}", errors);
     }
 }

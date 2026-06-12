@@ -1,4 +1,4 @@
-<!-- 2026-06-11 -->
+<!-- 2026-06-12 -->
 
 # Brief Compiler Glossary
 
@@ -36,3 +36,11 @@
 | **Responsive transaction** | `rct txn` — fires immediately when its preconditions become dirty. No tick, no timer. Existing convergence loop behavior. |
 | **Polled transaction** | `rct async txn @NHz` — fires at N Hz regardless of dirty state. The `@Hz` annotates a timer-backed trigger. Pre/post conditions still enforced. |
 | **Event-driven trigger** | `trg name: Type @ link <ffi_fn>` — FFI-backed trigger. When the linked FFI function returns a non-void value, the trigger variable is marked dirty and convergence runs. |
+| **`pvt`** | Struct-private visibility keyword. Fields marked `pvt` are accessible only from within the struct's own transactions and definitions. Enforcement stubbed (needs `current_struct` tracking). |
+| **`sed`** | File-private visibility keyword. Top-level `sed` items cannot be imported from other files. Struct fields marked `sed` trigger a `TypeMismatch` error when accessed from a different file. |
+| **`<:`** (struct derivation) | Single-inheritance syntax: `struct Child <: Parent { extra_field; };`. Parent fields are flattened into the child at the desugarer level. Upcast (child → parent) is implicitly allowed by the typechecker. |
+| **Struct derivation** | The mechanism by which a struct inherits fields from a parent struct. Resolved recursively (chain inheritance supported). Field name collisions produce a compile error. |
+| **Upcast** | Implicit type conversion from a derived struct to its parent type. Validated by `is_derived_from()` which walks the parent chain. |
+| **Call argument type checking** | Phase 1 feature. `check_call_argument_types()` validates argument types against parameter types at call sites for `defn`/`txn`/`sig`/`frgn` targets. Unknown functions are silently skipped. |
+
+(End of file - total 38 lines)

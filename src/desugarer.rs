@@ -127,6 +127,65 @@ impl Desugarer {
             }
         }
 
+        // Flatten struct derivation chains: prepend parent fields to child fields.
+        // This runs before any item processing so all backends see flat structs.
+        let mut flat_structs: std::collections::HashMap<String, Vec<StructField>> =
+            std::collections::HashMap::new();
+
+        fn collect_parent_fields<'a>(
+            struct_name: &str,
+            struct_defs: &std::collections::HashMap<String, &'a StructDefinition>,
+            flat_structs: &std::collections::HashMap<String, Vec<StructField>>,
+            visited: &mut std::collections::HashSet<String>,
+        ) -> Result<Vec<StructField>, String> {
+            if !visited.insert(struct_name.to_string()) {
+                return Err(format!("Circular derivation detected involving '{}'", struct_name));
+            }
+            let s = struct_defs.get(struct_name).ok_or_else(|| {
+                format!("Parent struct '{}' not found", struct_name)
+            })?;
+            let parent_fields = if let Some(ref parent) = s.parent {
+                let parent_name = match parent {
+                    Type::Custom(n) => n.clone(),
+                    Type::Applied(n, _) => n.clone(),
+                    _ => return Err(format!("Invalid parent type for '{}'", struct_name)),
+                };
+                collect_parent_fields(&parent_name, struct_defs, flat_structs, visited)?
+            } else {
+                Vec::new()
+            };
+            // Check for field collisions between parent and child
+            let parent_names: std::collections::HashSet<&str> =
+                parent_fields.iter().map(|f| f.name.as_str()).collect();
+            for field in &s.fields {
+                if parent_names.contains(field.name.as_str()) {
+                    return Err(format!(
+                        "Field '{}' in '{}' collides with field in parent struct",
+                        field.name, struct_name
+                    ));
+                }
+            }
+            let mut merged = parent_fields;
+            merged.extend(s.fields.clone());
+            Ok(merged)
+        }
+
+        for item in &program.items {
+            if let TopLevel::Struct(s) = item {
+                if s.parent.is_some() {
+                    let mut visited = std::collections::HashSet::new();
+                    match collect_parent_fields(&s.name, &struct_defs, &flat_structs, &mut visited) {
+                        Ok(fields) => {
+                            flat_structs.insert(s.name.clone(), fields);
+                        }
+                        Err(e) => {
+                            panic!("{}", e);
+                        }
+                    }
+                }
+            }
+        }
+
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
@@ -179,10 +238,14 @@ impl Desugarer {
                     items.push(TopLevel::Definition(self.expand_implicit_terms_defn(defn)));
                 }
                 TopLevel::Struct(s) => {
+                    // Use flattened fields if struct has a parent derivation
+                    let fields: &[StructField] = flat_structs.get(&s.name)
+                        .map(|f| f.as_slice())
+                        .unwrap_or(&s.fields);
                     // Only generate state for struct fields if the struct has transactions
                     // (i.e., it's a hardware component, not a pure data type)
                     if !s.transactions.is_empty() {
-                        for field in &s.fields {
+                        for field in fields {
                             let ty = match &field.ty {
                                 Type::Int => Type::Int,
                                 Type::Float => Type::Float,
@@ -276,6 +339,7 @@ impl Desugarer {
                     items.push(TopLevel::Struct(StructDefinition {
                         name: rs.name.clone(),
                         type_params: Vec::new(),
+                        parent: None,
                         fields: rs.fields.clone(),
                         transactions: rs.transactions.clone(),
                         view_html: Some(rs.view_html.clone()),

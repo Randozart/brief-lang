@@ -37,7 +37,7 @@ fn inject_dbvl_path(expr: &mut Expr, file_path: &str) {
 }
 
 pub struct ImportResolver {
-    loaded_modules: HashMap<String, Program>,
+    loaded_modules: HashMap<String, (Program, Vec<String>)>,
     search_paths: Vec<PathBuf>,
     strict_mode: StrictMode,
 }
@@ -125,8 +125,8 @@ impl ImportResolver {
             }
         };
 
-        if let Some(cached) = self.loaded_modules.get(&path_str) {
-            return self.filter_items(cached, &import.items);
+        if let Some((cached, sed_names)) = self.loaded_modules.get(&path_str) {
+            return self.filter_items(cached, sed_names, &import.items);
         }
 
         // Check for CSS import
@@ -142,9 +142,9 @@ impl ImportResolver {
                     .map_err(|e| format!("Failed to read CSS '{}': {}", css_path.display(), e))?;
                 let css_for_cache = css_content.clone();
                 let css_for_return = css_content.clone();
- self.loaded_modules.insert(
+                self.loaded_modules.insert(
                     path_str.clone(),
-                    Program {
+                    (Program {
                         items: vec![TopLevel::Stylesheet(css_for_cache)],
                         comments: vec![],
                         reactor_speed: None,
@@ -155,7 +155,7 @@ impl ImportResolver {
                         exit_condition: None,
                         out_pragmas: vec![],
             default_sig_modifier: None,
-                    },
+                    }, vec![]),
                 );
                 return Ok(Program {
                     items: vec![TopLevel::Stylesheet(css_for_return)],
@@ -212,9 +212,9 @@ impl ImportResolver {
                     });
                 let svg_for_cache = svg_content.clone();
                 let svg_for_return = svg_content.clone();
-self.loaded_modules.insert(
+                self.loaded_modules.insert(
                     path_str.clone(),
-                    Program {
+                    (Program {
                         items: vec![TopLevel::SvgComponent {
                             name: component_name.clone(),
                             content: svg_for_cache,
@@ -228,7 +228,7 @@ self.loaded_modules.insert(
                         exit_condition: None,
                         out_pragmas: vec![],
             default_sig_modifier: None,
-                    },
+                    }, vec![]),
                 );
                 return Ok(Program {
                     items: vec![TopLevel::SvgComponent {
@@ -331,7 +331,7 @@ self.loaded_modules.insert(
 
             self.loaded_modules.insert(
                 path_str.clone(),
-                program_for_cache,
+                (program_for_cache, vec![]),
             );
 
             return Ok(Program {
@@ -444,6 +444,7 @@ self.loaded_modules.insert(
         let imported_program = parser
             .parse()
             .map_err(|e| format!("Failed to parse '{}': {}", resolved_path.display(), e))?;
+        let sed_names = parser.take_sed_item_names();
 
         let resolved = self.resolve_imports(&imported_program, &resolved_path)?;
 
@@ -451,16 +452,12 @@ self.loaded_modules.insert(
         // not the parsed-only version. Otherwise cache hits return
         // programs whose internal imports were never resolved.
         self.loaded_modules
-            .insert(path_str.clone(), resolved.clone());
+            .insert(path_str.clone(), (resolved.clone(), sed_names.clone()));
 
-        self.filter_items(&resolved, &import.items)
+        self.filter_items(&resolved, &sed_names, &import.items)
     }
 
-    fn filter_items(&self, program: &Program, items: &[ImportItem]) -> Result<Program, String> {
-        if items.is_empty() {
-            return Ok(program.clone());
-        }
-
+    fn filter_items(&self, program: &Program, sed_names: &[String], items: &[ImportItem]) -> Result<Program, String> {
         let item_names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
 
         let filtered: Vec<TopLevel> = program
@@ -487,7 +484,20 @@ self.loaded_modules.insert(
                     TopLevel::StateDecl(s) => Some(s.name.as_str()),
                     _ => None,
                 };
-                name.map(|n| item_names.contains(&n)).unwrap_or(false)
+                let name = match name {
+                    Some(n) => n,
+                    None => return false,
+                };
+                // Filter out sed (file-private) items — they are not importable
+                if sed_names.iter().any(|s| s == name) {
+                    return false;
+                }
+                // If specific items are requested, only include matches
+                if items.is_empty() {
+                    true
+                } else {
+                    item_names.contains(&name)
+                }
             })
             .cloned()
             .collect();

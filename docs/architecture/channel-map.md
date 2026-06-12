@@ -1,4 +1,4 @@
-<!-- 2026-06-11 -->
+<!-- 2026-06-12 -->
 
 # Channel Map — Data Flow Between Compiler Passes
 
@@ -18,6 +18,9 @@ Type-Universe ────► TypeUniverse (frozen map of resolved type metadata
   │
   ▼
 Import Resolver ──► Program (resolved paths, validated imports, synthesized imports)
+  │                 Accepts `sed_item_names: Vec<String>` from Parser
+  │                 Filters sed items from exported symbols via filter_items()
+  │                 Cache: HashMap<String, (Program, Vec<String>)>
   │
   ├──► Program::synthesize_init_txn() — wraps TopLevel::Statement in __init txn
   │     (called in run_llvm_compile and run_check after import resolution)
@@ -25,9 +28,18 @@ Import Resolver ──► Program (resolved paths, validated imports, synthesize
 Desugarer ────────► Program (sugar constructs lowered to core AST)
   │                 @"..." → Expr::RegexLiteral
   │                 name#() → Expr::IntrinsicCall
+  │                 Struct derivation: flatten parent fields into child structs
+  │                   before state generation. Handles chain inheritance,
+  │                   detects field name collisions, preserves parent link
+  │                   for type system queries.
   ▼
 Typechecker ──────► Program (annotated with types), TypecheckContext
   │                 Routes Expr variants through ExprTypecheck trait
+  │                 Visibility enforcement: enforce_field_visibility()
+  │                   — Sedentary cross-file access → TypeError
+  │                   — Public allowed everywhere (Private stubbed)
+  │                 Struct derivation: is_derived_from() walks parent chain
+  │                   — B <: A → types_compatible(B, A) == true
   ▼
 EqSaturation ─────► Program (simplified via 5-pass fixpoint rewrite)
   │                 9 rules: add-zero, mul-one, sub-self, double-neg, etc.

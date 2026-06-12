@@ -1383,6 +1383,7 @@ pub struct StructVariant {
 pub struct StructDefinition {
     pub name: String,
     pub type_params: Vec<String>,
+    pub parent: Option<Type>,
     pub fields: Vec<StructField>,
     pub transactions: Vec<Transaction>,
     pub view_html: Option<String>,
@@ -1426,6 +1427,7 @@ impl StructDefinition {
         StructDefinition {
             name,
             type_params: Vec::new(),
+            parent: None,
             fields: Vec::new(),
             transactions: Vec::new(),
             view_html: None,

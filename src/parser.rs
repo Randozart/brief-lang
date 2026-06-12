@@ -47,6 +47,8 @@ pub struct Parser<'a> {
     /// Track whether a top-level executable statement has been seen.
     /// Declarations after the first statement are a compile error.
     seen_top_level_stmt: bool,
+    /// Names of top-level items marked with `sed` (file-private).
+    sed_item_names: Vec<String>,
 }
 
 impl<'a> Parser<'a> {
@@ -65,12 +67,25 @@ impl<'a> Parser<'a> {
             shr_consumed_as_gt: false,
             strict_mode: StrictMode::Off,
             seen_top_level_stmt: false,
+            sed_item_names: Vec::new(),
         }
     }
 
     pub fn with_strict_mode(mut self, strict: bool) -> Self {
         self.strict_mode = if strict { StrictMode::Strict } else { StrictMode::Off };
         self
+    }
+
+    pub fn take_sed_item_names(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.sed_item_names)
+    }
+
+    fn parse_field_visibility(&mut self) -> Visibility {
+        match self.current_token() {
+            Some(Ok(Token::Pvt)) => { self.advance(); Visibility::Private }
+            Some(Ok(Token::Sed)) => { self.advance(); Visibility::Sedentary }
+            _ => Visibility::Public,
+        }
     }
 
     fn advance(&mut self) {
@@ -860,6 +875,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_top_level(&mut self) -> Result<TopLevel, SyntaxError> {
+        let is_sed = matches!(self.current_token(), Some(Ok(Token::Sed)));
+        if is_sed {
+            self.advance();
+        }
+
         let span = self.current_span().unwrap_or_else(Span::dummy);
         if self.current_token().is_none() {
             return Err(SyntaxError::UnexpectedEOF {
@@ -897,9 +917,9 @@ impl<'a> Parser<'a> {
         };
 
         let cur_tok = self.current_token().cloned();
-        match cur_tok {
+        let result = match cur_tok {
             Some(Ok(Token::Import)) => {
-                return self.parse_import().map(|item| wrap_test(item, &test_groups));
+                self.parse_import().map(|item| wrap_test(item, &test_groups))
             }
             Some(Ok(Token::Sig)) => {
                 let sig = self.parse_signature()?;
@@ -1007,7 +1027,28 @@ impl<'a> Parser<'a> {
                 expected: "top-level declaration or statement".to_string(),
                 span,
             }),
+        };
+
+        if is_sed {
+            if let Ok(ref item) = result {
+                let name = match item {
+                    TopLevel::Definition(d) => Some(d.name.clone()),
+                    TopLevel::Transaction(t) => Some(t.name.clone()),
+                    TopLevel::Trigger(t) => Some(t.name.clone()),
+                    TopLevel::StateDecl(s) => Some(s.name.clone()),
+                    TopLevel::Struct(s) => Some(s.name.clone()),
+                    TopLevel::Enum(e) => Some(e.name.clone()),
+                    TopLevel::Constant(c) => Some(c.name.clone()),
+                    TopLevel::RStruct(r) => Some(r.name.clone()),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    self.sed_item_names.push(name);
+                }
+            }
         }
+
+        result
     }
 
     /// Try to parse a top-level executable statement.
@@ -1547,6 +1588,14 @@ impl<'a> Parser<'a> {
             self.expect(Token::Gt)?;
         }
 
+        // Parse optional parent type: struct Name <: ParentType {
+        let parent = if let Some(Ok(Token::LtColon)) = self.current_token() {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
         self.expect(Token::LBrace)?;
 
         let mut fields = Vec::new();
@@ -1557,6 +1606,31 @@ impl<'a> Parser<'a> {
                 Ok(Token::RBrace) => {
                     self.advance();
                     break;
+                }
+                Ok(Token::Pvt) | Ok(Token::Sed) => {
+                    let vis = self.parse_field_visibility();
+                    let field_name = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let field_type = self.parse_type()?;
+
+                    let default = if let Some(Ok(Token::Eq)) = self.peek() {
+                        self.expect(Token::Eq)?;
+                        Some(self.parse_expression()?)
+                    } else {
+                        None
+                    };
+
+                    if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                    } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                    fields.push(StructField {
+                        name: field_name,
+                        ty: field_type,
+                        default,
+                        visibility: vis,
+                    });
                 }
                 Ok(Token::Identifier(_)) => {
                     if let Some(Ok(Token::Colon)) = self.peek() {
@@ -1583,6 +1657,7 @@ impl<'a> Parser<'a> {
                             name: field_name,
                             ty: field_type,
                             default,
+                            visibility: Visibility::Public,
                         });
                     } else {
                         let txn = self.parse_transaction()?;
@@ -1596,6 +1671,8 @@ impl<'a> Parser<'a> {
                 Ok(Token::Let) => {
                     // Handle "let field: Type;" syntax explicitly
                     self.advance(); // Consume 'let' keyword
+
+                    let vis = self.parse_field_visibility();
 
                     if let Some(Ok(Token::Colon)) = self.peek() {
                         let field_name = self.expect_identifier()?;
@@ -1621,6 +1698,7 @@ impl<'a> Parser<'a> {
                             name: field_name,
                             ty: field_type,
                             default,
+                            visibility: vis,
                         });
                     } else {
                         // Not a field, treat as transaction
@@ -1647,6 +1725,7 @@ impl<'a> Parser<'a> {
         Ok(StructDefinition {
             name,
             type_params,
+            parent,
             fields,
             transactions,
             view_html: None,
@@ -1703,7 +1782,7 @@ impl<'a> Parser<'a> {
                     } else if let Some(Ok(Token::Comma)) = self.current_token() {
                         self.advance();
                     }
-                    additions.push(StructField { name, ty, default });
+                    additions.push(StructField { name, ty, default, visibility: Visibility::Public });
                 }
                 Some(Ok(Token::Minus)) => {
                     self.advance();
@@ -1715,7 +1794,8 @@ impl<'a> Parser<'a> {
                     }
                     removals.push(name);
                 }
-                Some(Ok(Token::Identifier(_))) => {
+                Some(Ok(Token::Identifier(_))) | Some(Ok(Token::Pvt)) | Some(Ok(Token::Sed)) => {
+                    let vis = self.parse_field_visibility();
                     let name = self.expect_identifier()?;
                     self.expect(Token::Colon)?;
                     let ty = self.parse_type()?;
@@ -1730,7 +1810,7 @@ impl<'a> Parser<'a> {
                     } else if let Some(Ok(Token::Comma)) = self.current_token() {
                         self.advance();
                     }
-                    fields.push(StructField { name, ty, default });
+                    fields.push(StructField { name, ty, default, visibility: vis });
                 }
                 _ => {
                     return self.spanned_err(
@@ -1769,6 +1849,31 @@ impl<'a> Parser<'a> {
                     self.advance();
                     break;
                 }
+                Ok(Token::Pvt) | Ok(Token::Sed) => {
+                    let vis = self.parse_field_visibility();
+                    let field_name = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let field_type = self.parse_type()?;
+
+                    let default = if let Some(Ok(Token::Eq)) = self.current_token() {
+                        self.advance(); // consume '='
+                        Some(self.parse_expression()?)
+                    } else {
+                        None
+                    };
+
+                    if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                    } else if let Some(Ok(Token::Comma)) = self.current_token() {
+                        self.advance();
+                    }
+                    fields.push(StructField {
+                        name: field_name,
+                        ty: field_type,
+                        default,
+                        visibility: vis,
+                    });
+                }
                 Ok(Token::Identifier(_)) => {
                     // Check if it's a field (name: Type) or transaction
                     if let Some(Ok(Token::Colon)) = self.peek() {
@@ -1795,6 +1900,7 @@ impl<'a> Parser<'a> {
                             name: field_name,
                             ty: field_type,
                             default,
+                            visibility: Visibility::Public,
                         });
                     } else {
                         // This is a transaction - parse it and expand name if no dot
@@ -1814,6 +1920,8 @@ impl<'a> Parser<'a> {
                 Ok(Token::Let) => {
                     // Handle "let field: Type;" syntax explicitly
                     self.advance(); // Consume 'let' keyword
+
+                    let vis = self.parse_field_visibility();
 
                     if let Some(Ok(Token::Colon)) = self.peek() {
                         let field_name = self.expect_identifier()?;
@@ -1839,6 +1947,7 @@ impl<'a> Parser<'a> {
                             name: field_name,
                             ty: field_type,
                             default,
+                            visibility: vis,
                         });
                     } else {
                         // Not a field, treat as transaction - parse and expand name
@@ -1867,6 +1976,17 @@ impl<'a> Parser<'a> {
                         txn
                     };
                     transactions.push(expanded_txn);
+                }
+                Ok(Token::Lt) => {
+                    let start = if let Some((_, span)) = &self.current {
+                        span.start
+                    } else {
+                        return self.spanned_err("Unexpected EOF in rstruct".to_string());
+                    };
+                    let (html, end_pos) = self.scan_html_block(start)?;
+                    view_html.push_str(&html);
+                    self.advance_past_position(end_pos);
+                    self.advance();
                 }
                 Ok(Token::Lt) => {
                     let start = if let Some((_, span)) = &self.current {
@@ -4283,7 +4403,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         Some(Ok(Token::Underscore)) => {
                             self.advance();
                             self.expect(Token::RParen)?;
-                            self.expect(Token::Eq)?;
+                            self.expect(Token::Arrow)?;
                             let expr = self.parse_unification_rhs()?;
                             self.expect(Token::Semicolon)?;
                             return Ok(Statement::Unification {
@@ -4345,7 +4465,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     };
 
                     self.expect(Token::RParen)?;
-                    self.expect(Token::Eq)?;
+                    self.expect(Token::Arrow)?;
                     let expr = self.parse_unification_rhs()?;
                     self.expect(Token::Semicolon)?;
                     Ok(Statement::Unification {
@@ -4360,7 +4480,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         Expr::Identifier(n) => n.clone(),
                         _ => return self.spanned_err("Expected pattern name after uni".to_string()),
                     };
-                    self.expect(Token::Eq)?;
+                    self.expect(Token::Arrow)?;
                     let expr = self.parse_expression()?;
                     self.expect(Token::Semicolon)?;
                     Ok(Statement::Unification {
@@ -6108,8 +6228,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 MatchPattern::Variant { name: pattern_name, fields }
             };
 
-            // Parse = (consistent with uni pattern = expr syntax)
-            self.expect(Token::Eq)?;
+            // Parse -> (consistent with uni pattern -> expr syntax)
+            self.expect(Token::Arrow)?;
 
             // Parse body: expression or block
             let body = if let Some(Ok(Token::LBrace)) = self.current_token() {
@@ -6545,6 +6665,97 @@ struct MultiSliceResult {
 #[cfg(test)]
 mod parser_tests {
     use super::*;
+
+    #[test]
+    fn test_parse_struct_public_field_default() {
+        let src = "struct S { x: Int; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::Struct(s) = &prog.items[0] {
+            assert!(!s.fields.is_empty());
+            assert_eq!(s.fields[0].visibility, Visibility::Public);
+        } else {
+            panic!("Expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_pvt_field() {
+        let src = "struct S { pvt x: Int; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::Struct(s) = &prog.items[0] {
+            assert!(!s.fields.is_empty());
+            assert_eq!(s.fields[0].visibility, Visibility::Private);
+        } else {
+            panic!("Expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_sed_field() {
+        let src = "struct S { sed x: Int; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::Struct(s) = &prog.items[0] {
+            assert!(!s.fields.is_empty());
+            assert_eq!(s.fields[0].visibility, Visibility::Sedentary);
+        } else {
+            panic!("Expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_derivation_basic() {
+        let src = "struct B <: A { z: Int; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::Struct(s) = &prog.items[0] {
+            assert_eq!(s.name, "B");
+            assert!(s.parent.is_some());
+            if let Some(Type::Custom(parent)) = &s.parent {
+                assert_eq!(parent, "A");
+            } else {
+                panic!("Expected Custom parent type, got {:?}", s.parent);
+            }
+            assert_eq!(s.fields.len(), 1);
+            assert_eq!(s.fields[0].name, "z");
+        } else {
+            panic!("Expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_derivation_with_type_params() {
+        let src = "struct B <: Container<Int> { z: Float; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::Struct(s) = &prog.items[0] {
+            assert!(s.parent.is_some());
+            if let Some(Type::Applied(parent, args)) = &s.parent {
+                assert_eq!(parent, "Container");
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0], Type::Int);
+            } else {
+                panic!("Expected Applied parent type, got {:?}", s.parent);
+            }
+        } else {
+            panic!("Expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_no_derivation() {
+        let src = "struct A { x: Int; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::Struct(s) = &prog.items[0] {
+            assert_eq!(s.name, "A");
+            assert!(s.parent.is_none(), "Struct without <: should have no parent");
+        } else {
+            panic!("Expected Struct");
+        }
+    }
 
     #[test]
     fn test_parse_rstruct_with_self_closing_html() {
@@ -7351,7 +7562,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_simple_pattern() {
-        let mut parser = Parser::new("uni x = 42;");
+        let mut parser = Parser::new("uni x -> 42;");
         let stmt = parser.parse_statement().unwrap();
         match stmt {
             Statement::Unification { name, variant, fields, expr } => {
@@ -7366,7 +7577,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_variant_with_field() {
-        let src = "uni val(Some(v)) = 42;";
+        let src = "uni val(Some(v)) -> 42;";
         let mut parser = Parser::new(src);
         let stmt = parser.parse_statement().unwrap();
         match stmt {
@@ -7383,7 +7594,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_wildcard() {
-        let src = "uni val(_) = 99;";
+        let src = "uni val(_) -> 99;";
         let mut parser = Parser::new(src);
         let stmt = parser.parse_statement().unwrap();
         match stmt {
@@ -7399,7 +7610,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_variant_with_tuple_field() {
-        let src = "uni val(Some((a, b))) = 0;";
+        let src = "uni val(Some((a, b))) -> 0;";
         let mut parser = Parser::new(src);
         let stmt = parser.parse_statement().unwrap();
         match stmt {
@@ -7423,7 +7634,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_variant_with_literal_int() {
-        let src = "uni val(Some(42)) = 0;";
+        let src = "uni val(Some(42)) -> 0;";
         let mut parser = Parser::new(src);
         let stmt = parser.parse_statement().unwrap();
         match stmt {
@@ -7440,7 +7651,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_variant_with_literal_string() {
-        let src = r#"uni val(Msg("hello")) = 0;"#;
+        let src = r#"uni val(Msg("hello")) -> 0;"#;
         let mut parser = Parser::new(src);
         let stmt = parser.parse_statement().unwrap();
         match stmt {
@@ -7457,7 +7668,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_variant_with_multiple_fields() {
-        let src = "uni pair(Pair(a, b)) = 1;";
+        let src = "uni pair(Pair(a, b)) -> 1;";
         let mut parser = Parser::new(src);
         let stmt = parser.parse_statement().unwrap();
         match stmt {
@@ -7475,7 +7686,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_block_rhs() {
-        let src = "uni val(Some(v)) = { term; };";
+        let src = "uni val(Some(v)) -> { term; };";
         let mut parser = Parser::new(src);
         let stmt = parser.parse_statement().unwrap();
         match stmt {
@@ -7492,7 +7703,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_uni_with_wildcard_in_block_rhs() {
-        let src = "uni val(_) = { term; };";
+        let src = "uni val(_) -> { term; };";
         let mut parser = Parser::new(src);
         let stmt = parser.parse_statement().unwrap();
         match stmt {
@@ -7508,7 +7719,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_match_wildcard_only() {
-        let src = "match x { _ = 0 }";
+        let src = "match x { _ -> 0 }";
         let mut parser = Parser::new(src);
         let expr = parser.parse_expression().unwrap();
         match expr {
@@ -7524,7 +7735,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_match_variant_with_field() {
-        let src = "match x { Some(v) = v, _ = 0 }";
+        let src = "match x { Some(v) -> v, _ -> 0 }";
         let mut parser = Parser::new(src);
         let expr = parser.parse_expression().unwrap();
         match expr {
@@ -7547,7 +7758,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_match_variant_with_literal_int() {
-        let src = "match x { N(42) = 1, _ = 0 }";
+        let src = "match x { N(42) -> 1, _ -> 0 }";
         let mut parser = Parser::new(src);
         let expr = parser.parse_expression().unwrap();
         match expr {
@@ -7569,7 +7780,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_match_variant_with_tuple() {
-        let src = "match x { P((a, b)) = a, _ = 0 }";
+        let src = "match x { P((a, b)) -> a, _ -> 0 }";
         let mut parser = Parser::new(src);
         let expr = parser.parse_expression().unwrap();
         match expr {
@@ -7598,7 +7809,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_match_variant_with_literal_string() {
-        let src = r#"match x { Msg("ok") = 1, _ = 0 }"#;
+        let src = r#"match x { Msg("ok") -> 1, _ -> 0 }"#;
         let mut parser = Parser::new(src);
         let expr = parser.parse_expression().unwrap();
         match expr {
@@ -7620,7 +7831,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_match_multiple_fields() {
-        let src = "match x { Pair(a, b) = 0, _ = 1 }";
+        let src = "match x { Pair(a, b) -> 0, _ -> 1 }";
         let mut parser = Parser::new(src);
         let expr = parser.parse_expression().unwrap();
         match expr {

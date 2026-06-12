@@ -28,11 +28,11 @@ flowchart LR
 | Module | File | Responsibility |
 |--------|------|----------------|
 | Lexer | `lexer.rs` | Tokenizes source text into `Token` stream using `logos` |
-| Parser | `parser.rs` | Pratt-style precedence climbing, produces `Program` AST |
+| Parser | `parser.rs` | Pratt-style precedence climbing, produces `Program` AST. Tracks `sed_item_names` for file-private items. Parses `<:` struct derivation syntax. |
 | Type-Universe | `type_universe.rs` | Pass 1: collect/resolve/freeze `Type Name <: Base` declarations |
-| Import Resolver | `import_resolver.rs` | Resolves `import` paths, builds module graph |
-| Desugarer | `desugarer.rs` | Lowers sugar syntax to core AST |
-| Typechecker | `typechecker.rs` | Infers and checks types, validates contracts |
+| Import Resolver | `import_resolver.rs` | Resolves `import` paths, builds module graph. Filters `sed` items from exported symbols. Cache stores `(Program, Vec<String>)` pairs. |
+| Desugarer | `desugarer.rs` | Lowers sugar syntax to core AST. Flattens struct derivation chains (parent fields → child), detects field collisions. |
+| Typechecker | `typechecker.rs` | Infers and checks types, validates contracts. Enforces field visibility (`Sedentary` cross-file check). Validates struct derivation upcast (`B <: A → B compatible with A`). |
 | Proof Engine | `proof_engine.rs` | Symbolic verification of contracts, convergence analysis |
 | Annotator | `annotator.rs` | File-level attribute processing |
 | Analysis | `analysis/` | Call graph, dataflow, transition graph, PGO, region, SLP hazard |

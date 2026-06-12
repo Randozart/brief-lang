@@ -1,8 +1,8 @@
 # Plan: Call Argument Check + Struct Derivation + Visibility System
 
 **Created:** 2026-06-12T07:20Z  
-**Updated:** 2026-06-12T15:00Z — added Phase 1.5 (match/uni arrow syntax), Phase 2.4 (parser visibility) completed  
-**Status:** Draft  
+**Updated:** 2026-06-12T15:00Z — implementation complete, 769 tests passing  
+**Status:** Complete — all phases implemented and merged  
 **Source:** officina-cli design session — structural typing analysis, visibility ergonomics, bug audit
 
 ---

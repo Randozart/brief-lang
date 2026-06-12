@@ -2014,6 +2014,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
                     type_params: vec![],
+                    parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::Int, default: None, visibility: Visibility::Public },
                         StructField { name: "y".to_string(), ty: Type::Int, default: None, visibility: Visibility::Public },
@@ -2040,6 +2041,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
                     type_params: vec![],
+                    parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::Int, default: None, visibility: Visibility::Public },
                         StructField { name: "y".to_string(), ty: Type::Int, default: None, visibility: Visibility::Public },
