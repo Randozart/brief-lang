@@ -446,6 +446,7 @@ void __rt_init(void) {
 
     /* Ensure stdout buffer is line-buffered for __print */
     setvbuf(stdout, NULL, _IOLBF, 0);
+    setvbuf(stderr, NULL, _IOFBF, 65536);  /* buffer FFI stderr output (e.g. fasta __putchar) */
 
     /* Mark io as pending initially so the first tick checks for work */
     __io_pending = 1;

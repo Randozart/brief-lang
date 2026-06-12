@@ -33,38 +33,15 @@ const IC: Int = 29573;
 
 // ── Transaction ──────────────────────────────────────────────────────
 rct txn fan [count < N][count == N] {
-    &seed = seed * IA;
-    &seed = seed + IC;
-    &seed = seed % IM;
-
-    // Save p0 before rotation (matches C: `long saved = p0;`)
+    let ns: Int = (seed * IA + IC) % IM;
     let saved: Int = p0;
-
-    // Rotate: every field gets the value of the next field (cyclically)
-    &p0 = p1;
-    &p1 = p2;
-    &p2 = p3;
-    &p3 = p4;
-    &p4 = p5;
-    &p5 = p6;
-    &p6 = p7;
-    &p7 = p8;
-    &p8 = p9;
-    &p9 = p10;
-    &p10 = p11;
-    &p11 = seed;    // old p0 wraps to the end
-
-    // Compute final checksum into a local (not subject to prior-state)
-    // so it can be printed before program exit.
-    let final_checksum: Int = checksum + saved % 13;
-
-    &checksum = checksum + saved % 13;
-    &max_flips = max_flips + checksum % 17;
-
+    let nchecksum: Int = checksum + saved % 13;
+    let nmax: Int = max_flips + nchecksum % 17;
+    &seed = ns;
+    &p0 = p1;  &p1 = p2;  &p2 = p3;  &p3 = p4;  &p4 = p5;  &p5 = p6;
+    &p6 = p7;  &p7 = p8;  &p8 = p9;  &p9 = p10;  &p10 = p11;  &p11 = saved;
+    &checksum = nchecksum;  &max_flips = nmax;
     &count = count + 1;
-
-    [count == N - 1] {
-        term! -> __print_int(final_checksum);
-    };
+    [count == N - 1] { term! -> __print_int(nchecksum); };
     term;
 };
