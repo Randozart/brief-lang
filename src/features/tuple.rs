@@ -36,7 +36,9 @@ impl ExprEval for TupleDestructureExpr {
             Value::Tuple(items) | Value::List(items) => {
                 for (i, name) in self.names.iter().enumerate() {
                     if i < items.len() {
-                        ctx.state.insert(name.clone(), items[i].clone());
+                        if name != "_" {
+                            ctx.state.insert(name.clone(), items[i].clone());
+                        }
                     }
                 }
                 Ok(Value::Void)

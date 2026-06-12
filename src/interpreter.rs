@@ -1097,7 +1097,9 @@ impl Interpreter {
                             Value::Tuple(items) | Value::List(items) => {
                                 for (i, name) in names.iter().enumerate() {
                                     if i < items.len() {
-                                        self.state.insert(name.clone(), items[i].clone());
+                                        if name != "_" {
+                                            self.state.insert(name.clone(), items[i].clone());
+                                        }
                                     }
                                 }
                             }

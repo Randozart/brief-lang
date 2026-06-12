@@ -4004,7 +4004,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     self.advance();
                     let mut names = Vec::new();
                     loop {
-                        names.push(self.expect_identifier()?);
+                        if matches!(self.current_token(), Some(Ok(Token::Underscore))) {
+                            names.push("_".to_string());
+                            self.advance();
+                        } else {
+                            names.push(self.expect_identifier()?);
+                        }
                         if let Some(Ok(Token::Comma)) = self.current_token() {
                             self.advance();
                         } else {
@@ -5251,7 +5256,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                             self.advance();
                             let mut names = Vec::new();
                             loop {
-                                names.push(self.expect_identifier()?);
+                                if matches!(self.current_token(), Some(Ok(Token::Underscore))) {
+                                    names.push("_".to_string());
+                                    self.advance();
+                                } else {
+                                    names.push(self.expect_identifier()?);
+                                }
                                 if let Some(Ok(Token::Comma)) = self.current_token() {
                                     self.advance();
                                 } else {
