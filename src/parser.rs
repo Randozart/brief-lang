@@ -3440,7 +3440,14 @@ let span = self.current_span();
                 None
             };
             let contract = if let Some(Ok(Token::LBracket)) = self.current_token() {
-                self.parse_contract()?
+                // Path B: contract after return type — works but [pre][post] -> Type
+                // is the canonical ordering and avoids confusion with Type[expr] bounds.
+                // We parse it but emit a soft hint so users learn the canonical form.
+                let c = self.parse_contract()?;
+                if c.pre_condition != Expr::Bool(true) || c.post_condition != Expr::Bool(true) {
+                    eprintln!("note: contracts read more clearly before the return type — use `[pre][post] -> Type` instead of `-> Type [pre][post]`");
+                }
+                c
             } else {
                 Contract::new(Expr::Bool(true), Expr::Bool(true))
             };
