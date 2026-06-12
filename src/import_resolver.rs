@@ -425,12 +425,14 @@ self.loaded_modules.insert(
         }
 
         let resolved_path = found_path.ok_or_else(|| {
+            let dir = source_dir.display();
             format!(
-                "Cannot find module '{}'. Searched in: lib/{}.{{bv,ebv}}, imports/{}.{{bv,ebv}}, ./{}.{{bv,ebv}}",
+                "Cannot find module '{}'. Searched in: \
+                 {dir}/lib/{mp}.{{bv,ebv}}, \
+                 {dir}/imports/{mp}.{{bv,ebv}}, \
+                 {dir}/{mp}.{{bv,ebv}}",
                 path_str,
-                module_path,
-                module_path,
-                module_path
+                mp = module_path,
             )
         })?;
 
@@ -442,10 +444,14 @@ self.loaded_modules.insert(
             .parse()
             .map_err(|e| format!("Failed to parse '{}': {}", resolved_path.display(), e))?;
 
-        self.loaded_modules
-            .insert(path_str.clone(), imported_program.clone());
-
         let resolved = self.resolve_imports(&imported_program, &resolved_path)?;
+
+        // Cache the fully resolved program (with sub-imports processed),
+        // not the parsed-only version. Otherwise cache hits return
+        // programs whose internal imports were never resolved.
+        self.loaded_modules
+            .insert(path_str.clone(), resolved.clone());
+
         self.filter_items(&resolved, &import.items)
     }
 
