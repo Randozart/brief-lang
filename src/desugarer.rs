@@ -193,6 +193,7 @@ impl Desugarer {
                     let post_vars = self.extract_vars_from_expr(&txn.contract.post_condition);
                     for var_name in post_vars {
                         if !existing_state.contains(&var_name)
+                            && !txn.parameters.iter().any(|(n, _)| n == &var_name)
                             && !self
                                 .generated_state
                                 .iter()

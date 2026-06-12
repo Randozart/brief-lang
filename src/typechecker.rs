@@ -1128,11 +1128,24 @@ impl TypeChecker {
                         }
 
                         if !self.check_geometry(&lhs_ty, &expr_ty) {
-                            self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                                expected: self.type_to_string(&lhs_ty),
-                                found: self.type_to_string(&expr_ty),
-                                context: "assignment".to_string(),
-                            });
+                            // Auto-declare implicit state variable on first &N = ... assignment
+                            if let Expr::OwnedRef(var_name) = lhs {
+                                if self.lookup_variable(var_name).is_none() {
+                                    self.declare_variable(var_name, expr_ty.clone());
+                                } else {
+                                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                        expected: self.type_to_string(&lhs_ty),
+                                        found: self.type_to_string(&expr_ty),
+                                        context: "assignment".to_string(),
+                                    });
+                                }
+                            } else {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: self.type_to_string(&lhs_ty),
+                                    found: self.type_to_string(&expr_ty),
+                                    context: "assignment".to_string(),
+                                });
+                            }
                         }
                     }
                 }
