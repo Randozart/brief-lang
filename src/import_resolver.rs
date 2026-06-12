@@ -120,7 +120,8 @@ impl ImportResolver {
             if last_component.ends_with(".css") || last_component.ends_with(".svg") || last_component.ends_with(".dbv") || last_component.ends_with(".dbvs") || last_component.ends_with(".dbvl") {
                 import.path.join("/")
             } else {
-                import.path.join(".")
+                // Use "/" directly — eliminates the ".join(".")" / ".replace('.', '/')" round trip.
+                import.path.join("/")
             }
         };
 
