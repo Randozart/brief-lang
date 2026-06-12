@@ -175,7 +175,15 @@ impl<'a> Parser<'a> {
             Token::Link => "link".into(),
             Token::Asm => "asm".into(),
             Token::Ellipsis => "'...'".into(),
-            _ => format!("{:?}", token),
+            _ => format!("{}", token),
+        }
+    }
+
+    fn fmt_current_token(&self) -> String {
+        match self.current_token() {
+            Some(Ok(tok)) => format!("{}", tok),
+            Some(Err(_)) => "<lexer error>".to_string(),
+            None => "<end of input>".to_string(),
         }
     }
 
@@ -196,7 +204,7 @@ impl<'a> Parser<'a> {
                 span,
             }),
             None => Err(crate::errors::SyntaxError::UnexpectedEOF {
-                expected: format!("{:?}", expected),
+                expected: Self::token_display(&expected),
                 span,
             }),
         }
@@ -277,7 +285,7 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::TypeU64)) => { self.advance(); Ok("u64".to_string()) }
             _ => Err(SyntaxError::UnexpectedToken {
                 expected: "identifier".to_string(),
-                found: format!("{:?}", self.current_token()),
+                found: self.fmt_current_token(),
                 span,
             }),
         }
@@ -293,7 +301,7 @@ impl<'a> Parser<'a> {
             }
             _ => Err(SyntaxError::UnexpectedToken {
                 expected: "integer".to_string(),
-                found: format!("{:?}", self.current_token()),
+                found: self.fmt_current_token(),
                 span,
             }),
         }
@@ -431,7 +439,7 @@ impl<'a> Parser<'a> {
             }
             Some(Ok(tok)) => Err(crate::errors::SyntaxError::UnexpectedToken {
                 expected: "identifier".to_string(),
-                found: format!("{:?}", tok),
+                found: Self::token_display(tok),
                 span,
             }),
             Some(Err(_)) => Err(crate::errors::SyntaxError::InvalidStatement {
@@ -673,7 +681,7 @@ impl<'a> Parser<'a> {
                 } else {
                     return Err(SyntaxError::UnexpectedToken {
                         expected: "numeric speed".to_string(),
-                        found: format!("{:?}", self.current_token()),
+                        found: self.fmt_current_token(),
                         span: self.current_span().unwrap_or_else(Span::dummy),
                     });
                 }
@@ -985,7 +993,7 @@ impl<'a> Parser<'a> {
                     Some(stmt) => Ok(TopLevel::Statement(Box::new(stmt))),
                     None => Err(SyntaxError::UnexpectedToken {
                         expected: "top-level declaration or statement".to_string(),
-                        found: format!("{:?}", tok),
+                        found: Self::token_display(&tok),
                         span,
                     }),
                 }
@@ -1287,7 +1295,7 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::TypeU64)) => { self.advance(); Ok("u64".to_string()) }
             Some(Ok(Token::TypeI64)) => { self.advance(); Ok("i64".to_string()) }
             Some(Ok(Token::Err)) => { self.advance(); Ok("Err".to_string()) }
-            other => self.spanned_err(format!("Expected type name, found {:?}", other)),
+            _ => self.spanned_err(format!("Expected type name, found {}", self.fmt_current_token())),
         }
     }
 
@@ -1620,7 +1628,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 _ => {
-                    return self.spanned_err(format!("Unexpected token in struct: {:?}", token));
+                    return self.spanned_err(format!("Unexpected token in struct: {}", match token { Ok(t) => Self::token_display(t), _ => "<lexer error>".into() }));
                 }
             }
         }
@@ -1634,6 +1642,7 @@ impl<'a> Parser<'a> {
         if let Some(Ok(Token::Semicolon)) = self.current_token() {
             self.advance();
         }
+
         Ok(StructDefinition {
             name,
             type_params,
@@ -1643,7 +1652,7 @@ impl<'a> Parser<'a> {
             span,
             modifiers: Vec::new(),
             variants,
-     })
+        })
     }
 
     fn parse_struct_variants(&mut self) -> Result<Vec<StructVariant>, SyntaxError> {
@@ -1870,7 +1879,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                 }
                 _ => {
-                    return self.spanned_err(format!("Unexpected token in rstruct: {:?}", token));
+                    return self.spanned_err(format!("Unexpected token in rstruct: {}", match token { Ok(t) => Self::token_display(t), _ => "<lexer error>".into() }));
                 }
             }
         }
@@ -2216,7 +2225,7 @@ impl<'a> Parser<'a> {
                         self.advance();
                     }
                 }
-                _ => return self.spanned_err(format!("Unexpected token in enum: {:?}", token)),
+                _ => return self.spanned_err(format!("Unexpected token in enum: {}", match token { Ok(t) => Self::token_display(t), _ => "<lexer error>".into() })),
             }
         }
 
@@ -2490,7 +2499,7 @@ impl<'a> Parser<'a> {
                 span.start
             } else {
                 return self
-                    .spanned_err(format!("Expected LBrace, found {:?}", self.current_token()));
+                    .spanned_err(format!("Expected LBrace, found {}", self.fmt_current_token()));
             }
         } else {
             return self.spanned_err("Unexpected EOF".to_string());
@@ -4283,7 +4292,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         Some(Ok(Token::Asm)) => "KeywordAsm".to_string(),
                         Some(Ok(Token::Bank)) => "KeywordBank".to_string(),
                         Some(Ok(Token::Match)) => "KeywordMatch".to_string(),
-                        _ => return self.spanned_err(format!("Expected pattern variant, found {:?}", self.current_token()).to_string()),
+                        _ => return self.spanned_err(format!("Expected pattern variant, found {}", self.fmt_current_token()).to_string()),
                     };
                     self.advance();
                     
@@ -4841,7 +4850,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     }
                 }
             }
-            Some(Ok(tok)) => return self.spanned_err(format!("Expected type, found {:?}", tok)),
+            Some(Ok(tok)) => return self.spanned_err(format!("Expected type, found {}", Self::token_display(tok))),
             Some(Err(_)) => return self.spanned_err("Lexer error".to_string()),
             None => return self.spanned_err("Expected type, found EOF".to_string()),
         };
