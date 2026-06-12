@@ -1333,7 +1333,8 @@ impl TypeChecker {
                     .unwrap_or(Type::TypeVar("T".to_string()));
                 Type::Applied("List".to_string(), vec![elem_type])
             }
-            Expr::ListIndex(list_expr, _) => match self.infer_expression(list_expr) {
+            Expr::ListIndex(list_expr, _) => {
+                match self.infer_expression(list_expr) {
                 Type::Applied(_, args) if !args.is_empty() => args[0].clone(),
                 Type::Vector(inner, dims) => {
                     // For multidimensional, indexing returns the inner type with one fewer dimension
@@ -1344,6 +1345,7 @@ impl TypeChecker {
                     }
                 }
                 _ => Type::TypeVar("T".to_string()),
+                }
             },
             Expr::Slice { value, mask, .. } => {
                 if let Some(mask_expr) = mask {
@@ -2573,7 +2575,6 @@ mod kani_full_tests {
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
-        let errors = check(&mut prog);
         assert!(errors.is_empty(), "Expected no errors for public field access, got: {:?}", errors);
     }
 }

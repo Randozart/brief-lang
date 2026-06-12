@@ -259,3 +259,19 @@ Added `root_path: PathBuf` to `ImportResolver`, set on first call from the compi
 
 **Files changed**: `src/import_resolver.rs`
 
+---
+
+## 2026-06-12 — Import + ListIndex Type Inference Corruption
+
+**Bug**: Importing ANY file (even an empty 0-byte file) causes `items[0]` on a `List<String>` parameter to infer as `List<String>` instead of `String`. Both old (April) and new (June) binaries exhibit this. The bug was latent because the earlier import path doubling always killed the typechecker before this code path was reached.
+
+**Diagnostic clues**:
+- All span/position info shows `?:?` when an import is involved
+- The control file (no import) passes cleanly
+
+**Root cause**: `peek_multidimensional_slice()` used `self.pos` which was always 0 (initialized at parser creation and never updated). It scanned the source from byte 0 on every call, finding `;` from earlier statements (like `import "empty";`) before reaching `]` in `items[0]`. The `;` was interpreted as a mask bracket op, making the parser create `Expr::MultiSlice` instead of `Expr::ListIndex`. This caused the typechecker to infer `List<String>` instead of `String` for `items[0]`.
+
+**Fix**: Added `self.pos = span.start;` to `self.advance()` at `parser.rs:96`, so `self.pos` tracks the current token's byte position. `peek_multidimensional_slice()` now scans from the correct position after `[` instead of from byte 0.
+
+**Files changed**: `src/parser.rs` (1 line: `self.pos = span.start;`)
+

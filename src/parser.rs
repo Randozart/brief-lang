@@ -94,6 +94,7 @@ impl<'a> Parser<'a> {
 
         if let Some((_, span)) = &self.current {
             self.current_line = span.start;
+            self.pos = span.start;
         }
     }
 
@@ -6768,6 +6769,27 @@ mod parser_tests {
             assert!(s.parent.is_none(), "Struct without <: should have no parent");
         } else {
             panic!("Expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_list_index_after_import() {
+        // Regression: peek_multidimensional_slice used self.pos which was
+        // always 0, causing ';' from earlier statements to trigger a false
+        // positive for "mask bracket op", making items[0] parse as MultiSlice.
+        let src = "import \"empty\";\n\ndefn get_first(items: List<String>) -> String {\n    term items[0];\n};";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        assert_eq!(prog.items.len(), 2);
+        if let TopLevel::Definition(defn) = &prog.items[1] {
+            if let Statement::Term { values, .. } = &defn.body[0] {
+                assert!(matches!(&values[0], Some(Expr::ListIndex(..))),
+                    "Expected ListIndex for items[0], got {:?}", values[0]);
+            } else {
+                panic!("Expected Term statement");
+            }
+        } else {
+            panic!("Expected Definition");
         }
     }
 
