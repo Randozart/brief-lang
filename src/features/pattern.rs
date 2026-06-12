@@ -50,6 +50,9 @@ impl ExprEval for MatchExpr {
         for arm in &self.arms {
             let matched = match &arm.pattern {
                 MatchPattern::Wildcard => true,
+                MatchPattern::Literal(pat) => {
+                    Interpreter::pattern_match(pat, &target, &mut ctx.state)
+                }
                 MatchPattern::Variant { name, fields } => {
                     match &target {
                          Value::Enum(_, variant, enum_fields) if variant == name => {

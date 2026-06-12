@@ -796,6 +796,7 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MatchPattern {
     Wildcard,
+    Literal(Pattern),
     Variant { name: String, fields: Vec<Pattern> },
 }
 

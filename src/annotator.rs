@@ -531,6 +531,7 @@ impl Annotator {
                 let arms_str = arms.iter().map(|arm| {
                     let pat = match &arm.pattern {
                         MatchPattern::Wildcard => "_".to_string(),
+                        MatchPattern::Literal(pat) => format!("{}", pat),
                         MatchPattern::Variant { name, fields } => {
                             if fields.is_empty() { name.clone() }
                             else { format!("{}({})", name, fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ")) }

@@ -6046,6 +6046,28 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             let pattern = if let Some(Ok(Token::Underscore)) = self.current_token() {
                 self.advance();
                 MatchPattern::Wildcard
+            } else if matches!(self.current_token(), Some(Ok(Token::String(_)))) {
+                let s = match self.current_token() { Some(Ok(Token::String(s))) => s.clone(), _ => unreachable!() };
+                self.advance();
+                MatchPattern::Literal(Pattern::LitString(s))
+            } else if matches!(self.current_token(), Some(Ok(Token::Integer(_)))) {
+                let val = match self.current_token() { Some(Ok(Token::Integer(n))) => *n, _ => unreachable!() };
+                self.advance();
+                MatchPattern::Literal(Pattern::LitInt(val))
+            } else if matches!(self.current_token(), Some(Ok(Token::Float(_)))) {
+                let val = match self.current_token() { Some(Ok(Token::Float(f))) => *f, _ => unreachable!() };
+                self.advance();
+                MatchPattern::Literal(Pattern::LitFloat(val))
+            } else if let Some(Ok(Token::BoolTrue)) = self.current_token() {
+                self.advance();
+                MatchPattern::Literal(Pattern::LitBool(true))
+            } else if let Some(Ok(Token::BoolFalse)) = self.current_token() {
+                self.advance();
+                MatchPattern::Literal(Pattern::LitBool(false))
+            } else if matches!(self.current_token(), Some(Ok(Token::Char(_)))) {
+                let val = match self.current_token() { Some(Ok(Token::Char(c))) => *c, _ => unreachable!() };
+                self.advance();
+                MatchPattern::Literal(Pattern::LitChar(val))
             } else {
                 let pattern_name = self.expect_identifier()?;
                 // Check for variant fields: Variant(f1, f2, ...)
