@@ -249,3 +249,13 @@ Added `root_path: PathBuf` to `ImportResolver`, set on first call from the compi
 
 **Files changed**: `src/typechecker.rs`
 
+---
+
+## 2026-06-12 — Transaction Omitted from Import Filter Items
+
+**Bug**: The `filter_items` method's name extraction match in `import_resolver.rs:493-504` had no arm for `TopLevel::Transaction`. Every imported `txn` fell through to `_ => None` and was silently dropped. This meant named imports like `import "file" { filter_fluff, count_brackets }` would load the transactions from the source file but then filter them all out before the typechecker ever saw them.
+
+**Fix**: Added `TopLevel::Transaction(t) => Some(t.name.as_str())` at line 496, alongside the other named top-level items.
+
+**Files changed**: `src/import_resolver.rs`
+

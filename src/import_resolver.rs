@@ -494,6 +494,7 @@ impl ImportResolver {
                     TopLevel::Definition(d) => Some(d.name.as_str()),
                     TopLevel::Signature(s) => Some(s.name.as_str()),
                     TopLevel::ForeignBinding { name, .. } => Some(name.as_str()),
+                    TopLevel::Transaction(t) => Some(t.name.as_str()),
                     TopLevel::Constant(c) => Some(c.name.as_str()),
                     TopLevel::Struct(s) => Some(s.name.as_str()),
                     TopLevel::RStruct(r) => Some(r.name.as_str()),
