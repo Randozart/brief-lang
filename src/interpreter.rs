@@ -4941,6 +4941,50 @@ mod tests {
         ])).unwrap();
         assert_eq!(result, Value::Int(10));  // 0+1+2+3+4 = 10
     }
+
+    #[test]
+    fn test_match_string_literal() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Match {
+            value: Box::new(Expr::String("foo".to_string())),
+            arms: vec![
+                crate::ast::MatchArm {
+                    pattern: crate::ast::MatchPattern::Literal(crate::ast::Pattern::LitString("foo".to_string())),
+                    guard: None,
+                    body: Box::new(Expr::Integer(1)),
+                },
+                crate::ast::MatchArm {
+                    pattern: crate::ast::MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Integer(0)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_match_int_literal() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Match {
+            value: Box::new(Expr::Integer(42)),
+            arms: vec![
+                crate::ast::MatchArm {
+                    pattern: crate::ast::MatchPattern::Literal(crate::ast::Pattern::LitInt(42)),
+                    guard: None,
+                    body: Box::new(Expr::Bool(true)),
+                },
+                crate::ast::MatchArm {
+                    pattern: crate::ast::MatchPattern::Wildcard,
+                    guard: None,
+                    body: Box::new(Expr::Bool(false)),
+                },
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
