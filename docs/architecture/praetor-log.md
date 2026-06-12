@@ -171,3 +171,43 @@ All new functions expected to pass Praetor strict limits (complexity ≤ 15, lin
 - Visibility enforcement is additive — only `Sedentary` cross-file check is wired
 - `Private` enforcement stubbed (requires `current_struct` tracking)
 
+---
+
+## 2026-06-12 — Highlighter/LSP Syntax Audit
+
+**Files audited:**
+- `syntax-highlighter/syntaxes/brief.tmLanguage.json` (412 lines)
+- `syntax-highlighter/syntaxes/dbrief.tmLanguage.json` (330 lines)
+- `src/lsp.rs` (completion list at line 558-566)
+
+**Gaps identified:**
+
+| Gap | Impact | Fix |
+|-----|--------|-----|
+| `pvt`/`sed` keywords missing from grammar | Not highlighted as keywords | Add keyword match patterns |
+| `match`/`uni` keywords missing from grammar | Highlighted as function calls or variables | Add keyword match patterns |
+| `frgn`/`frgn!`/`syscall`/`syscall!` keywords missing | Not highlighted | Add keyword match patterns |
+| Sugar contracts `[[post]`/`[pre]]` not handled | Second `[` or `]` breaks contract region | Replace `\\[` begin with `\\[\\[?` and `\\]` end with `\\]\\]?` |
+| Double-quote runaway | Unmatched `"` highlights rest of file as string | Add line-ending guard or boundary pattern |
+| Single-quote Char literals missing | `'a'` tokenized as punctuation+identifier | Add `'.'` pattern |
+| `src/lsp.rs` missing keywords | No completions for `pvt`/`sed`/`match`/`uni`/`frgn`/`syscall` | Add to completion vec |
+| Binaries stale (Apr 19-20) | All June 12 fixes invisible at runtime | Rebuild + install |
+
+**Resolution**: All fixes applied in 2026-06-12 session.
+
+---
+
+## 2026-06-12 — Import Path Resolution Bugfix
+
+**Bug**: Nested imports doubled the path. When `officina/tui/layout.bv` imported `"officina/tui/history"`, the resolver searched `officina/tui/officina/tui/history.bv` — prepending the importing file's parent directory to an already-canonical import path.
+
+**Root cause**: `src/import_resolver.rs:361-364` — `source_dir` was always set to `source_file.parent()`, the importing file's parent. All imports, including canonical ones, were resolved relative to this directory.
+
+**Fix**: TypeScript-style import resolution — distinguish relative from non-relative imports:
+- **Relative**: start with `./` or `../` → resolve from importing file's directory
+- **Non-relative**: anything else → resolve from project root
+
+Added `root_path: PathBuf` to `ImportResolver`, set on first call from the compiler's working directory.
+
+**Files changed**: `src/import_resolver.rs`
+

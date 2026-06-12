@@ -40,6 +40,7 @@ pub struct ImportResolver {
     loaded_modules: HashMap<String, (Program, Vec<String>)>,
     search_paths: Vec<PathBuf>,
     strict_mode: StrictMode,
+    root_path: PathBuf,
 }
 
 impl ImportResolver {
@@ -48,6 +49,7 @@ impl ImportResolver {
             loaded_modules: HashMap::new(),
             search_paths: vec![PathBuf::from("lib"), PathBuf::from("imports"), PathBuf::from(".")],
             strict_mode: StrictMode::Off,
+            root_path: PathBuf::from("."),
         }
     }
 
@@ -66,6 +68,14 @@ impl ImportResolver {
         program: &Program,
         file_path: &PathBuf,
     ) -> Result<Program, String> {
+        // Set root path from the main file's directory on first call
+        if self.root_path == PathBuf::from(".") {
+            self.root_path = file_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+        }
+
         let mut items = program.items.clone();
         let mut index = 0;
 
@@ -358,10 +368,18 @@ impl ImportResolver {
                 path_str.replace('.', "/")
             }
         };
-        let source_dir = source_file
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
+        // TypeScript-style import resolution:
+        //   "./foo" or "../foo" → relative to importing file
+        //   "foo/bar"           → relative to project root
+        let is_relative = path_str.starts_with("./") || path_str.starts_with("../");
+        let source_dir = if is_relative {
+            source_file
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
+        } else {
+            self.root_path.clone()
+        };
 
         // Try both .bv and .ebv extensions
         let mut found_path = None;

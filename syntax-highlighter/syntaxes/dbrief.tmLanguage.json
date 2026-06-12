@@ -105,6 +105,18 @@
           "match": "\\b(sig|defn|let|const|trg|SIG|DEFN|LET|CONST|TRG)\\b"
         },
         {
+          "name": "keyword.declaration.ffi.brief",
+          "match": "\\b(frgn!?|syscall!?)\\b"
+        },
+        {
+          "name": "keyword.control.match.brief",
+          "match": "\\b(match|uni)\\b"
+        },
+        {
+          "name": "keyword.control.visibility.brief",
+          "match": "\\b(pvt|sed)\\b"
+        },
+        {
           "name": "keyword.import.brief",
           "match": "\\b(import|from|IMPORT|FROM)\\b"
         },
@@ -129,25 +141,9 @@
     "contracts": {
       "patterns": [
         {
-          "name": "meta.contract.pre.brief",
-          "begin": "\\[",
-          "end": "\\]",
-          "patterns": [
-            {
-              "include": "#line-comments"
-            },
-            {
-              "include": "#block-comments"
-            },
-            {
-              "include": "#expressions"
-            }
-          ]
-        },
-        {
-          "name": "meta.contract.post.brief",
-          "begin": "\\[",
-          "end": "\\]",
+          "name": "meta.contract.brief",
+          "begin": "\\[\\[?",
+          "end": "\\]\\]?",
           "patterns": [
             {
               "include": "#line-comments"
@@ -208,6 +204,10 @@
     },
     "strings": {
       "patterns": [
+        {
+          "name": "string.quoted.single.brief",
+          "match": "'(\\\\.|[^'\\\\])'"
+        },
         {
           "name": "string.quoted.double.brief",
           "begin": "\"",

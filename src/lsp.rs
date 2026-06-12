@@ -563,6 +563,7 @@ impl LspServer {
             "IMPORT", "FROM", "TERM", "ESCAPE",
             "ASYNC", "REGISTER", "ALIAS", "RULE", "CHECK", "IMPORT", "Ok", "Err", "Some", "None",
             "TRUE", "FALSE", "null", "NULL",
+            "pvt", "sed", "match", "uni", "frgn", "frgn!", "syscall", "syscall!",
         ];
 
         // Add Codicil-specific completions when in Codicil mode
