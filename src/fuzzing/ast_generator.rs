@@ -216,7 +216,7 @@ fn arb_struct_field(max_depth: usize) -> impl Strategy<Value = StructField> {
         arb_type(),
         arb_expr(max_depth).prop_map(Some),
     ).prop_map(|(name, ty, default)| {
-        StructField { name, ty, default }
+        StructField { name, ty, default, visibility: Visibility::Public }
     })
 }
 

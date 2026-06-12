@@ -1,7 +1,7 @@
 # Plan: Call Argument Check + Struct Derivation + Visibility System
 
 **Created:** 2026-06-12T07:20Z  
-**Updated:** 2026-06-12T08:00Z — added Phase 1 (call argument type checking)  
+**Updated:** 2026-06-12T15:00Z — added Phase 1.5 (match/uni arrow syntax), Phase 2.4 (parser visibility) completed  
 **Status:** Draft  
 **Source:** officina-cli design session — structural typing analysis, visibility ergonomics, bug audit
 
@@ -473,3 +473,39 @@ semantics. Only steps 1-2 (Phase 1) must be done first — correctness fix.
    parent fields. For small structs this is trivially optimized by LLVM. For
    large structs in hot paths, a pointer reinterpret may eventually matter.
    Document as a known cost; revisit when benchmarks show a problem.
+
+---
+
+## Phase 1.5: Match/Uni Arrow Syntax (`=` → `->`)
+
+**2026-06-12T15:00Z** — Implemented during Phase 2.4 work.
+
+### Rationale
+
+The `=` separator between pattern and body in `match` and `uni` was semantically
+ambiguous with assignment. The `->` arrow reads more naturally as "pattern maps to
+body" and is consistent with Brief's use of `->` for return types and swan songs.
+
+### Changes
+
+| Location | File | Lines |
+|----------|------|-------|
+| Match arm separator | `parser.rs:6140` | `self.expect(Token::Eq)` → `self.expect(Token::Arrow)` |
+| Uni wildcard pattern | `parser.rs:4314` | same |
+| Uni named variant pattern | `parser.rs:4376` | same |
+| Uni simple pattern | `parser.rs:4391` | same |
+| 6 match test strings | `parser.rs:7539-7651` | `= ` → `-> ` in source strings |
+| 9 uni test strings | `parser.rs:7382-7523` | `= ` → `-> ` in source strings |
+
+### Syntax After
+
+```brief
+match x {
+    Some(v) -> expr1,
+    None    -> expr2,
+    _       -> fallback,
+};
+
+uni val(Some(v)) -> result;
+uni x -> expression;
+```

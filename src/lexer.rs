@@ -180,6 +180,19 @@ pub enum Token {
     #[token("FOREACH")]
     Foreach,
 
+    // Visibility: pvt / private (struct boundary), sed / sedentary (file boundary)
+    #[token("pvt")]
+    #[token("PVT")]
+    #[token("private")]
+    #[token("PRIVATE")]
+    Pvt,
+
+    #[token("sed")]
+    #[token("SED")]
+    #[token("sedentary")]
+    #[token("SEDENTARY")]
+    Sed,
+
     #[token("sync")]
     #[token("SYNC")]
     Sync,
@@ -463,6 +476,8 @@ impl std::fmt::Display for Token {
             Token::Err => write!(f, "Err"),
             Token::Match => write!(f, "match"),
             Token::Foreach => write!(f, "foreach"),
+            Token::Pvt => write!(f, "pvt"),
+            Token::Sed => write!(f, "sed"),
             Token::Sync => write!(f, "sync"),
             Token::Some => write!(f, "some"),
             Token::None => write!(f, "none"),

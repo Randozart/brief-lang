@@ -107,6 +107,7 @@ fn schema_to_struct(schema: &SchemaDef) -> ast::TopLevel {
                 name: f.name.clone(),
                 ty,
                 default: None,
+                visibility: ast::Visibility::Public,
             }
         })
         .collect();

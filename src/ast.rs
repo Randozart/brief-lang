@@ -1391,11 +1391,19 @@ pub struct StructDefinition {
     pub variants: Vec<StructVariant>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    Public,
+    Sedentary,
+    Private,
+}
+
 #[derive(Debug, Clone)]
 pub struct StructField {
     pub name: String,
     pub ty: Type,
     pub default: Option<Expr>,
+    pub visibility: Visibility,
 }
 
 #[derive(Debug, Clone)]

@@ -2015,8 +2015,8 @@ let spec = crate::target_spec::TargetSpec {
                     name: "Point".to_string(),
                     type_params: vec![],
                     fields: vec![
-                        StructField { name: "x".to_string(), ty: Type::Int, default: None },
-                        StructField { name: "y".to_string(), ty: Type::Int, default: None },
+                        StructField { name: "x".to_string(), ty: Type::Int, default: None, visibility: Visibility::Public },
+                        StructField { name: "y".to_string(), ty: Type::Int, default: None, visibility: Visibility::Public },
                     ],
                     transactions: vec![],
                     view_html: None,
@@ -2041,8 +2041,8 @@ let spec = crate::target_spec::TargetSpec {
                     name: "Point".to_string(),
                     type_params: vec![],
                     fields: vec![
-                        StructField { name: "x".to_string(), ty: Type::Int, default: None },
-                        StructField { name: "y".to_string(), ty: Type::Int, default: None },
+                        StructField { name: "x".to_string(), ty: Type::Int, default: None, visibility: Visibility::Public },
+                        StructField { name: "y".to_string(), ty: Type::Int, default: None, visibility: Visibility::Public },
                     ],
                     transactions: vec![],
                     view_html: None,
