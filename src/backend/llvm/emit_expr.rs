@@ -397,9 +397,9 @@ impl LlvmBackend {
                     Intrinsic::Keys | Intrinsic::Values => {
                         writeln!(out, "{}{} = add i64 0, 0 ; keys/values stub", indent, v).ok();
                     }
-                    // System I/O intrinsics (stubs)
+                    // System I/O intrinsics (stubs — passthrough to frgn calls)
                     Intrinsic::Println => {
-                        writeln!(out, "{}{} = add i64 0, 1 ; println stub (returns true)", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 0, 1 ; println stub", indent, v).ok();
                     }
                     Intrinsic::Readln => {
                         writeln!(out, "{}{} = add i64 0, 0 ; readln stub", indent, v).ok();
@@ -420,10 +420,10 @@ impl LlvmBackend {
                         }
                     }
                     Intrinsic::WriteFile => {
-                        writeln!(out, "{}{} = add i64 0, 1 ; write_file stub (returns true)", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 0, 1 ; write_file stub", indent, v).ok();
                     }
                     Intrinsic::Sleep => {
-                        writeln!(out, "{}{} = add i64 0, 1 ; sleep stub (returns true)", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 0, 1 ; sleep stub", indent, v).ok();
                     }
                     Intrinsic::Socket | Intrinsic::Bind | Intrinsic::Listen | Intrinsic::Accept => {
                         writeln!(out, "{}{} = add i64 0, 0 ; socket/bind/listen/accept stub", indent, v).ok();

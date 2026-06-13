@@ -23,6 +23,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 /* ===================================================================
  * 1. @ link Global Definitions
@@ -657,6 +659,215 @@ int64_t brief_read_file(int64_t path_ptr) {
 
     free(file_data);
     return (int64_t)result;
+}
+
+/* ===================================================================
+ * 6. Wrapper symbols — bridge frgn names to runtime implementations
+ *
+ * The LLVM backend emits calls using the frgn declaration names directly
+ * (e.g. "print", "string_trim"). These wrappers bridge to the internal
+ * __-prefixed implementations.
+ *
+ * Brief string format for all String parameters and returns:
+ *   int64_t header[2 + len]
+ *   header[0] = data pointer (address of header[2])
+ *   header[1] = length (int64_t)
+ *   header[2..2+len] = character data (one int64_t per char, low byte only)
+ * =================================================================== */
+
+#include <ctype.h>
+#include <string.h>
+#include <sys/wait.h>
+
+/* ── Helpers (forward declarations from section 7) ─────────────────── */
+static char*   brief_str_to_c(int64_t bstr);
+static int64_t cstr_to_brief(const char* s);
+static int64_t buf_to_brief(const char* buf, int64_t len);
+
+/* ── Console ──────────────────────────────────────────────────────── */
+
+int64_t print(int64_t msg) {
+    char* s = brief_str_to_c(msg);
+    if (s) { int64_t r = __print(s); free(s); return r; }
+    return 0;
+}
+
+/* ── Terminal ─────────────────────────────────────────────────────── */
+
+int64_t tty_raw_mode(int64_t enable) {
+    int64_t r = *((volatile int64_t*)&enable); // read arg to prevent elimination
+    return r ? 1 : 0; // placeholder — real termios requires platform includes
+}
+
+int64_t tty_size(void) {
+    return (int64_t)(80 * 10000 + 24); // placeholder — real ioctl
+}
+
+int64_t tty_read_key(void) {
+    unsigned char ch = 0;
+    if (fread(&ch, 1, 1, stdin) > 0) return (int64_t)ch;
+    return 0;
+}
+
+/* ── String operations ────────────────────────────────────────────── */
+
+int64_t string_trim(int64_t s_val) {
+    char* s = brief_str_to_c(s_val);
+    if (!s) return 0;
+    // Trim leading whitespace
+    char* start = s;
+    while (*start && (unsigned char)*start <= 32) start++;
+    // Trim trailing whitespace
+    char* end = start + strlen(start);
+    while (end > start && (unsigned char)*(end - 1) <= 32) end--;
+    *end = '\0';
+    int64_t result = cstr_to_brief(start);
+    free(s);
+    return result;
+}
+
+int64_t string_to_lower(int64_t s_val) {
+    char* s = brief_str_to_c(s_val);
+    if (!s) return 0;
+    for (char* p = s; *p; p++) *p = (char)tolower((unsigned char)*p);
+    int64_t result = cstr_to_brief(s);
+    free(s);
+    return result;
+}
+
+int64_t string_contains(int64_t s_val, int64_t sub_val) {
+    char* s = brief_str_to_c(s_val);
+    char* sub = brief_str_to_c(sub_val);
+    if (!s || !sub) { free(s); free(sub); return 0; }
+    int64_t r = strstr(s, sub) ? 1 : 0;
+    free(s); free(sub);
+    return r;
+}
+
+int64_t string_starts_with(int64_t s_val, int64_t prefix_val) {
+    char* s = brief_str_to_c(s_val);
+    char* prefix = brief_str_to_c(prefix_val);
+    if (!s || !prefix) { free(s); free(prefix); return 0; }
+    size_t plen = strlen(prefix);
+    int64_t r = strncmp(s, prefix, plen) == 0 ? 1 : 0;
+    free(s); free(prefix);
+    return r;
+}
+
+int64_t string_split(int64_t s_val) {
+    return s_val; // placeholder — needs list allocation
+}
+
+int64_t substring(int64_t s_val) {
+    return s_val; // placeholder
+}
+
+int64_t int_to_string(int64_t n) {
+    char buf[64];
+    int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
+    return buf_to_brief(buf, (int64_t)len);
+}
+
+/* ── JSON ─────────────────────────────────────────────────────────── */
+
+int64_t json_parse(int64_t s_val) {
+    return s_val; // placeholder — needs real JSON parser
+}
+
+int64_t json_is_array(int64_t v_val) {
+    (void)v_val;
+    return 0;
+}
+
+int64_t json_length(int64_t v_val) {
+    (void)v_val;
+    return 0;
+}
+
+int64_t json_get(int64_t v_val, int64_t key_val) {
+    (void)v_val; (void)key_val;
+    return 0;
+}
+
+int64_t json_get_by_index(int64_t v_val, int64_t i_val) {
+    (void)v_val; (void)i_val;
+    return 0;
+}
+
+/* ── Process ──────────────────────────────────────────────────────── */
+
+int64_t exec_cmd(int64_t cmd_val) {
+    char* cmd = brief_str_to_c(cmd_val);
+    if (!cmd) return 0;
+    FILE* fp = popen(cmd, "r");
+    free(cmd);
+    if (!fp) return 0;
+    char buf[65536];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    int status = pclose(fp);
+    if (n > 0) {
+        buf[n] = '\0';
+        while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) n--;
+        buf[n] = '\0';
+        return cstr_to_brief(buf);
+    }
+    return status == 0 ? cstr_to_brief("") : 0;
+}
+
+/* ===================================================================
+ * 7. Brief String Helpers — convert between Brief string format and C
+ *
+ * Brief string format:
+ *   int64_t header[2 + len]
+ *   header[0] = data pointer (address of header[2])
+ *   header[1] = length (int64_t)
+ *   header[2..2+len] = character data (one int64_t per char)
+ *
+ * An int64_t parameter is ptrtoint(header) — a pointer to header[0].
+ * =================================================================== */
+
+/* Convert a Brief string pointer to a null-terminated C string. Caller frees. */
+static char* brief_str_to_c(int64_t bstr) {
+    int64_t* h = (int64_t*)bstr;
+    if (!h) return NULL;
+    int64_t len = h[1];
+    if (len <= 0) return NULL;
+    char* s = malloc((size_t)len + 1);
+    if (!s) return NULL;
+    for (int64_t i = 0; i < len; i++) {
+        s[i] = (char)(h[i + 2] & 0xFF);
+    }
+    s[len] = '\0';
+    return s;
+}
+
+/* Create a Brief string from a C null-terminated string. Returns ptrtoint.
+   The caller receives ownership of the heap-allocated header. */
+static int64_t cstr_to_brief(const char* s) {
+    if (!s) return 0;
+    size_t len = strlen(s);
+    if (len == 0) return 0;
+    int64_t* h = malloc((len + 2) * sizeof(int64_t));
+    if (!h) return 0;
+    h[0] = (int64_t)(h + 2);
+    h[1] = (int64_t)len;
+    for (size_t i = 0; i < len; i++) {
+        h[i + 2] = (int64_t)((unsigned char)s[i]);
+    }
+    return (int64_t)h;
+}
+
+/* Create a Brief string from a buffer with known length. Returns ptrtoint. */
+static int64_t buf_to_brief(const char* buf, int64_t len) {
+    if (!buf || len <= 0) return 0;
+    int64_t* h = malloc(((size_t)len + 2) * sizeof(int64_t));
+    if (!h) return 0;
+    h[0] = (int64_t)(h + 2);
+    h[1] = len;
+    for (int64_t i = 0; i < len; i++) {
+        h[i + 2] = (int64_t)((unsigned char)buf[i]);
+    }
+    return (int64_t)h;
 }
 
 /* Constructor wrapper — ensures init runs even without the generated main() */

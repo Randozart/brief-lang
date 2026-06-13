@@ -2280,6 +2280,20 @@ fn run_llvm_compile(
             });
         }
 
+        // 2026-06-13: Auto-link .c files referenced by frgn `from` paths.
+        // Any frgn foo(x: T) -> U from "*.c" is auto-compiled to bitcode and linked.
+        for item in &program.items {
+            if let crate::ast::TopLevel::ForeignBinding { name: _, toml_path, .. } = item {
+                if toml_path.ends_with(".c") && !seen.contains(toml_path) {
+                    seen.insert(toml_path.clone());
+                    deps.push(crate::ast::LinkDependency {
+                        path: toml_path.clone(),
+                        source_lang: crate::ast::LinkLanguage::C,
+                    });
+                }
+            }
+        }
+
         deps
     };
 

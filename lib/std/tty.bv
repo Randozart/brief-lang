@@ -1,0 +1,41 @@
+// TTY — Terminal I/O for Brief
+//
+// Provides ergonomic terminal operations: raw mode, size detection,
+// and single-key reading. All operations route through the C runtime
+// (brief_rt.c) which is auto-linked when this module is imported.
+//
+// Import:
+//   import tty from "std/tty.bv";
+//
+// Usage:
+//   tty.raw_mode(true);     // enable raw mode
+//   let size: Int = tty.size();
+//   let key: Int = tty.read_key();
+
+import "link/brief_rt.c";
+
+frgn __tty_raw_mode(enable: Int) -> Int from "link/brief_rt.c";
+frgn __tty_size() -> Int from "link/brief_rt.c";
+frgn __tty_read_key() -> Int from "link/brief_rt.c";
+
+defn raw_mode(enable: Bool) -> Bool {
+    term __tty_raw_mode(if enable { 1 } else { 0 }) == 1;
+};
+
+defn size() -> Int {
+    term __tty_size();
+};
+
+// Returns the column count of the terminal.
+defn cols(size: Int) -> Int {
+    term size / 10000;
+};
+
+// Returns the row count of the terminal.
+defn rows(size: Int) -> Int {
+    term size % 10000;
+};
+
+defn read_key() -> Int {
+    term __tty_read_key();
+};

@@ -381,6 +381,22 @@ fn resolve_location_to_impl(location: &str) -> Option<ForeignFn> {
         "std::tty::read_key" => tty_read_key_impl,
         "std::process::exec" => exec_cmd_impl,
 
+        // officina-cli string utilities
+        "std::string::trim" => string_trim_impl,
+        "std::string::to_lower" => string_to_lower_impl,
+        "std::string::contains" => string_contains_impl,
+        "std::string::starts_with" => string_starts_with_impl,
+        "std::string::split" => string_split_impl,
+        "std::string::substring" => substring_impl,
+        "std::convert::int_to_string" => int_to_string_impl,
+
+        // officina-cli JSON utilities
+        "std::json::parse" => json_parse_impl,
+        "std::json::is_array" => json_is_array_impl,
+        "std::json::length" => json_length_impl,
+        "std::json::get" => json_get_impl,
+        "std::json::get_by_index" => json_get_by_index_impl,
+
         // JSON
         "json::parse" => json_parse_impl,
         "json::stringify" => json_stringify_impl,
@@ -494,6 +510,30 @@ fn tty_read_key_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 }
 fn exec_cmd_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     interpreter::exec_cmd_impl(args)
+}
+fn string_trim_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::string_trim_impl(args)
+}
+fn string_to_lower_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::string_to_lower_impl(args)
+}
+fn string_contains_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::string_contains_impl(args)
+}
+fn string_starts_with_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::string_starts_with_impl(args)
+}
+fn string_split_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::string_split_impl(args)
+}
+fn substring_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::substring_impl(args)
+}
+fn int_to_string_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::int_to_string_impl(args)
+}
+fn json_get_by_index_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::json_get_by_index_impl(args)
 }
 
 fn abs_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {

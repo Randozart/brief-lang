@@ -2182,6 +2182,137 @@ pub(crate) fn exec_cmd_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
+pub(crate) fn string_trim_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        Ok(Value::String(s.trim().to_string()))
+    } else {
+        Err(RuntimeError::TypeMismatch("string_trim expects String".to_string()))
+    }
+}
+
+pub(crate) fn string_to_lower_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        Ok(Value::String(s.to_lowercase()))
+    } else {
+        Err(RuntimeError::TypeMismatch("string_to_lower expects String".to_string()))
+    }
+}
+
+pub(crate) fn string_contains_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let (Value::String(s), Value::String(sub)) = (&args[0], &args[1]) {
+        Ok(Value::Bool(s.contains(sub.as_str())))
+    } else {
+        Err(RuntimeError::TypeMismatch("string_contains expects String, String".to_string()))
+    }
+}
+
+pub(crate) fn string_starts_with_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let (Value::String(s), Value::String(prefix)) = (&args[0], &args[1]) {
+        Ok(Value::Bool(s.starts_with(prefix.as_str())))
+    } else {
+        Err(RuntimeError::TypeMismatch("string_starts_with expects String, String".to_string()))
+    }
+}
+
+pub(crate) fn string_split_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        let parts: Vec<Value> = s.split(char::is_whitespace)
+            .filter(|p| !p.is_empty())
+            .map(|p| Value::String(p.to_string()))
+            .collect();
+        Ok(Value::List(parts))
+    } else {
+        Err(RuntimeError::TypeMismatch("string_split expects String".to_string()))
+    }
+}
+
+pub(crate) fn substring_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        let chars: Vec<Value> = s.chars().map(|c| Value::Char(c)).collect();
+        Ok(Value::List(chars))
+    } else {
+        Err(RuntimeError::TypeMismatch("substring expects String".to_string()))
+    }
+}
+
+pub(crate) fn int_to_string_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::Int(n) = &args[0] {
+        Ok(Value::String(n.to_string()))
+    } else {
+        Err(RuntimeError::TypeMismatch("int_to_string expects Int".to_string()))
+    }
+}
+
+pub(crate) fn json_parse_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(s) = &args[0] {
+        match serde_json::from_str::<serde_json::Value>(s) {
+            Ok(v) => Ok(json_value_to_brief(v)),
+            Err(e) => Ok(Value::String(format!("JSON parse error: {}", e))),
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch("json_parse expects String".to_string()))
+    }
+}
+
+fn json_value_to_brief(v: serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => Value::String("null".to_string()),
+        serde_json::Value::Bool(b) => Value::Bool(b),
+        serde_json::Value::Number(n) => Value::Int(n.as_i64().unwrap_or(0)),
+        serde_json::Value::String(s) => Value::String(s),
+        serde_json::Value::Array(arr) => Value::List(arr.into_iter().map(json_value_to_brief).collect()),
+        serde_json::Value::Object(obj) => {
+            let mut pairs = Vec::new();
+            for (k, v) in obj {
+                pairs.push(Value::List(vec![Value::String(k), json_value_to_brief(v)]));
+            }
+            Value::List(pairs)
+        }
+    }
+}
+
+pub(crate) fn json_is_array_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::List(_) = &args[0] {
+        Ok(Value::Bool(true))
+    } else {
+        Ok(Value::Bool(false))
+    }
+}
+
+pub(crate) fn json_length_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match &args[0] {
+        Value::List(items) => Ok(Value::Int(items.len() as i64)),
+        _ => Ok(Value::Int(0)),
+    }
+}
+
+pub(crate) fn json_get_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let (Value::List(obj), Value::String(key)) = (&args[0], &args[1]) {
+        for pair in obj {
+            if let Value::List(kv) = pair {
+                if kv.len() == 2 && kv[0] == Value::String(key.clone()) {
+                    return Ok(kv[1].clone());
+                }
+            }
+        }
+        Ok(Value::String(String::new()))
+    } else {
+        Err(RuntimeError::TypeMismatch("json_get expects Value, String".to_string()))
+    }
+}
+
+pub(crate) fn json_get_by_index_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let (Value::List(items), Value::Int(idx)) = (&args[0], &args[1]) {
+        if *idx >= 0 && (*idx as usize) < items.len() {
+            Ok(items[*idx as usize].clone())
+        } else {
+            Ok(Value::String(String::new()))
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch("json_get_by_index expects Value, Int".to_string()))
+    }
+}
+
 pub(crate) fn abs_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Int(n) = &args[0] {
         Ok(Value::Int(n.abs()))

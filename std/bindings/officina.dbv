@@ -2,8 +2,20 @@
 schema FnBinding { name: String; impl: String }
 
 as FnBinding {
-    tty_raw_mode  { "tty_raw_mode", "std::tty::raw_mode" }
-    tty_size      { "tty_size", "std::tty::size" }
-    tty_read_key  { "tty_read_key", "std::tty::read_key" }
-    exec_cmd      { "exec_cmd", "std::process::exec" }
+    tty_raw_mode    { "tty_raw_mode", "std::tty::raw_mode" }
+    tty_size        { "tty_size", "std::tty::size" }
+    tty_read_key    { "tty_read_key", "std::tty::read_key" }
+    exec_cmd        { "exec_cmd", "std::process::exec" }
+    string_trim     { "string_trim", "std::string::trim" }
+    string_to_lower { "string_to_lower", "std::string::to_lower" }
+    string_contains { "string_contains", "std::string::contains" }
+    string_starts_with { "string_starts_with", "std::string::starts_with" }
+    string_split    { "string_split", "std::string::split" }
+    substring       { "substring", "std::string::substring" }
+    int_to_string   { "int_to_string", "std::convert::int_to_string" }
+    json_parse      { "json_parse", "std::json::parse" }
+    json_is_array   { "json_is_array", "std::json::is_array" }
+    json_length     { "json_length", "std::json::length" }
+    json_get        { "json_get", "std::json::get" }
+    json_get_by_index { "json_get_by_index", "std::json::get_by_index" }
 }
