@@ -306,6 +306,11 @@ impl LlvmBackend {
                             let fl = self.native_float_or_box(out, indent, &val.to_string());
                             writeln!(out, "{}store{} float {}, float* {}, align {}", indent, vol_str, fl, p, self.align_of(&ty)).ok();
                         }
+                        s if s == "i8*" || s == "ptr" => {
+                            let fp = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, fp, val).ok();
+                            writeln!(out, "{}store{} i8* {}, i8** {}, align {}", indent, vol_str, fp, p, self.align_of(&ty)).ok();
+                        }
                         _ => {
                             writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val, ty, p, self.align_of(&ty)).ok();
                         }
@@ -318,6 +323,8 @@ impl LlvmBackend {
                         self.let_binding_types.insert(fname.clone(), ft.clone());
                     }
                 } else {
+                    self.let_bindings.insert(fname.clone(), val.name.clone());
+                    self.let_binding_types.insert(fname.clone(), val.ty.clone());
                     writeln!(out, "{}; assign {} to {}", indent, val, fname).ok();
                 }
             }
@@ -398,7 +405,11 @@ impl LlvmBackend {
                     writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, then_l, end_l).ok();
                 }
                 writeln!(out, "{}{}:", indent, then_l).ok();
+                // 2026-06-13: Save let bindings — values defined in the then-path
+                // use SSA registers local to %then_l and don't dominate %end_l.
+                let saved_bindings = self.let_bindings.clone();
                 for s in statements { self.emit_stmt(out, s, &format!("{}  ", indent)); }
+                self.let_bindings = saved_bindings;
                 if !self.terminated { writeln!(out, "{}  br label %{}", indent, end_l).ok(); }
                 writeln!(out, "{}{}:", indent, end_l).ok();
                 if !self.terminated {
@@ -417,11 +428,18 @@ impl LlvmBackend {
                         }
                     }
                     self.terminated = prev_terminated;
-                }
-                // When a terminating statement (term!, escape) fired inside the
-                // guarded body, leave self.terminated = true so callers know
-                // the block terminated execution. Only restore when no termination.}
-            }
+                } else {
+                    // 2026-06-13: Then-path terminated, but the end_l block (else path)
+                    // still needs a terminator. Emit the appropriate ret for the function
+                    // type. The then-path already has its own ret, so this covers the else
+                    // path. Reset terminated so callers can continue normally.
+                    if self.returns_i64 {
+                        writeln!(out, "  ret i64 0").ok();
+                    } else {
+                        writeln!(out, "  ret void").ok();
+                    }
+                    self.terminated = prev_terminated;
+                }}
             Statement::SyncBlock { body } => {
                 for s in body { self.emit_stmt(out, s, indent); }
             }

@@ -1300,3 +1300,38 @@ body + post/done structure with loop-back, and (c) conditional body with
 rollback. Each must independently ensure every basic block has a
 terminator. The `post:` label pattern is unique to callable txns and
 was missed by the first 8-site pass.
+
+## 2026-06-13 — SSA dominance violations: values from guard then-path used in merge path
+
+**Issue**: `opt` and `llc` reported "Instruction does not dominate all
+uses!" for values computed inside a Guarded block's then-path but
+referenced in the merge path. 17 violations in officina-cli.gen IR.
+
+**Root Cause**: Three interacting problems:
+1. **Unconditional `ret` fix was too aggressive**: The fix from 81a899c
+   changed `if !self.terminated { ret }` to always emit `ret` at function
+   end. This created dead code after terminator instructions when all
+   code paths already returned. Reverted to conditional, with proper
+   per-path termination instead.
+2. **Guarded handler didn't terminate `end_l` block when then-path
+   returned**: When a Guarded's then-path had `term;`, the `end_l` block
+   (else path) was emitted without a terminator. Fixed by emitting
+   `ret i64 0` or `ret void` for the else-path block, then restoring
+   `prev_terminated` so callers continue normally.
+3. **`let_bindings` leaked SSA registers across guard boundary**: Values
+   assigned via `let x = expr;` inside a guard's then-path created SSA
+   registers local to the `%then_l` block. After the guard, lookups for
+   `x` returned the stale register name from `%then_l`, which doesn't
+   dominate `%end_l`. Fixed by saving and restoring `let_bindings`
+   around the then-path statement emission.
+
+**Verification**: `opt -O2` and `llc` now pass on officina-cli.gen IR
+with zero SSA dominance violations. 777 compiler tests pass.
+
+**Lesson**: `let_bindings` (and all similar backend maps from names to
+SSA register names) are implicitly scoped to the current basic block.
+Any value computed inside a guard's then-path must either use a `phi`
+at the merge point or be evaluated before the guard branch. The
+save/restore approach works because it effectively discards then-path
+bindings at the merge point, forcing re-evaluation in the correct
+dominating block.

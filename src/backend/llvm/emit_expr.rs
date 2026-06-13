@@ -48,6 +48,22 @@ impl LlvmBackend {
                 // SSA body mode: prefer pre-extracted old-value register
                 // for int fields so all body ops are independent.
                 if let Some(old_reg) = self.ssa_old_int_regs.get(name) {
+                    // If the old register is a non-i64 type, cast to i64 first
+                    if let Some(&idx) = self.field_index_map.get(name) {
+                        let ft = &self.field_types[idx];
+                        if ft == "i8" {
+                            let z = format!("%iz{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = zext i8 {} to i64", indent, z, old_reg).ok();
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                            return TypedRegister { name: v, ty: Type::Int };
+                        }
+                        if ft == "i8*" || ft == "ptr" {
+                            let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, old_reg).ok();
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, p).ok();
+                            return TypedRegister { name: v, ty: Type::Int };
+                        }
+                    }
                     writeln!(out, "{}{} = add i64 0, {}", indent, v, old_reg).ok();
                     return TypedRegister { name: v, ty: Type::Int };
                 }
@@ -389,7 +405,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = add i64 0, 0 ; readln stub", indent, v).ok();
                     }
                     Intrinsic::Exit => {
-                        writeln!(out, "{}call void @exit(i64 0) ; exit stub", indent).ok();
+                        writeln!(out, "{}call void @__exit() ; exit stub", indent).ok();
                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                     }
                     Intrinsic::Time => {
@@ -772,6 +788,22 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, ai).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, count_reg, s1).ok();
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+            }
+            // — Subtype projection (e.g. list :> Size) —
+            Expr::SubtypeProjection { source, .. } => {
+                let src = self.emit_expr(out, source, indent);
+                let hp = format!("%shp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src.name).ok();
+                let slp = format!("%slp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, slp, hp).ok();
+                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, slp).ok();
+                return TypedRegister { name: v, ty: Type::Int };
+            }
+            Expr::SubtypeProjectionExpr(e) => {
+                return self.emit_expr(out, &Expr::SubtypeProjection {
+                    source: e.source.clone(),
+                    ops: e.ops.clone(),
+                }, indent);
             }
             _ => {}
         }

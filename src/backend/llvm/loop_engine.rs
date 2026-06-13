@@ -513,6 +513,68 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
+    /// Emit a counted-loop main() that uses per-field GEP loads/stores (no SSA
+    /// insertvalue chain). Used when the body has branching control flow (Guarded
+    /// statements) and linearity cannot be proven — avoids phi %State dominance issues.
+    ///
+    /// 2026-06-13: A005b — memory path for non-linear bodies.
+    pub(crate) fn emit_folded_memory_main(
+        &mut self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        body: &[Statement],
+    ) {
+        self.fn_ret_ty = "i32".to_string();
+        let attr = self.slp_attr("main", "#0");
+        let c0 = self.txn_counter;
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        // Bound loading — use numbered positional args ({0}, {1}) to avoid
+        // LLVM IR brace chars being parsed as named format placeholders.
+        if let Some(ti) = total_idx {
+            writeln!(out, "  %gt{0}_{1} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", c0, ti).ok();
+            writeln!(out, "  %lt{0}_{0} = load i64, i64* %gt{0}_{0}, align 8", c0).ok();
+        } else if let Some(cn) = total_const_name {
+            writeln!(out, "  %lt{0}_{0} = load i64, i64* @{1}, align 8", c0, cn).ok();
+        } else {
+            writeln!(out, "  %lt{0}_{0} = add i64 0, 0", c0).ok();
+        }
+        writeln!(out, "  br label %_hdr").ok();
+        writeln!(out, "_hdr:").ok();
+        writeln!(out, "  %gp{0}_{1} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", c0 + 1, counter_idx).ok();
+        writeln!(out, "  %lp{0}_{0} = load i64, i64* %gp{0}_{1}, align 8", c0 + 1, counter_idx).ok();
+        let cmp_reg = format!("%cp{}", c0 + 2);
+        writeln!(out, "  {0} = icmp slt i64 %lp{1}_{1}, %lt{2}_{2}", cmp_reg, c0 + 1, c0).ok();
+        writeln!(out, "  br i1 {}, label %_body, label %_done", cmp_reg).ok();
+        writeln!(out, "_body:").ok();
+        self.ssa_state_reg = None; // memory mode: writes go through GEP+store
+        self.returns_i64 = false;
+        self.pre_load_all_fields(out, "%state");
+        for s in body {
+            if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+                self.emit_stmt(out, s, "  ");
+            }
+        }
+        self.ssa_old_float_regs.clear();
+        self.ssa_old_int_regs.clear();
+        // Increment counter via GEP+store
+        let inc = format!("%inc{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "  {0} = add i64 %lp{1}_{1}, 1", inc, c0 + 1).ok();
+        let sg = format!("%sg{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "  {0} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", sg, counter_idx).ok();
+        writeln!(out, "  store i64 {}, i64* {}, align 8", inc, sg).ok();
+        writeln!(out, "  br label %_hdr").ok();
+        writeln!(out, "_done:").ok();
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
     /// Emit a `main()` that uses per-field GEP loads/stores for all-convergent
     /// programs. Loads each field via GEP at tick entry, runs each reactive txn's
     /// precondition and body inline with direct GEP stores for modifications,

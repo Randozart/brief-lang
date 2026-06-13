@@ -32,6 +32,7 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @time(i64*) nounwind").ok();
         writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
         writeln!(out, "declare i64 @brief_read_file(i64)").ok();
+        writeln!(out, "declare void @__exit()").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {
@@ -280,10 +281,7 @@ impl LlvmBackend {
         self.terminated = false;
         self.returns_i64 = true;
         for s in &d.body { self.emit_stmt(out, s, "  "); }
-        // 2026-06-13: Always emit ret — when a guard's then-path terminates,
-        // the else-path's end_l block still needs a terminator. The duplicate
-        // ret is valid (dead code in the then-block, terminator in the else-block).
-        writeln!(out, "  ret i64 0").ok();
+        if !self.terminated { writeln!(out, "  ret i64 0").ok(); }
         writeln!(out, "}}").ok();
     }
     // 2026-06-13: Added %State* %state param — definitions can access global state.

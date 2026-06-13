@@ -1077,10 +1077,18 @@ self.emit_declares(&mut out);
                                 true
                             }
                         } else {
-                            // A005: folded SSA (non-pure body)
-                            self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (non-pure body, inline)", node.name));
-                            // Non-pure body → SSA mode (load/store state once, emit body inline)
-                            self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&txns[0].1.body));
+                            let body = &txns[0].1.body;
+                            let has_guards = body.iter().any(|s| matches!(s, crate::ast::Statement::Guarded { .. } | crate::ast::Statement::Escape(_) | crate::ast::Statement::SyncBlock { .. }));
+                            if has_guards && !crate::proof_engine::prove_linear(body) {
+                                // A005b: non-linear body with branching guards → memory path (no phi)
+                                self.warnings.push(format!("info: txn '{}' dispatched via folded (memory, no phi — not provably linear)", &node.name));
+                                self.emit_folded_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, body);
+                            } else {
+                                // A005a: straight-line or provably linear body → SSA insertvalue path
+                                self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (inline, {})", &node.name,
+                                    if has_guards { "proven linear" } else { "straight-line" }));
+                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(body));
+                            }
                             true
                         }
                     } else { false }

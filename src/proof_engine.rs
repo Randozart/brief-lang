@@ -3236,6 +3236,183 @@ impl ProofEngine {
     }
 }
 
+// ── Standalone expression analysis helpers (for linearity proof) ──
+
+/// Extract (variable_name, operator, value) from a comparison expression.
+/// Supports: x > N, x >= N, x < N, x <= N (variable on either side).
+pub fn extract_bound_from_expr(expr: &Expr) -> Option<(String, &str, i64)> {
+    fn bind_val(e: &Expr) -> Option<i64> { e.as_integer() }
+    match expr {
+        Expr::Gt(l, r) => {
+            if let Expr::Identifier(var) = l.as_ref() {
+                if let Some(val) = bind_val(r) {
+                    return Some((var.clone(), "gt", val));
+                }
+            }
+            if let Expr::Identifier(var) = r.as_ref() {
+                if let Some(val) = bind_val(l) {
+                    return Some((var.clone(), "lt", val));
+                }
+            }
+            None
+        }
+        Expr::Ge(l, r) => {
+            if let Expr::Identifier(var) = l.as_ref() {
+                if let Some(val) = bind_val(r) {
+                    return Some((var.clone(), "ge", val));
+                }
+            }
+            if let Expr::Identifier(var) = r.as_ref() {
+                if let Some(val) = bind_val(l) {
+                    return Some((var.clone(), "le", val));
+                }
+            }
+            None
+        }
+        Expr::Lt(l, r) => {
+            if let Expr::Identifier(var) = l.as_ref() {
+                if let Some(val) = bind_val(r) {
+                    return Some((var.clone(), "lt", val));
+                }
+            }
+            if let Expr::Identifier(var) = r.as_ref() {
+                if let Some(val) = bind_val(l) {
+                    return Some((var.clone(), "gt", val));
+                }
+            }
+            None
+        }
+        Expr::Le(l, r) => {
+            if let Expr::Identifier(var) = l.as_ref() {
+                if let Some(val) = bind_val(r) {
+                    return Some((var.clone(), "le", val));
+                }
+            }
+            if let Expr::Identifier(var) = r.as_ref() {
+                if let Some(val) = bind_val(l) {
+                    return Some((var.clone(), "ge", val));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Extract (variable_name, constant_value) from an equality expression.
+pub fn extract_eq_pair_from_expr(a: &Expr, b: &Expr) -> Option<(String, i64)> {
+    match (a, b) {
+        (Expr::Identifier(name), b) => b.as_integer().map(|val| (name.clone(), val)),
+        (a, Expr::Identifier(name)) => a.as_integer().map(|val| (name.clone(), val)),
+        _ => None,
+    }
+}
+
+/// Decompose `a && b && c` into individual conjuncts.
+pub fn split_and(expr: &Expr) -> Vec<&Expr> {
+    match expr {
+        Expr::And(l, r) => {
+            let mut v = split_and(l);
+            v.extend(split_and(r));
+            v
+        }
+        _ => vec![expr],
+    }
+}
+
+/// Check if two expressions are mutually exclusive (cannot both be true).
+/// Returns `true` if they COULD be satisfiable (not provably unsat).
+/// Returns `false` if proven unsatisfiable (mutually exclusive).
+///
+/// 2026-06-13: Standalone function for linearity proof at codegen time.
+pub fn check_satisfiable(a: &Expr, b: &Expr) -> bool {
+    let ca = split_and(a);
+    let cb = split_and(b);
+    for ai in &ca {
+        for bj in &cb {
+            // Check bound contradiction: x > 5 vs x < 4
+            if let (Some((var_a, cmp_a, val_a)), Some((var_b, cmp_b, val_b))) =
+                (extract_bound_from_expr(ai), extract_bound_from_expr(bj))
+            {
+                if var_a == var_b {
+                    let contradictory = match (cmp_a, cmp_b) {
+                        ("gt", "lt") => val_a >= val_b,
+                        ("lt", "gt") => val_a <= val_b,
+                        ("ge", "lt") => val_a >= val_b,
+                        ("lt", "ge") => val_a <= val_b,
+                        ("gt", "le") => val_a >= val_b,
+                        ("le", "gt") => val_a <= val_b,
+                        ("ge", "le") => val_a > val_b,
+                        ("le", "ge") => val_a < val_b,
+                        _ => false,
+                    };
+                    if contradictory {
+                        return false; // unsat — mutually exclusive
+                    }
+                }
+            }
+            // Check equality contradiction: x == 5 vs x == 10
+            if let (Expr::Eq(l1, r1), Expr::Eq(l2, r2)) = (*ai, *bj) {
+                if let (Some((var1, val1)), Some((var2, val2))) =
+                    (extract_eq_pair_from_expr(l1, r1), extract_eq_pair_from_expr(l2, r2))
+                {
+                    if var1 == var2 && val1 != val2 {
+                        return false; // unsat — same var can't equal two constants
+                    }
+                }
+            }
+            // Check boolean contradiction: x vs !x or true vs false
+            match (*ai, *bj) {
+                (Expr::Not(inner), other) | (other, Expr::Not(inner)) => {
+                    if format!("{:?}", inner) == format!("{:?}", other) {
+                        return false; // unsat — x && !x
+                    }
+                }
+                (Expr::Bool(a_val), Expr::Bool(b_val)) if a_val != b_val => {
+                    return false; // unsat — true && false
+                }
+                _ => {}
+            }
+        }
+    }
+    true // could not prove unsat — assume satisfiable
+}
+
+/// Collect all guard conditions from a statement list (recursive).
+pub fn collect_guard_conditions(stmts: &[crate::ast::Statement]) -> Vec<Expr> {
+    let mut conds = Vec::new();
+    for s in stmts {
+        match s {
+            crate::ast::Statement::Guarded { condition, statements } => {
+                conds.push(condition.clone());
+                conds.extend(collect_guard_conditions(statements));
+            }
+            crate::ast::Statement::SyncBlock { body } => {
+                conds.extend(collect_guard_conditions(body));
+            }
+            _ => {}
+        }
+    }
+    conds
+}
+
+/// Prove that a transaction body has at most one guard then-path firing per iteration.
+/// A body is linear when all guard conditions are pairwise mutually exclusive
+/// (burden_i && burden_j is unsat for all i ≠ j).
+///
+/// 2026-06-13: Used at codegen time to determine if SSA insertvalue path is safe.
+pub fn prove_linear(stmts: &[crate::ast::Statement]) -> bool {
+    let guards = collect_guard_conditions(stmts);
+    for i in 0..guards.len() {
+        for j in (i + 1)..guards.len() {
+            if check_satisfiable(&guards[i], &guards[j]) {
+                return false; // two guards could both fire → not linear
+            }
+        }
+    }
+    true // all pairs are mutually exclusive
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
