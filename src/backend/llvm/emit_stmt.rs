@@ -416,8 +416,11 @@ impl LlvmBackend {
                             }
                         }
                     }
+                    self.terminated = prev_terminated;
                 }
-                self.terminated = prev_terminated; // always restore
+                // When a terminating statement (term!, escape) fired inside the
+                // guarded body, leave self.terminated = true so callers know
+                // the block terminated execution. Only restore when no termination.}
             }
             Statement::SyncBlock { body } => {
                 for s in body { self.emit_stmt(out, s, indent); }
