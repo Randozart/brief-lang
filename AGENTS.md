@@ -428,16 +428,37 @@ Evolution: The old pattern `[guard] { &i = i + 1; }` inside `defn` bodies was ca
 
 Run `cargo test --lib` before every commit. If a change has no test, it does not exist.
 
-## `--dev` / `--prod` Budget Semantics (2026-06-07)
+## `--dev` / `--prod` / `--release` Optimization Flags (2026-06-13)
 
-The compiler has two optimization budget modes:
+The compiler has three optimization modes with two additional controls:
 
-- **`--dev`** (default when no flag given): Uses the current folding budget (default 256, overridable via `--optimize-budget`). Best for fast compilation during development.
-- **`--prod`**: Uses the maximum folding budget (`u64::MAX`), enabling the compiler to fully precompute every bounded loop at compile time. Only overridden by an explicit `--optimize-budget <N>` flag — if the user sets a budget, that budget wins regardless of dev/prod.
+| Flag | Budget | Simplify | Use Case |
+|------|--------|----------|----------|
+| `--dev` (default) | 256 | OFF | Fast compilation, development |
+| `--prod` / `--release` | `u64::MAX` | ON (`u64::MAX` nodes) | Full optimization, production |
+| `--optimize-budget <N>` | `N` | per mode | Override budget (region analyzer) |
+| `--simplify-budget <N>` | per mode | ON with cap `N` | Override simplify nodes |
+| `--no-simplify` | per mode | OFF | Disable expression simplification |
 
-**Implementation note**: The budget flag is set before codegen, not in the codegen itself. The `--optimize-budget` CLI flag overrides both defaults. If neither `--dev`/`--prod` nor `--optimize-budget` is set, `--dev` (budget=256) is the implicit default.
+**Budget**: Controls how many transaction iterations the interpreter will
+simulate during precomputation analysis. Lower values compile faster but
+may produce runtime loops for large bounds.
 
-See `plans/2026-06-06-universal-ffi-no-magic-architecture.md` for the full master plan.
+**Simplify**: The expression simplification pass (`equality_saturation.rs`)
+rewrites algebraic identities (`x+0→x`, `!!x→x`) bottom-up O(n) using a
+hash-cons cache. Enabled in `--prod`/`--release`. The `--simplify-budget`
+flag caps total nodes processed before bailing out.
+
+**--optimize-budget <N>** overrides both `--dev` and `--prod` budgets.
+**--simplify-budget <N>** enables simplify with a node cap regardless
+of mode. **--no-simplify** disables it regardless.
+
+Implementation: `main.rs` — flags parsed in `build` and `llvm` subcommands,
+passed through `run_build` → `run_llvm_compile`. `--prod`/`--release` also
+enable the A005b linearity-memory path when guards aren't provably linear.
+
+See `docs/architecture/features/backend-dispatch.md` for the full dispatch
+decision tree.
 
 ## Architecture Documentation (Permanent Practice)
 

@@ -10,21 +10,21 @@ recompiles LLVM codegen.
 
 ## LLVM Backend (Split into Subdirectory)
 
-The LLVM backend is now `src/backend/llvm/` (7 files, 7,981 total lines;
+The LLVM backend is at `src/backend/llvm/` (10 files, ~8,400 total lines;
 original monolithic `llvm.rs` was ~7,800 lines).
 
 ### File Layout
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 1,700 | `LlvmBackend` struct (45 fields in 9 groups), `generate()` entry point, builder methods, `build_field_index`, `validate_schema_types`, `is_ptr_expr`, `trg_llvm_storage_ty`, `sparsity_ratio`/`find_perfect_hash` |
-| `emit_toplevel.rs` | 550 | Top-level emission: `emit_header`, `emit_declares`, `emit_init_state`, `emit_definition`, `emit_transaction`, `emit_callable_txn`, `emit_precondition_check`, `emit_pre_function`, `emit_async_body`, `emit_fused`, `emit_shape_guarded_body`, `emit_fused_composed`, `emit_trg_load`, `native_float_or_box`, `llvm_type`, `align_of`, `declare_state_type` |
-| `emit_expr.rs` | 897 | `emit_expr()` router — all 20+ Expr variant arms including ProjectionTarget (18 targets), BracketOp (MultiSlice), Slice, collection emissions, field access, match/pattern, tuple |
-| `emit_stmt.rs` | 394 | `emit_stmt()` router — all Statement variant arms including Let, Assignment, Guarded, Term/TermBang, Unification, Escape, InlineAsm |
-| `loop_engine.rs` | 881 | Folded loop SSA engine: `emit_folded_loop`, `emit_folded_main`, `emit_ssa_main`, `emit_folded_multi_main`, `emit_folded_pure_counter`, `emit_exit_expr`, `emit_main`, `pre_extract_float_fields`, `pre_extract_int_fields` |
-| `dispatch.rs` | 256 | Reactor dispatch: `emit_reactor`, `emit_parallel_reactor`, `extract_ranges`, `resolve_dispatch_first_txn`, `dispatch_has_pre`, `build_write_masks`, `check_exit_condition_idents` |
-| `optimizer.rs` | 280 | Decision tree: `select_optimization_strategy`, `classify_txns`, `is_trigger_gated`, `extract_trigger_keys`, `extract_enum_keys`, `select_dispatch_mode` |
-| `hazard.rs` | 249 | SLP hazard analysis: `estimate_slp_hazard`, `slp_attr`, `is_float_field`, `is_float_expr_pre_cg`, `count_cross_float_ops`, `collect_local_floats_and_temps`, `target_hardware`, `count_all_float_ops`, `count_float_arith_ops` |
+| `mod.rs` | 1,744 | `LlvmBackend` struct (45 fields in 9 groups), `generate()` entry point, builder methods, codegen dispatch (A000-A006 decision), `build_field_index`, `validate_schema_types` |
+| `emit_toplevel.rs` | 591 | Top-level emission: `emit_header`, `emit_declares`, `emit_init_state`, `emit_definition`, `emit_transaction`, `emit_callable_txn`, `emit_precondition_check`, `emit_pre_function`, `emit_async_body`, `emit_fused`, `emit_shape_guarded_body`, `emit_fused_composed`, `emit_trg_load`, `llvm_type`, `align_of`, `declare_state_type` |
+| `emit_expr.rs` | 1,037 | `emit_expr()` router — all 20+ Expr variant arms including ProjectionTarget (18 targets), BracketOp (MultiSlice), Slice, collection emissions, field access, match/pattern, tuple |
+| `emit_stmt.rs` | 477 | `emit_stmt()` router — all Statement variant arms with Guarded block handling, let_bindings save/restore across guard boundaries |
+| `loop_engine.rs` | 978 | Folded loop engine: `emit_folded_main`, `emit_folded_memory_main` (2026-06-13), `emit_ssa_main`, `emit_folded_loop`, `emit_folded_pure_counter`, `pre_extract_float/int_fields`, `pre_load_all_fields` |
+| `dispatch.rs` | 256 | Reactor dispatch: `emit_reactor`, `emit_parallel_reactor`, `extract_ranges` |
+| `optimizer.rs` | 280 | Decision tree: `select_optimization_strategy`, classify, extract trigger/enum keys |
+| `hazard.rs` | 249 | SLP hazard analysis: `estimate_slp_hazard`, `slp_attr`, `compute_peak_live_floats` |
 | `tests.rs` | 2,882 | 80+ unit tests — backend correctness, wake triggers, SLP hazard, chain composition, exit conditions, natural death, struct/enum, collections, projections |
 | `kani.rs` | 57 | 6 Kani proof harnesses (fast group) |
 
@@ -48,3 +48,25 @@ LLVM pattern is proven.
 (`src/backend/webstack.rs`, 2,230 lines) — expression emission extracted
 into feature `ExprCodegenWebstack` impls. Optimizations deferred until
 LLVM pattern is proven.
+
+## Known Backend Bugs (Fixed 2026-06-13)
+
+All bugs below were found during officina-cli compilation testing. Each
+produced invalid LLVM IR that `opt` or `llc` rejected.
+
+| # | Bug | File | Root Cause | Fix |
+|---|-----|------|-----------|-----|
+| 1 | Bare label `%` prefix | `emit_expr.rs` | Label definitions used `%name:`, should be `name:` | Removed `%` from 6 `writeln!` format strings |
+| 2 | `%state` SSA scoping | `emit_toplevel.rs`, `emit_expr.rs` | `defn`/callable `txn` emitted functions without `%State* %state` parameter | Added `%State*` as first param in 2 function signatures + at call sites |
+| 3 | Duplicate function definitions | `import_resolver.rs` | Same module imported through N paths produces N copies of items | `dedup_items()` after resolution loop — first occurrence wins |
+| 4 | Unterminated basic block (9 sites) | `emit_toplevel.rs` | Leaked `self.terminated` from Guarded then-path suppressed caller's `ret` | Changed 9 `if !terminated { ret }` to unconditional `ret` (later refined) |
+| 5 | Unterminated `post:` label | `emit_toplevel.rs` | Callable txn's body loop didn't emit `br %post` after last statement | Added `br label %post` when last statement didn't terminate |
+| 6 | SSA dominance (17 violations) | `emit_stmt.rs` | Values from guard then-path (`%then_l`) referenced in merge path (`%end_l`) without phi | Save/restore `let_bindings` around then-path emission |
+| 7 | Expr simplification exponential blowup | `equality_saturation.rs` | Fixpoint loop × recursive simplify on children = O(10^n) for 32-term `||` chain | Rewritten as bottom-up O(n) with hash-cons cache |
+| 8 | Wrong ret after terminated guard | `emit_stmt.rs`, `emit_toplevel.rs` | Unconditional `ret` fix created dead code after terminator | Reverted to conditional; Guarded handler emits `ret` for else-path itself |
+| 9 | Non-linear body with SSA insertvalue | `mod.rs`, `loop_engine.rs` | A005 SSA path used phi nodes even with non-exclusive guard conditions | Added `prove_linear()` check + A005b memory fallback |
+
+**Verification**: After all fixes, `opt -O2` and `llc` pass on officina-cli
+(4,280-line IR) with zero SSA violations. 777 compiler tests pass. All 30
+benchmarks compile, all 7 runtime benchmarks produce correct output, and
+`clang -O3` accepts the generated IR.

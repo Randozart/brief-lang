@@ -13,21 +13,29 @@ flowchart TD
     A[Program] --> B{All const inputs?}
     B -->|Yes| C[Precomputation]
     C --> D{Within --optimize-budget?}
-    D -->|Yes| E[Constant-fold all txns]
-    D -->|No| F[Emit runtime loop]
-    B -->|No| G{Enum dispatch?}
-    G -->|Yes| H[emit_enum_main]
-    H --> I{Async triggers?}
-    I -->|Yes| J[Reactor tick loop]
-    I -->|No| K[Direct SSA loop]
-    G -->|No| L{Async/MMIO?}
-    L -->|Yes| M[Reactor tick loop]
-    L -->|No| N[Direct SSA loop]
+    D -->|Yes| E[A000: Constant-fold all txns]
+    D -->|No| F[Fall through]
+    B -->|No| F
+    
+    F --> G{is_counter_bounded?}
+    G -->|Yes| H{Body has FFI?}
+    H -->|No| I{A001: Pure counter fold?}
+    I -->|Const bound| J[A001: O(1) store]
+    I -->|Runtime bound| K[A005: Phi pipeline]
+    H -->|Yes| L{Body has branching?}
+    L -->|No| M[A005a: Folded SSA insertvalue]
+    L -->|Yes| N{prove_linear?}
+    N -->|Yes| M
+    N -->|No| O[A005b: Folded memory (no phi)]
+    
+    G -->|No| P{Async/MMIO/triggers?}
+    P -->|Yes| Q[Reactor tick loop]
+    P -->|No| R[A006: Direct SSA loop]
 ```
 
 ## Codegen Strategies
 
-### Precomputation (--optimize-budget)
+### A000: Precomputation (--optimize-budget)
 
 When all inputs are compile-time constants (no `frgn __get_env_int` calls
 in the hot path), the interpreter evaluates each reactive transaction up
@@ -44,22 +52,104 @@ in the loop body), precomputation is disabled.
 - --prod (budget=u64::MAX): fully precomputes every bounded loop
 - --optimize-budget <N>: overrides both
 
-### Direct SSA Loop (A006 — 2026-06-10)
+### A001: Pure Counter Fold
 
-For programs with NO async triggers and NO MMIO mappings, the reactor tick
+When a reactive txn has a compile-time-constant bound AND a pure body
+(no FFI calls), the compiler emits a single O(1) store of the final
+counter value. No runtime loop.
+
+File: `src/backend/llvm/loop_engine.rs` — `emit_folded_pure_counter`
+
+### A005: Folded SSA / Memory (Counted Loop)
+
+For programs with a counter-bounded reactive txn (e.g. `[count < N]`)
+and a non-pure body (has FFI calls), the compiler emits a counted-loop
+`main()`. Two sub-paths based on body structure:
+
+#### A005a: Folded SSA Insertvalue (Straight-Line or Provably Linear)
+
+When the body contains NO `Guarded`/`Escape` statements, OR when all
+guard conditions are pairwise mutually exclusive (`prove_linear()` returns
+true), the compiler uses the SSA insertvalue chain:
+
+```
+entry → _hdr → _body4 (4× unrolled) → _hdr (backedge) → _done → ret
+```
+
+- State read: `extractvalue %State %ssa_reg, %field_idx`
+- State write: `insertvalue %State %ssa_reg, %val, %field_idx`
+- Guard merge: `phi %State [ %then_val, %then_l ], [ %else_val, %entry_l ]`
+- `%slot_` alloca carries state across loop iterations (load/store %State)
+
+Safe only when `prove_linear()` confirms all guards are pairwise mutually
+exclusive — otherwise phi incoming values don't dominate the merge block.
+
+File: `src/backend/llvm/loop_engine.rs` — `emit_folded_main(use_phi=false, body=Some(stmts))`
+
+#### A005b: Folded Memory (Non-Linear Body)
+
+When the body HAS branching control flow (Guarded/Escape) AND `prove_linear()`
+cannot prove mutual exclusivity, the compiler falls back to per-field
+GEP+load/store with no phi nodes:
+
+```
+entry → _hdr → _body → _hdr (backedge) → _done → ret
+```
+
+- State read: GEP+load from `%state` pointer (via `pre_load_all_fields`)
+- State write: GEP+store to `%state` pointer (via `ssa_state_reg = None`)
+- No slot alloca, no extractvalue/insertvalue, no phi
+- No 4× unrolling (single body emission)
+
+LLVM's GVN/LICM eliminate redundant GEPs across the loop.
+
+File: `src/backend/llvm/loop_engine.rs` — `emit_folded_memory_main` (2026-06-13)
+
+### A005: Folded Phi Pipeline (Pure Body, Runtime-Variable Bound)
+
+When the body is pure (no FFI) but the bound is runtime-determined
+(`__get_env_int`), the compiler emits a counter-only phi pipeline.
+The txn body is NOT emitted inline — it's called as `@txn(%State* %state)`.
+
+File: `src/backend/llvm/loop_engine.rs` — `emit_folded_main(use_phi=true, body=None)`
+
+### A006: Direct SSA Loop
+
+For programs with NO async triggers and NO MMIO mappings, and where the
+counter-bounded optimization (A005) does not apply, the reactor tick
 dispatch function (`@reactor_tick`) is eliminated. Instead, a tight `while`
-loop is emitted directly in `main()`, using phi nodes for field state.
+loop is emitted directly in `main()` with per-field GEP+load+store.
 
-File: `src/backend/llvm/loop_engine.rs` — `emit_direct_ssa_main()`
+File: `src/backend/llvm/loop_engine.rs` — `emit_ssa_main()`
 
 Key features:
 - Per-field GEP codegen: `getelementptr %State, %State* %state, i32 0, i32 N`
   instead of `load %State; extractvalue; insertvalue; store %State`
-- SROA promotion: LLVM promotes `%State` alloca fields to phi nodes
+- Multiple reactive txns, each with precondition check and body
+- Exit condition determines loop termination
 - Self-loop on precondition failure replaced with direct branch to `done`
   label (2026-06-11), enabling LLVM loop unrolling
 - `loop_exit_label` for `term!` inside reactive loops emits `br %done`
   instead of `ret`, also enabling unrolling
+
+### Linearity Proof (2026-06-13)
+
+Standalone `prove_linear()` in `proof_engine.rs` determines whether a
+transaction body's guard conditions are pairwise mutually exclusive.
+Used at codegen time to choose between A005a (SSA insertvalue) and
+A005b (memory).
+
+**Algorithm**: For each pair of guard conditions (collected recursively
+from `Guarded` statements), check `check_satisfiable(a, b)`. Returns
+`false` (unsat → mutually exclusive) using:
+
+1. **Bound contradiction**: `x > 5 && x < 4` — same var, contradictory bounds
+2. **Equality contradiction**: `x == 5 && x == 10` — same var, different constants
+3. **Boolean contradiction**: `x && !x` or `true && false`
+
+All checks use standalone `extract_bound_from_expr()` and
+`extract_eq_pair_from_expr()` free functions — no `SymbolicExecutor`
+state needed.
 
 ### Reactor Tick Loop
 
@@ -158,10 +248,13 @@ Combined impact: 3.85x → 0.98x (brief ties C).
 
 | File | Role |
 |------|------|
-| `src/backend/llvm/loop_engine.rs` | Direct SSA loop emission, self-loop fix, loop_exit_label |
-| `src/backend/llvm/hazard.rs` | SLP hazard analysis, compute_peak_live_floats |
+| `src/backend/llvm/loop_engine.rs` | Direct SSA loop, folded SSA A005a, folded memory A005b, pure counter A001 |
+| `src/backend/llvm/mod.rs` | Field index map, exit condition, codegen dispatch (A005 vs A006 decision) |
 | `src/backend/llvm/emit_expr.rs` | Expr codegen (per-field GEP, copy elimination) |
-| `src/backend/llvm/mod.rs` | Field index map, exit condition, codegen dispatch |
+| `src/backend/llvm/emit_stmt.rs` | Statement codegen (Guarded handler, let_bindings save/restore) |
+| `src/backend/llvm/emit_toplevel.rs` | Definition/txn/callable-txn emission, ret terminators |
+| `src/backend/llvm/hazard.rs` | SLP hazard analysis, compute_peak_live_floats |
 | `src/analysis/equality_saturation.rs` | Expression simplification pass (bottom-up + hash-cons) |
 | `src/analysis/region_analyzer.rs` | Precomputation budget analysis |
-| `src/analysis/transition_graph.rs` | Dispatch collapse |
+| `src/analysis/transition_graph.rs` | Dispatch collapse, is_counter_bounded |
+| `src/analysis/proof_engine.rs` | `prove_linear()`, `check_satisfiable()`, `extract_bound/eq_pair` |
