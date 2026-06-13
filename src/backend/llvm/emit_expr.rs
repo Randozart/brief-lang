@@ -653,7 +653,7 @@ impl LlvmBackend {
                 writeln!(out, "{}switch i64 {}, label %{} [ {} ]", indent, disc_reg, default_label, cases.join(" ")).ok();
 
                 for (i, (disc, arm)) in variant_arms.iter().enumerate() {
-                    writeln!(out, "{}%marm{}:", indent, i).ok();
+                    writeln!(out, "{}marm{}:", indent, i).ok();
                     if let MatchPattern::Variant { fields, .. } = &arm.pattern {
                         for (j, field) in fields.iter().enumerate() {
                             if let Pattern::Var(var_name) = field {
@@ -670,15 +670,15 @@ impl LlvmBackend {
                     writeln!(out, "{}br label %{}", indent, merge_label).ok();
                 }
 
-                writeln!(out, "{}%{}:", indent, default_label).ok();
+                writeln!(out, "{}{}:", indent, default_label).ok();
                 if let Some(wildcard) = wildcard_arm {
                     let body_val = self.emit_expr(out, &wildcard.body, indent);
                     writeln!(out, "{}{} = add i64 0, {} ; match wildcard", indent, v, body_val.name).ok();
+                    writeln!(out, "{}br label %{}", indent, merge_label).ok();
                 } else {
                     writeln!(out, "{}unreachable", indent).ok();
                 }
-                writeln!(out, "{}br label %{}", indent, merge_label).ok();
-                writeln!(out, "{}%{}:", indent, merge_label).ok();
+                writeln!(out, "{}{}:", indent, merge_label).ok();
             }
             // ── Slice ───────────────────────────────────────────
             Expr::Slice { value, start, end, stride, mask } => {
@@ -732,11 +732,11 @@ impl LlvmBackend {
                 let next_reg = format!("%snext{}", self.txn_counter); self.txn_counter += 1;
 
                 writeln!(out, "{}br label %{}", indent, header_label).ok();
-                writeln!(out, "{}%{}:", indent, header_label).ok();
+                writeln!(out, "{}{}:", indent, header_label).ok();
                 writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, i_reg, entry_label, next_reg, body_label).ok();
                 writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cond_reg, i_reg, count_reg).ok();
                 writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_reg, body_label, done_label).ok();
-                writeln!(out, "{}%{}:", indent, body_label).ok();
+                writeln!(out, "{}{}:", indent, body_label).ok();
                 // Copy element: src[start + i]
                 let src_idx = format!("%ssi{}", self.txn_counter); self.txn_counter += 1;
                 if let Some(s) = &start_reg {
@@ -756,7 +756,7 @@ impl LlvmBackend {
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, elem, dst_ep).ok();
                 writeln!(out, "{}{} = add i64 {}, 1", indent, next_reg, i_reg).ok();
                 writeln!(out, "{}br label %{}", indent, header_label).ok();
-                writeln!(out, "{}%{}:", indent, done_label).ok();
+                writeln!(out, "{}{}:", indent, done_label).ok();
                 // Store data_ptr and length
                 let dp_ptr = format!("%sdp2{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, ai).ok();

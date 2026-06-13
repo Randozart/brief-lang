@@ -416,8 +416,8 @@ impl LlvmBackend {
                             }
                         }
                     }
-                    self.terminated = prev_terminated;
                 }
+                self.terminated = prev_terminated; // always restore
             }
             Statement::SyncBlock { body } => {
                 for s in body { self.emit_stmt(out, s, indent); }

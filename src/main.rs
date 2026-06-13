@@ -23,7 +23,7 @@
 // or embeds the Work.
 
 use brief_compiler::{
-    annotator, ast, backend, dbrief, desugarer, errors, hardware, hardware_validator, import_resolver, interpreter,
+    analysis, annotator, ast, backend, dbrief, desugarer, errors, hardware, hardware_validator, import_resolver, interpreter,
     linkage, lsp, manifest, memory_spec, parser, proof_engine, rbv, typechecker, view_compiler,
     target_spec::{self, TargetSpec},
 };
@@ -367,6 +367,10 @@ fn print_usage(program: &str) {
     eprintln!("  -v, --verbose        Verbose output");
     eprintln!("  --explain            Show detailed compilation decisions (sig resolution, liveness, folds)");
     eprintln!("  --quiet, --whisper   Minimal output (for CI/automated use)");
+    eprintln!("  --dev                Development mode (default): fast compilation, no simplify pass");
+    eprintln!("  --prod, --release    Production mode: full optimization (simplify pass enabled)");
+    eprintln!("  --simplify-budget N  Max nodes for expression simplification (default dev:0, prod:MAX)");
+    eprintln!("  --no-simplify        Disable expression simplification pass");
     eprintln!("  -h, --help           Show this help");
     eprintln!();
     eprintln!("File Extensions:");
@@ -941,6 +945,8 @@ fn run_build(
     _memory_spec_format: &str,
     strict: bool,
     _optimize: bool,
+    prod_mode: bool,
+    simplify_budget: Option<u64>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Detect source type from extension
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -952,11 +958,14 @@ fn run_build(
             if ext == "sbv" {
                 println!("  Strict mode: full pre/postcondition verification enforced");
             }
+            if prod_mode {
+                println!("  Production mode: full optimization enabled");
+            }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1655,7 +1664,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
     let result: Option<PathBuf> = match backend.as_str() {
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, None) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -2107,6 +2116,8 @@ fn run_llvm_compile(
     mmio_addresses: Option<HashMap<String, u64>>,
     pgo_generate: bool,
     explain: bool,
+    prod_mode: bool,
+    simplify_budget: Option<u64>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -2243,7 +2254,7 @@ fn run_llvm_compile(
     }
 
     let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
+    let mut program = desug.desugar(&program);
 
     let link_deps: Vec<crate::ast::LinkDependency> = {
         let mut seen = std::collections::HashSet::new();
@@ -2281,6 +2292,15 @@ fn run_llvm_compile(
 
     // Run shared program analysis
     let _analysis = backend::analyze_program(&program, false);
+
+    // Run simplify pass (expression-level algebraic rewriting)
+    // Only enabled in --prod/--release mode, or when --simplify-budget is explicitly set.
+    {
+        let sb = simplify_budget.unwrap_or(if prod_mode { u64::MAX } else { 0 });
+        if sb > 0 {
+            analysis::equality_saturation::simplify_program(&mut program, sb);
+        }
+    }
 
     let mut llvm_backend = crate::backend::llvm::LlvmBackend::new()
         .with_optimize_budget(optimize_budget)
@@ -3865,12 +3885,26 @@ fn main() {
         "build" | "b" => {
             let mut file_path = None;
             let mut out_dir = None;
+            let mut prod_mode = false;
+            let mut simplify_budget: Option<u64> = None;
 
             let mut i = 2;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg == "--prod" || arg == "--release" {
+                    prod_mode = true;
+                    i += 1;
+                } else if arg == "--dev" {
+                    prod_mode = false;
+                    i += 1;
+                } else if arg == "--no-simplify" {
+                    simplify_budget = Some(0);
+                    i += 1;
+                } else if arg == "--simplify-budget" && i + 1 < args.len() {
+                    simplify_budget = Some(args[i + 1].parse::<u64>().unwrap_or(0));
                     i += 2;
                 } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".hebv")
                     || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv") {
@@ -3884,7 +3918,7 @@ fn main() {
             if let Some(path) = file_path {
                 let out = out_dir.as_deref();
                 let strict = strict_flag || is_strict_extension(&path);
-                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format, strict, optimize_flag) {
+                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format, strict, optimize_flag, prod_mode, simplify_budget) {
                     Ok(output) => {
                         println!("Build complete: {}", output.display());
                     }
@@ -3895,7 +3929,7 @@ fn main() {
                 }
             } else {
                 eprintln!("Error: No .bv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} build <file> [--out <dir>]", args[0]);
+                eprintln!("Usage: {} build <file> [--out <dir>] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
                 eprintln!("  .bv/.sbv files → compile via LLVM to native binary");
                 eprintln!("  .rbv/.srbv files → WASM + JS + frontend");
                 eprintln!("  .ebv/.sebv files → requires explicit target (see: brief compile --help)");
@@ -3924,6 +3958,8 @@ fn main() {
             let mut target_dbv: Option<String> = None;
             let mut pgo_generate = false;
             let mut explain = false;
+            let mut prod_mode = false;
+            let mut simplify_budget: Option<u64> = None;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
@@ -3959,6 +3995,19 @@ fn main() {
                 } else if arg == "--explain" {
                     explain = true;
                     i += 1;
+                } else if arg == "--prod" || arg == "--release" {
+                    prod_mode = true;
+                    i += 1;
+                } else if arg == "--dev" {
+                    prod_mode = false;
+                    simplify_budget = Some(0);
+                    i += 1;
+                } else if arg == "--no-simplify" {
+                    simplify_budget = Some(0);
+                    i += 1;
+                } else if arg == "--simplify-budget" && i + 1 < args.len() {
+                    simplify_budget = Some(args[i + 1].parse::<u64>().unwrap_or(0));
+                    i += 2;
                 } else if !arg.starts_with('-') {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -3985,14 +4034,14 @@ fn main() {
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, prod_mode, simplify_budget);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
             } else {
                 eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--hw-handoff <system.xsa|xparameters.h>] [--hw-target <board>] [--target-dbv <target.dbv>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info]", args[0]);
+                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--hw-handoff <system.xsa|xparameters.h>] [--hw-target <board>] [--target-dbv <target.dbv>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
                 std::process::exit(1);
             }
         }
