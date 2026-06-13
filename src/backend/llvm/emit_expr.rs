@@ -324,6 +324,9 @@ impl LlvmBackend {
                         }
                         writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
                     } else {
+                        // 2026-06-13: Pass %state to defns/callable txns — functions need
+                        // the state pointer to access module-level fields (SSA is function-scoped).
+                        a_strs.insert(0, "%State* %state".to_string());
                         let is_float_ret = def_rets.as_ref().map_or(false, |rets| rets.iter().any(|t| matches!(t, Type::Float)));
                         let call_ret = if is_float_ret { "float" } else { "i64" };
                         writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, name, a_strs.join(", ")).ok();

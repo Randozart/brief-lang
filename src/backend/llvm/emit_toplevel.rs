@@ -248,9 +248,9 @@ impl LlvmBackend {
         self.pending_cleanup.clear();
         self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         write!(out, "define i64 @{}(", d.name).ok();
+        write!(out, "%State* noalias nocapture %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
-            if i > 0 { write!(out, ", ").ok(); }
-            write!(out, "{} %arg{}", self.llvm_type(t), i).ok();
+            write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
         }
         writeln!(out, ") local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
@@ -283,6 +283,8 @@ impl LlvmBackend {
         if !self.terminated { writeln!(out, "  ret i64 0").ok(); }
         writeln!(out, "}}").ok();
     }
+    // 2026-06-13: Added %State* %state param — definitions can access global state.
+    // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).
 
     pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
         let has_output = txn.output_type.is_some() || !txn.outputs.is_empty();
@@ -381,9 +383,9 @@ impl LlvmBackend {
         let ret_llvm = if has_return { "i64" } else { "void" };
 
         write!(out, "define {} @{}(", ret_llvm, name).ok();
+        write!(out, "%State* noalias nocapture %state").ok();
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
-            if i > 0 { write!(out, ", ").ok(); }
-            write!(out, "{} %arg{}", self.llvm_type(t), i).ok();
+            write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
         }
         writeln!(out, ") local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
@@ -472,6 +474,8 @@ impl LlvmBackend {
         self.in_callable_txn = false;
         self.param_slots.clear();
     }
+    // 2026-06-13: Added %State* %state param — callable txns can access global state.
+    // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).
 
     pub(super) fn emit_precondition_check(&mut self, out: &mut String, pre: &Expr, indent: &str) {
         let cond = self.emit_expr(out, pre, indent);

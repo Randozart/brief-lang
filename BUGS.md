@@ -1174,4 +1174,28 @@ errors.
 
 **Lesson**: When a code path ends with `unreachable`, no control-flow instruction should follow. The `br` was an unconditional spill from the wildcard branch.
 
-## 2026-06-13 — `equality_saturation::simplify` exponential blowup on nested `||` chains
+## 2026-06-13 — `%state` SSA scoping bug in LLVM backend
+
+**Issue**: Standalone functions (`defn`, callable `txn`) accessed global state
+through `%state`, but `%state` was only alloca'd in `main()`. LLVM IR SSA
+values are function-scoped — `%state` from `main()` is undefined in other
+functions, producing invalid IR.
+
+**Root Cause**: `emit_definition` and `emit_callable_txn` emitted function
+signatures without `%State* %state` as a parameter. When the function body
+referenced a state field, it emitted `getelementptr inbounds %State, %State* %state, ...`
+on an undefined value. The call sites in `emit_expr.rs` also didn't pass
+`%state` as an argument.
+
+**Fix**: Three changes:
+1. `emit_definition`: prepend `%State* noalias nocapture %state` as first
+   parameter in function signature
+2. `emit_callable_txn`: same signature fix
+3. `emit_expr.rs` internal call site: prepend `%State* %state` to the
+   argument list when calling definitions/callable txns
+
+**Lesson**: Any LLVM function that emits GEP on `%State` must either (a)
+receive `%state` as a parameter, or (b) use a global `@state` variable.
+The backend's design choice is (a) — but two of the six function types
+(defn, callable txn) were missing the parameter. Always audit ALL function
+emission paths when adding state field references to the backend.
