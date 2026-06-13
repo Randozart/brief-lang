@@ -29,6 +29,9 @@ impl LlvmBackend {
         writeln!(out, "declare void @brief_barrier_release()").ok();
         writeln!(out, "declare void @brief_barrier_wait()").ok();
         writeln!(out, "declare void @brief_thread_pool_init(i32, i8**)").ok();
+        writeln!(out, "declare i64 @time(i64*) nounwind").ok();
+        writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
+        writeln!(out, "declare i64 @brief_read_file(i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {

@@ -402,8 +402,8 @@ impl ImportResolver {
             }
         }
 
-        // For std.* imports, also search from project root's lib/ directory
-        if !found_both && found_path.is_none() && path_str.starts_with("std.") {
+        // For std.* or std/ imports, also search from project root's lib/ directory
+        if !found_both && found_path.is_none() && (path_str.starts_with("std.") || path_str.starts_with("std/")) {
             // Walk up from source_dir to find project root (where Cargo.toml exists)
             let mut current = source_dir.clone();
             while let Some(parent) = current.parent() {

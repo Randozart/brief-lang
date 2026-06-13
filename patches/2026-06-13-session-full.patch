@@ -1,0 +1,112 @@
+diff --git a/src/backend/llvm/emit_expr.rs b/src/backend/llvm/emit_expr.rs
+index 363573a..9e3c615 100644
+--- a/src/backend/llvm/emit_expr.rs
++++ b/src/backend/llvm/emit_expr.rs
+@@ -6,11 +6,7 @@ use std::fmt::Write;
+ 
+ impl LlvmBackend {
+     pub(crate) fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> TypedRegister {
+-        let expr = if self.optimize_budget > 0 {
+-            crate::analysis::equality_saturation::simplify(expr)
+-        } else {
+-            expr.clone()
+-        };
++        let expr = expr.clone();
+         let v = format!("%t{}", self.txn_counter);
+         self.txn_counter += 1;
+         match &expr {
+@@ -387,10 +383,15 @@ impl LlvmBackend {
+                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                     }
+                     Intrinsic::Time => {
+-                        writeln!(out, "{}{} = add i64 0, 0 ; time stub", indent, v).ok();
++                        writeln!(out, "{}{} = call i64 @time(i64* null)", indent, v).ok();
+                     }
+                     Intrinsic::ReadFile => {
+-                        writeln!(out, "{}{} = add i64 0, 0 ; read_file stub", indent, v).ok();
++                        if args.len() >= 1 {
++                            let path_val = self.emit_expr(out, &args[0], indent);
++                            writeln!(out, "{}{} = call i64 @brief_read_file(i64 {})", indent, v, path_val.name).ok();
++                        } else {
++                            writeln!(out, "{}{} = add i64 0, 0 ; read_file: missing arg", indent, v).ok();
++                        }
+                     }
+                     Intrinsic::WriteFile => {
+                         writeln!(out, "{}{} = add i64 0, 1 ; write_file stub (returns true)", indent, v).ok();
+@@ -510,6 +511,7 @@ impl LlvmBackend {
+                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, fv.name, fp).ok();
+                 }
+                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
++                return TypedRegister { name: v, ty: Type::Custom(name.clone()) };
+             }
+             // ── ObjectLiteral ───────────────────────────────────
+             Expr::ObjectLiteral(fields) => {
+@@ -544,6 +546,19 @@ impl LlvmBackend {
+                         }
+                     }
+                 }
++                if !found_offset {
++                    if let Type::Custom(struct_name) = &obj_val.ty {
++                        if let Some(fields) = self.struct_types.get(struct_name) {
++                            for (fi, (fn_, _)) in fields.iter().enumerate() {
++                                if fn_ == field {
++                                    offset = fi as i64;
++                                    found_offset = true;
++                                    break;
++                                }
++                            }
++                        }
++                    }
++                }
+                 if found_offset {
+                     let fp = format!("%fafp{}", self.txn_counter); self.txn_counter += 1;
+                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, hp, offset).ok();
+diff --git a/src/backend/llvm/emit_toplevel.rs b/src/backend/llvm/emit_toplevel.rs
+index dfb4071..175fe9e 100644
+--- a/src/backend/llvm/emit_toplevel.rs
++++ b/src/backend/llvm/emit_toplevel.rs
+@@ -29,6 +29,9 @@ impl LlvmBackend {
+         writeln!(out, "declare void @brief_barrier_release()").ok();
+         writeln!(out, "declare void @brief_barrier_wait()").ok();
+         writeln!(out, "declare void @brief_thread_pool_init(i32, i8**)").ok();
++        writeln!(out, "declare i64 @time(i64*) nounwind").ok();
++        writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
++        writeln!(out, "declare i64 @brief_read_file(i64)").ok();
+     }
+ 
+     pub(super) fn llvm_type(&self, ty: &Type) -> &str {
+diff --git a/src/backend/llvm/mod.rs b/src/backend/llvm/mod.rs
+index 05bced3..cff0bdd 100644
+--- a/src/backend/llvm/mod.rs
++++ b/src/backend/llvm/mod.rs
+@@ -723,7 +723,15 @@ impl LlvmBackend {
+ self.emit_declares(&mut out);
+ 
+         // Emit foreign declares inline (frgn_map is populated from the scan above)
++        // Skip names that are also linked triggers — they'll be emitted as global variables below.
++        let trigger_linked_symbols: std::collections::HashSet<&str> = self.triggers.iter()
++            .filter_map(|(_, t)| match &t.address {
++                crate::ast::LinkRef::Linked(sym) => Some(sym.as_str()),
++                _ => None,
++            })
++            .collect();
+         for (name, sig) in &self.frgn_map {
++            if trigger_linked_symbols.contains(name.as_str()) { continue; }
+             let ret_ty = match sig.result_type {
+                 crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
+                 crate::ast::ResultType::Projection(ref ts) => {
+diff --git a/src/import_resolver.rs b/src/import_resolver.rs
+index ac09616..c22ef01 100644
+--- a/src/import_resolver.rs
++++ b/src/import_resolver.rs
+@@ -402,8 +402,8 @@ impl ImportResolver {
+             }
+         }
+ 
+-        // For std.* imports, also search from project root's lib/ directory
+-        if !found_both && found_path.is_none() && path_str.starts_with("std.") {
++        // For std.* or std/ imports, also search from project root's lib/ directory
++        if !found_both && found_path.is_none() && (path_str.starts_with("std.") || path_str.starts_with("std/")) {
+             // Walk up from source_dir to find project root (where Cargo.toml exists)
+             let mut current = source_dir.clone();
+             while let Some(parent) = current.parent() {

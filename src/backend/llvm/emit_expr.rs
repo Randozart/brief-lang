@@ -6,11 +6,14 @@ use std::fmt::Write;
 
 impl LlvmBackend {
     pub(crate) fn emit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> TypedRegister {
-        let expr = if self.optimize_budget > 0 {
-            crate::analysis::equality_saturation::simplify(expr)
-        } else {
-            expr.clone()
-        };
+        // 2026-06-13: equality_saturation::simplify() REMOVED from here.
+        // It caused exponential blowup on deeply nested || chains (32+ terms = 13M+ calls).
+        // Root cause: simplify() fixpoint loop × simplify_pass() recursive simplify()
+        // on children produces O(6^n) calls. LLVM -O3 handles the same folds.
+        // To restore: replace the clone below with the conditional simplify call,
+        // but first fix the exponential blowup (add depth cap or move to separate pass).
+        // See patches/2026-06-13-remove-simplify-from-emit-expr.patch for exact removed code.
+        let expr = expr.clone();
         let v = format!("%t{}", self.txn_counter);
         self.txn_counter += 1;
         match &expr {
@@ -387,10 +390,15 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                     }
                     Intrinsic::Time => {
-                        writeln!(out, "{}{} = add i64 0, 0 ; time stub", indent, v).ok();
+                        writeln!(out, "{}{} = call i64 @time(i64* null)", indent, v).ok();
                     }
                     Intrinsic::ReadFile => {
-                        writeln!(out, "{}{} = add i64 0, 0 ; read_file stub", indent, v).ok();
+                        if args.len() >= 1 {
+                            let path_val = self.emit_expr(out, &args[0], indent);
+                            writeln!(out, "{}{} = call i64 @brief_read_file(i64 {})", indent, v, path_val.name).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; read_file: missing arg", indent, v).ok();
+                        }
                     }
                     Intrinsic::WriteFile => {
                         writeln!(out, "{}{} = add i64 0, 1 ; write_file stub (returns true)", indent, v).ok();
@@ -510,6 +518,7 @@ impl LlvmBackend {
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, fv.name, fp).ok();
                 }
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                return TypedRegister { name: v, ty: Type::Custom(name.clone()) };
             }
             // ── ObjectLiteral ───────────────────────────────────
             Expr::ObjectLiteral(fields) => {
@@ -533,6 +542,19 @@ impl LlvmBackend {
                 let mut offset = 0i64;
                 if let Expr::Identifier(name) = obj.as_ref() {
                     if let Some(Type::Custom(struct_name)) = self.let_binding_types.get(name) {
+                        if let Some(fields) = self.struct_types.get(struct_name) {
+                            for (fi, (fn_, _)) in fields.iter().enumerate() {
+                                if fn_ == field {
+                                    offset = fi as i64;
+                                    found_offset = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if !found_offset {
+                    if let Type::Custom(struct_name) = &obj_val.ty {
                         if let Some(fields) = self.struct_types.get(struct_name) {
                             for (fi, (fn_, _)) in fields.iter().enumerate() {
                                 if fn_ == field {

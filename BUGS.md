@@ -1141,3 +1141,15 @@ errors, or a typo in the specific file.
 **Lesson**: When hitting unexpected parse errors, first verify with a minimal
 reproduction, then check for preceding syntax issues that may cause cascaded
 errors.
+
+## 2026-06-13 — `equality_saturation::simplify` exponential blowup on nested `||` chains
+
+- **Issue**: `emit_expr` called `simplify(expr)` for every expression during LLVM codegen. On deeply nested `||` chains (32+ terms like `word == "the" || word == "a" || ...`), `simplify` caused exponential blowup — 13M+ calls in 15 seconds instead of hundreds.
+
+- **Root Cause**: `simplify()` runs a fixpoint loop (up to 5 iterations), each calling `simplify_pass()`, which recursively calls `simplify()` on children. For `Or(l, r)`, `simplify_pass` calls `simplify(l)` + `simplify(r)`. Each `simplify` call has its own fixpoint loop. The product creates O(6^n) calls for n-deep Or trees. The `format!("{:?}", ...)` comparison at each step further slows things.
+
+- **Fix**: Removed the `simplify` call from `emit_expr()`. Equality saturation is a compile-time optimization pass that should run separately, not inline during codegen. LLVM's own optimizer handles redundant operations (`add i64 0, %x` etc.) at -O1+.
+
+- **Lesson**: Never call an optimizer pass with a fixpoint loop inline during codegen on every expression node. Optimizer passes should be idempotent and O(n), or run once on the full AST before codegen.
+
+## 2026-06-13 — `equality_saturation::simplify` exponential blowup on nested `||` chains

@@ -723,7 +723,15 @@ impl LlvmBackend {
 self.emit_declares(&mut out);
 
         // Emit foreign declares inline (frgn_map is populated from the scan above)
+        // Skip names that are also linked triggers — they'll be emitted as global variables below.
+        let trigger_linked_symbols: std::collections::HashSet<&str> = self.triggers.iter()
+            .filter_map(|(_, t)| match &t.address {
+                crate::ast::LinkRef::Linked(sym) => Some(sym.as_str()),
+                _ => None,
+            })
+            .collect();
         for (name, sig) in &self.frgn_map {
+            if trigger_linked_symbols.contains(name.as_str()) { continue; }
             let ret_ty = match sig.result_type {
                 crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
                 crate::ast::ResultType::Projection(ref ts) => {

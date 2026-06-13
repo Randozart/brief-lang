@@ -1,0 +1,69 @@
+From 2026-06-13
+Subject: Removed equality_saturation::simplify() from emit_expr
+
+== Why removed ==
+
+The simplify() call caused exponential blowup on deeply nested || chains
+(32+ terms). Each Or level multiplied calls by ~6 (simplify fixpoint ×
+simplify_pass recursive descent), producing 13M+ calls in 15 seconds
+for a 32-term expression like word == "a" || word == "b" || ... .
+
+See BUGS.md (2026-06-13 entry) for root cause analysis.
+
+== Impact ==
+
+- LLVM -O3 handles all redundant ops (add i64 0, %x → %x) that simplify
+  was catching. No measurable performance regression on 7 runtime benchmarks.
+- Without simplify, emit_expr no longer does peephole constant folding
+  on the Brief AST before codegen. This means slightly more verbose IR,
+  but the final binary is identical after LLVM optimization.
+
+== Current state (emit_expr.rs:9) ==
+
+    let expr = expr.clone();
+
+== Removed code ==
+
+    let expr = if self.optimize_budget > 0 {
+        crate::analysis::equality_saturation::simplify(expr)
+    } else {
+        expr.clone()
+    };
+
+== How to restore ==
+
+Apply this patch in reverse:
+    git apply -R patches/2026-06-13-remove-simplify-from-emit-expr.patch
+
+Or edit src/backend/llvm/emit_expr.rs line 9, replace:
+    let expr = expr.clone();
+with:
+    let expr = if self.optimize_budget > 0 {
+        crate::analysis::equality_saturation::simplify(expr)
+    } else {
+        expr.clone()
+    };
+
+== Before restoring, fix the exponential blowup ==
+
+The simplify() function in src/analysis/equality_saturation.rs needs
+a depth limit or the fixpoint loop removed before it can be safely
+called from emit_expr. Current exponential structure:
+
+    simplify(expr):
+        current = simplify_pass(expr)
+        for _ in 0..5:               # fixpoint
+            next = simplify_pass(current)
+            if same: break
+            current = next
+
+    simplify_pass(Or(l, r)):
+        Or(Box::new(simplify(l)), Box::new(simplify(r)))  # ← O(6^n)
+
+Without a depth cap, this creates O(6^n) calls for n-deep Or trees.
+
+Possible fixes:
+a) Add depth limit to simplify() — bail at depth > 10
+b) Move simplify to a separate pre-codegen pass (runs once, not per node)
+c) Only call simplify when has_candidates(expr) is true (avoids the
+    expense for expressions with no foldable patterns)
