@@ -454,13 +454,21 @@ impl LlvmBackend {
 
         writeln!(out, "body:").ok();
 
+        let mut last_terminated = false;
         for s in &txn.body {
             self.emit_stmt(out, s, "  ");
+            last_terminated = self.terminated;
             if self.terminated {
                 self.terminated = false;
             }
         }
 
+        // 2026-06-13: Emit br to post if last statement left block unterminated.
+        // Guarded then-path leaks terminated=true, caller resets it (line above),
+        // but the end_l block has no terminator before the post: label.
+        if !last_terminated {
+            writeln!(out, "  br label %post").ok();
+        }
         writeln!(out, "post:").ok();
         writeln!(out, "  br label %loop").ok();
 

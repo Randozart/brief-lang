@@ -1269,3 +1269,34 @@ more code" signal to the caller. These conflict when a guard's then-path
 terminates but the else-path doesn't. Always emitting `ret` at function
 end is the simplest resolution — the extra `ret` is dead code that LLVM
 optimizes away.
+
+## 2026-06-13 — Unterminated `post:` label in `emit_callable_txn`
+
+**Issue**: `toggle_record` function had an unterminated basic block before
+the `post:` label. A `store` instruction was followed directly by `post:`
+with no `br` or `ret` between them. Same root cause as the previous 8
+sites — a Guarded's leaked `terminated` flag left the `end_l` block
+unterminated, and the `post:` label expected a terminated preceding block.
+
+**Root Cause**: `emit_callable_txn` (`emit_toplevel.rs:457-462`) reset
+`self.terminated` after each statement (`if self.terminated { self.terminated = false; }`)
+but did not emit a `br label %post` to terminate the last statement's
+block before the `post:` label. The other 8 function emitters (defn,
+reactive txn, etc.) use a `for s in &body { ... }; ret;` pattern where
+the unconditional `ret` terminates the last block. `emit_callable_txn`
+uses a different structure: `for s in &body { ... }; post: br loop; done: ret;`
+— the `post:` label acts as the merge point, but the last statement's
+block must have a terminator that branches to it.
+
+**Fix**: Added `last_terminated` tracking in the body loop. After the
+loop, if the last statement didn't terminate (e.g., a Guarded whose
+then-path did but else-path didn't), emit `br label %post` to terminate
+the block. When the last statement already terminated (e.g., `term;`),
+the existing `ret` suffices and no `br` is needed.
+
+**Lesson**: Three different function emission patterns exist in the
+backend — (a) sequential body + unconditional ret at end, (b) sequential
+body + post/done structure with loop-back, and (c) conditional body with
+rollback. Each must independently ensure every basic block has a
+terminator. The `post:` label pattern is unique to callable txns and
+was missed by the first 8-site pass.
