@@ -1142,14 +1142,36 @@ errors, or a typo in the specific file.
 reproduction, then check for preceding syntax issues that may cause cascaded
 errors.
 
-## 2026-06-13 — `equality_saturation::simplify` exponential blowup on nested `||` chains
+## 2026-06-13 — Bare label `%` prefix in LLVM IR (emit_expr.rs)
 
-- **Issue**: `emit_expr` called `simplify(expr)` for every expression during LLVM codegen. On deeply nested `||` chains (32+ terms like `word == "the" || word == "a" || ...`), `simplify` caused exponential blowup — 13M+ calls in 15 seconds instead of hundreds.
+**Issue**: `opt` failed with `expected '=' after instruction name` at `%mdef4:` in generated LLVM IR. All switch/match/slice label definitions used `%` prefix, which LLVM interprets as value references not label definitions.
 
-- **Root Cause**: `simplify()` runs a fixpoint loop (up to 5 iterations), each calling `simplify_pass()`, which recursively calls `simplify()` on children. For `Or(l, r)`, `simplify_pass` calls `simplify(l)` + `simplify(r)`. Each `simplify` call has its own fixpoint loop. The product creates O(6^n) calls for n-deep Or trees. The `format!("{:?}", ...)` comparison at each step further slows things.
+**Root Cause**: `emit_expr.rs` lines 656, 673, 681, 735, 739, 759 used `"%marm{}:"`, `"%{}:"` format strings for label definitions. In LLVM IR, label definitions must NOT have `%` (e.g. `marm0:`) while label references MUST have `%` (e.g. `br label %marm0`). The backend was doing the opposite for 6 label sites.
 
-- **Fix**: Removed the `simplify` call from `emit_expr()`. Equality saturation is a compile-time optimization pass that should run separately, not inline during codegen. LLVM's own optimizer handles redundant operations (`add i64 0, %x` etc.) at -O1+.
+**Latency**: The bug was invisible until `brief build` switched to LLVM backend (previous session). The old `compile` subcommand used Rust-transpile → `rustc`, and the `llvm` subcommand ran `llc` directly without `opt`. Only `brief build` runs `opt -O3` on the generated `.ll` file, which exposed the syntax error.
 
-- **Lesson**: Never call an optimizer pass with a fixpoint loop inline during codegen on every expression node. Optimizer passes should be idempotent and O(n), or run once on the full AST before codegen.
+**Fix**: Changed the 6 `writeln!` calls to omit the `%` prefix from label definitions. Branch target references (`label %mdef4`, `br label %mmerge5`) were already correct.
+
+**Lesson**: LLVM IR distinguishes label definitions (`name:`) from value references (`%name`). The backend had been wrong since the match codegen was first written — the error was latent because `opt` was never run on the output before `brief build` was implemented.
+
+## 2026-06-13 — `terminated` flag leak in `Guarded` block (emit_stmt.rs)
+
+**Issue**: After a `Guarded` block whose body set `self.terminated = true` (e.g., via `term!`), the flag was not restored to `prev_terminated`. The next statement emitted after the guard would be in a terminated state, potentially suppressing terminators.
+
+**Root Cause**: `emit_stmt.rs:404-420` saved `prev_terminated`, set `terminated = false`, emitted the guarded body, then only restored `self.terminated = prev_terminated` inside `if !self.terminated { ... }`. When the body terminated, the restore was skipped — `self.terminated` leaked as `true`.
+
+**Fix**: Moved `self.terminated = prev_terminated;` outside the `if !self.terminated` block so it's always restored unconditionally. The `if !self.terminated` block only guards the SSA phi merge logic.
+
+**Lesson**: Any save/restore of control-flow flags must restore unconditionally. Conditional restore is correct for the immediate downstream code (phi merge) but the flag itself must always revert to its pre-guard value.
+
+## 2026-06-13 — Dead `br` after `unreachable` in match emission (emit_expr.rs)
+
+**Issue**: When a `match` expression has no wildcard arm, the code emitted `unreachable` (a terminator) then immediately `br label %mmerge` (another terminator). The `br` after `unreachable` is dead code.
+
+**Root Cause**: The `br label %mmerge` was emitted unconditionally after the wildcard/fallback block, regardless of whether a wildcard arm existed. For the no-wildcard case, `unreachable` terminates the block and the `br` can never execute. LLVM accepts this but it's semantically incorrect.
+
+**Fix**: Moved the `br label %mmerge` inside the `if let Some(wildcard)` arm, so it only emits when a wildcard body needs to branch to the merge label.
+
+**Lesson**: When a code path ends with `unreachable`, no control-flow instruction should follow. The `br` was an unconditional spill from the wildcard branch.
 
 ## 2026-06-13 — `equality_saturation::simplify` exponential blowup on nested `||` chains

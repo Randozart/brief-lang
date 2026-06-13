@@ -89,27 +89,31 @@ simultaneously live). The new liveness-interval analysis:
 
 Impact: nbody_sqrt went from 1.17x slower to 1.22x faster than C.
 
-## Equality Saturation
+## Expression Simplification (Equality Saturation)
 
-File: `src/analysis/saturate.rs` — `saturate_program()`
+File: `src/analysis/equality_saturation.rs` — `simplify_program()`
 
-A 5-pass fixpoint engine with 9 rewrite rules that runs over the expression
-AST before codegen:
+A bottom-up rewriting pass with hash-cons cache that runs on the AST before
+codegen. Rewritten 2026-06-13 — the original 5-pass fixpoint engine was
+removed because it caused O(10^n) blowup on deeply nested `||` chains.
 
-| Rule | Pattern | Result |
-|------|---------|--------|
-| Add zero | `x + 0` | `x` |
-| Mul one | `x * 1` | `x` |
-| Sub self | `x - x` | `0` |
-| And true | `x && true` | `x` |
-| Double neg | `!!x` | `x` |
-| Ternary | `x ? true : false` | `x` |
-| Const fold | literal arithmetic | result |
-| Or true | `x || true` | `true` |
-| And false | `x && false` | `false` |
+**Algorithm**: Single bottom-up pass (children before parent). Each node is
+visited exactly once. A `HashMap<u64, Expr>` cache maps structural hashes
+to simplified results, so identical subexpressions are simplified once.
 
-Each pass walks the expression tree bottom-up. Repeats until no rule fires
-or 5 iterations are exhausted.
+**Complexity**: O(n) — 26-term `||` chain visits 26 nodes (previously ~10^26).
+
+**18 rewrite rules**: `x+0→x`, `x*1→x`, `x-x→0`, `!!x→x`, `--x→x`,
+`true&&x→x`, `false||x→x`, `(a+b)-b→a`, `(a-b)+b→a`,
+`x&0→0`, `x|0→x`, `x^0→x`, `x<<0→x`, `x>>0→x`, and identity rules for
+`Mul(0)`, `Div(1)`, `Or(true)`, `And(false)`, `x&&x`, `x||x`.
+
+**Gating**: Only runs with `--prod`/`--release` flag. Disabled in `--dev` mode.
+Controlled independently via `--simplify-budget <N>` and `--no-simplify`.
+
+**Canonical replacement for `has_candidates`**: The old `has_candidates` function
+(pre-check that returned true only when a candidate pattern existed) is dead
+code — the new bottom-up pass is cheap enough (O(n)) to always run when enabled.
 
 ## Dispatch Collapse
 
@@ -158,6 +162,6 @@ Combined impact: 3.85x → 0.98x (brief ties C).
 | `src/backend/llvm/hazard.rs` | SLP hazard analysis, compute_peak_live_floats |
 | `src/backend/llvm/emit_expr.rs` | Expr codegen (per-field GEP, copy elimination) |
 | `src/backend/llvm/mod.rs` | Field index map, exit condition, codegen dispatch |
-| `src/analysis/saturate.rs` | Equality saturation pass |
+| `src/analysis/equality_saturation.rs` | Expression simplification pass (bottom-up + hash-cons) |
 | `src/analysis/region_analyzer.rs` | Precomputation budget analysis |
 | `src/analysis/transition_graph.rs` | Dispatch collapse |
