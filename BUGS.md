@@ -1235,3 +1235,37 @@ items (Stylesheet, Test, Assertion, Statement, etc.) pass through.
 **Lesson**: Any pipeline stage that splices items from another module
 into a flat list must deduplicate afterward. The fix is at the import
 resolver level so all compilation paths benefit.
+
+## 2026-06-13 — Unterminated basic block when Guarded then-path terminates (emit_toplevel.rs)
+
+**Issue**: Functions compiled via `emit_definition` ended with `}` and no
+`ret` terminator. LLVM opt rejects this with `expected '=' after instruction`
+or `block does not have a terminator`. Occurred when a `Guarded` block
+was the last statement in a function and its then-path contained `term;`
+or `term!;`.
+
+**Root Cause**: Two interacting bugs:
+1. `Guarded` handler (2026-06-07 fix, `emit_stmt.rs:419`): when the
+   then-path terminates, `self.terminated` is NOT restored to
+   `prev_terminated` — it leaks as `true` so the folded loop doesn't
+   emit code after `ret`.
+2. `emit_definition`/`emit_transaction`/etc. (`emit_toplevel.rs`,
+   8 sites): check `if !self.terminated { ret }` before emitting the
+   function's return. The leaked `terminated = true` suppresses this
+   `ret`, leaving the else-path's `end_l:` basic block unterminated.
+
+**Fix**: Changed all 8 `if !self.terminated { ret }` sites to always
+emit `ret` unconditionally. The then-path's `ret` from `term;` is in a
+different basic block — the extra `ret` is dead code there but serves
+as the required terminator for the else-path's `end_l:` block. LLVM's
+optimizer removes duplicate terminators.
+
+The `emit_callable_txn` path uses a different pattern (resets
+`self.terminated` after each statement) and was not affected.
+
+**Lesson**: `self.terminated` is used for two purposes — (a) local block
+termination within a Guarded handler, and (b) function-level "don't emit
+more code" signal to the caller. These conflict when a guard's then-path
+terminates but the else-path doesn't. Always emitting `ret` at function
+end is the simplest resolution — the extra `ret` is dead code that LLVM
+optimizes away.

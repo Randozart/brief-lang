@@ -280,7 +280,10 @@ impl LlvmBackend {
         self.terminated = false;
         self.returns_i64 = true;
         for s in &d.body { self.emit_stmt(out, s, "  "); }
-        if !self.terminated { writeln!(out, "  ret i64 0").ok(); }
+        // 2026-06-13: Always emit ret — when a guard's then-path terminates,
+        // the else-path's end_l block still needs a terminator. The duplicate
+        // ret is valid (dead code in the then-block, terminator in the else-block).
+        writeln!(out, "  ret i64 0").ok();
         writeln!(out, "}}").ok();
     }
     // 2026-06-13: Added %State* %state param — definitions can access global state.
@@ -332,7 +335,8 @@ impl LlvmBackend {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
             for s in &txn.body { self.emit_stmt(out, s, "  "); }
-            if !self.terminated { writeln!(out, "  ret void").ok(); }
+            // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
+            writeln!(out, "  ret void").ok();
             writeln!(out, "  rollback:").ok();
             match action {
                 "exit" => {
@@ -358,7 +362,8 @@ impl LlvmBackend {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
             for s in &txn.body { self.emit_stmt(out, s, "  "); }
-            if !self.terminated { writeln!(out, "  ret void").ok(); }
+            // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
+            writeln!(out, "  ret void").ok();
             writeln!(out, "}}").ok();
         }
     }
@@ -519,7 +524,8 @@ impl LlvmBackend {
         self.terminated = false;
         self.returns_i64 = false;
         for s in &txn.body { self.emit_stmt(out, s, "  "); }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
+        writeln!(out, "  ret void").ok();
         writeln!(out, "{}_done:", async_name).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
@@ -535,7 +541,8 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined { self.emit_stmt(out, s, "  "); }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
+        writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
     }
 
@@ -545,9 +552,10 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();         self.terminated = false; self.returns_i64 = false;
         for s in body { self.emit_stmt(out, s, "  "); }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
+        writeln!(out, "  ret void").ok();
         writeln!(out, "  rollback:").ok();
         match action {
             "exit" => {
@@ -570,7 +578,8 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body { self.emit_stmt(out, s, "  "); }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
+        writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
     }
 }
