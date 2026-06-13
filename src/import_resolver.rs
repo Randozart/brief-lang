@@ -21,7 +21,7 @@
 // or embeds the Work.
 
 use crate::ast::{Import, ImportItem, Program, StrictMode, TopLevel, Expr};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use crate::dbrief::v2 as dbrief_v2;
 
@@ -90,6 +90,12 @@ impl ImportResolver {
                 index += 1;
             }
         }
+
+        // 2026-06-13: Dedup items — same module imported through multiple paths
+        // produces duplicate items. Keep first occurrence of each named item.
+        // E.g., officina.bv imports "understand" directly AND via "layout" →
+        // understand.bv's items appear twice without this dedup.
+        items = dedup_items(items);
 
         Ok(Program {
             items,
@@ -534,6 +540,39 @@ impl ImportResolver {
             default_sig_modifier: None,
         })
     }
+}
+
+/// Keep only the first occurrence of each named top-level item.
+/// When the same module is imported through multiple paths (direct + transitive),
+/// its items appear multiple times in `items`. This dedup eliminates duplicates.
+fn dedup_items(items: Vec<TopLevel>) -> Vec<TopLevel> {
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut result = Vec::with_capacity(items.len());
+    for item in items {
+        let key = match &item {
+            TopLevel::Definition(d) => Some(("def", &d.name)),
+            TopLevel::Transaction(t) => Some(("txn", &t.name)),
+            TopLevel::StateDecl(s) => Some(("state", &s.name)),
+            TopLevel::Trigger(t) => Some(("trigger", &t.name)),
+            TopLevel::Constant(c) => Some(("const", &c.name)),
+            TopLevel::Signature(s) => Some(("sig", &s.name)),
+            TopLevel::ForeignBinding { name, .. } => Some(("frgn", name)),
+            TopLevel::Struct(s) => Some(("struct", &s.name)),
+            TopLevel::RStruct(r) => Some(("rstruct", &r.name)),
+            TopLevel::Enum(e) => Some(("enum", &e.name)),
+            TopLevel::TypeDef(t) => Some(("typedef", &t.name)),
+            TopLevel::RenderBlock(r) => Some(("render", &r.struct_name)),
+            TopLevel::LinkDependency(l) => Some(("link", &l.path)),
+            TopLevel::ResourceDecl(r) => Some(("rsrc", &r.name)),
+            _ => None,
+        };
+        match key {
+            Some((cat, name)) if seen.insert((cat.to_string(), name.clone())) => result.push(item),
+            Some(_) => {} // skip duplicate
+            None => result.push(item), // keep unnamed items
+        }
+    }
+    result
 }
 
 impl Default for ImportResolver {

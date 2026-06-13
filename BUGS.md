@@ -1199,3 +1199,39 @@ receive `%state` as a parameter, or (b) use a global `@state` variable.
 The backend's design choice is (a) — but two of the six function types
 (defn, callable txn) were missing the parameter. Always audit ALL function
 emission paths when adding state field references to the backend.
+
+## 2026-06-13 — Duplicate import items: functions emitted once per import path
+
+**Issue**: The LLVM backend emitted the same function 4 times for modules
+imported through multiple paths (e.g., `understand.bv` imported directly
++ through `prompt` + through `persistence` + transitively through `layout`).
+LLVM IR rejects duplicate function definitions.
+
+**Root Cause**: `import_resolver.rs:82-92` replaces each `Import` item with
+the resolved module's items inline. When the same module is imported
+through N paths (direct + transitive), its items appear N times in the
+`items` vector. No deduplication existed anywhere in the pipeline —
+not in the import resolver, not in `Program`, not in the backend.
+
+Example trace for `officina.bv` importing both `"understand"` directly
+and `"layout"` which also imports `"understand"`:
+```
+Phase 1: items = [Import("understand"), Import("layout"), ...]
+Phase 2: resolve Import("understand") → items = [U1, U2, Import("layout"), ...]
+Phase 3: resolve Import("layout") → layout.bv has Import("understand")
+         → cache miss for "layout", parse layout.bv
+         → resolve Import("understand") inside layout → cache HIT → return [U1, U2]
+         → layout items = [U1, U2, L1, L2]
+         → splice into parent: items = [U1, U2, U1, U2, L1, L2, ...] ❌
+```
+
+**Fix**: Added `dedup_items()` function in `import_resolver.rs` that runs
+after the resolution while-loop. It keeps only the first occurrence of
+each named top-level item, keyed by `(category, name)`. Handles all
+15 named TopLevel variants (defn, txn, state, trigger, const, sig,
+frgn, struct, rstruct, enum, typedef, render, link, rsrc). Unnamed
+items (Stylesheet, Test, Assertion, Statement, etc.) pass through.
+
+**Lesson**: Any pipeline stage that splices items from another module
+into a flat list must deduplicate afterward. The fix is at the import
+resolver level so all compilation paths benefit.
