@@ -325,14 +325,9 @@ fn print_usage(program: &str) {
     eprintln!("  serve [dir]      Serve static files (default: .)");
     eprintln!("  rbv <file>       Compile RBV to browser-ready files");
     eprintln!("  run <file>       Compile, build WASM, serve, and open browser");
-    eprintln!("  wasm <file>      Direct WASM binary (.bv/.sbv) or WASM+JS+UI (.rbv/.srbv)");
     eprintln!("  webstack <file>  Rust + wasm-bindgen glue, compile via wasm-pack");
-    eprintln!("  rust <file>      Compile to Native Rust (std)");
-    eprintln!("  c <file>         Compile to C with __asm__");
-    eprintln!("  arm <file>       Compile to ARM bare-metal Rust");
     eprintln!("  verilog <file>   Compile to SystemVerilog (FPGA, with --tcl flag)");
     eprintln!("  vhdl <file>      Compile to VHDL (FPGA, with PSL assertions)");
-    eprintln!("  cobol <file>     Compile to IBM Enterprise COBOL");
     eprintln!("  dbvl <file>      Parse .dbvl and export to JSON (--out, --pretty)");
     eprintln!("  dbvs <file>      Parse .dbvs and export to JSON (--out, --pretty)");
     eprintln!("  dbv <file>       Parse .dbv and export to JSON (--out, --pretty)");
@@ -938,57 +933,42 @@ if verbose {
 /// Intent: run build.
 fn run_build(
     file_path: &PathBuf,
-    verbose: bool,
+    _verbose: bool,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
     out_dir: Option<&Path>,
-    emit_memory_spec: bool,
-    memory_spec_format: &str,
+    _emit_memory_spec: bool,
+    _memory_spec_format: &str,
     strict: bool,
-    optimize: bool,
+    _optimize: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Detect source type from extension
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     
     match ext {
         "bv" | "sbv" => {
-            // .bv / .sbv files: Transpile to Rust and compile to native executable
-            println!("Building {} file: transpiling to Rust...", if ext == "sbv" { "Strict Brief" } else { ".bv" });
+            // .bv / .sbv files: Compile to native binary via LLVM backend
+            println!("Building {} file: compiling via LLVM...", if ext == "sbv" { "Strict Brief" } else { ".bv" });
             if ext == "sbv" {
                 println!("  Strict mode: full pre/postcondition verification enforced");
             }
-            run_rust(file_path, out_dir, no_stdlib, stdlib_path, None, emit_memory_spec, memory_spec_format, strict, verbose, optimize)?;
-
-            // Try to compile the generated Rust
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-            let rs_path = out_dir.map(|d| d.join(format!("{}.rs", stem)))
-                .unwrap_or_else(|| PathBuf::from(format!("{}.rs", stem)));
+            let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
-            if rs_path.exists() {
-                println!("  Compiling Rust to native executable...");
-                let bin_path = rs_path.with_extension("");
-                let compile_result = std::process::Command::new("rustc")
-                    .args(&["-o", &bin_path.to_string_lossy(), &rs_path.to_string_lossy()])
-                    .output();
-                
-                match compile_result {
-                    Ok(output) if output.status.success() => {
-                        println!("  Built executable: {}", bin_path.display());
-                        Ok(bin_path)
-                    }
-                    Ok(output) => {
-                        eprintln!("  Rust compile warnings/errors: {}", String::from_utf8_lossy(&output.stderr));
-                        // Return the .rs file even if compilation had warnings
-                        Ok(rs_path)
-                    }
-                    Err(e) => {
-                        eprintln!("  Warning: rustc not found, skipping native compilation");
-                        eprintln!("  Generated Rust code at: {}", rs_path.display());
-                        Ok(rs_path)
+            // Run LLVM compile with sensible defaults
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false);
+            match result {
+                Ok(ll_path) => {
+                    let exe_path = out.join(stem);
+                    if exe_path.exists() {
+                        println!("  Built executable: {}", exe_path.display());
+                        Ok(exe_path)
+                    } else {
+                        eprintln!("  LLVM output at: {}", ll_path.display());
+                        Ok(ll_path)
                     }
                 }
-            } else {
-                Err("Failed to generate Rust output".into())
+                Err(e) => Err(e),
             }
         }
         "rbv" | "srbv" => {
@@ -1007,7 +987,7 @@ fn run_build(
             eprintln!("Error: {} files require explicit target", if ext == "sebv" { ".sebv (Strict Embedded)" } else { ".ebv" });
             eprintln!("  Use: brief compile <file.{}> --target <spec.toml>", ext);
             eprintln!("  Example targets: verilog_fpga.toml, vhdl_fpga.toml");
-            eprintln!("  Or: brief <c|rust|verilog|vhdl> <file.{}> --hw <hardware.dbv>", ext);
+            eprintln!("  Or: brief <verilog|vhdl> <file.{}> --hw <hardware.dbv>", ext);
             Err(format!(".{} files require explicit target specification", ext).into())
         }
         _ => {
@@ -1608,7 +1588,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         let inferred_target = match source_type {
             "rendered" => "react_web.toml",
             "embedded" => "verilog_fpga.toml",
-            _ => "hosted_c.toml",
+            _ => "llvm.toml",
         };
         let loader = target_spec::TargetSpecLoader::new();
         // Try to find the target spec
@@ -1666,34 +1646,16 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         println!("  Target: {}", spec.target.as_ref().map(|t| &t.name).unwrap_or(&"default".to_string()));
         println!("  Backend: {}", spec.backend());
     } else {
-        println!("  Target: default (hosted_c)");
-        println!("  Backend: c");
+        println!("  Target: default (llvm)");
+        println!("  Backend: llvm");
     }
 
     // Dispatch to appropriate backend based on target backend
-    let backend = target_spec.as_ref().map(|s| s.backend()).unwrap_or_else(|| "c".to_string());
+    let backend = target_spec.as_ref().map(|s| s.backend()).unwrap_or_else(|| "llvm".to_string());
 
     let result: Option<PathBuf> = match backend.as_str() {
-        "c" => {
-            match run_c_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref(), is_strict) {
-                Ok(p) => Some(p),
-                Err(e) => { eprintln!("Error: {}", e); None }
-            }
-        },
-        "rust" => {
-            match run_rust_compile(&file_path, out_dir.as_deref(), false, None, target_spec.as_ref(), emit_memory_spec, memory_spec_format, is_strict, verbose, false) {
-                Ok(p) => Some(p),
-                Err(e) => { eprintln!("Error: {}", e); None }
-            }
-        },
         "llvm" => {
             match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain) {
-                Ok(p) => Some(p),
-                Err(e) => { eprintln!("Error: {}", e); None }
-            }
-        },
-        "cobol" => {
-            match run_cobol_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -1747,10 +1709,6 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             // For .bv files, we need a dedicated React generator (future work)
             eprintln!("Note: React backend - .rbv files use RBV path, .bv files need dedicated generator");
             Some(file_path.clone())
-        }
-        "wasm" => {
-            eprintln!("Error: wasm backend requires explicit target (use brief wasm)");
-            None
         }
         _ => {
             eprintln!("Error: Unknown backend '{}' in target spec", backend);
@@ -3938,7 +3896,7 @@ fn main() {
             } else {
                 eprintln!("Error: No .bv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
                 eprintln!("Usage: {} build <file> [--out <dir>]", args[0]);
-                eprintln!("  .bv/.sbv files → transpile to Rust + compile");
+                eprintln!("  .bv/.sbv files → compile via LLVM to native binary");
                 eprintln!("  .rbv/.srbv files → WASM + JS + frontend");
                 eprintln!("  .ebv/.sebv files → requires explicit target (see: brief compile --help)");
                 std::process::exit(1);
@@ -3946,34 +3904,9 @@ fn main() {
         }
 
         "rust" => {
-            let mut file_path = None;
-            let mut out_dir = None;
-
-            let mut i = 2;
-            while i < args.len() {
-                let arg = &args[i];
-                if arg == "--out" && i + 1 < args.len() {
-                    out_dir = Some(PathBuf::from(&args[i + 1]));
-                    i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") {
-                    file_path = Some(PathBuf::from(arg));
-                    i += 1;
-                } else {
-                    i += 1;
-                }
-            }
-
-            if let Some(path) = file_path {
-                let strict = strict_flag || is_strict_extension(&path);
-                if let Err(e) = run_rust(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), None, emit_memory_spec, memory_spec_format, strict, verbose, optimize_flag) {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
-                }
-            } else {
-                eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} rust <file.bv|file.sbv|file.ebv|file.sebv> [--out <dir>]", args[0]);
-                std::process::exit(1);
-            }
+            eprintln!("Error: 'brief rust' has been removed.");
+            eprintln!("  Use 'brief build <file>' for LLVM compilation instead.");
+            std::process::exit(1);
         }
 
         "llvm" => {
@@ -4065,104 +3998,21 @@ fn main() {
         }
 
         "c" | "cc" => {
-            let mut file_path = None;
-            let mut out_dir = None;
-            let mut target = None;
-
-            let mut i = 2;
-            while i < args.len() {
-                let arg = &args[i];
-                if arg == "--out" && i + 1 < args.len() {
-                    out_dir = Some(PathBuf::from(&args[i + 1]));
-                    i += 2;
-                } else if arg == "--target" && i + 1 < args.len() {
-                    target = Some(args[i + 1].as_str());
-                    i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") {
-                    file_path = Some(PathBuf::from(arg));
-                    i += 1;
-                } else {
-                    i += 1;
-                }
-            }
-
-            if let Some(path) = file_path {
-                let spec = if let Some(t) = target {
-                    let loader = target_spec::TargetSpecLoader::new();
-                    loader.load(std::path::Path::new(t)).ok()
-                } else {
-                    None
-                };
-                let strict = strict_flag || is_strict_extension(&path);
-                if let Err(e) = run_c(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone(), spec, &args, strict) {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
-                }
-            } else {
-                eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} c <file.bv|file.sbv|file.ebv|file.sebv> [--out <dir>]", args[0]);
-                std::process::exit(1);
-            }
+            eprintln!("Error: 'brief c' has been removed.");
+            eprintln!("  Use 'brief build <file>' for LLVM compilation instead.");
+            std::process::exit(1);
         }
 
         "cobol" | "cbl" => {
-            let mut file_path = None;
-            let mut out_dir = None;
-
-            let mut i = 2;
-            while i < args.len() {
-                let arg = &args[i];
-                if arg == "--out" && i + 1 < args.len() {
-                    out_dir = Some(PathBuf::from(&args[i + 1]));
-                    i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") || arg.ends_with(".br") {
-                    file_path = Some(PathBuf::from(arg));
-                    i += 1;
-                } else {
-                    i += 1;
-                }
-            }
-
-            if let Some(path) = file_path {
-                if let Err(e) = run_cobol(&path, out_dir.as_deref(), None) {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
-                }
-            } else {
-                eprintln!("Error: No .bv, .sbv, .ebv, .sebv, or .br file specified");
-                eprintln!("Usage: {} cobol <file.bv|file.sbv|file.ebv|file.sebv|file.br> [--out <dir>]", args[0]);
-                std::process::exit(1);
-            }
+            eprintln!("Error: 'brief cobol' has been removed.");
+            eprintln!("  Use 'brief build <file>' for LLVM compilation instead.");
+            std::process::exit(1);
         }
 
         "arm" | "a" => {
-            let mut file_path = None;
-            let mut out_dir = None;
-
-            let mut i = 2;
-            while i < args.len() {
-                let arg = &args[i];
-                if arg == "--out" && i + 1 < args.len() {
-                    out_dir = Some(PathBuf::from(&args[i + 1]));
-                    i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") {
-                    file_path = Some(PathBuf::from(arg));
-                    i += 1;
-                } else {
-                    i += 1;
-                }
-            }
-
-            if let Some(path) = file_path {
-                if let Err(e) = run_arm(&path, out_dir.as_deref(), no_stdlib, stdlib_path.clone()) {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
-                }
-            } else {
-                eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} arm <file.bv|file.sbv|file.ebv|file.sebv> [--out <dir>]", args[0]);
-                std::process::exit(1);
-            }
+            eprintln!("Error: 'brief arm' has been removed.");
+            eprintln!("  Use 'brief build <file>' for LLVM compilation instead.");
+            std::process::exit(1);
         }
 
         "watch" | "w" => {
@@ -4498,44 +4348,9 @@ fn main() {
         }
 
         "wasm" => {
-            let mut file_path = None;
-            let mut out_dir = None;
-            let mut build_wasm = true;
-
-            let mut i = 2;
-            while i < args.len() {
-                let arg = &args[i];
-                if arg == "--out" && i + 1 < args.len() {
-                    out_dir = Some(PathBuf::from(&args[i + 1]));
-                    i += 2;
-                } else if arg == "--no-build" {
-                    build_wasm = false;
-                    i += 1;
-                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") || arg.ends_with(".rbv") || arg.ends_with(".srbv") {
-                    file_path = Some(PathBuf::from(arg));
-                    i += 1;
-                } else {
-                    i += 1;
-                }
-            }
-
-            if let Some(path) = file_path {
-                match run_wasm(&path, out_dir.as_deref(), build_wasm, no_stdlib, stdlib_path.clone()) {
-                    Ok(output) => {
-                        println!("WASM generated: {}", output.display());
-                    }
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        std::process::exit(1);
-                    }
-                }
-            } else {
-                eprintln!("Error: No .bv, .sbv, .rbv, or .srbv file specified");
-                eprintln!("Usage: {} wasm <file> [--out <dir>]", args[0]);
-                eprintln!("  .bv/.sbv files → direct WASM binary");
-                eprintln!("  .rbv/.srbv files → WASM + JS + frontend (same as webstack)");
-                std::process::exit(1);
-            }
+            eprintln!("Error: 'brief wasm' has been removed.");
+            eprintln!("  Use 'brief webstack <file>' for WASM compilation instead.");
+            std::process::exit(1);
         }
 
         "webstack" => {

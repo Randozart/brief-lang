@@ -1,0 +1,9 @@
+// officina-cli FFI Bindings
+schema FnBinding { name: String; impl: String }
+
+as FnBinding {
+    tty_raw_mode  { "tty_raw_mode", "std::tty::raw_mode" }
+    tty_size      { "tty_size", "std::tty::size" }
+    tty_read_key  { "tty_read_key", "std::tty::read_key" }
+    exec_cmd      { "exec_cmd", "std::process::exec" }
+}

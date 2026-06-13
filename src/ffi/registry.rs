@@ -375,6 +375,12 @@ fn resolve_location_to_impl(location: &str) -> Option<ForeignFn> {
         "encoding::sha512" => encoding_sha512_impl,
         "encoding::uuid_v4" => encoding_uuid_v4_impl,
 
+        // officina-cli TTY + process
+        "std::tty::raw_mode" => tty_raw_mode_impl,
+        "std::tty::size" => tty_size_impl,
+        "std::tty::read_key" => tty_read_key_impl,
+        "std::process::exec" => exec_cmd_impl,
+
         // JSON
         "json::parse" => json_parse_impl,
         "json::stringify" => json_stringify_impl,
@@ -477,6 +483,19 @@ pub(crate) fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
 }
 
 // Math implementations
+fn tty_raw_mode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::tty_raw_mode_impl(args)
+}
+fn tty_size_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::tty_size_impl(args)
+}
+fn tty_read_key_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::tty_read_key_impl(args)
+}
+fn exec_cmd_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    interpreter::exec_cmd_impl(args)
+}
+
 fn abs_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     interpreter::abs_impl(args)
 }

@@ -2133,6 +2133,55 @@ pub(crate) fn input_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
+pub(crate) fn tty_raw_mode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::Bool(enable) = &args[0] {
+        let _ = *enable;
+        // Placeholder — raw mode requires termios
+        Ok(Value::Bool(true))
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "tty_raw_mode expects Bool".to_string(),
+        ))
+    }
+}
+
+pub(crate) fn tty_size_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    // Return 80x24 as default terminal size
+    let encoded: i64 = 80 * 10000 + 24;
+    Ok(Value::Int(encoded))
+}
+
+pub(crate) fn tty_read_key_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+    use std::io::Read;
+    let mut buf = [0u8; 1];
+    match std::io::stdin().read(&mut buf) {
+        Ok(0) | Err(_) => Ok(Value::String(String::new())),
+        Ok(_) => Ok(Value::String((buf[0] as char).to_string())),
+    }
+}
+
+pub(crate) fn exec_cmd_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if let Value::String(cmd) = &args[0] {
+        match std::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .output()
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                Ok(Value::String(stdout))
+            }
+            Err(e) => Err(RuntimeError::TypeMismatch(
+                format!("exec failed: {}", e),
+            )),
+        }
+    } else {
+        Err(RuntimeError::TypeMismatch(
+            "exec_cmd expects String".to_string(),
+        ))
+    }
+}
+
 pub(crate) fn abs_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Value::Int(n) = &args[0] {
         Ok(Value::Int(n.abs()))
