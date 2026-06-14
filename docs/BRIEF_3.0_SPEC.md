@@ -523,6 +523,74 @@ PASS 2: Executable Pass
 | **Zig** | `comptime` + struct generation | Powerful but no formal refinement |
 | **Brief** | `Type ... <: ... { ... }` | Layout, codecs, access gates, all in user-space |
 
+## 11. Type/Metadata Check Expressions: `is`, `from`, `like`
+
+**Added 2026-06-14 (Phase 15)**
+
+Three infix expressions that inspect types and structure at runtime:
+
+| Expression | Meaning | Returns |
+|-----------|---------|---------|
+| `x is T` | `x`'s runtime type is `T` | `Bool` |
+| `x is Some` | `x`'s enum variant is `Some` | `Bool` |
+| `x from T` | `x`'s type derives from `T` | `Bool` |
+| `x like y` | `x` and `y` have structurally equivalent layout | `Bool` |
+
+### Precedence
+
+```
+!x is Some      → !(x is Some)
+x is Some == true → (x is Some) == true
+x from T == false → (x from T) == false
+```
+
+`is`/`from`/`like` bind tighter than `==`/`!=` but looser than unary `!` and comparison operators.
+
+### `is` — Type and Variant Check
+
+```brief
+let x: Int = 42;
+let is_int = x is Int;       // → true
+
+let y: Option[Int] = some(42);
+let is_some = y is some;     // → true
+let is_none = y is none;     // → false
+```
+
+The RHS of `is` can be:
+- A **type name** (`Int`, `String`, `Option[Int]`, `MyStruct`) — checks if the LHS value's runtime type matches.
+- A **variant keyword** (`some`, `none`, `ok`, `err`) — checks if the LHS enum value's discriminant matches the named variant.
+
+### `from` — Derivation Check
+
+```brief
+struct Foo { x: Int; }
+struct Bar <: Foo { y: Int; }
+
+let obj = Bar { x: 1, y: 2 };
+let is_from_foo = obj from Foo;   // → true
+let is_from_baz = obj from Baz;   // → false
+```
+
+Checks whether the LHS value's type is the target type or a subtype of it. For structs, this walks the `<:` derivation chain. For enums, this checks the enum type name.
+
+### `like` — Structural Equality
+
+```brief
+42 like 42             // → true
+42 like 1              // → false
+"hello" like "hello"   // → true
+[1, 2] like [1, 2]     // → true (recursive element comparison)
+```
+
+`like` compares the structural layout of two values, not their nominal type. Two structs with different names but identical fields can be `like` each other.
+
+### Implementation Notes
+
+- **Interpreter**: Fully implemented with recursive structural comparison for lists, structs (Instance), enums, and primitive types.
+- **LLVM Backend**: Currently emits stubs (compile-time `true` for `is`/`from`, delegate to `fcmp` for `like`). Full runtime type-tag comparison is future work.
+- **Typechecker**: Returns `Type::Bool` without deeper structural analysis. Future work includes compile-time folding and variant resolution.
+
 ---
 
 *End of Brief 3.0 Specification*

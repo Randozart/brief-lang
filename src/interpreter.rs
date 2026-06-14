@@ -1382,6 +1382,19 @@ impl Interpreter {
             Expr::Le(l, r) => BinaryOpExpr::new(BinaryOpKind::Le, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
             Expr::Gt(l, r) => BinaryOpExpr::new(BinaryOpKind::Gt, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
             Expr::Ge(l, r) => BinaryOpExpr::new(BinaryOpKind::Ge, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
+            Expr::IsType(lit, target) => {
+                let val = self.eval_expr(lit)?;
+                self.eval_is_type(val, target)
+            }
+            Expr::FromCheck(le, ty) => {
+                let val = self.eval_expr(le)?;
+                self.eval_from_check(val, ty)
+            }
+            Expr::Like(l, r) => {
+                let lv = self.eval_expr(l)?;
+                let rv = self.eval_expr(r)?;
+                self.eval_like(lv, rv)
+            }
             Expr::Or(l, r) => BinaryOpExpr::new(BinaryOpKind::Or, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
             Expr::And(l, r) => BinaryOpExpr::new(BinaryOpKind::And, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
             Expr::BitAnd(l, r) => BinaryOpExpr::new(BinaryOpKind::BitAnd, *l.clone(), *r.clone()).evaluate(self, &ExprDispatch),
@@ -1696,6 +1709,89 @@ impl Interpreter {
                 Err(RuntimeError::TypeMismatch("Pattern B variant not yet evaluated".into()))
             }
         }
+    }
+
+    fn eval_is_type(&self, val: Value, target: &crate::ast::IsTarget) -> Result<Value, RuntimeError> {
+        use crate::ast::IsTarget;
+        match target {
+            IsTarget::Type(ty) => {
+                let matches = match (&val, ty) {
+                    (Value::Int(_), Type::Int | Type::UInt) => true,
+                    (Value::Float(_), Type::Float) => true,
+                    (Value::Bool(_), Type::Bool) => true,
+                    (Value::String(_), Type::String) => true,
+                    (Value::Char(_), Type::Char) => true,
+                    (Value::List(_), Type::Vector(..)) => true,
+                    (Value::List(_), Type::Applied(n, _)) if n == "List" => true,
+                    (Value::Instance { typename, .. }, Type::Custom(n)) => typename == n,
+                    (Value::Instance { typename, .. }, Type::Enum(n)) => typename == n,
+                    (Value::Instance { typename, .. }, Type::Applied(n, _)) => typename == n,
+                    (Value::Instance { typename, .. }, Type::Sig(n)) => typename == n,
+                    (Value::Enum(ename, ..), Type::Custom(n)) => ename == n,
+                    (Value::Enum(ename, ..), Type::Enum(n)) => ename == n,
+                    (Value::Enum(ename, ..), Type::Applied(n, _)) => ename == n,
+                    _ => false,
+                };
+                Ok(Value::Bool(matches))
+            }
+            IsTarget::Variant(vname) => {
+                match &val {
+                    Value::Enum(_, variant_name, _) => Ok(Value::Bool(variant_name == vname)),
+                    _ => Err(RuntimeError::TypeMismatch("is requires an enum value for variant check".into())),
+                }
+            }
+        }
+    }
+
+    fn eval_from_check(&self, val: Value, ty: &Type) -> Result<Value, RuntimeError> {
+        let type_name = match &val {
+            Value::Instance { typename, .. } | Value::Enum(typename, ..) => typename.clone(),
+            _ => return Ok(Value::Bool(false)),
+        };
+        let target_name = format!("{:?}", ty);
+        Ok(Value::Bool(type_name == target_name))
+    }
+
+    fn eval_like(&self, lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
+        fn is_bool_true(v: &Value) -> bool {
+            matches!(v, Value::Bool(true))
+        }
+        let result = match (&lhs, &rhs) {
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => (a - b).abs() < f64::EPSILON,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Char(a), Value::Char(b)) => a == b,
+            (Value::List(a), Value::List(b)) => {
+                if a.len() != b.len() { false }
+                else {
+                    a.iter().zip(b.iter()).all(|(la, lb)| {
+                        self.eval_like(la.clone(), lb.clone()).map_or(false, |v| is_bool_true(&v))
+                    })
+                }
+            }
+            (Value::Instance { typename: _, fields: af }, Value::Instance { typename: _, fields: bf }) => {
+                if af.len() != bf.len() { false }
+                else {
+                    af.iter().zip(bf.iter()).all(|pair| {
+                        let ((k_a, av), (k_b, bv)) = pair;
+                        k_a == k_b && self.eval_like(av.clone(), bv.clone()).map_or(false, |v| is_bool_true(&v))
+                    })
+                }
+            }
+            (Value::Enum(an, avn, ap), Value::Enum(bn, bvn, bp)) => {
+                an == bn && avn == bvn && {
+                    if ap.len() != bp.len() { false }
+                    else {
+                        ap.iter().zip(bp.iter()).all(|((ka, va), (kb, vb))| {
+                            ka == kb && self.eval_like(va.clone(), vb.clone()).map_or(false, |v| is_bool_true(&v))
+                        })
+                    }
+                }
+            }
+            _ => false,
+        };
+        Ok(Value::Bool(result))
     }
 
     /// Evaluate a `<:` subtype projection: applies a sequence of ops to a source value.
@@ -5544,4 +5640,150 @@ mod kani_full_tests {
         assert!(result.is_err(), "sqrt#(\"hello\") should produce a type error");
     }
 
+    #[test]
+    fn test_eval_is_type_int() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IsType(
+            Box::new(Expr::Integer(42)),
+            crate::ast::IsTarget::Type(Type::Int),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true), "42 is Int should be true");
+    }
+
+    #[test]
+    fn test_eval_is_type_string() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IsType(
+            Box::new(Expr::String("hello".to_string())),
+            crate::ast::IsTarget::Type(Type::Int),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false), "string is Int should be false");
+    }
+
+    #[test]
+    fn test_eval_is_variant() {
+        let mut i = Interpreter::new();
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("value".to_string(), Value::Int(42));
+        i.state.insert("x".to_string(), Value::Enum("Option".to_string(), "Some".to_string(), fields));
+        let expr = Expr::IsType(
+            Box::new(Expr::OwnedRef("x".to_string())),
+            crate::ast::IsTarget::Variant("Some".to_string()),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true), "Option::Some is Some should be true");
+    }
+
+    #[test]
+    fn test_eval_is_variant_mismatch() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Enum("Option".to_string(), "None".to_string(), std::collections::HashMap::new()));
+        let expr = Expr::IsType(
+            Box::new(Expr::OwnedRef("x".to_string())),
+            crate::ast::IsTarget::Variant("Some".to_string()),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false), "Option::None is Some should be false");
+    }
+
+    #[test]
+    fn test_eval_from_check() {
+        let mut i = Interpreter::new();
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("x".to_string(), Value::Int(1));
+        i.state.insert("obj".to_string(), Value::Instance { typename: "Foo".to_string(), fields });
+        let expr = Expr::FromCheck(
+            Box::new(Expr::OwnedRef("obj".to_string())),
+            Type::Custom("Foo".to_string()),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true), "obj from Foo should be true");
+    }
+
+    #[test]
+    fn test_eval_like_int() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Like(
+            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Integer(42)),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true), "42 like 42 should be true");
+    }
+
+    #[test]
+    fn test_eval_like_int_mismatch() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Like(
+            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Integer(1)),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false), "42 like 1 should be false");
+    }
+
+    #[test]
+    fn test_eval_like_float() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Like(
+            Box::new(Expr::Float(3.14)),
+            Box::new(Expr::Float(3.14)),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true), "3.14 like 3.14 should be true");
+    }
+
+    #[test]
+    fn test_eval_like_string() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Like(
+            Box::new(Expr::String("hello".to_string())),
+            Box::new(Expr::String("hello".to_string())),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true), "\"hello\" like \"hello\" should be true");
+    }
+
+    #[test]
+    fn test_eval_like_string_mismatch() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Like(
+            Box::new(Expr::String("hello".to_string())),
+            Box::new(Expr::String("world".to_string())),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false), "\"hello\" like \"world\" should be false");
+    }
+
+    #[test]
+    fn test_eval_like_list() {
+        let mut i = Interpreter::new();
+        let a = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        let b = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        i.state.insert("a".to_string(), a);
+        i.state.insert("b".to_string(), b);
+        let expr = Expr::Like(
+            Box::new(Expr::OwnedRef("a".to_string())),
+            Box::new(Expr::OwnedRef("b".to_string())),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true), "[1,2] like [1,2] should be true");
+    }
+
+    #[test]
+    fn test_eval_like_list_mismatch() {
+        let mut i = Interpreter::new();
+        let a = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        let b = Value::List(vec![Value::Int(1), Value::Int(3)]);
+        i.state.insert("a".to_string(), a);
+        i.state.insert("b".to_string(), b);
+        let expr = Expr::Like(
+            Box::new(Expr::OwnedRef("a".to_string())),
+            Box::new(Expr::OwnedRef("b".to_string())),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false), "[1,2] like [1,3] should be false");
+    }
 }

@@ -277,6 +277,8 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::SyscallBang)) => { self.advance(); Ok("syscall!".to_string()) }
             Some(Ok(Token::Resource)) => { self.advance(); Ok("resource".to_string()) }
             Some(Ok(Token::Rsrc)) => { self.advance(); Ok("rsrc".to_string()) }
+            Some(Ok(Token::Is)) => { self.advance(); Ok("is".to_string()) }
+            Some(Ok(Token::Like)) => { self.advance(); Ok("like".to_string()) }
             Some(Ok(Token::Cycles)) => { self.advance(); Ok("cycles".to_string()) }
             Some(Ok(Token::Cyc)) => { self.advance(); Ok("cyc".to_string()) }
             Some(Ok(Token::Ms)) => { self.advance(); Ok("ms".to_string()) }
@@ -5280,23 +5282,78 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
     }
 
     fn parse_equality(&mut self) -> Result<Expr, SyntaxError> {
-        let mut left = self.parse_comparison()?;
+        let mut left = self.parse_check()?;
         while let Some(token) = self.current_token() {
             match token {
                 Ok(Token::EqEq) => {
                     self.advance();
-                    let right = self.parse_comparison()?;
+                    let right = self.parse_check()?;
                     left = Expr::Eq(Box::new(left), Box::new(right));
                 }
                 Ok(Token::Ne) => {
                     self.advance();
-                    let right = self.parse_comparison()?;
+                    let right = self.parse_check()?;
                     left = Expr::Ne(Box::new(left), Box::new(right));
                 }
                 _ => break,
             }
         }
         Ok(left)
+    }
+
+    /// Parse `is`/`from`/`like` check expressions.
+    /// Precedence: tighter than `==`/`!=`, looser than `<`/`>`/`<=`/`>=`.
+    fn parse_check(&mut self) -> Result<Expr, SyntaxError> {
+        let mut left = self.parse_comparison()?;
+        while let Some(token) = self.current_token() {
+            match token {
+                Ok(Token::Is) => {
+                    self.advance();
+                    let target = self.parse_is_target()?;
+                    left = Expr::IsType(Box::new(left), target);
+                }
+                Ok(Token::From) => {
+                    self.advance();
+                    let ty = self.parse_type()?;
+                    left = Expr::FromCheck(Box::new(left), ty);
+                }
+                Ok(Token::Like) => {
+                    self.advance();
+                    let right = self.parse_comparison()?;
+                    left = Expr::Like(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    /// Parse the RHS of an `is` expression: either a Type or a Variant name.
+    /// `Some`, `None`, `Ok`, `Err` tokens → Variant; everything else → Type.
+    fn parse_is_target(&mut self) -> Result<IsTarget, SyntaxError> {
+        let target = match self.current_token() {
+            Some(Ok(Token::Some)) => {
+                self.advance();
+                IsTarget::Variant("Some".to_string())
+            }
+            Some(Ok(Token::None)) => {
+                self.advance();
+                IsTarget::Variant("None".to_string())
+            }
+            Some(Ok(Token::Ok)) => {
+                self.advance();
+                IsTarget::Variant("Ok".to_string())
+            }
+            Some(Ok(Token::Err)) => {
+                self.advance();
+                IsTarget::Variant("Err".to_string())
+            }
+            _ => {
+                let ty = self.parse_type()?;
+                IsTarget::Type(ty)
+            }
+        };
+        Ok(target)
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, SyntaxError> {
@@ -6623,6 +6680,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             Token::Unification => Some("uni"),
             Token::Escape => Some("escape"),
             Token::Async => Some("async"),
+            Token::Is => Some("is"),
+            Token::Like => Some("like"),
             Token::Some => Some("Some"),
             Token::None => Some("None"),
             Token::Ok => Some("Ok"),
@@ -8055,6 +8114,96 @@ mod parser_tests {
                 crate::ast::SubtypeOp::Limit(5),
             ],
         );
+    }
+
+    #[test]
+    fn test_parse_is_type() {
+        let s = r#"defn f() -> Bool { term 42 is Int; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "is type check should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::IsType(_, crate::ast::IsTarget::Type(Type::Int))),
+                        "Expected IsType(Int), got {:?}", expr);
+                }
+                _ => panic!("Expected Term"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_is_variant() {
+        let s = r#"defn f(x: Option[Int]) -> Bool { term x is some; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "is variant check should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::IsType(_, crate::ast::IsTarget::Variant(v)) if v == "Some"),
+                        "Expected IsType(Some), got {:?}", expr);
+                }
+                _ => panic!("Expected Term"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_from_check() {
+        let s = r#"defn f(x: Int) -> Bool { term x from Int; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "from check should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::FromCheck(_, Type::Int)),
+                        "Expected FromCheck(Int), got {:?}", expr);
+                }
+                _ => panic!("Expected Term"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_like() {
+        let s = r#"defn f(x: Int, y: Int) -> Bool { term x like y; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "like should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::Like(_, _)),
+                        "Expected Like expr, got {:?}", expr);
+                }
+                _ => panic!("Expected Term"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_is_precedence() {
+        let s = r#"defn f(x: Int, y: Int) -> Bool { term x is Int && y is Int; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "is with && should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::And(_, _)),
+                        "is should bind tighter than &&, got: {:?}", expr);
+                }
+                _ => panic!("Expected Term"),
+            }
+        }
     }
 }
 

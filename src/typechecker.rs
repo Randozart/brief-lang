@@ -846,6 +846,13 @@ impl TypeChecker {
             Expr::FieldAccess(obj, _) => {
                 self.check_expr_for_function_calls(obj);
             }
+            Expr::IsType(expr, _) | Expr::FromCheck(expr, _) => {
+                self.check_expr_for_function_calls(expr);
+            }
+            Expr::Like(l, r) => {
+                self.check_expr_for_function_calls(l);
+                self.check_expr_for_function_calls(r);
+            }
             Expr::ListLiteral(elems) => {
                 for elem in elems {
                     self.check_expr_for_function_calls(elem);
@@ -1693,6 +1700,7 @@ impl TypeChecker {
 Expr::ObjectLiteral(fields) => {
                 fields.first().map(|(_, v)| self.infer_expression(v)).unwrap_or(Type::Custom("Object".to_string()))
             },
+            Expr::IsType(_, _) | Expr::FromCheck(_, _) | Expr::Like(_, _) => Type::Bool,
             Expr::Cast(..) => Type::Custom("unknown".to_string()),
             // ── Pattern B routing (direct destructure, not through trait) ──
             Expr::BinaryOp(bop) => {
@@ -2073,6 +2081,13 @@ Expr::ObjectLiteral(fields) => {
             }
             Expr::FieldAccess(obj, _) => {
                 self.check_expr_for_ffi_errors(obj);
+            }
+            Expr::IsType(expr, _) | Expr::FromCheck(expr, _) => {
+                self.check_expr_for_ffi_errors(expr);
+            }
+            Expr::Like(l, r) => {
+                self.check_expr_for_ffi_errors(l);
+                self.check_expr_for_ffi_errors(r);
             }
             _ => {}
         }
@@ -2589,5 +2604,49 @@ mod kani_full_tests {
             }),
         ]);
         assert!(errors.is_empty(), "Expected no errors for public field access, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_infer_is_type_returns_bool() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::IsType(
+            Box::new(Expr::Integer(42)),
+            crate::ast::IsTarget::Type(Type::Int),
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Bool, "IsType should infer as Bool");
+    }
+
+    #[test]
+    fn test_infer_is_variant_returns_bool() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::IsType(
+            Box::new(Expr::Identifier("x".to_string())),
+            crate::ast::IsTarget::Variant("Some".to_string()),
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Bool, "IsType(variant) should infer as Bool");
+    }
+
+    #[test]
+    fn test_infer_from_check_returns_bool() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::FromCheck(
+            Box::new(Expr::Identifier("x".to_string())),
+            Type::Custom("Foo".to_string()),
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Bool, "FromCheck should infer as Bool");
+    }
+
+    #[test]
+    fn test_infer_like_returns_bool() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Like(
+            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Integer(1)),
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Bool, "Like should infer as Bool");
     }
 }

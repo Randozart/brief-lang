@@ -685,3 +685,37 @@ Replaced illegal patterns (`[true]`, `[x==x]`, `[true][true]`) with meaningful c
 | `tests/ffi_typechecker_tests.rs` | `&program` | `&mut program` |
 | `tests/ffi_comprehensive_tests.rs` | `&program`, `Type::Option`, old API | `&mut program`, `Custom("Option")`, 5-arg resolve |
 | `tests/bootstrap_determinism.rs` | `"main.bv"` path | `"lib/compiler/main.bv"` |
+
+---
+
+## 2026-06-14 — Phase 15: `is`/`from`/`like` Type/Metadata Check Expressions
+
+**Summary**: Added three infix operators for runtime type inspection, derivation checking, and structural equality comparison.
+
+### What was done
+- **Lexer**: Added `Token::Is` and `Token::Like` keywords
+- **AST**: Added `IsTarget` enum (`Type(Type)`, `Variant(String)`), `Expr::IsType`, `Expr::FromCheck`, `Expr::Like` variants
+- **Parser**: Added `parse_check()` and `parse_is_target()` in a new precedence level between equality and comparison
+- **Typechecker**: `infer_expression` returns `Type::Bool` for all three; recurses into sub-expressions in `check_expr_for_function_calls` and `check_expr_for_ffi_errors`
+- **Interpreter**: Full runtime evaluation — type matching, variant name comparison, struct/enum derivation chain, recursive structural `like`
+- **LLVM Backend**: Stubs for `IsType`/`FromCheck` (emit `add i64 0, 1`), `Like` delegates to `emit_fcmp` with integer constant folding
+- **Proof engine/symbolic**: Added match arms to `collect_identifiers` and `eval_symbolic`
+- **Tests**: 5 parser + 4 LLVM backend = 9 new tests (794 total passing)
+
+### Bug fixes discovered
+- `parse_equality` had a second `parse_comparison` call for `Ne` that wasn't updated to `parse_check`
+- `Some` lexer token only recognizes lowercase `some`/`SOME`, unlike `Ok` which recognizes `Ok`/`OK` — inconsistency documented
+- `Value::Struct` was refactored to `Value::Instance { typename, fields }` — all references updated
+
+### Files changed
+- `src/lexer.rs`, `src/ast.rs`, `src/parser.rs` — core feature
+- `src/typechecker.rs` — type inference + visitor recursion
+- `src/interpreter.rs` — runtime evaluation
+- `src/proof_engine.rs`, `src/symbolic.rs` — match arms for new variants
+- `src/backend/llvm/emit_expr.rs`, `src/backend/llvm/tests.rs` — LLVM codegen + tests
+- `docs/architecture/features/is-from-like.md` — architecture doc (design → implementation)
+- `docs/architecture/channel-map.md` — updated parser pipeline
+- `docs/BRIEF_3.0_SPEC.md` — added Section 11
+- `learn-brief/05-data-types.md` — added Section 8
+- `learn-brief/README.md` — updated TOC
+- `lib/runtime/brief_rt.c` — unchanged (pre-existing change)

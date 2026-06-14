@@ -13,6 +13,10 @@ Lexer ──────────► Vec<Token>
   ▼
 Parser ─────────► Program { items: Vec<TopLevel>, comments, attrs, exit_condition }
   │               TopLevel::Statement(Box<Statement>) — top-level executable stmts
+  │               Expression parsing now has a new `parse_check()` level:
+  │                 parse_equality → parse_check → parse_comparison
+  │                 Handles: `is` (type/variant check), `from` (derivation check),
+  │                          `like` (structural equality)
   ▼
 Type-Universe ────► TypeUniverse (frozen map of resolved type metadata)
   │

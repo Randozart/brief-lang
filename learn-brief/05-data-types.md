@@ -561,4 +561,56 @@ with a `ProofError`.
 
 ---
 
+## 8. Type/Metadata Checks: `is`, `from`, `like`
+
+Brief provides three infix operators for inspecting types and structure at runtime.
+
+### `is` — Type or Variant Check
+
+```brief
+let x: Int = 42;
+let is_int = x is Int;    // → true
+
+let y: Option[Int] = some(42);
+let is_some = y is some;  // → true
+let is_none = y is none;  // → false
+```
+
+The RHS of `is` can be a type name (`Int`, `String`) or a variant keyword (`some`, `none`, `ok`, `err`).
+
+### `from` — Derivation Check
+
+```brief
+struct Foo { x: Int; }
+struct Bar <: Foo { y: Int; }
+
+let obj = Bar { x: 1, y: 2 };
+let is_from_foo = obj from Foo;   // → true
+```
+
+Checks whether the value's type is or derives from the target type.
+
+### `like` — Structural Equality
+
+```brief
+42 like 42             // → true
+[1, 2] like [1, 2]     // → true (recursive comparison)
+"hi" like "hi"         // → true
+42 like 1              // → false
+```
+
+Compares structural layout, not nominal type. Two structs with different names
+but identical fields can be `like` each other.
+
+### Precedence
+
+```brief
+!x is Some      → !(x is Some)
+x is Some == true → (x is Some) == true
+```
+
+Binds tighter than `==`/`!=` but looser than unary `!`.
+
+---
+
 *Next: [06-string.md](06-string.md) - String manipulation and operations*

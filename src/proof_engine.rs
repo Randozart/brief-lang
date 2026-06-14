@@ -2433,9 +2433,13 @@ impl ProofEngine {
             | Expr::Gt(l, r)
             | Expr::Ge(l, r)
             | Expr::Or(l, r)
-            | Expr::And(l, r) => {
+            | Expr::And(l, r)
+            | Expr::Like(l, r) => {
                 self.collect_identifiers(l, vars);
                 self.collect_identifiers(r, vars);
+            }
+            Expr::IsType(expr, _) | Expr::FromCheck(expr, _) => {
+                self.collect_identifiers(expr, vars);
             }
             Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) => {
                 self.collect_identifiers(inner, vars);

@@ -1,7 +1,7 @@
 # Learn Brief - Complete Tutorial
 
 **Version:** 0.16.0  
-**Last Updated:** 2026-06-08  
+**Last Updated:** 2026-06-14  
 **Status:** Complete ✅
 
 ---
@@ -51,8 +51,9 @@
    - HashMap<K,V> (O(1) lookup)
    - HashSet<T> (O(1) membership)
    - Stack<T> (LIFO)
-   - Queue<T> (FIFO)
-   - StringBuilder (O(n) concatenation)
+    - Queue<T> (FIFO)
+    - StringBuilder (O(n) concatenation)
+    - `is`, `from`, `like` — type/metadata checks
 
 7. **[06-string.md](06-string.md)** - String Manipulation
    - Basic operations (len, concat, substr)

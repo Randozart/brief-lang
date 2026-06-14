@@ -551,6 +551,14 @@ impl Intrinsic {
     }
 }
 
+/// Target for the `is` check expression: either a Type or a Variant name.
+/// Variant names (Some, None, Ok, Err) are resolved against the LHS enum type.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IsTarget {
+    Type(Type),
+    Variant(String),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Integer(i64),
@@ -608,6 +616,12 @@ pub enum Expr {
     Le(Box<Expr>, Box<Expr>),
     Gt(Box<Expr>, Box<Expr>),
     Ge(Box<Expr>, Box<Expr>),
+    /// Runtime/compile-time type check: `x is Int` or `x is Some`
+    IsType(Box<Expr>, IsTarget),
+    /// Derivation check: `x from Foo` (type or value against ancestor type)
+    FromCheck(Box<Expr>, Type),
+    /// Structural equivalence check: `x like y` (field-by-field comparison)
+    Like(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),

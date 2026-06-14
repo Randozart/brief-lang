@@ -670,53 +670,49 @@ int64_t tty_read_key(void) {
 
 /* ── Stdlib __ functions ──────────────────────────────────────────── */
 
-int64_t __trim_left(int64_t s_val) {
-    char* s = brief_str_to_c(s_val);
+int64_t __trim_left(const char* s) {
     if (!s) return 0;
-    char* start = s;
+    const char* start = s;
     while (*start && (unsigned char)*start <= 32) start++;
-    int64_t result = cstr_to_brief(start);
-    free(s);
-    return result;
+    return cstr_to_brief(start);
 }
 
-int64_t __trim_right(int64_t s_val) {
-    char* s = brief_str_to_c(s_val);
+int64_t __trim_right(const char* s) {
     if (!s) return 0;
-    char* end = s + strlen(s);
+    size_t len = strlen(s);
+    const char* end = s + len;
     while (end > s && (unsigned char)*(end - 1) <= 32) end--;
-    *end = '\0';
-    int64_t result = cstr_to_brief(s);
-    free(s);
-    return result;
+    // Copy since we need to null-terminate
+    char buf[65536];
+    size_t new_len = (size_t)(end - s);
+    if (new_len >= sizeof(buf)) new_len = sizeof(buf) - 1;
+    memcpy(buf, s, new_len);
+    buf[new_len] = '\0';
+    return cstr_to_brief(buf);
 }
 
-int64_t __to_lower(int64_t s_val) {
-    char* s = brief_str_to_c(s_val);
+int64_t __to_lower(const char* s) {
     if (!s) return 0;
-    for (char* p = s; *p; p++) *p = (char)tolower((unsigned char)*p);
-    int64_t result = cstr_to_brief(s);
-    free(s);
-    return result;
+    size_t len = strlen(s);
+    if (len > 65535) len = 65535;
+    char buf[65536];
+    for (size_t i = 0; i < len; i++) {
+        buf[i] = (char)tolower((unsigned char)s[i]);
+    }
+    buf[len] = '\0';
+    return cstr_to_brief(buf);
 }
 
-int64_t __contains_at(int64_t haystack_val, int64_t needle_val, int64_t start_val) {
-    char* haystack = brief_str_to_c(haystack_val);
-    char* needle = brief_str_to_c(needle_val);
-    if (!haystack || !needle) { free(haystack); free(needle); return 0; }
-    int64_t r = (strstr(haystack + (size_t)start_val, needle) != NULL) ? 1 : 0;
-    free(haystack); free(needle);
-    return r;
+int64_t __contains_at(const char* haystack, const char* needle, int64_t start) {
+    if (!haystack || !needle) return 0;
+    const char* pos = strstr(haystack + (size_t)start, needle);
+    return pos ? 1 : 0;
 }
 
-int64_t __find_from(int64_t s_val, int64_t needle_val, int64_t start_val) {
-    char* s = brief_str_to_c(s_val);
-    char* needle = brief_str_to_c(needle_val);
-    if (!s || !needle) { free(s); free(needle); return -1; }
-    char* found = strstr(s + (size_t)start_val, needle);
-    int64_t r = found ? (int64_t)(found - s) : -1;
-    free(s); free(needle);
-    return r;
+int64_t __find_from(const char* s, const char* needle, int64_t start) {
+    if (!s || !needle) return -1;
+    const char* found = strstr(s + (size_t)start, needle);
+    return found ? (int64_t)(found - s) : -1;
 }
 
 int64_t __int_to_str(int64_t n) {
@@ -725,40 +721,40 @@ int64_t __int_to_str(int64_t n) {
     return buf_to_brief(buf, (int64_t)len);
 }
 
-int64_t __splitn(int64_t s_val, int64_t delim_val, int64_t n_val) {
+int64_t __splitn(const char* s, const char* delim, int64_t n_val) {
     (void)n_val;
-    char* s = brief_str_to_c(s_val);
-    char* delim = brief_str_to_c(delim_val);
-    if (!s || !delim) { free(s); free(delim); return 0; }
+    if (!s || !delim) return 0;
+    size_t slen = strlen(s);
+    if (slen > 65500) slen = 65500;
+    char tmp[65536];
+    memcpy(tmp, s, slen);
+    tmp[slen] = '\0';
+    size_t dlen = strlen(delim);
     // Count tokens
     int64_t count = 1;
-    for (char* p = s; *p; p++) {
-        if (strncmp(p, delim, strlen(delim)) == 0) { count++; p += strlen(delim) - 1; }
+    for (char* p = tmp; *p; p++) {
+        if (strncmp(p, delim, dlen) == 0) { count++; p += dlen - 1; }
     }
     // Allocate list header: [data_ptr, length, elem0, elem1, ...]
     int64_t* list = malloc(sizeof(int64_t) * (2 + count));
-    list[0] = (int64_t)(list + 2);  // data pointer
+    list[0] = (int64_t)(list + 2);
     list[1] = count;
     int64_t idx = 0;
-    char* tok = strtok(s, delim);
+    char* tok = strtok(tmp, delim);
     while (tok && idx < count) {
         list[2 + idx] = cstr_to_brief(tok);
         idx++;
         tok = strtok(NULL, delim);
     }
-    int64_t result = (int64_t)list;
-    free(s); free(delim);
-    return result;
+    return (int64_t)list;
 }
 
 /* ── Process ──────────────────────────────────────────────────────── */
 
-int64_t __spawn_with_output(int64_t cmd_val, int64_t args_val) {
+int64_t __spawn_with_output(const char* cmd, int64_t args_val) {
     (void)args_val;
-    char* cmd = brief_str_to_c(cmd_val);
     if (!cmd) return 0;
     FILE* fp = popen(cmd, "r");
-    free(cmd);
     if (!fp) return 0;
     char buf[65536];
     size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
@@ -774,8 +770,7 @@ int64_t __spawn_with_output(int64_t cmd_val, int64_t args_val) {
 
 /* ── Officina-local frgn (JSON, substring) ────────────────────────── */
 
-int64_t substring(int64_t s_val) {
-    char* s = brief_str_to_c(s_val);
+int64_t substring(const char* s) {
     if (!s) return 0;
     int64_t len = (int64_t)strlen(s);
     // List header: [data_ptr, length, char0, char1, ...]
@@ -786,15 +781,12 @@ int64_t substring(int64_t s_val) {
     for (int64_t i = 0; i < len; i++) {
         list[2 + i] = (int64_t)(unsigned char)s[i];
     }
-    free(s);
     return (int64_t)list;
 }
 
-int64_t json_parse(int64_t s_val) {
-    // Minimal JSON object parser — returns list of (key, value) pairs
-    char* s = brief_str_to_c(s_val);
-    if (!s) return 0;
-    return (int64_t)s; // placeholder — full JSON parser needed
+int64_t json_parse(const char* s) {
+    (void)s;
+    return 0;
 }
 
 int64_t json_is_array(int64_t v_val) {

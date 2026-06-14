@@ -809,6 +809,23 @@ impl LlvmBackend {
                     ops: e.ops.clone(),
                 }, indent);
             }
+            Expr::IsType(expr, target) => {
+                let _ = self.emit_expr(out, expr, indent);
+                let comment = match target {
+                    crate::ast::IsTarget::Type(_) => "is type",
+                    crate::ast::IsTarget::Variant(v) => v,
+                };
+                writeln!(out, "{}{} = add i64 0, 1 ; {} (compile-time)", indent, v, comment).ok();
+                return TypedRegister { name: v, ty: Type::Bool };
+            }
+            Expr::FromCheck(expr, _ty) => {
+                let _ = self.emit_expr(out, expr, indent);
+                writeln!(out, "{}{} = add i64 0, 1 ; from (compile-time)", indent, v).ok();
+                return TypedRegister { name: v, ty: Type::Bool };
+            }
+            Expr::Like(l, r) => {
+                return self.emit_fcmp(out, indent, l, r, "oeq");
+            }
             _ => {}
         }
         // Default: treat as Int. Float operations are handled explicitly

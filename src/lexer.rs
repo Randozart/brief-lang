@@ -88,6 +88,12 @@ pub enum Token {
     #[token("uni")]
     #[token("UNI")]
     Unification,
+    #[token("is")]
+    #[token("IS")]
+    Is,
+    #[token("like")]
+    #[token("LIKE")]
+    Like,
     #[token("import")]
     #[token("IMPORT")]
     Import,
@@ -448,6 +454,8 @@ impl std::fmt::Display for Token {
             Token::TermBang => write!(f, "term!"),
             Token::Escape => write!(f, "escape"),
             Token::Unification => write!(f, "unification"),
+            Token::Is => write!(f, "is"),
+            Token::Like => write!(f, "like"),
             Token::Import => write!(f, "import"),
             Token::From => write!(f, "from"),
             Token::As => write!(f, "as"),

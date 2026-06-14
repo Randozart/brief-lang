@@ -3138,3 +3138,177 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("call float @llvm.ceil.f32"),
             "ceil# should emit call to llvm.ceil.f32. Got:\n{}", output);
     }
+
+    #[test]
+    fn test_emit_is_type() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Bool),
+                            expr: Some(Expr::IsType(
+                                Box::new(Expr::Integer(42)),
+                                crate::ast::IsTarget::Type(Type::Int),
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("add i64 0, 1 ; is type"),
+            "IsType should emit add i64 0, 1. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_emit_from_check() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Bool),
+                            expr: Some(Expr::FromCheck(
+                                Box::new(Expr::Integer(42)),
+                                Type::Int,
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("add i64 0, 1 ; from"),
+            "FromCheck should emit add i64 0, 1. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_emit_like_int() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Bool),
+                            expr: Some(Expr::Like(
+                                Box::new(Expr::Integer(42)),
+                                Box::new(Expr::Integer(1)),
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Constant-folded: 42 != 1, so should emit add i64 0, 0
+        assert!(output.contains("add i64 0, 0"),
+            "Like(42, 1) should constant-fold to 0. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_emit_like_int_equal() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Bool),
+                            expr: Some(Expr::Like(
+                                Box::new(Expr::Integer(42)),
+                                Box::new(Expr::Integer(42)),
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Constant-folded: 42 == 42, so should emit add i64 0, 1
+        assert!(output.contains("add i64 0, 1"),
+            "Like(42, 42) should constant-fold to 1. Got:\n{}", output);
+    }

@@ -280,6 +280,10 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         }
         Expr::StructInstanceExpr(e) => { for (_, v) in &e.fields { collect_strings_expr(v, seen, out); } }
         Expr::EllipsisExpr(_) | Expr::DbvlTable { .. } | Expr::DbvlTableExpr(_) => {}
+        // Type check expressions
+        Expr::IsType(e, _) => { collect_strings_expr(e, seen, out); }
+        Expr::FromCheck(e, _) => { collect_strings_expr(e, seen, out); }
+        Expr::Like(l, r) => { collect_strings_expr(l, seen, out); collect_strings_expr(r, seen, out); }
         // Terminals
         Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
         | Expr::Ellipsis | Expr::TypeRef(_) | Expr::OwnedRef(_) | Expr::PriorState(_) => {}
