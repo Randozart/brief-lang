@@ -6158,6 +6158,20 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
             }
             Some(Ok(Token::LParen)) => {
+                // Check for C-style prefix cast: (Type)expr
+                // Built-in types have dedicated tokens (TypeInt, TypeString, etc.),
+                // so this is unambiguous with a parenthesized expression.
+                let is_cast = matches!(self.peek_token(), 
+                    Some(Ok(Token::TypeInt | Token::TypeFloat | Token::TypeString |
+                           Token::TypeChar | Token::TypeBool | Token::TypeUInt |
+                           Token::TypeData | Token::TypeVoid)));
+                if is_cast {
+                    self.advance(); // consume (
+                    let cast_ty = self.parse_type()?;
+                    self.expect(Token::RParen)?; // consume )
+                    let inner = self.parse_expression()?;
+                    return Ok(Expr::Cast(Box::new(inner), cast_ty));
+                }
                 self.advance();
                 // Check if it's a tuple or just a parenthesized expression
                 let expr = self.parse_expression()?;

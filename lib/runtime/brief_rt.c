@@ -463,6 +463,15 @@ int32_t __trg_stdin_read(void) {
     return 0;
 }
 
+/* ── Cast helpers ─────────────────────────────────────────────── */
+
+/* Convert a 32-bit character code to a 1-character string. */
+char* __chr_to_str(int32_t c) {
+    static char buf[2] = {0, 0};
+    buf[0] = (char)(c & 0xFF);
+    return buf;
+}
+
 #if defined(__linux__)
 #include <sys/timerfd.h>
 #include <sys/signalfd.h>

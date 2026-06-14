@@ -829,6 +829,12 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
+            Expr::Cast(inner, target_ty) => {
+                let inner_val = self.emit_expr(out, inner, indent);
+                let cv = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                self.emit_cast_convert(out, indent, &cv, &inner_val.name, Some(inner_val.ty), target_ty);
+                return TypedRegister { name: cv, ty: target_ty.clone() };
+            }
             _ => { unreachable!("emit_expr: unhandled Expr variant"); }
         }
         // Default: treat as Int. Float operations are handled explicitly
@@ -1005,6 +1011,65 @@ impl LlvmBackend {
                 let _ = writeln!(out, "{}{} = select i1 {}, float 1.000000e+00, float 0.000000e+00", indent, fl, ci);
                 let _ = writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fl);
                 let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, fi);
+            }
+            // Char ↔ Bool
+            (Type::Char, Type::Bool) => {
+                let ci = format!("%cci{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
+                let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
+            }
+            (Type::Bool, Type::Char) => {
+                let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
+            }
+            // Char ↔ Int
+            (Type::Char, Type::Int | Type::UInt) => {
+                let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
+            }
+            (Type::Int | Type::UInt, Type::Char) => {
+                let tr = format!("%cctr{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
+                let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, tr);
+            }
+            // Char ↔ String (via __chr_to_str / load first byte)
+            (Type::Char, Type::String) => {
+                let tr = format!("%cctr{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
+                let ip = format!("%ccip{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = call i8* @__chr_to_str(i32 {})", indent, ip, tr);
+                let _ = writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, dst, ip);
+            }
+            (Type::String, Type::Char) => {
+                let ip = format!("%csip{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ip, src);
+                let lb = format!("%cslb{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, lb, ip);
+                let _ = writeln!(out, "{}{} = zext i8 {} to i64", indent, dst, lb);
+            }
+            // Int ↔ String (via existing __int_to_str)
+            (Type::Int | Type::UInt, Type::String) => {
+                let _ = writeln!(out, "{}{} = call i64 @__int_to_str(i64 {})", indent, dst, src);
+            }
+            (Type::String, Type::Int | Type::UInt) => {
+                let ip = format!("%csii{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ip, src);
+                let _ = writeln!(out, "{}{} = call i64 @__str_to_int(i8* {})", indent, dst, ip);
+            }
+            // String ↔ Bool (non-empty is true)
+            (Type::String, Type::Bool) => {
+                let ip = format!("%csbi{}", self.txn_counter); self.txn_counter += 1;
+                let lb = format!("%csbl{}", self.txn_counter); self.txn_counter += 1;
+                let ci = format!("%csbc{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ip, src);
+                let _ = writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, lb, ip);
+                let _ = writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, ci, lb);
+                let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
+            }
+            (Type::Bool, Type::String) => {
+                let ci = format!("%cbsc{}", self.txn_counter); self.txn_counter += 1;
+                let ip = format!("%cbsi{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
+                let _ = writeln!(out, "{}{} = call i8* @__chr_to_str(i32 {})", indent, ip, ci);
+                let _ = writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, dst, ip);
             }
             _ => {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);

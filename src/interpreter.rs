@@ -1677,7 +1677,10 @@ impl Interpreter {
                 TupleDestructureExpr { names: names.clone(), expr: expr.clone() }.evaluate(self, &ExprDispatch),
             Expr::MultiSlice { value, ops } =>
                 MultiSliceExpr { value: value.clone(), ops: ops.clone() }.evaluate(self, &ExprDispatch),
-            Expr::Cast(inner, _) => self.eval_expr(inner),
+            Expr::Cast(inner, target_ty) => {
+                let v = self.eval_expr(inner)?;
+                return self.eval_cast(v, target_ty);
+            }
             Expr::SubtypeProjection { source, ops } =>
                 SubtypeProjectionExpr { source: source.clone(), ops: ops.clone() }.evaluate(self, &ExprDispatch),
             Expr::DbvlTable { path, field_names, key_offsets, schema_name } =>
@@ -1792,6 +1795,58 @@ impl Interpreter {
             _ => false,
         };
         Ok(Value::Bool(result))
+    }
+
+    /// Evaluate a type cast: convert a value to a target type.
+    fn eval_cast(&self, val: Value, target: &Type) -> Result<Value, RuntimeError> {
+        match (&val, target) {
+            // Int ↔ Float
+            (Value::Int(n), Type::Float) => Ok(Value::Float(*n as f64)),
+            (Value::Float(f), Type::Int) => Ok(Value::Int(*f as i64)),
+
+            // Int ↔ Char
+            (Value::Char(c), Type::Int) => Ok(Value::Int(*c as i64)),
+            (Value::Int(n), Type::Char) => {
+                if *n < 0 || *n > 0x10FFFF {
+                    return Err(RuntimeError::TypeMismatch("integer value out of valid Char range".into()));
+                }
+                let ch = char::from_u32(*n as u32).unwrap_or('\0');
+                Ok(Value::Char(ch))
+            }
+
+            // Char → String
+            (Value::Char(c), Type::String) => {
+                let s = c.to_string();
+                Ok(Value::String(s))
+            }
+
+            // String → Char
+            (Value::String(s), Type::Char) => {
+                let ch = s.chars().next().unwrap_or('\0');
+                Ok(Value::Char(ch))
+            }
+
+            // Int → String
+            (Value::Int(n), Type::String) => Ok(Value::String(n.to_string())),
+
+            // String → Int
+            (Value::String(s), Type::Int) => {
+                let n = s.trim().parse::<i64>()
+                    .map_err(|_| RuntimeError::TypeMismatch(format!("cannot parse '{}' as Int", s)))?;
+                Ok(Value::Int(n))
+            }
+
+            // Bool → Int
+            (Value::Bool(b), Type::Int) => Ok(Value::Int(if *b { 1 } else { 0 })),
+
+            // Int → Bool
+            (Value::Int(n), Type::Bool) => Ok(Value::Bool(*n != 0)),
+
+            // Unsupported
+            _ => Err(RuntimeError::TypeMismatch(format!(
+                "cannot convert {:?} to {:?}", val, target
+            ))),
+        }
     }
 
     /// Evaluate a `<:` subtype projection: applies a sequence of ops to a source value.

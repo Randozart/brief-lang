@@ -1711,7 +1711,17 @@ Expr::ObjectLiteral(fields) => {
                 fields.first().map(|(_, v)| self.infer_expression(v)).unwrap_or(Type::Custom("Object".to_string()))
             },
             Expr::IsType(_, _) | Expr::FromCheck(_, _) | Expr::Like(_, _) => Type::Bool,
-            Expr::Cast(..) => Type::Custom("unknown".to_string()),
+            Expr::Cast(inner, target_ty) => {
+                let src_ty = self.infer_expression(inner);
+                if !self.is_cast_valid(&src_ty, target_ty) {
+                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                        expected: format!("convertible type, found {}", self.type_to_string(&src_ty)),
+                        found: self.type_to_string(target_ty),
+                        context: format!("cannot cast {} to {}", self.type_to_string(&src_ty), self.type_to_string(target_ty)),
+                    });
+                }
+                target_ty.clone()
+            }
             // ── Pattern B routing (direct destructure, not through trait) ──
             Expr::BinaryOp(bop) => {
                 let l_ty = self.infer_expression(&bop.left);
@@ -1959,6 +1969,24 @@ Expr::ObjectLiteral(fields) => {
                 }
             }
         }
+    }
+
+    /// Check whether a type conversion is valid.
+    fn is_cast_valid(&self, src: &Type, dst: &Type) -> bool {
+        if src == dst { return true; }
+        matches!((src, dst),
+            (Type::Int, Type::Float) | (Type::Float, Type::Int) |
+            (Type::Int, Type::Char) | (Type::Char, Type::Int) |
+            (Type::Int, Type::UInt) | (Type::UInt, Type::Int) |
+            (Type::Float, Type::Char) | (Type::Char, Type::Float) |
+            (Type::Int, Type::String) | (Type::String, Type::Int) |
+            (Type::Char, Type::String) | (Type::String, Type::Char) |
+            (Type::Bool, Type::Int) | (Type::Int, Type::Bool) |
+            (Type::UInt, Type::Float) | (Type::Float, Type::UInt) |
+            (Type::UInt, Type::Char) | (Type::Char, Type::UInt) |
+            (Type::UInt, Type::String) | (Type::String, Type::UInt) |
+            (Type::Bool, Type::String) | (Type::String, Type::Bool)
+        )
     }
 
     /// Check if struct `child` derives from (or transitively derives from) `parent`.
