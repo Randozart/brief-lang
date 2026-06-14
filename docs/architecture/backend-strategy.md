@@ -49,6 +49,48 @@ LLVM pattern is proven.
 into feature `ExprCodegenWebstack` impls. Optimizations deferred until
 LLVM pattern is proven.
 
+## FFI Marshaling Convention (Critical)
+
+The LLVM backend and C runtime must agree on how Brief types cross the FFI
+boundary. The convention is documented at `brief_rt.c:376`:
+
+> The LLVM backend marshals String as i8*, Int as i64, Bool as i64.
+
+### Convention
+
+| Brief type | C type | LLVM IR type | Notes |
+|------------|--------|-------------|-------|
+| `Int` | `int64_t` | `i64` | Passed directly |
+| `Bool` | `int64_t` | `i64` | Truncated to `i32`/`i8` at frgn call sites only |
+| `Float` | `float` / `double` | `float` / `double` | Float-specific SSA registers, bitcast to/from `i32` for storage |
+| `String` | `const char*` | `ptr` (`i8*` in older LLVM) | Heap-allocated, null-terminated C string |
+| `Data` | `const char*` | `ptr` | Same as String |
+| `Char` | `int64_t` | `i64` | Unicode codepoint |
+
+### Implementation pattern
+
+**Frgn calls** (`emit_expr.rs:262-272`) use explicit `inttoptr`/`ptrtoint` casts:
+
+```llvm
+; frgn __print(msg: String) -> Bool  →  int64_t __print(const char* msg)
+%fp  = inttoptr i64 %raw_msg to ptr
+%ret = call i64 @__print(ptr %fp)
+```
+
+**Intrinsics** (like `read_file#`) must follow the same pattern — never pass raw
+`i64` to C functions expecting pointers. The intrinsic at `emit_expr.rs:414-421`
+uses the same `inttoptr` → `call ptr` → `ptrtoint` marshaling:
+
+```llvm
+%fp   = inttoptr i64 %path_val to ptr
+%raw  = call ptr @brief_read_file(ptr %fp)
+%data = ptrtoint ptr %raw to i64
+```
+
+This was the root cause of the `brief_read_file` bug (2026-06-14) — the intrinsic
+was passing `i64` directly, and the C function interpreted raw characters as a
+Brief header pointer. See `docs/architecture/fixes/brief-read-file-ffi-marshal.md`.
+
 ## Known Backend Bugs (Fixed 2026-06-13)
 
 All bugs below were found during officina-cli compilation testing. Each

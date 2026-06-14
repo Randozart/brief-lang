@@ -590,35 +590,16 @@ void brief_thread_pool_shutdown(void) {
 /* ===================================================================
  * 5. Brief String I/O — read_file intrinsic
  *
- * brief_read_file takes a Brief string pointer (int64_t) as input,
- * where the Brief string format is:
- *   ptr[0] = data pointer (address of ptr[2])
- *   ptr[1] = length
- *   ptr[2..] = character data as int64_t
- *
- * Returns a new Brief string pointer (int64_t) with the file contents,
- * or a zero-length string if the file cannot be read.
+ * The LLVM backend marshals String as i8*, so both path and return
+ * value are C strings (null-terminated char*). The interpreter uses
+ * Rust std::fs::read_to_string and never calls this function.
  * =================================================================== */
 
-int64_t brief_read_file(int64_t path_ptr) {
-    int64_t* path_str = (int64_t*)path_ptr;
-    if (!path_str) return 0;
+char* brief_read_file(const char* path) {
+    if (!path) return NULL;
 
-    int64_t path_len = path_str[1];
-    if (path_len <= 0) return 0;
-
-    // Extract path from Brief string format
-    char* path = malloc((size_t)path_len + 1);
-    if (!path) return 0;
-    for (int64_t i = 0; i < path_len; i++) {
-        path[i] = (char)(path_str[i + 2] & 0xFF);
-    }
-    path[path_len] = '\0';
-
-    // Open and read the file
     FILE* fp = fopen(path, "rb");
-    free(path);
-    if (!fp) return 0;
+    if (!fp) return NULL;
 
     fseek(fp, 0, SEEK_END);
     long file_size = ftell(fp);
@@ -626,39 +607,25 @@ int64_t brief_read_file(int64_t path_ptr) {
 
     if (file_size <= 0) {
         fclose(fp);
-        return 0;
+        return NULL;
     }
 
-    char* file_data = malloc((size_t)file_size);
-    if (!file_data) {
+    char* data = malloc((size_t)file_size + 1);
+    if (!data) {
         fclose(fp);
-        return 0;
+        return NULL;
     }
 
-    size_t bytes_read = fread(file_data, 1, (size_t)file_size, fp);
+    size_t bytes_read = fread(data, 1, (size_t)file_size, fp);
     fclose(fp);
 
-    if (bytes_read <= 0) {
-        free(file_data);
-        return 0;
+    if (bytes_read == 0) {
+        free(data);
+        return NULL;
     }
 
-    // Create Brief string result
-    int64_t result_len = (int64_t)bytes_read;
-    int64_t* result = malloc((size_t)(result_len + 2) * sizeof(int64_t));
-    if (!result) {
-        free(file_data);
-        return 0;
-    }
-
-    result[0] = (int64_t)(result + 2);  // data pointer
-    result[1] = result_len;
-    for (int64_t i = 0; i < result_len; i++) {
-        result[i + 2] = (int64_t)((unsigned char)file_data[i]);
-    }
-
-    free(file_data);
-    return (int64_t)result;
+    data[bytes_read] = '\0';
+    return data;
 }
 
 /* ===================================================================

@@ -414,7 +414,11 @@ impl LlvmBackend {
                     Intrinsic::ReadFile => {
                         if args.len() >= 1 {
                             let path_val = self.emit_expr(out, &args[0], indent);
-                            writeln!(out, "{}{} = call i64 @brief_read_file(i64 {})", indent, v, path_val.name).ok();
+                            let fp = format!("%frfp{}", self.txn_counter); self.txn_counter += 1;
+                            let raw = format!("%frraw{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, fp, path_val.name).ok();
+                            writeln!(out, "{}{} = call ptr @brief_read_file(ptr {})", indent, raw, fp).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, raw).ok();
                         } else {
                             writeln!(out, "{}{} = add i64 0, 0 ; read_file: missing arg", indent, v).ok();
                         }

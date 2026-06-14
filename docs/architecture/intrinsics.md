@@ -181,8 +181,8 @@ The interpreter implements real system calls for:
 - `readln#` — `std::io::stdin().read_line`
 - `exit#` — `std::process::exit(code)`
 - `time#` — `SystemTime::now().duration_since(UNIX_EPOCH)`
-- `read_file#` — `std::fs::read_to_string(path)`
-- `write_file#` — `std::fs::write(path, data)`
+- `read_file#` — Interpreter: `std::fs::read_to_string(path)`. LLVM backend: calls `brief_read_file` via C string marshaling (`inttoptr`/`ptrtoint`). See `backend-strategy.md` FFI Marshaling section.
+- `write_file#` — Interpreter: `std::fs::write(path, data)`. LLVM backend: stub (returns 1).
 - `sleep#` — `std::thread::sleep(Duration::from_millis(ms))`
 - `socket#`, `bind#`, `listen#`, `accept#` — return failure stubs in interpreter
 - `sort#`, `reverse#` — passthrough (no-op in interpreter)

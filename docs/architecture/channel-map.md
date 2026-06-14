@@ -105,6 +105,7 @@ Interpreter: dispatches on Intrinsic enum — native Rust implementation
 LLVM Backend: dispatches on Intrinsic enum
                 ├── Sqrt → call float @llvm.sqrt.f32
                 ├── Println → printf with per-type format
+                ├── ReadFile → call ptr @brief_read_file(ptr) via inttoptr/ptrtoint marshaling
                 └── Socket → add i64 0, -1 (stub)
 ```
 
