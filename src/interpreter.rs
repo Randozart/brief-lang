@@ -5841,4 +5841,100 @@ mod kani_full_tests {
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(false), "[1,2] like [1,3] should be false");
     }
+
+    #[test]
+    fn test_eval_cast_int_to_string() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::String);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::String("42".to_string()), "Int -> String should format as decimal");
+    }
+
+    #[test]
+    fn test_eval_cast_string_to_int() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::String("42".to_string())), Type::Int);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(42), "String -> Int should parse decimal");
+    }
+
+    #[test]
+    fn test_eval_cast_char_to_string() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Char('A')), Type::String);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::String("A".to_string()), "Char -> String should be single-char");
+    }
+
+    #[test]
+    fn test_eval_cast_string_to_char() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::String("hello".to_string())), Type::Char);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Char('h'), "String -> Char should take first char");
+    }
+
+    #[test]
+    fn test_eval_cast_int_to_float() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::Float);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Float(42.0), "Int -> Float should be exact");
+    }
+
+    #[test]
+    fn test_eval_cast_float_to_int() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Float(3.14)), Type::Int);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(3), "Float -> Int should truncate");
+    }
+
+    #[test]
+    fn test_eval_cast_int_to_char() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Integer(65)), Type::Char);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Char('A'), "Int 65 -> Char should be 'A'");
+    }
+
+    #[test]
+    fn test_eval_cast_char_to_int() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Char('A')), Type::Int);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(65), "Char 'A' -> Int should be 65");
+    }
+
+    #[test]
+    fn test_eval_cast_bool_to_int() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Bool(true)), Type::Int);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1), "Bool true -> Int should be 1");
+    }
+
+    #[test]
+    fn test_eval_cast_int_to_bool() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::Bool);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true), "Int 42 -> Bool should be true");
+    }
+
+    #[test]
+    fn test_eval_cast_int_zero_to_bool() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::Integer(0)), Type::Bool);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false), "Int 0 -> Bool should be false");
+    }
+
+    #[test]
+    fn test_eval_cast_unsupported() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(Box::new(Expr::List(vec![])), Type::Int);
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err(), "List -> Int should be an error");
+    }
 }

@@ -8253,6 +8253,60 @@ mod parser_tests {
             }
         }
     }
+
+    #[test]
+    fn test_parse_cast_as() {
+        let s = r#"defn f(x: Int) -> String { term x as String; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "as cast should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::Cast(_, Type::String)),
+                        "Expected Cast(Int, String), got {:?}", expr);
+                }
+                _ => panic!("Expected Term"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_cast_paren() {
+        let s = r#"defn f(x: Int) -> String { term (String)x; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "(Type) cast should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::Cast(_, Type::String)),
+                        "Expected Cast(Int, String), got {:?}", expr);
+                }
+                _ => panic!("Expected Term"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_cast_int_paren() {
+        let s = r#"defn f(x: String) -> Int { term (Int)x; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "(Int) cast should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Term { values, .. } => {
+                    let expr = values[0].as_ref().unwrap();
+                    assert!(matches!(expr, Expr::Cast(_, Type::Int)),
+                        "Expected Cast(String, Int), got {:?}", expr);
+                }
+                _ => panic!("Expected Term"),
+            }
+        }
+    }
 }
 
 enum BracketElement {

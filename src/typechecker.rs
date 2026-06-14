@@ -2696,4 +2696,76 @@ mod kani_full_tests {
         let ty = ctx.infer_expression(&expr);
         assert_eq!(ty, Type::Bool, "Like should infer as Bool");
     }
+
+    #[test]
+    fn test_infer_cast_int_to_string_valid() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Cast(
+            Box::new(Expr::Integer(42)),
+            Type::String,
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::String, "Cast Int -> String should return String");
+        assert!(ctx.errors.borrow().is_empty(), "Int -> String should be valid");
+    }
+
+    #[test]
+    fn test_infer_cast_string_to_int_valid() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Cast(
+            Box::new(Expr::String("42".to_string())),
+            Type::Int,
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "Cast String -> Int should return Int");
+        assert!(ctx.errors.borrow().is_empty(), "String -> Int should be valid");
+    }
+
+    #[test]
+    fn test_infer_cast_char_to_string_valid() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Cast(
+            Box::new(Expr::Char('A')),
+            Type::String,
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::String, "Cast Char -> String should return String");
+        assert!(ctx.errors.borrow().is_empty(), "Char -> String should be valid");
+    }
+
+    #[test]
+    fn test_infer_cast_string_to_char_valid() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Cast(
+            Box::new(Expr::String("hello".to_string())),
+            Type::Char,
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Char, "Cast String -> Char should return Char");
+        assert!(ctx.errors.borrow().is_empty(), "String -> Char should be valid");
+    }
+
+    #[test]
+    fn test_infer_cast_int_to_float_valid() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Cast(
+            Box::new(Expr::Integer(42)),
+            Type::Float,
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Float, "Cast Int -> Float should return Float");
+        assert!(ctx.errors.borrow().is_empty(), "Int -> Float should be valid");
+    }
+
+    #[test]
+    fn test_infer_cast_int_to_char_valid() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::Cast(
+            Box::new(Expr::Integer(65)),
+            Type::Char,
+        );
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Char, "Cast Int -> Char should return Char");
+        assert!(ctx.errors.borrow().is_empty(), "Int -> Char should be valid");
+    }
 }

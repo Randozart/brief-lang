@@ -3312,3 +3312,147 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("add i64 0, 1"),
             "Like(42, 42) should constant-fold to 1. Got:\n{}", output);
     }
+
+    #[test]
+    fn test_emit_cast_int_to_string() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::String),
+                            expr: Some(Expr::Cast(
+                                Box::new(Expr::Integer(42)),
+                                Type::String,
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![], range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call i64 @__int_to_str(i64"),
+            "Cast Int -> String should call __int_to_str. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_emit_cast_string_to_int() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Int),
+                            expr: Some(Expr::Cast(
+                                Box::new(Expr::String("42".to_string())),
+                                Type::Int,
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![], range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call i64 @__str_to_int"),
+            "Cast String -> Int should call __str_to_int. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_emit_cast_char_to_string() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::String),
+                            expr: Some(Expr::Cast(
+                                Box::new(Expr::Char('A')),
+                                Type::String,
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![], range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call i8* @__chr_to_str"),
+            "Cast Char -> String should call __chr_to_str. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_emit_cast_int_to_float() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(),
+                    is_async: false,
+                    is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Let {
+                            name: "r".into(),
+                            ty: Some(Type::Float),
+                            expr: Some(Expr::Cast(
+                                Box::new(Expr::Integer(42)),
+                                Type::Float,
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![], range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("sitofp"),
+            "Cast Int -> Float should emit sitofp. Got:\n{}", output);
+    }
