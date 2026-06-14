@@ -763,6 +763,13 @@ self.emit_declares(&mut out);
         // Declare __str_concat used by the backend for string concatenation
         writeln!(out, "declare i8* @__str_concat(i8*, i8*) #1").ok();
 
+        // Declare built-in trigger source helpers
+        writeln!(out, "declare i32 @__trg_stdin_read() #1").ok();
+        writeln!(out, "declare i32 @__trg_timerfd_open(i64) #1").ok();
+        writeln!(out, "declare i32 @__trg_timerfd_read(i32) #1").ok();
+        writeln!(out, "declare i32 @__trg_signalfd_open(i8*) #1").ok();
+        writeln!(out, "declare i32 @__trg_signalfd_read(i32) #1").ok();
+
         // Emit external global declarations for linked triggers (fixes bug 4B)
         for (name, trg) in &self.triggers {
             if let crate::ast::LinkRef::Linked(sym) = &trg.address {

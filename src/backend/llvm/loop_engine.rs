@@ -29,13 +29,7 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
                 } else if self.trigger_names.contains(name) {
                     if let Some(t) = self.triggers.get(name).cloned() {
-                        let addr_str = match &t.address {
-                            crate::ast::LinkRef::Explicit(a) => a.to_string(),
-                            crate::ast::LinkRef::Linked(s) => format!("@{}", s),
-                            _ => unreachable!(),
-                        };
-                        let addr_is_ptr = matches!(t.address, crate::ast::LinkRef::Linked(_));
-                        self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);
+                        self.emit_trg_load(out, indent, &v, &t.address, &t.ty);
                     } else {
                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                     }
@@ -503,6 +497,7 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_trg_init(out);
         // Legacy phi-mode: uses
         if use_phi {
             writeln!(out, "  br label %case_phi_entry").ok();
@@ -535,6 +530,7 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_trg_init(out);
         // Bound loading — use numbered positional args ({0}, {1}) to avoid
         // LLVM IR brace chars being parsed as named format placeholders.
         if let Some(ti) = total_idx {
@@ -594,6 +590,7 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_trg_init(out);
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
         self.ssa_state_reg = None;
@@ -702,6 +699,7 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_trg_init(out);
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
@@ -711,21 +709,17 @@ impl LlvmBackend {
         writeln!(out, "tick:").ok();
 
         // Sample triggers (clone trigger data to avoid borrow conflict)
-        let trigger_data: Vec<(String, String, bool, crate::ast::Type)> = enum_sizes.iter()
+        let trigger_data: Vec<(String, crate::ast::LinkRef, crate::ast::Type)> = enum_sizes.iter()
             .filter_map(|(tn, _)| {
                 self.triggers.get(tn).map(|t| {
                     let rn = format!("%sz_{}", tn);
-                    let (addr_str, addr_is_ptr) = match &t.address {
-                        crate::ast::LinkRef::Explicit(a) => (a.to_string(), false),
-                        crate::ast::LinkRef::Linked(s) => (format!("@{}", s), true),
-                        _ => unreachable!(),
-                    };
-                    (rn, addr_str, addr_is_ptr, t.ty.clone())
+                    let addr = &t.address;
+                    (rn, addr.clone(), t.ty.clone())
                 })
             })
             .collect();
-        for (rn, addr_str, addr_is_ptr, ty) in &trigger_data {
-            self.emit_trg_load(out, "  ", rn, addr_str, *addr_is_ptr, ty);
+        for (rn, addr, ty) in &trigger_data {
+            self.emit_trg_load(out, "  ", rn, addr, ty);
         }
 
         // Build switch dispatch

@@ -453,6 +453,75 @@ int64_t __putchar(int64_t c) {
     return c;
 }
 
+/* ── Built-in trigger source helpers ──────────────────────────── */
+
+/* Non-blocking read from stdin. Returns 0 if no data, 1-255 for a byte. */
+int32_t __trg_stdin_read(void) {
+    unsigned char ch = 0;
+    ssize_t n = read(STDIN_FILENO, &ch, 1);
+    if (n > 0) return (int32_t)ch;
+    return 0;
+}
+
+#if defined(__linux__)
+#include <sys/timerfd.h>
+#include <sys/signalfd.h>
+
+/* Create a timerfd at N Hz. Returns fd, or -1 on error. */
+int32_t __trg_timerfd_open(int64_t hz) {
+    if (hz <= 0) return -1;
+    int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+    if (fd < 0) return -1;
+    long ns_per_tick = 1000000000L / hz;
+    struct itimerspec spec = {
+        .it_interval = { .tv_sec = ns_per_tick / 1000000000L,
+                         .tv_nsec = ns_per_tick % 1000000000L },
+        .it_value    = { .tv_sec = ns_per_tick / 1000000000L,
+                         .tv_nsec = ns_per_tick % 1000000000L },
+    };
+    if (timerfd_settime(fd, 0, &spec, NULL) < 0) { close(fd); return -1; }
+    return fd;
+}
+
+/* Read timerfd expiration count. Returns 1 if timer fired, 0 otherwise. */
+int32_t __trg_timerfd_read(int32_t fd) {
+    uint64_t expirations = 0;
+    ssize_t n = read(fd, &expirations, sizeof(expirations));
+    return (n > 0 && expirations > 0) ? 1 : 0;
+}
+
+/* Open a signalfd for the given signal name. Returns fd, or -1 on error. */
+int32_t __trg_signalfd_open(const char* name) {
+    int sig = 0;
+    if      (strcmp(name, "SIGINT")   == 0) sig = SIGINT;
+    else if (strcmp(name, "SIGTERM")  == 0) sig = SIGTERM;
+    else if (strcmp(name, "SIGHUP")   == 0) sig = SIGHUP;
+    else if (strcmp(name, "SIGUSR1")  == 0) sig = SIGUSR1;
+    else if (strcmp(name, "SIGUSR2")  == 0) sig = SIGUSR2;
+    else return -1;
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, sig);
+    sigprocmask(SIG_BLOCK, &mask, NULL);
+    int fd = signalfd(-1, &mask, SFD_NONBLOCK);
+    return fd;
+}
+
+/* Read signalfd event. Returns 1 if signal fired, 0 otherwise. */
+int32_t __trg_signalfd_read(int32_t fd) {
+    struct signalfd_siginfo info;
+    ssize_t n = read(fd, &info, sizeof(info));
+    return (n > 0) ? 1 : 0;
+}
+
+#else
+/* Non-Linux: timerfd/signalfd stubs (return error sentinel) */
+int32_t __trg_timerfd_open(int64_t hz) { (void)hz; return -1; }
+int32_t __trg_timerfd_read(int32_t fd) { (void)fd; return 0; }
+int32_t __trg_signalfd_open(const char* name) { (void)name; return -1; }
+int32_t __trg_signalfd_read(int32_t fd) { (void)fd; return 0; }
+#endif
+
 /* ===================================================================
  * 5. Initialization — __rt_init() and constructor wrapper
  *
@@ -482,6 +551,10 @@ void __rt_init(void) {
 
     /* Ensure stdout buffer is line-buffered for __print */
     setvbuf(stdout, NULL, _IOLBF, 0);
+
+    /* Set stdin to non-blocking mode for @stdin# trigger */
+    int stdin_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, stdin_flags | O_NONBLOCK);
 
     /* Mark io as pending initially so the first tick checks for work */
     __io_pending = 1;

@@ -70,42 +70,101 @@ impl LlvmBackend {
         self.native_float_or_box(out, indent, &reg.name)
     }
 
-    pub(super) fn emit_trg_load(&mut self, out: &mut String, indent: &str, dst: &str, addr_src: &str, addr_is_ptr: bool, trg_ty: &Type) {
-        let store_ty = super::trg_llvm_storage_ty(trg_ty);
-        let tr_counter = self.txn_counter;
-        self.txn_counter += 1;
-        let raw = format!("%tr{}", tr_counter);
-        if addr_is_ptr {
-            writeln!(out, "{}{} = load volatile {}, {}* {}", indent, raw, store_ty, store_ty, addr_src).ok();
-        } else {
-            writeln!(out, "{}{} = load volatile {}, {}* inttoptr (i64 {} to {}*), align 1", indent, raw, store_ty, store_ty, addr_src, store_ty).ok();
+    /// Emit initialization code for built-in trigger sources.
+    /// Called once at the start of main(), before the tick loop.
+    pub(super) fn emit_trg_init(&mut self, out: &mut String) {
+        for (name, trg) in &self.triggers {
+            match &trg.address {
+                crate::ast::LinkRef::Timer(hz) => {
+                    let g = format!("@__trg_timerfd_{}", name);
+                    writeln!(out, "  %{} = call i32 @__trg_timerfd_open(i64 {})", name, hz).ok();
+                    writeln!(out, "  store i32 %{}, i32* {}, align 4", name, g).ok();
+                }
+                crate::ast::LinkRef::Signal(sig) => {
+                    let g = format!("@__trg_signalfd_{}", name);
+                    let sg = format!("@__trg_sig_str_{}", name);
+                    // Emit a global string constant for the signal name
+                    writeln!(out, "{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"", sg, sig.len() + 1, sig).ok();
+                    writeln!(out, "  %{} = call i32 @__trg_signalfd_open(i8* getelementptr inbounds ([{} x i8], [{} x i8]* {}, i64 0, i64 0))", name, sig.len() + 1, sig.len() + 1, sg).ok();
+                    writeln!(out, "  store i32 %{}, i32* {}, align 4", name, g).ok();
+                }
+                _ => {}
+            }
         }
+    }
+
+    pub(super) fn emit_trg_load(&mut self, out: &mut String, indent: &str, dst: &str, address: &crate::ast::LinkRef, trg_ty: &Type) {
+        match address {
+            crate::ast::LinkRef::Explicit(addr) => {
+                let store_ty = super::trg_llvm_storage_ty(trg_ty);
+                let tr_counter = self.txn_counter;
+                self.txn_counter += 1;
+                let raw = format!("%tr{}", tr_counter);
+                writeln!(out, "{}{} = load volatile {}, {}* inttoptr (i64 {} to {}*), align 1", indent, raw, store_ty, store_ty, addr, store_ty).ok();
+                self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
+            }
+            crate::ast::LinkRef::Linked(sym) => {
+                let store_ty = super::trg_llvm_storage_ty(trg_ty);
+                let tr_counter = self.txn_counter;
+                self.txn_counter += 1;
+                let raw = format!("%tr{}", tr_counter);
+                writeln!(out, "{}{} = load volatile {}, {}* @{}", indent, raw, store_ty, store_ty, sym).ok();
+                self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
+            }
+            crate::ast::LinkRef::Stdin => {
+                let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = call i32 @__trg_stdin_read()", indent, tr).ok();
+                let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, tr).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+            }
+            crate::ast::LinkRef::Timer(hz) => {
+                let g = format!("@__trg_timerfd_{}", hz);
+                let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, tr, g).ok();
+                let rr = format!("%rr{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = call i32 @__trg_timerfd_read(i32 {})", indent, rr, tr).ok();
+                let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, rr).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+            }
+            crate::ast::LinkRef::Signal(name) => {
+                let g = format!("@__trg_signalfd_{}", name);
+                let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, tr, g).ok();
+                let rr = format!("%rr{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = call i32 @__trg_signalfd_read(i32 {})", indent, rr, tr).ok();
+                let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, rr).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+            }
+        }
+    }
+
+    /// Finish loading a trigger value after the raw load: extend to i64.
+    fn emit_trg_load_finish(&self, out: &mut String, indent: &str, dst: &str, raw: String, trg_ty: &Type) {
         match trg_ty {
             Type::Bool => {
-                let zc = self.txn_counter; self.txn_counter += 1;
-                let z = format!("%tz{}", zc);
-                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
+                let zc = self.txn_counter; let z = format!("%tz{}", zc);
+                writeln!(out, "{}{} = zext {} {} to i64", indent, z, "i8", raw).ok();
                 writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
             }
             Type::Int | Type::UInt => {
                 writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
             }
             Type::Char => {
-                let zc = self.txn_counter; self.txn_counter += 1;
-                let z = format!("%tz{}", zc);
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, raw).ok();
+                let zc = self.txn_counter; let z = format!("%tz{}", zc);
+                writeln!(out, "{}{} = zext {} {} to i64", indent, z, "i32", raw).ok();
                 writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
             }
             Type::String | Type::Data => {
-                let zc = self.txn_counter; self.txn_counter += 1;
-                let z = format!("%tz{}", zc);
-                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
+                let zc = self.txn_counter; let z = format!("%tz{}", zc);
+                writeln!(out, "{}{} = zext {} {} to i64", indent, z, "i8", raw).ok();
                 writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
             }
             _ => {
-                let zc = self.txn_counter; self.txn_counter += 1;
-                let z = format!("%tz{}", zc);
-                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
+                let zc = self.txn_counter; let z = format!("%tz{}", zc);
+                writeln!(out, "{}{} = zext {} {} to i64", indent, z, "i8", raw).ok();
                 writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
             }
         }

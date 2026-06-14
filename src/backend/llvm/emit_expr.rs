@@ -124,13 +124,7 @@ impl LlvmBackend {
                     if let Some(sampled) = self.sampled_triggers.get(name) {
                         writeln!(out, "{}{} = add i64 0, {}", indent, v, sampled).ok();
                     } else if let Some(t) = self.triggers.get(name).cloned() {
-                        let addr_str = match &t.address {
-                            crate::ast::LinkRef::Explicit(a) => a.to_string(),
-                            crate::ast::LinkRef::Linked(s) => format!("@{}", s),
-                            _ => unreachable!(),
-                };
-                        let addr_is_ptr = matches!(t.address, crate::ast::LinkRef::Linked(_));
-                        self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);
+                        self.emit_trg_load(out, indent, &v, &t.address, &t.ty);
                     } else {
                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                     }
