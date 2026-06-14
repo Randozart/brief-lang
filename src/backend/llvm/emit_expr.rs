@@ -249,7 +249,7 @@ impl LlvmBackend {
             Expr::BitNot(e) => { let inner = self.emit_expr(out, e, indent); writeln!(out, "{}{} = xor i64 {}, -1", indent, v, inner).ok(); }
             Expr::Shl(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = shl i64 {}, {}", indent, v, a, b).ok(); }
             Expr::Shr(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = lshr i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::Concat(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = add i64 {}, {} ; concat", indent, v, a, b).ok(); }
+            Expr::Concat(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); let ip = format!("%ip{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ip, a).ok(); let jp = format!("%jp{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, jp, b).ok(); let cc = format!("%cc{}", self.txn_counter); self.txn_counter += 1; writeln!(out, "{}{} = call i8* @__str_concat(i8* {}, i8* {})", indent, cc, ip, jp).ok(); writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, cc).ok(); }
             // Call
             Expr::Call(name, args) => {
                 // Clone foreign info upfront to avoid borrow conflict with emit_expr
@@ -826,7 +826,15 @@ impl LlvmBackend {
             Expr::Like(l, r) => {
                 return self.emit_fcmp(out, indent, l, r, "oeq");
             }
-            _ => {}
+            Expr::Block(stmts, last) => {
+                for s in stmts { self.emit_stmt(out, s, indent); }
+                return self.emit_expr(out, last, indent);
+            }
+            Expr::MapLiteral(_) | Expr::SetLiteral(_) | Expr::ArrowTransfer { .. } => {
+                writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
+                return TypedRegister { name: v, ty: Type::Int };
+            }
+            _ => { unreachable!("emit_expr: unhandled Expr variant"); }
         }
         // Default: treat as Int. Float operations are handled explicitly
         // by emit_binop/emit_fcmp which return Type::Float/Bool respectively.
@@ -1045,7 +1053,18 @@ impl LlvmBackend {
             }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
-        if a.ty == Type::Float || b.ty == Type::Float {
+        if int_op == "add" && (a.ty == Type::String || a.ty == Type::Data) && (b.ty == Type::String || b.ty == Type::Data) {
+            // String concatenation via __str_concat
+            let ip = format!("%scp{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ip, a.name).ok();
+            let jp = format!("%scq{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, jp, b.name).ok();
+            let cc = format!("%scc{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = call i8* @__str_concat(i8* {}, i8* {})", indent, cc, ip, jp).ok();
+            let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, cc).ok();
+            TypedRegister { name: v, ty: Type::String }
+        } else if a.ty == Type::Float || b.ty == Type::Float {
             let fa = self.ensure_float_reg(out, indent, &a);
             let fb = self.ensure_float_reg(out, indent, &b);
             let fr = format!("%bfr{}", self.txn_counter); self.txn_counter += 1;
@@ -1085,18 +1104,24 @@ impl LlvmBackend {
             writeln!(out, "{}{} = add i64 0, {}", indent, v, if result { 1 } else { 0 }).ok();
             return TypedRegister { name: v, ty: Type::Bool };
         }
-        // String trigger vs string literal: compare against first byte
+        // String trigger vs string literal: dereference pointer and compare first byte
         if let Expr::String(s) = r {
             if self.is_linked_string_trigger(l) {
                 let a = self.emit_expr(out, l, indent);
-                let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
-                let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
                 let icmp_cond = match cond {
                     "oeq" => "eq", "one" => "ne", "olt" => "slt",
                     "ole" => "sle", "ogt" => "sgt", "oge" => "sge",
                     _ => cond,
                 };
-                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a.name, byte_val).ok();
+                let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, a.name).ok();
+                let b = format!("%fb{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, b, p).ok();
+                let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, b).ok();
+                let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
+                let c = format!("%fc{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
                 let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok();
                 return TypedRegister { name: v, ty: Type::Bool };
@@ -1105,14 +1130,20 @@ impl LlvmBackend {
         if let Expr::String(s) = l {
             if self.is_linked_string_trigger(r) {
                 let b = self.emit_expr(out, r, indent);
-                let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
-                let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
                 let icmp_cond = match cond {
                     "oeq" => "eq", "one" => "ne", "olt" => "slt",
                     "ole" => "sle", "ogt" => "sgt", "oge" => "sge",
                     _ => cond,
                 };
-                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, b.name, byte_val).ok();
+                let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, b.name).ok();
+                let bv = format!("%fb{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, bv, p).ok();
+                let z = format!("%fz{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, bv).ok();
+                let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
+                let c = format!("%fc{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
                 let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok();
                 return TypedRegister { name: v, ty: Type::Bool };

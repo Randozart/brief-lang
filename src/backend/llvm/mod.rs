@@ -315,7 +315,7 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type) -> &str {
         Type::Int | Type::UInt => "i64",
         Type::Float => "float",
         Type::Char => "i32",
-        Type::String | Type::Data => "i8",
+        Type::String | Type::Data => "i8*",
         _ => "i8", // fallback for unsupported types
     }
 }
@@ -749,7 +749,7 @@ self.emit_declares(&mut out);
                 Type::Bool => "i32",
                 Type::Char => "i32",
                 Type::Float => "float",
-                Type::String | Type::Data => "i8*",
+        Type::String | Type::Data => "i8",
                 _ => "i64",
             }).collect();
             write!(out, "declare {} @{}(", ret_ty, name).ok();
@@ -760,12 +760,20 @@ self.emit_declares(&mut out);
             writeln!(out, ") #1").ok();
         }
 
+        // Declare __str_concat used by the backend for string concatenation
+        writeln!(out, "declare i8* @__str_concat(i8*, i8*) #1").ok();
+
         // Emit external global declarations for linked triggers (fixes bug 4B)
         for (name, trg) in &self.triggers {
             if let crate::ast::LinkRef::Linked(sym) = &trg.address {
                 let store_ty = trg_llvm_storage_ty(&trg.ty);
                 let align = if store_ty == "i64" { 8 } else if store_ty == "i32" { 4 } else { 1 };
                 writeln!(out, "@{} = external global {}, align {}", sym, store_ty, align).ok();
+                // Warn if a linked trigger symbol is also declared as a frgn function
+                if self.frgn_map.contains_key(sym.as_str()) {
+                    eprintln!("warning: '{}' is declared as a frgn function but used as a @ link trigger. \
+                               Use a volatile C variable for triggers, or built-in sources like @stdin#.", sym);
+                }
                 // Warn on unsupported trigger types
                 match &trg.ty {
                     Type::Bool | Type::Int | Type::UInt | Type::Char | Type::String | Type::Data => {}

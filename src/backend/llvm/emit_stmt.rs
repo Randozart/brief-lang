@@ -444,7 +444,8 @@ impl LlvmBackend {
                 for s in body { self.emit_stmt(out, s, indent); }
             }
             Statement::Unification { name, variant, fields: _, expr } => {
-                let val = self.emit_expr(out, expr, indent);
+                // Load the variable being matched, not the continuation block.
+                let val = self.emit_expr(out, &Expr::Identifier(name.clone()), indent);
                 let disc = format!("%ud{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = and i64 {}, 255", indent, disc, val).ok();
                 let arm_l = format!("ua{}", self.txn_counter); self.txn_counter += 1;
@@ -458,6 +459,8 @@ impl LlvmBackend {
                 let pay = format!("%up{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = lshr i64 {}, 8", indent, pay, val).ok();
                 self.let_bindings.insert(variant.clone(), pay.clone());
+                // Execute the continuation block (side effects only — value is discarded)
+                let _ = self.emit_expr(out, expr, indent);
                 writeln!(out, "{}br label %{}", indent, merge_l).ok();
                 writeln!(out, "{}{}:", indent, def_l).ok();
                 writeln!(out, "{}  unreachable", indent).ok();

@@ -64,6 +64,7 @@ pub struct TypeChecker {
     struct_field_visibility: HashMap<String, HashMap<String, Visibility>>,  // struct_name -> {field_name -> visibility}
     struct_files: HashMap<String, PathBuf>,  // struct_name -> defining file
     struct_parents: HashMap<String, Option<Type>>,  // struct_name -> parent type (for derivation upcast)
+    trigger_names: std::collections::HashSet<String>,  // names of declared @ link triggers (read-only)
 }
 
 impl TypeChecker {
@@ -87,6 +88,7 @@ impl TypeChecker {
             struct_field_visibility: HashMap::new(),
             struct_files: HashMap::new(),
             struct_parents: HashMap::new(),
+            trigger_names: std::collections::HashSet::new(),
         }
     }
 
@@ -625,6 +627,7 @@ impl TypeChecker {
                 }
                 TopLevel::Trigger(trg) => {
                     self.declare_variable(&trg.name, trg.ty.clone());
+                    self.trigger_names.insert(trg.name.clone());
                 }
                 TopLevel::ForeignBinding {
                     name,
@@ -1137,6 +1140,13 @@ impl TypeChecker {
                         if !self.check_geometry(&lhs_ty, &expr_ty) {
                             // Auto-declare implicit state variable on first &N = ... assignment
                             if let Expr::OwnedRef(var_name) = lhs {
+                                if self.trigger_names.contains(var_name.as_str()) {
+                                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                        expected: "regular variable".to_string(),
+                                        found: "trigger variable".to_string(),
+                                        context: format!("cannot assign to trigger '{}' — triggers are read-only", var_name),
+                                    });
+                                }
                                 if self.lookup_variable(var_name).is_none() {
                                     self.declare_variable(var_name, expr_ty.clone());
                                 } else {
@@ -1910,6 +1920,15 @@ Expr::ObjectLiteral(fields) => {
             (Type::Int, Type::Int) => int_type,
             (Type::Float, _) | (_, Type::Float) => float_type,
             (Type::String, Type::String) => Type::String,
+            (Type::String, other) | (other, Type::String) => {
+                let type_name = format!("{:?}", other);
+                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                    expected: "String".to_string(),
+                    found: type_name,
+                    context: "cannot perform arithmetic with String and non-String type".to_string(),
+                });
+                Type::Custom("type_error".to_string())
+            }
             _ => Type::Custom("unknown".to_string()),
         }
     }
