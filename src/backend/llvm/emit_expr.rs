@@ -127,6 +127,7 @@ impl LlvmBackend {
                         let addr_str = match &t.address {
                             crate::ast::LinkRef::Explicit(a) => a.to_string(),
                             crate::ast::LinkRef::Linked(s) => format!("@{}", s),
+                            _ => unreachable!(),
                 };
                         let addr_is_ptr = matches!(t.address, crate::ast::LinkRef::Linked(_));
                         self.emit_trg_load(out, indent, &v, &addr_str, addr_is_ptr, &t.ty);

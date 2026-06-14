@@ -415,6 +415,7 @@ impl VerilogGenerator {
                                 }
                             }
                         }
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -460,6 +461,7 @@ impl VerilogGenerator {
                     None
                 }
             }
+            _ => None,
         }
     }
 
@@ -469,6 +471,7 @@ impl VerilogGenerator {
             LinkRef::Linked(name) => {
                 self.linkage.as_ref().and_then(|l| l.resolve_sv(name))
             }
+            _ => None,
         }
     }
 
@@ -565,6 +568,7 @@ impl VerilogGenerator {
                             }
                         }
                     }
+                    _ => {}
                 }
             }
         }

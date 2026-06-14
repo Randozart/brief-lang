@@ -3205,9 +3205,38 @@ let span = self.current_span();
                             address = crate::ast::LinkRef::Linked(link_name);
                         }
                         Some(Ok(Token::Identifier(name))) => {
-                            // Backward compat: @ identifier as link reference
-                            address = crate::ast::LinkRef::Linked(name.clone());
-                            self.advance();
+                            match name.as_str() {
+                                "stdin" => {
+                                    self.advance();
+                                    self.expect(Token::Hash)?;
+                                    address = crate::ast::LinkRef::Stdin;
+                                }
+                                "timer" => {
+                                    self.advance();
+                                    self.expect(Token::Hash)?;
+                                    self.expect(Token::LParen)?;
+                                    let hz = match self.current_token() {
+                                        Some(Ok(Token::Integer(n))) => *n as u64,
+                                        _ => return self.spanned_err("Expected integer Hz for @ timer#(Hz)".to_string()),
+                                    };
+                                    self.advance();
+                                    self.expect(Token::RParen)?;
+                                    address = crate::ast::LinkRef::Timer(hz);
+                                }
+                                "signal" => {
+                                    self.advance();
+                                    self.expect(Token::Hash)?;
+                                    self.expect(Token::LParen)?;
+                                    let sig_name = self.expect_identifier()?;
+                                    self.expect(Token::RParen)?;
+                                    address = crate::ast::LinkRef::Signal(sig_name);
+                                }
+                                _ => {
+                                    // Backward compat: @ identifier as link reference
+                                    address = crate::ast::LinkRef::Linked(name.clone());
+                                    self.advance();
+                                }
+                            }
                         }
                         _ => return self.spanned_err("Expected integer address, 'link <name>', or / after '@'".to_string()),
                     }
@@ -3245,16 +3274,21 @@ let span = self.current_span();
 
         // @ link triggers are wake-capable by default - they monitor volatile globals
         // that change during sleep. MMIO triggers (Explicit) are natively wake-capable.
-        let mut is_wake = matches!(address, crate::ast::LinkRef::Linked(_));
+        // Built-in sources (Stdin, Timer, Signal) are wake-capable by design.
+        let is_builtin = matches!(address, crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_));
+        let mut is_wake = matches!(address, crate::ast::LinkRef::Linked(_)) || is_builtin;
         // #wake is retained for backward compat but is now the default for @ link
-        if let Some(Ok(Token::Hash)) = self.current_token() {
-            self.advance();
-            if let Some(Ok(Token::Identifier(n))) = self.current_token() {
-                if n == "wake" {
-                    self.advance();
-                    is_wake = true;
-                } else {
-                    return self.spanned_err("Expected 'wake' after '#' modifier".to_string());
+        // Built-in sources already consumed their # as part of the source syntax.
+        if !is_builtin {
+            if let Some(Ok(Token::Hash)) = self.current_token() {
+                self.advance();
+                if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                    if n == "wake" {
+                        self.advance();
+                        is_wake = true;
+                    } else {
+                        return self.spanned_err("Expected 'wake' after '#' modifier".to_string());
+                    }
                 }
             }
         }

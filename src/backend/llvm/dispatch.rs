@@ -35,6 +35,7 @@ impl LlvmBackend {
             let (addr_str, addr_is_ptr) = match &t.address {
                 crate::ast::LinkRef::Explicit(a) => (a.to_string(), false),
                 crate::ast::LinkRef::Linked(s) => (format!("@{}", s), true),
+                _ => unreachable!(),
             };
             self.emit_trg_load(out, "  ", &sz, &addr_str, addr_is_ptr, &t.ty);
             self.sampled_triggers.insert(tn.clone(), sz);
@@ -152,6 +153,7 @@ impl LlvmBackend {
             let (addr_str, addr_is_ptr) = match &t.address {
                 crate::ast::LinkRef::Explicit(a) => (a.to_string(), false),
                 crate::ast::LinkRef::Linked(s) => (format!("@{}", s), true),
+                _ => unreachable!(),
             };
             self.emit_trg_load(out, "  ", &sz, &addr_str, addr_is_ptr, &t.ty);
             self.sampled_triggers.insert(tn.clone(), sz);

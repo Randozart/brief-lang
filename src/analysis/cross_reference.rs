@@ -66,6 +66,7 @@ impl CrossReferenceValidator {
                         crate::ast::LinkRef::Linked(name) => {
                             used_addrs.insert(format!("link:{}", name));
                         }
+                        _ => {}
                     }
                 }
                 _ => {}

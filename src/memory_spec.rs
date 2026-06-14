@@ -118,6 +118,7 @@ impl MemorySpec {
         let address = match &trg.address {
             LinkRef::Explicit(addr) => Some(format!("0x{:X}", addr)),
             LinkRef::Linked(name) => Some(format!("link:{}", name)),
+            _ => None,
         };
         let bit_range = trg.bit_range.as_ref().map(|br| format_bit_range(br));
         let size = estimate_type_size(&trg.ty);

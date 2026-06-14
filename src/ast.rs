@@ -1285,6 +1285,9 @@ pub struct StateDecl {
 pub enum LinkRef {
     Explicit(u64),
     Linked(String),
+    Stdin,
+    Timer(u64),
+    Signal(String),
 }
 
 #[derive(Debug, Clone)]
