@@ -619,7 +619,7 @@ impl LlvmBackend {
                 self.ssa_old_int_regs.clear();
                 writeln!(out, "  br label %{}", skip_l).ok();
                 writeln!(out, "  {}:", done_l).ok();
-                writeln!(out, "  br label %done").ok();
+                writeln!(out, "  br label %{}", skip_l).ok();
                 writeln!(out, "  {}:", skip_l).ok();
             } else {
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();

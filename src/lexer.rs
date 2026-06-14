@@ -205,9 +205,11 @@ pub enum Token {
 
     #[token("some")]
     #[token("SOME")]
+    #[token("Some")]
     Some,
     #[token("none")]
     #[token("NONE")]
+    #[token("None")]
     None,
 
     #[token("true")]

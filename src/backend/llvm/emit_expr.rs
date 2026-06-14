@@ -1059,6 +1059,16 @@ impl LlvmBackend {
         }
     }
 
+    /// Check if an expression is a reference to a linked String trigger.
+    fn is_linked_string_trigger(&self, expr: &Expr) -> bool {
+        if let Expr::Identifier(name) = expr {
+            if let Some(trg) = self.triggers.get(name) {
+                return matches!(trg.ty, Type::String | Type::Data);
+            }
+        }
+        false
+    }
+
     pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, cond: &str) -> TypedRegister {
         // Peephole: constant-fold integer comparisons at compile time
         if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
@@ -1074,6 +1084,39 @@ impl LlvmBackend {
             let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = add i64 0, {}", indent, v, if result { 1 } else { 0 }).ok();
             return TypedRegister { name: v, ty: Type::Bool };
+        }
+        // String trigger vs string literal: compare against first byte
+        if let Expr::String(s) = r {
+            if self.is_linked_string_trigger(l) {
+                let a = self.emit_expr(out, l, indent);
+                let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
+                let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
+                let icmp_cond = match cond {
+                    "oeq" => "eq", "one" => "ne", "olt" => "slt",
+                    "ole" => "sle", "ogt" => "sgt", "oge" => "sge",
+                    _ => cond,
+                };
+                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a.name, byte_val).ok();
+                let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok();
+                return TypedRegister { name: v, ty: Type::Bool };
+            }
+        }
+        if let Expr::String(s) = l {
+            if self.is_linked_string_trigger(r) {
+                let b = self.emit_expr(out, r, indent);
+                let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
+                let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;
+                let icmp_cond = match cond {
+                    "oeq" => "eq", "one" => "ne", "olt" => "slt",
+                    "ole" => "sle", "ogt" => "sgt", "oge" => "sge",
+                    _ => cond,
+                };
+                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, b.name, byte_val).ok();
+                let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, c).ok();
+                return TypedRegister { name: v, ty: Type::Bool };
+            }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         let c = format!("%c{}", self.txn_counter); self.txn_counter += 1;

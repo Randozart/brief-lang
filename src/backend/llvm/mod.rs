@@ -315,7 +315,7 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type) -> &str {
         Type::Int | Type::UInt => "i64",
         Type::Float => "float",
         Type::Char => "i32",
-        Type::String | Type::Data => "i8*",
+        Type::String | Type::Data => "i8",
         _ => "i8", // fallback for unsupported types
     }
 }

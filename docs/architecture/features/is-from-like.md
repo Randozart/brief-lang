@@ -192,7 +192,10 @@ Recursive structural comparison:
 
 ### `Like`
 
+### `Like`
+
 - **Delegates to `emit_fcmp`** with `oeq` — handles integer and float equality with compile-time constant folding (for integer literals). For compound types, this is a structural approximation.
+- **String trigger special case**: When comparing a linked String trigger variable against a string literal, compares the trigger's byte value against the first byte of the literal (0 for `""`). This is handled before the general `emit_fcmp` logic.
 - **Future**: recursive field-by-field `icmp eq` chain, `and` all results.
 
 ## Contract/Guard Usage

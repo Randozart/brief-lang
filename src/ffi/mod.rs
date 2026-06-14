@@ -89,6 +89,9 @@ pub enum FfiError {
 
     /// Mapper not found
     MapperNotFound(String),
+
+    /// Metropolitan dispatch failure
+    MetropolitanDispatch(String),
 }
 
 impl std::fmt::Display for FfiError {
@@ -101,6 +104,7 @@ impl std::fmt::Display for FfiError {
             FfiError::ValidationError(err) => write!(f, "Binding validation error: {}", err),
             FfiError::PathResolutionError(err) => write!(f, "Path resolution error: {}", err),
             FfiError::MapperNotFound(name) => write!(f, "Mapper not found: {}", name),
+            FfiError::MetropolitanDispatch(msg) => write!(f, "Metropolitan dispatch: {}", msg),
         }
     }
 }

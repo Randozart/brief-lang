@@ -47,6 +47,7 @@ volatile int64_t   __timer_1hz     __attribute__((section("brief_trg")));
 volatile int64_t   __timer_100hz   __attribute__((section("brief_trg")));
 volatile char      __stdin_ready   __attribute__((section("brief_trg")));
 volatile char*     __stdin_buffer  __attribute__((section("brief_trg")));
+volatile char      __tty_read_key  __attribute__((section("brief_trg")));
 /* ===================================================================
  * 1.5 Environment Variable Reader
  *
@@ -162,6 +163,10 @@ void __rt_wait(void) {
             for (int i = 0; i < n; i++) {
                 if (events[i].data.fd == STDIN_FILENO
                     && (events[i].events & EPOLLIN)) {
+                    unsigned char ch = 0;
+                    if (read(STDIN_FILENO, &ch, 1) > 0) {
+                        __tty_read_key = (volatile char)ch;
+                    }
                     __stdin_ready = 1;
                     __io_pending = 1;
                 }
@@ -181,6 +186,10 @@ void __rt_wait(void) {
     struct timeval tv = {0, 100000};
     select(1, &rfds, NULL, NULL, &tv);
     if (FD_ISSET(STDIN_FILENO, &rfds)) {
+        unsigned char ch = 0;
+        if (read(STDIN_FILENO, &ch, 1) > 0) {
+            __tty_read_key = (volatile char)ch;
+        }
         __stdin_ready = 1;
         __io_pending = 1;
     }
@@ -200,6 +209,10 @@ void __rt_poll(void) {
             for (int i = 0; i < n; i++) {
                 if (events[i].data.fd == STDIN_FILENO
                     && (events[i].events & EPOLLIN)) {
+                    unsigned char ch = 0;
+                    if (read(STDIN_FILENO, &ch, 1) > 0) {
+                        __tty_read_key = (volatile char)ch;
+                    }
                     __stdin_ready = 1;
                     __io_pending = 1;
                 }
@@ -215,6 +228,10 @@ void __rt_poll(void) {
     struct timeval tv = {0, 0};
     select(1, &rfds, NULL, NULL, &tv);
     if (FD_ISSET(STDIN_FILENO, &rfds)) {
+        unsigned char ch = 0;
+        if (read(STDIN_FILENO, &ch, 1) > 0) {
+            __tty_read_key = (volatile char)ch;
+        }
         __stdin_ready = 1;
         __io_pending = 1;
     }
@@ -252,6 +269,10 @@ void __rt_wait(void) {
             for (int i = 0; i < n; i++) {
                 if (events[i].ident == STDIN_FILENO
                     && events[i].filter == EVFILT_READ) {
+                    unsigned char ch = 0;
+                    if (read(STDIN_FILENO, &ch, 1) > 0) {
+                        __tty_read_key = (volatile char)ch;
+                    }
                     __stdin_ready = 1;
                     __io_pending = 1;
                 }
@@ -266,6 +287,10 @@ void __rt_wait(void) {
     struct timeval tv = {1, 0};
     select(1, &rfds, NULL, NULL, &tv);
     if (FD_ISSET(STDIN_FILENO, &rfds)) {
+        unsigned char ch = 0;
+        if (read(STDIN_FILENO, &ch, 1) > 0) {
+            __tty_read_key = (volatile char)ch;
+        }
         __stdin_ready = 1;
         __io_pending = 1;
     }
@@ -280,6 +305,10 @@ void __rt_poll(void) {
             for (int i = 0; i < n; i++) {
                 if (events[i].ident == STDIN_FILENO
                     && events[i].filter == EVFILT_READ) {
+                    unsigned char ch = 0;
+                    if (read(STDIN_FILENO, &ch, 1) > 0) {
+                        __tty_read_key = (volatile char)ch;
+                    }
                     __stdin_ready = 1;
                     __io_pending = 1;
                 }
@@ -294,6 +323,10 @@ void __rt_poll(void) {
     struct timeval tv = {0, 0};
     select(1, &rfds, NULL, NULL, &tv);
     if (FD_ISSET(STDIN_FILENO, &rfds)) {
+        unsigned char ch = 0;
+        if (read(STDIN_FILENO, &ch, 1) > 0) {
+            __tty_read_key = (volatile char)ch;
+        }
         __stdin_ready = 1;
         __io_pending = 1;
     }
@@ -378,6 +411,7 @@ void __wait_for_event(void) {
 
 int64_t __print(const char* msg) {
     fputs(msg, stdout);
+    fflush(stdout);
     return 1;
 }
 
@@ -662,11 +696,8 @@ int64_t tty_size(void) {
     return (int64_t)(80 * 10000 + 24); // placeholder — real ioctl
 }
 
-int64_t tty_read_key(void) {
-    unsigned char ch = 0;
-    if (fread(&ch, 1, 1, stdin) > 0) return (int64_t)ch;
-    return 0;
-}
+// tty_read_key is now a volatile char global (see @ link globals above),
+// set by __rt_wait()/__rt_poll() when stdin data is available.
 
 /* ── Stdlib __ functions ──────────────────────────────────────────── */
 

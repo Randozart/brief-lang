@@ -1,0 +1,50 @@
+// Collections bindings (2026-05-27)
+// Licensed under Apache 2.0
+
+register 0x10 as "__filter" {
+    type: Data;
+    location: "collections::filter";
+    target: native;
+    description: "Filter a collection using a predicate";
+    check: [true];
+}
+
+register 0x11 as "__map" {
+    type: Data;
+    location: "collections::map";
+    target: native;
+    description: "Transform each element in a collection";
+    check: [true];
+}
+
+register 0x12 as "__reduce" {
+    type: Data;
+    location: "collections::reduce";
+    target: native;
+    description: "Reduce a collection to a single value";
+    check: [true];
+}
+
+register 0x13 as "__unique" {
+    type: Data;
+    location: "collections::unique";
+    target: native;
+    description: "Remove duplicate elements from a collection";
+    check: [true];
+}
+
+register 0x14 as "__sort" {
+    type: Data;
+    location: "collections::sort";
+    target: native;
+    description: "Sort a collection";
+    check: [true];
+}
+
+register 0x15 as "__reverse" {
+    type: Data;
+    location: "collections::reverse";
+    target: native;
+    description: "Reverse a collection";
+    check: [true];
+}

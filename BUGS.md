@@ -1385,3 +1385,41 @@ handle:
 **Lesson**: Auto-core injection is TypeChecker-gated. Only files that
 pass via `cargo run -- check lib/std/core/<file>.bv` should be added
 to the whitelist.
+
+---
+
+## 2026-06-14 — `__print` doesn't flush stdout
+
+**Issue**: ANSI escape sequences (`"\x1b[2J\x1b[H"`) with no `\n` never reach the terminal. Line-buffered stdout (`_IOLBF`) only flushes on `\n` or buffer-full.
+
+**Root Cause**: `lib/runtime/brief_rt.c:379-381`: `fputs(msg, stdout)` without `fflush(stdout)`.
+
+**Fix**: Added `fflush(stdout)` after `fputs`.
+
+**Lesson**: Any output function that may be called with non-newline-terminated data (especially ANSI escape codes) must explicitly flush.
+
+---
+
+## 2026-06-14 — `done_{name} → br label %done` exits main() after one reactive cycle
+
+**Issue**: The first reactive txn whose precondition is false causes `main()` to return immediately. The program processes one cycle then exits.
+
+**Root Cause**: `loop_engine.rs:622`: `done_{name}: br label %done` branches to the program exit label instead of the next txn's continuation (`s_{name}`).
+
+**Fix**: Changed to `br label %s_{name}` so that when a txn's precondition is false, execution continues to the next txn's precondition check.
+
+**Lesson**: In the `emit_ssa_main` loop, `done_` labels are per-txn skip-exits. They should chain to the next txn (`s_`), not terminate the program. The `done` (global exit) label is only for the exit condition check after all txns.
+
+---
+
+## 2026-06-14 — `@ link` for String loads pointer address, not content
+
+**Issue**: `trg keypress: String @ link tty_read_key` always evaluates `keypress != ""` as true. The trigger fires unconditionally, appending garbage to the input buffer on every tick.
+
+**Root Cause**: `trg_llvm_storage_ty` returned `"i8*"` for String. The backend emitted `load volatile i8*, i8** @sym; ptrtoint i64` — loading a **pointer address** (function entry point for C functions) and comparing it against the empty string literal's address. These addresses are never equal.
+
+**Fix**: Changed String `@ link` storage to `"i8"` (single byte). Backend now emits `load volatile i8, i8* @sym; zext i8 to i64`. Added special case in `emit_fcmp` to compare linked String triggers against string literals by first-byte value (0 for `""`). C runtime provides `volatile char __tty_read_key` set by epoll/kqueue stdin handlers.
+
+**Files**: `mod.rs:318`, `emit_toplevel.rs:99-103`, `emit_expr.rs` (`emit_fcmp`), `loop_engine.rs:622`, `brief_rt.c`
+
+**Lesson**: `@ link` should load raw byte values from the linked address, consistent with all other types. The `i8*` storage type was inconsistent with the byte-oriented nature of the trigger mechanism. String triggers now compare by first-byte value, not by pointer identity.

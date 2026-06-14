@@ -97,10 +97,10 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
             }
             Type::String | Type::Data => {
-                let pc = self.txn_counter; self.txn_counter += 1;
-                let p = format!("%tp{}", pc);
-                writeln!(out, "{}{} = ptrtoint {} {} to i64", indent, p, store_ty, raw).ok();
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, p).ok();
+                let zc = self.txn_counter; self.txn_counter += 1;
+                let z = format!("%tz{}", zc);
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, raw).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
             }
             _ => {
                 let zc = self.txn_counter; self.txn_counter += 1;

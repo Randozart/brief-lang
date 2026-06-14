@@ -112,3 +112,42 @@ produced invalid LLVM IR that `opt` or `llc` rejected.
 (4,280-line IR) with zero SSA violations. 777 compiler tests pass. All 30
 benchmarks compile, all 7 runtime benchmarks produce correct output, and
 `clang -O3` accepts the generated IR.
+
+## `@ link` String Semantics (Fixed 2026-06-14)
+
+### Problem
+`@ link` for String types declared `external global i8*` and emitted
+`load volatile i8*, i8** @sym; ptrtoint i64; add i64 0, %ptr`. This loaded
+a **pointer address**, not string content. For C functions mapped as linked
+globals (e.g., `tty_read_key`), the GOT entry contained the function's entry
+point — comparing this against the empty string literal's address always
+produced "not empty," making the trigger always fire.
+
+### Fix
+`@ link String` now uses **single-byte storage** (`i8` instead of `i8*`):
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| Storage type | `"i8*"` | `"i8"` |
+| Load op | `load volatile i8*, i8** @sym` | `load volatile i8, i8* @sym` |
+| Convert | `ptrtoint i8* %val to i64` | `zext i8 %val to i64` |
+| Value meaning | Address of external symbol | First byte of data at symbol |
+
+### Comparison with string literals
+When a linked String trigger variable is compared against a string literal
+(e.g., `keypress != ""`), the backend's `emit_fcmp` now checks for this pattern
+and compares the trigger's byte value against the first byte of the literal
+(0 for `""`). This ensures `keypress != ""`, `keypress == "\n"`, etc. all
+compile to correct integer comparisons.
+
+### C runtime
+The linked global must be a `volatile char` variable in the C runtime.
+The runtime's `__rt_wait()`/`__rt_poll()` read stdin data into the global
+via epoll/kqueue events.
+
+### Files changed
+- `src/backend/llvm/mod.rs:318` — storage type
+- `src/backend/llvm/emit_toplevel.rs:99-103` — load+zext
+- `src/backend/llvm/emit_expr.rs` — `emit_fcmp` special case
+- `src/backend/llvm/loop_engine.rs:622` — loop exit fix
+- `lib/runtime/brief_rt.c` — `__tty_read_key` global + epoll reads, `__print` flush
