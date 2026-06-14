@@ -1296,6 +1296,7 @@ pub struct Constant {
 pub struct Import {
     pub items: Vec<ImportItem>,
     pub path: Vec<String>,
+    pub is_magic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1607,6 +1608,47 @@ impl Program {
         self.items.push(init_txn);
     }
 
+    /// Inject Option<T> and Result<T, E> enum definitions into the program.
+    /// These are required by the FFI system and always available.
+    pub fn synthesize_builtin_types(&mut self) {
+        // Only inject if not already present
+        let has_option = self.items.iter().any(|item| {
+            matches!(item, TopLevel::Enum(e) if e.name == "Option")
+        });
+        let has_result = self.items.iter().any(|item| {
+            matches!(item, TopLevel::Enum(e) if e.name == "Result")
+        });
+
+        // enum Option<T> { Some(T), None }
+        if !has_option {
+            self.items.insert(0, TopLevel::Enum(EnumDefinition {
+                name: "Option".to_string(),
+                type_params: vec![TypeParam { name: "T".to_string(), bounds: vec![] }],
+                variants: vec![
+                    EnumVariant::Tuple("Some".to_string(), vec![Type::TypeVar("T".to_string())]),
+                    EnumVariant::Unit("None".to_string()),
+                ],
+                span: None,
+            }));
+        }
+
+        // enum Result<T, E> { Ok(T), Err(E) }
+        if !has_result {
+            self.items.insert(0, TopLevel::Enum(EnumDefinition {
+                name: "Result".to_string(),
+                type_params: vec![
+                    TypeParam { name: "T".to_string(), bounds: vec![] },
+                    TypeParam { name: "E".to_string(), bounds: vec![] },
+                ],
+                variants: vec![
+                    EnumVariant::Tuple("Ok".to_string(), vec![Type::TypeVar("T".to_string())]),
+                    EnumVariant::Tuple("Err".to_string(), vec![Type::TypeVar("E".to_string())]),
+                ],
+                span: None,
+            }));
+        }
+    }
+
     fn find_unique_booted_name(&self) -> String {
         let existing: std::collections::HashSet<&str> = self.items.iter().filter_map(|item| {
             match item {
@@ -1802,5 +1844,84 @@ mod kani_full_tests {
         assert_eq!(e.as_string(), None);
         let f = Expr::Integer(0);
         assert_eq!(f.as_string(), None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_synthesize_builtin_types_basic() {
+        let mut program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        program.synthesize_builtin_types();
+        let enum_names: Vec<&str> = program.items.iter().filter_map(|item| {
+            if let TopLevel::Enum(e) = item { Some(e.name.as_str()) } else { None }
+        }).collect();
+        assert!(enum_names.contains(&"Option"), "Option should be injected");
+        assert!(enum_names.contains(&"Result"), "Result should be injected");
+    }
+
+    #[test]
+    fn test_synthesize_builtin_types_no_duplicate() {
+        let mut program = Program {
+            items: vec![TopLevel::Enum(EnumDefinition {
+                name: "Option".to_string(),
+                type_params: vec![TypeParam { name: "T".to_string(), bounds: vec![] }],
+                variants: vec![
+                    EnumVariant::Tuple("Some".to_string(), vec![Type::TypeVar("T".to_string())]),
+                    EnumVariant::Unit("None".to_string()),
+                ],
+                span: None,
+            })],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        program.synthesize_builtin_types();
+        let count = program.items.iter().filter(|item| {
+            if let TopLevel::Enum(e) = item { e.name == "Option" } else { false }
+        }).count();
+        assert_eq!(count, 1, "Option should not be duplicated");
+    }
+
+    #[test]
+    fn test_option_variants_correct() {
+        let mut program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        program.synthesize_builtin_types();
+        let option = program.items.iter().find_map(|item| {
+            if let TopLevel::Enum(e) = item { if e.name == "Option" { Some(e) } else { None } } else { None }
+        }).unwrap();
+        assert_eq!(option.variants.len(), 2);
+        assert_eq!(option.type_params.len(), 1);
+        assert_eq!(option.type_params[0].name, "T");
+    }
+
+    #[test]
+    fn test_result_variants_correct() {
+        let mut program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        program.synthesize_builtin_types();
+        let result = program.items.iter().find_map(|item| {
+            if let TopLevel::Enum(e) = item { if e.name == "Result" { Some(e) } else { None } } else { None }
+        }).unwrap();
+        assert_eq!(result.variants.len(), 2);
+        assert_eq!(result.type_params.len(), 2);
+        assert_eq!(result.type_params[0].name, "T");
+        assert_eq!(result.type_params[1].name, "E");
     }
 }

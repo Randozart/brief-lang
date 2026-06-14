@@ -22,7 +22,7 @@
 
 use crate::ast::{Import, ImportItem, Program, StrictMode, TopLevel, Expr};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use crate::dbrief::v2 as dbrief_v2;
 
 /// Recursively fill in the `path` field of any `Expr::DbvlTable` in an expression tree.
@@ -41,6 +41,9 @@ pub struct ImportResolver {
     search_paths: Vec<PathBuf>,
     strict_mode: StrictMode,
     root_path: PathBuf,
+    stdlib_path: Option<PathBuf>,
+    use_stdlib: bool,
+    core_imported: bool,
 }
 
 impl ImportResolver {
@@ -50,6 +53,9 @@ impl ImportResolver {
             search_paths: vec![PathBuf::from("lib"), PathBuf::from("imports"), PathBuf::from(".")],
             strict_mode: StrictMode::Off,
             root_path: PathBuf::from("."),
+            stdlib_path: None,
+            use_stdlib: true,
+            core_imported: false,
         }
     }
 
@@ -59,8 +65,71 @@ impl ImportResolver {
         self
     }
 
+    /// Set the stdlib root path for import# resolution
+    pub fn with_stdlib_path(mut self, path: Option<PathBuf>) -> Self {
+        self.stdlib_path = path;
+        self
+    }
+
+    /// Enable or disable auto-import of std/core/* (default: enabled)
+    pub fn with_use_stdlib(mut self, use_it: bool) -> Self {
+        self.use_stdlib = use_it;
+        self
+    }
+
     pub fn add_search_path(&mut self, path: PathBuf) {
         self.search_paths.push(path);
+    }
+
+    /// Resolve the stdlib root path, trying multiple sources in order:
+    /// 1. Explicitly configured path (from --stdlib-path)
+    /// 2. BRIEF_STDLIB_PATH env var
+    /// 3. Executable-relative (dev layout: target/release/ -> ../../lib/)
+    /// 4. root_path/lib/ (project-local)
+    fn resolve_stdlib_root(&self) -> Option<PathBuf> {
+        // 1. Explicitly configured
+        if let Some(ref path) = self.stdlib_path {
+            if path.exists() {
+                return Some(path.clone());
+            }
+        }
+
+        // 2. Environment variable
+        if let Ok(env_path) = std::env::var("BRIEF_STDLIB_PATH") {
+            let p = PathBuf::from(env_path);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+
+        // 3. Executable-relative (dev layout)
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                // Development: brief-compiler/target/release/ -> ../../lib/
+                let dev_p = exe_dir.join("../../lib/");
+                if dev_p.exists() {
+                    return Some(dev_p);
+                }
+                // Alternate: brief-compiler/target/debug/ -> ../../lib/
+                let debug_p = exe_dir.join("../../lib/");
+                if debug_p.exists() {
+                    return Some(debug_p);
+                }
+                // Installed: ~/.local/bin/ -> ~/.local/share/brief/
+                let installed_p = exe_dir.join("../share/brief/");
+                if installed_p.join("std/core").exists() {
+                    return Some(installed_p);
+                }
+            }
+        }
+
+        // 4. Project-local lib/
+        let local = self.root_path.join("lib");
+        if local.exists() {
+            return Some(local);
+        }
+
+        None
     }
 
     pub fn resolve_imports(
@@ -77,6 +146,41 @@ impl ImportResolver {
         }
 
         let mut items = program.items.clone();
+
+        // Auto-import known-safe std/core modules once
+        // NOTE: Some stdlib files use `uni`/`<-` syntax that the current
+        // Rust parser doesn't support (pre-existing limitation). Only
+        // files that parse correctly are included here.
+        if self.use_stdlib && !self.core_imported {
+            self.core_imported = true;
+            let has_core_imports = items.iter().any(|item| {
+                if let TopLevel::Import(imp) = item {
+                    imp.is_magic
+                        && imp.path.len() >= 2
+                        && imp.path[0] == "std"
+                        && imp.path[1] == "core"
+                } else {
+                    false
+                }
+            });
+            if !has_core_imports {
+                // Files that parse correctly with the current Rust parser
+                // Only files that BOTH parse AND pass the TypeChecker without errors.
+                // Other core files (bits, char, collections, hashmap, hashset, etc.)
+                // use features the Rust TypeChecker doesn't fully support yet.
+                let safe_core_modules = [
+                    "ptr.bv",
+                ];
+                for module in safe_core_modules {
+                    items.insert(0, TopLevel::Import(Import {
+                        is_magic: true,
+                        path: vec!["std".to_string(), "core".to_string(), module.to_string()],
+                        items: vec![],
+                    }));
+                }
+            }
+        }
+
         let mut index = 0;
 
         while index < items.len() {
@@ -117,7 +221,7 @@ impl ImportResolver {
         source_file: &PathBuf,
     ) -> Result<Program, String> {
         // Skip .dbvs schema imports - they're handled by schema validation, not as Brief modules
-        let path_str = if import.path.is_empty() {
+        if import.path.is_empty() {
             return Ok(Program {
                 items: vec![],
                 comments: vec![],
@@ -130,13 +234,26 @@ impl ImportResolver {
                 out_pragmas: vec![],
             default_sig_modifier: None,
             });
-        } else {
-            // Check if this is a file-based import (ends with .css, .svg, etc.)
+        }
+
+        // Handle glob expansion (* or ** in last path segment)
+        if let Some(last) = import.path.last() {
+            if last == "*" || last == "**" {
+                return self.resolve_glob(import, source_file);
+            }
+        }
+
+        // Magic imports (import#) resolve against stdlib path, not project paths
+        if import.is_magic {
+            return self.resolve_magic_import(import, source_file);
+        }
+
+        // Non-magic imports: build path string for resolution
+        let path_str = {
             let last_component = import.path.last().unwrap();
             if last_component.ends_with(".css") || last_component.ends_with(".svg") || last_component.ends_with(".dbv") || last_component.ends_with(".dbvs") || last_component.ends_with(".dbvl") {
                 import.path.join("/")
             } else {
-                // Use "/" directly — eliminates the ".join(".")" / ".replace('.', '/')" round trip.
                 import.path.join("/")
             }
         };
@@ -481,6 +598,157 @@ impl ImportResolver {
         self.filter_items(&resolved, &sed_names, &import.items)
     }
 
+    /// Resolve a magic import (import#) — resolves the path relative to the stdlib root.
+    fn resolve_magic_import(
+        &mut self,
+        import: &Import,
+        _source_file: &PathBuf,
+    ) -> Result<Program, String> {
+        let stdlib_root = self.resolve_stdlib_root().ok_or_else(|| {
+            format!(
+                "Cannot resolve import# '{}': no stdlib path configured. \
+                 Use --stdlib-path or set BRIEF_STDLIB_PATH.",
+                import.path.join("/")
+            )
+        })?;
+
+        let relative_path: PathBuf = import.path.iter().collect();
+        let full_path = stdlib_root.join(&relative_path);
+
+        // Try with .bv extension if the path doesn't have one
+        let candidate = if full_path.extension().is_some() {
+            full_path.clone()
+        } else {
+            full_path.with_extension("bv")
+        };
+
+        // Use a distinct cache key for magic imports to avoid collisions
+        let cache_key = format!("magic:{}", import.path.join("/"));
+        if let Some((cached, sed_names)) = self.loaded_modules.get(&cache_key) {
+            return self.filter_items(cached, sed_names, &import.items);
+        }
+
+        if !candidate.exists() {
+            return Err(format!(
+                "Cannot find module '{}' at stdlib path: {}",
+                import.path.join("/"),
+                candidate.display()
+            ));
+        }
+
+        let source = std::fs::read_to_string(&candidate)
+            .map_err(|e| format!("Failed to read '{}': {}", candidate.display(), e))?;
+
+        let mut parser = crate::parser::Parser::new(&source);
+        let imported_program = parser
+            .parse()
+            .map_err(|e| format!("Failed to parse '{}': {}", candidate.display(), e))?;
+        let sed_names = parser.take_sed_item_names();
+
+        let resolved = self.resolve_imports(&imported_program, &candidate)?;
+
+        self.loaded_modules
+            .insert(cache_key, (resolved.clone(), sed_names.clone()));
+
+        self.filter_items(&resolved, &sed_names, &import.items)
+    }
+
+    /// Expand a glob pattern (* or **) into individual Import nodes.
+    /// *  — all .bv files in the matched directory
+    /// ** — all .bv files recursively from the matched directory
+    fn resolve_glob(
+        &mut self,
+        import: &Import,
+        source_file: &PathBuf,
+    ) -> Result<Program, String> {
+        let is_recursive = import.path.last().map(|s| s == "**").unwrap_or(false);
+
+        // Determine base directory
+        let base_dir = if import.is_magic {
+            let stdlib_root = self.resolve_stdlib_root().ok_or_else(|| {
+                format!(
+                    "Cannot resolve import# glob '{}': no stdlib path configured.",
+                    import.path.join("/")
+                )
+            })?;
+            let path_prefix: PathBuf = import.path[..import.path.len() - 1].iter().collect();
+            stdlib_root.join(path_prefix)
+        } else {
+            // Non-magic glob: resolve relative to project search paths
+            let module_path = import.path[..import.path.len() - 1].join("/");
+            let is_relative = module_path.starts_with("./") || module_path.starts_with("../");
+            let source_dir = if is_relative {
+                source_file
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."))
+            } else {
+                self.root_path.clone()
+            };
+            let mut found = None;
+            for search_dir in &self.search_paths {
+                let candidate = source_dir.join(search_dir).join(&module_path);
+                if candidate.exists() {
+                    found = Some(candidate);
+                    break;
+                }
+            }
+            found.unwrap_or_else(|| source_dir.join(&module_path))
+        };
+
+        // Collect .bv files
+        let mut entries: Vec<PathBuf> = Vec::new();
+        if is_recursive {
+            collect_bv_files_recursive(&base_dir, &mut entries)
+                .map_err(|e| format!("Error reading directory '{}': {}", base_dir.display(), e))?;
+        } else {
+            if let Ok(rd) = std::fs::read_dir(&base_dir) {
+                for entry in rd.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.is_file()
+                        && path.extension().map(|ext| ext == "bv").unwrap_or(false)
+                    {
+                        entries.push(path);
+                    }
+                }
+            }
+        }
+        entries.sort();
+
+        // Generate wildcard Import nodes for each file
+        let path_prefix: Vec<String> = import.path[..import.path.len() - 1].to_vec();
+        let items: Vec<TopLevel> = entries
+            .into_iter()
+            .map(|path| {
+                let rel_path = path
+                    .strip_prefix(&base_dir)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string();
+                let mut path_components = path_prefix.clone();
+                path_components.extend(rel_path.split('/').map(|s| s.to_string()));
+                TopLevel::Import(Import {
+                    is_magic: import.is_magic,
+                    path: path_components,
+                    items: vec![],
+                })
+            })
+            .collect();
+
+        Ok(Program {
+            items,
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: self.strict_mode,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        })
+    }
+
     fn filter_items(&self, program: &Program, sed_names: &[String], items: &[ImportItem]) -> Result<Program, String> {
         let item_names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
 
@@ -542,6 +810,22 @@ impl ImportResolver {
     }
 }
 
+/// Recursively collect all .bv files under a directory.
+fn collect_bv_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                collect_bv_files_recursive(&path, files)?;
+            } else if path.extension().map(|ext| ext == "bv").unwrap_or(false) {
+                files.push(path);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Keep only the first occurrence of each named top-level item.
 /// When the same module is imported through multiple paths (direct + transitive),
 /// its items appear multiple times in `items`. This dedup eliminates duplicates.
@@ -591,7 +875,7 @@ mod tests {
 
     fn import_program(path: Vec<&str>, items: Vec<ImportItem>) -> Program {
         Program {
-            items: vec![TopLevel::Import(Import { path: path.iter().map(|s| s.to_string()).collect(), items })],
+            items: vec![TopLevel::Import(Import { is_magic: false, path: path.iter().map(|s| s.to_string()).collect(), items })],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
@@ -601,7 +885,7 @@ mod tests {
     #[test]
     fn test_resolve_empty_import() {
         let prog = import_program(vec![], vec![]);
-        let mut resolver = ImportResolver::new();
+        let mut resolver = ImportResolver::new().with_use_stdlib(false);
         let result = resolver.resolve_imports(&prog, &PathBuf::from("main.bv")).unwrap();
         assert_eq!(result.items.len(), 0);
     }
@@ -613,7 +897,7 @@ mod tests {
         fs::write(&bv_path, "defn hello -> Int { term 42; };").unwrap();
 
         let prog = import_program(vec!["test_module"], vec![]);
-        let mut resolver = ImportResolver::new();
+        let mut resolver = ImportResolver::new().with_use_stdlib(false);
         resolver.add_search_path(dir.path().to_path_buf());
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
@@ -630,7 +914,7 @@ mod tests {
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let mut resolver = ImportResolver::new();
+        let mut resolver = ImportResolver::new().with_use_stdlib(false);
         resolver.add_search_path(dir.path().to_path_buf());
         let prog = import_program(vec!["cache_test"], vec![]);
         resolver.resolve_imports(&prog, &src).unwrap();
@@ -647,7 +931,7 @@ mod tests {
         fs::write(&src, "").unwrap();
 
         let prog = import_program(vec!["styles.m.css"], vec![]);
-        let mut resolver = ImportResolver::new();
+        let mut resolver = ImportResolver::new().with_use_stdlib(false);
         resolver.add_search_path(dir.path().to_path_buf());
         let result = resolver.resolve_imports(&prog, &src).unwrap();
         assert!(result.items.iter().any(|i| matches!(i, TopLevel::Stylesheet(_))));
@@ -661,7 +945,7 @@ mod tests {
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let mut resolver = ImportResolver::new().with_strict_mode(true);
+        let mut resolver = ImportResolver::new().with_strict_mode(true).with_use_stdlib(false);
         resolver.add_search_path(dir.path().to_path_buf());
         let prog = import_program(vec!["strict_test"], vec![]);
         let result = resolver.resolve_imports(&prog, &src).unwrap();
@@ -676,7 +960,7 @@ mod tests {
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let mut resolver = ImportResolver::new();
+        let mut resolver = ImportResolver::new().with_use_stdlib(false);
         resolver.add_search_path(dir.path().to_path_buf());
         let prog = import_program(vec!["filter_mod"], vec![ImportItem { name: "keep".into(), alias: None }]);
         let result = resolver.resolve_imports(&prog, &src).unwrap();
@@ -695,7 +979,7 @@ mod tests {
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let mut resolver = ImportResolver::new();
+        let mut resolver = ImportResolver::new().with_use_stdlib(false);
         resolver.add_search_path(dir.path().to_path_buf());
         let prog = import_program(vec!["full_mod"], vec![]);
         let result = resolver.resolve_imports(&prog, &src).unwrap();
@@ -706,9 +990,110 @@ mod tests {
     #[test]
     fn test_resolve_module_not_found() {
         let prog = import_program(vec!["nonexistent_mod"], vec![]);
-        let mut resolver = ImportResolver::new();
+        let mut resolver = ImportResolver::new().with_use_stdlib(false);
         let src = PathBuf::from("/tmp/main.bv");
         let result = resolver.resolve_imports(&prog, &src);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_magic_import_resolution() {
+        let dir = TempDir::new().unwrap();
+        let stdlib_root = dir.path().join("lib");
+        let core_dir = stdlib_root.join("std").join("core");
+        fs::create_dir_all(&core_dir).unwrap();
+        fs::write(core_dir.join("test_magic.bv"), "defn greet -> String { term \"hello\"; };").unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let prog = import_program(vec!["std", "core", "test_magic.bv"], vec![]);
+        // Mark as magic by converting to Import with is_magic: true
+        let prog = Program {
+            items: vec![TopLevel::Import(Import {
+                is_magic: true,
+                path: vec!["std".to_string(), "core".to_string(), "test_magic.bv".to_string()],
+                items: vec![],
+            })],
+            ..prog
+        };
+        let mut resolver = ImportResolver::new()
+            .with_use_stdlib(false)
+            .with_stdlib_path(Some(stdlib_root));
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        let defns: Vec<&TopLevel> = result.items.iter().filter(|i| matches!(i, TopLevel::Definition(_))).collect();
+        assert_eq!(defns.len(), 1);
+        if let Some(TopLevel::Definition(d)) = defns.first() {
+            assert_eq!(d.name, "greet");
+        }
+    }
+
+    #[test]
+    fn test_glob_import_non_recursive() {
+        let dir = TempDir::new().unwrap();
+        let stdlib_root = dir.path().join("lib");
+        let core_dir = stdlib_root.join("std").join("core");
+        fs::create_dir_all(&core_dir).unwrap();
+        fs::write(core_dir.join("a.bv"), "defn a_fn -> Int { term 1; };").unwrap();
+        fs::write(core_dir.join("b.bv"), "defn b_fn -> Int { term 2; };").unwrap();
+        // Should not be picked up by non-recursive glob
+        let sub_dir = core_dir.join("sub");
+        fs::create_dir_all(&sub_dir).unwrap();
+        fs::write(sub_dir.join("c.bv"), "defn c_fn -> Int { term 3; };").unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let prog = import_program(vec!["std", "core", "*"], vec![]);
+        let prog = Program {
+            items: vec![TopLevel::Import(Import {
+                is_magic: true,
+                path: vec!["std".to_string(), "core".to_string(), "*".to_string()],
+                items: vec![],
+            })],
+            ..prog
+        };
+        let mut resolver = ImportResolver::new()
+            .with_use_stdlib(false)
+            .with_stdlib_path(Some(stdlib_root));
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        let defns: Vec<&TopLevel> = result.items.iter().filter(|i| matches!(i, TopLevel::Definition(_))).collect();
+        assert_eq!(defns.len(), 2, "non-recursive glob should pick up a.bv and b.bv, but not sub/c.bv");
+    }
+
+    #[test]
+    fn test_auto_core_injection() {
+        let dir = TempDir::new().unwrap();
+        let stdlib_root = dir.path().join("lib");
+        let core_dir = stdlib_root.join("std").join("core");
+        fs::create_dir_all(&core_dir).unwrap();
+        fs::write(core_dir.join("ptr.bv"), "defn p_fn -> Int { term 0; };").unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let prog = import_program(vec![], vec![]);
+        let mut resolver = ImportResolver::new()
+            .with_use_stdlib(true)
+            .with_stdlib_path(Some(stdlib_root));
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        // Auto-core injection resolves imports, so the result should contain
+        // the defn from ptr.bv but no remaining Import items
+        let defns: Vec<&TopLevel> = result.items.iter().filter(|i| matches!(i, TopLevel::Definition(_))).collect();
+        assert!(!defns.is_empty(), "should have auto-injected definitions");
+        if let Some(TopLevel::Definition(d)) = defns.first() {
+            assert_eq!(d.name, "p_fn");
+        }
+    }
+
+    #[test]
+    fn test_auto_core_disabled() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("main.bv");
+        fs::write(&src, "").unwrap();
+
+        let prog = import_program(vec![], vec![]);
+        let mut resolver = ImportResolver::new()
+            .with_use_stdlib(false);
+        let result = resolver.resolve_imports(&prog, &src).unwrap();
+        let imports: Vec<&TopLevel> = result.items.iter().filter(|i| matches!(i, TopLevel::Import(_))).collect();
+        assert!(imports.is_empty(), "no imports should be injected when use_stdlib is false");
     }
 }

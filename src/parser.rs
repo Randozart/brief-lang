@@ -1074,6 +1074,14 @@ impl<'a> Parser<'a> {
     fn parse_import(&mut self) -> Result<TopLevel, SyntaxError> {
         self.expect(Token::Import)?;
 
+        // import# — compiler-relative path resolution (resolved against BRIEF_STDLIB_PATH)
+        let is_magic = if matches!(self.current_token(), Some(Ok(Token::Hash))) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
         let mut items = if let Some(Ok(Token::LBrace)) = self.current_token() {
             self.advance();
             let mut items = Vec::new();
@@ -1182,7 +1190,7 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(Token::Semicolon)?;
-        Ok(TopLevel::Import(Import { items, path }))
+        Ok(TopLevel::Import(Import { items, path, is_magic }))
     }
 
     fn parse_signature(&mut self) -> Result<Signature, SyntaxError> {
@@ -8229,6 +8237,63 @@ mod kani_full_tests {
             }
         } else {
             panic!("Expected Transaction");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_magic() {
+        let s = r#"import# "std/core/ptr.bv"; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "import# should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert!(imp.is_magic, "import# should set is_magic = true");
+            assert_eq!(imp.path.join("/"), "std/core/ptr.bv");
+        } else {
+            panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_normal() {
+        let s = r#"import "test_module"; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "import (without #) should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert!(!imp.is_magic, "import without # should set is_magic = false");
+            assert_eq!(imp.path.join("/"), "test_module");
+        } else {
+            panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_magic_with_items() {
+        let s = r#"import# { greet } from "std/core/test.bv"; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "import# with items should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert!(imp.is_magic, "import# should set is_magic = true");
+            assert!(!imp.items.is_empty(), "should have import items");
+            assert_eq!(imp.items[0].name, "greet");
+        } else {
+            panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_magic_glob() {
+        let s = r#"import# "std/core/*"; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "import# with glob should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert!(imp.is_magic, "import# should set is_magic = true");
+            assert_eq!(imp.path.join("/"), "std/core/*");
+        } else {
+            panic!("Expected Import");
         }
     }
 

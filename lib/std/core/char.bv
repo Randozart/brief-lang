@@ -1,0 +1,214 @@
+// Char - Unicode codepoint operations
+// Tier 2: String & Text Processing
+
+// ===== NATIVE DEFINITIONS =====
+
+// Conversion
+defn char_to_int(c: Char) [true][term >= 0] -> Int {
+    term c as Int;
+};
+
+defn int_to_char(n: Int) [n >= 0 && n <= 0x10FFFF][true] -> Char {
+    term n as Char;
+};
+
+defn char_to_string(c: Char) [true][term :> Size == 1] -> String {
+    let sb = new_builder();
+    sb = sb.append_char(c);
+    term sb.to_string();
+};
+
+// Classification
+defn is_whitespace(c: Char) [true][term == true || term == false] -> Bool {
+    [c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'] {
+        term true;
+    };
+    term false;
+};
+
+defn is_digit(c: Char) [true][term == true || term == false] -> Bool {
+    [c >= '0' && c <= '9'] {
+        term true;
+    };
+    term false;
+};
+
+defn is_hex_digit(c: Char) [true][term == true || term == false] -> Bool {
+    [is_digit(c)] {
+        term true;
+    };
+    [(c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')] {
+        term true;
+    };
+    term false;
+};
+
+defn is_oct_digit(c: Char) [true][term == true || term == false] -> Bool {
+    [c >= '0' && c <= '7'] {
+        term true;
+    };
+    term false;
+};
+
+defn is_alpha(c: Char) [true][term == true || term == false] -> Bool {
+    [(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')] {
+        term true;
+    };
+    term false;
+};
+
+defn is_alphanumeric(c: Char) [true][term == true || term == false] -> Bool {
+    [is_alpha(c) || is_digit(c)] {
+        term true;
+    };
+    term false;
+};
+
+defn is_upper(c: Char) [true][term == true || term == false] -> Bool {
+    [c >= 'A' && c <= 'Z'] {
+        term true;
+    };
+    term false;
+};
+
+defn is_lower(c: Char) [true][term == true || term == false] -> Bool {
+    [c >= 'a' && c <= 'z'] {
+        term true;
+    };
+    term false;
+};
+
+defn is_symbol(c: Char) [true][term == true || term == false] -> Bool {
+    // Basic ASCII symbols
+    [(c >= '!' && c <= '/') || (c >= ':' && c <= '@') || 
+     (c >= '[' && c <= '`') || (c >= '{' && c <= '~')] {
+        term true;
+    };
+    term false;
+};
+
+defn is_punctuation(c: Char) [true][term == true || term == false] -> Bool {
+    [(c >= '!' && c <= '/') || (c >= ':' && c <= '@') || 
+     (c >= '[' && c <= '`') || (c >= '{' && c <= '~')] {
+        term true;
+    };
+    term false;
+};
+
+defn is_control(c: Char) [true][term == true || term == false] -> Bool {
+    [c < ' ' || c == '\x7F'] {
+        term true;
+    };
+    term false;
+};
+
+defn is_ascii(c: Char) [true][term == true || term == false] -> Bool {
+    [c <= '\x7F'] {
+        term true;
+    };
+    term false;
+};
+
+// Case conversion
+defn to_upper(c: Char) [true][term >= 'A'] -> Char {
+    [is_lower(c)] {
+        // Convert lowercase to uppercase
+        let code = char_to_int(c);
+        let upper_code = code - 32;  // ASCII difference
+        term int_to_char(upper_code);
+    };
+    term c;
+};
+
+defn to_lower(c: Char) [true][term <= 'z'] -> Char {
+    [is_upper(c)] {
+        // Convert uppercase to lowercase
+        let code = char_to_int(c);
+        let lower_code = code + 32;  // ASCII difference
+        term int_to_char(lower_code);
+    };
+    term c;
+};
+
+// Digit conversion
+defn digit_to_int(c: Char) [is_digit(c)][term >= 0 && term <= 9] -> Int {
+    let code = char_to_int(c);
+    term code - char_to_int('0');
+};
+
+defn int_to_digit(n: Int) [n >= 0 && n <= 9][true] -> Char {
+    let code = char_to_int('0') + n;
+    term int_to_char(code);
+};
+
+defn hex_digit_to_int(c: Char) [is_hex_digit(c)][term >= 0 && term <= 15] -> Int {
+    [is_digit(c)] {
+        term digit_to_int(c);
+    };
+    [c >= 'a' && c <= 'f'] {
+        let code = char_to_int(c);
+        term code - char_to_int('a') + 10;
+    };
+    [c >= 'A' && c <= 'F'] {
+        let code = char_to_int(c);
+        term code - char_to_int('A') + 10;
+    };
+    term 0;
+};
+
+defn int_to_hex_digit(n: Int) [n >= 0 && n <= 15][true] -> Char {
+    [n < 10] {
+        term int_to_digit(n);
+    };
+    let code = char_to_int('a') + (n - 10);
+    term int_to_char(code);
+};
+
+// Comparison
+defn char_eq(a: Char, b: Char) [true][term == true || term == false] -> Bool {
+    term a == b;
+};
+
+defn char_lt(a: Char, b: Char) [true][term == true || term == false] -> Bool {
+    term char_to_int(a) < char_to_int(b);
+};
+
+defn char_le(a: Char, b: Char) [true][term == true || term == false] -> Bool {
+    term char_to_int(a) <= char_to_int(b);
+};
+
+defn char_gt(a: Char, b: Char) [true][term == true || term == false] -> Bool {
+    term char_to_int(a) > char_to_int(b);
+};
+
+defn char_ge(a: Char, b: Char) [true][term == true || term == false] -> Bool {
+    term char_to_int(a) >= char_to_int(b);
+};
+
+// Unicode checks
+defn is_unicode_scalar(c: Char) [true][term == true || term == false] -> Bool {
+    [c >= '\u{0000}' && c <= '\u{D7FF}'] {
+        term true;
+    };
+    [c >= '\u{E000}' && c <= '\u{10FFFF}'] {
+        term true;
+    };
+    term false;
+};
+
+defn is_surrogate(c: Char) [true][term == true || term == false] -> Bool {
+    [c >= '\u{D800}' && c <= '\u{DFFF}'] {
+        term true;
+    };
+    term false;
+};
+
+defn is_valid_codepoint(n: Int) [true][term == true || term == false] -> Bool {
+    [n >= 0 && n <= 0x10FFFF] {
+        [n >= 0xD800 && n <= 0xDFFF] {
+            term false;  // Surrogates are invalid
+        };
+        term true;
+    };
+    term false;
+};

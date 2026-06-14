@@ -1,0 +1,97 @@
+// StringBuilder - Efficient string building
+// Avoids O(n²) concatenation by using internal buffer
+
+// ===== STRUCT DEFINITION =====
+
+struct StringBuilder {
+    buffer: String
+};
+
+// ===== CONSTRUCTION =====
+
+defn new_builder() -> StringBuilder [true][term :> Size == 0] {
+    term StringBuilder { buffer: "" };
+};
+
+defn with_capacity(capacity: Int) -> StringBuilder [capacity > 0][term :> Size == 0] {
+    term StringBuilder { buffer: "" };
+};
+
+// ===== APPEND OPERATIONS =====
+
+defn append_char(builder: StringBuilder, c: Char) 
+    [true][term :> Size == builder :> Size + 1] 
+    -> StringBuilder 
+{
+    term StringBuilder { buffer: builder.buffer + c };
+};
+
+defn append_str(builder: StringBuilder, s: String) 
+    [true][term :> Size == builder :> Size + s :> Size] 
+    -> StringBuilder 
+{
+    term StringBuilder { buffer: builder.buffer + s };
+};
+
+defn append_int(builder: StringBuilder, n: Int) 
+    [true][term :> Size >= builder :> Size] 
+    -> StringBuilder 
+{
+    term StringBuilder { buffer: builder.buffer + n };
+};
+
+defn append_bool(builder: StringBuilder, b: Bool) 
+    [true][term :> Size >= builder :> Size] 
+    -> StringBuilder 
+{
+    [b] {
+        term StringBuilder { buffer: builder.buffer + "true" };
+    };
+    term StringBuilder { buffer: builder.buffer + "false" };
+};
+
+defn append_float(builder: StringBuilder, f: Float) 
+    [true][term :> Size >= builder :> Size] 
+    -> StringBuilder 
+{
+    term StringBuilder { buffer: builder.buffer + f };
+};
+
+// ===== CONVERSION =====
+
+defn to_string(builder: StringBuilder) 
+    [true][term :> Size == builder :> Size] 
+    -> String 
+{
+    term builder.buffer;
+};
+
+defn clear(builder: StringBuilder) 
+    [true][term :> Size == 0] 
+    -> StringBuilder 
+{
+    term StringBuilder { buffer: "" };
+};
+
+// ===== METADATA =====
+
+defn len(builder: StringBuilder) 
+    [true][term >= 0] 
+    -> Int 
+{
+    term builder.buffer :> Size;
+};
+
+defn is_empty(builder: StringBuilder) 
+    [true][term == true || term == false] 
+    -> Bool 
+{
+    term builder.buffer :> Size == 0;
+};
+
+defn capacity(builder: StringBuilder) 
+    [true][term >= builder :> Size] 
+    -> Int 
+{
+    term builder.buffer :> Size;
+};

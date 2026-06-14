@@ -1,0 +1,86 @@
+// Standard Time Library
+//
+// Functions marked with 'frgn' require foreign implementation.
+// Functions with 'defn' are implemented natively in Brief.
+
+// ===== PURE FOREIGN (requires system time) =====
+
+// Current time
+frgn __now() -> Result<Int, TimeError>;
+frgn __now_millis() -> Result<Int, TimeError>;
+frgn __now_micros() -> Result<Int, TimeError>;
+// Time component extraction
+frgn __year(timestamp: Int) -> Result<Int, TimeError>;
+frgn __month(timestamp: Int) -> Result<Int, TimeError>;
+frgn __day(timestamp: Int) -> Result<Int, TimeError>;
+frgn __hour(timestamp: Int) -> Result<Int, TimeError>;
+frgn __minute(timestamp: Int) -> Result<Int, TimeError>;
+frgn __second(timestamp: Int) -> Result<Int, TimeError>;
+frgn __weekday(timestamp: Int) -> Result<Int, TimeError>;
+frgn __yearday(timestamp: Int) -> Result<Int, TimeError>;
+// Time creation
+frgn __timestamp(year: Int, month: Int, day: Int) -> Result<Int, TimeError>;
+frgn __timestamp_full(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Result<Int, TimeError>;
+// Formatting
+frgn __format_timestamp(timestamp: Int, format: String) -> Result<String, TimeError>;
+frgn __format_date(timestamp: Int) -> Result<String, TimeError>;
+frgn __format_time(timestamp: Int) -> Result<String, TimeError>;
+frgn __format_datetime(timestamp: Int) -> Result<String, TimeError>;
+// Parsing
+frgn __parse_timestamp(s: String) -> Result<Int, TimeError>;
+frgn __parse_datetime(s: String) -> Result<Int, TimeError>;
+// ===== NATIVE DEFINITIONS =====
+
+// Duration helpers - native arithmetic
+defn duration_seconds(secs: Int) [[term == secs] -> Int {
+  term secs;
+};
+
+defn duration_millis(ms: Int) [[term == ms] -> Int {
+  term ms;
+};
+
+defn duration_minutes(mins: Int) [[term == mins * 60] -> Int {
+  term mins * 60;
+};
+
+defn duration_hours(hours: Int) [[term == hours * 3600] -> Int {
+  term hours * 3600;
+};
+
+defn duration_days(days: Int) [[term == days * 86400] -> Int {
+  term days * 86400;
+};
+
+// Time arithmetic - native
+defn add_seconds(timestamp: Int, secs: Int) [true][term == timestamp + secs] -> Int {
+  term timestamp + secs;
+};
+
+defn add_minutes(timestamp: Int, mins: Int) [true][term == timestamp + mins * 60] -> Int {
+  term timestamp + mins * 60;
+};
+
+defn add_hours(timestamp: Int, hours: Int) [true][term == timestamp + hours * 3600] -> Int {
+  term timestamp + hours * 3600;
+};
+
+defn add_days(timestamp: Int, days: Int) [true][term == timestamp + days * 86400] -> Int {
+  term timestamp + days * 86400;
+};
+
+// Time differences - native
+defn diff_seconds(t1: Int, t2: Int) [true][term == t1 - t2] -> Int {
+  term t1 - t2;
+};
+
+defn diff_days(t1: Int, t2: Int) [[term == (t1 - t2) / 86400] -> Int {
+  term (t1 - t2) / 86400;
+};
+
+// Constants - these could be frgn or defn
+frgn __seconds_per_minute() -> Result<Int, TimeError>;
+frgn __seconds_per_hour() -> Result<Int, TimeError>;
+frgn __seconds_per_day() -> Result<Int, TimeError>;
+frgn __millis_per_second() -> Result<Int, TimeError>;
+frgn __micros_per_second() -> Result<Int, TimeError>;

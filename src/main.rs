@@ -801,7 +801,9 @@ fn run_check(
         println!("[Resolver] Resolving imports...");
     }
     let mut import_resolver = import_resolver::ImportResolver::new()
-        .with_strict_mode(strict);
+        .with_strict_mode(strict)
+        .with_use_stdlib(!no_stdlib)
+        .with_stdlib_path(stdlib_path.clone());
     let mut program = match import_resolver.resolve_imports(&program, file_path) {
         Ok(resolved) => resolved,
         Err(e) => {
@@ -810,6 +812,7 @@ fn run_check(
         }
     };
 
+    program.synthesize_builtin_types();
     program.synthesize_init_txn();
 
     if verbose {
@@ -965,7 +968,7 @@ fn run_build(
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone());
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1393,7 +1396,9 @@ fn run_arm(
         .parse()
         .map_err(|e| format!("Brief parse error: {}", e))?;
 
-    let mut import_resolver = import_resolver::ImportResolver::new();
+    let mut import_resolver = import_resolver::ImportResolver::new()
+        .with_use_stdlib(!no_stdlib)
+        .with_stdlib_path(stdlib_path.clone());
     let mut program = import_resolver
         .resolve_imports(&program, file_path)
         .map_err(|e| format!("Import error: {}", e))?;
@@ -1466,7 +1471,9 @@ fn run_rust(
         .map_err(|e| format!("Brief parse error: {}", e))?;
 
     let mut import_resolver = import_resolver::ImportResolver::new()
-        .with_strict_mode(strict);
+        .with_strict_mode(strict)
+        .with_use_stdlib(!no_stdlib)
+        .with_stdlib_path(stdlib_path.clone());
     let mut program = import_resolver
         .resolve_imports(&program, file_path)
         .map_err(|e| format!("Import error: {}", e))?;
@@ -1541,6 +1548,12 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
     } else {
         "json"
     };
+    let no_stdlib = args.contains(&"--no-stdlib".to_string()) || args.contains(&"--no-std".to_string());
+    let stdlib_path = args
+        .iter()
+        .position(|a| a == "--stdlib-path")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from);
 
     // Parse arguments
     let mut i = 2;
@@ -1664,7 +1677,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
     let result: Option<PathBuf> = match backend.as_str() {
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, None) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, None, no_stdlib, stdlib_path.clone()) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -2118,6 +2131,8 @@ fn run_llvm_compile(
     explain: bool,
     prod_mode: bool,
     simplify_budget: Option<u64>,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -2130,11 +2145,14 @@ fn run_llvm_compile(
         .map_err(|e| format!("Parse error: {}", e))?;
 
     let mut import_resolver = import_resolver::ImportResolver::new()
-        .with_strict_mode(_strict);
+        .with_strict_mode(_strict)
+        .with_use_stdlib(!no_stdlib)
+        .with_stdlib_path(stdlib_path);
     let mut program = import_resolver
         .resolve_imports(&program, file_path)
         .map_err(|e| format!("Import error: {}", e))?;
 
+    program.synthesize_builtin_types();
     program.synthesize_init_txn();
 
     let mut schema_aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
@@ -3840,7 +3858,7 @@ fn main() {
 
     let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
     let explain = args.contains(&"--explain".to_string());
-    let no_stdlib = args.contains(&"--no-stdlib".to_string());
+    let no_stdlib = args.contains(&"--no-stdlib".to_string()) || args.contains(&"--no-std".to_string());
     let emit_memory_spec = args.contains(&"--emit-memory-spec".to_string());
     let memory_spec_format = if args.contains(&"--memory-spec-toml".to_string()) {
         "toml"
@@ -4048,7 +4066,7 @@ fn main() {
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, prod_mode, simplify_budget);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone());
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);

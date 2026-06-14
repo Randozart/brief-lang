@@ -1,0 +1,40 @@
+// OUT Library — Observable Output Signatures
+// Tier 8: Infrastructure
+//
+// Provides sig #out wrappers around raw FFI functions. Every OUT__ function
+// has #out baked in — the compiler WILL NOT eliminate these calls.
+//
+// Usage:
+//   import { OUT__print_int, OUT__println } from "std/out.bv";
+//   OUT__print_int(42);
+//   OUT__println("hello");
+//
+import "link/brief_rt.c";
+
+// ===== UNDERLYING FFI (neutral) =====
+// Raw FFI calls with no sig, no #out. These CAN be eliminated by the optimizer.
+// The OUT__ wrappers below add #out to prevent elimination.
+
+frgn __print_int(n: Int) -> Bool ;
+frgn __putchar(c: Int) -> Int ;
+frgn __print(msg: String) -> Bool ;
+frgn __print_float(f: Float) -> Bool ;
+frgn __exit() -> Void ;
+
+// ===== OUTPUT-MARKED SIGNATURES =====
+// sig #out — WILL NOT be eliminated by dead-code elimination.
+// Each wraps a raw FFI call with observable output marking.
+
+sig #out OUT__print_int(n: Int) -> Bool from __print_int;
+sig #out OUT__putchar(c: Int) -> Int from __putchar;
+sig #out OUT__print(msg: String) -> Bool from __print;
+sig #out OUT__print_float(f: Float) -> Bool from __print_float;
+sig #out OUT__exit() -> Bool from __exit;
+
+// ===== CONVENIENCE WRAPPERS =====
+
+sig #out OUT__println(msg: String) -> Bool from __print;
+// Appends newline before calling __print
+defn OUT__println(msg: String) -> Bool [true][term == true] {
+    term __print(msg + "\n");
+};

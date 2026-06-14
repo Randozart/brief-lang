@@ -684,14 +684,6 @@ static char*   brief_str_to_c(int64_t bstr);
 static int64_t cstr_to_brief(const char* s);
 static int64_t buf_to_brief(const char* buf, int64_t len);
 
-/* ── Console ──────────────────────────────────────────────────────── */
-
-int64_t print(int64_t msg) {
-    char* s = brief_str_to_c(msg);
-    if (s) { int64_t r = __print(s); free(s); return r; }
-    return 0;
-}
-
 /* ── Terminal ─────────────────────────────────────────────────────── */
 
 int64_t tty_raw_mode(int64_t enable) {
@@ -709,24 +701,30 @@ int64_t tty_read_key(void) {
     return 0;
 }
 
-/* ── String operations ────────────────────────────────────────────── */
+/* ── Stdlib __ functions ──────────────────────────────────────────── */
 
-int64_t string_trim(int64_t s_val) {
+int64_t __trim_left(int64_t s_val) {
     char* s = brief_str_to_c(s_val);
     if (!s) return 0;
-    // Trim leading whitespace
     char* start = s;
     while (*start && (unsigned char)*start <= 32) start++;
-    // Trim trailing whitespace
-    char* end = start + strlen(start);
-    while (end > start && (unsigned char)*(end - 1) <= 32) end--;
-    *end = '\0';
     int64_t result = cstr_to_brief(start);
     free(s);
     return result;
 }
 
-int64_t string_to_lower(int64_t s_val) {
+int64_t __trim_right(int64_t s_val) {
+    char* s = brief_str_to_c(s_val);
+    if (!s) return 0;
+    char* end = s + strlen(s);
+    while (end > s && (unsigned char)*(end - 1) <= 32) end--;
+    *end = '\0';
+    int64_t result = cstr_to_brief(s);
+    free(s);
+    return result;
+}
+
+int64_t __to_lower(int64_t s_val) {
     char* s = brief_str_to_c(s_val);
     if (!s) return 0;
     for (char* p = s; *p; p++) *p = (char)tolower((unsigned char)*p);
@@ -735,68 +733,61 @@ int64_t string_to_lower(int64_t s_val) {
     return result;
 }
 
-int64_t string_contains(int64_t s_val, int64_t sub_val) {
-    char* s = brief_str_to_c(s_val);
-    char* sub = brief_str_to_c(sub_val);
-    if (!s || !sub) { free(s); free(sub); return 0; }
-    int64_t r = strstr(s, sub) ? 1 : 0;
-    free(s); free(sub);
+int64_t __contains_at(int64_t haystack_val, int64_t needle_val, int64_t start_val) {
+    char* haystack = brief_str_to_c(haystack_val);
+    char* needle = brief_str_to_c(needle_val);
+    if (!haystack || !needle) { free(haystack); free(needle); return 0; }
+    int64_t r = (strstr(haystack + (size_t)start_val, needle) != NULL) ? 1 : 0;
+    free(haystack); free(needle);
     return r;
 }
 
-int64_t string_starts_with(int64_t s_val, int64_t prefix_val) {
+int64_t __find_from(int64_t s_val, int64_t needle_val, int64_t start_val) {
     char* s = brief_str_to_c(s_val);
-    char* prefix = brief_str_to_c(prefix_val);
-    if (!s || !prefix) { free(s); free(prefix); return 0; }
-    size_t plen = strlen(prefix);
-    int64_t r = strncmp(s, prefix, plen) == 0 ? 1 : 0;
-    free(s); free(prefix);
+    char* needle = brief_str_to_c(needle_val);
+    if (!s || !needle) { free(s); free(needle); return -1; }
+    char* found = strstr(s + (size_t)start_val, needle);
+    int64_t r = found ? (int64_t)(found - s) : -1;
+    free(s); free(needle);
     return r;
 }
 
-int64_t string_split(int64_t s_val) {
-    return s_val; // placeholder — needs list allocation
-}
-
-int64_t substring(int64_t s_val) {
-    return s_val; // placeholder
-}
-
-int64_t int_to_string(int64_t n) {
+int64_t __int_to_str(int64_t n) {
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
     return buf_to_brief(buf, (int64_t)len);
 }
 
-/* ── JSON ─────────────────────────────────────────────────────────── */
-
-int64_t json_parse(int64_t s_val) {
-    return s_val; // placeholder — needs real JSON parser
-}
-
-int64_t json_is_array(int64_t v_val) {
-    (void)v_val;
-    return 0;
-}
-
-int64_t json_length(int64_t v_val) {
-    (void)v_val;
-    return 0;
-}
-
-int64_t json_get(int64_t v_val, int64_t key_val) {
-    (void)v_val; (void)key_val;
-    return 0;
-}
-
-int64_t json_get_by_index(int64_t v_val, int64_t i_val) {
-    (void)v_val; (void)i_val;
-    return 0;
+int64_t __splitn(int64_t s_val, int64_t delim_val, int64_t n_val) {
+    (void)n_val;
+    char* s = brief_str_to_c(s_val);
+    char* delim = brief_str_to_c(delim_val);
+    if (!s || !delim) { free(s); free(delim); return 0; }
+    // Count tokens
+    int64_t count = 1;
+    for (char* p = s; *p; p++) {
+        if (strncmp(p, delim, strlen(delim)) == 0) { count++; p += strlen(delim) - 1; }
+    }
+    // Allocate list header: [data_ptr, length, elem0, elem1, ...]
+    int64_t* list = malloc(sizeof(int64_t) * (2 + count));
+    list[0] = (int64_t)(list + 2);  // data pointer
+    list[1] = count;
+    int64_t idx = 0;
+    char* tok = strtok(s, delim);
+    while (tok && idx < count) {
+        list[2 + idx] = cstr_to_brief(tok);
+        idx++;
+        tok = strtok(NULL, delim);
+    }
+    int64_t result = (int64_t)list;
+    free(s); free(delim);
+    return result;
 }
 
 /* ── Process ──────────────────────────────────────────────────────── */
 
-int64_t exec_cmd(int64_t cmd_val) {
+int64_t __spawn_with_output(int64_t cmd_val, int64_t args_val) {
+    (void)args_val;
     char* cmd = brief_str_to_c(cmd_val);
     if (!cmd) return 0;
     FILE* fp = popen(cmd, "r");
@@ -812,6 +803,53 @@ int64_t exec_cmd(int64_t cmd_val) {
         return cstr_to_brief(buf);
     }
     return status == 0 ? cstr_to_brief("") : 0;
+}
+
+/* ── Officina-local frgn (JSON, substring) ────────────────────────── */
+
+int64_t substring(int64_t s_val) {
+    char* s = brief_str_to_c(s_val);
+    if (!s) return 0;
+    int64_t len = (int64_t)strlen(s);
+    // List header: [data_ptr, length, char0, char1, ...]
+    // Each char is stored as int64_t with the byte in the low 8 bits
+    int64_t* list = malloc(sizeof(int64_t) * (size_t)(2 + len));
+    list[0] = (int64_t)(list + 2);
+    list[1] = len;
+    for (int64_t i = 0; i < len; i++) {
+        list[2 + i] = (int64_t)(unsigned char)s[i];
+    }
+    free(s);
+    return (int64_t)list;
+}
+
+int64_t json_parse(int64_t s_val) {
+    // Minimal JSON object parser — returns list of (key, value) pairs
+    char* s = brief_str_to_c(s_val);
+    if (!s) return 0;
+    return (int64_t)s; // placeholder — full JSON parser needed
+}
+
+int64_t json_is_array(int64_t v_val) {
+    (void)v_val;
+    return 0;
+}
+
+int64_t json_length(int64_t v_val) {
+    (void)v_val;
+    return 0;
+}
+
+int64_t json_get(int64_t v_val, int64_t key_val) {
+    (void)v_val;
+    (void)key_val;
+    return 0;
+}
+
+int64_t json_get_by_index(int64_t v_val, int64_t i_val) {
+    (void)v_val;
+    (void)i_val;
+    return 0;
 }
 
 /* ===================================================================

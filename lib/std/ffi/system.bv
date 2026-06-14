@@ -1,0 +1,45 @@
+// System Triggers — Standard OS-level event triggers for Regular Brief
+// These triggers map to OS events (signals, stdin, filesystem, network)
+// and provide a reactive I/O model without blocking calls.
+//
+// All trigger declarations come from std/brief_rt.bv.
+// import "link/brief_rt.c" in that file tells the compiler driver
+// to compile and link the runtime automatically — no CLI flags needed.
+//
+// Import this file:
+//   import system from "std/system.bv";
+//
+// Then use in reactive transactions:
+//   rct txn handle_sigint [sigint]] { ... term; };
+
+import {
+    sigint, sigterm, sighup,
+    stdin_ready, stdin_line,
+    clock_1hz, clock_100hz
+} from "std/brief_rt.bv";
+
+// ===== HELPER TRANSACTIONS =====
+
+// Reactive stdin reader — accumulates lines from stdin
+let stdin_buffer: List<String> = [];
+
+rct txn read_stdin_line [sigint == false && stdin_ready == true]] {
+    &stdin_buffer = stdin_buffer + [stdin_line];
+    term;
+};
+
+// Reactive signal handler — sets state on signals
+let shutting_down: Bool = false;
+
+rct txn handle_sigint [sigint == true]] {
+    &shutting_down = true;
+    term;
+};
+
+// Reactive timer counter
+let tick_count: Int = 0;
+
+rct txn count_ticks [clock_tick_1hz > 0]] {
+    &tick_count = tick_count + 1;
+    term;
+};

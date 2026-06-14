@@ -1335,3 +1335,53 @@ at the merge point or be evaluated before the guard branch. The
 save/restore approach works because it effectively discards then-path
 bindings at the merge point, forcing re-evaluation in the correct
 dominating block.
+
+## 2026-06-14 — Stdlib files fail to parse with Rust parser (pre-existing)
+
+**Issue**: When implementing auto-core import (`import#` / `--no-std`),
+discovered that most Brief stdlib files in `lib/std/` fail to parse
+with the Rust parser. The auto-core whitelist currently includes only
+`ptr.bv`.
+
+**Root Cause**: Multiple Brief language features used in stdlib files
+are not supported by the Rust parser. Examples:
+- `uni` keyword (unification operator) used in `options.bv`, `result.bv`,
+  `hashmap.bv`, `hashset.bv` and others
+- `term &x <- y;` collection mutation syntax used in many files
+- `defn` with generic `T` type parameters without explicit bounds
+- Some syntax constructs parse but then fail the TypeChecker
+
+**Fix**: Isolated the auto-core import to `ptr.bv` only. Option + Result
+are now hardcoded via `Program::synthesize_builtin_types()` in `ast.rs`.
+
+**Lesson**: Brief's Rust parser and TypeChecker have known gaps vs the
+interpreter. Auto-core must be conservative — only inject files that
+pass both parsing AND typechecking. Gradual expansion can happen as the
+parser improves.
+
+## 2026-06-14 — Parseable core files fail TypeChecker
+
+**Issue**: Several `std/core/*.bv` files parse correctly but fail the
+TypeChecker:
+
+| File | Error |
+|------|-------|
+| `bits.bv` | Cast-as-int type mismatch (`as Int`) |
+| `char.bv` | Projection (`:> Popcount`) type mismatch |
+| `collections.bv` | Collection mutation (`&list <- item`) not a recognized statement type |
+| `string_builder.bv` | Same collection mutation pattern, not a recognized statement |
+
+**Root Cause**: While these files are syntactically valid Brief, the
+Rust TypeChecker (which predates several language features) does not
+handle:
+1. Type casts via `as Type` syntax
+2. Projection operator with non-trivial targets like `Popcount`
+3. Arrow-mutation `<-` as a statement (parser may handle,
+   but TypeChecker doesn't)
+
+**Fix**: Excluded these files from auto-core whitelist. They remain in
+`lib/std/core/` for interpreter-based workflows.
+
+**Lesson**: Auto-core injection is TypeChecker-gated. Only files that
+pass via `cargo run -- check lib/std/core/<file>.bv` should be added
+to the whitelist.

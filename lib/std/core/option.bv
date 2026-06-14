@@ -1,0 +1,70 @@
+enum Option<T> {
+    Some(T),
+    None
+};
+
+defn is_some<T>(opt: Option<T>) -> Bool {
+    uni opt(Some(_)) = { term true; };
+    uni opt(None) = { term false; };
+    term false;
+};
+defn is_none<T>(opt: Option<T>) -> Bool {
+    uni opt(Some(_)) = { term false; };
+    uni opt(None) = { term true; };
+    term false;
+};
+defn unwrap<T>(opt: Option<T>) -> T {
+    uni opt(Some(v)) = { term v; };
+};
+defn unwrap_or<T>(opt: Option<T>, default: T) -> T {
+    uni opt(Some(v)) = { term v; };
+    uni opt(None) = { term default; };
+    term default;
+};
+defn unwrap_or_else<T>(opt: Option<T>, fallback: () -> T) -> T {
+    uni opt(Some(v)) = { term v; };
+    uni opt(None) = { term fallback(); };
+    term fallback();
+};
+defn map<T, U>(opt: Option<T>, f: T -> U) -> Option<U> {
+    uni opt(Some(v)) = { term Some(f(v)); };
+    uni opt(None) = { term None; };
+    term None;
+};
+defn and_then<T, U>(opt: Option<T>, f: T -> Option<U>) -> Option<U> {
+    uni opt(Some(v)) = { term f(v); };
+    uni opt(None) = { term None; };
+    term None;
+};
+defn or_else<T>(opt: Option<T>, fallback: () -> Option<T>) -> Option<T> {
+    uni opt(Some(v)) = { term Some(v); };
+    uni opt(None) = { term fallback(); };
+    term fallback();
+};
+defn filter<T>(opt: Option<T>, pred: T -> Bool) -> Option<T> {
+    uni opt(Some(v)) = {
+        [pred(v)] { term Some(v); };
+        term None;
+    };
+    uni opt(None) = { term None; };
+    term None;
+};
+defn zip<T, U>(a: Option<T>, b: Option<U>) -> Option<(T, U)> {
+    uni a(Some(x)) = {
+        uni b(Some(y)) = { term Some((x, y)); };
+        uni b(None) = { term None; };
+        term None;
+    };
+    uni a(None) = { term None; };
+    term None;
+};
+defn ok_or<T, E>(opt: Option<T>, err: E) -> Result<T, E> {
+    uni opt(Some(v)) = { term Ok(v); };
+    uni opt(None) = { term Err(err); };
+    term Err(err);
+};
+defn ok_or_else<T, E>(opt: Option<T>, err_fn: () -> E) -> Result<T, E> {
+    uni opt(Some(v)) = { term Ok(v); };
+    uni opt(None) = { term Err(err_fn()); };
+    term Err(err_fn());
+};

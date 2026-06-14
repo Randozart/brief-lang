@@ -1,0 +1,141 @@
+// Standard JSON Library
+//
+// Functions marked with 'frgn' require foreign implementation.
+// Functions with 'defn' are implemented natively in Brief.
+//
+// Note: JSON requires a Data type which is inherently foreign,
+// but we can provide helper functions natively.
+
+// ===== PURE FOREIGN (requires Data type implementation) =====
+
+// Parse & Serialize
+frgn __parse(s: String) -> Result<Data, JsonError>;
+frgn __stringify(data: Data) -> Result<String, JsonError>;
+frgn __to_json(data: Data) -> Result<String, JsonError>;
+frgn __from_json(s: String) -> Result<Data, JsonError>;
+// Type Check
+frgn __is_null(data: Data) -> Result<Bool, JsonError>;
+frgn __is_bool(data: Data) -> Result<Bool, JsonError>;
+frgn __is_number(data: Data) -> Result<Bool, JsonError>;
+frgn __is_string(data: Data) -> Result<Bool, JsonError>;
+frgn __is_array(data: Data) -> Result<Bool, JsonError>;
+frgn __is_object(data: Data) -> Result<Bool, JsonError>;
+// Get Values
+frgn __get_bool(data: Data, key: String) -> Result<Bool, JsonError>;
+frgn __get_number(data: Data, key: String) -> Result<Float, JsonError>;
+frgn __get_string(data: Data, key: String) -> Result<String, JsonError>;
+frgn __get_array(data: Data, key: String) -> Result<Data, JsonError>;
+frgn __get_object(data: Data, key: String) -> Result<Data, JsonError>;
+// Array Access
+frgn __get_index(data: Data, index: Int) -> Result<Data, JsonError>;
+frgn __array_len(data: Data) -> Result<Int, JsonError>;
+frgn __array_push(data: Data, item: Data) -> Result<Data, JsonError>;
+frgn __array_pop(data: Data) -> Result<Data, JsonError>;
+frgn __array_shift(data: Data) -> Result<Data, JsonError>;
+// Object Operations
+frgn __keys(data: Data) -> Result<List<String>, JsonError>
+frgn __values(data: Data) -> Result<List<Data>, JsonError>
+frgn __has_key(data: Data, key: String) -> Result<Bool, JsonError>;
+// Create Values
+frgn __null() -> Result<Data, JsonError>;
+frgn __bool_val(b: Bool) -> Result<Data, JsonError>;
+frgn __number_val(n: Float) -> Result<Data, JsonError>;
+frgn __string_val(s: String) -> Result<Data, JsonError>;
+frgn __array_val(list: List<Data>) -> Result<Data, JsonError>;
+frgn __object_val(map: Data) -> Result<Data, JsonError>;
+// Merge
+frgn __merge(a: Data, b: Data) -> Result<Data, JsonError>;
+// ===== NATIVE DEFINITIONS =====
+
+// Pretty Print - simple version
+defn pretty_print(data: Data) [[term :> Size >= 0] -> String {
+  term __stringify(data);
+};
+
+// Helper: Check if data exists and is not null
+defn exists(data: Data) [true][term == true || term == false] -> Bool {
+  term !__is_null(data);
+};
+
+// Helper: Get value with default
+defn get_or_default(data: Data, key: String, default: String) [true][term :> Size >= 0] -> String {
+  [__has_key(data, key)] {
+    term __get_string(data, key);
+  };
+  term default;
+};
+
+// Helper: Get number with default
+defn get_number_or(data: Data, key: String, default: Float) [true][term >= 0.0 || term < 0.0] -> Float {
+  [__has_key(data, key) && __is_number(__get_object(data, key))] {
+    term __get_number(data, key);
+  };
+  term default;
+};
+
+// Helper: Get number with default (Int)
+defn get_int_or(data: Data, key: String, default: Int) [true][term == default || term != default] -> Int {
+  [__has_key(data, key) && __is_number(__get_object(data, key))] {
+    let n: Float = __get_number(data, key);
+    term n;
+  };
+  term default;
+};
+
+// Helper: Get bool with default
+defn get_bool_or(data: Data, key: String, default: Bool) [true][term == true || term == false] -> Bool {
+  [__has_key(data, key) && __is_bool(__get_object(data, key))] {
+    term __get_bool(data, key);
+  };
+  term default;
+};
+
+// Helper: Safe array access with bounds check
+defn array_get(data: Data, index: Int) [index >= 0][term.is_null() || true] -> Data {
+  [index < 0 || index >= __array_len(data)] {
+    term __null();
+  };
+  term __get_index(data, index);
+};
+
+// Helper: Array to list of strings (if strings)
+txn array_to_strings_loop(data: Data, len: Int, result: List<String>, i: Int)
+    [i < len][i == len] -> List<String>
+{
+  let item: Data = __get_index(data, i);
+  [__is_string(item)] {
+    &result = result + [__get_string(data, "__item")];
+  };
+  &i = i + 1;
+  term result;
+};
+
+defn array_to_strings(data: Data) [__is_array(data)][term :> Size == __array_len(data)] -> List<String> {
+  let len: Int = __array_len(data);
+  [len == 0] {
+    term [];
+  };
+  term array_to_strings_loop(data, len, [], 0);
+};
+
+// Helper: Get array item count safely
+defn array_count(data: Data) [__is_array(data)][term >= 0] -> Int {
+  term __array_len(data);
+};
+
+// Helper: Check if array is empty
+defn array_empty(data: Data) [__is_array(data)][term == true || term == false] -> Bool {
+  term __array_len(data) == 0;
+};
+
+// Helper: Object to list count
+defn object_count(data: Data) [__is_object(data)][term >= 0] -> Int {
+  let k: List<String> = __keys(data);
+  term k :> Size;
+};
+
+// Helper: Object is empty
+defn object_empty(data: Data) [__is_object(data)][term == true || term == false] -> Bool {
+  let k: List<String> = __keys(data);
+  term k :> Size == 0;
+};
