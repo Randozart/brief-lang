@@ -271,7 +271,7 @@ defn repeat(s: String, count: Int) [count >= 0][term :> Size == s :> Size * coun
 
 // Type conversions
 defn to_string(n: Int) [true][term :> Size >= 0] -> String {
-  term n;
+  term __int_to_str(n);
 };
 
 defn to_float(s: String) [true][term >= 0.0 || term < 0.0] -> Float {

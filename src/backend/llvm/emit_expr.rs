@@ -1159,6 +1159,12 @@ impl LlvmBackend {
                 writeln!(out, "{}{}:", indent, merge_label).ok();
                 self.let_bindings = saved_bindings;
                 self.let_binding_types = saved_types;
+                let match_ty = if arms.iter().all(|a| matches!(a.body.as_ref(), Expr::String(_))) {
+                    Type::String
+                } else {
+                    Type::Int
+                };
+                return TypedRegister { name: v, ty: match_ty };
             }
             // ── Slice ───────────────────────────────────────────
             Expr::Slice { value, start, end, stride, mask } => {

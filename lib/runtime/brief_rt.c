@@ -147,15 +147,30 @@ void __exit(int64_t code) {
  * Used by the LLVM backend's emit_binop for String + String.
  * Allocates a new buffer containing a + b.
  * =================================================================== */
+#include <unistd.h>
+
+/* Try to determine if a pointer points to readable memory.
+   Returns the safe null-terminated string, or "" if invalid. */
+static const char* safe_cstr(const char* s) {
+    if (!s || (uintptr_t)s < 65536) return "";
+    // Use write() to check readability (writes 0 bytes — just probes)
+    if (write(STDOUT_FILENO, s, 0) < 0) return "";
+    return s;
+}
+
 char* __str_concat(const char* a, const char* b) {
-    if (!a) a = "";
-    if (!b) b = "";
-    size_t la = strlen(a);
-    size_t lb = strlen(b);
+    const char* ca = safe_cstr(a);
+    const char* cb = safe_cstr(b);
+    size_t la = strlen(ca);
+    size_t lb = strlen(cb);
+    // Cap length to prevent huge allocations on corrupted pointers
+    if (la > 1000000) la = 0;
+    if (lb > 1000000) lb = 0;
     char* result = (char*)malloc(la + lb + 1);
     if (result) {
-        memcpy(result, a, la);
-        memcpy(result + la, b, lb + 1);
+        if (la > 0) memcpy(result, ca, la);
+        if (lb > 0) memcpy(result + la, cb, lb);
+        result[la + lb] = '\0';
     }
     return result ? result : "";
 }
@@ -635,7 +650,9 @@ int64_t __find_from(const char* s, const char* needle, int64_t start) {
 int64_t __int_to_str(int64_t n) {
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
-    return buf_to_brief(buf, (int64_t)len);
+    int64_t result = buf_to_brief(buf, (int64_t)len);
+    fprintf(stderr, "DEBUG __int_to_str(%lld) = 0x%llx\n", (long long)n, (unsigned long long)result);
+    return result;
 }
 
 int64_t __splitn(const char* s, const char* delim, int64_t n_val) {
