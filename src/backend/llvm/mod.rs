@@ -804,8 +804,8 @@ self.emit_declares(&mut out);
         writeln!(out, "declare i32 @sigemptyset(i8*) #1").ok();
         writeln!(out, "declare i32 @sigaddset(i8*, i32) #1").ok();
         writeln!(out, "declare i32 @sigprocmask(i32, i8*, i8*) #1").ok();
-        // Declare the step() function for the trg reactive dirty-flag system
-        writeln!(out, "declare void @step(%State*, i64) #1").ok();
+        // The step() function is defined in the same module — no declare needed.
+        // writeln!(out, "declare void @step(%State*, i64) #1").ok();
 
         // Declare cast helper functions
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
@@ -1805,6 +1805,13 @@ self.emit_declares(&mut out);
                     self.field_types.push(self.llvm_type(&s.ty).to_string());
                     self.field_initializers.insert(s.name.clone(), s.expr.clone());
                 }
+            } else if let TopLevel::Trigger(t) = item {
+                // Triggers get a slot in the state struct so the event loop
+                // can store their values and emit_expr can load them.
+                self.field_index_map
+                    .insert(t.name.clone(), self.field_types.len());
+                self.field_types.push(self.llvm_type(&t.ty).to_string());
+                self.field_initializers.insert(t.name.clone(), None);
             }
         }
     }

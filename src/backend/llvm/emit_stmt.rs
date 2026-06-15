@@ -451,6 +451,7 @@ impl LlvmBackend {
                     // still needs a terminator. Do NOT restore prev_terminated —
                     // the current block (end_l) has a ret, so callers must not
                     // emit more code after us.
+                    self.terminated = true;
                     if self.returns_i64 {
                         writeln!(out, "  ret i64 0").ok();
                     } else {
@@ -460,7 +461,7 @@ impl LlvmBackend {
             Statement::SyncBlock { body } => {
                 for s in body { self.emit_stmt(out, s, indent); }
             }
-            Statement::Unification { name, variant, fields: _, expr } => {
+            Statement::Unification { name, variant: _, fields, expr } => {
                 // Save/restore bindings — pattern variable bindings from the arm
                 // block must not leak past the merge block.
                 let saved_bindings = self.let_bindings.clone();
@@ -478,9 +479,19 @@ impl LlvmBackend {
                 writeln!(out, "{}{}:", indent, arm_l).ok();
                 let pay = format!("%up{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = lshr i64 {}, 8", indent, pay, val).ok();
-                self.let_bindings.insert(variant.clone(), pay.clone());
+                // Bind pattern fields to the payload register
+                bind_pattern_fields(&mut self.let_bindings, &mut self.let_binding_types, fields, &pay);
+                let prev_terminated = self.terminated;
                 let _ = self.emit_expr(out, expr, indent);
-                writeln!(out, "{}br label %{}", indent, merge_l).ok();
+                if !self.terminated {
+                    writeln!(out, "{}br label %{}", indent, merge_l).ok();
+                } else {
+                    self.terminated = false;
+                    if !self.returns_i64 {
+                        writeln!(out, "{}br label %{}", indent, merge_l).ok();
+                    }
+                }
+                self.terminated = prev_terminated;
                 writeln!(out, "{}{}:", indent, def_l).ok();
                 writeln!(out, "{}  unreachable", indent).ok();
                 writeln!(out, "{}{}:", indent, merge_l).ok();
@@ -506,6 +517,33 @@ impl LlvmBackend {
             }
         }
     }
-
-    // ── EXPRESSIONS ───────────────────────────────────────────
 }
+
+/// Bind pattern fields from a Unification pattern to let_bindings.
+fn bind_pattern_fields(
+    let_bindings: &mut std::collections::HashMap<String, String>,
+    let_binding_types: &mut std::collections::HashMap<String, Type>,
+    fields: &[crate::ast::Pattern],
+    payload_reg: &str,
+) {
+    for field in fields {
+        match field {
+            crate::ast::Pattern::Var(name) => {
+                let_bindings.insert(name.clone(), payload_reg.to_string());
+                let_binding_types.insert(name.clone(), Type::Int);
+            }
+            crate::ast::Pattern::Tuple(subfields) => {
+                // For tuple patterns, bind each subfield to the payload
+                for sub in subfields {
+                    if let crate::ast::Pattern::Var(name) = sub {
+                        let_bindings.insert(name.clone(), payload_reg.to_string());
+                        let_binding_types.insert(name.clone(), Type::Int);
+                    }
+                }
+            }
+            _ => {} // Wildcard, literals — no binding
+        }
+    }
+}
+
+// ── EXPRESSIONS ───────────────────────────────────────────

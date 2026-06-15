@@ -292,8 +292,8 @@ impl LlvmBackend {
     }
 
     /// Load an external trigger value (MMIO address or C global).
-    /// Built-in triggers (@stdin#, @timer#, @signal#) are handled by the
-    /// event loop — they're read from epoll_wait and stored directly to state.
+    /// Built-in triggers (@stdin#, @timer#, @signal#) are stored to state
+    /// by the event loop — load from the state field.
     pub(super) fn emit_trg_load(&mut self, out: &mut String, indent: &str, dst: &str, address: &crate::ast::LinkRef, trg_ty: &Type) {
         match address {
             crate::ast::LinkRef::Explicit(addr) => {
@@ -312,12 +312,17 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = load volatile {}, {}* @{}", indent, raw, store_ty, store_ty, sym).ok();
                 self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
             }
-            _ => {} // Stdin, Timer, Signal — handled by the event loop
+            _ => {
+                // Stdin, Timer, Signal — event loop stores values to state.
+                // Emit add i64 0, 0 as zero default; callers with field access
+                // patterns will have already loaded from state via Identifier -> field_index_map path.
+                writeln!(out, "{}{} = add i64 0, 0 ; built-in trigger (loaded by event loop)", indent, dst).ok();
+            }
         }
     }
 
     /// Finish loading a trigger value after the raw load: extend to i64.
-    fn emit_trg_load_finish(&self, out: &mut String, indent: &str, dst: &str, raw: String, trg_ty: &Type) {
+    pub(super) fn emit_trg_load_finish(&self, out: &mut String, indent: &str, dst: &str, raw: String, trg_ty: &Type) {
         match trg_ty {
             Type::Bool => {
                 let zc = self.txn_counter; let z = format!("%tz{}", zc);
@@ -515,7 +520,10 @@ impl LlvmBackend {
         self.txn_counter = 0;
         self.terminated = false;
         self.returns_i64 = true;
-        for s in &d.body { self.emit_stmt(out, s, "  "); }
+        for s in &d.body {
+            if self.terminated { break; }
+            self.emit_stmt(out, s, "  ");
+        }
         if !self.terminated { writeln!(out, "  ret i64 0").ok(); }
         writeln!(out, "}}").ok();
     }
@@ -568,9 +576,11 @@ impl LlvmBackend {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
             let reordered = super::reorder::reorder_body_statements(&txn.body);
-            for s in &reordered { self.emit_stmt(out, s, "  "); }
-            // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
-            writeln!(out, "  ret void").ok();
+            for s in &reordered {
+                if self.terminated { break; }
+                self.emit_stmt(out, s, "  ");
+            }
+            if !self.terminated { writeln!(out, "  ret void").ok(); }
             writeln!(out, "  rollback:").ok();
             match action {
                 "exit" => {
@@ -596,9 +606,11 @@ impl LlvmBackend {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
             let reordered = super::reorder::reorder_body_statements(&txn.body);
-            for s in &reordered { self.emit_stmt(out, s, "  "); }
-            // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
-            writeln!(out, "  ret void").ok();
+            for s in &reordered {
+                if self.terminated { break; }
+                self.emit_stmt(out, s, "  ");
+            }
+            if !self.terminated { writeln!(out, "  ret void").ok(); }
             writeln!(out, "}}").ok();
         }
     }
@@ -689,19 +701,12 @@ impl LlvmBackend {
 
         writeln!(out, "body:").ok();
 
-        let mut last_terminated = false;
         for s in &txn.body {
+            if self.terminated { break; }
             self.emit_stmt(out, s, "  ");
-            last_terminated = self.terminated;
-            if self.terminated {
-                self.terminated = false;
-            }
         }
 
-        // 2026-06-13: Emit br to post if last statement left block unterminated.
-        // Guarded then-path leaks terminated=true, caller resets it (line above),
-        // but the end_l block has no terminator before the post: label.
-        if !last_terminated {
+        if !self.terminated {
             writeln!(out, "  br label %post").ok();
         }
         writeln!(out, "post:").ok();
@@ -722,8 +727,6 @@ impl LlvmBackend {
         self.in_callable_txn = false;
         self.param_slots.clear();
     }
-    // 2026-06-13: Added %State* %state param — callable txns can access global state.
-    // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).
 
     pub(super) fn emit_precondition_check(&mut self, out: &mut String, pre: &Expr, indent: &str) {
         let cond = self.emit_expr(out, pre, indent);
@@ -766,9 +769,11 @@ impl LlvmBackend {
         writeln!(out, "{}:", txn_fire_l).ok();
         self.terminated = false;
         self.returns_i64 = false;
-        for s in &txn.body { self.emit_stmt(out, s, "  "); }
-        // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
-        writeln!(out, "  ret void").ok();
+        for s in &txn.body {
+            if self.terminated { break; }
+            self.emit_stmt(out, s, "  ");
+        }
+        if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "{}_done:", async_name).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
@@ -783,9 +788,11 @@ impl LlvmBackend {
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
-        for s in &combined { self.emit_stmt(out, s, "  "); }
-        // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
-        writeln!(out, "  ret void").ok();
+        for s in &combined {
+            if self.terminated { break; }
+            self.emit_stmt(out, s, "  ");
+        }
+        if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
     }
 
@@ -796,9 +803,11 @@ impl LlvmBackend {
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();         self.terminated = false; self.returns_i64 = false;
-        for s in body { self.emit_stmt(out, s, "  "); }
-        // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
-        writeln!(out, "  ret void").ok();
+        for s in body {
+            if self.terminated { break; }
+            self.emit_stmt(out, s, "  ");
+        }
+        if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "  rollback:").ok();
         match action {
             "exit" => {
@@ -820,9 +829,11 @@ impl LlvmBackend {
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
-        for s in body { self.emit_stmt(out, s, "  "); }
-        // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
-        writeln!(out, "  ret void").ok();
+        for s in body {
+            if self.terminated { break; }
+            self.emit_stmt(out, s, "  ");
+        }
+        if !self.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
     }
 }

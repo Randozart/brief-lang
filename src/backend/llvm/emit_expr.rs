@@ -57,6 +57,12 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
                             return TypedRegister { name: v, ty: Type::Int };
                         }
+                        if ft == "i32" {
+                            let z = format!("%iz_{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, z, old_reg).ok();
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                            return TypedRegister { name: v, ty: Type::Int };
+                        }
                         if ft == "i8*" || ft == "ptr" {
                             let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, old_reg).ok();
@@ -124,7 +130,26 @@ impl LlvmBackend {
                     if let Some(sampled) = self.sampled_triggers.get(name) {
                         writeln!(out, "{}{} = add i64 0, {}", indent, v, sampled).ok();
                     } else if let Some(t) = self.triggers.get(name).cloned() {
-                        self.emit_trg_load(out, indent, &v, &t.address, &t.ty);
+                        // For built-in triggers (@stdin#, @timer#, @signal#), load from
+                        // the state field (the event loop stored the value there).
+                        if matches!(t.address, crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_)) {
+                            if let Some(&idx) = self.field_index_map.get(name) {
+                                let ll_ty = &self.field_types[idx];
+                                let sge = format!("%sge_{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, sge, idx).ok();
+                                let ev = format!("%ev_{}", self.txn_counter); self.txn_counter += 1;
+                                match ll_ty.as_str() {
+                                    "i8" => { writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, ev, sge).ok(); }
+                                    "i32" => { writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, ev, sge).ok(); }
+                                    _ => { writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ev, sge).ok(); }
+                                }
+                                self.emit_trg_load_finish(out, indent, &v, ev, &t.ty);
+                            } else {
+                                writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            }
+                        } else {
+                            self.emit_trg_load(out, indent, &v, &t.address, &t.ty);
+                        }
                     } else {
                         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                     }
@@ -1259,7 +1284,12 @@ impl LlvmBackend {
                 return self.emit_fcmp(out, indent, l, r, "oeq");
             }
             Expr::Block(stmts, last) => {
-                for s in stmts { self.emit_stmt(out, s, indent); }
+                for s in stmts {
+                    self.emit_stmt(out, s, indent);
+                    if self.terminated {
+                        return TypedRegister { name: "_".to_string(), ty: Type::Void };
+                    }
+                }
                 return self.emit_expr(out, last, indent);
             }
             Expr::MapLiteral(_) | Expr::SetLiteral(_)
