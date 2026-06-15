@@ -1,5 +1,6 @@
 pub mod aarch64;
 pub mod c;
+pub mod circt;
 pub mod llvm;
 // llvm_optimizer moved into llvm/ as llvm::optimizer
 pub mod rust;
