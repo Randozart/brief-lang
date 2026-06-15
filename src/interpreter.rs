@@ -2673,6 +2673,119 @@ impl Interpreter {
                             Ok(Value::Int(-1))
                         }
                     }
+                    // ===== Phase F: Signals (intrinsics.md D8) =====
+                    Intrinsic::SigAction => {
+                        let signum = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sigaction signum requires Int, got {:?}", v))),
+                        };
+                        let handler = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sigaction handler requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+                            let new: libc::sigaction = libc::sigaction {
+                                sa_sigaction: handler as usize,
+                                sa_mask: unsafe { std::mem::zeroed() },
+                                sa_flags: 0,
+                                sa_restorer: None,
+                            };
+                            let ret = unsafe { libc::sigaction(signum, &new, &mut old) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (signum, handler);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SigProcMask => {
+                        let how = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sigprocmask how requires Int, got {:?}", v))),
+                        };
+                        let mask = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sigprocmask mask requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+                            let ret = unsafe { libc::sigprocmask(how, &set as *const _ as *const libc::sigset_t, std::ptr::null_mut()) };
+                            let _ = mask;
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (how, mask);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Kill => {
+                        let pid = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("kill pid requires Int, got {:?}", v))),
+                        };
+                        let sig = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("kill sig requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::kill(pid, sig) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (pid, sig);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SignalFd => {
+                        let mask = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("signalfd mask requires Int, got {:?}", v))),
+                        };
+                        #[cfg(target_os = "linux")]
+                        {
+                            let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+                            let ret = unsafe { libc::signalfd(-1, &set, libc::SFD_NONBLOCK) };
+                            let _ = mask;
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            let _ = mask;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::TimerFdCreate => {
+                        let hz = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("timerfd_create hz requires Int, got {:?}", v))),
+                        };
+                        #[cfg(target_os = "linux")]
+                        {
+                            let fd = unsafe { libc::timerfd_create(libc::CLOCK_MONOTONIC, libc::TFD_NONBLOCK) };
+                            if fd >= 0 {
+                                let sec = 1 / hz as u64;
+                                let nsec = if hz > 0 { (1_000_000_000u64) / hz as u64 } else { 0 };
+                                let itimerspec = libc::itimerspec {
+                                    it_interval: libc::timespec { tv_sec: 0, tv_nsec: nsec as i64 },
+                                    it_value: libc::timespec { tv_sec: sec as i64, tv_nsec: 0 },
+                                };
+                                unsafe { libc::timerfd_settime(fd, 0, &itimerspec, std::ptr::null_mut()) };
+                            }
+                            Ok(Value::Int(fd as i64))
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            let _ = hz;
+                            Ok(Value::Int(-1))
+                        }
+                    }
                     // Data intrinsics
                     Intrinsic::Sort => Ok(values.remove(0)),
                     Intrinsic::Reverse => Ok(values.remove(0)),
@@ -7652,6 +7765,58 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SemPost,
             args: vec![Expr::String("sem".into())],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    // ── Phase F: Signals intrinsic tests ───────────────────────────
+
+    #[test]
+    fn test_intrinsic_sigaction_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SigAction,
+            args: vec![Expr::Bool(false), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_sigprocmask_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SigProcMask,
+            args: vec![Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_kill_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Kill,
+            args: vec![Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_signalfd_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SignalFd,
+            args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_timerfd_create_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::TimerFdCreate,
+            args: vec![Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }

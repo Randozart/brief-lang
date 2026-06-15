@@ -1,7 +1,7 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Phase E — IPC complete (2026-06-15). Phases A–D also complete. Supersedes `as-intrinsic.md`.
+**Status:** Phase F — Signals complete (2026-06-15). Phases A–E also complete. Supersedes `as-intrinsic.md`.
 
 ## Purpose
 
@@ -467,14 +467,21 @@ Interpreter: Rust `std::fs`.
 
 **LLVM backend:** Category **Shim**→**Direct**.
 
-### Phase F — Signals (5 intrinsics)
+### Phase F — Signals (completed 2026-06-15)
 
 **New Intrinsic variants:** D8: `SigAction`, `SigProcMask`, `Kill`,
 `SignalFd`, `TimerFdCreate`
 
-**LLVM backend:** Category **Shim**→**Direct**.
+**LLVM backend:** Category **Shim** — emit `call i64 @brief_*`, implemented
+in `brief_rt.c` via POSIX (sigaction, sigprocmask, kill, signalfd, timerfd_create).
 
-**Files deleted:** `lib/std/ffi/system.bv` frgn trigger declarations
+**Interpreter:** Uses `libc::sigaction`, `libc::sigprocmask`, `libc::kill`,
+`libc::signalfd`, `libc::timerfd_create`. All return Int.
+
+**Tests added:**
+- `src/ast.rs` — 5 roundtrip tests
+- `src/interpreter.rs` — 5 eval tests (type errors)
+- `src/typechecker.rs` — 5 inference tests
 
 ### Phase G — Networking (13 intrinsics)
 

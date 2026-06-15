@@ -88,6 +88,12 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @brief_sem_open(i64, i64, i64, i64)").ok();
         writeln!(out, "declare i64 @brief_sem_wait(i64)").ok();
         writeln!(out, "declare i64 @brief_sem_post(i64)").ok();
+        // Phase F: Signals intrinsics (intrinsics.md D8)
+        writeln!(out, "declare i64 @brief_sigaction(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_sigprocmask(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_kill(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_signalfd(i64)").ok();
+        writeln!(out, "declare i64 @brief_timerfd_create(i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {

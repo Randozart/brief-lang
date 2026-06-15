@@ -546,6 +546,13 @@ pub enum Intrinsic {
     SemOpen,
     SemWait,
     SemPost,
+
+    // ===== Phase F: Signals (intrinsics.md D8) =====
+    SigAction,
+    SigProcMask,
+    Kill,
+    SignalFd,
+    TimerFdCreate,
 }
 
 impl Intrinsic {
@@ -641,6 +648,12 @@ impl Intrinsic {
             "sem_open" => Some(Intrinsic::SemOpen),
             "sem_wait" => Some(Intrinsic::SemWait),
             "sem_post" => Some(Intrinsic::SemPost),
+            // Phase F: Signals
+            "sigaction" => Some(Intrinsic::SigAction),
+            "sigprocmask" => Some(Intrinsic::SigProcMask),
+            "kill" => Some(Intrinsic::Kill),
+            "signalfd" => Some(Intrinsic::SignalFd),
+            "timerfd_create" => Some(Intrinsic::TimerFdCreate),
             _ => None,
         }
     }
@@ -737,6 +750,12 @@ impl Intrinsic {
             Intrinsic::SemOpen => "sem_open",
             Intrinsic::SemWait => "sem_wait",
             Intrinsic::SemPost => "sem_post",
+            // Phase F: Signals
+            Intrinsic::SigAction => "sigaction",
+            Intrinsic::SigProcMask => "sigprocmask",
+            Intrinsic::Kill => "kill",
+            Intrinsic::SignalFd => "signalfd",
+            Intrinsic::TimerFdCreate => "timerfd_create",
         }
     }
 }
@@ -2456,6 +2475,36 @@ mod tests {
     fn test_intrinsic_from_name_sem_post() {
         assert_eq!(Intrinsic::from_name("sem_post"), Some(Intrinsic::SemPost));
         assert_eq!(Intrinsic::SemPost.name(), "sem_post");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_sigaction() {
+        assert_eq!(Intrinsic::from_name("sigaction"), Some(Intrinsic::SigAction));
+        assert_eq!(Intrinsic::SigAction.name(), "sigaction");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_sigprocmask() {
+        assert_eq!(Intrinsic::from_name("sigprocmask"), Some(Intrinsic::SigProcMask));
+        assert_eq!(Intrinsic::SigProcMask.name(), "sigprocmask");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_kill() {
+        assert_eq!(Intrinsic::from_name("kill"), Some(Intrinsic::Kill));
+        assert_eq!(Intrinsic::Kill.name(), "kill");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_signalfd() {
+        assert_eq!(Intrinsic::from_name("signalfd"), Some(Intrinsic::SignalFd));
+        assert_eq!(Intrinsic::SignalFd.name(), "signalfd");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_timerfd_create() {
+        assert_eq!(Intrinsic::from_name("timerfd_create"), Some(Intrinsic::TimerFdCreate));
+        assert_eq!(Intrinsic::TimerFdCreate.name(), "timerfd_create");
     }
 
     #[test]

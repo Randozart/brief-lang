@@ -1028,6 +1028,59 @@ int64_t brief_sem_post(int64_t sem) {
     return (int64_t)sem_post((sem_t*)(uintptr_t)sem);
 }
 
+/* ===================================================================
+ * Phase F: Signals intrinsics (intrinsics.md D8)
+ *
+ * Signal handling (sigaction, sigprocmask, kill) and Linux-specific
+ * signalfd/timerfd_create for reactive trigger sources.
+ * =================================================================== */
+
+#include <signal.h>
+#include <sys/signalfd.h>
+#include <sys/timerfd.h>
+
+int64_t brief_sigaction(int64_t signum, int64_t handler) {
+    struct sigaction sa;
+    struct sigaction old;
+    sa.sa_handler = (void(*)(int))(uintptr_t)handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    return (int64_t)sigaction((int)signum, &sa, &old);
+}
+
+int64_t brief_sigprocmask(int64_t how, int64_t mask) {
+    sigset_t set;
+    (void)mask;
+    sigemptyset(&set);
+    return (int64_t)sigprocmask((int)how, &set, NULL);
+}
+
+int64_t brief_kill(int64_t pid, int64_t sig) {
+    return (int64_t)kill((pid_t)pid, (int)sig);
+}
+
+int64_t brief_signalfd(int64_t mask) {
+    sigset_t set;
+    sigemptyset(&set);
+    (void)mask;
+    return (int64_t)signalfd(-1, &set, SFD_NONBLOCK);
+}
+
+int64_t brief_timerfd_create(int64_t hz) {
+    int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+    if (fd < 0) return -1;
+    if (hz > 0) {
+        long nsec = 1000000000L / hz;
+        struct itimerspec spec;
+        spec.it_interval.tv_sec = 0;
+        spec.it_interval.tv_nsec = nsec;
+        spec.it_value.tv_sec = 0;
+        spec.it_value.tv_nsec = nsec;
+        timerfd_settime(fd, 0, &spec, NULL);
+    }
+    return (int64_t)fd;
+}
+
 /* ── Officina-local frgn (JSON, substring) ────────────────────────── */
 
 int64_t substring(const char* s) {

@@ -1321,6 +1321,9 @@ impl TypeChecker {
                     // Phase E: IPC — all return Int
                     Intrinsic::Pipe | Intrinsic::ShmOpen | Intrinsic::ShmUnlink
                     | Intrinsic::SemOpen | Intrinsic::SemWait | Intrinsic::SemPost => Type::Int,
+                    // Phase F: Signals — all return Int
+                    Intrinsic::SigAction | Intrinsic::SigProcMask | Intrinsic::Kill
+                    | Intrinsic::SignalFd | Intrinsic::TimerFdCreate => Type::Int,
                 }
             }
             Expr::Call(name, args) => {
@@ -3172,6 +3175,58 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SemPost,
             args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    // ── Phase F: Signals type inference tests ──────────────────────
+
+    #[test]
+    fn test_check_intrinsic_sigaction_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SigAction,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_sigprocmask_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SigProcMask,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_kill_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Kill,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_signalfd_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SignalFd,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_timerfd_create_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::TimerFdCreate,
+            args: vec![Expr::Integer(100)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::Int);

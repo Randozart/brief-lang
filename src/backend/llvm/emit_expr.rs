@@ -723,6 +723,30 @@ impl LlvmBackend {
                         let sem = self.emit_expr(out, &args[0], indent);
                         writeln!(out, "{}{} = call i64 @brief_sem_post(i64 {})", indent, v, sem.name).ok();
                     }
+                    // ===== Phase F: Signals (intrinsics.md D8) — Shim =====
+                    Intrinsic::SigAction => {
+                        let signum = self.emit_expr(out, &args[0], indent);
+                        let handler = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_sigaction(i64 {}, i64 {})", indent, v, signum.name, handler.name).ok();
+                    }
+                    Intrinsic::SigProcMask => {
+                        let how = self.emit_expr(out, &args[0], indent);
+                        let mask = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_sigprocmask(i64 {}, i64 {})", indent, v, how.name, mask.name).ok();
+                    }
+                    Intrinsic::Kill => {
+                        let pid = self.emit_expr(out, &args[0], indent);
+                        let sig = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_kill(i64 {}, i64 {})", indent, v, pid.name, sig.name).ok();
+                    }
+                    Intrinsic::SignalFd => {
+                        let mask = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_signalfd(i64 {})", indent, v, mask.name).ok();
+                    }
+                    Intrinsic::TimerFdCreate => {
+                        let hz = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_timerfd_create(i64 {})", indent, v, hz.name).ok();
+                    }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
                         writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();
