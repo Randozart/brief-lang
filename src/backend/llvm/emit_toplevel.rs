@@ -475,7 +475,8 @@ impl LlvmBackend {
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
-            for s in &txn.body { self.emit_stmt(out, s, "  "); }
+            let reordered = super::reorder::reorder_body_statements(&txn.body);
+            for s in &reordered { self.emit_stmt(out, s, "  "); }
             // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
             writeln!(out, "  ret void").ok();
             writeln!(out, "  rollback:").ok();
@@ -502,7 +503,8 @@ impl LlvmBackend {
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
-            for s in &txn.body { self.emit_stmt(out, s, "  "); }
+            let reordered = super::reorder::reorder_body_statements(&txn.body);
+            for s in &reordered { self.emit_stmt(out, s, "  "); }
             // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
             writeln!(out, "  ret void").ok();
             writeln!(out, "}}").ok();

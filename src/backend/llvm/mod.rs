@@ -5,6 +5,7 @@ pub mod emit_toplevel;
 pub mod hazard;
 pub mod loop_engine;
 pub mod optimizer;
+pub mod reorder;
 
 #[cfg(test)]
 mod tests;
