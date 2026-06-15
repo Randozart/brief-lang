@@ -461,6 +461,86 @@ impl LlvmBackend {
                         let cmd = self.emit_expr(out, &args[0], indent);
                         writeln!(out, "{}{} = call i64 @brief_spawn(i64 {})", indent, v, cmd.name).ok();
                     }
+                    // ===== Phase B: Raw File I/O (intrinsics.md D2) =====
+                    Intrinsic::Open => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        let flags = self.emit_expr(out, &args[1], indent);
+                        let mode = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_open(i64 {}, i64 {}, i64 {})", indent, v, path.name, flags.name, mode.name).ok();
+                    }
+                    Intrinsic::Close => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_close(i64 {})", indent, v, fd.name).ok();
+                    }
+                    Intrinsic::Read => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let buf = self.emit_expr(out, &args[1], indent);
+                        let count = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_read(i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, count.name).ok();
+                    }
+                    Intrinsic::Write => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let buf = self.emit_expr(out, &args[1], indent);
+                        let count = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_write(i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, count.name).ok();
+                    }
+                    Intrinsic::LSeek => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let offset = self.emit_expr(out, &args[1], indent);
+                        let whence = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_lseek(i64 {}, i64 {}, i64 {})", indent, v, fd.name, offset.name, whence.name).ok();
+                    }
+                    Intrinsic::PRead => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let buf = self.emit_expr(out, &args[1], indent);
+                        let count = self.emit_expr(out, &args[2], indent);
+                        let offset = self.emit_expr(out, &args[3], indent);
+                        writeln!(out, "{}{} = call i64 @brief_pread(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, count.name, offset.name).ok();
+                    }
+                    Intrinsic::PWrite => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let buf = self.emit_expr(out, &args[1], indent);
+                        let count = self.emit_expr(out, &args[2], indent);
+                        let offset = self.emit_expr(out, &args[3], indent);
+                        writeln!(out, "{}{} = call i64 @brief_pwrite(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, count.name, offset.name).ok();
+                    }
+                    Intrinsic::Stat => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_stat(i64 {})", indent, v, path.name).ok();
+                    }
+                    Intrinsic::FStat => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_fstat(i64 {})", indent, v, fd.name).ok();
+                    }
+                    Intrinsic::Truncate => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        let len = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_truncate(i64 {}, i64 {})", indent, v, path.name, len.name).ok();
+                    }
+                    Intrinsic::FTruncate => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let len = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_ftruncate(i64 {}, i64 {})", indent, v, fd.name, len.name).ok();
+                    }
+                    Intrinsic::FSync => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_fsync(i64 {})", indent, v, fd.name).ok();
+                    }
+                    Intrinsic::FDup => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_dup(i64 {})", indent, v, fd.name).ok();
+                    }
+                    Intrinsic::FDup2 => {
+                        let old = self.emit_expr(out, &args[0], indent);
+                        let newfd = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_dup2(i64 {}, i64 {})", indent, v, old.name, newfd.name).ok();
+                    }
+                    Intrinsic::FCntl => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let cmd = self.emit_expr(out, &args[1], indent);
+                        let arg = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_fcntl(i64 {}, i64 {}, i64 {})", indent, v, fd.name, cmd.name, arg.name).ok();
+                    }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
                         writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();

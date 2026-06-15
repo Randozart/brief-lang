@@ -690,6 +690,104 @@ int64_t __spawn_with_output(const char* cmd, int64_t args_val) {
     return status == 0 ? cstr_to_brief("") : 0;
 }
 
+/* ===================================================================
+ * Phase B: Raw File I/O intrinsics (intrinsics.md D2)
+ *
+ * Wraps POSIX fd operations. All return int64_t (-1 on error except
+ * read/write/pread/pwrite which return bytes transferred, also -1 on
+ * error). Path parameters follow Brief string format.
+ * =================================================================== */
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+int64_t brief_open(int64_t path_bstr, int64_t flags, int64_t mode) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int fd = open(c_path, (int)flags, (mode_t)mode);
+    free(c_path);
+    return (int64_t)fd;
+}
+
+int64_t brief_close(int64_t fd) {
+    int ret = close((int)fd);
+    return (int64_t)ret;
+}
+
+int64_t brief_read(int64_t fd, int64_t buf, int64_t count) {
+    ssize_t n = read((int)fd, (void*)(uintptr_t)buf, (size_t)count);
+    return (int64_t)n;
+}
+
+int64_t brief_write(int64_t fd, int64_t buf, int64_t count) {
+    ssize_t n = write((int)fd, (void*)(uintptr_t)buf, (size_t)count);
+    return (int64_t)n;
+}
+
+int64_t brief_lseek(int64_t fd, int64_t offset, int64_t whence) {
+    off_t off = lseek((int)fd, (off_t)offset, (int)whence);
+    return (int64_t)off;
+}
+
+int64_t brief_pread(int64_t fd, int64_t buf, int64_t count, int64_t offset) {
+    ssize_t n = pread((int)fd, (void*)(uintptr_t)buf, (size_t)count, (off_t)offset);
+    return (int64_t)n;
+}
+
+int64_t brief_pwrite(int64_t fd, int64_t buf, int64_t count, int64_t offset) {
+    ssize_t n = pwrite((int)fd, (void*)(uintptr_t)buf, (size_t)count, (off_t)offset);
+    return (int64_t)n;
+}
+
+int64_t brief_stat(int64_t path_bstr) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    struct stat st;
+    int ret = stat(c_path, &st);
+    free(c_path);
+    return (int64_t)ret;
+}
+
+int64_t brief_fstat(int64_t fd) {
+    struct stat st;
+    int ret = fstat((int)fd, &st);
+    return (int64_t)ret;
+}
+
+int64_t brief_truncate(int64_t path_bstr, int64_t len) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int ret = truncate(c_path, (off_t)len);
+    free(c_path);
+    return (int64_t)ret;
+}
+
+int64_t brief_ftruncate(int64_t fd, int64_t len) {
+    int ret = ftruncate((int)fd, (off_t)len);
+    return (int64_t)ret;
+}
+
+int64_t brief_fsync(int64_t fd) {
+    int ret = fsync((int)fd);
+    return (int64_t)ret;
+}
+
+int64_t brief_dup(int64_t fd) {
+    int newfd = dup((int)fd);
+    return (int64_t)newfd;
+}
+
+int64_t brief_dup2(int64_t old, int64_t newfd) {
+    int ret = dup2((int)old, (int)newfd);
+    return (int64_t)ret;
+}
+
+int64_t brief_fcntl(int64_t fd, int64_t cmd, int64_t arg) {
+    int ret = fcntl((int)fd, (int)cmd, (long)arg);
+    return (int64_t)ret;
+}
+
 /* ── Officina-local frgn (JSON, substring) ────────────────────────── */
 
 int64_t substring(const char* s) {

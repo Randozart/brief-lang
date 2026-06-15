@@ -1,7 +1,7 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Phase A — Implementation Complete (2026-06-15). Supersedes `as-intrinsic.md`.
+**Status:** Phase B — Raw File I/O complete (2026-06-15). Phase A also complete. Supersedes `as-intrinsic.md`.
 
 ## Purpose
 
@@ -341,7 +341,35 @@ and `call`, implemented in `brief_rt.c` via libc.
 - `src/interpreter.rs` — eval tests for `tty_raw_mode#`, `tty_size#`, `tty_read_key#`, `ioctl#`, `isatty#`, `spawn_with_output#`, `spawn#`
 - `src/typechecker.rs` — return type inference tests for all Phase A intrinsics
 
-**Test result:** 801 pass, 0 fail (up from 713)
+**Test result:** 809 pass, 0 fail (up from 713)
+
+### Phase B — Raw File I/O (completed 2026-06-15)
+
+**New Intrinsic variants:** D2: `Open`, `Close`, `Read`, `Write`, `LSeek`,
+`PRead`, `PWrite`, `Stat`, `FStat`, `Truncate`, `FTruncate`, `FSync`,
+`FDup`, `FDup2`, `FCntl`
+
+**LLVM backend:** Category **Shim** — emit `declare i64 @brief_*(i64, ...)`
+and `call`, implemented in `brief_rt.c` via POSIX.
+
+**Interpreter:** Rust `libc` crate for raw fd operations. `read#`/`pread#`
+allocate temporary buffers (caller's pointer is opaque in interpreter).
+`write#`/`pwrite#` return `-1` (can't dereference opaque pointer).
+
+**Files changed:**
+- `src/ast.rs` — add 15 variants + `from_name` + `name`
+- `src/interpreter.rs` — add eval match arms for all 15
+- `src/backend/llvm/emit_expr.rs` — add LLVM codegen match arms
+- `src/backend/llvm/emit_toplevel.rs` — add 15 `declare` stubs
+- `src/typechecker.rs` — add return type (all `Type::Int`)
+- `lib/runtime/brief_rt.c` — add C function implementations
+
+**Tests added:**
+- `src/ast.rs` — 15 roundtrip tests (from_name + name)
+- `src/interpreter.rs` — 22 eval tests (type errors + edge cases)
+- `src/typechecker.rs` — 15 inference tests (one per variant)
+
+**Test result:** after Phase A+B
 
 ### Phase B — Raw File I/O (15 intrinsics)
 

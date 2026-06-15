@@ -42,6 +42,22 @@ impl LlvmBackend {
         // Phase A: Process intrinsics (intrinsics.md D5)
         writeln!(out, "declare i64 @brief_spawn_with_output(i64)").ok();
         writeln!(out, "declare i64 @brief_spawn(i64)").ok();
+        // Phase B: Raw File I/O intrinsics (intrinsics.md D2)
+        writeln!(out, "declare i64 @brief_open(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_close(i64)").ok();
+        writeln!(out, "declare i64 @brief_read(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_write(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_lseek(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_pread(i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_pwrite(i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_stat(i64)").ok();
+        writeln!(out, "declare i64 @brief_fstat(i64)").ok();
+        writeln!(out, "declare i64 @brief_truncate(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_ftruncate(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_fsync(i64)").ok();
+        writeln!(out, "declare i64 @brief_dup(i64)").ok();
+        writeln!(out, "declare i64 @brief_dup2(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_fcntl(i64, i64, i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {

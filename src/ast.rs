@@ -489,6 +489,23 @@ pub enum Intrinsic {
     // ===== Phase A: Process (intrinsics.md D5) =====
     SpawnWithOutput,
     Spawn,
+
+    // ===== Phase B: Raw File I/O (intrinsics.md D2) =====
+    Open,
+    Close,
+    Read,
+    Write,
+    LSeek,
+    PRead,
+    PWrite,
+    Stat,
+    FStat,
+    Truncate,
+    FTruncate,
+    FSync,
+    FDup,
+    FDup2,
+    FCntl,
 }
 
 impl Intrinsic {
@@ -532,6 +549,22 @@ impl Intrinsic {
             // Phase A: Process
             "spawn_with_output" => Some(Intrinsic::SpawnWithOutput),
             "spawn" => Some(Intrinsic::Spawn),
+            // Phase B: Raw File I/O
+            "open" => Some(Intrinsic::Open),
+            "close" => Some(Intrinsic::Close),
+            "read" => Some(Intrinsic::Read),
+            "write" => Some(Intrinsic::Write),
+            "lseek" => Some(Intrinsic::LSeek),
+            "pread" => Some(Intrinsic::PRead),
+            "pwrite" => Some(Intrinsic::PWrite),
+            "stat" => Some(Intrinsic::Stat),
+            "fstat" => Some(Intrinsic::FStat),
+            "truncate" => Some(Intrinsic::Truncate),
+            "ftruncate" => Some(Intrinsic::FTruncate),
+            "fsync" => Some(Intrinsic::FSync),
+            "dup" => Some(Intrinsic::FDup),
+            "dup2" => Some(Intrinsic::FDup2),
+            "fcntl" => Some(Intrinsic::FCntl),
             _ => None,
         }
     }
@@ -576,6 +609,22 @@ impl Intrinsic {
             // Phase A: Process
             Intrinsic::SpawnWithOutput => "spawn_with_output",
             Intrinsic::Spawn => "spawn",
+            // Phase B: Raw File I/O
+            Intrinsic::Open => "open",
+            Intrinsic::Close => "close",
+            Intrinsic::Read => "read",
+            Intrinsic::Write => "write",
+            Intrinsic::LSeek => "lseek",
+            Intrinsic::PRead => "pread",
+            Intrinsic::PWrite => "pwrite",
+            Intrinsic::Stat => "stat",
+            Intrinsic::FStat => "fstat",
+            Intrinsic::Truncate => "truncate",
+            Intrinsic::FTruncate => "ftruncate",
+            Intrinsic::FSync => "fsync",
+            Intrinsic::FDup => "dup",
+            Intrinsic::FDup2 => "dup2",
+            Intrinsic::FCntl => "fcntl",
         }
     }
 }
@@ -2013,6 +2062,96 @@ mod tests {
     fn test_intrinsic_from_name_spawn() {
         assert_eq!(Intrinsic::from_name("spawn"), Some(Intrinsic::Spawn));
         assert_eq!(Intrinsic::Spawn.name(), "spawn");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_open() {
+        assert_eq!(Intrinsic::from_name("open"), Some(Intrinsic::Open));
+        assert_eq!(Intrinsic::Open.name(), "open");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_close() {
+        assert_eq!(Intrinsic::from_name("close"), Some(Intrinsic::Close));
+        assert_eq!(Intrinsic::Close.name(), "close");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_read() {
+        assert_eq!(Intrinsic::from_name("read"), Some(Intrinsic::Read));
+        assert_eq!(Intrinsic::Read.name(), "read");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_write() {
+        assert_eq!(Intrinsic::from_name("write"), Some(Intrinsic::Write));
+        assert_eq!(Intrinsic::Write.name(), "write");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_lseek() {
+        assert_eq!(Intrinsic::from_name("lseek"), Some(Intrinsic::LSeek));
+        assert_eq!(Intrinsic::LSeek.name(), "lseek");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_pread() {
+        assert_eq!(Intrinsic::from_name("pread"), Some(Intrinsic::PRead));
+        assert_eq!(Intrinsic::PRead.name(), "pread");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_pwrite() {
+        assert_eq!(Intrinsic::from_name("pwrite"), Some(Intrinsic::PWrite));
+        assert_eq!(Intrinsic::PWrite.name(), "pwrite");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_stat() {
+        assert_eq!(Intrinsic::from_name("stat"), Some(Intrinsic::Stat));
+        assert_eq!(Intrinsic::Stat.name(), "stat");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_fstat() {
+        assert_eq!(Intrinsic::from_name("fstat"), Some(Intrinsic::FStat));
+        assert_eq!(Intrinsic::FStat.name(), "fstat");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_truncate() {
+        assert_eq!(Intrinsic::from_name("truncate"), Some(Intrinsic::Truncate));
+        assert_eq!(Intrinsic::Truncate.name(), "truncate");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_ftruncate() {
+        assert_eq!(Intrinsic::from_name("ftruncate"), Some(Intrinsic::FTruncate));
+        assert_eq!(Intrinsic::FTruncate.name(), "ftruncate");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_fsync() {
+        assert_eq!(Intrinsic::from_name("fsync"), Some(Intrinsic::FSync));
+        assert_eq!(Intrinsic::FSync.name(), "fsync");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_dup() {
+        assert_eq!(Intrinsic::from_name("dup"), Some(Intrinsic::FDup));
+        assert_eq!(Intrinsic::FDup.name(), "dup");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_dup2() {
+        assert_eq!(Intrinsic::from_name("dup2"), Some(Intrinsic::FDup2));
+        assert_eq!(Intrinsic::FDup2.name(), "dup2");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_fcntl() {
+        assert_eq!(Intrinsic::from_name("fcntl"), Some(Intrinsic::FCntl));
+        assert_eq!(Intrinsic::FCntl.name(), "fcntl");
     }
 
     #[test]

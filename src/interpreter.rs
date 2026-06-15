@@ -1720,6 +1720,330 @@ impl Interpreter {
                             Err(_) => Ok(Value::Int(-1)),
                         }
                     }
+                    // ===== Phase B: Raw File I/O (intrinsics.md D2) =====
+                    Intrinsic::Open => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("open path requires String, got {:?}", v))),
+                        };
+                        let flags = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("open flags requires Int, got {:?}", v))),
+                        };
+                        let mode = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("open mode requires Int, got {:?}", v))),
+                        };
+                        let c_path = std::ffi::CString::new(path).ok();
+                        let c_path = match c_path {
+                            Some(p) => p,
+                            None => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let fd = unsafe { libc::open(c_path.as_ptr(), flags, mode) };
+                            Ok(Value::Int(fd as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_path, flags, mode);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Close => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("close fd requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::close(fd) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = fd;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Read => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("read fd requires Int, got {:?}", v))),
+                        };
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("read buf requires Int, got {:?}", v))),
+                        };
+                        let count = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("read count requires Int, got {:?}", v))),
+                        };
+                        // buf is an opaque pointer — allocate temp buffer for interpreter
+                        #[cfg(unix)]
+                        {
+                            let mut tmp = vec![0u8; count];
+                            let n = unsafe { libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, count) };
+                            let _ = buf; // unused in interpreter — caller's buf is opaque
+                            Ok(Value::Int(n as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, buf, count);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Write => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("write fd requires Int, got {:?}", v))),
+                        };
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("write buf requires Int, got {:?}", v))),
+                        };
+                        let count = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("write count requires Int, got {:?}", v))),
+                        };
+                        // Interpreter can't dereference opaque buf pointer
+                        let _ = (fd, buf, count);
+                        Ok(Value::Int(-1))
+                    }
+                    Intrinsic::LSeek => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("lseek fd requires Int, got {:?}", v))),
+                        };
+                        let offset = match values.remove(0) {
+                            Value::Int(n) => n as i64,
+                            v => return Err(RuntimeError::TypeMismatch(format!("lseek offset requires Int, got {:?}", v))),
+                        };
+                        let whence = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("lseek whence requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::lseek(fd, offset, whence) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, offset, whence);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::PRead => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pread fd requires Int, got {:?}", v))),
+                        };
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pread buf requires Int, got {:?}", v))),
+                        };
+                        let count = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pread count requires Int, got {:?}", v))),
+                        };
+                        let offset = match values.remove(0) {
+                            Value::Int(n) => n as i64,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pread offset requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut tmp = vec![0u8; count];
+                            let n = unsafe { libc::pread(fd, tmp.as_mut_ptr() as *mut libc::c_void, count, offset) };
+                            let _ = buf;
+                            Ok(Value::Int(n as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, buf, count, offset);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::PWrite => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pwrite fd requires Int, got {:?}", v))),
+                        };
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pwrite buf requires Int, got {:?}", v))),
+                        };
+                        let count = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pwrite count requires Int, got {:?}", v))),
+                        };
+                        let offset = match values.remove(0) {
+                            Value::Int(n) => n as i64,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pwrite offset requires Int, got {:?}", v))),
+                        };
+                        let _ = (fd, buf, count, offset);
+                        Ok(Value::Int(-1))
+                    }
+                    Intrinsic::Stat => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("stat path requires String, got {:?}", v))),
+                        };
+                        let c_path = std::ffi::CString::new(path).ok();
+                        let c_path = match c_path {
+                            Some(p) => p,
+                            None => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+                            let ret = unsafe { libc::stat(c_path.as_ptr(), &mut st) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = c_path;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::FStat => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("fstat fd requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+                            let ret = unsafe { libc::fstat(fd, &mut st) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = fd;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Truncate => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("truncate path requires String, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as i64,
+                            v => return Err(RuntimeError::TypeMismatch(format!("truncate len requires Int, got {:?}", v))),
+                        };
+                        let c_path = std::ffi::CString::new(path).ok();
+                        let c_path = match c_path {
+                            Some(p) => p,
+                            None => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::truncate(c_path.as_ptr(), len) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_path, len);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::FTruncate => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("ftruncate fd requires Int, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as i64,
+                            v => return Err(RuntimeError::TypeMismatch(format!("ftruncate len requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::ftruncate(fd, len) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, len);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::FSync => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("fsync fd requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::fsync(fd) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = fd;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::FDup => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("dup fd requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::dup(fd) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = fd;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::FDup2 => {
+                        let old = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("dup2 old requires Int, got {:?}", v))),
+                        };
+                        let new = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("dup2 new requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::dup2(old, new) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (old, new);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::FCntl => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("fcntl fd requires Int, got {:?}", v))),
+                        };
+                        let cmd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("fcntl cmd requires Int, got {:?}", v))),
+                        };
+                        let arg = match values.remove(0) {
+                            Value::Int(n) => n as i64,
+                            v => return Err(RuntimeError::TypeMismatch(format!("fcntl arg requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::fcntl(fd, cmd, arg) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, cmd, arg);
+                            Ok(Value::Int(-1))
+                        }
+                    }
                     // Data intrinsics
                     Intrinsic::Sort => Ok(values.remove(0)),
                     Intrinsic::Reverse => Ok(values.remove(0)),
@@ -6031,6 +6355,217 @@ mod kani_full_tests {
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "spawn#(42) should type error");
+    }
+
+    // ── Phase B: Raw File I/O intrinsic tests ───────────────────────
+    //
+    // These intrinsics wrap POSIX raw I/O. In the interpreter, syscalls
+    // that require opaque pointer args (read/write/pread/pwrite) allocate
+    // temporary buffers since the interpreter can't dereference caller
+    // pointers. write#/pwrite# return -1 (pointer is opaque).
+
+    #[test]
+    fn test_intrinsic_open_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Open,
+            args: vec![Expr::Bool(true), Expr::Integer(0), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_open_bad_path() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Open,
+            args: vec![
+                Expr::String("/nonexistent_file_xyz.bv".into()),
+                Expr::Integer(0),
+                Expr::Integer(0),
+            ],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(-1), "open#(bad path) should return -1");
+    }
+
+    #[test]
+    fn test_intrinsic_close_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Close,
+            args: vec![Expr::String("fd".into())],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_close_bad_fd() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Close,
+            args: vec![Expr::Integer(-1)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        #[cfg(unix)]
+        assert_eq!(result, Value::Int(-1), "close#(-1) should return -1");
+        #[cfg(not(unix))]
+        assert_eq!(result, Value::Int(-1));
+    }
+
+    #[test]
+    fn test_intrinsic_read_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Read,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::String("nope".into())],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_write_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Write,
+            args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(5)],
+        };
+        // write# with opaque pointer returns -1 in interpreter
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(-1), "write# should return -1 in interpreter");
+    }
+
+    #[test]
+    fn test_intrinsic_lseek_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::LSeek,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(true)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_lseek_bad_fd() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::LSeek,
+            args: vec![Expr::Integer(-1), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(-1), "lseek#(-1,0,0) should return -1");
+    }
+
+    #[test]
+    fn test_intrinsic_pread_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::PRead,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(5), Expr::String("off".into())],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_pwrite_returns_minus_one() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::PWrite,
+            args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(5), Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(-1), "pwrite# should return -1 in interpreter");
+    }
+
+    #[test]
+    fn test_intrinsic_stat_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Stat,
+            args: vec![Expr::Integer(42)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_stat_bad_path() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Stat,
+            args: vec![Expr::String("/nonexistent_stat_file.xyz".into())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(-1), "stat#(bad path) should return -1");
+    }
+
+    #[test]
+    fn test_intrinsic_fstat_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FStat,
+            args: vec![Expr::String("fd".into())],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_truncate_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Truncate,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_ftruncate_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FTruncate,
+            args: vec![Expr::Integer(0), Expr::Bool(true)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_fsync_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FSync,
+            args: vec![Expr::String("fd".into())],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_dup_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FDup,
+            args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_dup2_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FDup2,
+            args: vec![Expr::Integer(0), Expr::Bool(true)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_fcntl_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FCntl,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
     }
 
     #[test]

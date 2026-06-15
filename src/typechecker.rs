@@ -1299,6 +1299,12 @@ impl TypeChecker {
                     Intrinsic::IsTty => Type::Bool,
                     Intrinsic::SpawnWithOutput => Type::String,
                     Intrinsic::Spawn => Type::Int,
+                    // Phase B: Raw File I/O — all return Int (fd, bytes, or -1)
+                    Intrinsic::Open | Intrinsic::Close | Intrinsic::Read
+                    | Intrinsic::Write | Intrinsic::LSeek | Intrinsic::PRead
+                    | Intrinsic::PWrite | Intrinsic::Stat | Intrinsic::FStat
+                    | Intrinsic::Truncate | Intrinsic::FTruncate | Intrinsic::FSync
+                    | Intrinsic::FDup | Intrinsic::FDup2 | Intrinsic::FCntl => Type::Int,
                 }
             }
             Expr::Call(name, args) => {
@@ -2675,6 +2681,158 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
         assert_eq!(ty, Type::Int, "spawn# should infer as Int");
+    }
+
+    // ── Phase B: Raw File I/O type inference tests ─────────────────
+
+    #[test]
+    fn test_check_intrinsic_open_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Open,
+            args: vec![Expr::String("/tmp/t".into()), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "open# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_close_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Close,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "close# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_read_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Read,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(4096)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "read# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_write_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Write,
+            args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(8)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "write# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_lseek_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::LSeek,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "lseek# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_pread_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::PRead,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(16), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "pread# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_pwrite_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::PWrite,
+            args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(8), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "pwrite# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_stat_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Stat,
+            args: vec![Expr::String("/tmp/t".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "stat# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_fstat_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FStat,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "fstat# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_truncate_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Truncate,
+            args: vec![Expr::String("/tmp/t".into()), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "truncate# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_ftruncate_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FTruncate,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "ftruncate# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_fsync_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FSync,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "fsync# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_dup_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FDup,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "dup# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_dup2_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FDup2,
+            args: vec![Expr::Integer(0), Expr::Integer(3)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "dup2# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_fcntl_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::FCntl,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "fcntl# should infer as Int");
     }
 
     #[test]
