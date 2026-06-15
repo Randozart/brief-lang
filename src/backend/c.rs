@@ -904,6 +904,7 @@ impl CBackend {
                 output.push_str(&format!("    /* unification: {} {} = {} */\n", name, variant, val));
             }
             Statement::Foreach { .. } => { /* foreach: not yet implemented in C backend */ }
+            Statement::Oracle { .. } => { /* oracle: not yet implemented */ }
         }
     }
 

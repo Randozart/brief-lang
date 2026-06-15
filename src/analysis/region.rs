@@ -1314,6 +1314,7 @@ fn count_statements_recursive(body: &[Statement]) -> usize {
             | Statement::LocalTrigger { .. } | Statement::Escape(_) => 1,
             Statement::SyncBlock { body } => 1 + count_statements_recursive(body),
             Statement::Foreach { body, .. } => 1 + count_statements_recursive(body),
+            Statement::Oracle { body, handler, .. } => 1 + count_statements_recursive(body) + count_statements_recursive(handler),
         }
     }).sum()
 }
@@ -1336,6 +1337,10 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
         Statement::LocalTrigger { .. } => false,
         Statement::SyncBlock { .. } => false,
         Statement::Foreach { body, .. } => body.iter().any(|s| has_ffi_or_terminator_stmt(s)),
+        Statement::Oracle { body, handler, .. } => {
+            body.iter().any(|s| has_ffi_or_terminator_stmt(s))
+                || handler.iter().any(|s| has_ffi_or_terminator_stmt(s))
+        }
     }
 }
 
@@ -1363,6 +1368,10 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, _trigger_vars: &HashSet<String>) ->
         Statement::LocalTrigger { .. } => false,
         Statement::SyncBlock { .. } => false,
         Statement::Foreach { body, .. } => body.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars)),
+        Statement::Oracle { body, handler, .. } => {
+            body.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars))
+                || handler.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars))
+        }
     }
 }
 

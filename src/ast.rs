@@ -1360,6 +1360,16 @@ pub enum Statement {
         list: Box<Expr>,
         body: Vec<Statement>,
     },
+
+    // Proof oracle: ?#[handler] { body };
+    // Throws the proof engine's full strategy palette at proving the body
+    // terminates. If no static strategy succeeds, injects a runtime fuel
+    // counter with rollback. The handler block executes on fuel exhaustion.
+    Oracle {
+        handler: Vec<Statement>,
+        body: Vec<Statement>,
+        span: Option<Span>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -504,6 +504,7 @@ impl AArch64Backend {
                 writeln!(output, "    // unification: {} {} (value in x0)", name, variant).ok();
             }
             Statement::Foreach { .. } => { /* foreach: not yet implemented in AArch64 backend */ }
+            Statement::Oracle { .. } => { /* oracle: not yet implemented */ }
         }
     }
     

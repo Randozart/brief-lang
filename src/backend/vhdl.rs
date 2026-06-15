@@ -901,6 +901,7 @@ impl VhdlGenerator {
                 let _ = write!(output, "{}-- uni {}({}) = {}\n", indent, name, variant, expr_code);
             }
             Statement::Foreach { .. } => { /* foreach: not yet implemented */ }
+            Statement::Oracle { .. } => { /* oracle: not yet implemented */ }
             Statement::Guarded { condition, statements } => {
                 let cond_code = self.expr_to_string(condition);
                 let _ = write!(output, "{}if {} then\n", indent, cond_code);

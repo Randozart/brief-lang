@@ -127,6 +127,10 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             collect_strings_expr(list, seen, out);
             for s in body { collect_strings_stmt(s, seen, out); }
         }
+        Statement::Oracle { body, handler, .. } => {
+            for s in body { collect_strings_stmt(s, seen, out); }
+            for s in handler { collect_strings_stmt(s, seen, out); }
+        }
     }
 }
 

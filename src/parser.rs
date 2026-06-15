@@ -4440,6 +4440,29 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     body,
                 })
             }
+            Some(Ok(Token::Question)) => {
+                // ?#[handler] { body } — proof oracle
+                self.advance();
+                if !matches!(self.current_token(), Some(Ok(Token::HashBracket))) {
+                    return Err(SyntaxError::UnexpectedToken {
+                        expected: "'#['".to_string(),
+                        found: self.fmt_current_token(),
+                        span: self.current_span().unwrap_or_else(Span::dummy),
+                    });
+                }
+                self.advance();
+                let handler = self.parse_body()?;
+                self.expect(Token::RBracket)?;
+                self.expect(Token::LBrace)?;
+                let body = self.parse_body()?;
+                self.expect(Token::RBrace)?;
+                self.expect(Token::Semicolon)?;
+                Ok(Statement::Oracle {
+                    handler,
+                    body,
+                    span: None,
+                })
+            }
             Some(Ok(Token::Unification)) => {
                 // Three syntaxes supported:
                 // 1. uni variable(Pattern) = result; (library pattern match)

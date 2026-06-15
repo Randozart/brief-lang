@@ -499,6 +499,11 @@ impl LlvmBackend {
                     body: body.clone(),
                 }.emit_llvm(self, out, &StmtDispatch, indent);
             }
+            Statement::Oracle { body, handler, .. } => {
+                for s in body {
+                    self.emit_stmt(out, s, indent);
+                }
+            }
         }
     }
 

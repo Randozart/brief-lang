@@ -1209,6 +1209,11 @@ impl Interpreter {
                     )),
                 }
             }
+            Statement::Oracle { body, .. } => {
+                for stmt in body {
+                    self.exec_stmt(stmt)?;
+                }
+            }
             Statement::Unification {
                 name,
                 variant,

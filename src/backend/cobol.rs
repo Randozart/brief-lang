@@ -517,6 +517,7 @@ impl CobolBackend {
                 output.push_str(&format!("    *> unification: {} {} = {}\n", name, variant, expr_str));
             }
             Statement::Foreach { .. } => { /* foreach: not yet implemented in COBOL backend */ }
+            Statement::Oracle { .. } => { /* oracle: not yet implemented */ }
         }
     }
 

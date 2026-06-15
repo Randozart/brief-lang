@@ -917,6 +917,10 @@ impl SymbolicExecutor {
                 Statement::Foreach { body, .. } => {
                     self.enumerate_paths_recursive(body, current_state.clone(), paths);
                 }
+                Statement::Oracle { body, handler, .. } => {
+                    self.enumerate_paths_recursive(body, current_state.clone(), paths);
+                    self.enumerate_paths_recursive(handler, current_state.clone(), paths);
+                }
             }
         }
 
@@ -3023,6 +3027,14 @@ impl ProofEngine {
             Statement::Alka(_) | Statement::OnExit { .. } => {}
             Statement::Foreach { body, .. } => {
                 for stmt in body {
+                    self.collect_write_vars(stmt, vars);
+                }
+            }
+            Statement::Oracle { body, handler, .. } => {
+                for stmt in body {
+                    self.collect_write_vars(stmt, vars);
+                }
+                for stmt in handler {
                     self.collect_write_vars(stmt, vars);
                 }
             }

@@ -291,6 +291,14 @@ impl<'a> DataflowAnalyzer<'a> {
                     self.extract_ids_from_statement(s, ids);
                 }
             }
+            Statement::Oracle { body, handler, .. } => {
+                for s in body {
+                    self.extract_ids_from_statement(s, ids);
+                }
+                for s in handler {
+                    self.extract_ids_from_statement(s, ids);
+                }
+            }
         }
     }
 

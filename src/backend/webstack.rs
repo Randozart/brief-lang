@@ -1491,6 +1491,7 @@ impl WebstackGenerator {
                 for s in body { self.statement_to_rust(output, s); }
             }
             Statement::Foreach { .. } => { /* foreach: not yet implemented in Webstack backend */ }
+            Statement::Oracle { .. } => { /* oracle: not yet implemented */ }
         }
     }
 

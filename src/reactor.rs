@@ -374,6 +374,12 @@ impl Reactor {
                 }
                 Ok(StmtResult::Continue)
             }
+            Statement::Oracle { body, handler, .. } => {
+                for stmt in body {
+                    interp.exec_stmt(stmt)?;
+                }
+                Ok(StmtResult::Continue)
+            }
         }
     }
 }
