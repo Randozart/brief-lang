@@ -1076,6 +1076,8 @@ impl LlvmBackend {
             }
             // ── Match ───────────────────────────────────────────
             Expr::Match { value, arms } => {
+                let saved_bindings = self.let_bindings.clone();
+                let saved_types = self.let_binding_types.clone();
                 let val = self.emit_expr(out, value, indent);
                 let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, val.name).ok();
@@ -1130,6 +1132,8 @@ impl LlvmBackend {
                     writeln!(out, "{}unreachable", indent).ok();
                 }
                 writeln!(out, "{}{}:", indent, merge_label).ok();
+                self.let_bindings = saved_bindings;
+                self.let_binding_types = saved_types;
             }
             // ── Slice ───────────────────────────────────────────
             Expr::Slice { value, start, end, stride, mask } => {

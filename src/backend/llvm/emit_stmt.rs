@@ -405,46 +405,65 @@ impl LlvmBackend {
                     writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, then_l, end_l).ok();
                 }
                 writeln!(out, "{}{}:", indent, then_l).ok();
-                // 2026-06-13: Save let bindings — values defined in the then-path
+                // Save let bindings + types — values defined in the then-path
                 // use SSA registers local to %then_l and don't dominate %end_l.
                 let saved_bindings = self.let_bindings.clone();
+                let saved_types = self.let_binding_types.clone();
                 for s in statements { self.emit_stmt(out, s, &format!("{}  ", indent)); }
                 self.let_bindings = saved_bindings;
-                if !self.terminated { writeln!(out, "{}  br label %{}", indent, end_l).ok(); }
+                self.let_binding_types = saved_types;
+                if !self.terminated {
+                    // Emit a sentinel then-exit block so the phi at end_l:
+                    // (a) has a single predecessor from the then-path (not then_l
+                    //     directly — nested guards inside the body terminate then_l
+                    //     before reaching end_l), and
+                    // (b) the phi predecessor matches the actual last block.
+                    let then_exit = format!("{}_tx", gid);
+                    writeln!(out, "{}  br label %{}", indent, then_exit).ok();
+                    writeln!(out, "{}{}:", indent, then_exit).ok();
+                    writeln!(out, "{}  br label %{}", indent, end_l).ok();
+                }
                 writeln!(out, "{}{}:", indent, end_l).ok();
                 if !self.terminated {
                     // SSA mode: phi merge at guard — the guard body may have
                     // modified state via insertvalue (only on the then path).
                     // Without a phi, the insertvalue result from %then_l would
-                    // be undefined on the skip path.
+                    // be undefined on the skip path. Use then_exit as predecessor.
                     if let Some(ref pre_reg) = ssa_pre_reg {
                         if let Some(ref post_reg) = self.ssa_state_reg {
                             if post_reg != pre_reg {
+                                let then_exit = format!("{}_tx", gid);
                                 let merge = format!("%me{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "  {} = phi %State [ {}, %{} ], [ {}, %{} ]",
-                                    merge, post_reg, then_l, pre_reg, entry_l);
+                                    merge, post_reg, then_exit, pre_reg, entry_l);
                                 self.ssa_state_reg = Some(merge);
                             }
                         }
                     }
+                    // Clear stale old-value caches — guard may have modified state
+                    // via insertvalue; pre-guard cached values are now incorrect.
+                    self.ssa_old_int_regs.clear();
+                    self.ssa_old_float_regs.clear();
                     self.terminated = prev_terminated;
                 } else {
-                    // 2026-06-13: Then-path terminated, but the end_l block (else path)
-                    // still needs a terminator. Emit the appropriate ret for the function
-                    // type. The then-path already has its own ret, so this covers the else
-                    // path. Reset terminated so callers can continue normally.
+                    // Then-path terminated (e.g. term!). The else path at end_l
+                    // still needs a terminator. Do NOT restore prev_terminated —
+                    // the current block (end_l) has a ret, so callers must not
+                    // emit more code after us.
                     if self.returns_i64 {
                         writeln!(out, "  ret i64 0").ok();
                     } else {
                         writeln!(out, "  ret void").ok();
                     }
-                    self.terminated = prev_terminated;
                 }}
             Statement::SyncBlock { body } => {
                 for s in body { self.emit_stmt(out, s, indent); }
             }
             Statement::Unification { name, variant, fields: _, expr } => {
-                // Load the variable being matched, not the continuation block.
+                // Save/restore bindings — pattern variable bindings from the arm
+                // block must not leak past the merge block.
+                let saved_bindings = self.let_bindings.clone();
+                let saved_types = self.let_binding_types.clone();
                 let val = self.emit_expr(out, &Expr::Identifier(name.clone()), indent);
                 let disc = format!("%ud{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = and i64 {}, 255", indent, disc, val).ok();
@@ -459,12 +478,13 @@ impl LlvmBackend {
                 let pay = format!("%up{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = lshr i64 {}, 8", indent, pay, val).ok();
                 self.let_bindings.insert(variant.clone(), pay.clone());
-                // Execute the continuation block (side effects only — value is discarded)
                 let _ = self.emit_expr(out, expr, indent);
                 writeln!(out, "{}br label %{}", indent, merge_l).ok();
                 writeln!(out, "{}{}:", indent, def_l).ok();
                 writeln!(out, "{}  unreachable", indent).ok();
                 writeln!(out, "{}{}:", indent, merge_l).ok();
+                self.let_bindings = saved_bindings;
+                self.let_binding_types = saved_types;
             }
             Statement::Expression(e) => { let _ = self.emit_expr(out, e, indent); }
             Statement::LocalTrigger { .. } => { writeln!(out, "{}; trg!", indent).ok(); }

@@ -394,6 +394,28 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
 - MultiSlice mask/stride evaluation implemented in interpreter. `_` bound as implicit element variable for filter expressions.
 - Intrinsic system (Phases A–H, 79 intrinsics) complete: terminal, process, file I/O, filesystem, time, signals, networking, env vars, process info, timing.
 
+### Roadmap — Next Work Items
+
+See `docs/plans/2026-06-15-trinity-work-items.md` for the full plan. Summary:
+
+**Critical — officina-cli blockers:**
+1. SSA phi dominance — 17 "Instruction does not dominate all uses" errors in `loop_engine.rs` general loop emission
+
+**Core feature — `foreach` completion (AST exists, backends are stubs):**
+2. LLVM backend: emit real loop IR (phi indvar, list load, element bind, body, back-edge)
+3. SIMD vectorization: wire `check_list_simd_lengths` → `!llvm.loop.vectorize.enable` metadata
+4. Feature file migration: `src/features/stmt/foreach.rs` following `sync_block.rs` pattern
+5. Documentation: update `statement.md` with LLVM IR and SIMD lowering
+
+**New feature — `?#` proof oracle:**
+6. Structural recursion checker (SPARK-style decreasing variant)
+7. `?#` AST / parser / desugaring (fuel injection + rollback + handler)
+8. Proof engine dispatch: bounded counter, structural recursion, SMT, fuel fallback
+9. Runtime fuel counter + state rollback + handler emission
+
+**Optimization:**
+10. Transaction body instruction reordering — reorder for ILP, emit `noalias` GEP annotations
+
 ## Iteration Pattern
 
 **Iteration requires `txn` with `[pre][post]` convergence, NOT `defn` + `[guard]`:**
