@@ -1330,6 +1330,10 @@ impl TypeChecker {
                     | Intrinsic::Recv | Intrinsic::SendTo | Intrinsic::RecvFrom
                     | Intrinsic::SetSockOpt | Intrinsic::GetSockOpt | Intrinsic::Shutdown
                     | Intrinsic::GetAddrInfo => Type::Int,
+                    // Phase H: Everything Else (intrinsics.md D6, D7)
+                    Intrinsic::GetEnv | Intrinsic::SetEnv | Intrinsic::UnsetEnv
+                    | Intrinsic::GetPid | Intrinsic::GetPPid | Intrinsic::ClockGetTime
+                    | Intrinsic::NanoSleep => Type::Int,
                 }
             }
             Expr::Call(name, args) => {
@@ -3377,6 +3381,78 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetAddrInfo,
             args: vec![Expr::String("localhost".into()), Expr::String("80".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    // ── Phase H: Everything Else type inference tests ─────────────
+
+    #[test]
+    fn test_check_intrinsic_getenv_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetEnv,
+            args: vec![Expr::String("PATH".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_setenv_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SetEnv,
+            args: vec![Expr::String("VAR".into()), Expr::String("val".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_unsetenv_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UnsetEnv,
+            args: vec![Expr::String("VAR".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_getpid_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetPid,
+            args: vec![],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_getppid_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetPPid,
+            args: vec![],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_clock_gettime_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ClockGetTime,
+            args: vec![Expr::Integer(1)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_nanosleep_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::NanoSleep,
+            args: vec![Expr::Integer(1000)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::Int);

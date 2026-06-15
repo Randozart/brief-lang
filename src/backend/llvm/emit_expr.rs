@@ -832,6 +832,34 @@ impl LlvmBackend {
                         let service = self.emit_expr(out, &args[1], indent);
                         writeln!(out, "{}{} = call i64 @brief_getaddrinfo(i64 {}, i64 {})", indent, v, node.name, service.name).ok();
                     }
+                    // ===== Phase H: Everything Else (intrinsics.md D6, D7) — Shim =====
+                    Intrinsic::GetEnv => {
+                        let name = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_getenv(i64 {})", indent, v, name.name).ok();
+                    }
+                    Intrinsic::SetEnv => {
+                        let name = self.emit_expr(out, &args[0], indent);
+                        let val = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_setenv(i64 {}, i64 {})", indent, v, name.name, val.name).ok();
+                    }
+                    Intrinsic::UnsetEnv => {
+                        let name = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_unsetenv(i64 {})", indent, v, name.name).ok();
+                    }
+                    Intrinsic::GetPid => {
+                        writeln!(out, "{}{} = call i64 @brief_getpid()", indent, v).ok();
+                    }
+                    Intrinsic::GetPPid => {
+                        writeln!(out, "{}{} = call i64 @brief_getppid()", indent, v).ok();
+                    }
+                    Intrinsic::ClockGetTime => {
+                        let clock_id = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_clock_gettime(i64 {})", indent, v, clock_id.name).ok();
+                    }
+                    Intrinsic::NanoSleep => {
+                        let ns = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_nanosleep(i64 {})", indent, v, ns.name).ok();
+                    }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
                         writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();

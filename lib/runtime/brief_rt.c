@@ -1155,6 +1155,53 @@ int64_t brief_getaddrinfo(int64_t node, int64_t service) {
     return (int64_t)ret;
 }
 
+/* ===================================================================
+ * Phase H: Everything Else (intrinsics.md D6, D7)
+ *
+ * Environment variables, process info, and timing.
+ * =================================================================== */
+
+#include <unistd.h>
+#include <time.h>
+
+int64_t brief_getenv(int64_t name) {
+    const char* s = getenv((const char*)(uintptr_t)name);
+    if (!s) return 0;
+    return (int64_t)s;
+}
+
+int64_t brief_setenv(int64_t name, int64_t value) {
+    return (int64_t)setenv((const char*)(uintptr_t)name, (const char*)(uintptr_t)value, 1);
+}
+
+int64_t brief_unsetenv(int64_t name) {
+    return (int64_t)unsetenv((const char*)(uintptr_t)name);
+}
+
+int64_t brief_getpid(void) {
+    return (int64_t)getpid();
+}
+
+int64_t brief_getppid(void) {
+    return (int64_t)getppid();
+}
+
+int64_t brief_clock_gettime(int64_t clock_id) {
+    struct timespec ts;
+    if (clock_gettime((clockid_t)clock_id, &ts) == 0) {
+        return ts.tv_sec * 1000000000L + ts.tv_nsec;
+    }
+    return 0;
+}
+
+int64_t brief_nanosleep(int64_t ns) {
+    struct timespec req;
+    struct timespec rem;
+    req.tv_sec = ns / 1000000000L;
+    req.tv_nsec = ns % 1000000000L;
+    return (int64_t)nanosleep(&req, &rem);
+}
+
 /* ── Officina-local frgn (JSON, substring) ────────────────────────── */
 
 int64_t substring(const char* s) {

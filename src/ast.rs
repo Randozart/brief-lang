@@ -563,6 +563,14 @@ pub enum Intrinsic {
     GetSockOpt,
     Shutdown,
     GetAddrInfo,
+    // ===== Phase H: Everything Else (intrinsics.md D6, D7) =====
+    GetEnv,
+    SetEnv,
+    UnsetEnv,
+    GetPid,
+    GetPPid,
+    ClockGetTime,
+    NanoSleep,
 }
 
 impl Intrinsic {
@@ -674,6 +682,14 @@ impl Intrinsic {
             "getsockopt" => Some(Intrinsic::GetSockOpt),
             "shutdown" => Some(Intrinsic::Shutdown),
             "getaddrinfo" => Some(Intrinsic::GetAddrInfo),
+            // Phase H: Everything Else (intrinsics.md D6, D7)
+            "getenv" => Some(Intrinsic::GetEnv),
+            "setenv" => Some(Intrinsic::SetEnv),
+            "unsetenv" => Some(Intrinsic::UnsetEnv),
+            "getpid" => Some(Intrinsic::GetPid),
+            "getppid" => Some(Intrinsic::GetPPid),
+            "clock_gettime" => Some(Intrinsic::ClockGetTime),
+            "nanosleep" => Some(Intrinsic::NanoSleep),
             _ => None,
         }
     }
@@ -786,6 +802,14 @@ impl Intrinsic {
             Intrinsic::GetSockOpt => "getsockopt",
             Intrinsic::Shutdown => "shutdown",
             Intrinsic::GetAddrInfo => "getaddrinfo",
+            // Phase H: Everything Else (intrinsics.md D6, D7)
+            Intrinsic::GetEnv => "getenv",
+            Intrinsic::SetEnv => "setenv",
+            Intrinsic::UnsetEnv => "unsetenv",
+            Intrinsic::GetPid => "getpid",
+            Intrinsic::GetPPid => "getppid",
+            Intrinsic::ClockGetTime => "clock_gettime",
+            Intrinsic::NanoSleep => "nanosleep",
         }
     }
 }
@@ -2613,6 +2637,48 @@ mod tests {
     fn test_intrinsic_from_name_getaddrinfo() {
         assert_eq!(Intrinsic::from_name("getaddrinfo"), Some(Intrinsic::GetAddrInfo));
         assert_eq!(Intrinsic::GetAddrInfo.name(), "getaddrinfo");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_getenv() {
+        assert_eq!(Intrinsic::from_name("getenv"), Some(Intrinsic::GetEnv));
+        assert_eq!(Intrinsic::GetEnv.name(), "getenv");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_setenv() {
+        assert_eq!(Intrinsic::from_name("setenv"), Some(Intrinsic::SetEnv));
+        assert_eq!(Intrinsic::SetEnv.name(), "setenv");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_unsetenv() {
+        assert_eq!(Intrinsic::from_name("unsetenv"), Some(Intrinsic::UnsetEnv));
+        assert_eq!(Intrinsic::UnsetEnv.name(), "unsetenv");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_getpid() {
+        assert_eq!(Intrinsic::from_name("getpid"), Some(Intrinsic::GetPid));
+        assert_eq!(Intrinsic::GetPid.name(), "getpid");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_getppid() {
+        assert_eq!(Intrinsic::from_name("getppid"), Some(Intrinsic::GetPPid));
+        assert_eq!(Intrinsic::GetPPid.name(), "getppid");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_clock_gettime() {
+        assert_eq!(Intrinsic::from_name("clock_gettime"), Some(Intrinsic::ClockGetTime));
+        assert_eq!(Intrinsic::ClockGetTime.name(), "clock_gettime");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_nanosleep() {
+        assert_eq!(Intrinsic::from_name("nanosleep"), Some(Intrinsic::NanoSleep));
+        assert_eq!(Intrinsic::NanoSleep.name(), "nanosleep");
     }
 
     #[test]

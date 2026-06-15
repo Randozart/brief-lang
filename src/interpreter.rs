@@ -3151,6 +3151,102 @@ impl Interpreter {
                             Ok(Value::Int(-1))
                         }
                     }
+                    // ===== Phase H: Everything Else (intrinsics.md D6, D7) =====
+                    Intrinsic::GetEnv => {
+                        let name = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getenv name requires String, got {:?}", v))),
+                        };
+                        match std::env::var(&name) {
+                            Ok(val) => Ok(Value::String(val)),
+                            Err(_) => Ok(Value::String(String::new())),
+                        }
+                    }
+                    Intrinsic::SetEnv => {
+                        let name = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setenv name requires String, got {:?}", v))),
+                        };
+                        let value = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setenv value requires String, got {:?}", v))),
+                        };
+                        unsafe { std::env::set_var(&name, &value); }
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::UnsetEnv => {
+                        let name = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("unsetenv name requires String, got {:?}", v))),
+                        };
+                        unsafe { std::env::remove_var(&name); }
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::GetPid => {
+                        #[cfg(unix)]
+                        {
+                            let pid = unsafe { libc::getpid() };
+                            Ok(Value::Int(pid as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::GetPPid => {
+                        #[cfg(unix)]
+                        {
+                            let ppid = unsafe { libc::getppid() };
+                            Ok(Value::Int(ppid as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::ClockGetTime => {
+                        let clock_id = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("clock_gettime clock_id requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
+                            let ret = unsafe { libc::clock_gettime(clock_id, &mut ts) };
+                            if ret == 0 {
+                                let nanos = ts.tv_sec * 1_000_000_000 + ts.tv_nsec;
+                                Ok(Value::Int(nanos))
+                            } else {
+                                Ok(Value::Int(0))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = clock_id;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::NanoSleep => {
+                        let ns = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("nanosleep ns requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let req = libc::timespec {
+                                tv_sec: ns / 1_000_000_000,
+                                tv_nsec: ns % 1_000_000_000,
+                            };
+                            let mut rem: libc::timespec = unsafe { std::mem::zeroed() };
+                            let ret = unsafe { libc::nanosleep(&req, &mut rem) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            std::thread::sleep(std::time::Duration::from_nanos(ns as u64));
+                            Ok(Value::Int(0))
+                        }
+                    }
                     // Data intrinsics
                     Intrinsic::Sort => Ok(values.remove(0)),
                     Intrinsic::Reverse => Ok(values.remove(0)),
@@ -8326,6 +8422,58 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetAddrInfo,
             args: vec![Expr::Integer(0), Expr::String("http".into())],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    // ── Phase H: Everything Else intrinsic tests ──────────────────
+
+    #[test]
+    fn test_intrinsic_getenv_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetEnv,
+            args: vec![Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_setenv_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SetEnv,
+            args: vec![Expr::String("PATH".into()), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_unsetenv_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UnsetEnv,
+            args: vec![Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_clock_gettime_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ClockGetTime,
+            args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_nanosleep_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::NanoSleep,
+            args: vec![Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }

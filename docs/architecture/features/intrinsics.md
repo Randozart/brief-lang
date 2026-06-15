@@ -1,7 +1,7 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Phase G — Networking complete (2026-06-15). Phases A–F also complete. Supersedes `as-intrinsic.md`.
+**Status:** Phase H — Everything Else complete (2026-06-15). Phases A–G also complete. All planned intrinsic phases are done. Supersedes `as-intrinsic.md`.
 
 ## Purpose
 
@@ -502,26 +502,23 @@ in `brief_rt.c` via POSIX socket API.
 - `src/interpreter.rs` — 13 eval tests (type errors)
 - `src/typechecker.rs` — 13 inference tests
 
-### Phase H — Everything Else (~20 intrinsics)
+### Phase H — Everything Else (completed 2026-06-15)
 
-**New Intrinsic variants:**
-- D6: `GetEnv`, `SetEnv`, `UnsetEnv`, `GetPid`, `GetPPid`
-- D7: `ClockGetTime`, `NanoSleep`
-- D12: `GetRandom`
-- D13: `Uname`, `SysInfo`, `PageSize`, `CpuCount`, `HostName`, `ErrNo`
-- D14: `Abort`, `BackTrace`
-- D15: `SchedYield`, `GetPriority`, `SetPriority`
-- D16: `GetUid`, `GetEUid`, `GetGid`, `GetEGid`
-- D17: `ThreadCreate`, `ThreadJoin`, `ThreadExit`, `MutexLock`,
-       `MutexUnlock`, `CondVarWait`, `CondVarSignal`
-- D18: `GetRLimit`, `SetRLimit`
+**New Intrinsic variants:** D6: `GetEnv`, `SetEnv`, `UnsetEnv`, `GetPid`, `GetPPid`
++ D7: `ClockGetTime`, `NanoSleep`
 
-**LLVM backend:** Category **Shim**→**Direct** or **Native** as appropriate.
+**LLVM backend:** Category **Shim** — emit `call i64 @brief_*`, implemented
+in `brief_rt.c` via POSIX (getenv, setenv, unsetenv, getpid, getppid,
+clock_gettime, nanosleep).
 
-**Files deleted:**
-- `lib/std/ffi/time.bv` frgn declarations (~20 entries → intrinsic + pure Brief)
-- `lib/std/ffi/env.bv`
-- `lib/std/ffi/process.bv` frgn declarations
+**Interpreter:** Uses `std::env` for env vars, `libc::getpid`, `libc::getppid`,
+`libc::clock_gettime`, `libc::nanosleep`. `getenv#` returns String (empty on
+missing), `clock_gettime#` returns Int as nanoseconds since epoch.
+
+**Tests added:**
+- `src/ast.rs` — 7 roundtrip tests
+- `src/interpreter.rs` — 5 eval tests (type errors; GetPid/GetPPid take no args)
+- `src/typechecker.rs` — 7 inference tests
 
 ## LLVM Backend Type Policy
 

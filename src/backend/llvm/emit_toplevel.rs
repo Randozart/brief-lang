@@ -108,6 +108,14 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @brief_getsockopt(i64, i64, i64, i64, i64)").ok();
         writeln!(out, "declare i64 @brief_shutdown(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_getaddrinfo(i64, i64)").ok();
+        // Phase H: Everything Else (intrinsics.md D6, D7)
+        writeln!(out, "declare i64 @brief_getenv(i64)").ok();
+        writeln!(out, "declare i64 @brief_setenv(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_unsetenv(i64)").ok();
+        writeln!(out, "declare i64 @brief_getpid()").ok();
+        writeln!(out, "declare i64 @brief_getppid()").ok();
+        writeln!(out, "declare i64 @brief_clock_gettime(i64)").ok();
+        writeln!(out, "declare i64 @brief_nanosleep(i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {
