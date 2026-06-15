@@ -8,20 +8,33 @@ Backend codegen is extracted into feature files via per-backend traits.
 Each backend is a separate trait so changing VHDL emission never
 recompiles LLVM codegen.
 
+## Three Canonical Backends (2026-06-15)
+
+Only three backends are actively developed. All others are dead code:
+
+| Backend | Target | Status |
+|---------|--------|--------|
+| **LLVM** (`src/backend/llvm/`) | Native binary (`.ll` + `llc`) | **Active** — canonical OS target |
+| **Webstack** (`src/backend/webstack.rs`) | WASM + JS glue | **Active** — canonical web target |
+| **CIRCT** (`src/backend/circt.rs`) | Hardware (`.mlir` + `circt-opt` + `circt-translate`) | **Active** — canonical hardware target (NEW) |
+
+Dead backends: `verilog.rs`, `vhdl.rs`, `c.rs`, `rust.rs`, `cobol.rs`,
+`x86_64.rs`, `aarch64.rs`, `wasm.rs`, `tcl_generator.rs` — zero fixes.
+
 ## LLVM Backend (Split into Subdirectory)
 
-The LLVM backend is at `src/backend/llvm/` (10 files, ~8,400 total lines;
+The LLVM backend is at `src/backend/llvm/` (11 files, ~8,700 total lines;
 original monolithic `llvm.rs` was ~7,800 lines).
 
 ### File Layout
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 1,744 | `LlvmBackend` struct (45 fields in 9 groups), `generate()` entry point, builder methods, codegen dispatch (A000-A006 decision), `build_field_index`, `validate_schema_types` |
-| `emit_toplevel.rs` | 591 | Top-level emission: `emit_header`, `emit_declares`, `emit_init_state`, `emit_definition`, `emit_transaction`, `emit_callable_txn`, `emit_precondition_check`, `emit_pre_function`, `emit_async_body`, `emit_fused`, `emit_shape_guarded_body`, `emit_fused_composed`, `emit_trg_load`, `llvm_type`, `align_of`, `declare_state_type` |
+| `mod.rs` | 1,776 | `LlvmBackend` struct (46 fields in 9 groups), `generate()` entry point, builder methods, codegen dispatch (A000-A006 decision), `build_field_index`, `validate_schema_types` |
+| `emit_toplevel.rs` | 734 | Top-level emission: `emit_header`, `emit_declares`, `emit_init_state`, `emit_definition`, `emit_transaction`, `emit_callable_txn`, `emit_precondition_check`, `emit_pre_function`, `emit_async_body`, `emit_fused`, `emit_shape_guarded_body`, `emit_fused_composed`, `emit_trg_load`, `llvm_type`, `align_of`, `declare_state_type` |
 | `emit_expr.rs` | 1,037 | `emit_expr()` router — all 20+ Expr variant arms including ProjectionTarget (18 targets), BracketOp (MultiSlice), Slice, collection emissions, field access, match/pattern, tuple |
 | `emit_stmt.rs` | 477 | `emit_stmt()` router — all Statement variant arms with Guarded block handling, let_bindings save/restore across guard boundaries |
-| `loop_engine.rs` | 978 | Folded loop engine: `emit_folded_main`, `emit_folded_memory_main` (2026-06-13), `emit_ssa_main`, `emit_folded_loop`, `emit_folded_pure_counter`, `pre_extract_float/int_fields`, `pre_load_all_fields` |
+| `loop_engine.rs` | 1,080 | Folded loop engine: `emit_folded_main`, `emit_folded_memory_main`, `emit_ssa_main`, `emit_folded_loop`, `emit_folded_pure_counter`, `emit_trg_step` (NEW), `pre_extract_float/int_fields`, `pre_load_all_fields` |
 | `dispatch.rs` | 256 | Reactor dispatch: `emit_reactor`, `emit_parallel_reactor`, `extract_ranges` |
 | `optimizer.rs` | 280 | Decision tree: `select_optimization_strategy`, classify, extract trigger/enum keys |
 | `hazard.rs` | 249 | SLP hazard analysis: `estimate_slp_hazard`, `slp_attr`, `compute_peak_live_floats` |
@@ -43,11 +56,32 @@ file is small enough to navigate, and no optimization path was touched.
 into feature `ExprCodegenVHDL` impls. Optimizations deferred until
 LLVM pattern is proven.
 
+## CIRCT Backend (NEW 2026-06-15)
+
+(`src/backend/circt.rs`, 240 lines) — emits MLIR text in HW + Comb
+dialects. Trigger variables become top-level input ports. State variables
+with initializer expressions become combinational logic. No dirty-bit
+`step()` function needed — hardware is purely combinatorial.
+
+```mlir
+hw.module @top(clock: i1, reset: i1, sensor: i64, c: i64) -> () {
+  %c0_c = hw.constant 0 : i64
+  hw.output_assign c, %sensor : i64
+  hw.output
+}
+```
+
+Invoked externally: `brief-compiler circt <file.bv> → program.mlir →
+circt-opt → circt-translate → verilog`. Same proven pattern as LLVM
+backend emitting `.ll` text.
+
 ## Webstack Backend
 
-(`src/backend/webstack.rs`, 2,230 lines) — expression emission extracted
-into feature `ExprCodegenWebstack` impls. Optimizations deferred until
-LLVM pattern is proven.
+(`src/backend/webstack.rs`, 2,327 lines) — expression emission extracted
+into feature `ExprCodegenWebstack` impls. Now integrates `TopLevel::Trigger`
+declarations as reactive signals via `collect_signals_and_transactions`.
+Generates `step_triggers()` function that marks dirty signals and propagates
+to dependent transactions. Optimizations deferred until LLVM pattern is proven.
 
 ## FFI Marshaling Convention (Critical)
 

@@ -35,8 +35,8 @@ flowchart LR
 | Typechecker | `typechecker.rs` | Infers and checks types, validates contracts. Enforces field visibility (`Sedentary` cross-file check). Validates struct derivation upcast (`B <: A → B compatible with A`). |
 | Proof Engine | `proof_engine.rs` | Symbolic verification of contracts, convergence analysis |
 | Annotator | `annotator.rs` | File-level attribute processing |
-| Analysis | `analysis/` | Call graph, dataflow, transition graph, PGO, region, SLP hazard |
-| Backend | `backend/` | Code generation for target (LLVM, VHDL, Webstack, etc.) |
+| Analysis | `analysis/` | Call graph, dependency graph (trg dirty-flag), dataflow, transition graph, PGO, region, SLP hazard |
+| Backend | `backend/` | Code generation for target (LLVM, CIRCT, Webstack, etc.) |
 | Interpreter | `interpreter.rs` | Reference implementation — evaluates Brief directly |
 
 ## Feature File Architecture (Pattern B)

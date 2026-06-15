@@ -56,6 +56,7 @@ Annotator ────────► Program (file-level attributes processed)
   ▼
 Analysis ─────────► AnalysisResult
   │                 ├── CallGraph ──► backend dispatch selection
+  │                 ├── DependencyGraph ──► trg dirty-flag step() order (NEW 2026-06-15)
   │                 ├── Dataflow ───► prior-state field analysis
   │                 ├── TransitionGraph ──► dispatch collapse
   │                 ├── SLP Hazard ──► compute_peak_live_floats → SLP enable/disable
@@ -63,7 +64,7 @@ Analysis ─────────► AnalysisResult
   │                 └── PGO ──► branch weight annotations for LLVM
   │
   ▼
-Codegen ──────────► Output (LLVM IR / VHDL / Webstack / C)
+Codegen ──────────► Output (LLVM IR / CIRCT / Webstack / C)
   │                 ├── Direct SSA loop (A006) — no async, no MMIO
   │                 ├── Enum dispatch — folded multi-txn
   │                 └── Reactor tick — async triggers or MMIO

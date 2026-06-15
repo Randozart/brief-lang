@@ -376,14 +376,23 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 713 tests pass, 0 fail
-- Phase 1.1 (LiteralExpr) complete — committed to `refactor/pattern-b`
+- 897 tests pass, 0 fail
+- **trg reactive dirty-flag architecture** complete (Phases 1–6):
+  - Phase 1: `DependencyGraph` — variable-level DAG, Kahn's sort, cycle detection
+  - Phase 2: `DirtyFlags(u64)` — bitmask with mark/clear/merge/any/none
+  - Phase 3: LLVM `@step(%State*, i64)` — volatile trigger loads, dirty-flag recomputation
+  - Phase 4: CIRCT backend (`circt.rs`) — HW+Comb MLIR emission, trg→input ports
+  - Phase 5: Webstack `step_triggers()` — dirty-signal propagation in generated Rust
+  - Phase 6: Removed `__trg_stdin_read` polling; deprecated timerfd/signalfd polling
+- Three canonical backends: LLVM (native), Webstack (WASM+JS), CIRCT (MLIR→Verilog)
+- All other backends are dead code — zero fixes
 - Kani: 14 fast-group harnesses proven (2.5s), 96 full-group pass with `--features kani_full`
 - Interpreter is the reference — if it runs a program, the backend should eventually compile it
 - All additions are additive (new match arms) — never modify existing optimization paths
 - Phases 11–13 (sync domains, HashMap/HashSet, Stack/Queue/Tuple) complete
 - BracketOp refactor (flat ops list for `MultiSlice`) complete
 - MultiSlice mask/stride evaluation implemented in interpreter. `_` bound as implicit element variable for filter expressions.
+- Intrinsic system (Phases A–H, 79 intrinsics) complete: terminal, process, file I/O, filesystem, time, signals, networking, env vars, process info, timing.
 
 ## Iteration Pattern
 
