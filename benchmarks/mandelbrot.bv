@@ -29,32 +29,19 @@ const THRESH: Int = 40000;
 
 // ── Transaction ──────────────────────────────────────────────────────
 rct txn mb [count < N][count == N] {
-    &seed = seed * IA;
-    &seed = seed + IC;
-    &seed = seed % IM;
-    &cr = seed % 200 - 100;
-
-    &seed = seed * IA;
-    &seed = seed + IC;
-    &seed = seed % IM;
-    &ci = seed % 200 - 100;
-
-    &t1 = zr * cr / SCALE;
-    &t2 = zi * ci / SCALE;
-    &t3 = zr * ci / SCALE;
-    &zr = t1 - t2;
-    &zi = t3 + zi * cr / SCALE;
-
-    &escapes = escapes + zr * zr / SCALE + zi * zi / SCALE;
-
-    [count % 5000000 == 0] {
-        __print_int(escapes);
-    };
-
+    let ns1: Int = (seed * IA + IC) % IM;
+    let ncr: Int = ns1 % 200 - 100;
+    let ns2: Int = (ns1 * IA + IC) % IM;
+    let nci: Int = ns2 % 200 - 100;
+    let nt1: Int = zr * ncr / SCALE;
+    let nt2: Int = zi * nci / SCALE;
+    let nt3: Int = zr * nci / SCALE;
+    let nzr: Int = nt1 - nt2;
+    let nzi: Int = nt3 + zi * ncr / SCALE;
+    let nesc: Int = escapes + nzr * nzr / SCALE + nzi * nzi / SCALE;
+    &seed = ns2;  &cr = ncr;  &ci = nci;  &t1 = nt1;  &t2 = nt2;  &t3 = nt3;  &zr = nzr;  &zi = nzi;  &escapes = nesc;
+    [count % 5000000 == 0] { __print_int(nesc); };
     &count = count + 1;
-
-    [count == N] {
-        __print_int(escapes);
-    };
+    [count == N] { term! -> __print_int(nesc); };
     term;
 };

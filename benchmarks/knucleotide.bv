@@ -21,23 +21,12 @@ const MASK: Int = 63;
 
 // ── Transaction ──────────────────────────────────────────────────────
 rct txn kn [count < N][count == N] {
-    &seed = seed * IA;
-    &seed = seed + IC;
-    &seed = seed % IM;
-
-    &hash = (hash << 2) | (seed & 3);
-    &hash = hash & MASK;
-
-    &chksum = chksum + hash % 13;
-
-    [count % 5000000 == 0] {
-        __print_int(chksum);
-    };
-
+    let nseed: Int = (seed * IA + IC) % IM;
+    let nhash: Int = ((hash << 2) | (nseed & 3)) & MASK;
+    let nchksum: Int = chksum + nhash % 13;
+    &seed = nseed;  &hash = nhash;  &chksum = nchksum;
+    [count % 5000000 == 0] { __print_int(nchksum); };
     &count = count + 1;
-
-    [count == N] {
-        term! -> __print_int(chksum);
-    };
+    [count == N] { term! -> __print_int(nchksum); };
     term;
 };
