@@ -13,6 +13,7 @@ pub mod guarded;
 pub mod term;
 pub mod escape;
 pub mod expression;
+pub mod foreach;
 pub mod unification;
 pub mod inline_asm;
 pub mod local_trigger;

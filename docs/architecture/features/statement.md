@@ -98,8 +98,8 @@ has a special `Expr::TupleDestructure` branch that:
 
 ## `foreach(item in list) { body }` — Bounded Iteration
 
-**Date:** 2026-06-12  
-**Status:** Implemented (interpreter, parser, all backends)
+**Date:** 2026-06-15  
+**Status:** Implemented (interpreter, LLVM backend with SIMD hint, parser; other backends stubs)
 
 `foreach` is a statement-level bounded loop. It iterates over a `List<T>`,
 binding `item: T` in each iteration. Unlike `rct txn` loops, `foreach`
@@ -139,11 +139,56 @@ Statement::Foreach { item, list, body } => {
 | Backend | Status |
 |---------|--------|
 | Interpreter  | ✅ Direct implementation |
-| LLVM         | ⚠️ Comment stub + recursive body emission |
-| C / COBOL / Verilog / VHDL / Wasm / Webstack / aarch64 / x86_64 | ⚠️ Comment stubs |
+| LLVM         | ✅ Real loop IR (phi-less alloca-based index) + `!llvm.loop.vectorize.enable` metadata |
+| Webstack     | ⚠️ Comment stub |
+| C / COBOL / Verilog / VHDL / Wasm / aarch64 / x86_64 | ⚠️ Zero-fix dead backends |
 
-The backend stubs emit comments but don't produce executable code yet.
-The interpreter is the reference implementation.
+### LLVM IR (2026-06-15)
+
+The LLVM backend emits a counted loop using an alloca-based index variable
+(avoids phi-block naming issues that plagued the SSA path):
+
+```llvm
+; list_val is i64 (ptrtoint of the 2-slot-header buffer)
+; Slot 0: data_ptr (i64), Slot 1: length (i64), Slot 2+: elements
+%fe_hp_N = inttoptr i64 %list_val to i64*
+%fe_dp_gep_N = getelementptr i64, i64* %fe_hp_N, i64 0
+%fe_dp_N = load i64, i64* %fe_dp_gep_N
+%fe_ep_N = inttoptr i64 %fe_dp_N to i64*
+%fe_len_gep_N = getelementptr i64, i64* %fe_hp_N, i64 1
+%fe_len_N = load i64, i64* %fe_len_gep_N
+%fe_idx_slot_N = alloca i64
+store i64 0, i64* %fe_idx_slot_N
+br label %fe_hdr_N
+
+fe_hdr_N:
+%fe_cur_N = load i64, i64* %fe_idx_slot_N
+%fe_cmp_N = icmp slt i64 %fe_cur_N, %fe_len_N
+br i1 %fe_cmp_N, label %fe_body_N, label %fe_done_N
+
+fe_body_N:
+%fe_elem_gep_N = getelementptr i64, i64* %fe_ep_N, i64 %fe_cur_N
+%fe_elem_N = load i64, i64* %fe_elem_gep_N
+; element bound to 'item' in let_bindings, body emitted here
+%fe_next_N = add i64 %fe_cur_N, 1
+store i64 %fe_next_N, i64* %fe_idx_slot_N
+br label %fe_hdr_N, !llvm.loop !M
+
+; LLVM Loop Vectorizer metadata — LLVM only vectorizes when the
+; body has no cross-iteration dependencies.
+!M = !{!M, !N}
+!N = !{!"llvm.loop.vectorize.enable", i1 true}
+
+fe_done_N:
+```
+
+### Feature file (2026-06-15)
+
+The Foreach implementation lives in `src/features/stmt/foreach.rs` as
+a `ForeachStmt` struct with trait impls (`StmtTypecheck`, `StmtEval`,
+`StmtCodegenLLVM`, `StmtCodegenWebstack`), following the `sync_block.rs`
+migration pattern. The central `emit_stmt.rs` delegates to the feature
+module rather than containing the loop IR inline.
 
 ### Comparison to manual iteration
 

@@ -421,8 +421,8 @@ pub struct LlvmBackend {
     pub(crate) txn_counter: usize,
     pub(crate) metadata_counter: usize,  // for !llvm.loop metadata nodes
     pending_cleanup: Vec<Statement>,
-    let_bindings: HashMap<String, String>,
-    let_binding_types: HashMap<String, Type>,
+    pub(crate) let_bindings: HashMap<String, String>,
+    pub(crate) let_binding_types: HashMap<String, Type>,
     terminated: bool,
     returns_i64: bool,
     fn_ret_ty: String,
