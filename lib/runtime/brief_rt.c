@@ -788,6 +788,153 @@ int64_t brief_fcntl(int64_t fd, int64_t cmd, int64_t arg) {
     return (int64_t)ret;
 }
 
+/* ===================================================================
+ * Phase C: Filesystem intrinsics (intrinsics.md D3)
+ *
+ * Wraps POSIX filesystem operations. Path parameters follow Brief string
+ * format. readlink/getcwd return Brief string (0 on error). readdir
+ * returns Brief List<string> (0 on error).
+ * =================================================================== */
+
+#include <dirent.h>
+
+int64_t brief_mkdir(int64_t path_bstr, int64_t mode) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int ret = mkdir(c_path, (mode_t)mode);
+    free(c_path);
+    return (int64_t)ret;
+}
+
+int64_t brief_rmdir(int64_t path_bstr) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int ret = rmdir(c_path);
+    free(c_path);
+    return (int64_t)ret;
+}
+
+int64_t brief_unlink(int64_t path_bstr) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int ret = unlink(c_path);
+    free(c_path);
+    return (int64_t)ret;
+}
+
+int64_t brief_rename(int64_t old_bstr, int64_t new_bstr) {
+    char* c_old = brief_str_to_c(old_bstr);
+    if (!c_old) return -1;
+    char* c_new = brief_str_to_c(new_bstr);
+    if (!c_new) { free(c_old); return -1; }
+    int ret = rename(c_old, c_new);
+    free(c_old); free(c_new);
+    return (int64_t)ret;
+}
+
+int64_t brief_symlink(int64_t target_bstr, int64_t link_bstr) {
+    char* c_target = brief_str_to_c(target_bstr);
+    if (!c_target) return -1;
+    char* c_link = brief_str_to_c(link_bstr);
+    if (!c_link) { free(c_target); return -1; }
+    int ret = symlink(c_target, c_link);
+    free(c_target); free(c_link);
+    return (int64_t)ret;
+}
+
+int64_t brief_readlink(int64_t path_bstr) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return 0;
+    char buf[4096];
+    ssize_t n = readlink(c_path, buf, sizeof(buf) - 1);
+    free(c_path);
+    if (n < 0) return 0;
+    buf[n] = '\0';
+    return cstr_to_brief(buf);
+}
+
+int64_t brief_link(int64_t old_bstr, int64_t new_bstr) {
+    char* c_old = brief_str_to_c(old_bstr);
+    if (!c_old) return -1;
+    char* c_new = brief_str_to_c(new_bstr);
+    if (!c_new) { free(c_old); return -1; }
+    int ret = link(c_old, c_new);
+    free(c_old); free(c_new);
+    return (int64_t)ret;
+}
+
+int64_t brief_getcwd(void) {
+    char buf[4096];
+    if (!getcwd(buf, sizeof(buf))) return 0;
+    return cstr_to_brief(buf);
+}
+
+int64_t brief_chdir(int64_t path_bstr) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int ret = chdir(c_path);
+    free(c_path);
+    return (int64_t)ret;
+}
+
+int64_t brief_readdir(int64_t path_bstr) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return 0;
+    DIR* dir = opendir(c_path);
+    free(c_path);
+    if (!dir) return 0;
+
+    // Count entries
+    struct dirent* entry;
+    int count = 0;
+    rewinddir(dir);
+    while ((entry = readdir(dir)) != NULL) count++;
+    rewinddir(dir);
+
+    // Allocate Brief list header: [data_ptr, size, str1, str2, ...]
+    int64_t* list = malloc(sizeof(int64_t) * (size_t)(2 + count));
+    if (!list) { closedir(dir); return 0; }
+    list[0] = (int64_t)(list + 2);
+    list[1] = count;
+
+    int i = 0;
+    while ((entry = readdir(dir)) != NULL && i < count) {
+        list[2 + i] = cstr_to_brief(entry->d_name);
+        i++;
+    }
+    closedir(dir);
+    return (int64_t)list;
+}
+
+int64_t brief_chmod(int64_t path_bstr, int64_t mode) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int ret = chmod(c_path, (mode_t)mode);
+    free(c_path);
+    return (int64_t)ret;
+}
+
+int64_t brief_chown(int64_t path_bstr, int64_t uid, int64_t gid) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int ret = chown(c_path, (uid_t)uid, (gid_t)gid);
+    free(c_path);
+    return (int64_t)ret;
+}
+
+int64_t brief_umask(int64_t mask) {
+    mode_t old = umask((mode_t)mask);
+    return (int64_t)old;
+}
+
+int64_t brief_access(int64_t path_bstr, int64_t mode) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return -1;
+    int ret = access(c_path, (int)mode);
+    free(c_path);
+    return (int64_t)ret;
+}
+
 /* ── Officina-local frgn (JSON, substring) ────────────────────────── */
 
 int64_t substring(const char* s) {

@@ -541,6 +541,70 @@ impl LlvmBackend {
                         let arg = self.emit_expr(out, &args[2], indent);
                         writeln!(out, "{}{} = call i64 @brief_fcntl(i64 {}, i64 {}, i64 {})", indent, v, fd.name, cmd.name, arg.name).ok();
                     }
+                    // ===== Phase C: Filesystem (intrinsics.md D3) =====
+                    Intrinsic::MkDir => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        let mode = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_mkdir(i64 {}, i64 {})", indent, v, path.name, mode.name).ok();
+                    }
+                    Intrinsic::RmDir => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_rmdir(i64 {})", indent, v, path.name).ok();
+                    }
+                    Intrinsic::Unlink => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_unlink(i64 {})", indent, v, path.name).ok();
+                    }
+                    Intrinsic::Rename => {
+                        let old = self.emit_expr(out, &args[0], indent);
+                        let new = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_rename(i64 {}, i64 {})", indent, v, old.name, new.name).ok();
+                    }
+                    Intrinsic::SymLink => {
+                        let target = self.emit_expr(out, &args[0], indent);
+                        let link = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_symlink(i64 {}, i64 {})", indent, v, target.name, link.name).ok();
+                    }
+                    Intrinsic::ReadLink => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_readlink(i64 {})", indent, v, path.name).ok();
+                    }
+                    Intrinsic::Link => {
+                        let old = self.emit_expr(out, &args[0], indent);
+                        let new = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_link(i64 {}, i64 {})", indent, v, old.name, new.name).ok();
+                    }
+                    Intrinsic::GetCwd => {
+                        writeln!(out, "{}{} = call i64 @brief_getcwd()", indent, v).ok();
+                    }
+                    Intrinsic::ChDir => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_chdir(i64 {})", indent, v, path.name).ok();
+                    }
+                    Intrinsic::ReadDir => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_readdir(i64 {})", indent, v, path.name).ok();
+                    }
+                    Intrinsic::ChMod => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        let mode = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_chmod(i64 {}, i64 {})", indent, v, path.name, mode.name).ok();
+                    }
+                    Intrinsic::ChOwn => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        let uid = self.emit_expr(out, &args[1], indent);
+                        let gid = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_chown(i64 {}, i64 {}, i64 {})", indent, v, path.name, uid.name, gid.name).ok();
+                    }
+                    Intrinsic::UMask => {
+                        let mask = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_umask(i64 {})", indent, v, mask.name).ok();
+                    }
+                    Intrinsic::Access => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        let mode = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_access(i64 {}, i64 {})", indent, v, path.name, mode.name).ok();
+                    }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
                         writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();

@@ -506,6 +506,22 @@ pub enum Intrinsic {
     FDup,
     FDup2,
     FCntl,
+
+    // ===== Phase C: Filesystem (intrinsics.md D3) =====
+    MkDir,
+    RmDir,
+    Unlink,
+    Rename,
+    SymLink,
+    ReadLink,
+    Link,
+    GetCwd,
+    ChDir,
+    ReadDir,
+    ChMod,
+    ChOwn,
+    UMask,
+    Access,
 }
 
 impl Intrinsic {
@@ -565,6 +581,21 @@ impl Intrinsic {
             "dup" => Some(Intrinsic::FDup),
             "dup2" => Some(Intrinsic::FDup2),
             "fcntl" => Some(Intrinsic::FCntl),
+            // Phase C: Filesystem
+            "mkdir" => Some(Intrinsic::MkDir),
+            "rmdir" => Some(Intrinsic::RmDir),
+            "unlink" => Some(Intrinsic::Unlink),
+            "rename" => Some(Intrinsic::Rename),
+            "symlink" => Some(Intrinsic::SymLink),
+            "readlink" => Some(Intrinsic::ReadLink),
+            "link" => Some(Intrinsic::Link),
+            "getcwd" => Some(Intrinsic::GetCwd),
+            "chdir" => Some(Intrinsic::ChDir),
+            "readdir" => Some(Intrinsic::ReadDir),
+            "chmod" => Some(Intrinsic::ChMod),
+            "chown" => Some(Intrinsic::ChOwn),
+            "umask" => Some(Intrinsic::UMask),
+            "access" => Some(Intrinsic::Access),
             _ => None,
         }
     }
@@ -625,6 +656,21 @@ impl Intrinsic {
             Intrinsic::FDup => "dup",
             Intrinsic::FDup2 => "dup2",
             Intrinsic::FCntl => "fcntl",
+            // Phase C: Filesystem
+            Intrinsic::MkDir => "mkdir",
+            Intrinsic::RmDir => "rmdir",
+            Intrinsic::Unlink => "unlink",
+            Intrinsic::Rename => "rename",
+            Intrinsic::SymLink => "symlink",
+            Intrinsic::ReadLink => "readlink",
+            Intrinsic::Link => "link",
+            Intrinsic::GetCwd => "getcwd",
+            Intrinsic::ChDir => "chdir",
+            Intrinsic::ReadDir => "readdir",
+            Intrinsic::ChMod => "chmod",
+            Intrinsic::ChOwn => "chown",
+            Intrinsic::UMask => "umask",
+            Intrinsic::Access => "access",
         }
     }
 }
@@ -2152,6 +2198,90 @@ mod tests {
     fn test_intrinsic_from_name_fcntl() {
         assert_eq!(Intrinsic::from_name("fcntl"), Some(Intrinsic::FCntl));
         assert_eq!(Intrinsic::FCntl.name(), "fcntl");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_mkdir() {
+        assert_eq!(Intrinsic::from_name("mkdir"), Some(Intrinsic::MkDir));
+        assert_eq!(Intrinsic::MkDir.name(), "mkdir");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_rmdir() {
+        assert_eq!(Intrinsic::from_name("rmdir"), Some(Intrinsic::RmDir));
+        assert_eq!(Intrinsic::RmDir.name(), "rmdir");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_unlink() {
+        assert_eq!(Intrinsic::from_name("unlink"), Some(Intrinsic::Unlink));
+        assert_eq!(Intrinsic::Unlink.name(), "unlink");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_rename() {
+        assert_eq!(Intrinsic::from_name("rename"), Some(Intrinsic::Rename));
+        assert_eq!(Intrinsic::Rename.name(), "rename");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_symlink() {
+        assert_eq!(Intrinsic::from_name("symlink"), Some(Intrinsic::SymLink));
+        assert_eq!(Intrinsic::SymLink.name(), "symlink");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_readlink() {
+        assert_eq!(Intrinsic::from_name("readlink"), Some(Intrinsic::ReadLink));
+        assert_eq!(Intrinsic::ReadLink.name(), "readlink");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_link() {
+        assert_eq!(Intrinsic::from_name("link"), Some(Intrinsic::Link));
+        assert_eq!(Intrinsic::Link.name(), "link");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_getcwd() {
+        assert_eq!(Intrinsic::from_name("getcwd"), Some(Intrinsic::GetCwd));
+        assert_eq!(Intrinsic::GetCwd.name(), "getcwd");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_chdir() {
+        assert_eq!(Intrinsic::from_name("chdir"), Some(Intrinsic::ChDir));
+        assert_eq!(Intrinsic::ChDir.name(), "chdir");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_readdir() {
+        assert_eq!(Intrinsic::from_name("readdir"), Some(Intrinsic::ReadDir));
+        assert_eq!(Intrinsic::ReadDir.name(), "readdir");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_chmod() {
+        assert_eq!(Intrinsic::from_name("chmod"), Some(Intrinsic::ChMod));
+        assert_eq!(Intrinsic::ChMod.name(), "chmod");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_chown() {
+        assert_eq!(Intrinsic::from_name("chown"), Some(Intrinsic::ChOwn));
+        assert_eq!(Intrinsic::ChOwn.name(), "chown");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_umask() {
+        assert_eq!(Intrinsic::from_name("umask"), Some(Intrinsic::UMask));
+        assert_eq!(Intrinsic::UMask.name(), "umask");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_access() {
+        assert_eq!(Intrinsic::from_name("access"), Some(Intrinsic::Access));
+        assert_eq!(Intrinsic::Access.name(), "access");
     }
 
     #[test]

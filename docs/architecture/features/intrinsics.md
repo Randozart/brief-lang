@@ -1,7 +1,7 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Phase B — Raw File I/O complete (2026-06-15). Phase A also complete. Supersedes `as-intrinsic.md`.
+**Status:** Phase C — Filesystem complete (2026-06-15). Phases A+B also complete. Supersedes `as-intrinsic.md`.
 
 ## Purpose
 
@@ -370,6 +370,28 @@ allocate temporary buffers (caller's pointer is opaque in interpreter).
 - `src/typechecker.rs` — 15 inference tests (one per variant)
 
 **Test result:** after Phase A+B
+
+### Phase C — Filesystem (completed 2026-06-15)
+
+**New Intrinsic variants:** D3: `MkDir`, `RmDir`, `Unlink`, `Rename`,
+`SymLink`, `ReadLink`, `Link`, `GetCwd`, `ChDir`, `ReadDir`, `ChMod`,
+`ChOwn`, `UMask`, `Access`
+
+**LLVM backend:** Category **Shim** — emit `declare i64 @brief_*(i64, ...)`
+and `call`, implemented in `brief_rt.c` via POSIX.
+
+**Interpreter:** Rust `libc` crate for filesystem ops.
+`readdir#` uses `std::fs::read_dir`, `readlink#`/`getcwd#` use libc.
+
+**Return types:** `readlink#`/`getcwd#` → String; `readdir#` → List;
+all others → Int.
+
+**Tests added:**
+- `src/ast.rs` — 14 roundtrip tests
+- `src/interpreter.rs` — 20 eval tests (type errors + edge cases)
+- `src/typechecker.rs` — 14 inference tests
+
+**Files deleted:** (none yet — `lib/std/ffi/io.bv` frgn lines after Phase B+C)
 
 ### Phase B — Raw File I/O (15 intrinsics)
 

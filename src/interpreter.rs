@@ -2044,6 +2044,333 @@ impl Interpreter {
                             Ok(Value::Int(-1))
                         }
                     }
+                    // ===== Phase C: Filesystem (intrinsics.md D3) =====
+                    Intrinsic::MkDir => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mkdir path requires String, got {:?}", v))),
+                        };
+                        let mode = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mkdir mode requires Int, got {:?}", v))),
+                        };
+                        let c_path = match std::ffi::CString::new(path) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::mkdir(c_path.as_ptr(), mode) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_path, mode);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::RmDir => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("rmdir path requires String, got {:?}", v))),
+                        };
+                        let c_path = match std::ffi::CString::new(path) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::rmdir(c_path.as_ptr()) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = c_path;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Unlink => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("unlink path requires String, got {:?}", v))),
+                        };
+                        let c_path = match std::ffi::CString::new(path) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::unlink(c_path.as_ptr()) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = c_path;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Rename => {
+                        let old = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("rename old requires String, got {:?}", v))),
+                        };
+                        let new = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("rename new requires String, got {:?}", v))),
+                        };
+                        let c_old = match std::ffi::CString::new(old) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        let c_new = match std::ffi::CString::new(new) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::rename(c_old.as_ptr(), c_new.as_ptr()) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_old, c_new);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SymLink => {
+                        let target = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("symlink target requires String, got {:?}", v))),
+                        };
+                        let link = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("symlink link requires String, got {:?}", v))),
+                        };
+                        let c_target = match std::ffi::CString::new(target) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        let c_link = match std::ffi::CString::new(link) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::symlink(c_target.as_ptr(), c_link.as_ptr()) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_target, c_link);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::ReadLink => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("readlink path requires String, got {:?}", v))),
+                        };
+                        let c_path = match std::ffi::CString::new(path) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::String(String::new())),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut buf = vec![0u8; 4096];
+                            let n = unsafe {
+                                libc::readlink(c_path.as_ptr(), buf.as_mut_ptr() as *mut libc::c_char, 4096)
+                            };
+                            if n < 0 {
+                                Ok(Value::String(String::new()))
+                            } else {
+                                buf.truncate(n as usize);
+                                let s = String::from_utf8_lossy(&buf).to_string();
+                                Ok(Value::String(s))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = c_path;
+                            Ok(Value::String(String::new()))
+                        }
+                    }
+                    Intrinsic::Link => {
+                        let old = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("link old requires String, got {:?}", v))),
+                        };
+                        let new = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("link new requires String, got {:?}", v))),
+                        };
+                        let c_old = match std::ffi::CString::new(old) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        let c_new = match std::ffi::CString::new(new) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::link(c_old.as_ptr(), c_new.as_ptr()) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_old, c_new);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::GetCwd => {
+                        #[cfg(unix)]
+                        {
+                            let mut buf = vec![0u8; 4096];
+                            let ptr = unsafe { libc::getcwd(buf.as_mut_ptr() as *mut libc::c_char, 4096) };
+                            if ptr.is_null() {
+                                Ok(Value::String(String::new()))
+                            } else {
+                                let len = unsafe { libc::strlen(ptr) };
+                                buf.truncate(len);
+                                let s = String::from_utf8_lossy(&buf).to_string();
+                                Ok(Value::String(s))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::String(String::new()))
+                        }
+                    }
+                    Intrinsic::ChDir => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("chdir path requires String, got {:?}", v))),
+                        };
+                        let c_path = match std::ffi::CString::new(path) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::chdir(c_path.as_ptr()) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = c_path;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::ReadDir => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("readdir path requires String, got {:?}", v))),
+                        };
+                        match std::fs::read_dir(&path) {
+                            Ok(entries) => {
+                                let mut list = Vec::new();
+                                for entry in entries.flatten() {
+                                    if let Ok(name) = entry.file_name().into_string() {
+                                        list.push(Value::String(name));
+                                    }
+                                }
+                                Ok(Value::List(list))
+                            }
+                            Err(_) => Ok(Value::List(Vec::new())),
+                        }
+                    }
+                    Intrinsic::ChMod => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("chmod path requires String, got {:?}", v))),
+                        };
+                        let mode = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("chmod mode requires Int, got {:?}", v))),
+                        };
+                        let c_path = match std::ffi::CString::new(path) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::chmod(c_path.as_ptr(), mode) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_path, mode);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::ChOwn => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("chown path requires String, got {:?}", v))),
+                        };
+                        let uid = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("chown uid requires Int, got {:?}", v))),
+                        };
+                        let gid = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("chown gid requires Int, got {:?}", v))),
+                        };
+                        let c_path = match std::ffi::CString::new(path) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::chown(c_path.as_ptr(), uid, gid) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_path, uid, gid);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::UMask => {
+                        let mask = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("umask mask requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let old = unsafe { libc::umask(mask) };
+                            Ok(Value::Int(old as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = mask;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::Access => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("access path requires String, got {:?}", v))),
+                        };
+                        let mode = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("access mode requires Int, got {:?}", v))),
+                        };
+                        let c_path = match std::ffi::CString::new(path) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::access(c_path.as_ptr(), mode) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_path, mode);
+                            Ok(Value::Int(-1))
+                        }
+                    }
                     // Data intrinsics
                     Intrinsic::Sort => Ok(values.remove(0)),
                     Intrinsic::Reverse => Ok(values.remove(0)),
@@ -6564,6 +6891,193 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FCntl,
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    // ── Phase C: Filesystem intrinsic tests ─────────────────────────
+
+    #[test]
+    fn test_intrinsic_mkdir_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::MkDir,
+            args: vec![Expr::Integer(42), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_rmdir_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::RmDir,
+            args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_unlink_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Unlink,
+            args: vec![Expr::Bool(true)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_rename_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Rename,
+            args: vec![Expr::String("a".into()), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_symlink_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SymLink,
+            args: vec![Expr::String("target".into()), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_readlink_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ReadLink,
+            args: vec![Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_readlink_bad_path() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ReadLink,
+            args: vec![Expr::String("/nonexistent_readlink.xyz".into())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::String(String::new()), "readlink#(bad path) should return empty string");
+    }
+
+    #[test]
+    fn test_intrinsic_link_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Link,
+            args: vec![Expr::String("old".into()), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_getcwd_returns_string() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetCwd,
+            args: vec![],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert!(matches!(result, Value::String(s) if !s.is_empty()), "getcwd#() should return non-empty string");
+    }
+
+    #[test]
+    fn test_intrinsic_chdir_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ChDir,
+            args: vec![Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_readdir_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ReadDir,
+            args: vec![Expr::Integer(42)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_readdir_bad_path() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ReadDir,
+            args: vec![Expr::String("/nonexistent_dir_xyz".into())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::List(vec![]), "readdir#(bad path) should return empty list");
+    }
+
+    #[test]
+    fn test_intrinsic_readdir_current_dir() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ReadDir,
+            args: vec![Expr::String(".".into())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert!(matches!(result, Value::List(ref items) if !items.is_empty()), "readdir#(\".\") should return entries");
+    }
+
+    #[test]
+    fn test_intrinsic_chmod_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ChMod,
+            args: vec![Expr::String("/tmp".into()), Expr::Bool(true)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_chown_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ChOwn,
+            args: vec![Expr::String("/tmp".into()), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_umask_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UMask,
+            args: vec![Expr::Bool(true)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_umask_returns_int() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UMask,
+            args: vec![Expr::Integer(0o022)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert!(matches!(result, Value::Int(_)), "umask# should return Int");
+    }
+
+    #[test]
+    fn test_intrinsic_access_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Access,
+            args: vec![Expr::Integer(42), Expr::Integer(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }

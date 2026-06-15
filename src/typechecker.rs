@@ -1305,6 +1305,13 @@ impl TypeChecker {
                     | Intrinsic::PWrite | Intrinsic::Stat | Intrinsic::FStat
                     | Intrinsic::Truncate | Intrinsic::FTruncate | Intrinsic::FSync
                     | Intrinsic::FDup | Intrinsic::FDup2 | Intrinsic::FCntl => Type::Int,
+                    // Phase C: Filesystem
+                    Intrinsic::ReadLink | Intrinsic::GetCwd => Type::String,
+                    Intrinsic::ReadDir => Type::Custom("List".to_string()),
+                    Intrinsic::MkDir | Intrinsic::RmDir | Intrinsic::Unlink
+                    | Intrinsic::Rename | Intrinsic::SymLink | Intrinsic::Link
+                    | Intrinsic::ChDir | Intrinsic::ChMod | Intrinsic::ChOwn
+                    | Intrinsic::UMask | Intrinsic::Access => Type::Int,
                 }
             }
             Expr::Call(name, args) => {
@@ -2833,6 +2840,148 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::Int, "fcntl# should infer as Int");
+    }
+
+    // ── Phase C: Filesystem type inference tests ───────────────────
+
+    #[test]
+    fn test_check_intrinsic_mkdir_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::MkDir,
+            args: vec![Expr::String("/tmp/d".into()), Expr::Integer(0o755)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "mkdir# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_rmdir_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::RmDir,
+            args: vec![Expr::String("/tmp/d".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "rmdir# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_unlink_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Unlink,
+            args: vec![Expr::String("/tmp/f".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "unlink# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_rename_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Rename,
+            args: vec![Expr::String("a".into()), Expr::String("b".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "rename# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_symlink_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SymLink,
+            args: vec![Expr::String("target".into()), Expr::String("link".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "symlink# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_readlink_returns_string() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ReadLink,
+            args: vec![Expr::String("/tmp/l".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::String, "readlink# should infer as String");
+    }
+
+    #[test]
+    fn test_check_intrinsic_link_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Link,
+            args: vec![Expr::String("old".into()), Expr::String("new".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "link# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_getcwd_returns_string() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetCwd,
+            args: vec![],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::String, "getcwd# should infer as String");
+    }
+
+    #[test]
+    fn test_check_intrinsic_chdir_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ChDir,
+            args: vec![Expr::String("/tmp".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "chdir# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_readdir_returns_list() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ReadDir,
+            args: vec![Expr::String(".".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Custom("List".to_string()), "readdir# should infer as List");
+    }
+
+    #[test]
+    fn test_check_intrinsic_chmod_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ChMod,
+            args: vec![Expr::String("/tmp/f".into()), Expr::Integer(0o644)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "chmod# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_chown_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ChOwn,
+            args: vec![Expr::String("/tmp/f".into()), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "chown# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_umask_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UMask,
+            args: vec![Expr::Integer(0o022)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "umask# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_access_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Access,
+            args: vec![Expr::String("/tmp".into()), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "access# should infer as Int");
     }
 
     #[test]

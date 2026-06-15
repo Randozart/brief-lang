@@ -58,6 +58,21 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @brief_dup(i64)").ok();
         writeln!(out, "declare i64 @brief_dup2(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_fcntl(i64, i64, i64)").ok();
+        // Phase C: Filesystem intrinsics (intrinsics.md D3)
+        writeln!(out, "declare i64 @brief_mkdir(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_rmdir(i64)").ok();
+        writeln!(out, "declare i64 @brief_unlink(i64)").ok();
+        writeln!(out, "declare i64 @brief_rename(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_symlink(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_readlink(i64)").ok();
+        writeln!(out, "declare i64 @brief_link(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_getcwd()").ok();
+        writeln!(out, "declare i64 @brief_chdir(i64)").ok();
+        writeln!(out, "declare i64 @brief_readdir(i64)").ok();
+        writeln!(out, "declare i64 @brief_chmod(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_chown(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_umask(i64)").ok();
+        writeln!(out, "declare i64 @brief_access(i64, i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {
