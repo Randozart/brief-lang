@@ -153,29 +153,147 @@ impl LlvmBackend {
         self.native_float_or_box(out, indent, &reg.name)
     }
 
-    /// Emit initialization code for built-in trigger sources.
-    /// Called once at the start of main(), before the tick loop.
+    /// Emit epoll-based initialization for built-in trigger sources.
+    /// Creates an epoll fd, registers each built-in trigger's source fd,
+    /// and stores the epfd in a synthetic state field.
     pub(super) fn emit_trg_init(&mut self, out: &mut String) {
+        // Need at least one built-in trigger to emit setup
+        let has_builtin = self.triggers.iter().any(|(_, trg)| matches!(
+            &trg.address,
+            crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_)
+        ));
+        if !has_builtin { return; }
+
+        // Constants
+        let epoin = 0x01u32; // EPOLLIN
+        let epolet = 0x80000000u32; // EPOLLET
+        let epoloneshot = 0x40000000u32; // EPOLLONESHOT
+        let f_setfl = 4; // F_SETFL
+        let o_nonblock = 0x800u32; // O_NONBLOCK
+        let clo_monotonic = 1; // CLOCK_MONOTONIC
+        let tfd_nonblock = 0x400; // TFD_NONBLOCK
+        let sfd_nonblock = 0x400; // SFD_NONBLOCK
+        let sig_block = 0; // SIG_BLOCK
+
+        // epoll_create1(0)
+        let epfd = format!("%epfd");
+        writeln!(out, "  {} = call i32 @epoll_create1(i32 0)", epfd).ok();
+
+        // Store epfd in epfd_field slot
+        let sge = format!("%sge{}", self.txn_counter); self.txn_counter += 1;
+        if let Some(epfd_idx) = self.field_index_map.get("__trg_epfd") {
+            writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sge, epfd_idx).ok();
+            writeln!(out, "  store i32 {}, i32* {}, align 4", epfd, sge).ok();
+        }
+
+        // Per-trigger setup
         for (name, trg) in &self.triggers {
+            let bit = self.dep_graph.bit_index.get(name).copied().unwrap_or(0);
             match &trg.address {
+                crate::ast::LinkRef::Stdin => {
+                    // fcntl(0, F_SETFL, O_NONBLOCK)
+                    writeln!(out, "  %fcntl_{} = call i32 @fcntl(i32 0, i32 {}, i32 {})", name, f_setfl, o_nonblock).ok();
+                    // epoll_event struct on stack: { events: EPOLLIN, data: { u64: bit } }
+                    let ev_slot = format!("%ev_{}", name);
+                    writeln!(out, "  {} = alloca i8, i64 16, align 8", ev_slot).ok();
+                    let ev_events = format!("%eve_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 0", ev_events, ev_slot).ok();
+                    let ev_events_i32 = format!("%evei_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i32*", ev_events_i32, ev_events).ok();
+                    writeln!(out, "  store i32 {}, i32* {}, align 4", epoin, ev_events_i32).ok();
+                    let ev_data = format!("%evd_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", ev_data, ev_slot).ok();
+                    let ev_data_u64 = format!("%evdu_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i64*", ev_data_u64, ev_data).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align 8", bit, ev_data_u64).ok();
+                    // epoll_ctl(epfd, EPOLL_CTL_ADD, 0, &ev)
+                    let ctl = format!("%ectl_{}", name);
+                    writeln!(out, "  {} = call i32 @epoll_ctl(i32 {}, i32 1, i32 0, i8* {})", ctl, epfd, ev_slot).ok();
+                }
                 crate::ast::LinkRef::Timer(hz) => {
-                    let g = format!("@__trg_timerfd_{}", name);
-                    writeln!(out, "  %{} = call i32 @__trg_timerfd_open(i64 {})", name, hz).ok();
-                    writeln!(out, "  store i32 %{}, i32* {}, align 4", name, g).ok();
+                    // timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK)
+                    let tfd = format!("%tfd_{}", name);
+                    writeln!(out, "  {} = call i32 @timerfd_create(i32 {}, i32 {})", tfd, clo_monotonic, tfd_nonblock).ok();
+                    // timerfd_settime(tfd, 0, &its, null) — fires at Hz
+                    let its_slot = format!("%its_{}", name);
+                    writeln!(out, "  {} = alloca i8, i64 32, align 8", its_slot).ok();
+                    // itimerspec.it_interval.tv_sec = 0
+                    // itimerspec.it_interval.tv_nsec = 1_000_000_000 / hz
+                    let interval_nsec = if *hz > 0 { 1_000_000_000u64 / *hz as u64 } else { 0 };
+                    // itimerspec.it_value.tv_sec = 0
+                    // itimerspec.it_value.tv_nsec = interval_nsec (fire immediately, then at interval)
+                    let its_val_sec = format!("%its_vs_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 0", its_val_sec, its_slot).ok();
+                    let its_val_sec_i64 = format!("%itsvsi_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i64*", its_val_sec_i64, its_val_sec).ok();
+                    writeln!(out, "  store i64 0, i64* {}, align 8", its_val_sec_i64).ok();
+                    let its_val_nsec = format!("%its_vn_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", its_val_nsec, its_slot).ok();
+                    let its_val_nsec_i64 = format!("%itsvni_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i64*", its_val_nsec_i64, its_val_nsec).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align 8", interval_nsec, its_val_nsec_i64).ok();
+                    let its_int_sec = format!("%its_is_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 16", its_int_sec, its_slot).ok();
+                    let its_int_sec_i64 = format!("%itsisi_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i64*", its_int_sec_i64, its_int_sec).ok();
+                    writeln!(out, "  store i64 0, i64* {}, align 8", its_int_sec_i64).ok();
+                    let its_int_nsec = format!("%its_in_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 24", its_int_nsec, its_slot).ok();
+                    let its_int_nsec_i64 = format!("%itsini_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i64*", its_int_nsec_i64, its_int_nsec).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align 8", interval_nsec, its_int_nsec_i64).ok();
+                    writeln!(out, "  %tfd_settime_{} = call i32 @timerfd_settime(i32 {}, i32 0, i8* {}, i8* null)", name, tfd, its_slot).ok();
+                    // epoll_ctl(epfd, EPOLL_CTL_ADD, tfd, &ev)
+                    let ev_slot = format!("%ev_{}", name);
+                    writeln!(out, "  {} = alloca i8, i64 16, align 8", ev_slot).ok();
+                    let ev_events = format!("%eve_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 0", ev_events, ev_slot).ok();
+                    let ev_events_i32 = format!("%evei_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i32*", ev_events_i32, ev_events).ok();
+                    writeln!(out, "  store i32 {}, i32* {}, align 4", epoin, ev_events_i32).ok();
+                    let ev_data = format!("%evd_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", ev_data, ev_slot).ok();
+                    let ev_data_u64 = format!("%evdu_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i64*", ev_data_u64, ev_data).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align 8", bit, ev_data_u64).ok();
+                    writeln!(out, "  %ectl_{} = call i32 @epoll_ctl(i32 {}, i32 1, i32 {}, i8* {})", name, epfd, tfd, ev_slot).ok();
                 }
                 crate::ast::LinkRef::Signal(sig) => {
-                    let g = format!("@__trg_signalfd_{}", name);
-                    let sg = format!("@__trg_sig_str_{}", name);
-                    // Emit a global string constant for the signal name
-                    writeln!(out, "{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"", sg, sig.len() + 1, sig).ok();
-                    writeln!(out, "  %{} = call i32 @__trg_signalfd_open(i8* getelementptr inbounds ([{} x i8], [{} x i8]* {}, i64 0, i64 0))", name, sig.len() + 1, sig.len() + 1, sg).ok();
-                    writeln!(out, "  store i32 %{}, i32* {}, align 4", name, g).ok();
+                    // sigemptyset(&mask)
+                    let mask_slot = format!("%mask_{}", name);
+                    writeln!(out, "  {} = alloca i8, i64 128, align 8", mask_slot).ok();
+                    writeln!(out, "  %sigemptyset_{} = call i32 @sigemptyset(i8* {})", name, mask_slot).ok();
+                    // sigaddset(&mask, SIG)
+                    let sig_num = sig_number(sig);
+                    writeln!(out, "  %sigadd_{} = call i32 @sigaddset(i8* {}, i32 {})", name, mask_slot, sig_num).ok();
+                    // sigprocmask(SIG_BLOCK, &mask, null)
+                    writeln!(out, "  %sigprocmask_{} = call i32 @sigprocmask(i32 {}, i8* {}, i8* null)", name, sig_block, mask_slot).ok();
+                    // signalfd(-1, &mask, SFD_NONBLOCK)
+                    let sfd = format!("%sfd_{}", name);
+                    writeln!(out, "  {} = call i32 @signalfd(i32 -1, i8* {}, i32 {})", sfd, mask_slot, sfd_nonblock).ok();
+                    // epoll_ctl(epfd, EPOLL_CTL_ADD, sfd, &ev)
+                    let ev_slot = format!("%ev_{}", name);
+                    writeln!(out, "  {} = alloca i8, i64 16, align 8", ev_slot).ok();
+                    let ev_events = format!("%eve_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 0", ev_events, ev_slot).ok();
+                    let ev_events_i32 = format!("%evei_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i32*", ev_events_i32, ev_events).ok();
+                    writeln!(out, "  store i32 {}, i32* {}, align 4", epoin, ev_events_i32).ok();
+                    let ev_data = format!("%evd_{}", name);
+                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", ev_data, ev_slot).ok();
+                    let ev_data_u64 = format!("%evdu_{}", name);
+                    writeln!(out, "  {} = bitcast i8* {} to i64*", ev_data_u64, ev_data).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align 8", bit, ev_data_u64).ok();
+                    writeln!(out, "  %ectl_{} = call i32 @epoll_ctl(i32 {}, i32 1, i32 {}, i8* {})", name, epfd, sfd, ev_slot).ok();
                 }
-                _ => {}
+                _ => {} // Explicit(addr), Linked(sym) — handled by emit_trg_load in step()
             }
         }
     }
 
+    /// Load an external trigger value (MMIO address or C global).
+    /// Built-in triggers (@stdin#, @timer#, @signal#) are handled by the
+    /// event loop — they're read from epoll_wait and stored directly to state.
     pub(super) fn emit_trg_load(&mut self, out: &mut String, indent: &str, dst: &str, address: &crate::ast::LinkRef, trg_ty: &Type) {
         match address {
             crate::ast::LinkRef::Explicit(addr) => {
@@ -194,33 +312,7 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = load volatile {}, {}* @{}", indent, raw, store_ty, store_ty, sym).ok();
                 self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
             }
-            crate::ast::LinkRef::Stdin => {
-                let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = call i32 @__trg_stdin_read()", indent, tr).ok();
-                let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, tr).ok();
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
-            }
-            crate::ast::LinkRef::Timer(hz) => {
-                let g = format!("@__trg_timerfd_{}", hz);
-                let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, tr, g).ok();
-                let rr = format!("%rr{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = call i32 @__trg_timerfd_read(i32 {})", indent, rr, tr).ok();
-                let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, rr).ok();
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
-            }
-            crate::ast::LinkRef::Signal(name) => {
-                let g = format!("@__trg_signalfd_{}", name);
-                let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, tr, g).ok();
-                let rr = format!("%rr{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = call i32 @__trg_signalfd_read(i32 {})", indent, rr, tr).ok();
-                let z = format!("%tz{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, rr).ok();
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
-            }
+            _ => {} // Stdin, Timer, Signal — handled by the event loop
         }
     }
 
@@ -732,5 +824,43 @@ impl LlvmBackend {
         // 2026-06-13: Always emit ret — guard then-path leaks terminated flag.
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
+    }
+}
+
+/// Map a Brief signal name (e.g. "SIGWINCH", "SIGINT") to its POSIX number.
+fn sig_number(name: &str) -> i32 {
+    match name {
+        "SIGHUP" => 1,
+        "SIGINT" => 2,
+        "SIGQUIT" => 3,
+        "SIGILL" => 4,
+        "SIGTRAP" => 5,
+        "SIGABRT" => 6,
+        "SIGBUS" => 7,
+        "SIGFPE" => 8,
+        "SIGKILL" => 9,
+        "SIGUSR1" => 10,
+        "SIGSEGV" => 11,
+        "SIGUSR2" => 12,
+        "SIGPIPE" => 13,
+        "SIGALRM" => 14,
+        "SIGTERM" => 15,
+        "SIGSTKFLT" => 16,
+        "SIGCHLD" => 17,
+        "SIGCONT" => 18,
+        "SIGSTOP" => 19,
+        "SIGTSTP" => 20,
+        "SIGTTIN" => 21,
+        "SIGTTOU" => 22,
+        "SIGURG" => 23,
+        "SIGXCPU" => 24,
+        "SIGXFSZ" => 25,
+        "SIGVTALRM" => 26,
+        "SIGPROF" => 27,
+        "SIGWINCH" => 28,
+        "SIGIO" => 29,
+        "SIGPWR" => 30,
+        "SIGSYS" => 31,
+        _ => 0,
     }
 }

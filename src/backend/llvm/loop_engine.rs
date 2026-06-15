@@ -142,7 +142,7 @@ impl LlvmBackend {
             if has_wake_triggers {
                 writeln!(out, "  br i1 {}, label %done, label %wait", tr).ok();
                 writeln!(out, "  wait:").ok();
-                writeln!(out, "  call void @__rt_wait()").ok();
+                emit_trg_event_epoll_wait(self, out);
                 writeln!(out, "  br label %tick").ok();
             } else {
                 writeln!(out, "  br i1 {}, label %done, label %tick", tr).ok();
@@ -151,7 +151,7 @@ impl LlvmBackend {
             writeln!(out, "  ret i32 0").ok();
         } else {
             if has_wake_triggers {
-                writeln!(out, "  call void @__rt_wait()").ok();
+                emit_trg_event_epoll_wait(self, out);
             }
             writeln!(out, "  br label %tick").ok();
         }
@@ -1077,4 +1077,85 @@ impl LlvmBackend {
         writeln!(out).ok();
         self.txn_counter = tc;
     }
+}
+
+/// Emit epoll_wait + per-trigger read + dirty-bit-set for the event loop.
+/// Called instead of @__rt_wait() when the program has built-in triggers.
+pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut String) {
+    let tc = backend.txn_counter; backend.txn_counter += 20;
+    let epfd_idx = match backend.field_index_map.get("__trg_epfd") {
+        Some(&i) => i,
+        None => return,
+    };
+    let evt = format!("%evt_{}", tc);
+    writeln!(out, "  {} = alloca i8, i64 16, align 8", evt).ok();
+    let ep_gep = format!("%epg_{}", tc);
+    writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", ep_gep, epfd_idx).ok();
+    let ep_ld = format!("%epl_{}", tc);
+    writeln!(out, "  {} = load i32, i32* {}, align 4", ep_ld, ep_gep).ok();
+    let n_ev = format!("%nev_{}", tc);
+    writeln!(out, "  {} = call i32 @epoll_wait(i32 {}, i8* {}, i32 1, i32 -1)", n_ev, ep_ld, evt).ok();
+    let ev_cmp = format!("%evc_{}", tc);
+    writeln!(out, "  {} = icmp sgt i32 {}, 0", ev_cmp, n_ev).ok();
+    let ev_body = format!("ev_body_{}", tc);
+    let ev_done = format!("ev_done_{}", tc);
+    writeln!(out, "  br i1 {}, label %{}, label %{}", ev_cmp, ev_body, ev_done).ok();
+    writeln!(out, "{}:", ev_body).ok();
+    let ev_data = format!("%evd_{}", tc);
+    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", ev_data, evt).ok();
+    let ev_data_u64 = format!("%evdu_{}", tc);
+    writeln!(out, "  {} = bitcast i8* {} to i64*", ev_data_u64, ev_data).ok();
+    let ev_bit = format!("%evb_{}", tc);
+    writeln!(out, "  {} = load i64, i64* {}, align 8", ev_bit, ev_data_u64).ok();
+    for (name, trg) in &backend.triggers {
+        let bit = backend.dep_graph.bit_index.get(name).copied().unwrap_or(0);
+        let bit_check = format!("%bc_{}_{}", tc, name);
+        writeln!(out, "  {} = icmp eq i64 {}, {}", bit_check, ev_bit, bit).ok();
+        let t_body = format!("tb_{}_{}", tc, name);
+        let t_skip = format!("ts_{}_{}", tc, name);
+        writeln!(out, "  br i1 {}, label %{}, label %{}", bit_check, t_body, t_skip).ok();
+        writeln!(out, "{}:", t_body).ok();
+        match &trg.address {
+            crate::ast::LinkRef::Stdin => {
+                let ch_slot = format!("%ch_{}_{}", tc, name);
+                writeln!(out, "  {} = alloca i8, i64 1, align 1", ch_slot).ok();
+                writeln!(out, "  %rd_{}_{} = call i64 @read(i32 0, i8* {}, i64 1)", tc, name, ch_slot).ok();
+                if let Some(&idx) = backend.field_index_map.get(name) {
+                    let sge = format!("%sge_{}_{}", tc, name);
+                    writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sge, idx).ok();
+                    let ch_ld = format!("%chld_{}_{}", tc, name);
+                    writeln!(out, "  {} = load i8, i8* {}, align 1", ch_ld, ch_slot).ok();
+                    let ch_z = format!("%chz_{}_{}", tc, name);
+                    writeln!(out, "  {} = zext i8 {} to i64", ch_z, ch_ld).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align 8", ch_z, sge).ok();
+                }
+            }
+            crate::ast::LinkRef::Timer(_hz) => {
+                if let Some(&idx) = backend.field_index_map.get(name) {
+                    let sge = format!("%sge_{}_{}", tc, name);
+                    writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sge, idx).ok();
+                    let cur = format!("%cur_{}_{}", tc, name);
+                    writeln!(out, "  {} = load i64, i64* {}, align 8", cur, sge).ok();
+                    let inc = format!("%inc_{}_{}", tc, name);
+                    writeln!(out, "  {} = add i64 {}, 1", inc, cur).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align 8", inc, sge).ok();
+                }
+            }
+            crate::ast::LinkRef::Signal(_sig) => {
+                if let Some(&idx) = backend.field_index_map.get(name) {
+                    let sge = format!("%sge_{}_{}", tc, name);
+                    writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sge, idx).ok();
+                    writeln!(out, "  store i64 1, i64* {}, align 8", sge).ok();
+                }
+            }
+            _ => {}
+        }
+        let drx = format!("%drx_{}_{}", tc, name);
+        writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
+        writeln!(out, "  call void @step(%State* %state, i64 {})", drx).ok();
+        writeln!(out, "  br label %{}", t_skip).ok();
+        writeln!(out, "{}:", t_skip).ok();
+    }
+    writeln!(out, "  br label %{}", ev_done).ok();
+    writeln!(out, "{}:", ev_done).ok();
 }

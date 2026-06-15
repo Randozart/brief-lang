@@ -425,6 +425,7 @@ pub struct LlvmBackend {
     // ── Codegen State (per-function) ───────────────────────
     pub(crate) txn_counter: usize,
     pub(crate) metadata_counter: usize,  // for !llvm.loop metadata nodes
+    pub(crate) dep_graph: crate::analysis::dependency_graph::DependencyGraph, // trg dependency graph
     pending_cleanup: Vec<Statement>,
     pub(crate) let_bindings: HashMap<String, String>,
     pub(crate) let_binding_types: HashMap<String, Type>,
@@ -499,7 +500,15 @@ impl LlvmBackend {
             pgo_profile: None,
             pgo_guard_idx: 0,
             txn_counter: 0,
-            metadata_counter: 100,  // start above likely conflict range
+            metadata_counter: 100,
+            dep_graph: crate::analysis::dependency_graph::DependencyGraph {
+                topo_order: Vec::new(),
+                bit_index: std::collections::HashMap::new(),
+                dependencies: std::collections::HashMap::new(),
+                dependents: std::collections::HashMap::new(),
+                is_trg: std::collections::HashSet::new(),
+                all_vars: std::collections::HashSet::new(),
+            },  // start above likely conflict range
             has_cycles: false,
             pending_cleanup: Vec::new(),
             let_bindings: HashMap::new(),
@@ -603,6 +612,7 @@ impl LlvmBackend {
 
     pub fn generate(&mut self, program: &Program) -> String {
         let mut analysis = crate::backend::analyze_program(program, false);
+        self.dep_graph = analysis.dependency_graph.clone();
 
         analysis.region_analyzer.compose_chains();
         analysis.region_analyzer.build_budget_plan(self.optimize_budget);
@@ -631,6 +641,18 @@ impl LlvmBackend {
 
         self.exit_condition = program.exit_condition.clone();
         self.build_field_index(program);
+        // Inject synthetic __trg_epfd field if program has built-in triggers
+        let has_builtin_trg = program.items.iter().any(|item| {
+            if let TopLevel::Trigger(t) = item {
+                matches!(t.address, crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_))
+            } else { false }
+        });
+        if has_builtin_trg && !self.field_index_map.contains_key("__trg_epfd") {
+            let idx = self.field_index_map.len();
+            self.field_index_map.insert("__trg_epfd".to_string(), idx);
+            self.field_types.push("i32".to_string());
+            self.field_initializers.insert("__trg_epfd".to_string(), None);
+        }
         self.validate_schema_types();
         self.triggers.clear();
         self.trigger_names.clear();
@@ -770,11 +792,18 @@ self.emit_declares(&mut out);
         // Declare __str_concat used by the backend for string concatenation
         writeln!(out, "declare i8* @__str_concat(i8*, i8*) #1").ok();
 
-        // Declare built-in trigger source helpers (deprecated — replaced by step() + epoll)
-        writeln!(out, "declare i32 @__trg_timerfd_open(i64) #1").ok();
-        writeln!(out, "declare i32 @__trg_timerfd_read(i32) #1").ok();
-        writeln!(out, "declare i32 @__trg_signalfd_open(i8*) #1").ok();
-        writeln!(out, "declare i32 @__trg_signalfd_read(i32) #1").ok();
+        // Declare epoll + libc functions for the trg reactive event loop
+        writeln!(out, "declare i32 @epoll_create1(i32) #1").ok();
+        writeln!(out, "declare i32 @epoll_ctl(i32, i32, i32, i8*) #1").ok();
+        writeln!(out, "declare i32 @epoll_wait(i32, i8*, i32, i32) #1").ok();
+        writeln!(out, "declare i64 @read(i32, i8*, i64) #1").ok();
+        writeln!(out, "declare i32 @fcntl(i32, i32, i32) #1").ok();
+        writeln!(out, "declare i32 @timerfd_create(i32, i32) #1").ok();
+        writeln!(out, "declare i32 @timerfd_settime(i32, i32, i8*, i8*) #1").ok();
+        writeln!(out, "declare i32 @signalfd(i32, i8*, i32) #1").ok();
+        writeln!(out, "declare i32 @sigemptyset(i8*) #1").ok();
+        writeln!(out, "declare i32 @sigaddset(i8*, i32) #1").ok();
+        writeln!(out, "declare i32 @sigprocmask(i32, i8*, i8*) #1").ok();
         // Declare the step() function for the trg reactive dirty-flag system
         writeln!(out, "declare void @step(%State*, i64) #1").ok();
 
