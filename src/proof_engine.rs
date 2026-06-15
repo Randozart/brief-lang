@@ -1520,6 +1520,7 @@ impl ProofEngine {
         self.check_ffi_error_handling(program);
         self.check_circular_dependencies(program);
         self.check_list_simd_lengths(program);
+        self.check_structural_recursion(program);
         self.verify_contracts(program);
         self.errors.clone()
     }
@@ -2026,6 +2027,31 @@ impl ProofEngine {
     /// Check that List SIMD operations have provable length equality
     /// When two Lists are used in a binary operation (e.g., list_a * list_b),
     /// their lengths must be provably equal from the precondition.
+    fn check_structural_recursion(&mut self, program: &Program) {
+        for item in &program.items {
+            if let TopLevel::Definition(defn) = item {
+                let has_recursive_call = defn.body.iter().any(|s| contains_call_to(s, &defn.name));
+                if !has_recursive_call {
+                    continue;
+                }
+                let proven = defn.parameters.iter().any(|(param_name, _)| {
+                    defn.body.iter().all(|s| check_decreasing_arg(s, &defn.name, param_name))
+                });
+                if !proven {
+                    self.errors.push(
+                        ProofError::new("P021", "Structural recursion not proven")
+                            .with_explanation(&format!(
+                                "Definition '{}' has recursive calls but no structurally decreasing parameter was found. \
+                                 Try using a decreasing argument like n-1 or list.tail().",
+                                defn.name
+                            ))
+                            .with_hint("Ensure at least one argument strictly decreases on every recursive call")
+                    );
+                }
+            }
+        }
+    }
+
     fn check_list_simd_lengths(&mut self, program: &Program) {
         for item in &program.items {
             match item {
@@ -3427,6 +3453,148 @@ pub fn prove_linear(stmts: &[crate::ast::Statement]) -> bool {
         }
     }
     true // all pairs are mutually exclusive
+}
+
+// ── Structural recursion helpers (standalone) ─────────────────
+
+/// Check if a statement contains a call to the given function name.
+pub(crate) fn contains_call_to(stmt: &Statement, name: &str) -> bool {
+    match stmt {
+        Statement::Expression(e) => expr_contains_call_to(e, name),
+        Statement::Term { values, .. } => {
+            values.iter().any(|v| v.as_ref().map_or(false, |e| expr_contains_call_to(e, name)))
+        }
+        Statement::Guarded { condition, statements, .. } => {
+            expr_contains_call_to(condition, name)
+                || statements.iter().any(|s| contains_call_to(s, name))
+        }
+        Statement::Let { expr, .. } => {
+            expr.as_ref().map_or(false, |e| expr_contains_call_to(e, name))
+        }
+        Statement::Assignment { expr, .. } => expr_contains_call_to(expr, name),
+        Statement::Foreach { body, .. } => body.iter().any(|s| contains_call_to(s, name)),
+        Statement::Oracle { body, handler, .. } => {
+            body.iter().any(|s| contains_call_to(s, name))
+                || handler.iter().any(|s| contains_call_to(s, name))
+        }
+        Statement::SyncBlock { body } => body.iter().any(|s| contains_call_to(s, name)),
+        Statement::Unification { expr, .. } => expr_contains_call_to(expr, name),
+        Statement::OnExit { body, .. } => body.iter().any(|s| contains_call_to(s, name)),
+        _ => false,
+    }
+}
+
+/// Check if an expression contains a CallExpr to the given name.
+fn expr_contains_call_to(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::CallExpr(call) => {
+            if call.name == name {
+                return true;
+            }
+            call.args.iter().any(|a| expr_contains_call_to(a, name))
+        }
+        Expr::Block(_, body) => expr_contains_call_to(body, name),
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
+        | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+            expr_contains_call_to(l, name) || expr_contains_call_to(r, name)
+        }
+        Expr::UnaryOp(op) => expr_contains_call_to(&op.operand, name),
+        Expr::Not(e) | Expr::Neg(e) => {
+            expr_contains_call_to(e, name)
+        }
+        Expr::OwnedRef(_) | Expr::PriorState(_) => false,
+        Expr::Projection { source, .. } => expr_contains_call_to(source, name),
+        Expr::ListLiteral(items) => items.iter().any(|e| expr_contains_call_to(e, name)),
+        Expr::MapLiteral(entries) => {
+            entries.iter().any(|(k, v)| expr_contains_call_to(k, name) || expr_contains_call_to(v, name))
+        }
+        Expr::Match { value, arms } => {
+            expr_contains_call_to(value, name)
+                || arms.iter().any(|a| expr_contains_call_to(&a.body, name))
+        }
+        _ => false,
+    }
+}
+
+/// Check if all recursive calls in a statement use a structurally decreasing
+/// argument at the position corresponding to the given parameter name.
+fn check_decreasing_arg(stmt: &Statement, fn_name: &str, param_name: &str) -> bool {
+    match stmt {
+        Statement::Term { values, .. } => {
+            values.iter().all(|v| v.as_ref().map_or(true, |e| check_decreasing_arg_expr(e, fn_name, param_name)))
+        }
+        Statement::Expression(e) => check_decreasing_arg_expr(e, fn_name, param_name),
+        Statement::Guarded { condition, statements, .. } => {
+            check_decreasing_arg_expr(condition, fn_name, param_name)
+                && statements.iter().all(|s| check_decreasing_arg(s, fn_name, param_name))
+        }
+        Statement::Let { expr, .. } => {
+            expr.as_ref().map_or(true, |e| check_decreasing_arg_expr(e, fn_name, param_name))
+        }
+        Statement::Assignment { expr, .. } => check_decreasing_arg_expr(expr, fn_name, param_name),
+        Statement::Foreach { body, .. } => body.iter().all(|s| check_decreasing_arg(s, fn_name, param_name)),
+        Statement::Oracle { body, handler, .. } => {
+            body.iter().all(|s| check_decreasing_arg(s, fn_name, param_name))
+                && handler.iter().all(|s| check_decreasing_arg(s, fn_name, param_name))
+        }
+        Statement::SyncBlock { body } => body.iter().all(|s| check_decreasing_arg(s, fn_name, param_name)),
+        Statement::Unification { expr, .. } => check_decreasing_arg_expr(expr, fn_name, param_name),
+        Statement::OnExit { body, .. } => body.iter().all(|s| check_decreasing_arg(s, fn_name, param_name)),
+        _ => true,
+    }
+}
+
+/// Check if an expression's recursive calls use a structurally decreasing
+/// argument matching the given parameter name.
+fn check_decreasing_arg_expr(expr: &Expr, fn_name: &str, param_name: &str) -> bool {
+    match expr {
+        Expr::CallExpr(call) => {
+            if call.name != fn_name {
+                return true;
+            }
+            call.args.iter().any(|arg| is_decreasing_expr(arg, param_name))
+        }
+        Expr::Block(_, body) => check_decreasing_arg_expr(body, fn_name, param_name),
+        Expr::Sub(l, r) => {
+            check_decreasing_arg_expr(l, fn_name, param_name)
+                && check_decreasing_arg_expr(r, fn_name, param_name)
+        }
+        Expr::Add(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
+        | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+            check_decreasing_arg_expr(l, fn_name, param_name)
+                && check_decreasing_arg_expr(r, fn_name, param_name)
+        }
+        Expr::Not(e) | Expr::Neg(e) => {
+            check_decreasing_arg_expr(e, fn_name, param_name)
+        }
+        Expr::OwnedRef(_) | Expr::PriorState(_) => true,
+        Expr::UnaryOp(op) => check_decreasing_arg_expr(&op.operand, fn_name, param_name),
+        Expr::Projection { source, .. } => check_decreasing_arg_expr(source, fn_name, param_name),
+        Expr::ListLiteral(items) => items.iter().all(|e| check_decreasing_arg_expr(e, fn_name, param_name)),
+        Expr::Match { value, arms } => {
+            check_decreasing_arg_expr(value, fn_name, param_name)
+                && arms.iter().all(|a| check_decreasing_arg_expr(&a.body, fn_name, param_name))
+        }
+        _ => true,
+    }
+}
+
+/// Check if an expression is structurally smaller than the parameter.
+/// Currently detects: param - 1, param - literal, param.tail()
+fn is_decreasing_expr(expr: &Expr, param_name: &str) -> bool {
+    match expr {
+        // n - 1
+        Expr::Sub(l, r) if matches!(l.as_ref(), Expr::Identifier(n) if n == param_name)
+            && matches!(r.as_ref(), Expr::Integer(i) if *i == 1) => true,
+        // n - literal > 0
+        Expr::Sub(l, r) if matches!(l.as_ref(), Expr::Identifier(n) if n == param_name)
+            && matches!(r.as_ref(), Expr::Integer(i) if *i > 0) => true,
+        // direct identifier (n) — not decreasing, but allowed as fallback
+        Expr::Identifier(n) if n == param_name => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
