@@ -718,6 +718,57 @@ fn writes_variable_general(body: &[Statement], var: &str) -> bool {
     false
 }
 
+/// A bitmask-based dirty flag set for the `trg` reactive system.
+/// Each bit corresponds to a variable in the dependency graph's topological order.
+/// Supports marking, testing, and clearing individual flags, as well as
+/// marking all downstream dependents of a given variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DirtyFlags(pub u64);
+
+impl DirtyFlags {
+    /// Mark a variable at `index` as dirty.
+    pub fn mark(&mut self, index: usize) {
+        self.0 |= 1u64 << index;
+    }
+
+    /// Check if a variable at `index` is dirty.
+    pub fn is_set(&self, index: usize) -> bool {
+        (self.0 & (1u64 << index)) != 0
+    }
+
+    /// Clear a variable at `index` (mark as clean).
+    pub fn clear(&mut self, index: usize) {
+        self.0 &= !(1u64 << index);
+    }
+
+    /// Mark all variables in `downstream` as dirty.
+    pub fn mark_downstream(&mut self, downstream: &[usize]) {
+        for &idx in downstream {
+            self.mark(idx);
+        }
+    }
+
+    /// Merge another DirtyFlags into this one (bitwise OR).
+    pub fn merge(&mut self, other: &DirtyFlags) {
+        self.0 |= other.0;
+    }
+
+    /// Check if any flag is set.
+    pub fn any(&self) -> bool {
+        self.0 != 0
+    }
+
+    /// Check if no flag is set.
+    pub fn none(&self) -> bool {
+        self.0 == 0
+    }
+
+    /// Return the raw bitmask.
+    pub fn bits(&self) -> u64 {
+        self.0
+    }
+}
+
 /// Intent: Tracks guard dependencies for pre-computation caching.
 /// Allows backends to pre-compute guard conditions that depend on state variables.
 #[derive(Debug, Clone)]
@@ -839,5 +890,88 @@ mod tests {
         };
         let results = validate_hashtags(&[tag], "verilog");
         assert_eq!(results[0], HashtagValidation::Supported);
+    }
+
+    #[test]
+    fn test_dirty_flags_mark_and_is_set() {
+        let mut df = DirtyFlags::default();
+        assert!(!df.is_set(0));
+        assert!(!df.is_set(5));
+        df.mark(0);
+        assert!(df.is_set(0));
+        assert!(!df.is_set(5));
+        df.mark(5);
+        assert!(df.is_set(0));
+        assert!(df.is_set(5));
+    }
+
+    #[test]
+    fn test_dirty_flags_clear() {
+        let mut df = DirtyFlags::default();
+        df.mark(0);
+        df.mark(1);
+        df.mark(2);
+        assert!(df.is_set(1));
+        df.clear(1);
+        assert!(df.is_set(0));
+        assert!(!df.is_set(1));
+        assert!(df.is_set(2));
+        df.clear(0);
+        df.clear(2);
+        assert!(df.none());
+    }
+
+    #[test]
+    fn test_dirty_flags_mark_downstream() {
+        let mut df = DirtyFlags::default();
+        df.mark_downstream(&[2, 4, 6]);
+        assert!(!df.is_set(0));
+        assert!(df.is_set(2));
+        assert!(!df.is_set(3));
+        assert!(df.is_set(4));
+        assert!(df.is_set(6));
+    }
+
+    #[test]
+    fn test_dirty_flags_merge() {
+        let mut a = DirtyFlags::default();
+        let b = DirtyFlags::default();
+        a.mark(0);
+        a.mark(2);
+        // b is empty, merge should be no-op
+        a.merge(&b);
+        assert!(a.is_set(0));
+        assert!(a.is_set(2));
+        assert!(!a.is_set(1));
+        // merge with b having bits set
+        let mut b2 = DirtyFlags::default();
+        b2.mark(1);
+        b2.mark(3);
+        a.merge(&b2);
+        assert!(a.is_set(0));
+        assert!(a.is_set(1));
+        assert!(a.is_set(2));
+        assert!(a.is_set(3));
+    }
+
+    #[test]
+    fn test_dirty_flags_any_none() {
+        let df = DirtyFlags::default();
+        assert!(df.none());
+        assert!(!df.any());
+        let mut df2 = DirtyFlags::default();
+        df2.mark(63);
+        assert!(df2.any());
+        assert!(!df2.none());
+    }
+
+    #[test]
+    fn test_dirty_flags_bits() {
+        let mut df = DirtyFlags::default();
+        assert_eq!(df.bits(), 0);
+        df.mark(0);
+        assert_eq!(df.bits(), 1);
+        df.mark(3);
+        assert_eq!(df.bits(), 0b1001);
     }
 }
