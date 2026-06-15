@@ -492,10 +492,68 @@ impl LlvmBackend {
             Statement::Alka(b) => { for l in b.content.lines() { let _ = writeln!(out, "{}{}", indent, l); } }
             Statement::InlineAsm { asm_string, .. } => { writeln!(out, "{}{}", indent, asm_string).ok(); }
             Statement::Foreach { item, list, body } => {
-                writeln!(out, "{}; foreach {} in ...", indent, item).ok();
+                let list_val = self.emit_expr(out, list, indent);
+                // list_val is i64 (ptrtoint of the 2-slot-header buffer)
+                // Slot 0: data_ptr (i64), Slot 1: length (i64), Slot 2+: elements
+                let tc = self.txn_counter; self.txn_counter += 20;
+                // Cast list ptr to i64* header pointer
+                let hp = format!("%fe_hp_{}", tc);
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_val.name).ok();
+                // Load data_ptr from slot 0
+                let dp_gep = format!("%fe_dp_gep_{}", tc);
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, dp_gep, hp).ok();
+                let dp_val = format!("%fe_dp_{}", tc);
+                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp_val, dp_gep).ok();
+                // Cast data_ptr to i64* element pointer
+                let ep = format!("%fe_ep_{}", tc);
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, ep, dp_val).ok();
+                // Load length from slot 1
+                let len_gep = format!("%fe_len_gep_{}", tc);
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, len_gep, hp).ok();
+                let len_val = format!("%fe_len_{}", tc);
+                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, len_val, len_gep).ok();
+                // Allocate mutable index variable (avoids phi block naming)
+                let idx_slot = format!("%fe_idx_slot_{}", tc);
+                writeln!(out, "{}{} = alloca i64, align 8", indent, idx_slot).ok();
+                writeln!(out, "{}store i64 0, i64* {}", indent, idx_slot).ok();
+                // Loop header
+                let hdr_l = format!("fe_hdr_{}", tc);
+                let body_l = format!("fe_body_{}", tc);
+                let done_l = format!("fe_done_{}", tc);
+                writeln!(out, "{}br label %{}", indent, hdr_l).ok();
+                writeln!(out, "{}{}:", indent, hdr_l).ok();
+                let cur_idx = format!("%fe_cur_{}", tc);
+                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, cur_idx, idx_slot).ok();
+                // Check cur < len
+                let idx_cmp = format!("%fe_cmp_{}", tc);
+                writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, idx_cmp, cur_idx, len_val).ok();
+                writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, idx_cmp, body_l, done_l).ok();
+                // Body: load element at data_ptr[cur]
+                writeln!(out, "{}{}:", indent, body_l).ok();
+                let elem_gep = format!("%fe_elem_gep_{}", tc);
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, elem_gep, ep, cur_idx).ok();
+                let elem_val = format!("%fe_elem_{}", tc);
+                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, elem_val, elem_gep).ok();
+                // Bind element to item in let_bindings (save previous binding)
+                let prev_item = self.let_bindings.insert(item.clone(), elem_val.clone());
+                let prev_item_ty = self.let_binding_types.insert(item.clone(), Type::Int);
                 for s in body {
                     self.emit_stmt(out, s, &format!("{}  ", indent));
                 }
+                // Restore previous binding
+                if let Some(prev) = prev_item {
+                    self.let_bindings.insert(item.clone(), prev);
+                    self.let_binding_types.insert(item.clone(), prev_item_ty.unwrap_or(Type::Int));
+                } else {
+                    self.let_bindings.remove(item.as_str());
+                    self.let_binding_types.remove(item.as_str());
+                }
+                // Increment index and loop back
+                let next_idx = format!("%fe_next_{}", tc);
+                writeln!(out, "{}{} = add i64 {}, 1", indent, next_idx, cur_idx).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, next_idx, idx_slot).ok();
+                writeln!(out, "{}br label %{}", indent, hdr_l).ok();
+                writeln!(out, "{}{}:", indent, done_l).ok();
             }
         }
     }
