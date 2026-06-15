@@ -33,6 +33,15 @@ impl LlvmBackend {
         writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
         writeln!(out, "declare ptr @brief_read_file(ptr)").ok();
         writeln!(out, "declare void @__exit()").ok();
+        // Phase A: Terminal intrinsics (intrinsics.md D4)
+        writeln!(out, "declare i64 @brief_tty_raw_mode(i64)").ok();
+        writeln!(out, "declare i64 @brief_tty_size()").ok();
+        writeln!(out, "declare i64 @brief_tty_read_key()").ok();
+        writeln!(out, "declare i64 @brief_ioctl(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_isatty(i64)").ok();
+        // Phase A: Process intrinsics (intrinsics.md D5)
+        writeln!(out, "declare i64 @brief_spawn_with_output(i64)").ok();
+        writeln!(out, "declare i64 @brief_spawn(i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {

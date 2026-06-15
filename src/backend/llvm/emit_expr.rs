@@ -431,6 +431,36 @@ impl LlvmBackend {
                     Intrinsic::Socket | Intrinsic::Bind | Intrinsic::Listen | Intrinsic::Accept => {
                         writeln!(out, "{}{} = add i64 0, 0 ; socket/bind/listen/accept stub", indent, v).ok();
                     }
+                    // ===== Phase A: Terminal (intrinsics.md D4) =====
+                    Intrinsic::TtyRawMode => {
+                        let arg = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_tty_raw_mode(i64 {})", indent, v, arg.name).ok();
+                    }
+                    Intrinsic::TtySize => {
+                        writeln!(out, "{}{} = call i64 @brief_tty_size()", indent, v).ok();
+                    }
+                    Intrinsic::TtyReadKey => {
+                        writeln!(out, "{}{} = call i64 @brief_tty_read_key()", indent, v).ok();
+                    }
+                    Intrinsic::IoCtl => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let req = self.emit_expr(out, &args[1], indent);
+                        let arg = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_ioctl(i64 {}, i64 {}, i64 {})", indent, v, fd.name, req.name, arg.name).ok();
+                    }
+                    Intrinsic::IsTty => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_isatty(i64 {})", indent, v, fd.name).ok();
+                    }
+                    // ===== Phase A: Process (intrinsics.md D5) =====
+                    Intrinsic::SpawnWithOutput => {
+                        let cmd = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_spawn_with_output(i64 {})", indent, v, cmd.name).ok();
+                    }
+                    Intrinsic::Spawn => {
+                        let cmd = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_spawn(i64 {})", indent, v, cmd.name).ok();
+                    }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
                         writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();

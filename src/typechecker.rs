@@ -1293,6 +1293,12 @@ impl TypeChecker {
                     Intrinsic::Time | Intrinsic::Socket | Intrinsic::Accept => Type::Int,
                     Intrinsic::Sort | Intrinsic::Reverse => Type::Bool,
                     Intrinsic::Range => Type::Custom("List".to_string()),
+                    Intrinsic::TtyRawMode | Intrinsic::TtySize => Type::Int,
+                    Intrinsic::TtyReadKey => Type::Int,
+                    Intrinsic::IoCtl => Type::Int,
+                    Intrinsic::IsTty => Type::Bool,
+                    Intrinsic::SpawnWithOutput => Type::String,
+                    Intrinsic::Spawn => Type::Int,
                 }
             }
             Expr::Call(name, args) => {
@@ -2590,6 +2596,85 @@ mod kani_full_tests {
             args: vec![Expr::String("hello".into())],
         });
         assert_eq!(ty, Type::Int, "bytes# should infer as Int");
+    }
+
+    // ── Phase A: Terminal / TTY + Process type inference tests ─────
+
+    #[test]
+    fn test_check_intrinsic_tty_raw_mode_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::TtyRawMode,
+            args: vec![Expr::Bool(true)],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "tty_raw_mode# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_tty_size_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::TtySize,
+            args: vec![],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "tty_size# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_tty_read_key_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::TtyReadKey,
+            args: vec![],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "tty_read_key# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_ioctl_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::IoCtl,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "ioctl# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_isatty_returns_bool() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::IsTty,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Bool, "isatty# should infer as Bool");
+    }
+
+    #[test]
+    fn test_check_intrinsic_spawn_with_output_returns_string() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SpawnWithOutput,
+            args: vec![Expr::String("echo hi".into())],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::String, "spawn_with_output# should infer as String");
+    }
+
+    #[test]
+    fn test_check_intrinsic_spawn_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Spawn,
+            args: vec![Expr::String("true".into())],
+        };
+        let ctx = TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "spawn# should infer as Int");
     }
 
     #[test]

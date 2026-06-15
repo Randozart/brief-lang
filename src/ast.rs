@@ -478,6 +478,17 @@ pub enum Intrinsic {
     Sort,
     Reverse,
     Range,
+
+    // ===== Phase A: Terminal / TTY (intrinsics.md D4) =====
+    TtyRawMode,
+    TtySize,
+    TtyReadKey,
+    IoCtl,
+    IsTty,
+
+    // ===== Phase A: Process (intrinsics.md D5) =====
+    SpawnWithOutput,
+    Spawn,
 }
 
 impl Intrinsic {
@@ -512,6 +523,15 @@ impl Intrinsic {
             "sort" => Some(Intrinsic::Sort),
             "reverse" => Some(Intrinsic::Reverse),
             "range" => Some(Intrinsic::Range),
+            // Phase A: Terminal
+            "tty_raw_mode" => Some(Intrinsic::TtyRawMode),
+            "tty_size" => Some(Intrinsic::TtySize),
+            "tty_read_key" => Some(Intrinsic::TtyReadKey),
+            "ioctl" => Some(Intrinsic::IoCtl),
+            "isatty" => Some(Intrinsic::IsTty),
+            // Phase A: Process
+            "spawn_with_output" => Some(Intrinsic::SpawnWithOutput),
+            "spawn" => Some(Intrinsic::Spawn),
             _ => None,
         }
     }
@@ -547,6 +567,15 @@ impl Intrinsic {
             Intrinsic::Sort => "sort",
             Intrinsic::Reverse => "reverse",
             Intrinsic::Range => "range",
+            // Phase A: Terminal
+            Intrinsic::TtyRawMode => "tty_raw_mode",
+            Intrinsic::TtySize => "tty_size",
+            Intrinsic::TtyReadKey => "tty_read_key",
+            Intrinsic::IoCtl => "ioctl",
+            Intrinsic::IsTty => "isatty",
+            // Phase A: Process
+            Intrinsic::SpawnWithOutput => "spawn_with_output",
+            Intrinsic::Spawn => "spawn",
         }
     }
 }
@@ -1940,5 +1969,54 @@ mod tests {
         assert_eq!(result.type_params.len(), 2);
         assert_eq!(result.type_params[0].name, "T");
         assert_eq!(result.type_params[1].name, "E");
+    }
+
+    // ── Intrinsic::from_name / name roundtrip tests ────────────────
+
+    #[test]
+    fn test_intrinsic_from_name_tty_raw_mode() {
+        assert_eq!(Intrinsic::from_name("tty_raw_mode"), Some(Intrinsic::TtyRawMode));
+        assert_eq!(Intrinsic::TtyRawMode.name(), "tty_raw_mode");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_tty_size() {
+        assert_eq!(Intrinsic::from_name("tty_size"), Some(Intrinsic::TtySize));
+        assert_eq!(Intrinsic::TtySize.name(), "tty_size");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_tty_read_key() {
+        assert_eq!(Intrinsic::from_name("tty_read_key"), Some(Intrinsic::TtyReadKey));
+        assert_eq!(Intrinsic::TtyReadKey.name(), "tty_read_key");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_ioctl() {
+        assert_eq!(Intrinsic::from_name("ioctl"), Some(Intrinsic::IoCtl));
+        assert_eq!(Intrinsic::IoCtl.name(), "ioctl");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_isatty() {
+        assert_eq!(Intrinsic::from_name("isatty"), Some(Intrinsic::IsTty));
+        assert_eq!(Intrinsic::IsTty.name(), "isatty");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_spawn_with_output() {
+        assert_eq!(Intrinsic::from_name("spawn_with_output"), Some(Intrinsic::SpawnWithOutput));
+        assert_eq!(Intrinsic::SpawnWithOutput.name(), "spawn_with_output");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_spawn() {
+        assert_eq!(Intrinsic::from_name("spawn"), Some(Intrinsic::Spawn));
+        assert_eq!(Intrinsic::Spawn.name(), "spawn");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_unknown() {
+        assert_eq!(Intrinsic::from_name("nonexistent"), None);
     }
 }

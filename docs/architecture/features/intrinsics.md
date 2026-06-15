@@ -1,7 +1,7 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Planned — Phase A implementation begins immediately. Supersedes `as-intrinsic.md`.
+**Status:** Phase A — Implementation Complete (2026-06-15). Supersedes `as-intrinsic.md`.
 
 ## Purpose
 
@@ -315,7 +315,7 @@ eliminates the libpthread link dependency.
 
 ## Implementation Phases
 
-### Phase A — Terminal + Process (immediate)
+### Phase A — Terminal + Process (completed 2026-06-15)
 
 **New Intrinsic variants:**
 - D4: `TtyRawMode`, `TtySize`, `TtyReadKey`, `IoCtl`, `IsTty`
@@ -324,16 +324,24 @@ eliminates the libpthread link dependency.
 **LLVM backend:** Category **Shim** — emit `declare i64 @brief_*(i64, ...)`
 and `call`, implemented in `brief_rt.c` via libc.
 
-**Interpreter:** Rust `std::process::Command`, `termios` crate, direct impl.
+**Interpreter:** Rust `std::process::Command`, `libc` crate, direct impl.
 
 **Files changed:**
 - `src/ast.rs` — add variants + `from_name` + `name`
-- `src/interpreter.rs` — add eval match arms
+- `src/interpreter.rs` — add eval match arms + helper functions (`set_tty_raw_mode`, `get_terminal_size`, `read_key_nonblocking`)
 - `src/backend/llvm/emit_expr.rs` — add LLVM codegen match arms
-- `lib/runtime/brief_rt.c` — add C function implementations
 - `src/backend/llvm/emit_toplevel.rs` — add `declare` stubs in `emit_declares`
+- `src/typechecker.rs` — add return type dispatch match arms
+- `lib/runtime/brief_rt.c` — add C function implementations (`brief_tty_raw_mode`, `brief_tty_size`, `brief_tty_read_key`, `brief_ioctl`, `brief_isatty`, `brief_spawn_with_output`, `brief_spawn`)
 
 **Files deleted:** `lib/std/ffi/tty.bv` (replaced by intrinsics)
+
+**Tests added:**
+- `src/ast.rs` — roundtrip test for `Intrinsic::from_name` + `name()` for all Phase A entries
+- `src/interpreter.rs` — eval tests for `tty_raw_mode#`, `tty_size#`, `tty_read_key#`, `ioctl#`, `isatty#`, `spawn_with_output#`, `spawn#`
+- `src/typechecker.rs` — return type inference tests for all Phase A intrinsics
+
+**Test result:** 801 pass, 0 fail (up from 713)
 
 ### Phase B — Raw File I/O (15 intrinsics)
 

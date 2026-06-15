@@ -504,6 +504,92 @@ int64_t tty_size(void) {
 // tty_read_key is now a volatile char global (see @ link globals above),
 // set by __rt_wait()/__rt_poll() when stdin data is available.
 
+/* ===================================================================
+ * Phase A: #-intrinsic implementations (intrinsics.md)
+ *
+ * These are called by the LLVM backend's emit_expr for name#() calls.
+ * All take and return int64_t (i64 in LLVM IR). String parameters
+ * follow the Brief string format (brief_str_to_c / cstr_to_brief).
+ * =================================================================== */
+
+#include <termios.h>
+#include <sys/ioctl.h>
+
+int64_t brief_tty_raw_mode(int64_t enable) {
+    static struct termios orig_termios;
+    static int saved = 0;
+    if (enable) {
+        struct termios raw;
+        if (tcgetattr(STDIN_FILENO, &orig_termios) != 0) return 0;
+        raw = orig_termios;
+        cfmakeraw(&raw);
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) return 0;
+        saved = 1;
+        return 1;
+    } else {
+        if (!saved) return 1;
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios) != 0) return 0;
+        saved = 0;
+        return 1;
+    }
+}
+
+int64_t brief_tty_size(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
+        return (int64_t)(ws.ws_col) * 10000 + ws.ws_row;
+    }
+    return (int64_t)(80 * 10000 + 24);
+}
+
+int64_t brief_tty_read_key(void) {
+    unsigned char ch = 0;
+    ssize_t n = read(STDIN_FILENO, &ch, 1);
+    if (n > 0) return (int64_t)ch;
+    return -1;
+}
+
+int64_t brief_ioctl(int64_t fd, int64_t request, int64_t arg) {
+    return (int64_t)ioctl((int)fd, (unsigned long)request, (void*)(uintptr_t)arg);
+}
+
+int64_t brief_isatty(int64_t fd) {
+    return (int64_t)isatty((int)fd);
+}
+
+int64_t brief_spawn_with_output(int64_t cmd_bstr) {
+    char* c_cmd = brief_str_to_c(cmd_bstr);
+    if (!c_cmd) return 0;
+
+    FILE* fp = popen(c_cmd, "r");
+    free(c_cmd);
+
+    if (!fp) return 0;
+
+    char buf[65536];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    int status = pclose(fp);
+
+    if (n > 0) {
+        buf[n] = '\0';
+        while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) n--;
+        buf[n] = '\0';
+        return cstr_to_brief(buf);
+    }
+    return status == 0 ? cstr_to_brief("") : 0;
+}
+
+int64_t brief_spawn(int64_t cmd_bstr) {
+    char* c_cmd = brief_str_to_c(cmd_bstr);
+    if (!c_cmd) return -1;
+
+    int status = system(c_cmd);
+    free(c_cmd);
+
+    if (status < 0) return -1;
+    return (int64_t)WEXITSTATUS(status);
+}
+
 /* ── Stdlib __ functions ──────────────────────────────────────────── */
 
 int64_t __trim_left(const char* s) {
