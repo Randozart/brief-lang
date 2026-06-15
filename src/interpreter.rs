@@ -2371,6 +2371,170 @@ impl Interpreter {
                             Ok(Value::Int(-1))
                         }
                     }
+                    // ===== Phase D: Memory (intrinsics.md D1) =====
+                    Intrinsic::Mmap => {
+                        let addr = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mmap addr requires Int, got {:?}", v))),
+                        };
+                        let length = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mmap length requires Int, got {:?}", v))),
+                        };
+                        let prot = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mmap prot requires Int, got {:?}", v))),
+                        };
+                        let flags = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mmap flags requires Int, got {:?}", v))),
+                        };
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mmap fd requires Int, got {:?}", v))),
+                        };
+                        let offset = match values.remove(0) {
+                            Value::Int(n) => n as i64,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mmap offset requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::mmap(addr as *mut libc::c_void, length, prot, flags, fd, offset) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (addr, length, prot, flags, fd, offset);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::MUnmap => {
+                        let addr = match values.remove(0) {
+                            Value::Int(n) => n as *mut libc::c_void,
+                            v => return Err(RuntimeError::TypeMismatch(format!("munmap addr requires Int, got {:?}", v))),
+                        };
+                        let length = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("munmap length requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::munmap(addr, length) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (addr, length);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::MProtect => {
+                        let addr = match values.remove(0) {
+                            Value::Int(n) => n as *mut libc::c_void,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mprotect addr requires Int, got {:?}", v))),
+                        };
+                        let length = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mprotect length requires Int, got {:?}", v))),
+                        };
+                        let prot = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mprotect prot requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::mprotect(addr, length, prot) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (addr, length, prot);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Brk => {
+                        let addr = match values.remove(0) {
+                            Value::Int(n) => n as *mut libc::c_void,
+                            v => return Err(RuntimeError::TypeMismatch(format!("brk addr requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::sbrk(0) }; // get current brk
+                            let _ = addr; // setting brk is unsafe; just return current
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = addr;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::MLock => {
+                        let addr = match values.remove(0) {
+                            Value::Int(n) => n as *mut libc::c_void,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mlock addr requires Int, got {:?}", v))),
+                        };
+                        let length = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mlock length requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::mlock(addr, length) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (addr, length);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    // ===== Phase D: Synchronization (intrinsics.md D9) =====
+                    // These operate on opaque memory addresses. The interpreter
+                    // stubs them — they only work meaningfully in compiled code.
+                    Intrinsic::AtomicLoad => {
+                        let _ = values.remove(0); // addr
+                        let _ = values.remove(0); // order
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::AtomicStore => {
+                        let _ = values.remove(0); // addr
+                        let _ = values.remove(0); // val
+                        let _ = values.remove(0); // order
+                        Ok(Value::Int(-1))
+                    }
+                    Intrinsic::AtomicCas => {
+                        let _ = values.remove(0); // addr
+                        let _ = values.remove(0); // expected
+                        let _ = values.remove(0); // new
+                        let _ = values.remove(0); // order
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::AtomicXchg => {
+                        let _ = values.remove(0); // addr
+                        let _ = values.remove(0); // val
+                        let _ = values.remove(0); // order
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::AtomicAdd => {
+                        let _ = values.remove(0); // addr
+                        let _ = values.remove(0); // val
+                        let _ = values.remove(0); // order
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::Fence => {
+                        let _ = values.remove(0); // order
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::Futex => {
+                        let _ = values.remove(0); // uaddr
+                        let _ = values.remove(0); // op
+                        let _ = values.remove(0); // val
+                        let _ = values.remove(0); // timeout
+                        let _ = values.remove(0); // uaddr2
+                        let _ = values.remove(0); // val3
+                        Ok(Value::Int(-1))
+                    }
                     // Data intrinsics
                     Intrinsic::Sort => Ok(values.remove(0)),
                     Intrinsic::Reverse => Ok(values.remove(0)),
@@ -7080,6 +7244,216 @@ mod kani_full_tests {
             args: vec![Expr::Integer(42), Expr::Integer(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
+    }
+
+    // ── Phase D: Memory + Synchronization intrinsic tests ───────────
+
+    #[test]
+    fn test_intrinsic_mmap_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Mmap,
+            args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Bool(true), Expr::Integer(0), Expr::Integer(-1), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err(), "mmap# with Bool prot should type error");
+    }
+
+    #[test]
+    fn test_intrinsic_munmap_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::MUnmap,
+            args: vec![Expr::Bool(false), Expr::Integer(4096)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_mprotect_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::MProtect,
+            args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Bool(true)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_brk_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Brk,
+            args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_brk_returns_zero() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Brk,
+            args: vec![Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert!(matches!(result, Value::Int(_)), "brk# should return Int");
+    }
+
+    #[test]
+    fn test_intrinsic_mlock_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::MLock,
+            args: vec![Expr::Integer(0), Expr::Bool(true)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_load_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicLoad,
+            args: vec![Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_load_stub() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicLoad,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0), "atomic_load# stub should return 0");
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_store_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicStore,
+            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_store_stub() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicStore,
+            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(-1), "atomic_store# stub should return -1");
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_cas_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicCas,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(1), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_cas_stub() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicCas,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0), "atomic_cas# stub should return 0");
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_xchg_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicXchg,
+            args: vec![Expr::Integer(0), Expr::Bool(true), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_xchg_stub() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicXchg,
+            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0), "atomic_xchg# stub should return 0");
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_add_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicAdd,
+            args: vec![Expr::Integer(0), Expr::Bool(true), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_atomic_add_stub() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicAdd,
+            args: vec![Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0), "atomic_add# stub should return 0");
+    }
+
+    #[test]
+    fn test_intrinsic_fence_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Fence,
+            args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_fence_stub() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Fence,
+            args: vec![Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0), "fence# stub should return 0");
+    }
+
+    #[test]
+    fn test_intrinsic_futex_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Futex,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_futex_stub() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Futex,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(-1), "futex# stub should return -1");
     }
 
     #[test]

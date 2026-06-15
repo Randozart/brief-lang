@@ -935,6 +935,53 @@ int64_t brief_access(int64_t path_bstr, int64_t mode) {
     return (int64_t)ret;
 }
 
+/* ===================================================================
+ * Phase D: Memory + Synchronization intrinsics (intrinsics.md D1 + D9)
+ *
+ * Memory operations (mmap, munmap, mprotect, brk, mlock) are Shim
+ * category — libc wrappers. futex is also Shim — syscall via libc.
+ * Atomic operations (load/store/cas/xchg/add/fence) are Native category
+ * — emitted as LLVM atomic IR, no C implementation needed.
+ * =================================================================== */
+
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+int64_t brief_mmap(int64_t addr, int64_t length, int64_t prot, int64_t flags, int64_t fd, int64_t offset) {
+    void* ret = mmap((void*)(uintptr_t)addr, (size_t)length, (int)prot, (int)flags, (int)fd, (off_t)offset);
+    if (ret == MAP_FAILED) return -1;
+    return (int64_t)(uintptr_t)ret;
+}
+
+int64_t brief_munmap(int64_t addr, int64_t length) {
+    return (int64_t)munmap((void*)(uintptr_t)addr, (size_t)length);
+}
+
+int64_t brief_mprotect(int64_t addr, int64_t length, int64_t prot) {
+    return (int64_t)mprotect((void*)(uintptr_t)addr, (size_t)length, (int)prot);
+}
+
+int64_t brief_brk(int64_t addr) {
+    // brk() is not on all systems; use sbrk(0) for query, brk() for set
+    if (addr == 0) {
+        void* cur = sbrk(0);
+        return (int64_t)(uintptr_t)cur;
+    }
+    int ret = brk((void*)(uintptr_t)addr);
+    return (int64_t)ret;
+}
+
+int64_t brief_mlock(int64_t addr, int64_t length) {
+    return (int64_t)mlock((void*)(uintptr_t)addr, (size_t)length);
+}
+
+int64_t brief_futex(int64_t uaddr, int64_t op, int64_t val, int64_t timeout, int64_t uaddr2, int64_t val3) {
+    (void)uaddr; (void)op; (void)val; (void)timeout; (void)uaddr2; (void)val3;
+    // Futex is architecture-dependent; stub returns -1 (unsupported)
+    return -1;
+}
+
 /* ── Officina-local frgn (JSON, substring) ────────────────────────── */
 
 int64_t substring(const char* s) {

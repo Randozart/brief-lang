@@ -1312,6 +1312,12 @@ impl TypeChecker {
                     | Intrinsic::Rename | Intrinsic::SymLink | Intrinsic::Link
                     | Intrinsic::ChDir | Intrinsic::ChMod | Intrinsic::ChOwn
                     | Intrinsic::UMask | Intrinsic::Access => Type::Int,
+                    // Phase D: Memory + Sync — all return Int
+                    Intrinsic::Mmap | Intrinsic::MUnmap | Intrinsic::MProtect
+                    | Intrinsic::Brk | Intrinsic::MLock | Intrinsic::AtomicLoad
+                    | Intrinsic::AtomicStore | Intrinsic::AtomicCas
+                    | Intrinsic::AtomicXchg | Intrinsic::AtomicAdd
+                    | Intrinsic::Fence | Intrinsic::Futex => Type::Int,
                 }
             }
             Expr::Call(name, args) => {
@@ -2982,6 +2988,128 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::Int, "access# should infer as Int");
+    }
+
+    // ── Phase D: Memory + Synchronization type inference tests ─────
+
+    #[test]
+    fn test_check_intrinsic_mmap_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Mmap,
+            args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Integer(3), Expr::Integer(-1), Expr::Integer(-1), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int, "mmap# should infer as Int");
+    }
+
+    #[test]
+    fn test_check_intrinsic_munmap_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::MUnmap,
+            args: vec![Expr::Integer(0), Expr::Integer(4096)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_mprotect_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::MProtect,
+            args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Integer(3)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_brk_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Brk,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_mlock_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::MLock,
+            args: vec![Expr::Integer(0), Expr::Integer(4096)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_atomic_load_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicLoad,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_atomic_store_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicStore,
+            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_atomic_cas_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicCas,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_atomic_xchg_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicXchg,
+            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_atomic_add_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::AtomicAdd,
+            args: vec![Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_fence_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Fence,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_futex_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Futex,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
     }
 
     #[test]

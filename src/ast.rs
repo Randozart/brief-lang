@@ -522,6 +522,22 @@ pub enum Intrinsic {
     ChOwn,
     UMask,
     Access,
+
+    // ===== Phase D: Memory (intrinsics.md D1) =====
+    Mmap,
+    MUnmap,
+    MProtect,
+    Brk,
+    MLock,
+
+    // ===== Phase D: Synchronization (intrinsics.md D9) =====
+    AtomicLoad,
+    AtomicStore,
+    AtomicCas,
+    AtomicXchg,
+    AtomicAdd,
+    Fence,
+    Futex,
 }
 
 impl Intrinsic {
@@ -596,6 +612,20 @@ impl Intrinsic {
             "chown" => Some(Intrinsic::ChOwn),
             "umask" => Some(Intrinsic::UMask),
             "access" => Some(Intrinsic::Access),
+            // Phase D: Memory
+            "mmap" => Some(Intrinsic::Mmap),
+            "munmap" => Some(Intrinsic::MUnmap),
+            "mprotect" => Some(Intrinsic::MProtect),
+            "brk" => Some(Intrinsic::Brk),
+            "mlock" => Some(Intrinsic::MLock),
+            // Phase D: Synchronization
+            "atomic_load" => Some(Intrinsic::AtomicLoad),
+            "atomic_store" => Some(Intrinsic::AtomicStore),
+            "atomic_cas" => Some(Intrinsic::AtomicCas),
+            "atomic_xchg" => Some(Intrinsic::AtomicXchg),
+            "atomic_add" => Some(Intrinsic::AtomicAdd),
+            "fence" => Some(Intrinsic::Fence),
+            "futex" => Some(Intrinsic::Futex),
             _ => None,
         }
     }
@@ -671,6 +701,20 @@ impl Intrinsic {
             Intrinsic::ChOwn => "chown",
             Intrinsic::UMask => "umask",
             Intrinsic::Access => "access",
+            // Phase D: Memory
+            Intrinsic::Mmap => "mmap",
+            Intrinsic::MUnmap => "munmap",
+            Intrinsic::MProtect => "mprotect",
+            Intrinsic::Brk => "brk",
+            Intrinsic::MLock => "mlock",
+            // Phase D: Synchronization
+            Intrinsic::AtomicLoad => "atomic_load",
+            Intrinsic::AtomicStore => "atomic_store",
+            Intrinsic::AtomicCas => "atomic_cas",
+            Intrinsic::AtomicXchg => "atomic_xchg",
+            Intrinsic::AtomicAdd => "atomic_add",
+            Intrinsic::Fence => "fence",
+            Intrinsic::Futex => "futex",
         }
     }
 }
@@ -2282,6 +2326,78 @@ mod tests {
     fn test_intrinsic_from_name_access() {
         assert_eq!(Intrinsic::from_name("access"), Some(Intrinsic::Access));
         assert_eq!(Intrinsic::Access.name(), "access");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_mmap() {
+        assert_eq!(Intrinsic::from_name("mmap"), Some(Intrinsic::Mmap));
+        assert_eq!(Intrinsic::Mmap.name(), "mmap");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_munmap() {
+        assert_eq!(Intrinsic::from_name("munmap"), Some(Intrinsic::MUnmap));
+        assert_eq!(Intrinsic::MUnmap.name(), "munmap");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_mprotect() {
+        assert_eq!(Intrinsic::from_name("mprotect"), Some(Intrinsic::MProtect));
+        assert_eq!(Intrinsic::MProtect.name(), "mprotect");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_brk() {
+        assert_eq!(Intrinsic::from_name("brk"), Some(Intrinsic::Brk));
+        assert_eq!(Intrinsic::Brk.name(), "brk");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_mlock() {
+        assert_eq!(Intrinsic::from_name("mlock"), Some(Intrinsic::MLock));
+        assert_eq!(Intrinsic::MLock.name(), "mlock");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_atomic_load() {
+        assert_eq!(Intrinsic::from_name("atomic_load"), Some(Intrinsic::AtomicLoad));
+        assert_eq!(Intrinsic::AtomicLoad.name(), "atomic_load");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_atomic_store() {
+        assert_eq!(Intrinsic::from_name("atomic_store"), Some(Intrinsic::AtomicStore));
+        assert_eq!(Intrinsic::AtomicStore.name(), "atomic_store");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_atomic_cas() {
+        assert_eq!(Intrinsic::from_name("atomic_cas"), Some(Intrinsic::AtomicCas));
+        assert_eq!(Intrinsic::AtomicCas.name(), "atomic_cas");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_atomic_xchg() {
+        assert_eq!(Intrinsic::from_name("atomic_xchg"), Some(Intrinsic::AtomicXchg));
+        assert_eq!(Intrinsic::AtomicXchg.name(), "atomic_xchg");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_atomic_add() {
+        assert_eq!(Intrinsic::from_name("atomic_add"), Some(Intrinsic::AtomicAdd));
+        assert_eq!(Intrinsic::AtomicAdd.name(), "atomic_add");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_fence() {
+        assert_eq!(Intrinsic::from_name("fence"), Some(Intrinsic::Fence));
+        assert_eq!(Intrinsic::Fence.name(), "fence");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_futex() {
+        assert_eq!(Intrinsic::from_name("futex"), Some(Intrinsic::Futex));
+        assert_eq!(Intrinsic::Futex.name(), "futex");
     }
 
     #[test]

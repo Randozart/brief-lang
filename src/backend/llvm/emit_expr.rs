@@ -605,6 +605,94 @@ impl LlvmBackend {
                         let mode = self.emit_expr(out, &args[1], indent);
                         writeln!(out, "{}{} = call i64 @brief_access(i64 {}, i64 {})", indent, v, path.name, mode.name).ok();
                     }
+                    // ===== Phase D: Memory (intrinsics.md D1) — Shim category =====
+                    Intrinsic::Mmap => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let length = self.emit_expr(out, &args[1], indent);
+                        let prot = self.emit_expr(out, &args[2], indent);
+                        let flags = self.emit_expr(out, &args[3], indent);
+                        let fd = self.emit_expr(out, &args[4], indent);
+                        let offset = self.emit_expr(out, &args[5], indent);
+                        writeln!(out, "{}{} = call i64 @brief_mmap(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, addr.name, length.name, prot.name, flags.name, fd.name, offset.name).ok();
+                    }
+                    Intrinsic::MUnmap => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let length = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_munmap(i64 {}, i64 {})", indent, v, addr.name, length.name).ok();
+                    }
+                    Intrinsic::MProtect => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let length = self.emit_expr(out, &args[1], indent);
+                        let prot = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_mprotect(i64 {}, i64 {}, i64 {})", indent, v, addr.name, length.name, prot.name).ok();
+                    }
+                    Intrinsic::Brk => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_brk(i64 {})", indent, v, addr.name).ok();
+                    }
+                    Intrinsic::MLock => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let length = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_mlock(i64 {}, i64 {})", indent, v, addr.name, length.name).ok();
+                    }
+                    // ===== Phase D: Synchronization (intrinsics.md D9) — Native category =====
+                    Intrinsic::AtomicLoad => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let _order = self.emit_expr(out, &args[1], indent); // order arg consumed for eval
+                        let ptr = format!("%aptr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
+                        writeln!(out, "{}{} = load atomic i64, ptr {} acquire, align 8", indent, v, ptr).ok();
+                    }
+                    Intrinsic::AtomicStore => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let val = self.emit_expr(out, &args[1], indent);
+                        let _order = self.emit_expr(out, &args[2], indent);
+                        let ptr = format!("%aptr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
+                        writeln!(out, "{}store atomic i64 {}, ptr {} release, align 8", indent, val.name, ptr).ok();
+                        writeln!(out, "{}{} = add i64 0, 0 ; atomic_store returns void, stub", indent, v).ok();
+                    }
+                    Intrinsic::AtomicCas => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let expected = self.emit_expr(out, &args[1], indent);
+                        let new = self.emit_expr(out, &args[2], indent);
+                        let _order = self.emit_expr(out, &args[3], indent);
+                        let ptr = format!("%aptr{}", self.txn_counter); self.txn_counter += 1;
+                        let pair = format!("%apair{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
+                        writeln!(out, "{}{} = cmpxchg ptr {}, i64 {}, i64 {} acquire", indent, pair, ptr, expected.name, new.name).ok();
+                        writeln!(out, "{}{} = extractvalue {{ i64, i1 }} {}, 0", indent, v, pair).ok();
+                    }
+                    Intrinsic::AtomicXchg => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let val = self.emit_expr(out, &args[1], indent);
+                        let _order = self.emit_expr(out, &args[2], indent);
+                        let ptr = format!("%aptr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
+                        writeln!(out, "{}{} = atomicrmw xchg ptr {}, i64 {} acquire", indent, v, ptr, val.name).ok();
+                    }
+                    Intrinsic::AtomicAdd => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let val = self.emit_expr(out, &args[1], indent);
+                        let _order = self.emit_expr(out, &args[2], indent);
+                        let ptr = format!("%aptr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
+                        writeln!(out, "{}{} = atomicrmw add ptr {}, i64 {} acquire", indent, v, ptr, val.name).ok();
+                    }
+                    Intrinsic::Fence => {
+                        let _order = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}fence acquire", indent).ok();
+                        writeln!(out, "{}{} = add i64 0, 0 ; fence returns void, stub", indent, v).ok();
+                    }
+                    Intrinsic::Futex => {
+                        let uaddr = self.emit_expr(out, &args[0], indent);
+                        let op = self.emit_expr(out, &args[1], indent);
+                        let val = self.emit_expr(out, &args[2], indent);
+                        let timeout = self.emit_expr(out, &args[3], indent);
+                        let uaddr2 = self.emit_expr(out, &args[4], indent);
+                        let val3 = self.emit_expr(out, &args[5], indent);
+                        writeln!(out, "{}{} = call i64 @brief_futex(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, uaddr.name, op.name, val.name, timeout.name, uaddr2.name, val3.name).ok();
+                    }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
                         writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();

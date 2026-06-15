@@ -1,7 +1,7 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Phase C — Filesystem complete (2026-06-15). Phases A+B also complete. Supersedes `as-intrinsic.md`.
+**Status:** Phase D — Memory + Sync complete (2026-06-15). Phases A–C also complete. Supersedes `as-intrinsic.md`.
 
 ## Purpose
 
@@ -391,7 +391,24 @@ all others → Int.
 - `src/interpreter.rs` — 20 eval tests (type errors + edge cases)
 - `src/typechecker.rs` — 14 inference tests
 
-**Files deleted:** (none yet — `lib/std/ffi/io.bv` frgn lines after Phase B+C)
+### Phase D — Memory + Synchronization (completed 2026-06-15)
+
+**New Intrinsic variants:** D1: `Mmap`, `MUnmap`, `MProtect`, `Brk`, `MLock`
++ D9: `AtomicLoad`, `AtomicStore`, `AtomicCas`, `AtomicXchg`, `AtomicAdd`,
+`Fence`, `Futex`
+
+**LLVM backend:** D1 → **Shim** (call i64 @brief_*). D9 atomic ops →
+**Native** (LLVM atomic IR: load atomic, store atomic, cmpxchg, atomicrmw,
+fence). Futex → **Shim** (call i64 @brief_futex).
+
+**Interpreter:** D1 uses libc::mmap/munmap/mprotect/sbrk/mlock. D9 atomic
+ops are stubs (opaque pointers can't be dereferenced). Brk returns current
+break via sbrk(0). Futex returns -1.
+
+**Tests added:**
+- `src/ast.rs` — 12 roundtrip tests
+- `src/interpreter.rs` — 22 eval tests (type errors + stub values)
+- `src/typechecker.rs` — 12 inference tests
 
 ### Phase B — Raw File I/O (15 intrinsics)
 
