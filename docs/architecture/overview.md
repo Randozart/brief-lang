@@ -79,6 +79,7 @@ src/features/
     alka.rs           — AlkaStmt
     on_exit.rs        — OnExitStmt
     sync_block.rs     — SyncBlockStmt
+    foreach.rs        — ForeachStmt (NEW 2026-06-15)
   toplevel/
     mod.rs            — Module declarations
     typedef.rs        — TopLevel::TypeDef — Phase 1.5

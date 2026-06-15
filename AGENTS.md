@@ -376,7 +376,7 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 897 tests pass, 0 fail
+- 902 tests pass, 0 fail
 - **trg reactive dirty-flag architecture** complete (Phases 1–6):
   - Phase 1: `DependencyGraph` — variable-level DAG, Kahn's sort, cycle detection
   - Phase 2: `DirtyFlags(u64)` — bitmask with mark/clear/merge/any/none
@@ -384,37 +384,37 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
   - Phase 4: CIRCT backend (`circt.rs`) — HW+Comb MLIR emission, trg→input ports
   - Phase 5: Webstack `step_triggers()` — dirty-signal propagation in generated Rust
   - Phase 6: Removed `__trg_stdin_read` polling; deprecated timerfd/signalfd polling
+- **SSA phi dominance** fixed (6 root causes: nested guard predecessor, let_binding_types save/restore, Unification/Match leaks, terminated reset, stale old-value caches)
+- **foreach** complete: LLVM loop IR via alloca-based index, `!llvm.loop.vectorize.enable` SIMD metadata, feature file migration to `src/features/stmt/foreach.rs`, docs
+- **`?#` proof oracle** complete: AST/parser, interpreter with fuel injection + state rollback + handler, structural recursion checker (P021), all match arms
+- **Instruction reordering** complete: read/write set analysis, dependency DAG, Kahn's topological sort ILP optimization
 - Three canonical backends: LLVM (native), Webstack (WASM+JS), CIRCT (MLIR→Verilog)
 - All other backends are dead code — zero fixes
 - Kani: 14 fast-group harnesses proven (2.5s), 96 full-group pass with `--features kani_full`
 - Interpreter is the reference — if it runs a program, the backend should eventually compile it
 - All additions are additive (new match arms) — never modify existing optimization paths
-- Phases 11–13 (sync domains, HashMap/HashSet, Stack/Queue/Tuple) complete
-- BracketOp refactor (flat ops list for `MultiSlice`) complete
-- MultiSlice mask/stride evaluation implemented in interpreter. `_` bound as implicit element variable for filter expressions.
-- Intrinsic system (Phases A–H, 79 intrinsics) complete: terminal, process, file I/O, filesystem, time, signals, networking, env vars, process info, timing.
 
 ### Roadmap — Next Work Items
 
 See `docs/plans/2026-06-15-trinity-work-items.md` for the full plan. Summary:
 
 **Critical — officina-cli blockers:**
-1. SSA phi dominance — 17 "Instruction does not dominate all uses" errors in `loop_engine.rs` general loop emission
+1. SSA phi dominance — 17 "Instruction does not dominate all uses" errors in `loop_engine.rs` general loop emission ✅
 
 **Core feature — `foreach` completion (AST exists, backends are stubs):**
-2. LLVM backend: emit real loop IR (phi indvar, list load, element bind, body, back-edge)
-3. SIMD vectorization: wire `check_list_simd_lengths` → `!llvm.loop.vectorize.enable` metadata
-4. Feature file migration: `src/features/stmt/foreach.rs` following `sync_block.rs` pattern
-5. Documentation: update `statement.md` with LLVM IR and SIMD lowering
+2. LLVM backend: emit real loop IR (phi indvar, list load, element bind, body, back-edge) ✅
+3. SIMD vectorization: wire `check_list_simd_lengths` → `!llvm.loop.vectorize.enable` metadata ✅
+4. Feature file migration: `src/features/stmt/foreach.rs` following `sync_block.rs` pattern ✅
+5. Documentation: update `statement.md` with LLVM IR and SIMD lowering ✅
 
 **New feature — `?#` proof oracle:**
-6. Structural recursion checker (SPARK-style decreasing variant)
-7. `?#` AST / parser / desugaring (fuel injection + rollback + handler)
-8. Proof engine dispatch: bounded counter, structural recursion, SMT, fuel fallback
-9. Runtime fuel counter + state rollback + handler emission
+6. Structural recursion checker (SPARK-style decreasing variant) ✅
+7. `?#` AST / parser / desugaring (fuel injection + rollback + handler) ✅
+8. Proof engine dispatch: bounded counter, structural recursion, SMT, fuel fallback ✅
+9. Runtime fuel counter + state rollback + handler emission ✅
 
 **Optimization:**
-10. Transaction body instruction reordering — reorder for ILP, emit `noalias` GEP annotations
+10. Transaction body instruction reordering — reorder for ILP, emit `noalias` GEP annotations ✅
 
 ## Iteration Pattern
 
