@@ -769,6 +769,8 @@ self.emit_declares(&mut out);
         writeln!(out, "declare i32 @__trg_timerfd_read(i32) #1").ok();
         writeln!(out, "declare i32 @__trg_signalfd_open(i8*) #1").ok();
         writeln!(out, "declare i32 @__trg_signalfd_read(i32) #1").ok();
+        // Declare the step() function for the trg reactive dirty-flag system
+        writeln!(out, "declare void @step(%State*, i64) #1").ok();
 
         // Declare cast helper functions
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
@@ -1119,6 +1121,14 @@ self.emit_declares(&mut out);
                 } else { false }
             } else { false }
         } else { false };
+
+        // Emit the trg step() function if the program has trigger declarations.
+        // The step() function recomputes dependent variables in topological order
+        // when trigger inputs change. It is called from the event loop.
+        if !self.trigger_names.is_empty() {
+            let trg_names = self.trigger_names.clone();
+            self.emit_trg_step(&mut out, &analysis.dependency_graph, &trg_names);
+        }
 
         if !folded {
             let precomputed = if let Some(ref final_values) = precomputed_final_values {

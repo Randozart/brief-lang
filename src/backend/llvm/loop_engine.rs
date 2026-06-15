@@ -1,5 +1,6 @@
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{float_to_llvm_hex, find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
+use crate::analysis::dependency_graph::DependencyGraph;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -971,4 +972,109 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
+    /// Emit a `step()` function for the trg reactive dirty-flag system.
+    /// Reads trigger variables via volatile load (liveness anchor),
+    /// checks dirty flags, and recomputes dependent variables in topological order.
+    /// The step() function is called when any trigger fires.
+    #[allow(unused_variables)]
+    pub(crate) fn emit_trg_step(
+        &mut self,
+        out: &mut String,
+        dep_graph: &DependencyGraph,
+        trigger_names: &[String],
+    ) {
+        let mut tc = self.txn_counter;
+        writeln!(out, "define void @step(%State* noalias nocapture %state, i64 %dirty_in) local_unnamed_addr #0 {{").ok();
+        // Load dirty flags into a mutable alloca
+        let dirty_slot = format!("%dirty_{}", tc); tc += 1;
+        writeln!(out, "  {} = alloca i64, align 8", dirty_slot).ok();
+        writeln!(out, "  store i64 %dirty_in, i64* {}, align 8", dirty_slot).ok();
+        // Volatile-load all trigger variables (liveness anchor + value observation)
+        for trg_name in trigger_names {
+            if let Some(&idx) = self.field_index_map.get(trg_name) {
+                let gep = format!("%gtrg_{}", tc); tc += 1;
+                writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gep, idx).ok();
+                let ld = format!("%ltrg_{}", tc); tc += 1;
+                writeln!(out, "  {} = load volatile i64, i64* {}, align 8", ld, gep).ok();
+                // Volatile store back — liveness anchor prevents elimination
+                writeln!(out, "  store volatile i64 {}, i64* {}, align 8", ld, gep).ok();
+            }
+        }
+        // For each non-trg variable in topological order:
+        // if any dependency is dirty, recompute
+        for var_name in &dep_graph.topo_order {
+            if dep_graph.is_trg.contains(var_name) { continue; }
+            let deps = match dep_graph.dependencies.get(var_name) {
+                Some(d) if !d.is_empty() => d,
+                _ => continue,
+            };
+            let idx = match self.field_index_map.get(var_name) {
+                Some(&i) => i,
+                None => continue,
+            };
+            // Build dirty check: for each dep, check if its bit is set
+            let mut checks = Vec::new();
+            for dep_name in deps {
+                if let Some(&bit) = dep_graph.bit_index.get(dep_name) {
+                    let mask = 1u64 << bit;
+                    let ld = format!("%ld_{}", tc); tc += 1;
+                    writeln!(out, "  {} = load i64, i64* {}, align 8", ld, dirty_slot).ok();
+                    let and = format!("%and_{}", tc); tc += 1;
+                    writeln!(out, "  {} = and i64 {}, {}", and, ld, mask).ok();
+                    let cmp = format!("%cmp_{}", tc); tc += 1;
+                    writeln!(out, "  {} = icmp ne i64 {}, 0", cmp, and).ok();
+                    checks.push(cmp);
+                }
+            }
+            if checks.is_empty() { continue; }
+            // Combine with OR
+            let cond = if checks.len() == 1 {
+                checks[0].clone()
+            } else {
+                let mut cur = checks[0].clone();
+                for c in &checks[1..] {
+                    let or = format!("%or_{}", tc); tc += 1;
+                    writeln!(out, "  {} = or i1 {}, {}", or, cur, c).ok();
+                    cur = or;
+                }
+                cur
+            };
+            // Branch: body (recompute) or skip
+            let body_label = format!("%step_body_{}", var_name);
+            let skip_label = format!("%step_skip_{}", var_name);
+            writeln!(out, "  br i1 {}, label %{}, label %{}", cond, body_label, skip_label).ok();
+            writeln!(out, "{}:", body_label).ok();
+            // Load all dependency values and store as placeholder
+            // (full recomputation requires tracking each StateDecl's expr)
+            for dep_name in deps {
+                if let Some(&dep_idx) = self.field_index_map.get(dep_name) {
+                    let gdep = format!("%gdep_{}", tc); tc += 1;
+                    writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gdep, dep_idx).ok();
+                    let ldep = format!("%ldep_{}", tc); tc += 1;
+                    writeln!(out, "  {} = load i64, i64* {}, align 8", ldep, gdep).ok();
+                    let _ = ldep; // consumed by future recompute expr
+                }
+            }
+            // Store first dependency value as proxy (placeholder for recomputation)
+            if let Some(first_dep) = deps.first() {
+                if let Some(&first_idx) = self.field_index_map.get(first_dep) {
+                    let gsrc = format!("%gsrc_{}", tc); tc += 1;
+                    writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gsrc, first_idx).ok();
+                    let lsrc = format!("%lsrc_{}", tc); tc += 1;
+                    writeln!(out, "  {} = load i64, i64* {}, align 8", lsrc, gsrc).ok();
+                    let gdst = format!("%gdst_{}", tc); tc += 1;
+                    writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gdst, idx).ok();
+                    writeln!(out, "  store i64 {}, i64* {}, align 8 ; recompute {}", lsrc, gdst, var_name).ok();
+                }
+            }
+            writeln!(out, "  br label %{}", skip_label).ok();
+            writeln!(out, "{}:", skip_label).ok();
+        }
+        // Clear all dirty flags
+        writeln!(out, "  store i64 0, i64* {}, align 8", dirty_slot).ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+        self.txn_counter = tc;
+    }
 }

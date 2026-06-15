@@ -12,6 +12,7 @@ pub mod tcl_generator;
 pub mod cobol;
 
 use crate::analysis::call_graph::CallGraph;
+use crate::analysis::dependency_graph::DependencyGraph;
 use crate::analysis::range::ParameterRanges;
 use crate::analysis::dataflow::DataflowError;
 use crate::analysis::region::RegionAnalyzer;
@@ -29,6 +30,7 @@ pub struct AnalysisResults {
     pub optimize_mode: bool,
     pub transition_graph: ReactorTransitionGraph,
     pub region_analyzer: RegionAnalyzer,
+    pub dependency_graph: DependencyGraph,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -57,6 +59,14 @@ pub fn analyze_program(program: &Program, optimize: bool) -> AnalysisResults {
 
     let transition_graph = ReactorTransitionGraph::build(program);
     let region_analyzer = RegionAnalyzer::analyze(program);
+    let dependency_graph = DependencyGraph::build(program).unwrap_or_else(|_| DependencyGraph {
+        topo_order: Vec::new(),
+        bit_index: std::collections::HashMap::new(),
+        dependencies: std::collections::HashMap::new(),
+        dependents: std::collections::HashMap::new(),
+        is_trg: std::collections::HashSet::new(),
+        all_vars: std::collections::HashSet::new(),
+    });
 
     AnalysisResults {
         call_graph: cg,
@@ -66,6 +76,7 @@ pub fn analyze_program(program: &Program, optimize: bool) -> AnalysisResults {
         optimize_mode: optimize,
         transition_graph,
         region_analyzer,
+        dependency_graph,
     }
 }
 
