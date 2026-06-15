@@ -1081,6 +1081,80 @@ int64_t brief_timerfd_create(int64_t hz) {
     return (int64_t)fd;
 }
 
+/* ===================================================================
+ * Phase G: Networking intrinsics (intrinsics.md D10)
+ *
+ * POSIX socket API: socket, bind, listen, accept, connect, send, recv,
+ * sendto, recvfrom, setsockopt, getsockopt, shutdown, getaddrinfo.
+ * =================================================================== */
+
+#include <sys/socket.h>
+#include <netdb.h>
+
+int64_t brief_socket(int64_t domain, int64_t type, int64_t protocol) {
+    return (int64_t)socket((int)domain, (int)type, (int)protocol);
+}
+
+int64_t brief_bind(int64_t fd, int64_t addr, int64_t addrlen) {
+    return (int64_t)bind((int)fd, (const struct sockaddr*)(uintptr_t)addr, (socklen_t)addrlen);
+}
+
+int64_t brief_listen(int64_t fd, int64_t backlog) {
+    return (int64_t)listen((int)fd, (int)backlog);
+}
+
+int64_t brief_accept(int64_t fd, int64_t addr, int64_t addrlen) {
+    socklen_t len = (socklen_t)addrlen;
+    return (int64_t)accept((int)fd, (struct sockaddr*)(uintptr_t)addr, &len);
+}
+
+int64_t brief_connect(int64_t fd, int64_t addr, int64_t addrlen) {
+    return (int64_t)connect((int)fd, (const struct sockaddr*)(uintptr_t)addr, (socklen_t)addrlen);
+}
+
+int64_t brief_send(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
+    return (int64_t)send((int)fd, (const void*)(uintptr_t)buf, (size_t)len, (int)flags);
+}
+
+int64_t brief_recv(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
+    return (int64_t)recv((int)fd, (void*)(uintptr_t)buf, (size_t)len, (int)flags);
+}
+
+int64_t brief_sendto(int64_t fd, int64_t buf, int64_t len, int64_t flags, int64_t dest_addr, int64_t addrlen) {
+    return (int64_t)sendto((int)fd, (const void*)(uintptr_t)buf, (size_t)len, (int)flags,
+                           (const struct sockaddr*)(uintptr_t)dest_addr, (socklen_t)addrlen);
+}
+
+int64_t brief_recvfrom(int64_t fd, int64_t buf, int64_t len, int64_t flags, int64_t src_addr, int64_t addrlen) {
+    socklen_t slen = (socklen_t)addrlen;
+    return (int64_t)recvfrom((int)fd, (void*)(uintptr_t)buf, (size_t)len, (int)flags,
+                             (struct sockaddr*)(uintptr_t)src_addr, &slen);
+}
+
+int64_t brief_setsockopt(int64_t fd, int64_t level, int64_t opt, int64_t val, int64_t len) {
+    return (int64_t)setsockopt((int)fd, (int)level, (int)opt, (const void*)(uintptr_t)val, (socklen_t)len);
+}
+
+int64_t brief_getsockopt(int64_t fd, int64_t level, int64_t opt, int64_t val, int64_t len) {
+    socklen_t slen = (socklen_t)len;
+    return (int64_t)getsockopt((int)fd, (int)level, (int)opt, (void*)(uintptr_t)val, &slen);
+}
+
+int64_t brief_shutdown(int64_t fd, int64_t how) {
+    return (int64_t)shutdown((int)fd, (int)how);
+}
+
+int64_t brief_getaddrinfo(int64_t node, int64_t service) {
+    struct addrinfo hints;
+    struct addrinfo *result;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    int ret = getaddrinfo((const char*)(uintptr_t)node, (const char*)(uintptr_t)service, &hints, &result);
+    if (ret == 0 && result) freeaddrinfo(result);
+    return (int64_t)ret;
+}
+
 /* ── Officina-local frgn (JSON, substring) ────────────────────────── */
 
 int64_t substring(const char* s) {

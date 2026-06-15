@@ -2786,6 +2786,371 @@ impl Interpreter {
                             Ok(Value::Int(-1))
                         }
                     }
+                    // ===== Phase G: Networking (intrinsics.md D10) — Shim =====
+                    Intrinsic::Socket => {
+                        let domain = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("socket domain requires Int, got {:?}", v))),
+                        };
+                        let sock_type = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("socket type requires Int, got {:?}", v))),
+                        };
+                        let protocol = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("socket protocol requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::socket(domain, sock_type, protocol) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (domain, sock_type, protocol);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Bind => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("bind fd requires Int, got {:?}", v))),
+                        };
+                        let addr = match values.remove(0) {
+                            Value::Int(n) => n as libc::uintptr_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("bind addr requires Int, got {:?}", v))),
+                        };
+                        let addrlen = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("bind addrlen requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::bind(fd, addr as *const libc::sockaddr, addrlen) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, addr, addrlen);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Listen => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("listen fd requires Int, got {:?}", v))),
+                        };
+                        let backlog = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("listen backlog requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::listen(fd, backlog) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, backlog);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Accept => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("accept fd requires Int, got {:?}", v))),
+                        };
+                        let addr = match values.remove(0) {
+                            Value::Int(n) => n as libc::uintptr_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("accept addr requires Int, got {:?}", v))),
+                        };
+                        let addrlen = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("accept addrlen requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::accept(fd, addr as *mut libc::sockaddr, &addrlen as *const u32 as *mut libc::socklen_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, addr, addrlen);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Connect => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("connect fd requires Int, got {:?}", v))),
+                        };
+                        let addr = match values.remove(0) {
+                            Value::Int(n) => n as libc::uintptr_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("connect addr requires Int, got {:?}", v))),
+                        };
+                        let addrlen = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("connect addrlen requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::connect(fd, addr as *const libc::sockaddr, addrlen) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, addr, addrlen);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Send => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("send fd requires Int, got {:?}", v))),
+                        };
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("send buf requires Int, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("send len requires Int, got {:?}", v))),
+                        };
+                        let flags = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("send flags requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::send(fd, buf as *const std::ffi::c_void, len, flags) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, buf, len, flags);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Recv => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recv fd requires Int, got {:?}", v))),
+                        };
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recv buf requires Int, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recv len requires Int, got {:?}", v))),
+                        };
+                        let flags = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recv flags requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::recv(fd, buf as *mut std::ffi::c_void, len, flags) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, buf, len, flags);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SendTo => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sendto fd requires Int, got {:?}", v))),
+                        };
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sendto buf requires Int, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sendto len requires Int, got {:?}", v))),
+                        };
+                        let flags = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sendto flags requires Int, got {:?}", v))),
+                        };
+                        let dest_addr = match values.remove(0) {
+                            Value::Int(n) => n as libc::uintptr_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sendto dest_addr requires Int, got {:?}", v))),
+                        };
+                        let addrlen = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sendto addrlen requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::sendto(fd, buf as *const std::ffi::c_void, len, flags, dest_addr as *const libc::sockaddr, addrlen) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, buf, len, flags, dest_addr, addrlen);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::RecvFrom => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recvfrom fd requires Int, got {:?}", v))),
+                        };
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recvfrom buf requires Int, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recvfrom len requires Int, got {:?}", v))),
+                        };
+                        let flags = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recvfrom flags requires Int, got {:?}", v))),
+                        };
+                        let src_addr = match values.remove(0) {
+                            Value::Int(n) => n as libc::uintptr_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recvfrom src_addr requires Int, got {:?}", v))),
+                        };
+                        let addrlen = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("recvfrom addrlen requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::recvfrom(fd, buf as *mut std::ffi::c_void, len, flags, src_addr as *mut libc::sockaddr, &addrlen as *const u32 as *mut libc::socklen_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, buf, len, flags, src_addr, addrlen);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SetSockOpt => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setsockopt fd requires Int, got {:?}", v))),
+                        };
+                        let level = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setsockopt level requires Int, got {:?}", v))),
+                        };
+                        let opt = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setsockopt opt requires Int, got {:?}", v))),
+                        };
+                        let val = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setsockopt val requires Int, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setsockopt len requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::setsockopt(fd, level, opt, val as *const std::ffi::c_void, len) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, level, opt, val, len);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::GetSockOpt => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getsockopt fd requires Int, got {:?}", v))),
+                        };
+                        let level = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getsockopt level requires Int, got {:?}", v))),
+                        };
+                        let opt = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getsockopt opt requires Int, got {:?}", v))),
+                        };
+                        let val = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getsockopt val requires Int, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getsockopt len requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::getsockopt(fd, level, opt, val as *mut std::ffi::c_void, &len as *const u32 as *mut libc::socklen_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, level, opt, val, len);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::Shutdown => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("shutdown fd requires Int, got {:?}", v))),
+                        };
+                        let how = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("shutdown how requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::shutdown(fd, how) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (fd, how);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::GetAddrInfo => {
+                        let node = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getaddrinfo node requires String, got {:?}", v))),
+                        };
+                        let service = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getaddrinfo service requires String, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+                            hints.ai_family = libc::AF_UNSPEC;
+                            hints.ai_socktype = libc::SOCK_STREAM;
+                            let mut result: *mut libc::addrinfo = std::ptr::null_mut();
+                            let c_node = std::ffi::CString::new(node.clone()).ok();
+                            let c_service = std::ffi::CString::new(service.clone()).ok();
+                            let ret = unsafe {
+                                libc::getaddrinfo(
+                                    c_node.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+                                    c_service.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+                                    &hints,
+                                    &mut result,
+                                )
+                            };
+                            if ret == 0 && !result.is_null() {
+                                unsafe { libc::freeaddrinfo(result) };
+                            }
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (node, service);
+                            Ok(Value::Int(-1))
+                        }
+                    }
                     // Data intrinsics
                     Intrinsic::Sort => Ok(values.remove(0)),
                     Intrinsic::Reverse => Ok(values.remove(0)),
@@ -7817,6 +8182,150 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::TimerFdCreate,
             args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    // ── Phase G: Networking intrinsic tests ────────────────────────
+
+    #[test]
+    fn test_intrinsic_socket_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Socket,
+            args: vec![Expr::Bool(false), Expr::Integer(0), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_bind_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bind,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_listen_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Listen,
+            args: vec![Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_accept_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Accept,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_connect_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Connect,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_send_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Send,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_recv_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Recv,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_sendto_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SendTo,
+            args: vec![
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Bool(false), Expr::Integer(0), Expr::Integer(0),
+            ],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_recvfrom_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::RecvFrom,
+            args: vec![
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Bool(false), Expr::Integer(0), Expr::Integer(0),
+            ],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_setsockopt_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SetSockOpt,
+            args: vec![
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Bool(false), Expr::Integer(0),
+            ],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_getsockopt_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetSockOpt,
+            args: vec![
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Bool(false), Expr::Integer(0),
+            ],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_shutdown_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Shutdown,
+            args: vec![Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_getaddrinfo_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetAddrInfo,
+            args: vec![Expr::Integer(0), Expr::String("http".into())],
         };
         assert!(i.eval_expr(&expr).is_err());
     }

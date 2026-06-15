@@ -94,6 +94,20 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @brief_kill(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_signalfd(i64)").ok();
         writeln!(out, "declare i64 @brief_timerfd_create(i64)").ok();
+        // Phase G: Networking intrinsics (intrinsics.md D10)
+        writeln!(out, "declare i64 @brief_socket(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_bind(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_listen(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_accept(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_connect(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_send(i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_recv(i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_sendto(i64, i64, i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_recvfrom(i64, i64, i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_setsockopt(i64, i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_getsockopt(i64, i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_shutdown(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_getaddrinfo(i64, i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {

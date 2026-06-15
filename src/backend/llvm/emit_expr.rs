@@ -428,9 +428,6 @@ impl LlvmBackend {
                     Intrinsic::Sleep => {
                         writeln!(out, "{}{} = add i64 0, 1 ; sleep stub", indent, v).ok();
                     }
-                    Intrinsic::Socket | Intrinsic::Bind | Intrinsic::Listen | Intrinsic::Accept => {
-                        writeln!(out, "{}{} = add i64 0, 0 ; socket/bind/listen/accept stub", indent, v).ok();
-                    }
                     // ===== Phase A: Terminal (intrinsics.md D4) =====
                     Intrinsic::TtyRawMode => {
                         let arg = self.emit_expr(out, &args[0], indent);
@@ -746,6 +743,94 @@ impl LlvmBackend {
                     Intrinsic::TimerFdCreate => {
                         let hz = self.emit_expr(out, &args[0], indent);
                         writeln!(out, "{}{} = call i64 @brief_timerfd_create(i64 {})", indent, v, hz.name).ok();
+                    }
+                    // ===== Phase G: Networking (intrinsics.md D10) — Shim =====
+                    Intrinsic::Socket => {
+                        let domain = self.emit_expr(out, &args[0], indent);
+                        let sock_type = self.emit_expr(out, &args[1], indent);
+                        let protocol = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_socket(i64 {}, i64 {}, i64 {})", indent, v, domain.name, sock_type.name, protocol.name).ok();
+                    }
+                    Intrinsic::Bind => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let addr = self.emit_expr(out, &args[1], indent);
+                        let addrlen = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_bind(i64 {}, i64 {}, i64 {})", indent, v, fd.name, addr.name, addrlen.name).ok();
+                    }
+                    Intrinsic::Listen => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let backlog = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_listen(i64 {}, i64 {})", indent, v, fd.name, backlog.name).ok();
+                    }
+                    Intrinsic::Accept => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let addr = self.emit_expr(out, &args[1], indent);
+                        let addrlen = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_accept(i64 {}, i64 {}, i64 {})", indent, v, fd.name, addr.name, addrlen.name).ok();
+                    }
+                    Intrinsic::Connect => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let addr = self.emit_expr(out, &args[1], indent);
+                        let addrlen = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_connect(i64 {}, i64 {}, i64 {})", indent, v, fd.name, addr.name, addrlen.name).ok();
+                    }
+                    Intrinsic::Send => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let buf = self.emit_expr(out, &args[1], indent);
+                        let len = self.emit_expr(out, &args[2], indent);
+                        let flags = self.emit_expr(out, &args[3], indent);
+                        writeln!(out, "{}{} = call i64 @brief_send(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, len.name, flags.name).ok();
+                    }
+                    Intrinsic::Recv => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let buf = self.emit_expr(out, &args[1], indent);
+                        let len = self.emit_expr(out, &args[2], indent);
+                        let flags = self.emit_expr(out, &args[3], indent);
+                        writeln!(out, "{}{} = call i64 @brief_recv(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, len.name, flags.name).ok();
+                    }
+                    Intrinsic::SendTo => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let buf = self.emit_expr(out, &args[1], indent);
+                        let len = self.emit_expr(out, &args[2], indent);
+                        let flags = self.emit_expr(out, &args[3], indent);
+                        let dest_addr = self.emit_expr(out, &args[4], indent);
+                        let addrlen = self.emit_expr(out, &args[5], indent);
+                        writeln!(out, "{}{} = call i64 @brief_sendto(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, len.name, flags.name, dest_addr.name, addrlen.name).ok();
+                    }
+                    Intrinsic::RecvFrom => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let buf = self.emit_expr(out, &args[1], indent);
+                        let len = self.emit_expr(out, &args[2], indent);
+                        let flags = self.emit_expr(out, &args[3], indent);
+                        let src_addr = self.emit_expr(out, &args[4], indent);
+                        let addrlen = self.emit_expr(out, &args[5], indent);
+                        writeln!(out, "{}{} = call i64 @brief_recvfrom(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, len.name, flags.name, src_addr.name, addrlen.name).ok();
+                    }
+                    Intrinsic::SetSockOpt => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let level = self.emit_expr(out, &args[1], indent);
+                        let opt = self.emit_expr(out, &args[2], indent);
+                        let val = self.emit_expr(out, &args[3], indent);
+                        let len = self.emit_expr(out, &args[4], indent);
+                        writeln!(out, "{}{} = call i64 @brief_setsockopt(i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, level.name, opt.name, val.name, len.name).ok();
+                    }
+                    Intrinsic::GetSockOpt => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let level = self.emit_expr(out, &args[1], indent);
+                        let opt = self.emit_expr(out, &args[2], indent);
+                        let val = self.emit_expr(out, &args[3], indent);
+                        let len = self.emit_expr(out, &args[4], indent);
+                        writeln!(out, "{}{} = call i64 @brief_getsockopt(i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, level.name, opt.name, val.name, len.name).ok();
+                    }
+                    Intrinsic::Shutdown => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        let how = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_shutdown(i64 {}, i64 {})", indent, v, fd.name, how.name).ok();
+                    }
+                    Intrinsic::GetAddrInfo => {
+                        let node = self.emit_expr(out, &args[0], indent);
+                        let service = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call i64 @brief_getaddrinfo(i64 {}, i64 {})", indent, v, node.name, service.name).ok();
                     }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {

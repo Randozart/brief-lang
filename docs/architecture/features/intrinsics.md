@@ -1,7 +1,7 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Phase F — Signals complete (2026-06-15). Phases A–E also complete. Supersedes `as-intrinsic.md`.
+**Status:** Phase G — Networking complete (2026-06-15). Phases A–F also complete. Supersedes `as-intrinsic.md`.
 
 ## Purpose
 
@@ -483,16 +483,24 @@ in `brief_rt.c` via POSIX (sigaction, sigprocmask, kill, signalfd, timerfd_creat
 - `src/interpreter.rs` — 5 eval tests (type errors)
 - `src/typechecker.rs` — 5 inference tests
 
-### Phase G — Networking (13 intrinsics)
+### Phase G — Networking (completed 2026-06-15)
 
 **New Intrinsic variants:** D10: `Socket`, `Bind`, `Listen`, `Accept`,
 `Connect`, `Send`, `Recv`, `SendTo`, `RecvFrom`, `SetSockOpt`,
 `GetSockOpt`, `Shutdown`, `GetAddrInfo`
 
-**LLVM backend:** Category **Shim**→**Direct**.
+**LLVM backend:** Category **Shim** — emit `call i64 @brief_*`, implemented
+in `brief_rt.c` via POSIX socket API.
 
-**Files deleted:** `lib/std/ffi/http.bv`, the stubs in `emit_expr.rs` for
-Socket/Bind/Listen/Accept
+**Interpreter:** Uses `libc::socket`, `libc::bind`, `libc::listen`,
+`libc::accept`, `libc::connect`, `libc::send`, `libc::recv`, `libc::sendto`,
+`libc::recvfrom`, `libc::setsockopt`, `libc::getsockopt`, `libc::shutdown`,
+`libc::getaddrinfo`. All return Int.
+
+**Tests added:**
+- `src/ast.rs` — 13 roundtrip tests
+- `src/interpreter.rs` — 13 eval tests (type errors)
+- `src/typechecker.rs` — 13 inference tests
 
 ### Phase H — Everything Else (~20 intrinsics)
 

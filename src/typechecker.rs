@@ -1324,6 +1324,12 @@ impl TypeChecker {
                     // Phase F: Signals — all return Int
                     Intrinsic::SigAction | Intrinsic::SigProcMask | Intrinsic::Kill
                     | Intrinsic::SignalFd | Intrinsic::TimerFdCreate => Type::Int,
+                    // Phase G: Networking — all return Int
+                    Intrinsic::Socket | Intrinsic::Bind | Intrinsic::Listen
+                    | Intrinsic::Accept | Intrinsic::Connect | Intrinsic::Send
+                    | Intrinsic::Recv | Intrinsic::SendTo | Intrinsic::RecvFrom
+                    | Intrinsic::SetSockOpt | Intrinsic::GetSockOpt | Intrinsic::Shutdown
+                    | Intrinsic::GetAddrInfo => Type::Int,
                 }
             }
             Expr::Call(name, args) => {
@@ -3227,6 +3233,150 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::TimerFdCreate,
             args: vec![Expr::Integer(100)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    // ── Phase G: Networking type inference tests ───────────────────
+
+    #[test]
+    fn test_check_intrinsic_socket_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Socket,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_bind_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bind,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_listen_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Listen,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_accept_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Accept,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_connect_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Connect,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_send_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Send,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_recv_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Recv,
+            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_sendto_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SendTo,
+            args: vec![
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+            ],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_recvfrom_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::RecvFrom,
+            args: vec![
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+            ],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_setsockopt_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SetSockOpt,
+            args: vec![
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Integer(0), Expr::Integer(0),
+            ],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_getsockopt_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetSockOpt,
+            args: vec![
+                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Integer(0), Expr::Integer(0),
+            ],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_shutdown_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Shutdown,
+            args: vec![Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_getaddrinfo_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetAddrInfo,
+            args: vec![Expr::String("localhost".into()), Expr::String("80".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::Int);

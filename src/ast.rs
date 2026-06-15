@@ -470,10 +470,6 @@ pub enum Intrinsic {
     ReadFile,
     WriteFile,
     Sleep,
-    Socket,
-    Bind,
-    Listen,
-    Accept,
     // Data intrinsics (Pass A - 2026-06-11)
     Sort,
     Reverse,
@@ -553,6 +549,20 @@ pub enum Intrinsic {
     Kill,
     SignalFd,
     TimerFdCreate,
+    // ===== Phase G: Networking (intrinsics.md D10) =====
+    Socket,
+    Bind,
+    Listen,
+    Accept,
+    Connect,
+    Send,
+    Recv,
+    SendTo,
+    RecvFrom,
+    SetSockOpt,
+    GetSockOpt,
+    Shutdown,
+    GetAddrInfo,
 }
 
 impl Intrinsic {
@@ -580,10 +590,6 @@ impl Intrinsic {
             "read_file" => Some(Intrinsic::ReadFile),
             "write_file" => Some(Intrinsic::WriteFile),
             "sleep" => Some(Intrinsic::Sleep),
-            "socket" => Some(Intrinsic::Socket),
-            "bind" => Some(Intrinsic::Bind),
-            "listen" => Some(Intrinsic::Listen),
-            "accept" => Some(Intrinsic::Accept),
             "sort" => Some(Intrinsic::Sort),
             "reverse" => Some(Intrinsic::Reverse),
             "range" => Some(Intrinsic::Range),
@@ -654,6 +660,20 @@ impl Intrinsic {
             "kill" => Some(Intrinsic::Kill),
             "signalfd" => Some(Intrinsic::SignalFd),
             "timerfd_create" => Some(Intrinsic::TimerFdCreate),
+            // Phase G: Networking (intrinsics.md D10)
+            "socket" => Some(Intrinsic::Socket),
+            "bind" => Some(Intrinsic::Bind),
+            "listen" => Some(Intrinsic::Listen),
+            "accept" => Some(Intrinsic::Accept),
+            "connect" => Some(Intrinsic::Connect),
+            "send" => Some(Intrinsic::Send),
+            "recv" => Some(Intrinsic::Recv),
+            "sendto" => Some(Intrinsic::SendTo),
+            "recvfrom" => Some(Intrinsic::RecvFrom),
+            "setsockopt" => Some(Intrinsic::SetSockOpt),
+            "getsockopt" => Some(Intrinsic::GetSockOpt),
+            "shutdown" => Some(Intrinsic::Shutdown),
+            "getaddrinfo" => Some(Intrinsic::GetAddrInfo),
             _ => None,
         }
     }
@@ -682,10 +702,6 @@ impl Intrinsic {
             Intrinsic::ReadFile => "read_file",
             Intrinsic::WriteFile => "write_file",
             Intrinsic::Sleep => "sleep",
-            Intrinsic::Socket => "socket",
-            Intrinsic::Bind => "bind",
-            Intrinsic::Listen => "listen",
-            Intrinsic::Accept => "accept",
             Intrinsic::Sort => "sort",
             Intrinsic::Reverse => "reverse",
             Intrinsic::Range => "range",
@@ -756,6 +772,20 @@ impl Intrinsic {
             Intrinsic::Kill => "kill",
             Intrinsic::SignalFd => "signalfd",
             Intrinsic::TimerFdCreate => "timerfd_create",
+            // Phase G: Networking (intrinsics.md D10)
+            Intrinsic::Socket => "socket",
+            Intrinsic::Bind => "bind",
+            Intrinsic::Listen => "listen",
+            Intrinsic::Accept => "accept",
+            Intrinsic::Connect => "connect",
+            Intrinsic::Send => "send",
+            Intrinsic::Recv => "recv",
+            Intrinsic::SendTo => "sendto",
+            Intrinsic::RecvFrom => "recvfrom",
+            Intrinsic::SetSockOpt => "setsockopt",
+            Intrinsic::GetSockOpt => "getsockopt",
+            Intrinsic::Shutdown => "shutdown",
+            Intrinsic::GetAddrInfo => "getaddrinfo",
         }
     }
 }
@@ -2505,6 +2535,84 @@ mod tests {
     fn test_intrinsic_from_name_timerfd_create() {
         assert_eq!(Intrinsic::from_name("timerfd_create"), Some(Intrinsic::TimerFdCreate));
         assert_eq!(Intrinsic::TimerFdCreate.name(), "timerfd_create");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_socket() {
+        assert_eq!(Intrinsic::from_name("socket"), Some(Intrinsic::Socket));
+        assert_eq!(Intrinsic::Socket.name(), "socket");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_bind() {
+        assert_eq!(Intrinsic::from_name("bind"), Some(Intrinsic::Bind));
+        assert_eq!(Intrinsic::Bind.name(), "bind");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_listen() {
+        assert_eq!(Intrinsic::from_name("listen"), Some(Intrinsic::Listen));
+        assert_eq!(Intrinsic::Listen.name(), "listen");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_accept() {
+        assert_eq!(Intrinsic::from_name("accept"), Some(Intrinsic::Accept));
+        assert_eq!(Intrinsic::Accept.name(), "accept");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_connect() {
+        assert_eq!(Intrinsic::from_name("connect"), Some(Intrinsic::Connect));
+        assert_eq!(Intrinsic::Connect.name(), "connect");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_send() {
+        assert_eq!(Intrinsic::from_name("send"), Some(Intrinsic::Send));
+        assert_eq!(Intrinsic::Send.name(), "send");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_recv() {
+        assert_eq!(Intrinsic::from_name("recv"), Some(Intrinsic::Recv));
+        assert_eq!(Intrinsic::Recv.name(), "recv");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_sendto() {
+        assert_eq!(Intrinsic::from_name("sendto"), Some(Intrinsic::SendTo));
+        assert_eq!(Intrinsic::SendTo.name(), "sendto");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_recvfrom() {
+        assert_eq!(Intrinsic::from_name("recvfrom"), Some(Intrinsic::RecvFrom));
+        assert_eq!(Intrinsic::RecvFrom.name(), "recvfrom");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_setsockopt() {
+        assert_eq!(Intrinsic::from_name("setsockopt"), Some(Intrinsic::SetSockOpt));
+        assert_eq!(Intrinsic::SetSockOpt.name(), "setsockopt");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_getsockopt() {
+        assert_eq!(Intrinsic::from_name("getsockopt"), Some(Intrinsic::GetSockOpt));
+        assert_eq!(Intrinsic::GetSockOpt.name(), "getsockopt");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_shutdown() {
+        assert_eq!(Intrinsic::from_name("shutdown"), Some(Intrinsic::Shutdown));
+        assert_eq!(Intrinsic::Shutdown.name(), "shutdown");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_getaddrinfo() {
+        assert_eq!(Intrinsic::from_name("getaddrinfo"), Some(Intrinsic::GetAddrInfo));
+        assert_eq!(Intrinsic::GetAddrInfo.name(), "getaddrinfo");
     }
 
     #[test]
