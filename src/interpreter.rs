@@ -132,6 +132,8 @@ pub enum RuntimeError {
     UndefinedForeignFunction(String),
     /// Transaction escaped - this is not an error, but a valid cancellation path
     Escaped,
+    /// Proof oracle fuel exhausted — state was rolled back, handler executed
+    FuelExhausted,
 }
 
 // Helper functions for JSON serialization stdlib
@@ -253,6 +255,9 @@ pub struct Interpreter {
     pub enum_variants: HashMap<String, EnumVariantInfo>,
     /// Cache for lazy-loaded DBVL table entries: path → key → values
     pub dbvl_cache: HashMap<String, HashMap<String, Vec<Value>>>,
+    /// Proof oracle fuel — decremented on every statement when set.
+    /// When it hits zero, FuelExhausted is returned.
+    oracle_fuel: Option<u64>,
 }
 
 impl Interpreter {
@@ -275,6 +280,7 @@ impl Interpreter {
             guard_counter: 0,
             enum_variants: HashMap::new(),
             dbvl_cache: HashMap::new(),
+            oracle_fuel: None,
         }
     }
 
@@ -430,6 +436,11 @@ impl Interpreter {
     }
 
     pub(crate) fn call_defn(&mut self, name: &str, args: &[Expr]) -> Result<Value, RuntimeError> {
+        // Check oracle fuel on every definition call
+        if let Some(fuel) = self.oracle_fuel.as_mut() {
+            if *fuel == 0 { return Err(RuntimeError::FuelExhausted); }
+            *fuel -= 1;
+        }
         let defn = match self.definitions.get(name) {
             Some(d) => d.clone(),
             None => return Err(RuntimeError::UndefinedForeignFunction(name.to_string())),
@@ -1055,7 +1066,31 @@ impl Interpreter {
         }
     }
 
+    /// Execute a block with a runtime fuel limit.
+    /// Sets oracle_fuel, runs the block, restores fuel state.
+    fn exec_stmts_with_fuel(&mut self, stmts: &[Statement], fuel: u64) -> Result<(), RuntimeError> {
+        let saved_fuel = self.oracle_fuel;
+        self.oracle_fuel = Some(fuel);
+        let mut result = Ok(());
+        for stmt in stmts {
+            if self.oracle_fuel == Some(0) { break; }
+            match self.exec_stmt(stmt) {
+                Ok(()) => {}
+                Err(RuntimeError::FuelExhausted) => { break; }
+                Err(e) => { result = Err(e); break; }
+            }
+        }
+        let exhausted = self.oracle_fuel == Some(0);
+        self.oracle_fuel = saved_fuel;
+        if exhausted { Err(RuntimeError::FuelExhausted) } else { result }
+    }
+
     pub fn exec_stmt(&mut self, stmt: &Statement) -> Result<(), RuntimeError> {
+        // Decrement oracle fuel on every statement execution
+        if let Some(fuel) = self.oracle_fuel.as_mut() {
+            if *fuel == 0 { return Err(RuntimeError::FuelExhausted); }
+            *fuel -= 1;
+        }
         match stmt {
             Statement::Assignment {
                 lhs,
@@ -1209,9 +1244,21 @@ impl Interpreter {
                     )),
                 }
             }
-            Statement::Oracle { body, .. } => {
-                for stmt in body {
-                    self.exec_stmt(stmt)?;
+            Statement::Oracle { body, handler, .. } => {
+                // Fuel-injected execution with state rollback on exhaustion.
+                let saved_state = self.state.clone();
+                let saved_prior = self.prior_state.clone();
+                let fuel_limit = 100;
+                match self.exec_stmts_with_fuel(body, fuel_limit) {
+                    Ok(()) => {}
+                    Err(RuntimeError::FuelExhausted) => {
+                        self.state = saved_state;
+                        self.prior_state = saved_prior;
+                        for stmt in handler {
+                            self.exec_stmt(stmt)?;
+                        }
+                    }
+                    Err(e) => return Err(e),
                 }
             }
             Statement::Unification {
@@ -7067,6 +7114,61 @@ mod tests {
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_oracle_executes_body() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        let stmt = Statement::Oracle {
+            handler: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("x".to_string()),
+                    expr: Expr::Integer(99),
+                    timeout: None, modifiers: vec![],
+                },
+            ],
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("x".to_string()),
+                    expr: Expr::Integer(42),
+                    timeout: None, modifiers: vec![],
+                },
+            ],
+            span: None,
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("x"), Some(&Value::Int(42)));
+    }
+
+    #[test]
+    fn test_oracle_fuel_exhausts_runs_handler() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        // Use a long sequence of statements to exhaust fuel, not recursion
+        let mut body = Vec::new();
+        // The fuel limit is 100, so 200 assignments should exhaust it
+        for _ in 0..200 {
+            body.push(Statement::Assignment {
+                lhs: Expr::OwnedRef("x".to_string()),
+                expr: Expr::Integer(42),
+                timeout: None, modifiers: vec![],
+            });
+        }
+        let stmt = Statement::Oracle {
+            handler: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("x".to_string()),
+                    expr: Expr::Integer(999),
+                    timeout: None, modifiers: vec![],
+                },
+            ],
+            body,
+            span: None,
+        };
+        i.exec_stmt(&stmt).unwrap();
+        // Fuel exhausted — handler sets x = 999
+        assert_eq!(i.state.get("x"), Some(&Value::Int(999)));
     }
 }
 
