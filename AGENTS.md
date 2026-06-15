@@ -594,6 +594,32 @@ mod kani_full_tests {
 }
 ```
 
+## Three Canonical Backends
+
+Only three backends are actively developed. All others are **dead code** —
+preserved in tree but receiving zero fixes, zero features, zero attention.
+
+| Backend | Target | Status |
+|---------|--------|--------|
+| **LLVM** (`src/backend/llvm/`) | Native binary (`.ll` + `llc`) | **Active** — canonical OS target |
+| **Webstack** (`src/backend/webstack.rs`) | WASM + JS glue | **Active** — canonical web target |
+| **CIRCT** (`src/backend/circt.rs`) | Hardware (`.mlir` + `circt-opt` + `circt-translate`) | **Active** — canonical hardware target |
+
+### Dead Backends — Zero Fixes
+
+The following backends are dead. Do not modify them for any reason,
+not even for compilation fixes. If a dead backend fails to compile,
+delete its broken code paths or mark them with `#[allow(...)]` —
+do not invest time fixing them.
+
+`verilog.rs`, `vhdl.rs`, `c.rs`, `rust.rs`, `cobol.rs`, `x86_64.rs`,
+`aarch64.rs`, `wasm.rs`, `tcl_generator.rs`
+
+The only exception: if a change to a shared API (e.g. `Statement::LocalTrigger`
+gets a new field or a variant is removed from an enum) mechanically breaks
+a dead backend, use `#[allow(unused_variables)]`, match with `_ => {}`, or
+`todo!()` with a comment `// dead backend` — do not implement the feature.
+
 ## Per-Commit Checklist
 
 Before every commit:
