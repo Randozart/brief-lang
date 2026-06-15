@@ -1,7 +1,7 @@
 # `as intrinsic` — Verbatim LLVM Intrinsic Support
 
 **Date added:** 2026-06-10
-**Status:** Active (will be replaced by `name#()` syntax — see `intrinsics.md`)
+**Status:** Superseded — replaced by `name#()` syntax documented in `intrinsics.md`
 
 ## Purpose
 

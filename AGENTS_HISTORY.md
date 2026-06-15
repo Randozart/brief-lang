@@ -719,3 +719,52 @@ Replaced illegal patterns (`[true]`, `[x==x]`, `[true][true]`) with meaningful c
 - `learn-brief/05-data-types.md` — added Section 8
 - `learn-brief/README.md` — updated TOC
 - `lib/runtime/brief_rt.c` — unchanged (pre-existing change)
+
+---
+
+## 2026-06-14 — Magic Audit: No-Magic Violations in Phases 18–19
+
+**Two items edge on "magic" — compiler has hardcoded knowledge about OS or C runtime
+that the user didn't declare.**
+
+### Item 1 — `@stdin#`, `@ timer#(Hz)`, `@ signal#(Name)` (Phase 18)
+
+**What it does**: Three built-in trigger sources that the compiler recognizes and
+generates epoll/timerfd/signalfd code for.
+
+**Why it's on the edge**: The compiler has hardcoded knowledge about:
+- Linux syscalls (`epoll_create`, `timerfd_create`, `signalfd`)
+- Signal names (`SIGINT`, `SIGTERM`, etc.)
+- File descriptor management
+
+The user writes `trg k: Char @stdin#;` and the compiler silently generates
+`epoll_ctl(epfd, EPOLL_CTL_ADD, STDIN_FILENO, ...)` with no `frgn` declarations
+the user can inspect or override.
+
+**Mitigation**: The `#` convention signals "compiler-managed" consistently with
+`import#` and `intrinsic#`. The C runtime wrappers (`__trg_stdin_read`,
+`__trg_timerfd_open`, etc.) are declared in the generated IR as external
+functions, creating a traceable link. But the epoll orchestration is still
+invisible to the user.
+
+### Item 2 — `__chr_to_str` (Phase 19)
+
+**What it does**: The LLVM backend emits `call i8* @__chr_to_str(i32)` for
+every `Char → String` cast at compile time.
+
+**Why it's on the edge**: `__chr_to_str` is a C function in `brief_rt.c` that
+the user never declared with `frgn`. If `brief_rt.c` isn't linked, the program
+fails with an opaque linker error. Same pattern as `__str_concat` (pre-existing,
+same problem).
+
+**Mitigation**: The LLVM backend could emit the conversion inline instead:
+```
+alloca i8, i8* %buf
+store i8 %char_val, i8* %buf
+store i8 0, i8* %buf+1
+```
+This would eliminate the C dependency entirely for Char→String.
+
+### Pending Plan
+
+See `.opencode/plans/2026-06-14-eliminate-magic.md` for the fix plan.

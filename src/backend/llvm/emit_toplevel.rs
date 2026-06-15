@@ -334,7 +334,8 @@ impl LlvmBackend {
             } else {
                 reg = raw;
             }
-            self.let_bindings.insert(n.clone(), reg);
+            self.let_bindings.insert(n.clone(), reg.clone());
+            self.let_binding_types.insert(n.clone(), t.clone());
         }
         self.txn_counter = 0;
         self.terminated = false;

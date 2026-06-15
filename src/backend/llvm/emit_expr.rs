@@ -339,10 +339,14 @@ impl LlvmBackend {
                         // the state pointer to access module-level fields (SSA is function-scoped).
                         a_strs.insert(0, "%State* %state".to_string());
                         let is_float_ret = def_rets.as_ref().map_or(false, |rets| rets.iter().any(|t| matches!(t, Type::Float)));
+                        let is_string_ret = def_rets.as_ref().map_or(false, |rets| rets.iter().any(|t| matches!(t, Type::String) || matches!(t, Type::Data)));
                         let call_ret = if is_float_ret { "float" } else { "i64" };
                         writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, name, a_strs.join(", ")).ok();
                         if is_float_ret {
                             return TypedRegister { name: v, ty: Type::Float };
+                        }
+                        if is_string_ret {
+                            return TypedRegister { name: v, ty: Type::String };
                         }
                 }
             }
@@ -825,7 +829,8 @@ impl LlvmBackend {
                 for s in stmts { self.emit_stmt(out, s, indent); }
                 return self.emit_expr(out, last, indent);
             }
-            Expr::MapLiteral(_) | Expr::SetLiteral(_) | Expr::ArrowTransfer { .. } => {
+            Expr::MapLiteral(_) | Expr::SetLiteral(_)
+            | Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } => {
                 writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
@@ -835,7 +840,7 @@ impl LlvmBackend {
                 self.emit_cast_convert(out, indent, &cv, &inner_val.name, Some(inner_val.ty), target_ty);
                 return TypedRegister { name: cv, ty: target_ty.clone() };
             }
-            _ => { unreachable!("emit_expr: unhandled Expr variant"); }
+            _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }
         }
         // Default: treat as Int. Float operations are handled explicitly
         // by emit_binop/emit_fcmp which return Type::Float/Bool respectively.

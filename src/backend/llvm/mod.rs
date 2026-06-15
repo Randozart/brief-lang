@@ -772,7 +772,7 @@ self.emit_declares(&mut out);
 
         // Declare cast helper functions
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
-        writeln!(out, "declare i64 @__int_to_str(i64) #1").ok();
+        // __int_to_str is already declared by std/string.bv — skip here.
         writeln!(out, "declare i64 @__str_to_int(i8*) #1").ok();
 
         // Emit external global declarations for linked triggers (fixes bug 4B)

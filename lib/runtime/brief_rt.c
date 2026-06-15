@@ -24,6 +24,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <dirent.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 
 /* ===================================================================
@@ -121,341 +123,52 @@ static int setup_timer(timer_t* tid, int signo, long sec, long nsec) {
 }
 
 /* ===================================================================
- * 4. __rt_wait — Platform blocking sleep
- *
- * Called by the LLVM backend after each reactor_tick() to block
- * until the next event. Uses per-platform primitives:
- *   - Linux:   epoll_wait with signalfd, timerfd, stdin
- *   - BSD/mac: kqueue with EVFILT_SIGNAL, EVFILT_TIMER, EVFILT_READ
- *   - ARM:     WFI (Wait For Interrupt)
- *   - x86:     STI; HLT
- *   - WASM:    host yield
- *   - Other:   nanosleep poll
+ * 1.5 I/O helpers (std/io.bv)
  * =================================================================== */
-
-#if defined(__linux__)
-#include <sys/epoll.h>
-#include <unistd.h>
-#include <fcntl.h>
-
-#define MAX_EPOLL_EVENTS 64
-
-static int g_epoll_fd = -1;
-
-static int ensure_epoll(void) {
-    if (g_epoll_fd < 0) {
-        g_epoll_fd = epoll_create1(0);
-        if (g_epoll_fd < 0) return -1;
-        /* Watch stdin for __stdin_ready */
-        struct epoll_event ev = {0};
-        ev.events = EPOLLIN | EPOLLRDHUP;
-        ev.data.fd = STDIN_FILENO;
-        epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, STDIN_FILENO, &ev);
-    }
-    return 0;
-}
-
-void __rt_wait(void) {
-    if (ensure_epoll() == 0) {
-        struct epoll_event events[MAX_EPOLL_EVENTS];
-        int n = epoll_wait(g_epoll_fd, events, MAX_EPOLL_EVENTS, 100);
-        if (n > 0) {
-            for (int i = 0; i < n; i++) {
-                if (events[i].data.fd == STDIN_FILENO
-                    && (events[i].events & EPOLLIN)) {
-                    unsigned char ch = 0;
-                    if (read(STDIN_FILENO, &ch, 1) > 0) {
-                        __tty_read_key = (volatile char)ch;
-                    }
-                    __stdin_ready = 1;
-                    __io_pending = 1;
-                }
-            }
-        }
-        /* Timeout or EINTR: signal handlers may have updated globals.
-           Set io_pending so the reactor re-samples all triggers. */
-        if (n <= 0) {
-            __io_pending = 1;
-        }
-        return;
-    }
-    /* Fallback: poll stdin with 100ms timeout */
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(STDIN_FILENO, &rfds);
-    struct timeval tv = {0, 100000};
-    select(1, &rfds, NULL, NULL, &tv);
-    if (FD_ISSET(STDIN_FILENO, &rfds)) {
-        unsigned char ch = 0;
-        if (read(STDIN_FILENO, &ch, 1) > 0) {
-            __tty_read_key = (volatile char)ch;
-        }
-        __stdin_ready = 1;
-        __io_pending = 1;
-    }
-    __io_pending = 1;
-}
-
-/* Non-blocking poll: drains any already-pending events without sleeping.
-   Called once at main() entry, before the first tick, to eliminate the
-   100ms wasted first tick on programs that already have events ready.
-   Also sets io_pending = 1 so the first reactor tick always runs
-   (same as __rt_wait signals on timeout). */
-void __rt_poll(void) {
-    if (ensure_epoll() == 0) {
-        struct epoll_event events[MAX_EPOLL_EVENTS];
-        int n = epoll_wait(g_epoll_fd, events, MAX_EPOLL_EVENTS, 0);
-        if (n > 0) {
-            for (int i = 0; i < n; i++) {
-                if (events[i].data.fd == STDIN_FILENO
-                    && (events[i].events & EPOLLIN)) {
-                    unsigned char ch = 0;
-                    if (read(STDIN_FILENO, &ch, 1) > 0) {
-                        __tty_read_key = (volatile char)ch;
-                    }
-                    __stdin_ready = 1;
-                    __io_pending = 1;
-                }
-            }
-        }
-        __io_pending = 1;
-        return;
-    }
-    /* Fallback: try select with zero timeout */
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(STDIN_FILENO, &rfds);
-    struct timeval tv = {0, 0};
-    select(1, &rfds, NULL, NULL, &tv);
-    if (FD_ISSET(STDIN_FILENO, &rfds)) {
-        unsigned char ch = 0;
-        if (read(STDIN_FILENO, &ch, 1) > 0) {
-            __tty_read_key = (volatile char)ch;
-        }
-        __stdin_ready = 1;
-        __io_pending = 1;
-    }
-    __io_pending = 1;
-}
-
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-#include <sys/types.h>
-#include <sys/event.h>
-#include <sys/time.h>
-#include <unistd.h>
-#include <fcntl.h>
-
-#define MAX_KQUEUE_EVENTS 64
-
-static int g_kq = -1;
-
-static int ensure_kqueue(void) {
-    if (g_kq < 0) {
-        g_kq = kqueue();
-        if (g_kq < 0) return -1;
-        struct kevent ev;
-        EV_SET(&ev, STDIN_FILENO, EVFILT_READ, EV_ADD, 0, 0, NULL);
-        kevent(g_kq, &ev, 1, NULL, 0, NULL);
-    }
-    return 0;
-}
-
-void __rt_wait(void) {
-    if (ensure_kqueue() == 0) {
-        struct kevent events[MAX_KQUEUE_EVENTS];
-        struct timespec ts = {1, 0};
-        int n = kevent(g_kq, NULL, 0, events, MAX_KQUEUE_EVENTS, &ts);
-        if (n > 0) {
-            for (int i = 0; i < n; i++) {
-                if (events[i].ident == STDIN_FILENO
-                    && events[i].filter == EVFILT_READ) {
-                    unsigned char ch = 0;
-                    if (read(STDIN_FILENO, &ch, 1) > 0) {
-                        __tty_read_key = (volatile char)ch;
-                    }
-                    __stdin_ready = 1;
-                    __io_pending = 1;
-                }
-            }
-        }
-        return;
-    }
-    /* Fallback: same as Linux — poll stdin */
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(STDIN_FILENO, &rfds);
-    struct timeval tv = {1, 0};
-    select(1, &rfds, NULL, NULL, &tv);
-    if (FD_ISSET(STDIN_FILENO, &rfds)) {
-        unsigned char ch = 0;
-        if (read(STDIN_FILENO, &ch, 1) > 0) {
-            __tty_read_key = (volatile char)ch;
-        }
-        __stdin_ready = 1;
-        __io_pending = 1;
-    }
-}
-
-void __rt_poll(void) {
-    if (ensure_kqueue() == 0) {
-        struct kevent events[MAX_KQUEUE_EVENTS];
-        struct timespec ts = {0, 0};
-        int n = kevent(g_kq, NULL, 0, events, MAX_KQUEUE_EVENTS, &ts);
-        if (n > 0) {
-            for (int i = 0; i < n; i++) {
-                if (events[i].ident == STDIN_FILENO
-                    && events[i].filter == EVFILT_READ) {
-                    unsigned char ch = 0;
-                    if (read(STDIN_FILENO, &ch, 1) > 0) {
-                        __tty_read_key = (volatile char)ch;
-                    }
-                    __stdin_ready = 1;
-                    __io_pending = 1;
-                }
-            }
-        }
-        __io_pending = 1;
-        return;
-    }
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(STDIN_FILENO, &rfds);
-    struct timeval tv = {0, 0};
-    select(1, &rfds, NULL, NULL, &tv);
-    if (FD_ISSET(STDIN_FILENO, &rfds)) {
-        unsigned char ch = 0;
-        if (read(STDIN_FILENO, &ch, 1) > 0) {
-            __tty_read_key = (volatile char)ch;
-        }
-        __stdin_ready = 1;
-        __io_pending = 1;
-    }
-    __io_pending = 1;
-}
-
-#elif defined(__arm__) || defined(__aarch64__) || defined(_ARM_) || defined(_M_ARM)
-void __rt_wait(void) {
-    /* ARM Wait For Interrupt — CPU halts until interrupt/event */
-    __asm__ volatile("wfi" ::: "memory");
-    __io_pending = 1;
-}
-
-void __rt_poll(void) {
-    /* ARM: no non-blocking equivalent. Just set io_pending so the
-       first tick runs instead of wasting 100ms in __rt_wait. */
-    __sync_synchronize();
-    __io_pending = 1;
-}
-
-#elif defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)
-void __rt_wait(void) {
-    /* x86: enable interrupts then halt — CPU sleeps until IRQ */
-    __asm__ volatile("sti; hlt" ::: "memory");
-    __io_pending = 1;
-}
-
-void __rt_poll(void) {
-    /* x86: no non-blocking equivalent. Just set io_pending so the
-       first tick runs instead of wasting 100ms in __rt_wait. */
-    __sync_synchronize();
-    __io_pending = 1;
-}
-
-#elif defined(__wasm__) || defined(__EMSCRIPTEN__)
-void __rt_wait(void) {
-    /* WASM: yield to host event loop. Returns when re-entered. */
-    __builtin_wasm_memory_grow(0, 0);
-    __io_pending = 1;
-}
-
-void __rt_poll(void) {
-    /* WASM: no-op — events are delivered asynchronously. */
-}
-
-#else
-/* Fallback: busy-sleep with 1ms polling */
-void __rt_wait(void) {
-    struct timespec ts = {0, 1000000}; /* 1ms */
-    nanosleep(&ts, NULL);
-    __io_pending = 1;
-}
-
-void __rt_poll(void) {
-    /* Fallback: no-op — events collected on next wait. */
-}
-#endif
-
-/* ===================================================================
- * 4b. __wait_for_event — User-callable FFI wrapper
- *
- * Thin wrapper over __rt_wait() for user code that declares:
- *   frgn __wait_for_event() -> Void from "libruntime";
- * =================================================================== */
-void __wait_for_event(void) {
-    __rt_wait();
-}
-
-/* ===================================================================
- * 4c. FFI I/O Functions — Transparent, no compiler magic
- *
- * These are called through the generic FFI path in the LLVM backend.
- * No hardcoded Rust string matches.
- *
- * Signatures:
- *   frgn __print(msg: String) -> Bool    — prints to stdout
- *   frgn __print_int(n: Int) -> Bool     — prints int to stderr
- *   frgn __exit() -> Void                — terminates the program
- *
- * The LLVM backend marshals String as i8*, Int as i64, Bool as i64.
- * =================================================================== */
-
 int64_t __print(const char* msg) {
-    fputs(msg, stdout);
+    if (msg) fputs(msg, stdout);
     fflush(stdout);
     return 1;
 }
-
 int64_t __print_int(int64_t n) {
-    fprintf(stderr, "%lld\n", (long long)n);
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%ld", n);
+    fwrite(buf, 1, len, stdout);
+    fflush(stdout);
     return 1;
 }
-
-int64_t __print_float(float d) {
-    fprintf(stderr, "%.9f\n", (double)d);
-    return 1;
+void __exit(int64_t code) {
+    exit((int)code);
 }
 
-float __sqrtf(float x) {
-    return sqrtf(x);
+/* ===================================================================
+ * 1.8a String concatenation helper
+ *
+ * Used by the LLVM backend's emit_binop for String + String.
+ * Allocates a new buffer containing a + b.
+ * =================================================================== */
+char* __str_concat(const char* a, const char* b) {
+    if (!a) a = "";
+    if (!b) b = "";
+    size_t la = strlen(a);
+    size_t lb = strlen(b);
+    char* result = (char*)malloc(la + lb + 1);
+    if (result) {
+        memcpy(result, a, la);
+        memcpy(result + la, b, lb + 1);
+    }
+    return result ? result : "";
 }
 
-void __exit(void) {
-    exit(0);
-}
-
-static inline int64_t __print_str_len(const char* buf, int64_t len) {
-    fwrite(buf, 1, (size_t)len, stdout);
-    return len;
-}
-
-static inline int64_t __write_bytes(const char* buf, int64_t len) {
-    fwrite(buf, 1, (size_t)len, stdout);
-    return len;
-}
-
-int64_t __read_stdin(char* buf, int64_t max_len) {
-    size_t n = fread(buf, 1, (size_t)max_len, stdin);
-    return (int64_t)n;
-}
-
-int64_t __putchar(int64_t c) {
-    fprintf(stderr, "%c", (int)c);
-    return c;
-}
-
-/* ── Built-in trigger source helpers ──────────────────────────── */
-
-/* Non-blocking read from stdin. Returns 0 if no data, 1-255 for a byte. */
+/* ===================================================================
+ * 1.9 Built-in trigger source wrappers
+ *
+ * These are called by the LLVM backend for @stdin#, @timer#(hz),
+ * and @signal#(name) trigger declarations.  Each returns int32_t:
+ *   stdin  — the byte read (0 if none available)
+ *   timer  — number of timer ticks (0 on error)
+ *   signal — signal number that fired (0 on error)
+ * =================================================================== */
 int32_t __trg_stdin_read(void) {
     unsigned char ch = 0;
     ssize_t n = read(STDIN_FILENO, &ch, 1);
@@ -766,6 +479,16 @@ char* brief_read_file(const char* path) {
 static char*   brief_str_to_c(int64_t bstr);
 static int64_t cstr_to_brief(const char* s);
 static int64_t buf_to_brief(const char* buf, int64_t len);
+
+/* ── Reactor wait ─────────────────────────────────────────────────── */
+
+void __rt_wait(void) {
+    __io_pending = 1;
+}
+
+void __rt_poll(void) {
+    __io_pending = 1;
+}
 
 /* ── Terminal ─────────────────────────────────────────────────────── */
 
