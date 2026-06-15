@@ -982,6 +982,52 @@ int64_t brief_futex(int64_t uaddr, int64_t op, int64_t val, int64_t timeout, int
     return -1;
 }
 
+/* ===================================================================
+ * Phase E: IPC intrinsics (intrinsics.md D11)
+ *
+ * Shared memory (shm_open/shm_unlink) and POSIX semaphores
+ * (sem_open/sem_wait/sem_post). Pipe wraps pipe(2) syscall.
+ * =================================================================== */
+
+#include <semaphore.h>
+#include <sys/mman.h>
+
+int64_t brief_pipe(int64_t fds) {
+    return (int64_t)pipe((int*)(uintptr_t)fds);
+}
+
+int64_t brief_shm_open(int64_t name_bstr, int64_t flags, int64_t mode) {
+    char* c_name = brief_str_to_c(name_bstr);
+    if (!c_name) return -1;
+    int fd = shm_open(c_name, (int)flags, (mode_t)mode);
+    free(c_name);
+    return (int64_t)fd;
+}
+
+int64_t brief_shm_unlink(int64_t name_bstr) {
+    char* c_name = brief_str_to_c(name_bstr);
+    if (!c_name) return -1;
+    int ret = shm_unlink(c_name);
+    free(c_name);
+    return (int64_t)ret;
+}
+
+int64_t brief_sem_open(int64_t name_bstr, int64_t flags, int64_t mode, int64_t value) {
+    char* c_name = brief_str_to_c(name_bstr);
+    if (!c_name) return -1;
+    sem_t* sem = sem_open(c_name, (int)flags, (mode_t)mode, (unsigned)value);
+    free(c_name);
+    return (int64_t)(uintptr_t)sem;
+}
+
+int64_t brief_sem_wait(int64_t sem) {
+    return (int64_t)sem_wait((sem_t*)(uintptr_t)sem);
+}
+
+int64_t brief_sem_post(int64_t sem) {
+    return (int64_t)sem_post((sem_t*)(uintptr_t)sem);
+}
+
 /* ── Officina-local frgn (JSON, substring) ────────────────────────── */
 
 int64_t substring(const char* s) {

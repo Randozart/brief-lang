@@ -693,6 +693,36 @@ impl LlvmBackend {
                         let val3 = self.emit_expr(out, &args[5], indent);
                         writeln!(out, "{}{} = call i64 @brief_futex(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, uaddr.name, op.name, val.name, timeout.name, uaddr2.name, val3.name).ok();
                     }
+                    // ===== Phase E: IPC (intrinsics.md D11) — Shim =====
+                    Intrinsic::Pipe => {
+                        let fds = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_pipe(i64 {})", indent, v, fds.name).ok();
+                    }
+                    Intrinsic::ShmOpen => {
+                        let name = self.emit_expr(out, &args[0], indent);
+                        let flags = self.emit_expr(out, &args[1], indent);
+                        let mode = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}{} = call i64 @brief_shm_open(i64 {}, i64 {}, i64 {})", indent, v, name.name, flags.name, mode.name).ok();
+                    }
+                    Intrinsic::ShmUnlink => {
+                        let name = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_shm_unlink(i64 {})", indent, v, name.name).ok();
+                    }
+                    Intrinsic::SemOpen => {
+                        let name = self.emit_expr(out, &args[0], indent);
+                        let flags = self.emit_expr(out, &args[1], indent);
+                        let mode = self.emit_expr(out, &args[2], indent);
+                        let value = self.emit_expr(out, &args[3], indent);
+                        writeln!(out, "{}{} = call i64 @brief_sem_open(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, name.name, flags.name, mode.name, value.name).ok();
+                    }
+                    Intrinsic::SemWait => {
+                        let sem = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_sem_wait(i64 {})", indent, v, sem.name).ok();
+                    }
+                    Intrinsic::SemPost => {
+                        let sem = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}{} = call i64 @brief_sem_post(i64 {})", indent, v, sem.name).ok();
+                    }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
                         writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();

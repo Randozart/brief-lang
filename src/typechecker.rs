@@ -1318,6 +1318,9 @@ impl TypeChecker {
                     | Intrinsic::AtomicStore | Intrinsic::AtomicCas
                     | Intrinsic::AtomicXchg | Intrinsic::AtomicAdd
                     | Intrinsic::Fence | Intrinsic::Futex => Type::Int,
+                    // Phase E: IPC — all return Int
+                    Intrinsic::Pipe | Intrinsic::ShmOpen | Intrinsic::ShmUnlink
+                    | Intrinsic::SemOpen | Intrinsic::SemWait | Intrinsic::SemPost => Type::Int,
                 }
             }
             Expr::Call(name, args) => {
@@ -3107,6 +3110,68 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Futex,
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    // ── Phase E: IPC type inference tests ──────────────────────────
+
+    #[test]
+    fn test_check_intrinsic_pipe_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Pipe,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_shm_open_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ShmOpen,
+            args: vec![Expr::String("/s".into()), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_shm_unlink_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ShmUnlink,
+            args: vec![Expr::String("/s".into())],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_sem_open_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SemOpen,
+            args: vec![Expr::String("/s".into()), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_sem_wait_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SemWait,
+            args: vec![Expr::Integer(0)],
+        };
+        let ctx = TypeChecker::new();
+        assert_eq!(ctx.infer_expression(&expr), Type::Int);
+    }
+
+    #[test]
+    fn test_check_intrinsic_sem_post_returns_int() {
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SemPost,
+            args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::Int);

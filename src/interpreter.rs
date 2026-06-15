@@ -2535,6 +2535,144 @@ impl Interpreter {
                         let _ = values.remove(0); // val3
                         Ok(Value::Int(-1))
                     }
+                    // ===== Phase E: IPC (intrinsics.md D11) =====
+                    Intrinsic::Pipe => {
+                        let fds = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("pipe fds requires Int, got {:?}", v))),
+                        };
+                        // fds is an opaque pointer to int[2]; interpreter can't fill it
+                        let _ = fds;
+                        #[cfg(unix)]
+                        {
+                            let mut pipe_fds = [0i32; 2];
+                            let ret = unsafe { libc::pipe(pipe_fds.as_mut_ptr()) };
+                            if ret == 0 {
+                                // Write fds back through pointer (attempt)
+                                unsafe {
+                                    std::ptr::write(fds as *mut i32, pipe_fds[0]);
+                                    std::ptr::write((fds + 4) as *mut i32, pipe_fds[1]);
+                                }
+                            }
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::ShmOpen => {
+                        let name = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("shm_open name requires String, got {:?}", v))),
+                        };
+                        let flags = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("shm_open flags requires Int, got {:?}", v))),
+                        };
+                        let mode = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("shm_open mode requires Int, got {:?}", v))),
+                        };
+                        let c_name = match std::ffi::CString::new(name) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let fd = unsafe { libc::shm_open(c_name.as_ptr(), flags, mode) };
+                            Ok(Value::Int(fd as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_name, flags, mode);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::ShmUnlink => {
+                        let name = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("shm_unlink name requires String, got {:?}", v))),
+                        };
+                        let c_name = match std::ffi::CString::new(name) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::shm_unlink(c_name.as_ptr()) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = c_name;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SemOpen => {
+                        let name = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sem_open name requires String, got {:?}", v))),
+                        };
+                        let flags = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sem_open flags requires Int, got {:?}", v))),
+                        };
+                        let mode = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sem_open mode requires Int, got {:?}", v))),
+                        };
+                        let value = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sem_open value requires Int, got {:?}", v))),
+                        };
+                        let c_name = match std::ffi::CString::new(name) {
+                            Ok(p) => p,
+                            _ => return Ok(Value::Int(-1)),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let sem = unsafe { libc::sem_open(c_name.as_ptr(), flags, mode, value) };
+                            Ok(Value::Int(sem as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = (c_name, flags, mode, value);
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SemWait => {
+                        let sem = match values.remove(0) {
+                            Value::Int(n) => n as *mut libc::sem_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sem_wait sem requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::sem_wait(sem) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = sem;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SemPost => {
+                        let sem = match values.remove(0) {
+                            Value::Int(n) => n as *mut libc::sem_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("sem_post sem requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::sem_post(sem) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = sem;
+                            Ok(Value::Int(-1))
+                        }
+                    }
                     // Data intrinsics
                     Intrinsic::Sort => Ok(values.remove(0)),
                     Intrinsic::Reverse => Ok(values.remove(0)),
@@ -7454,6 +7592,68 @@ mod kani_full_tests {
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(-1), "futex# stub should return -1");
+    }
+
+    // ── Phase E: IPC intrinsic tests ────────────────────────────────
+
+    #[test]
+    fn test_intrinsic_pipe_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Pipe,
+            args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_shm_open_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ShmOpen,
+            args: vec![Expr::Integer(42), Expr::Integer(0), Expr::Integer(0)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_shm_unlink_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::ShmUnlink,
+            args: vec![Expr::Integer(42)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_sem_open_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SemOpen,
+            args: vec![Expr::String("/test".into()), Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_sem_wait_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SemWait,
+            args: vec![Expr::Bool(false)],
+        };
+        assert!(i.eval_expr(&expr).is_err());
+    }
+
+    #[test]
+    fn test_intrinsic_sem_post_type_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SemPost,
+            args: vec![Expr::String("sem".into())],
+        };
+        assert!(i.eval_expr(&expr).is_err());
     }
 
     #[test]

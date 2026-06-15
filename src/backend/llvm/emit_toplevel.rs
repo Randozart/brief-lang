@@ -81,6 +81,13 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @brief_mlock(i64, i64)").ok();
         // Phase D: Sync intrinsics — futex (Shim); atomic ops are Native (no declare needed)
         writeln!(out, "declare i64 @brief_futex(i64, i64, i64, i64, i64, i64)").ok();
+        // Phase E: IPC intrinsics (intrinsics.md D11)
+        writeln!(out, "declare i64 @brief_pipe(i64)").ok();
+        writeln!(out, "declare i64 @brief_shm_open(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_shm_unlink(i64)").ok();
+        writeln!(out, "declare i64 @brief_sem_open(i64, i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_sem_wait(i64)").ok();
+        writeln!(out, "declare i64 @brief_sem_post(i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {

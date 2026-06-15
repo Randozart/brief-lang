@@ -538,6 +538,14 @@ pub enum Intrinsic {
     AtomicAdd,
     Fence,
     Futex,
+
+    // ===== Phase E: IPC (intrinsics.md D11) =====
+    Pipe,
+    ShmOpen,
+    ShmUnlink,
+    SemOpen,
+    SemWait,
+    SemPost,
 }
 
 impl Intrinsic {
@@ -626,6 +634,13 @@ impl Intrinsic {
             "atomic_add" => Some(Intrinsic::AtomicAdd),
             "fence" => Some(Intrinsic::Fence),
             "futex" => Some(Intrinsic::Futex),
+            // Phase E: IPC
+            "pipe" => Some(Intrinsic::Pipe),
+            "shm_open" => Some(Intrinsic::ShmOpen),
+            "shm_unlink" => Some(Intrinsic::ShmUnlink),
+            "sem_open" => Some(Intrinsic::SemOpen),
+            "sem_wait" => Some(Intrinsic::SemWait),
+            "sem_post" => Some(Intrinsic::SemPost),
             _ => None,
         }
     }
@@ -715,6 +730,13 @@ impl Intrinsic {
             Intrinsic::AtomicAdd => "atomic_add",
             Intrinsic::Fence => "fence",
             Intrinsic::Futex => "futex",
+            // Phase E: IPC
+            Intrinsic::Pipe => "pipe",
+            Intrinsic::ShmOpen => "shm_open",
+            Intrinsic::ShmUnlink => "shm_unlink",
+            Intrinsic::SemOpen => "sem_open",
+            Intrinsic::SemWait => "sem_wait",
+            Intrinsic::SemPost => "sem_post",
         }
     }
 }
@@ -2398,6 +2420,42 @@ mod tests {
     fn test_intrinsic_from_name_futex() {
         assert_eq!(Intrinsic::from_name("futex"), Some(Intrinsic::Futex));
         assert_eq!(Intrinsic::Futex.name(), "futex");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_pipe() {
+        assert_eq!(Intrinsic::from_name("pipe"), Some(Intrinsic::Pipe));
+        assert_eq!(Intrinsic::Pipe.name(), "pipe");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_shm_open() {
+        assert_eq!(Intrinsic::from_name("shm_open"), Some(Intrinsic::ShmOpen));
+        assert_eq!(Intrinsic::ShmOpen.name(), "shm_open");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_shm_unlink() {
+        assert_eq!(Intrinsic::from_name("shm_unlink"), Some(Intrinsic::ShmUnlink));
+        assert_eq!(Intrinsic::ShmUnlink.name(), "shm_unlink");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_sem_open() {
+        assert_eq!(Intrinsic::from_name("sem_open"), Some(Intrinsic::SemOpen));
+        assert_eq!(Intrinsic::SemOpen.name(), "sem_open");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_sem_wait() {
+        assert_eq!(Intrinsic::from_name("sem_wait"), Some(Intrinsic::SemWait));
+        assert_eq!(Intrinsic::SemWait.name(), "sem_wait");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_sem_post() {
+        assert_eq!(Intrinsic::from_name("sem_post"), Some(Intrinsic::SemPost));
+        assert_eq!(Intrinsic::SemPost.name(), "sem_post");
     }
 
     #[test]

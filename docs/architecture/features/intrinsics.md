@@ -1,7 +1,7 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Phase D — Memory + Sync complete (2026-06-15). Phases A–C also complete. Supersedes `as-intrinsic.md`.
+**Status:** Phase E — IPC complete (2026-06-15). Phases A–D also complete. Supersedes `as-intrinsic.md`.
 
 ## Purpose
 
@@ -409,6 +409,24 @@ break via sbrk(0). Futex returns -1.
 - `src/ast.rs` — 12 roundtrip tests
 - `src/interpreter.rs` — 22 eval tests (type errors + stub values)
 - `src/typechecker.rs` — 12 inference tests
+
+### Phase E — IPC (completed 2026-06-15)
+
+**New Intrinsic variants:** D11: `Pipe`, `ShmOpen`, `ShmUnlink`,
+`SemOpen`, `SemWait`, `SemPost`
+
+**LLVM backend:** Category **Shim** — emit `call i64 @brief_*`, implemented
+in `brief_rt.c` via POSIX (pipe, shm_open, shm_unlink, sem_open, sem_wait,
+sem_post).
+
+**Interpreter:** Uses `libc::pipe` (writes fds through opaque pointer),
+`libc::shm_open`, `libc::shm_unlink`, `libc::sem_open`, `libc::sem_wait`,
+`libc::sem_post`. All return Int.
+
+**Tests added:**
+- `src/ast.rs` — 6 roundtrip tests
+- `src/interpreter.rs` — 6 eval tests (type errors)
+- `src/typechecker.rs` — 6 inference tests
 
 ### Phase B — Raw File I/O (15 intrinsics)
 
