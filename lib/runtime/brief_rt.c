@@ -169,12 +169,6 @@ char* __str_concat(const char* a, const char* b) {
  *   timer  — number of timer ticks (0 on error)
  *   signal — signal number that fired (0 on error)
  * =================================================================== */
-int32_t __trg_stdin_read(void) {
-    unsigned char ch = 0;
-    ssize_t n = read(STDIN_FILENO, &ch, 1);
-    if (n > 0) return (int32_t)ch;
-    return 0;
-}
 
 /* ── Cast helpers ─────────────────────────────────────────────── */
 
