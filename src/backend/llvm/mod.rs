@@ -419,6 +419,7 @@ pub struct LlvmBackend {
 
     // ── Codegen State (per-function) ───────────────────────
     pub(crate) txn_counter: usize,
+    pub(crate) metadata_counter: usize,  // for !llvm.loop metadata nodes
     pending_cleanup: Vec<Statement>,
     let_bindings: HashMap<String, String>,
     let_binding_types: HashMap<String, Type>,
@@ -493,6 +494,7 @@ impl LlvmBackend {
             pgo_profile: None,
             pgo_guard_idx: 0,
             txn_counter: 0,
+            metadata_counter: 100,  // start above likely conflict range
             has_cycles: false,
             pending_cleanup: Vec::new(),
             let_bindings: HashMap::new(),

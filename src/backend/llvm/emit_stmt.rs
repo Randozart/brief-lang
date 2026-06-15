@@ -548,11 +548,18 @@ impl LlvmBackend {
                     self.let_bindings.remove(item.as_str());
                     self.let_binding_types.remove(item.as_str());
                 }
-                // Increment index and loop back
+                // Increment index and loop back with !llvm.loop.vectorize.enable
                 let next_idx = format!("%fe_next_{}", tc);
                 writeln!(out, "{}{} = add i64 {}, 1", indent, next_idx, cur_idx).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, next_idx, idx_slot).ok();
-                writeln!(out, "{}br label %{}", indent, hdr_l).ok();
+                // LLVM Loop Vectorizer hint — LLVM only vectorizes when safe.
+                // Metadata nodes use a counter to avoid conflicts with other
+                // metadata in the module (e.g. !0 from thread pool, !1 from SLP).
+                let md_idx = self.metadata_counter;
+                self.metadata_counter += 2;
+                writeln!(out, "{}br label %{} !llvm.loop !{}", indent, hdr_l, md_idx).ok();
+                writeln!(out, "!{0} = !{{!{0}, !{1}}}", md_idx, md_idx + 1).ok();
+                writeln!(out, "!{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}", md_idx + 1).ok();
                 writeln!(out, "{}{}:", indent, done_l).ok();
             }
         }
