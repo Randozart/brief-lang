@@ -75,6 +75,7 @@ pub struct WebstackGenerator {
     target: CodeTarget,
     pending_cleanup: RefCell<Vec<Statement>>,
     has_cycles: bool,
+    trigger_names: Vec<String>,           // trg variable names for dirty-flag integration
 }
 
 /// Intent: WebstackGenerator implementation block.
@@ -91,14 +92,15 @@ impl WebstackGenerator {
             txn_map: HashMap::new(),
             reactive_txns: Vec::new(),
             reactive_dependency_map: HashMap::new(),
-            reactor_speed: 10, // Default 10Hz
+            reactor_speed: 0,
             ffi_bindings: HashMap::new(),
             ffi_wasm_impl: HashMap::new(),
             ffi_wasm_setups: HashSet::new(),
             local_vars: HashMap::new(),
-            target: CodeTarget::default(),
+            target: CodeTarget::Wasm,
             pending_cleanup: RefCell::new(Vec::new()),
             has_cycles: false,
+            trigger_names: Vec::new(),
         }
     }
 
@@ -390,6 +392,28 @@ impl WebstackGenerator {
 
                     self.signal_map
                         .insert(decl.name.clone(), self.signal_counter);
+                    self.signal_counter += 1;
+                }
+                TopLevel::Trigger(trg) => {
+                    self.trigger_names.push(trg.name.clone());
+                    // Register trigger as a signal (like StateDecl but with FFI-observable initializer)
+                    let signal_type = match &trg.ty {
+                        Type::Int => SignalType::Int,
+                        Type::Float => SignalType::Float,
+                        Type::Bool => SignalType::Bool,
+                        Type::String => SignalType::String,
+                        _ => SignalType::Int,
+                    };
+                    self.signal_types.insert(trg.name.clone(), signal_type.clone());
+                    let initializer = match &signal_type {
+                        SignalType::Int | SignalType::Float | SignalType::Bool => {
+                            "JsValue::from(0)".to_string()
+                        }
+                        SignalType::String => "JsValue::from(\"\")".to_string(),
+                        _ => "JsValue::from(0)".to_string(),
+                    };
+                    self.signal_initializers.insert(trg.name.clone(), initializer);
+                    self.signal_map.insert(trg.name.clone(), self.signal_counter);
                     self.signal_counter += 1;
                 }
                 TopLevel::Transaction(txn) => {
@@ -1176,6 +1200,32 @@ impl WebstackGenerator {
         output.push_str("        self.dirty_signals.fill(false);\n");
         output.push_str("        let result = format!(\"[{}]\", parts.join(\",\"));\n");
         output.push_str("        result.into()\n");
+        output.push_str("    }\n");
+        // step_triggers: called from JS when external trigger values change.
+        // Reads all registered trg variables, compares with cached signal values,
+        // and marks dirty signals for dependent transactions.
+        output.push_str("    pub fn step_triggers(&mut self) {\n");
+        for trg_name in &self.trigger_names {
+            if let Some(&id) = self.signal_map.get(trg_name) {
+                output.push_str(&format!(
+                    "        // trigger '{}' (signal {}) — mark dirty for re-evaluation\n",
+                    trg_name, id
+                ));
+                output.push_str(&format!(
+                    "        self.dirty_signals[{}] = true;\n",
+                    id
+                ));
+                // Dirty all transactions that depend on this trigger
+                if let Some(txn_indices) = self.reactive_dependency_map.get(trg_name) {
+                    for txn_idx in txn_indices {
+                        output.push_str(&format!(
+                            "        self.dirty_transactions[{}] = true;\n",
+                            txn_idx
+                        ));
+                    }
+                }
+            }
+        }
         output.push_str("    }\n");
         output.push_str("}\n\n");
 
