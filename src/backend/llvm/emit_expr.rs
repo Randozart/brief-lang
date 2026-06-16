@@ -1005,44 +1005,33 @@ impl LlvmBackend {
                     Intrinsic::PrintInt => {
                         let n = self.emit_expr(out, &args[0], indent);
                         let so = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
-                        let so2 = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
-                        let fr = format!("%pfr{}", self.txn_counter); self.txn_counter += 1;
                         let fmt = format!("%pfi{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                         writeln!(out, "{}{} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", indent, fmt).ok();
                         writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, i64 {})",
-                            indent, fr, so, fmt, n).ok();
-                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
-                        writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
+                            indent, v, so, fmt, n).ok();
                     }
                     Intrinsic::PutChar => {
                         let c = self.emit_expr(out, &args[0], indent);
                         let ct = format!("%pct{}", self.txn_counter); self.txn_counter += 1;
                         let pc = format!("%ppc{}", self.txn_counter); self.txn_counter += 1;
                         let so = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
-                        let so2 = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = trunc i64 {} to i32", indent, ct, c).ok();
                         writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                         writeln!(out, "{}{} = call i32 @fputc(i32 {}, ptr {})",
-                            indent, pc, ct, so).ok();
-                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
-                        writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
+                            indent, v, ct, so).ok();
                     }
                     Intrinsic::PrintFloat => {
                         let d = self.emit_expr(out, &args[0], indent);
                         let fl = self.ensure_float_reg(out, indent, &d);
                         let fd = format!("%pfd{}", self.txn_counter); self.txn_counter += 1;
-                        let fr = format!("%pfr{}", self.txn_counter); self.txn_counter += 1;
                         let so = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
-                        let so2 = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
                         let fmt = format!("%pff{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = fpext float {} to double", indent, fd, fl).ok();
                         writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                         writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt).ok();
                         writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, double {})",
-                            indent, fr, so, fmt, fd).ok();
-                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
-                        writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
+                            indent, v, so, fmt, fd).ok();
                     }
                     Intrinsic::GetEnvInt => {
                         let name = self.emit_expr(out, &args[0], indent);

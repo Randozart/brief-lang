@@ -845,6 +845,7 @@ self.emit_declares(&mut out);
         writeln!(out, "declare ptr @getenv(ptr) #1").ok();
         writeln!(out, "declare i64 @atol(ptr) #1").ok();
         writeln!(out, "declare void @exit(i32) #1").ok();
+        writeln!(out, "declare i32 @setvbuf(ptr, ptr, i32, i64) #1").ok();
 
         // Emit external global declarations for linked triggers (fixes bug 4B)
         for (name, trg) in &self.triggers {

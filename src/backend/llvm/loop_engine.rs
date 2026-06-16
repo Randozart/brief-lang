@@ -126,6 +126,9 @@ impl LlvmBackend {
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
             writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
         }
+        // Line-buffer stdout so \n auto-flushes (matching default TTY behavior)
+        writeln!(out, "  %so_init = load ptr, ptr @stdout").ok();
+        writeln!(out, "  call i32 @setvbuf(ptr %so_init, ptr null, i32 1, i64 0)").ok();
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
         if self.has_async_txns && !self.is_lightweight_async {
@@ -855,39 +858,34 @@ impl LlvmBackend {
 
     /// Emit a single print intrinsic call from raw register names (no TypedRegister).
     fn emit_post_print(&mut self, out: &mut String, name: &str, reg: &str, ty: &str, indent: &str) {
-        // Use separate register names for fprintf and fflush results
         let so = format!("%ppl_a{}", self.txn_counter); self.txn_counter += 1;
-        let so2 = format!("%ppl_b{}", self.txn_counter); self.txn_counter += 1;
         let fmt_reg = format!("%ppl_c{}", self.txn_counter); self.txn_counter += 1;
-        let res_f = format!("%ppl_d{}", self.txn_counter); self.txn_counter += 1;
-        let res_ff = format!("%ppl_e{}", self.txn_counter); self.txn_counter += 1;
-        
+        let res = format!("%ppl_r{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
-        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
         match name {
             "print_int" => {
                 writeln!(out, "{}{} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", indent, fmt_reg).ok();
-                writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, i64 {})", indent, res_f, so, fmt_reg, reg).ok();
-                writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
+                writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, i64 {})", indent, res, so, fmt_reg, reg).ok();
             }
             "print_float" => {
                 let fd = format!("%ppl_f{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = fpext float {} to double", indent, fd, reg).ok();
                 writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt_reg).ok();
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
-                    indent, res_f, so, fmt_reg, fd).ok();
-                writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
+                    indent, res, so, fmt_reg, fd).ok();
             }
             "putchar" => {
                 let ct = format!("%ppl_g{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = trunc i64 {} to i32", indent, ct, reg).ok();
-                writeln!(out, "{}{} = call i32 @fputc(i32 {}, ptr {})", indent, res_f, ct, so).ok();
-                writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
+                writeln!(out, "{}{} = call i32 @fputc(i32 {}, ptr {})", indent, res, ct, so).ok();
             }
             "println" => {
+                let so2 = format!("%ppl_b{}", self.txn_counter); self.txn_counter += 1;
+                let res_ff = format!("%ppl_e{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
                 writeln!(out, "{}{} = getelementptr [4 x i8], [4 x i8]* @FMT_STR, i64 0, i64 0", indent, fmt_reg).ok();
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, ptr {})",
-                    indent, res_f, so, fmt_reg, reg).ok();
+                    indent, res, so, fmt_reg, reg).ok();
                 writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
             }
             _ => {}
