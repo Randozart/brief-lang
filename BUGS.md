@@ -38,6 +38,20 @@
 
 **Phase 0 Fix** (COMPLETED 2026-06-16): 18 edits across 4 files. See
 `docs/architecture/fixes/i64-boxing-type-confusion-phase0.md` for full details.
+
+**Bug 1** (2026-06-16): String trigger first-byte comparison — **correct by design**.
+`@ link String` triggers use single-byte `i8` storage (for `tty_read_key`), so
+comparing the first byte is the intended behavior. Full-string triggers would
+require changing the trigger storage model — deferred.
+
+**Bug 2** (2026-06-16): Dynamic `alloca` in enum constructors — **FIXED**.
+Replaced `alloca i64, i64 N` with `call i8* @malloc(i64 N*8)` + `bitcast to i64*`.
+Prevents stack overflow in reactive loops. Creates heap-allocated enum values
+(leak documented — caller must free).
+
+**Bug 3** (2026-06-16): Silent zero stubs — **WARNED**.
+MapLiteral/SetLiteral/ArrowMut/ArrowDiscard/ArrowTransfer now emit
+compile-time warnings: "LLVM backend stub: ... returns 0".
 Key changes:
 - All `TypedRegister.ty` values for boxed i64 values now use `Type::Int`
 - `adapt_to_i64` calls inserted before all field stores, tuple/list element stores,
