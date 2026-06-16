@@ -388,8 +388,12 @@ impl LlvmBackend {
                             .map(|(_, d, _)| *d)
                             .unwrap_or(0u64);
                         let n_slots = a_strs.len() + 1;
+                        let sz = format!("%csz{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = mul i64 {}, 8", indent, sz, n_slots as i64).ok();
+                        let pm = format!("%cpm{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, pm, sz).ok();
                         let p = format!("%cop{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = alloca i64, i64 {}", indent, p, n_slots).ok();
+                        writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, p, pm).ok();
                         let disc_gep = format!("%cdg{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, disc_gep, p).ok();
                         writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, disc_val, disc_gep).ok();
@@ -1375,8 +1379,13 @@ impl LlvmBackend {
                 }
                 return self.emit_expr(out, last, indent);
             }
-            Expr::MapLiteral(_) | Expr::SetLiteral(_)
-            | Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } => {
+            Expr::MapLiteral(_) | Expr::SetLiteral(_) => {
+                self.warnings.push("LLVM backend stub: MapLiteral/SetLiteral returns 0".into());
+                writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
+                return TypedRegister { name: v, ty: Type::Int };
+            }
+            Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } => {
+                self.warnings.push("LLVM backend stub: arrow operator (collect/discard/transfer) returns 0".into());
                 writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
