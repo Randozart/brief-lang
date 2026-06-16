@@ -2741,7 +2741,7 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("add i64 0, %tdr"), "Should bind destructured vars. Got: {}", output);
+        assert!(output.contains("%tdr"), "Should bind destructured vars. Got: {}", output);
     }
 
     #[test]

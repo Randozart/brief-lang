@@ -107,7 +107,6 @@ impl LlvmBackend {
                                 Type::Int
                             }
                         };
-                        return TypedRegister { name: v, ty: field_ty };
                     }
                 }
                 if let Some(reg) = self.let_bindings.get(name) {
@@ -488,8 +487,9 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
                             writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                             writeln!(out, "{}{} = getelementptr [4 x i8], [4 x i8]* @FMT_STR, i64 0, i64 0", indent, fmt).ok();
-                            writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, ptr {})",
-                                indent, v, so, fmt, str_ptr).ok();
+                            let fr = format!("%ppfr{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, ptr {})",
+                                indent, fr, so, fmt, str_ptr).ok();
                             writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
                             writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
                         } else {
@@ -538,8 +538,9 @@ impl LlvmBackend {
                     // ===== Phase A: Terminal (intrinsics.md D4) =====
                     Intrinsic::TtyRawMode => {
                         let arg = self.emit_expr(out, &args[0], indent);
+                        let arg64 = self.adapt_to_i64(out, indent, &arg);
                         let raw = format!("%trm{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = call i64 @brief_tty_raw_mode(i64 {})", indent, raw, arg.name).ok();
+                        writeln!(out, "{}{} = call i64 @brief_tty_raw_mode(i64 {})", indent, raw, arg64).ok();
                         writeln!(out, "{}{} = trunc i64 {} to i1", indent, v, raw).ok();
                         return TypedRegister { name: v, ty: Type::Bool };
                     }
@@ -1170,7 +1171,7 @@ impl LlvmBackend {
                 }
             }
             // ── StructInstance ──────────────────────────────────
-            Expr::StructInstance(name, fields) => {
+             Expr::StructInstance(name, fields) => {
                 let n = fields.len() as i64;
                 let ai = format!("%sai{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = alloca i64, i64 {}", indent, ai, n).ok();
@@ -1178,7 +1179,10 @@ impl LlvmBackend {
                     let fv = self.emit_expr(out, fval, indent);
                     let fp = format!("%sfp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, ai, i as i64).ok();
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, fv.name, fp).ok();
+                    let stored = if fv.ty == Type::Bool || fv.ty == Type::Char {
+                        self.adapt_to_i64(out, indent, &fv)
+                    } else { fv.name.clone() };
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
                 }
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
                 return TypedRegister { name: v, ty: Type::Custom(name.clone()) };
@@ -1192,7 +1196,10 @@ impl LlvmBackend {
                     let fv = self.emit_expr(out, fval, indent);
                     let fp = format!("%ofp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, ai, i as i64).ok();
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, fv.name, fp).ok();
+                    let stored = if fv.ty == Type::Bool || fv.ty == Type::Char {
+                        self.adapt_to_i64(out, indent, &fv)
+                    } else { fv.name.clone() };
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
                 }
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
             }
@@ -1404,6 +1411,8 @@ impl LlvmBackend {
                 let cond_reg = format!("%scond{}", self.txn_counter); self.txn_counter += 1;
                 let next_reg = format!("%snext{}", self.txn_counter); self.txn_counter += 1;
 
+                writeln!(out, "{}br label %{}", indent, entry_label).ok();
+                writeln!(out, "{}{}:", indent, entry_label).ok();
                 writeln!(out, "{}br label %{}", indent, header_label).ok();
                 writeln!(out, "{}{}:", indent, header_label).ok();
                 writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, i_reg, entry_label, next_reg, body_label).ok();

@@ -452,6 +452,8 @@ pub struct LlvmBackend {
     callable_txn_post_label: Option<String>,
     in_callable_txn: bool,
     loop_exit_label: Option<String>,
+    phi_induction_reg: Option<(String, String, String)>, // (counter_field, phi_reg, next_reg)
+    pending_post_hoist: Vec<(String, String)>, // post-loop prints saved for emission after canonical loop exit
     param_slots: HashMap<String, String>,
     state_reg_name: String,
 
@@ -536,6 +538,8 @@ impl LlvmBackend {
             callable_txn_post_label: None,
             in_callable_txn: false,
             loop_exit_label: None,
+            phi_induction_reg: None,
+            pending_post_hoist: Vec::new(),
             param_slots: HashMap::new(),
             range_bounds: HashMap::new(),
             field_to_meta_idx: HashMap::new(),
@@ -826,7 +830,7 @@ self.emit_declares(&mut out);
 
         // Declare cast helper functions
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
-        // __int_to_str is already declared by std/string.bv — skip here.
+        writeln!(out, "declare i64 @__int_to_str(i64) #1").ok();
         writeln!(out, "declare i64 @__str_to_int(i8*) #1").ok();
 
         // Format string constants for benchmark intrinsics (print_int#, print_float#)

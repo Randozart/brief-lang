@@ -592,8 +592,56 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
         self.emit_trg_init(out);
-        writeln!(out, "  br label %tick").ok();
-        writeln!(out, "  tick:").ok();
+        // Detect canonical loop pattern: simple single counter [count < bound]
+        let has_canonical_loop = txns.len() == 1 && {
+            let pre = &txns[0].1.contract.pre_condition;
+            match pre {
+                Expr::Lt(lhs, rhs) => {
+                    matches!(lhs.as_ref(), Expr::Identifier(_))
+                        && (matches!(rhs.as_ref(), Expr::Identifier(_)) || matches!(rhs.as_ref(), Expr::Integer(_)))
+                }
+                _ => false
+            }
+        };
+        if has_canonical_loop {
+            let txn = &txns[0].1;
+            let counter_name = if let Expr::Lt(lhs, _) = &txn.contract.pre_condition {
+                if let Expr::Identifier(name) = lhs.as_ref() { Some(name.clone()) } else { None }
+            } else { None };
+            if let Some(ref cname) = counter_name {
+                let bound_name = if let Expr::Lt(_, rhs) = &txn.contract.pre_condition {
+                    if let Expr::Identifier(name) = rhs.as_ref() { Some(name.clone()) }
+                    else if let Expr::Integer(n) = rhs.as_ref() { Some(n.to_string()) }
+                    else { None }
+                } else { None };
+                // Load bound once before loop
+                if let Some(ref bname) = bound_name {
+                    if let Some(&b_idx) = self.field_index_map.get(bname) {
+                        let b_gep = format!("%gep_bn{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", b_gep, b_idx).ok();
+                        let b_val = format!("%val_bn{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
+                        // Check if bound is compile-time or runtime
+                        let bound_imm = if bname.parse::<i64>().is_ok() { bname.clone() } else { b_val.clone() };
+                        let pi_name = format!("%pi_{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  br label %phdr").ok();
+                        writeln!(out, "  phdr:").ok();
+                        let pn_name = format!("%pn_{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = phi i64 [ 0, %entry ], [ {}, %platch ]", pi_name, pn_name).ok();
+                        let pc_name = format!("%pc_{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = icmp slt i64 {}, {}", pc_name, pi_name, bound_imm).ok();
+                        writeln!(out, "  br i1 {}, label %ptick, label %pdoneloop", pc_name).ok();
+                        writeln!(out, "  ptick:").ok();
+                        // The old tick label is skipped — we use ptick instead
+                        self.phi_induction_reg = Some((cname.clone(), pi_name.clone(), pn_name.clone()));
+                    }
+                }
+            }
+        }
+        if !has_canonical_loop {
+            writeln!(out, "  br label %tick").ok();
+            writeln!(out, "  tick:").ok();
+        }
         self.ssa_state_reg = None;
         for (name, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             let pre = &txn.contract.pre_condition;
@@ -672,7 +720,24 @@ impl LlvmBackend {
                 (stmts, hoist)
             };
             
-            if !matches!(pre, Expr::Bool(true)) {
+            if self.phi_induction_reg.is_some() {
+                // Canonical loop: phi induction variable already guarantees precondition.
+                // Skip precondition check — body runs unconditionally.
+                self.pre_load_all_fields(out, "%state");
+                if let Some((ref cname, ref pi_reg, _)) = self.phi_induction_reg {
+                    self.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
+                }
+                self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+                self.terminated = false;
+                self.returns_i64 = false;
+                self.loop_exit_label = Some("done".into());
+                for s in body_stmts { self.emit_stmt(out, s, "  "); }
+                self.loop_exit_label = None;
+                self.ssa_old_float_regs.clear();
+                self.ssa_old_int_regs.clear();
+                // Store post_hoist for emission after loop exit (in pdoneloop)
+                self.pending_post_hoist = post_hoist.clone();
+            } else if !matches!(pre, Expr::Bool(true)) {
                 self.pre_load_all_fields(out, "%state");
                 let cond = self.emit_expr(out, pre, "  ");
                 let i1 = if cond.ty == Type::Bool {
@@ -700,13 +765,21 @@ impl LlvmBackend {
                 writeln!(out, "  {}:", done_l).ok();
                 // Post-loop: emit hoisted field-based prints, then exit
                 self.emit_hoisted_post_loop_prints(out, &post_hoist);
-                writeln!(out, "  br label %done").ok();
+                if self.phi_induction_reg.is_some() {
+                    writeln!(out, "  br label %platch").ok();
+                } else {
+                    writeln!(out, "  br label %done").ok();
+                }
                 writeln!(out, "  {}:", skip_l).ok();
             } else {
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
                 self.pre_load_all_fields(out, "%state");
+                // Override counter field with phi induction register if available
+                if let Some((ref cname, ref pi_reg, _)) = self.phi_induction_reg {
+                    self.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
+                }
                 self.loop_exit_label = Some("done".into());
                 for s in body_stmts { self.emit_stmt(out, s, "  "); }
                 self.loop_exit_label = None;
@@ -716,7 +789,18 @@ impl LlvmBackend {
                 self.emit_hoisted_post_loop_prints(out, &post_hoist);
             }
         }
-        if let Some(ref cond) = self.exit_condition.clone() {
+        if let Some((_, ref pi_reg, ref pn_reg)) = self.phi_induction_reg.clone() {
+            // Canonical loop: emit latch and done labels
+            writeln!(out, "  br label %platch").ok();
+            writeln!(out, "  platch:").ok();
+            writeln!(out, "  {} = add i64 {}, 1", pn_reg, pi_reg).ok();
+            writeln!(out, "  br label %phdr").ok();
+            writeln!(out, "  pdoneloop:").ok();
+            // Emit post-loop prints after loop exit
+            let saved = std::mem::take(&mut self.pending_post_hoist);
+            self.emit_hoisted_post_loop_prints(out, &saved);
+            writeln!(out, "  ret i32 0").ok();
+        } else if let Some(ref cond) = self.exit_condition.clone() {
             let val = self.emit_exit_expr(out, cond, "  ");
             let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
@@ -735,7 +819,9 @@ impl LlvmBackend {
         } else {
             writeln!(out, "  br label %tick").ok();
         }
-        if self.exit_condition.is_none() {
+        self.phi_induction_reg = None;
+        self.pending_post_hoist.clear();
+        if self.exit_condition.is_none() && self.phi_induction_reg.is_none() {
             writeln!(out, "  done:").ok();
         }
         writeln!(out, "  ret i32 0").ok();
