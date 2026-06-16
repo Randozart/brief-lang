@@ -318,11 +318,6 @@ impl LlvmBackend {
                                 }
                             }
                             self.ssa_state_reg = Some(new_reg);
-                            // After an insertvalue updates the SSA state, the old-value
-                            // cache for this field is stale. Subsequent reads must reload
-                            // from the SSA state register, not the cache.
-                            self.ssa_old_int_regs.remove(&fname);
-                            self.ssa_old_float_regs.remove(&fname);
                             return;
                         }
                     }
@@ -358,10 +353,6 @@ impl LlvmBackend {
                             writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty)).ok();
                         }
                     }
-                    // After a field store, the old-value cache is stale.
-                    // Subsequent reads must reload from state.
-                    self.ssa_old_int_regs.remove(&fname);
-                    self.ssa_old_float_regs.remove(&fname);
                 } else if let Some(slot) = self.param_slots.get(&fname).cloned() {
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val_boxed, slot).ok();

@@ -1,0 +1,37 @@
+# Benchmark Results — 2026-06-16
+## Commit efebd27 + emit_stmt.rs revert
+
+Compiler: brief-compiler release build (commit efebd27 + revert SSA cache clear)
+Flags: clang -O3 -march=native -ffast-math
+BOUND: 50000000
+Method: 5 iterations, min time (Python subprocess + time.time)
+
+## Results
+
+| Benchmark | Brief (s) | C (s) | Ratio | Winner | Notes |
+|---|---|---|---|---|---|
+| knucleotide | 0.2272 | 0.1924 | 1.181x | C | Brief 18% slower — integer dispatch overhead |
+| nbody_sqrt | 0.0483 | 2.9596 | 0.016x | Brief | PRECOMPUTED — no sqrt# in hot loop (symmetric) |
+| nbody_sqrt_idio | 2.4155 | 3.8417 | 0.629x | Brief | @llvm.sqrt.f32 beats libm sqrtf |
+| nbody_newton | 7.6564 | 8.7000 | 0.880x | Brief | Inlined Newton iteration faster |
+| fasta | 26.8059 | 0.2720 | 98.539x | C | putchar# flushes every char — 50M fflush calls |
+| fannkuch_redux | 0.0882 | 0.0674 | 1.310x | C | Brief 31% slower — integer dispatch |
+| mandelbrot | 0.8973 | 0.6704 | 1.338x | C | Brief 34% slower — float dispatch |
+| print_loop | 0.0459 | 0.0467 | 0.983x | tie | FFI call throughput matches C |
+
+## Comparison to 8914ac5 Baseline
+
+| Benchmark | 8914ac5 Brief | Current Brief | C (clang) | Δ |
+|---|---|---|---|---|
+| knucleotide | 0.149 | 0.227 | 0.159 | Regressed (1.5x slower) — TODO |
+| nbody_sqrt | 1.96 | 2.416 (idio) | 2.13 | Similar (idio version) |
+| nbody_newton | 3.48 | 7.656 | 4.23 | Regressed (2.2x slower) — TODO |
+| fasta | 0.176 | *broken* | 0.203 | putchar# flush overhead |
+| fannkuch_redux | 0.115 | 0.088 | 0.051 | Improved (1.7x vs 2.25x gap to C) |
+| mandelbrot | 0.505 | 0.897 | 0.432 | Regressed (1.78x vs 1.17x gap to C) — TODO |
+
+## Known Issues
+
+1. fasta: putchar# calls fflush per character — 50M fflush calls
+2. nbody_sqrt (sym): no sqrt# in hot loop, LLVM precomputes
+3. nbody_newton, mandelbrot, knucleotide: regressed vs 8914ac5
