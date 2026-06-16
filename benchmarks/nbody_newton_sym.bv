@@ -389,10 +389,10 @@ rct txn simulate [
     let energy: Float = epp + ek0c + ek1c + ek2c + ek3c + ek4c;
 
     [count % 5000000 == 0] {
-        let __printed: Bool = __print_float(energy);
+        let __printed: Bool = print_float#(energy);
     };
     [count == bound] {
-        term! -> __print_float(energy);
+        term! -> print_float#(energy);
     };
     term;
 };

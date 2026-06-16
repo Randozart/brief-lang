@@ -1,10 +1,9 @@
-// nbody_sqrt — 5-body gravity sim with libm sqrtf (FFI)
-// Compares Brief vs C on identical algorithm: libm sqrtf, unrolled pairs.
-// The sqrt FFI call inside the hot body prevents pure-counter fold
-// via statement_contains_ffi, keeping all field stores live.
+// nbody_sqrt_idio — 5-body gravity sim, energy computed every iteration
+// Idiomatic Brief variant: energy (10 extra sqrt calls) computed each tick,
+// matching periodic output with C reference.
 //
 // Build:
-//   ./target/release/brief-compiler llvm benchmarks/nbody_sqrt.bv \
+//   ./target/release/brief-compiler llvm benchmarks/nbody_sqrt_idio.bv \
 //       --out benchmarks --optimize-budget 2048
 
 #!exit count == bound;
@@ -131,7 +130,7 @@ rct txn simulate [
     let nvy2: Float = vy2 + dy02*m0*mag02 + dy12*m1*mag12 - dy23*m3*mag23 - dy24*m4*mag24;
     let nvz2: Float = vz2 + dz02*m0*mag02 + dz12*m1*mag12 - dz23*m3*mag23 - dz24*m4*mag24;
     let nvx3: Float = vx3 + dx03*m0*mag03 + dx13*m1*mag13 + dx23*m2*mag23 - dx34*m4*mag34;
-    let nvy3: Float = vy3 + dy03*m0*mag03 + dy13*m1*mag13 + dy23*m2*mag23 - dy34*m4*mag34;
+    let nvy3: Float = vy3 + dy03*m0*mag03 + dy13*m1*mag13 + dy23*m2*mag23 - dx34*m4*mag34;
     let nvz3: Float = vz3 + dz03*m0*mag03 + dz13*m1*mag13 + dz23*m2*mag23 - dz34*m4*mag34;
     let nvx4: Float = vx4 + dx04*m0*mag04 + dx14*m1*mag14 + dx24*m2*mag24 + dx34*m3*mag34;
     let nvy4: Float = vy4 + dy04*m0*mag04 + dy14*m1*mag14 + dy24*m2*mag24 + dy34*m3*mag34;
@@ -168,35 +167,37 @@ rct txn simulate [
     &bz4 = bz4 + dt * nvz4;
     &count = count + 1;
 
-    [count == bound] {
-        let edist01: Float = sqrt#((bx0 - bx1) * (bx0 - bx1) + (by0 - by1) * (by0 - by1) + (bz0 - bz1) * (bz0 - bz1));
-        let edist02: Float = sqrt#((bx0 - bx2) * (bx0 - bx2) + (by0 - by2) * (by0 - by2) + (bz0 - bz2) * (bz0 - bz2));
-        let edist03: Float = sqrt#((bx0 - bx3) * (bx0 - bx3) + (by0 - by3) * (by0 - by3) + (bz0 - bz3) * (bz0 - bz3));
-        let edist04: Float = sqrt#((bx0 - bx4) * (bx0 - bx4) + (by0 - by4) * (by0 - by4) + (bz0 - bz4) * (bz0 - bz4));
-        let edist12: Float = sqrt#((bx1 - bx2) * (bx1 - bx2) + (by1 - by2) * (by1 - by2) + (bz1 - bz2) * (bz1 - bz2));
-        let edist13: Float = sqrt#((bx1 - bx3) * (bx1 - bx3) + (by1 - by3) * (by1 - by3) + (bz1 - bz3) * (bz1 - bz3));
-        let edist14: Float = sqrt#((bx1 - bx4) * (bx1 - bx4) + (by1 - by4) * (by1 - by4) + (bz1 - bz4) * (bz1 - bz4));
-        let edist23: Float = sqrt#((bx2 - bx3) * (bx2 - bx3) + (by2 - by3) * (by2 - by3) + (bz2 - bz3) * (bz2 - bz3));
-        let edist24: Float = sqrt#((bx2 - bx4) * (bx2 - bx4) + (by2 - by4) * (by2 - by4) + (bz2 - bz4) * (bz2 - bz4));
-        let edist34: Float = sqrt#((bx3 - bx4) * (bx3 - bx4) + (by3 - by4) * (by3 - by4) + (bz3 - bz4) * (bz3 - bz4));
-        let e01: Float = m0 * m1 / edist01;
-        let e02: Float = m0 * m2 / edist02;
-        let e03: Float = m0 * m3 / edist03;
-        let e04: Float = m0 * m4 / edist04;
-        let e12: Float = m1 * m2 / edist12;
-        let e13: Float = m1 * m3 / edist13;
-        let e14: Float = m1 * m4 / edist14;
-        let e23: Float = m2 * m3 / edist23;
-        let e24: Float = m2 * m4 / edist24;
-        let e34: Float = m3 * m4 / edist34;
-        let ep: Float = -(e01 + e02 + e03 + e04 + e12 + e13 + e14 + e23 + e24 + e34);
-        let ek0: Float = 0.5 * m0 * (vx0 * vx0 + vy0 * vy0 + vz0 * vz0);
-        let ek1: Float = 0.5 * m1 * (vx1 * vx1 + vy1 * vy1 + vz1 * vz1);
-        let ek2: Float = 0.5 * m2 * (vx2 * vx2 + vy2 * vy2 + vz2 * vz2);
-        let ek3: Float = 0.5 * m3 * (vx3 * vx3 + vy3 * vy3 + vz3 * vz3);
-        let ek4: Float = 0.5 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
-        let energy: Float = ep + ek0 + ek1 + ek2 + ek3 + ek4;
-        term! -> print_float#(energy);
+    let edist01: Float = sqrt#((bx0 - bx1) * (bx0 - bx1) + (by0 - by1) * (by0 - by1) + (bz0 - bz1) * (bz0 - bz1));
+    let edist02: Float = sqrt#((bx0 - bx2) * (bx0 - bx2) + (by0 - by2) * (by0 - by2) + (bz0 - bz2) * (bz0 - bz2));
+    let edist03: Float = sqrt#((bx0 - bx3) * (bx0 - bx3) + (by0 - by3) * (by0 - by3) + (bz0 - bz3) * (bz0 - bz3));
+    let edist04: Float = sqrt#((bx0 - bx4) * (bx0 - bx4) + (by0 - by4) * (by0 - by4) + (bz0 - bz4) * (bz0 - bz4));
+    let edist12: Float = sqrt#((bx1 - bx2) * (bx1 - bx2) + (by1 - by2) * (by1 - by2) + (bz1 - bz2) * (bz1 - bz2));
+    let edist13: Float = sqrt#((bx1 - bx3) * (bx1 - bx3) + (by1 - by3) * (by1 - by3) + (bz1 - bz3) * (bz1 - bz3));
+    let edist14: Float = sqrt#((bx1 - bx4) * (bx1 - bx4) + (by1 - by4) * (by1 - by4) + (bz1 - bz4) * (bz1 - bz4));
+    let edist23: Float = sqrt#((bx2 - bx3) * (bx2 - bx3) + (by2 - by3) * (by2 - by3) + (bz2 - bz3) * (bz2 - bz3));
+    let edist24: Float = sqrt#((bx2 - bx4) * (bx2 - bx4) + (by2 - by4) * (by2 - by4) + (bz2 - bz4) * (bz2 - bz4));
+    let edist34: Float = sqrt#((bx3 - bx4) * (bx3 - bx4) + (by3 - by4) * (by3 - by4) + (bz3 - bz4) * (bz3 - bz4));
+
+    let e01: Float = m0 * m1 / edist01;
+    let e02: Float = m0 * m2 / edist02;
+    let e03: Float = m0 * m3 / edist03;
+    let e04: Float = m0 * m4 / edist04;
+    let e12: Float = m1 * m2 / edist12;
+    let e13: Float = m1 * m3 / edist13;
+    let e14: Float = m1 * m4 / edist14;
+    let e23: Float = m2 * m3 / edist23;
+    let e24: Float = m2 * m4 / edist24;
+    let e34: Float = m3 * m4 / edist34;
+    let ep: Float = -(e01 + e02 + e03 + e04 + e12 + e13 + e14 + e23 + e24 + e34);
+    let ek0: Float = 0.5 * m0 * (vx0 * vx0 + vy0 * vy0 + vz0 * vz0);
+    let ek1: Float = 0.5 * m1 * (vx1 * vx1 + vy1 * vy1 + vz1 * vz1);
+    let ek2: Float = 0.5 * m2 * (vx2 * vx2 + vy2 * vy2 + vz2 * vz2);
+    let ek3: Float = 0.5 * m3 * (vx3 * vx3 + vy3 * vy3 + vz3 * vz3);
+    let ek4: Float = 0.5 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
+    let energy: Float = ep + ek0 + ek1 + ek2 + ek3 + ek4;
+
+    [count % 5000000 == 0] {
+        let __printed: Bool = print_float#(energy);
     };
     term;
 };

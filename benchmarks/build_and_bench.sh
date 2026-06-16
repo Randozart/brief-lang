@@ -51,6 +51,7 @@ TAG[sparse_dispatch]=runtime
 TAG[print_loop]=runtime
 TAG[nbody_newton]=runtime
 TAG[nbody_sqrt]=runtime
+TAG[nbody_sqrt_idio]=runtime
 TAG[fasta]=runtime
 TAG[fannkuch_redux]=runtime
 TAG[mandelbrot]=runtime
@@ -79,6 +80,7 @@ BENCHMARKS=(
     "print_loop"
     "nbody_newton"
     "nbody_sqrt"
+    "nbody_sqrt_idio"
     "fasta"
     "fannkuch_redux"
     "mandelbrot"
@@ -109,6 +111,7 @@ build_bench() {
     case "$name" in
         nbody_newton) budget=2048 ;;
         nbody_sqrt)   budget=2048 ;;
+        nbody_sqrt_idio) budget=2048 ;;
     esac
 
     ./target/release/brief-compiler llvm "benchmarks/${name}.bv" \
@@ -141,6 +144,7 @@ build_c() {
     case "$name" in
         iir_filter)      extra_flags="-lm" ;;
         nbody_sqrt)      extra_flags="-lm" ;;
+        nbody_sqrt_idio)  extra_flags="-lm" ;;
         fasta)           extra_flags="-lm" ;;
         fannkuch_redux)  extra_flags="-lm" ;;
         mandelbrot)      extra_flags="-lm" ;;

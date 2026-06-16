@@ -22,6 +22,5 @@ rct txn kn [count < N][count == N] {
     &seed = nseed;  &hash = nhash;  &chksum = nchksum;
     [count % 5000000 == 0] { print_int#(nchksum); };
     &count = count + 1;
-    [count == N] { term! -> print_int#(nchksum); };
     term;
 };

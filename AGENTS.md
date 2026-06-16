@@ -326,9 +326,10 @@ Preserve contract information in codegen so the optimizer can reason about it.
 9. **Interpreter IS the reference**: Add to interpreter first, then codegen.
 10. **Benchmarks on our own terms**: End-to-end results. Features for benchmarks must add language value.
 11. **NEVER discard staged or uncommitted work without asking.** The git index (staging area) holds work-in-progress from prior sessions that may be uncommitted but critical. Before any destructive action (`git checkout --`, `git restore`, `rm -f`, `git reset --hard`), inspect everything that will be destroyed. If in doubt, `git stash` instead of discard — stashes are recoverable, `git checkout --` is not. A single `git restore --staged .` followed by `git checkout -- <files>` can erase hours of uncommitted work with no recovery path.
-12. **Architecture docs**: Update `docs/architecture/` in the same commit as structural changes.
-13. **Kani**: Add proof harnesses for all new safety-critical code.
-14. **Praetor**: Run on new/changed files; verify complexity ≤ 15, lines ≤ 100, params ≤ 6.
+12. **Plan files**: Every plan-driven session writes a `docs/plans/YYYY-MM-DD-<topic>.md` with datetime stamp before starting work. The plan is committed alongside the implementation code.
+13. **Architecture docs**: Update `docs/architecture/` in the same commit as structural changes.
+14. **Kani**: Add proof harnesses for all new safety-critical code.
+15. **Praetor**: Run on new/changed files; verify complexity ≤ 15, lines ≤ 100, params ≤ 6.
 
 ## Self-Hosting Pipeline
 
