@@ -470,14 +470,46 @@ impl LlvmBackend {
                     }
                     // System I/O intrinsics (stubs — passthrough to frgn calls)
                     Intrinsic::Println => {
-                        writeln!(out, "{}{} = and i1 true, true ; println stub", indent, v).ok();
+                        // Print a Brief String followed by newline.
+                        // Brief String value is i64 (ptrtoint of struct ptr).
+                        // Load the first field (ptr_to_data) to get the data pointer.
+                        if !args.is_empty() {
+                            let msg = self.emit_expr(out, &args[0], indent);
+                            let sptr = format!("%ppls{}", self.txn_counter); self.txn_counter += 1;
+                            let sp = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
+                            let data_ptr = format!("%ppld{}", self.txn_counter); self.txn_counter += 1;
+                            let str_ptr = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
+                            let so = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
+                            let so2 = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
+                            let fmt = format!("%pplf{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, msg).ok();
+                            writeln!(out, "{}{} = bitcast ptr {} to i64*", indent, sp, sptr).ok();
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, data_ptr, sp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
+                            writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                            writeln!(out, "{}{} = getelementptr [4 x i8], [4 x i8]* @FMT_STR, i64 0, i64 0", indent, fmt).ok();
+                            writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, ptr {})",
+                                indent, v, so, fmt, str_ptr).ok();
+                            writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
+                            writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 1 ; println no arg", indent, v).ok();
+                        }
                     }
                     Intrinsic::Readln => {
                         writeln!(out, "{}{} = add i64 0, 0 ; readln stub", indent, v).ok();
                     }
                     Intrinsic::Exit => {
-                        writeln!(out, "{}call void @__exit() ; exit stub", indent).ok();
-                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                        // Call libc exit to terminate the program
+                        if args.len() >= 1 {
+                            let code = self.emit_expr(out, &args[0], indent);
+                            let ct = format!("%pext{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, ct, code).ok();
+                            writeln!(out, "{}call void @exit(i32 {})", indent, ct).ok();
+                        } else {
+                            writeln!(out, "{}call void @exit(i32 0)", indent).ok();
+                        }
+                        writeln!(out, "{}{} = add i64 0, 1", indent, v).ok();
                     }
                     Intrinsic::Time => {
                         writeln!(out, "{}{} = call i64 @time(i64* null)", indent, v).ok();
@@ -967,6 +999,80 @@ impl LlvmBackend {
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {
                         writeln!(out, "{}{} = add i64 0, 0 ; sort/reverse/range stub", indent, v).ok();
+                    }
+                    // Benchmark intrinsics (2026-06-16) — direct libc, no brief_rt.c shims
+                    Intrinsic::PrintInt => {
+                        let n = self.emit_expr(out, &args[0], indent);
+                        let so = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
+                        let so2 = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
+                        let fr = format!("%pfr{}", self.txn_counter); self.txn_counter += 1;
+                        let fmt = format!("%pfi{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                        writeln!(out, "{}{} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", indent, fmt).ok();
+                        writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, i64 {})",
+                            indent, fr, so, fmt, n).ok();
+                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
+                        writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
+                    }
+                    Intrinsic::PutChar => {
+                        let c = self.emit_expr(out, &args[0], indent);
+                        let ct = format!("%pct{}", self.txn_counter); self.txn_counter += 1;
+                        let pc = format!("%ppc{}", self.txn_counter); self.txn_counter += 1;
+                        let so = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
+                        let so2 = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ct, c).ok();
+                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                        writeln!(out, "{}{} = call i32 @fputc(i32 {}, ptr {})",
+                            indent, pc, ct, so).ok();
+                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
+                        writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
+                    }
+                    Intrinsic::PrintFloat => {
+                        let d = self.emit_expr(out, &args[0], indent);
+                        let fl = self.ensure_float_reg(out, indent, &d);
+                        let fd = format!("%pfd{}", self.txn_counter); self.txn_counter += 1;
+                        let fr = format!("%pfr{}", self.txn_counter); self.txn_counter += 1;
+                        let so = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
+                        let so2 = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
+                        let fmt = format!("%pff{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = fpext float {} to double", indent, fd, fl).ok();
+                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                        writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt).ok();
+                        writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, double {})",
+                            indent, fr, so, fmt, fd).ok();
+                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
+                        writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
+                    }
+                    Intrinsic::GetEnvInt => {
+                        let name = self.emit_expr(out, &args[0], indent);
+                        // Brief String value is i64 (ptrtoint of struct ptr).
+                        // The struct has layout { ptr_to_data: i64, length: i64, data: [N x i8] }.
+                        // Load the first field (ptr_to_data) to get the actual data pointer.
+                        let sptr = format!("%gsr{}", self.txn_counter); self.txn_counter += 1;
+                        let sp = format!("%gsp{}", self.txn_counter); self.txn_counter += 1;
+                        let data_ptr = format!("%gdp{}", self.txn_counter); self.txn_counter += 1;
+                        let str_ptr = format!("%gnp{}", self.txn_counter); self.txn_counter += 1;
+                        let gv = format!("%gnv{}", self.txn_counter); self.txn_counter += 1;
+                        let isnull = format!("%gnvl{}", self.txn_counter); self.txn_counter += 1;
+                        let nul_l = format!("genv_nul{}", self.txn_counter); self.txn_counter += 1;
+                        let ok_l = format!("genv_ok{}", self.txn_counter); self.txn_counter += 1;
+                        let after_l = format!("genv_af{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, name).ok();
+                        writeln!(out, "{}{} = bitcast ptr {} to i64*", indent, sp, sptr).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, data_ptr, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
+                        writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, gv, str_ptr).ok();
+                        writeln!(out, "{}{} = icmp eq ptr {}, null", indent, isnull, gv).ok();
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, isnull, nul_l, ok_l).ok();
+                        writeln!(out, "{}{}:", indent, nul_l).ok();
+                        writeln!(out, "{}  br label %{}", indent, after_l).ok();
+                        writeln!(out, "{}{}:", indent, ok_l).ok();
+                        let av = format!("%gav{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i64 @atol(ptr {})", indent, av, gv).ok();
+                        writeln!(out, "{}  br label %{}", indent, after_l).ok();
+                        writeln!(out, "{}{}:", indent, after_l).ok();
+                        writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]",
+                            indent, v, nul_l, av, ok_l).ok();
                     }
                 }
             }

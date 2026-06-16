@@ -116,6 +116,9 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
         Expr::Call(_, args) => {
             for a in args { collect_reads_from_expr(a, reads); }
         }
+        Expr::IntrinsicCall { args, .. } => {
+            for a in args { collect_reads_from_expr(a, reads); }
+        }
         Expr::Projection { source, .. } => collect_reads_from_expr(source, reads),
         Expr::ListIndex(list, idx) => {
             collect_reads_from_expr(list, reads);

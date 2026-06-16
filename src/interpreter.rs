@@ -3310,6 +3310,46 @@ impl Interpreter {
                         let list: Vec<Value> = (0..end).map(Value::Int).collect();
                         Ok(Value::List(list))
                     }
+                    // Benchmark intrinsics (2026-06-16)
+                    Intrinsic::PrintInt => {
+                        let n = match values.remove(0) {
+                            Value::Int(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("print_int requires Int, got {:?}", v))),
+                        };
+                        print!("{}", n);
+                        Ok(Value::Bool(true))
+                    }
+                    Intrinsic::PutChar => {
+                        let c = match values.remove(0) {
+                            Value::Char(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("putchar requires Char, got {:?}", v))),
+                        };
+                        print!("{}", c);
+                        Ok(Value::Bool(true))
+                    }
+                    Intrinsic::PrintFloat => {
+                        let d = match values.remove(0) {
+                            Value::Float(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("print_float requires Float, got {:?}", v))),
+                        };
+                        print!("{:.9}", d);
+                        Ok(Value::Bool(true))
+                    }
+                    Intrinsic::GetEnvInt => {
+                        let name = match values.remove(0) {
+                            Value::String(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("getenv_int requires String, got {:?}", v))),
+                        };
+                        let val = std::env::var(&name)
+                            .ok()
+                            .and_then(|s| s.parse::<i64>().ok())
+                            .unwrap_or(0);
+                        Ok(Value::Int(val))
+                    }
                 }
             }
             // Legacy collection variants — delegate through feature structs

@@ -1331,9 +1331,13 @@ impl TypeChecker {
                     | Intrinsic::SetSockOpt | Intrinsic::GetSockOpt | Intrinsic::Shutdown
                     | Intrinsic::GetAddrInfo => Type::Int,
                     // Phase H: Everything Else (intrinsics.md D6, D7)
-                    Intrinsic::GetEnv | Intrinsic::SetEnv | Intrinsic::UnsetEnv
-                    | Intrinsic::GetPid | Intrinsic::GetPPid | Intrinsic::ClockGetTime
+                    Intrinsic::GetEnv => Type::String,
+                    Intrinsic::SetEnv | Intrinsic::UnsetEnv => Type::Bool,
+                    Intrinsic::GetPid | Intrinsic::GetPPid | Intrinsic::ClockGetTime
                     | Intrinsic::NanoSleep => Type::Int,
+                    // Benchmark intrinsics (2026-06-16)
+                    Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat => Type::Bool,
+                    Intrinsic::GetEnvInt => Type::Int,
                 }
             }
             Expr::Call(name, args) => {

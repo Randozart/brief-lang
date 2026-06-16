@@ -489,16 +489,11 @@ impl LlvmBackend {
                     self.ssa_old_float_regs.clear();
                     self.terminated = prev_terminated;
                 } else {
-                    // Then-path terminated (e.g. term!). The else path at end_l
-                    // still needs a terminator. Do NOT restore prev_terminated —
-                    // the current block (end_l) has a ret, so callers must not
-                    // emit more code after us.
-                    self.terminated = true;
-                    if self.returns_i64 {
-                        writeln!(out, "  ret i64 0").ok();
-                    } else {
-                        writeln!(out, "  ret void").ok();
-                    }
+                    // Then-path terminated (e.g. term! → program exit).
+                    // The else path at end_l continues the loop naturally —
+                    // do NOT emit ret here. Restore prev_terminated so
+                    // callers emit the continuation (br to loop back-edge).
+                    self.terminated = prev_terminated;
                 }}
             Statement::SyncBlock { body } => {
                 for s in body { self.emit_stmt(out, s, indent); }

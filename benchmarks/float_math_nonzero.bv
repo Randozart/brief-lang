@@ -1,10 +1,5 @@
 #!exit count == total && x0 >= 0.0;
 
-import { __get_env_int } from "std/env.bv";
-import "link/brief_rt.c";
-
-frgn __print_float(d: Float) -> Bool ;
-
 let x0: Float = 1.0;
 let x1: Float = 0.5;
 let x2: Float = 0.2;
@@ -12,7 +7,7 @@ let p00: Float = 0.0;
 let p11: Float = 0.0;
 let p22: Float = 0.0;
 let count: Int = 0;
-let total: Int = __get_env_int("BOUND");
+let total: Int = getenv_int#("BOUND");
 
 const A00: Float = 1.0;
 const A01: Float = 0.01;
@@ -40,7 +35,7 @@ rct txn tick [
     &count = count + 1;
     [count % 5000000 == 0] {
         let trace: Float = p00 + p11 + p22;
-        __print_float(x0 + x1 + x2 + trace);
+        print_float#(x0 + x1 + x2 + trace);
     };
     term;
 };

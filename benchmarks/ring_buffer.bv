@@ -13,18 +13,13 @@
 
 #!exit ops == N;
 
-import "link/brief_rt.c";
-import { __get_env_int } from "std/env.bv";
-
-frgn __print_int(n: Int) -> Bool ;
-
 let ops: Int = 0;
-let N: Int = __get_env_int("BOUND");
+let N: Int = getenv_int#("BOUND");
 
 rct txn work [ops < N][ops == N] {
     &ops = ops + 1;
     [ops % 5000000 == 0] {
-        __print_int(ops);
+        print_int#(ops);
     };
     term;
 };

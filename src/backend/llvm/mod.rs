@@ -829,6 +829,19 @@ self.emit_declares(&mut out);
         // __int_to_str is already declared by std/string.bv — skip here.
         writeln!(out, "declare i64 @__str_to_int(i8*) #1").ok();
 
+        // Format string constants for benchmark intrinsics (print_int#, print_float#)
+        writeln!(out, "@FMT_INT = private unnamed_addr constant [5 x i8] c\"%ld\\0A\\00\"").ok();
+        writeln!(out, "@FMT_FLOAT = private unnamed_addr constant [6 x i8] c\"%.9f\\0A\\00\"").ok();
+        writeln!(out, "@FMT_STR = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\"").ok();
+        // Declare libc functions used by direct-libc intrinsics
+        writeln!(out, "@stdout = external global ptr").ok();
+        writeln!(out, "declare i32 @fprintf(ptr, ptr, ...) #1").ok();
+        writeln!(out, "declare i32 @fputc(i32, ptr) #1").ok();
+        writeln!(out, "declare i32 @fflush(ptr) #1").ok();
+        writeln!(out, "declare ptr @getenv(ptr) #1").ok();
+        writeln!(out, "declare i64 @atol(ptr) #1").ok();
+        writeln!(out, "declare void @exit(i32) #1").ok();
+
         // Emit external global declarations for linked triggers (fixes bug 4B)
         for (name, trg) in &self.triggers {
             if let crate::ast::LinkRef::Linked(sym) = &trg.address {

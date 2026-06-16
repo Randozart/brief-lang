@@ -739,7 +739,8 @@ fn is_pure_body(
 
 fn references_triggers_or_ffi(expr: &Expr) -> bool {
     match expr {
-        Expr::Call(_, _) | Expr::IntrinsicCall { .. } => true,
+        Expr::Call(_, _) => true,
+        Expr::IntrinsicCall { intrinsic, .. } => intrinsic.has_side_effects(),
         Expr::Identifier(_) | Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) | Expr::Char(_) => false,
         Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b)
         | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b)

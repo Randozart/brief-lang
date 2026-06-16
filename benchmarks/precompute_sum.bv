@@ -15,10 +15,6 @@
 // C reference: precompute_sum_c.c
 //   clang -O3 -march=native -o benchmarks/precompute_c benchmarks/precompute_sum_c.c
 
-import "link/brief_rt.c";
-
-frgn __print_int(n: Int) -> Bool ;
-
 const total: Int = 500;
 
 let count: Int = 0;
@@ -30,7 +26,7 @@ rct txn compute [count < total][count == total] {
     &acc_b = acc_b + count;
     &count = count + 1;
     [count == total] {
-        term! -> __print_int(acc_a + acc_b);
+        term! -> print_int#(acc_a + acc_b);
     };
     term;
 };

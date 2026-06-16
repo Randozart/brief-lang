@@ -1,10 +1,5 @@
 #!exit count == total;
 
-import { __get_env_int } from "std/env.bv";
-import "link/brief_rt.c";
-
-frgn __print_int(n: Int) -> Bool ;
-
 const C00: Int = 100;  const C01: Int = 200;
 const C02: Int = 300;  const C03: Int = 400;
 const C04: Int = 500;  const C05: Int = 600;
@@ -16,7 +11,7 @@ const C14: Int = 1500; const C15: Int = 1600;
 const C16: Int = 1700; const C17: Int = 1800;
 const C18: Int = 1900; const C19: Int = 2000;
 
-let total: Int = __get_env_int("BOUND");
+let total: Int = getenv_int#("BOUND");
 let count: Int = 0;
 let acc: Int = 0;
 
@@ -27,7 +22,7 @@ rct txn tick [count < total][count == total] {
           + C15 + C16 + C17 + C18 + C19;
     &count = count + 1;
     [count % 5000000 == 0] {
-        __print_int(acc);
+        print_int#(acc);
     };
     term;
 };

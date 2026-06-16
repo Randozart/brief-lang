@@ -571,9 +571,28 @@ pub enum Intrinsic {
     GetPPid,
     ClockGetTime,
     NanoSleep,
+    // Benchmark intrinsics (2026-06-16) — direct libc, no brief_rt.c
+    PrintInt,
+    PutChar,
+    PrintFloat,
+    GetEnvInt,
 }
 
 impl Intrinsic {
+    pub fn has_side_effects(&self) -> bool {
+        match self {
+            // Pure/mathematical — can fold safely
+            Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil
+            | Intrinsic::Floor
+            | Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz
+            | Intrinsic::Abs | Intrinsic::Bitreverse
+            | Intrinsic::Bytes | Intrinsic::Size
+            => false,
+            // Everything else is observable — cannot fold
+            _ => true,
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Intrinsic> {
         match name {
             "sqrt" => Some(Intrinsic::Sqrt),
@@ -690,6 +709,10 @@ impl Intrinsic {
             "getppid" => Some(Intrinsic::GetPPid),
             "clock_gettime" => Some(Intrinsic::ClockGetTime),
             "nanosleep" => Some(Intrinsic::NanoSleep),
+            "print_int" => Some(Intrinsic::PrintInt),
+            "putchar" => Some(Intrinsic::PutChar),
+            "print_float" => Some(Intrinsic::PrintFloat),
+            "getenv_int" => Some(Intrinsic::GetEnvInt),
             _ => None,
         }
     }
@@ -810,6 +833,10 @@ impl Intrinsic {
             Intrinsic::GetPPid => "getppid",
             Intrinsic::ClockGetTime => "clock_gettime",
             Intrinsic::NanoSleep => "nanosleep",
+            Intrinsic::PrintInt => "print_int",
+            Intrinsic::PutChar => "putchar",
+            Intrinsic::PrintFloat => "print_float",
+            Intrinsic::GetEnvInt => "getenv_int",
         }
     }
 }

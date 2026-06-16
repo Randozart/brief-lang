@@ -9,12 +9,7 @@
 
 #!exit count == bound;
 
-import { __get_env_int } from "std/env.bv";
-import "link/brief_rt.c";
-
-frgn __print_float(d: Float) -> Bool ;
-
-let bound: Int = __get_env_int("BOUND");
+let bound: Int = getenv_int#("BOUND");
 let x1: Float = 0.0;
 let x2: Float = 0.0;
 let y1: Float = 0.0;
@@ -47,7 +42,7 @@ rct txn process [bound > 0 && count < bound][count == bound] {
 
     &count = count + 1;
     [count % 5000000 == 0] {
-        __print_float(out);
+        print_float#(out);
     };
     term;
 };

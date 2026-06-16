@@ -17,10 +17,6 @@
 
 #!exit reg == 0;
 
-import "link/brief_rt.c";
-
-frgn #out __print_int(n: Int) -> Bool ;
-
 const initial_reg: Int = 0x7FFFFFFFFFFFFFFF;
 let reg: Int = initial_reg;
 
@@ -28,7 +24,7 @@ rct txn clear [reg != 0][reg == 0] {
     &reg = reg & (reg - 1);
 
     [reg % 100000 == 0] {
-        __print_int(reg);
+        print_int#(reg);
     };
 
     term;

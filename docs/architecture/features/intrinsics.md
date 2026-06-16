@@ -576,10 +576,93 @@ replaced by the new system:
 | `Time` | `clock_gettime#(CLOCK_REALTIME)` |
 | `Exit` | Keep as `exit#(code)` → wraps D5 |
 
+### Phase I — Benchmark Intrinsics (Direct Libc, completed 2026-06-16)
+
+**New Intrinsic variants:** D19: `PrintInt`, `PutChar`, `PrintFloat`, `GetEnvInt`
+
+Same syntax as existing `#` intrinsics, but with a fundamentally different codegen
+category: **Direct Libc** — no `brief_rt.c` shim, no LTO linking. The compiler
+emits inline calls to libc functions (`fprintf`, `fputc`, `getenv`, `atol`).
+
+| Intrinsic | Signature | LLVM IR emitted |
+|---|---|---|
+| `print_int#` | `(n: Int) -> Bool` | `fprintf(stdout, "%ld\n", n)` + `fflush(stdout)` |
+| `putchar#` | `(c: Char) -> Bool` | `fputc(c, stdout)` + `fflush(stdout)` |
+| `print_float#` | `(d: Float) -> Bool` | `fprintf(stdout, "%.9f\n", d)` + `fflush(stdout)` |
+| `getenv_int#` | `(name: String) -> Int` | `getenv(name)` → `atol(result)` or 0 if null |
+
+**Format string pool** (shared globals at module level):
+```llvm
+@FMT_INT = private unnamed_addr constant [5 x i8] c"%ld\0A\00"
+@FMT_FLOAT = private unnamed_addr constant [6 x i8] c"%.9f\0A\00"
+@FMT_STR = private unnamed_addr constant [4 x i8] c"%s\0A\00"
+```
+
+**String marshaling:** Brief's string struct has layout `{ ptr_to_data: i64, length: i64, data: [N x i8] }`.
+The first field contains the address of the actual data bytes. The LLVM codegen
+loads this field and passes it to libc:
+```llvm
+%sptr = inttoptr i64 %name to ptr
+%sp   = bitcast ptr %sptr to i64*
+%data = load i64, i64* %sp
+%str  = inttoptr i64 %data to ptr
+%res  = call ptr @getenv(ptr %str)
+```
+
+**Why Direct Libc?** These intrinsics are the toolchain's canonical output path.
+No C runtime dependency means the resulting `.ll` files are `clang`-compilable
+without any additional link step (besides `-lm`). The benchmarks that use these
+intrinsics no longer need `import "link/brief_rt.c"` or `frgn` declarations.
+
+**Side-effect annotation:** `has_side_effects()` returns `true` for all four,
+preventing the optimizer from folding them away even when their return values
+are unused. This is critical for benchmarks — `print_int#(n)` must remain
+observable regardless of optimization level.
+
+**Status:** 26 benchmark files migrated. `benchmarks/brief_rt.c` and
+`runtime/brief_rt.c` deleted (no longer referenced).
+
+## Side-Effect Metadata
+
+Intrinsics now carry `has_side_effects()` metadata (added 2026-06-16):
+
+```rust
+impl Intrinsic {
+    fn has_side_effects(&self) -> bool {
+        match self {
+            // Pure/mathematical — can fold safely
+            Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil
+            | Intrinsic::Floor
+            | Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz
+            | Intrinsic::Abs | Intrinsic::Bitreverse
+            | Intrinsic::Bytes | Intrinsic::Size
+            => false,
+            // Everything else is observable — cannot fold
+            _ => true,
+        }
+    }
+}
+```
+
+The `references_triggers_or_ffi` function in `transition_graph.rs` now uses
+this method instead of treating all `IntrinsicCall` as impure:
+
+```rust
+// Before:
+Expr::IntrinsicCall { .. } => true,  // all are impure
+
+// After:
+Expr::IntrinsicCall { intrinsic, .. } => intrinsic.has_side_effects(),
+```
+
+This enables folding of pure intrinsics like `sqrt#(9.0)` → `3.0` at compile
+time while preserving observable I/O intrinsics like `print_int#(n)`.
+
 ## Reference
 
-- Interpreter: `src/interpreter.rs` — `Expr::IntrinsicCall` match (line ~1423)
-- LLVM backend: `src/backend/llvm/emit_expr.rs` — `Expr::IntrinsicCall` match (line ~355)
-- AST enum: `src/ast.rs` — `Intrinsic` enum (line ~449), `from_name` (line ~484)
+- Interpreter: `src/interpreter.rs` — `Expr::IntrinsicCall` match (line ~1475)
+- LLVM backend: `src/backend/llvm/emit_expr.rs` — `Expr::IntrinsicCall` match (line ~427)
+- AST enum: `src/ast.rs` — `Intrinsic` enum (line ~449), `from_name` (line ~577), `has_side_effects` (line ~576)
 - Parser: `src/parser.rs` — `name#(` detection and resolution (line ~5676)
+- Reorder pass: `src/backend/llvm/reorder.rs` — `collect_reads_from_expr` now handles `IntrinsicCall`
 - Status: replaces `docs/architecture/features/as-intrinsic.md`

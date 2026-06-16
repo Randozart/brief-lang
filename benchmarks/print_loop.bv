@@ -11,19 +11,14 @@
 
 #!exit ops == N;
 
-import "link/brief_rt.c";
-import { __get_env_int } from "std/env.bv";
-
-frgn __print_int(n: Int) -> Bool ;
-
 let ops: Int = 0;
-let N: Int = __get_env_int("BOUND");
+let N: Int = getenv_int#("BOUND");
 const print_interval: Int = 100000;
 
 rct txn work [ops < N][ops == N] {
     &ops = ops + 1;
     [ops % print_interval == 0] {
-        __print_int(ops);
+        print_int#(ops);
     };
     term;
 };
