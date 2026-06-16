@@ -659,7 +659,33 @@ Before every commit:
 2. `cargo build` — no warnings
 3. Run Praetor on new/changed files — verify complexity ≤ 15, lines ≤ 100, params ≤ 6
 4. Update architecture docs if API contracts changed
-5. **Doc-per-cycle**: If this commit includes a new or migrated feature, write/update
+5. **LLVM Diagnostic Commands** — use these to identify why the optimizer is failing:
+
+   ```bash
+   # SROA failures (struct not decomposed into scalars)
+   opt -O3 -pass-remarks-missed=sroa unopt.ll -disable-output 2>&1
+
+   # Loop vectorization failures (trip count, reductions, dependencies)
+   opt -O3 -pass-remarks-missed=loop-vectorize -pass-remarks-analysis=loop-vectorize unopt.ll -disable-output 2>&1
+
+   # Alias analysis / GVN failures (loads not eliminated)
+   opt -O3 -pass-remarks-missed=gvn unopt.ll -disable-output 2>&1
+
+   # All optimization remarks at once
+   opt -O3 -pass-remarks-missed=sroa,gvn,licm,loop-vectorize unopt.ll -disable-output 2>&1
+
+   # Full pipeline with remarks
+   opt -O3 -pass-remarks=loop-vectorize -pass-remarks=sroa -pass-remarks=gvn unopt.ll -disable-output 2>&1
+
+   # Inspect IR before/after opt
+   opt -S -O3 unopt.ll -o opt.ll
+   diff <(grep -v '^;' unopt.ll | grep -v '^$') <(grep -v '^;' opt.ll | grep -v '^$')
+
+   # Check if %State struct survived SROA (bad sign)
+   grep '%State' opt.ll
+   ```
+
+6. **Doc-per-cycle**: If this commit includes a new or migrated feature, write/update
    `docs/architecture/features/<name>.md` in the same commit. Never batch documentation.
 6. Log bugs/gotchas in BUGS.md or docs/architecture/praetor-log.md
 7. Add Kani harnesses for all newly written or modified functions

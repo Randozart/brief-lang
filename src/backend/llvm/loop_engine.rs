@@ -597,6 +597,81 @@ impl LlvmBackend {
         self.ssa_state_reg = None;
         for (name, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             let pre = &txn.contract.pre_condition;
+            
+            // Detect terminating final guards and replace them with
+            // post-loop field-based prints. A "terminating final guard" is a
+            // Guarded statement whose body ends with term! (program exit).
+            // Replacing it with a post-loop field load removes the per-iteration
+            // branch, enabling LLVM to identify reductions and vectorize.
+            let (body_stmts, post_hoist): (Vec<&Statement>, Vec<(String, String)>) = {
+                let mut stmts: Vec<&Statement> = txn.body.iter()
+                    .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
+                    .collect();
+                let mut hoist: Vec<(String, String)> = Vec::new(); // (field_name, intrinsic_name)
+                // Build mapping from let-binding names to field names (e.g., nchecksum -> checksum)
+                // by scanning assignment statements like &checksum = nchecksum;
+                let mut let_to_field: HashMap<String, String> = HashMap::new();
+                for stmt in &txn.body {
+                    if let Statement::Assignment { lhs: Expr::OwnedRef(fname), expr, .. } = stmt {
+                        if self.field_index_map.contains_key(fname) {
+                            // Try to extract identifier from expr Box<Expr> using string hack
+                            let s = format!("{:?}", expr);
+                            if let Some(let_name) = s.strip_prefix("Identifier(\"").and_then(|s| s.split('"').next()) {
+                                let_to_field.insert(let_name.to_string(), fname.clone());
+                            }
+                        }
+                    }
+                }
+                'outer: while let Some(last_idx) = stmts.len().checked_sub(1) {
+                    if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
+                        let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang { .. }));
+                        if !is_terminating { break; }
+                        // Extract the print intrinsic from the guard body
+                        for s in statements {
+                            if let Statement::Expression(Expr::IntrinsicCall { intrinsic, args }) = s {
+                                let intrinsic_name = intrinsic.name();
+                                if let Some(Expr::Identifier(fname)) = args.first() {
+                                    if self.field_index_map.contains_key(fname) {
+                                        hoist.push((fname.clone(), intrinsic_name.to_string()));
+                                    }
+                                }
+                            }
+                            if let Statement::TermBang { values, swan_song, .. } = s {
+                                // Check values (outputs before ->)
+                                for v in values {
+                                    if let Some(Expr::IntrinsicCall { intrinsic, args }) = v {
+                                        let intrinsic_name = intrinsic.name();
+                                        if let Some(Expr::Identifier(fname)) = args.first() {
+                                            if self.field_index_map.contains_key(fname) {
+                                                hoist.push((fname.clone(), intrinsic_name.to_string()));
+                                            }
+                                        }
+                                    }
+                                }
+                                // Check swan_song (the expression after ->)
+                                if let Some(ss) = swan_song {
+                                    if let Statement::Expression(Expr::IntrinsicCall { intrinsic, args }) = ss.as_ref() {
+                                        let intrinsic_name = intrinsic.name();
+                                        if let Some(Expr::Identifier(fname)) = args.first() {
+                                            if self.field_index_map.contains_key(fname) {
+                                                hoist.push((fname.clone(), intrinsic_name.to_string()));
+                                            } else if let Some(mapped_field) = let_to_field.get(fname) {
+                                                hoist.push((mapped_field.clone(), intrinsic_name.to_string()));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if !hoist.is_empty() {
+                            stmts.pop();
+                        }
+                        break 'outer;
+                    } else { break; }
+                }
+                (stmts, hoist)
+            };
+            
             if !matches!(pre, Expr::Bool(true)) {
                 self.pre_load_all_fields(out, "%state");
                 let cond = self.emit_expr(out, pre, "  ");
@@ -617,13 +692,15 @@ impl LlvmBackend {
                 self.returns_i64 = false;
                 self.pre_load_all_fields(out, "%state");
                 self.loop_exit_label = Some("done".into());
-                for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) { self.emit_stmt(out, s, "  "); }
+                for s in body_stmts { self.emit_stmt(out, s, "  "); }
                 self.loop_exit_label = None;
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
                 writeln!(out, "  br label %{}", skip_l).ok();
                 writeln!(out, "  {}:", done_l).ok();
-                writeln!(out, "  br label %{}", skip_l).ok();
+                // Post-loop: emit hoisted field-based prints, then exit
+                self.emit_hoisted_post_loop_prints(out, &post_hoist);
+                writeln!(out, "  br label %done").ok();
                 writeln!(out, "  {}:", skip_l).ok();
             } else {
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
@@ -631,10 +708,12 @@ impl LlvmBackend {
                 self.returns_i64 = false;
                 self.pre_load_all_fields(out, "%state");
                 self.loop_exit_label = Some("done".into());
-                for s in txn.body.iter().filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. })) { self.emit_stmt(out, s, "  "); }
+                for s in body_stmts { self.emit_stmt(out, s, "  "); }
                 self.loop_exit_label = None;
                 self.ssa_old_float_regs.clear();
                 self.ssa_old_int_regs.clear();
+                // Post-loop: emit hoisted field-based prints
+                self.emit_hoisted_post_loop_prints(out, &post_hoist);
             }
         }
         if let Some(ref cond) = self.exit_condition.clone() {
@@ -662,6 +741,71 @@ impl LlvmBackend {
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
+    }
+
+    /// Emit post-loop field-based prints for hoisted terminating guards.
+    /// After the loop exits, load fields from %state and print their final values.
+    fn emit_hoisted_post_loop_prints(&mut self, out: &mut String, hoisted: &[(String, String)]) {
+        for (fname, intrinsic_name) in hoisted {
+            if let Some(&idx) = self.field_index_map.get(fname) {
+                let ty = self.field_types[idx].clone();
+                let gep = format!("%gep_pl_{}", self.txn_counter); self.txn_counter += 1;
+                let val = format!("%val_pl_{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+                    gep, idx).ok();
+                match ty.as_str() {
+                    "float" => {
+                        writeln!(out, "  {} = load float, float* {}, align 4", val, gep).ok();
+                        self.emit_post_print(out, intrinsic_name, &val, "float", "  ");
+                    }
+                    _ => {
+                        writeln!(out, "  {} = load i64, i64* {}, align 8", val, gep).ok();
+                        self.emit_post_print(out, intrinsic_name, &val, "i64", "  ");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Emit a single print intrinsic call from raw register names (no TypedRegister).
+    fn emit_post_print(&mut self, out: &mut String, name: &str, reg: &str, ty: &str, indent: &str) {
+        // Use separate register names for fprintf and fflush results
+        let so = format!("%ppl_a{}", self.txn_counter); self.txn_counter += 1;
+        let so2 = format!("%ppl_b{}", self.txn_counter); self.txn_counter += 1;
+        let fmt_reg = format!("%ppl_c{}", self.txn_counter); self.txn_counter += 1;
+        let res_f = format!("%ppl_d{}", self.txn_counter); self.txn_counter += 1;
+        let res_ff = format!("%ppl_e{}", self.txn_counter); self.txn_counter += 1;
+        
+        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
+        match name {
+            "print_int" => {
+                writeln!(out, "{}{} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", indent, fmt_reg).ok();
+                writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, i64 {})", indent, res_f, so, fmt_reg, reg).ok();
+                writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
+            }
+            "print_float" => {
+                let fd = format!("%ppl_f{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = fpext float {} to double", indent, fd, reg).ok();
+                writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt_reg).ok();
+                writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
+                    indent, res_f, so, fmt_reg, fd).ok();
+                writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
+            }
+            "putchar" => {
+                let ct = format!("%ppl_g{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = trunc i64 {} to i32", indent, ct, reg).ok();
+                writeln!(out, "{}{} = call i32 @fputc(i32 {}, ptr {})", indent, res_f, ct, so).ok();
+                writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
+            }
+            "println" => {
+                writeln!(out, "{}{} = getelementptr [4 x i8], [4 x i8]* @FMT_STR, i64 0, i64 0", indent, fmt_reg).ok();
+                writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, ptr {})",
+                    indent, res_f, so, fmt_reg, reg).ok();
+                writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
+            }
+            _ => {}
+        }
     }
 
     /// Emit a `main()` that folds ALL reactive transactions into a single
