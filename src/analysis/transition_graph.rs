@@ -63,7 +63,22 @@ impl ReactorTransitionGraph {
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
-                    let simplified_body = simplify_body(&txn.body);
+                    // Remove terminating guards before analysis so increments/purity
+                    // checks see a guard-free body.
+                    let body_no_term: Vec<Statement> = {
+                        let mut filtered: Vec<&Statement> = txn.body.iter()
+                            .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
+                            .collect();
+                        while filtered.last().map_or(false, |s| {
+                            if let Statement::Guarded { statements, .. } = s {
+                                statements.iter().any(|s| matches!(s, Statement::TermBang { .. }))
+                            } else { false }
+                        }) {
+                            filtered.pop();
+                        }
+                        filtered.into_iter().cloned().collect()
+                    };
+                    let simplified_body = simplify_body(&body_no_term);
                     let increments = detect_increments(&simplified_body)
                         .or_else(|| detect_popcount_decay(&simplified_body))
                         .or_else(|| detect_collection_drain(&simplified_body));
@@ -484,7 +499,30 @@ fn simplify_stmt(stmt: &Statement) -> Statement {
 /// Simplify a transaction body using algebraic cancellation rules.
 /// Applies fixpoint iteration (max 5 passes) to handle chained reductions.
 pub fn simplify_body(body: &[Statement]) -> Vec<Statement> {
-    let mut current = body.to_vec();
+    // Pre-convert Literal(Integer(n)) → Integer(n) so legacy pattern matchers work
+    fn lit_to_int(e: &Expr) -> Expr {
+        match e {
+            Expr::Literal(boxed) => match boxed.as_ref() { LiteralExpr::Integer(n) => Expr::Integer(*n), _ => e.clone() },
+            _ => e.clone(),
+        }
+    }
+    fn lit_stmt(s: &Statement) -> Statement {
+        match s {
+            Statement::Let { name, ty, expr, address, address_expr, bit_range, range_constraint, is_override, modifiers } => {
+                Statement::Let { name: name.clone(), ty: ty.clone(), expr: expr.as_ref().map(|e| lit_to_int(e)), address: address.clone(), address_expr: address_expr.clone(), bit_range: bit_range.clone(), range_constraint: range_constraint.clone(), is_override: is_override.clone(), modifiers: modifiers.clone() }
+            }
+            Statement::Assignment { lhs, expr, timeout, modifiers } => {
+                Statement::Assignment { lhs: lhs.clone(), expr: lit_to_int(expr), timeout: timeout.clone(), modifiers: modifiers.clone() }
+            }
+            Statement::Guarded { condition, statements } => {
+                let stmts: Vec<Statement> = statements.iter().map(|s| lit_stmt(s)).collect();
+                Statement::Guarded { condition: lit_to_int(condition), statements: stmts }
+            }
+            other => other.clone(),
+        }
+    }
+    let body: Vec<Statement> = body.iter().map(|s| lit_stmt(s)).collect();
+    let mut current = body;
     for _ in 0..5 {
         let next: Vec<Statement> = current.iter().map(|s| simplify_stmt(s)).collect();
         if next == current {
