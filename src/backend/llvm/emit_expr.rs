@@ -1513,14 +1513,14 @@ impl LlvmBackend {
     }
 
     pub(crate) fn emit_precomputed_main(
-        &self,
+        &mut self,
         out: &mut String,
         final_values: &[(Vec<String>, std::collections::HashMap<String, i64>)],
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
-        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_inline_init_stores(out, "%state");
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for (_, bindings) in final_values {
             for (var, val) in bindings {

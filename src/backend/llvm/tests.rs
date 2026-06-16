@@ -1077,8 +1077,8 @@ fn empty_program() -> Program {
             &[("count", 0), ("x", 0), ("y", 0)],
         );
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
-        assert!(output.contains("call void @init_state(%State* noalias nocapture %state)"),
-            "Should call init_state");
+        assert!(output.contains("store i64 0, i64* %ip_0, align"),
+            "Should init fields inline");
         assert!(!output.contains("switch i64"),
             "No enum dispatch for precomputed path");
         assert!(!output.contains("@reactor_tick"),

@@ -283,3 +283,66 @@ via epoll/kqueue events.
 - `src/backend/llvm/emit_expr.rs` — `emit_fcmp` special case
 - `src/backend/llvm/loop_engine.rs:622` — loop exit fix
 - `lib/runtime/brief_rt.c` — `__tty_read_key` global + epoll reads, `__print` flush
+
+---
+
+## Dispatch Architecture: GEP+Store vs SSA Insertvalue
+
+The LLVM backend has two loop dispatch paths with a fundamental trade-off:
+
+### Path A: GEP+Store (emit_ssa_main, "direct SSA loop")
+- **What**: Loads each field from `%State` via `getelementptr` + `load` at tick entry.
+  Writes via `getelementptr` + `store`. Each field is an independent memory operation.
+- **When**: Default path for programs with guarded bodies, async triggers, or when
+  the analysis can't prove purity.
+- **Pros**: No wide SSA registers. LLVM's register allocator handles fields independently.
+- **Cons**: LLVM can't track reductions through memory — `checksum` stores appear as
+  opaque memory writes, blocking vectorization.
+- **Performance**: Faster for benchmarks with 15+ fields (fannkuch_redux: 0.068s at
+  BOUND=50M vs Path B's 0.100s).
+
+### Path B: SSA Insertvalue (emit_folded_main, "folded SSA")
+- **What**: Builds a single wide `%State` SSA register via `extractvalue` at tick start,
+  `insertvalue` for each field update. The entire struct flows through phi nodes.
+- **When**: Pure bodies without branching guards that the analysis determines are foldable.
+- **Pros**: LLVM can track reductions in SSA form — enables reduction identification
+  for vectorization.
+- **Cons**: The wide `%State` SSA register (15+ fields) creates register pressure.
+  LLVM must spill to memory when SROA can't decompose the struct.
+- **Performance**: 47% slower for fannkuch_redux (0.100s vs 0.068s at BOUND=50M).
+
+### Root Cause: SROA Blockage
+
+Both paths could be equally fast if LLVM's **SROA** (Scalar Replacement of Aggregates)
+pass decomposed the `%State` struct into scalar registers. SROA is blocked by:
+
+```
+%state = alloca %State, align 8
+call void @init_state(%State* noalias nocapture %state)
+```
+
+The `alloca` address **escapes** to `@init_state`. Once a pointer escapes, SROA can't
+prove it's not aliased and refuses to decompose the struct.
+
+### The Fix: Inline init_state
+
+If the `init_state` function body is inlined into `main()` before the `alloca`, the
+`alloca` no longer escapes and SROA can decompose the struct. This requires:
+
+1. Move `init_state`'s body from its standalone function into `main()` entry
+2. Remove the `call void @init_state(%State*)` instruction
+3. Replace with inline stores/insertvalue for each field's initial value
+
+This makes both GEP+store and SSA insertvalue equally efficient, and enables LLVM
+to identify reductions through either path.
+
+### stdout Buffering Policy
+
+```
+call void @setvbuf(ptr @stdout, ptr null, i32 1, i64 0)
+```
+
+Line-buffered stdout (`_IOLBF = 1`). Only `println#` emits explicit `fflush(stdout)`.
+`print_int#`, `print_float#`, and `putchar#` rely on automatic line-buffering to flush.
+This is a single declarative policy at program startup — no per-intrinsic flush logic
+to maintain.

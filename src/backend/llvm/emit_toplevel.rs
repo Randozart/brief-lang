@@ -480,6 +480,104 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
     }
 
+    /// Emit field initialization stores inline in the current function (no function call).
+    /// Same logic as emit_init_state but stores are emitted directly, not wrapped in a
+    /// separate @init_state function. This prevents the %state alloca from escaping to
+    /// init_state, enabling LLVM's SROA to decompose the %State struct.
+    pub(super) fn emit_inline_init_stores(&mut self, out: &mut String, state_ptr: &str) {
+        let indent = if state_ptr == "%state" { "  " } else { "" };
+        let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
+            .map(|(name, &idx)| (name.clone(), idx, self.field_types[idx].clone()))
+            .collect();
+        fields.sort_by_key(|&(_, idx, _)| idx);
+        for (name, idx, _ty) in &fields {
+            let p = format!("%ip_{}", idx);
+            writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, p, state_ptr, idx).ok();
+            let init_clone = self.field_initializers.get(name).and_then(|e| e.clone());
+            let ty = self.field_types[*idx].clone();
+            match init_clone {
+                Some(Expr::Integer(n)) => {
+                    writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, n, p, self.align_of("i64")).ok();
+                }
+                Some(Expr::Float(f)) => {
+                    let h = float_to_llvm_hex(f);
+                    let bits_reg = format!("%ip_{}b", idx);
+                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                    writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
+                }
+                Some(Expr::Neg(ref inner)) => {
+                    match inner.as_ref() {
+                        Expr::Float(f) => {
+                            let h = float_to_llvm_hex(-*f);
+                            let bits_reg = format!("%ip_{}b", idx);
+                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                            writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
+                        }
+                        Expr::Literal(lit) => {
+                            if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                                let h = float_to_llvm_hex(-*f);
+                                let bits_reg = format!("%ip_{}b", idx);
+                                writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                                writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
+                            } else {
+                                writeln!(out, "{}store i64 0, i64* {}, align {}", indent, p, self.align_of("i64")).ok();
+                            }
+                        }
+                        Expr::Integer(n) => {
+                            writeln!(out, "{}store i64 -{}, i64* {}, align {}", indent, n, p, self.align_of("i64")).ok();
+                        }
+                        _ => {
+                            writeln!(out, "{}store i64 0, i64* {}, align {}", indent, p, self.align_of("i64")).ok();
+                        }
+                    }
+                }
+                Some(Expr::Bool(b)) => {
+                    let v = if b { "1" } else { "0" };
+                    writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, v, p, self.align_of("i8")).ok();
+                }
+                Some(Expr::String(_)) => {
+                    writeln!(out, "{}store i8* null, i8** {}, align {}", indent, p, self.align_of("i8*")).ok();
+                }
+                Some(Expr::Char(c)) => {
+                    let v = c as i32;
+                    writeln!(out, "{}store i32 {}, i32* {}, align {}", indent, v, p, self.align_of("i32")).ok();
+                }
+                Some(expr) => {
+                    let val_reg = self.emit_expr(out, &expr, indent);
+                    let boxed = self.adapt_to_i64(out, indent, &val_reg);
+                    match ty.as_str() {
+                        "i8" => {
+                            let t = format!("%ip_{}t", idx);
+                            writeln!(out, "{}{} = trunc i64 {} to i8", indent, t, boxed).ok();
+                            writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, t, p, self.align_of("i8")).ok();
+                        }
+                        "i32" => {
+                            let t = format!("%ip_{}t", idx);
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, boxed).ok();
+                            writeln!(out, "{}store i32 {}, i32* {}, align {}", indent, t, p, self.align_of("i32")).ok();
+                        }
+                        "float" => {
+                            let fl = self.native_float_or_box(out, indent, &val_reg.to_string());
+                            writeln!(out, "{}store float {}, float* {}, align {}", indent, fl, p, self.align_of("float")).ok();
+                        }
+                        "i8*" => {
+                            let t = format!("%ip_{}t", idx);
+                            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, t, boxed).ok();
+                            writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, t, p, self.align_of("i8*")).ok();
+                        }
+                        _ => {
+                            writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, boxed, ty, p, self.align_of(&ty)).ok();
+                        }
+                    }
+                }
+                None => {
+                    let default = if ty == "i8*" { "null".to_string() } else { "0".to_string() };
+                    writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, default, ty, p, self.align_of(&ty)).ok();
+                }
+            }
+        }
+    }
+
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.pending_cleanup.clear();
         self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();

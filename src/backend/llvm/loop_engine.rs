@@ -120,7 +120,7 @@ impl LlvmBackend {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#3")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
-        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_inline_init_stores(out, "%state");
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
@@ -500,7 +500,7 @@ impl LlvmBackend {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
-        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
         // Legacy phi-mode: uses
         if use_phi {
@@ -533,7 +533,7 @@ impl LlvmBackend {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
-        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
         // Bound loading — use numbered positional args ({0}, {1}) to avoid
         // LLVM IR brace chars being parsed as named format placeholders.
@@ -593,7 +593,7 @@ impl LlvmBackend {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
-        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
         // Detect canonical loop pattern: simple single counter [count < bound]
         let has_canonical_loop = txns.len() == 1 && {
@@ -932,7 +932,7 @@ impl LlvmBackend {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", main_attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
-        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
@@ -1153,7 +1153,7 @@ impl LlvmBackend {
             } else {
                 writeln!(out, "  br label %residual_entry").ok();
                 writeln!(out, "residual_entry:").ok();
-                writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+                self.emit_inline_init_stores(out, "%state");
                 writeln!(out, "  br label %residual_loop").ok();
                 writeln!(out, "residual_loop:").ok();
                 writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
@@ -1193,11 +1193,11 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
-    pub(crate) fn emit_folded_pure_counter(&self, out: &mut String, counter_idx: usize, total_value: i64) {
+    pub(crate) fn emit_folded_pure_counter(&mut self, out: &mut String, counter_idx: usize, total_value: i64) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
-        writeln!(out, "  call void @init_state(%State* noalias nocapture %state)").ok();
+        self.emit_inline_init_stores(out, "%state");
         writeln!(out, "  %gp = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", counter_idx).ok();
         writeln!(out, "  store i64 {}, i64* %gp, align 8", total_value).ok();
         writeln!(out, "  ret i32 0").ok();
