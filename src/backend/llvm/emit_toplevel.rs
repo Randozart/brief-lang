@@ -321,31 +321,26 @@ impl LlvmBackend {
         }
     }
 
-    /// Finish loading a trigger value after the raw load: extend to i64.
+    /// Finish loading a trigger value after the raw load: convert to native LLVM type.
     pub(super) fn emit_trg_load_finish(&self, out: &mut String, indent: &str, dst: &str, raw: String, trg_ty: &Type) {
         match trg_ty {
             Type::Bool => {
-                let zc = self.txn_counter; let z = format!("%tz{}", zc);
-                writeln!(out, "{}{} = zext {} {} to i64", indent, z, "i8", raw).ok();
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+                writeln!(out, "{}{} = trunc i8 {} to i1", indent, dst, raw).ok();
             }
             Type::Int | Type::UInt => {
                 writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
             }
+            Type::Float => {
+                writeln!(out, "{}{} = add float 0.0, {}", indent, dst, raw).ok();
+            }
             Type::Char => {
-                let zc = self.txn_counter; let z = format!("%tz{}", zc);
-                writeln!(out, "{}{} = zext {} {} to i64", indent, z, "i32", raw).ok();
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+                writeln!(out, "{}{} = add i32 0, {}", indent, dst, raw).ok();
             }
             Type::String | Type::Data => {
-                let zc = self.txn_counter; let z = format!("%tz{}", zc);
-                writeln!(out, "{}{} = zext {} {} to i64", indent, z, "i8", raw).ok();
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+                writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, dst, raw).ok();
             }
             _ => {
-                let zc = self.txn_counter; let z = format!("%tz{}", zc);
-                writeln!(out, "{}{} = zext {} {} to i64", indent, z, "i8", raw).ok();
-                writeln!(out, "{}{} = add i64 0, {}", indent, dst, z).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
             }
         }
     }
@@ -434,15 +429,16 @@ impl LlvmBackend {
                 }
                 Some(expr) => {
                     let val_reg = self.emit_expr(out, &expr, "  ");
+                    let boxed = self.adapt_to_i64(out, "  ", &val_reg);
                     match ty.as_str() {
                         "i8" => {
                             let t = format!("%ip{}t", reg); reg += 1;
-                            writeln!(out, "  {} = trunc i64 {} to i8", t, val_reg).ok();
+                            writeln!(out, "  {} = trunc i64 {} to i8", t, boxed).ok();
                             writeln!(out, "  store i8 {}, i8* {}, align {}", t, p, self.align_of("i8")).ok();
                         }
                         "i32" => {
                             let t = format!("%ip{}t", reg); reg += 1;
-                            writeln!(out, "  {} = trunc i64 {} to i32", t, val_reg).ok();
+                            writeln!(out, "  {} = trunc i64 {} to i32", t, boxed).ok();
                             writeln!(out, "  store i32 {}, i32* {}, align {}", t, p, self.align_of("i32")).ok();
                         }
                         "float" => {
@@ -451,11 +447,11 @@ impl LlvmBackend {
                         }
                         "i8*" => {
                             let t = format!("%ip{}t", reg); reg += 1;
-                            writeln!(out, "  {} = inttoptr i64 {} to i8*", t, val_reg).ok();
+                            writeln!(out, "  {} = inttoptr i64 {} to i8*", t, boxed).ok();
                             writeln!(out, "  store i8* {}, i8** {}, align {}", t, p, self.align_of("i8*")).ok();
                         }
                         _ => {
-                            writeln!(out, "  store i64 {}, {}* {}, align {}", val_reg, ty, p, self.align_of(&ty)).ok();
+                            writeln!(out, "  store {} {}, {}* {}, align {}", ty, boxed, ty, p, self.align_of(&ty)).ok();
                         }
                     }
                 }
@@ -515,7 +511,14 @@ impl LlvmBackend {
                 reg = raw;
             }
             self.let_bindings.insert(n.clone(), reg.clone());
-            self.let_binding_types.insert(n.clone(), t.clone());
+            // Boxed params (Bool/Char/String/Data) are stored as i64,
+            // so mark them as Type::Int so downstream doesn't treat them
+            // as native i1/i32/i8*. Float stays Type::Float (handled specially).
+            if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data) {
+                self.let_binding_types.insert(n.clone(), Type::Int);
+            } else {
+                self.let_binding_types.insert(n.clone(), t.clone());
+            }
         }
         self.txn_counter = 0;
         self.terminated = false;
@@ -680,7 +683,13 @@ impl LlvmBackend {
             self.txn_counter += 1;
             writeln!(out, "  {} = load i64, i64* {}, align 8", loaded, slot).ok();
             self.let_bindings.insert(n.clone(), loaded);
-            self.let_binding_types.insert(n.clone(), t.clone());
+            // loaded is i64 (boxed value from param slot). Store Type::Int
+            // for boxed types so downstream doesn't treat them as native.
+            if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data | Type::Float) {
+                self.let_binding_types.insert(n.clone(), Type::Int);
+            } else {
+                self.let_binding_types.insert(n.clone(), t.clone());
+            }
         }
 
         self.callable_txn_result = Some("%result".to_string());
@@ -693,7 +702,11 @@ impl LlvmBackend {
         if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
             let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
             let i1 = format!("%pc{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+            if cond.ty == Type::Bool {
+                writeln!(out, "  {} = and i1 {}, true", i1, cond).ok();
+            } else {
+                writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+            }
             writeln!(out, "  br i1 {}, label %body, label %done", i1).ok();
         } else {
             writeln!(out, "  br label %body").ok();
@@ -731,7 +744,12 @@ impl LlvmBackend {
     pub(super) fn emit_precondition_check(&mut self, out: &mut String, pre: &Expr, indent: &str) {
         let cond = self.emit_expr(out, pre, indent);
         let i1 = format!("%pi{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1, cond).ok();
+        if cond.ty == Type::Bool {
+            // cond is already i1 (native bool)
+            writeln!(out, "{}{} = and i1 {}, true", indent, i1, cond).ok();
+        } else {
+            writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1, cond).ok();
+        }
         let panic_l = format!("pp{}", self.txn_counter); self.txn_counter += 1;
         let safe_l = format!("ps{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, safe_l, panic_l).ok();
@@ -748,9 +766,13 @@ impl LlvmBackend {
         self.txn_counter = 0;
         self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
-        let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
-        writeln!(out, "  ret i1 {}", i1).ok();
+        if cond.ty == Type::Bool {
+            writeln!(out, "  ret i1 {}", cond).ok();
+        } else {
+            let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+            writeln!(out, "  ret i1 {}", i1).ok();
+        }
         writeln!(out, "}}").ok();
     }
 
@@ -762,8 +784,13 @@ impl LlvmBackend {
         self.txn_counter = 0;
         self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
-        let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+        let i1 = if cond.ty == Type::Bool {
+            cond.name.clone()
+        } else {
+            let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+            i1
+        };
         let txn_fire_l = format!("txn_fire_{}", self.txn_counter + 1);
         writeln!(out, "  br i1 {}, label %{}, label %{}_done", i1, txn_fire_l, async_name).ok();
         writeln!(out, "{}:", txn_fire_l).ok();

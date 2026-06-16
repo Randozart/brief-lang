@@ -5,6 +5,31 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 impl LlvmBackend {
+    /// Store a native-typed value to the i64 result slot, boxing if needed.
+    fn store_i64_result(&mut self, out: &mut String, indent: &str, r: &TypedRegister, rs: &str) {
+        let adapted = self.adapt_to_i64(out, indent, r);
+        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, adapted, rs).ok();
+    }
+
+    /// Box a native-typed value to i64 for return/store, returning the adapted SSA name.
+    pub(super) fn adapt_to_i64(&mut self, out: &mut String, indent: &str, r: &TypedRegister) -> String {
+        if r.ty == Type::Bool {
+            let z = format!("%rz{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = zext i1 {} to i64", indent, z, r.name).ok();
+            z
+        } else if r.ty == Type::Char {
+            let z = format!("%rz{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, z, r.name).ok();
+            z
+        } else if r.ty == Type::String || r.ty == Type::Data {
+            let p = format!("%rp{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
+            p
+        } else {
+            r.name.clone()
+        }
+    }
+
     pub(crate) fn emit_stmt(&mut self, out: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
             Statement::Term { values, swan_song, .. } => {
@@ -17,8 +42,8 @@ impl LlvmBackend {
                     // Store value to result slot, branch to post label
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);
-                        if let Some(ref rs) = self.callable_txn_result {
-                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, r, rs).ok();
+                        if let Some(rs) = self.callable_txn_result.clone() {
+                            self.store_i64_result(out, indent, &r, &rs);
                         }
                     }
                     if let Some(ref pl) = self.callable_txn_post_label {
@@ -28,13 +53,23 @@ impl LlvmBackend {
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);
                         if self.fn_ret_ty == "i32" {
-                            let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, r).ok();
-                            writeln!(out, "{}ret i32 {}", indent, tr).ok();
+                            if r.ty == Type::Bool {
+                                let z = format!("%rz{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = zext i1 {} to i32", indent, z, r.name).ok();
+                                writeln!(out, "{}ret i32 {}", indent, z).ok();
+                            } else if r.ty == Type::Char {
+                                writeln!(out, "{}ret i32 {}", indent, r).ok();
+                            } else {
+                                let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, r.name).ok();
+                                writeln!(out, "{}ret i32 {}", indent, tr).ok();
+                            }
                         } else if self.fn_ret_ty == "i64" {
-                            writeln!(out, "{}ret i64 {}", indent, r).ok();
+                            let adapted = self.adapt_to_i64(out, indent, &r);
+                            writeln!(out, "{}ret i64 {}", indent, adapted).ok();
                         } else {
-                            writeln!(out, "{}ret i64 {}", indent, r).ok();
+                            let adapted = self.adapt_to_i64(out, indent, &r);
+                            writeln!(out, "{}ret i64 {}", indent, adapted).ok();
                         }
                     } else if self.fn_ret_ty == "i32" {
                         writeln!(out, "{}ret i32 0", indent).ok();
@@ -56,8 +91,8 @@ impl LlvmBackend {
                     // Store value to result slot, branch to post label
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);
-                        if let Some(ref rs) = self.callable_txn_result {
-                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, r, rs).ok();
+                        if let Some(rs) = self.callable_txn_result.clone() {
+                            self.store_i64_result(out, indent, &r, &rs);
                         }
                     }
                     if let Some(ref pl) = self.callable_txn_post_label {
@@ -68,7 +103,7 @@ impl LlvmBackend {
                     // instead of ret, so LLVM can unroll the loop.
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);
-                        writeln!(out, "{}store i64 {}, i64* %state, align 8 ; term! value", indent, r).ok();
+                        self.store_i64_result(out, indent, &r, "%state");
                     }
                     writeln!(out, "{}br label %{}", indent, exit_label).ok();
                     self.terminated = true;
@@ -100,8 +135,8 @@ impl LlvmBackend {
                 if self.in_callable_txn {
                     if let Some(v) = e {
                         let r = self.emit_expr(out, v, indent);
-                        if let Some(ref rs) = self.callable_txn_result {
-                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, r, rs).ok();
+                        if let Some(rs) = self.callable_txn_result.clone() {
+                            self.store_i64_result(out, indent, &r, &rs);
                         }
                     }
                     if let Some(ref pl) = self.callable_txn_post_label {
@@ -262,10 +297,11 @@ impl LlvmBackend {
                         if !is_volatile {
                             let ty = self.field_types[idx].clone();
                             let new_reg = format!("%in{}", self.txn_counter); self.txn_counter += 1;
+                            let val_boxed = self.adapt_to_i64(out, indent, &val);
                             match ty.as_str() {
                                 "i8" => {
                                     let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val).ok();
+                                    writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val_boxed).ok();
                                     writeln!(out, "{}{} = insertvalue %State {}, i8 {}, {}", indent, new_reg, ssa_reg, tr, idx).ok();
                                 }
                                 "float" => {
@@ -274,11 +310,11 @@ impl LlvmBackend {
                                 }
                                 "i8*" => {
                                     let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, val).ok();
+                                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, val_boxed).ok();
                                     writeln!(out, "{}{} = insertvalue %State {}, i8* {}, {}", indent, new_reg, ssa_reg, p, idx).ok();
                                 }
                                 _ => {
-                                    writeln!(out, "{}{} = insertvalue %State {}, i64 {}, {}", indent, new_reg, ssa_reg, val, idx).ok();
+                                    writeln!(out, "{}{} = insertvalue %State {}, i64 {}, {}", indent, new_reg, ssa_reg, val_boxed, idx).ok();
                                 }
                             }
                             self.ssa_state_reg = Some(new_reg);
@@ -297,10 +333,11 @@ impl LlvmBackend {
                     let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
                     let vol_str = if is_volatile { " volatile" } else { "" };
+                    let val_boxed = self.adapt_to_i64(out, indent, &val);
                     match ty.as_str() {
                         "i8" => {
                             let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val).ok();
+                            writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val_boxed).ok();
                             writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, vol_str, tr, p, self.align_of(&ty)).ok();
                         }
                         "float" => {
@@ -309,20 +346,19 @@ impl LlvmBackend {
                         }
                         s if s == "i8*" || s == "ptr" => {
                             let fp = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, fp, val).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, fp, val_boxed).ok();
                             writeln!(out, "{}store{} i8* {}, i8** {}, align {}", indent, vol_str, fp, p, self.align_of(&ty)).ok();
                         }
                         _ => {
-                            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val, ty, p, self.align_of(&ty)).ok();
+                            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty)).ok();
                         }
                     }
-                } else if let Some(slot) = self.param_slots.get(&fname) {
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val, slot).ok();
-                    // Update let_bindings so subsequent reads see the new value
-                    self.let_bindings.insert(fname.clone(), val.name.clone());
-                    if let Some(ft) = self.let_binding_types.get(&fname) {
-                        self.let_binding_types.insert(fname.clone(), ft.clone());
-                    }
+                } else if let Some(slot) = self.param_slots.get(&fname).cloned() {
+                    let val_boxed = self.adapt_to_i64(out, indent, &val);
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val_boxed, slot).ok();
+                    // Update let_bindings so subsequent reads see the boxed i64 value
+                    self.let_bindings.insert(fname.clone(), val_boxed.clone());
+                    self.let_binding_types.insert(fname.clone(), Type::Int);
                 } else {
                     self.let_bindings.insert(fname.clone(), val.name.clone());
                     self.let_binding_types.insert(fname.clone(), val.ty.clone());
@@ -331,8 +367,13 @@ impl LlvmBackend {
             }
             Statement::Guarded { condition, statements, .. } => {
                 let cond = self.emit_expr(out, condition, indent);
-                let i1 = format!("%gc{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1, cond).ok();
+                let i1 = if cond.ty == Type::Bool {
+                    cond.name.clone()
+                } else {
+                    let i1 = format!("%gc{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1, cond).ok();
+                    i1
+                };
 
                 // Guard→select if single assignment (not in SSA mode — branch-based path handles insertvalue)
                 if statements.len() == 1 && self.ssa_state_reg.is_none() {
@@ -350,8 +391,9 @@ impl LlvmBackend {
                                     "i8" => {
                                         let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
                                         writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, ld, p, self.align_of(&ty)).ok();
+                                        let av_boxed = self.adapt_to_i64(out, indent, &av);
                                         let av_tr = format!("%gatr{}", self.txn_counter); self.txn_counter += 1;
-                                        writeln!(out, "{}{} = trunc i64 {} to i8", indent, av_tr, av).ok();
+                                        writeln!(out, "{}{} = trunc i64 {} to i8", indent, av_tr, av_boxed).ok();
                                         writeln!(out, "{}{} = select i1 {}, i8 {}, i8 {}", indent, se, i1, av_tr, ld).ok();
                                         writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }

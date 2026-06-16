@@ -23,6 +23,38 @@
 
 **Lesson**: Always check before overwriting. The "new FFI syntax" (direct `from "..."`) and "old profile FFI" coexist — the typechecker assumed no `from` clause existed.
 
+## 2026-06-16 — LLVM Backend Audit — i64 Boxing Tax (Phase 0/1 Plan)
+
+**Audit**: External audit of `src/backend/llvm/` found 4 bug classes:
+
+| # | Bug | Location | Impact |
+|---|---|---|---|
+| 1 | String trigger first-byte-only comparison | `emit_expr.rs:1775` | Silent match failure |
+| 2 | Dynamic alloca inside loops (enum constructors) | `emit_expr.rs:391` | Stack overflow under reactive loops |
+| 3 | Silent zero stubs (MapLiteral, SetLiteral, arrows) | `emit_expr.rs:1360` | Silent data corruption |
+| 4 | i64 boxing type confusion (`ptrtoint` on i64) | Multiple files | `llc` type errors — **active blocker** |
+
+**Root Cause (Bug 4)**: The backend boxes all native types (Bool → i1→i64, Char → i32→i64, String → i8*→i64, Float → float→i64) for a uniform i64 ABI. 30% of the LLVM backend code is casting/boxing glue. The type tracking (TypedRegister.ty) regularly falls out of sync with the actual LLVM register type, producing invalid IR.
+
+**Phase 0 Fix** (COMPLETED 2026-06-16): 18 edits across 4 files. See
+`docs/architecture/fixes/i64-boxing-type-confusion-phase0.md` for full details.
+Key changes:
+- All `TypedRegister.ty` values for boxed i64 values now use `Type::Int`
+- `adapt_to_i64` calls inserted before all field stores, tuple/list element stores,
+  comparison ops, and intrinsic calls that interface with C (i8*)
+- `emit_callable_txn` param binding fixed to store `Type::Int` for boxed types
+- `emit_init_state` fixed to `adapt_to_i64` before truncating to field type
+- `LiteralExpr::Char` and `LiteralExpr::String` return `Type::Int` (already boxed)
+- `Expr::String` uses `bitcast` to keep i8* (for correct String→Int cast detection)
+- ReadFile/Spawn intrinsics properly box i8* returns to i64
+
+**Phase 1 Plan** (native type refactor): Delete i64 boxing entirely per the LLVM backend. Native i1/i32/i8* throughout. Delete `adapt_to_i64`, `ptrtoint_if_string`, `store_i64_result`, all zext/trunc/inttoptr/ptrtoint boxing glue. The type system becomes self-verifying. ~200 lines deleted.
+
+**Follow-up tasks**:
+- Fix string trigger comparison (Bug 1): emit `@memcmp` instead of first-byte load.
+- Document enum alloca stack-safety limitation (Bug 2): add comment, fix later.
+- Track zero-stub expressions (Bug 3): add `todo!()` warnings in `--dev` mode.
+
 ## 2026-05-28 — Adding built-in string matches for stdlib functions
 
 **Issue**: Added `is_digit`, `is_alpha`, `is_alphanumeric`, `is_upper`, `is_lower`, `is_space`, `char_to_string` as Rust string-match built-ins in the interpreter.

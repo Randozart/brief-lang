@@ -86,8 +86,11 @@ impl ExprCodegenLLVM for LiteralExpr {
                 crate::backend::llvm::TypedRegister { name: v, ty: Type::Int }
             }
             LiteralExpr::Bool(b) => {
-                let val = if *b { 1 } else { 0 };
-                writeln!(out, "{indent}{v} = add i64 0, {val}", indent = "", v = v, val = val).ok();
+                if *b {
+                    writeln!(out, "{indent}{v} = and i1 true, true", indent = "", v = v).ok();
+                } else {
+                    writeln!(out, "{indent}{v} = xor i1 true, true", indent = "", v = v).ok();
+                }
                 crate::backend::llvm::TypedRegister { name: v, ty: Type::Bool }
             }
             LiteralExpr::Float(f) => {
@@ -107,13 +110,16 @@ impl ExprCodegenLLVM for LiteralExpr {
                 writeln!(out, "{indent}{p} = getelementptr inbounds [{len} x i8], [{len} x i8]* {g}, i64 0, i64 0",
                     indent = "", p = p, len = s.len() + 1, g = g).ok();
                 writeln!(out, "{indent}{v} = ptrtoint i8* {p} to i64", indent = "", v = v, p = p).ok();
-                crate::backend::llvm::TypedRegister { name: v, ty: Type::String }
+                // v is already i64 (boxed). Return Type::Int so adapt_to_i64
+                // doesn't try to ptrtoint an already-boxed value.
+                crate::backend::llvm::TypedRegister { name: v, ty: Type::Int }
             }
             LiteralExpr::Char(c) => {
                 let ci = format!("%cc{}", ctx.txn_counter); ctx.txn_counter += 1;
                 writeln!(out, "{indent}{ci} = add i32 0, {cval}", indent = "", ci = ci, cval = *c as i32).ok();
                 writeln!(out, "{indent}{v} = zext i32 {ci} to i64", indent = "", v = v, ci = ci).ok();
-                crate::backend::llvm::TypedRegister { name: v, ty: Type::Char }
+                // v is i64 (boxed Char). Type::Int so adapt_to_i64 passes through.
+                crate::backend::llvm::TypedRegister { name: v, ty: Type::Int }
             }
             LiteralExpr::Term => {
                 writeln!(out, "{indent}{v} = add i64 0, 0", indent = "", v = v).ok();

@@ -87,6 +87,22 @@ impl std::fmt::Display for TypedRegister {
         write!(f, "{}", self.name)
     }
 }
+
+/// Map Brief Type to native LLVM type string.
+/// This is the single source of truth — eliminates i64 boxing for strings, chars, bools.
+impl TypedRegister {
+    pub fn llvm(&self) -> &'static str {
+        match self.ty {
+            Type::Bool => "i1",
+            Type::Char => "i32",
+            Type::Int | Type::UInt => "i64",
+            Type::Float => "float",
+            Type::String | Type::Data => "i8*",
+            _ => "i64",
+        }
+    }
+}
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
@@ -778,7 +794,7 @@ self.emit_declares(&mut out);
                 Type::Bool => "i32",
                 Type::Char => "i32",
                 Type::Float => "float",
-        Type::String | Type::Data => "i8",
+        Type::String | Type::Data => "i8*",
                 _ => "i64",
             }).collect();
             write!(out, "declare {} @{}(", ret_ty, name).ok();
@@ -789,8 +805,9 @@ self.emit_declares(&mut out);
             writeln!(out, ") #1").ok();
         }
 
-        // Declare __str_concat used by the backend for string concatenation
-        writeln!(out, "declare i8* @__str_concat(i8*, i8*) #1").ok();
+        // Declare memory/string helpers used by inline concat and FFI marshaling
+        // malloc/strlen declared by brief_rt.c via #include <stdlib.h> + <string.h>
+        writeln!(out, "declare i64 @strlen(i8*) #1").ok();
 
         // Declare epoll + libc functions for the trg reactive event loop
         writeln!(out, "declare i32 @epoll_create1(i32) #1").ok();
@@ -943,10 +960,17 @@ self.emit_declares(&mut out);
         writeln!(out, "; %State is allocated on the stack in main() as %state = alloca %State").ok();
         writeln!(out).ok();
 
-        // Emit string constants
+        // Emit string constants as global Brief headers
+        // Each is a 2-slot header: { data_ptr (ptrtoint of slot 2), length, [chars] }
+        // This makes ALL string values in the IR uniform — same format as heap-allocated strings.
         for (si, s) in self.string_constants.iter().enumerate() {
             let escaped = escape_llvm_string(s);
-            writeln!(out, "@str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1", si, s.len() + 1, escaped).ok();
+            let len = s.len();
+            writeln!(out, "@str.{} = private unnamed_addr constant <{{ i64, i64, [{} x i8] }}> <{{", si, len + 1).ok();
+            writeln!(out, "  i64 ptrtoint (i8* getelementptr inbounds (<{{ i64, i64, [{} x i8] }}>, <{{ i64, i64, [{} x i8] }}>* @str.{}, i64 0, i32 2) to i64),", len + 1, len + 1, si).ok();
+            writeln!(out, "  i64 {},", len).ok();
+            writeln!(out, "  [{} x i8] c\"{}\\00\"", len + 1, escaped).ok();
+            writeln!(out, "}}>, align 8").ok();
         }
         if !self.string_constants.is_empty() { writeln!(out).ok(); }
 

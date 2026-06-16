@@ -600,8 +600,13 @@ impl LlvmBackend {
             if !matches!(pre, Expr::Bool(true)) {
                 self.pre_load_all_fields(out, "%state");
                 let cond = self.emit_expr(out, pre, "  ");
-                let i1 = format!("%pi{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+                let i1 = if cond.ty == Type::Bool {
+                    cond.name.clone()
+                } else {
+                    let i1 = format!("%pi{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+                    i1
+                };
                 let body_l = format!("b_{}", name);
                 let skip_l = format!("s_{}", name);
                 let done_l = format!("done_{}", name);
