@@ -1,4 +1,5 @@
 use crate::ast::{ArrowDir, BracketOp, Expr, Hashtag, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
+use crate::features::literal::LiteralExpr;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -494,6 +495,14 @@ pub fn simplify_body(body: &[Statement]) -> Vec<Statement> {
     current
 }
 
+fn get_int(e: &Expr) -> Option<i64> {
+    match e {
+        Expr::Integer(n) => Some(*n),
+        Expr::Literal(boxed) => match boxed.as_ref() { LiteralExpr::Integer(n) => Some(*n), _ => None },
+        _ => None,
+    }
+}
+
 fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
     for stmt in body {
         if let Statement::Assignment { lhs, expr, .. } = stmt {
@@ -502,22 +511,22 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
                 _ => continue,
             };
             if let Expr::Add(a, b) = expr {
-                if let (Expr::Identifier(var), Expr::Integer(delta)) = (a.as_ref(), b.as_ref()) {
-                    if *var == name && *delta > 0 {
-                        return Some(IncrementInfo { var: name.clone(), delta: *delta });
+                if let (Expr::Identifier(var), Some(delta)) = (a.as_ref(), get_int(b)) {
+                    if *var == name && delta > 0 {
+                        return Some(IncrementInfo { var: name.clone(), delta });
                     }
                 }
-                if let (Expr::Identifier(var), Expr::Integer(delta)) = (b.as_ref(), a.as_ref()) {
-                    if *var == name && *delta > 0 {
-                        return Some(IncrementInfo { var: name.clone(), delta: *delta });
+                if let (Expr::Identifier(var), Some(delta)) = (b.as_ref(), get_int(a)) {
+                    if *var == name && delta > 0 {
+                        return Some(IncrementInfo { var: name.clone(), delta });
                     }
                 }
             }
             // Decreasing counter: count = count - delta or count = count - 1
             if let Expr::Sub(a, b) = expr {
-                if let (Expr::Identifier(var), Expr::Integer(delta)) = (a.as_ref(), b.as_ref()) {
-                    if *var == name && *delta > 0 {
-                        return Some(IncrementInfo { var: name.clone(), delta: *delta });
+                if let (Expr::Identifier(var), Some(delta)) = (a.as_ref(), get_int(b)) {
+                    if *var == name && delta > 0 {
+                        return Some(IncrementInfo { var: name.clone(), delta });
                     }
                 }
             }
@@ -527,8 +536,8 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
                     let is_self_add = matches!(lhs.as_ref(), Expr::Identifier(v) if *v == name);
                     if is_self_add {
                         // Try r1 - r2 with both as constants
-                        let r1 = if let Expr::Integer(n) = rhs2.as_ref() { Some(*n) } else { None };
-                        let r2 = if let Expr::Integer(n) = rhs.as_ref() { Some(*n) } else { None };
+                        let r1 = get_int(rhs2);
+                        let r2 = get_int(rhs);
                         if let (Some(r1_val), Some(r2_val)) = (r1, r2) {
                             let net = r1_val - r2_val;
                             if net > 0 {
