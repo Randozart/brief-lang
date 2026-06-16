@@ -109,6 +109,29 @@ The following files received a single `Expr::Literal(lit)` route arm:
 | `Cargo.toml` | Modified | Added `kani_full` feature |
 | `scripts/verify.sh` | Created | CI verification script |
 
+## LLVM Backend Boxing Convention (2026-06-16)
+
+The LLVM backend's `emit_llvm` for `LiteralExpr` returns values in the
+**boxed i64 format** — matching the system-wide convention that all SSA
+values are `i64` regardless of Brief-level type:
+
+| Literal Variant | LLVM Emission | Register Type | TypedRegister.ty |
+|----------------|---------------|---------------|------------------|
+| `LiteralExpr::Char(c)` | `add i32 0, c` → `zext i32 to i64` | `i64` | `Type::Int` |
+| `LiteralExpr::String(s)` | `getelementptr @str.N` → `ptrtoint to i64` | `i64` | `Type::Int` |
+| `LiteralExpr::Bool(b)` | `and i1 true, true` / `xor i1 true, true` | `i1` | `Type::Bool` |
+| `LiteralExpr::Integer(n)` | `add i64 0, n` | `i64` | `Type::Int` |
+| `LiteralExpr::Float(f)` | `bitcast float f to i32` → `zext i32 to i64` | `i64` | `Type::Float` |
+
+**Important**: `LiteralExpr::Char` and `LiteralExpr::String` return
+`Type::Int` (not `Type::Char`/`Type::String`) because the value is
+already boxed to `i64`. This prevents `adapt_to_i64` from generating
+a bogus `ptrtoint`/`zext` on an already-boxed value.
+
+`LiteralExpr::Bool` returns `Type::Bool` with a native `i1` register.
+This is correct — `adapt_to_i64` can zext `i1` to `i64` on demand,
+and other code paths (comparisons, `as_bool_reg`) consume `i1` directly.
+
 ## Verification
 
 - 713 tests pass (`cargo test --lib`)

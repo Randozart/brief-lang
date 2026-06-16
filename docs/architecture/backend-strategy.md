@@ -126,7 +126,91 @@ This was the root cause of the `brief_read_file` bug (2026-06-14) — the intrin
 was passing `i64` directly, and the C function interpreted raw characters as a
 Brief header pointer. See `docs/architecture/fixes/brief-read-file-ffi-marshal.md`.
 
-## Known Backend Bugs (Fixed 2026-06-13)
+## i64 Boxing Convention (Phase 0, 2026-06-16)
+
+The LLVM backend boxes native types to `i64` for a uniform internal ABI.
+This avoids SSA type proliferation — every value slot is `i64` regardless
+of the Brief-level type. The `TypedRegister.ty` field tracks the Brief type,
+and `adapt_to_i64()` is the canonical function that produces a boxed `i64`
+from any `TypedRegister`, regardless of its current native/boxed state.
+
+### The Convention
+
+| Brief type | Internal LLVM type | TypedRegister.ty | adapt_to_i64 |
+|------------|-------------------|------------------|-------------|
+| `Bool` | `i1` (native) or `i64` (boxed) | `Type::Bool` or `Type::Int` | `zext i1 to i64` / pass-through |
+| `Char` | `i32` (native) or `i64` (boxed) | `Type::Char` or `Type::Int` | `zext i32 to i64` / pass-through |
+| `String` | `i8*` (native) or `i64` (boxed) | `Type::String` or `Type::Int` | `ptrtoint i8* to i64` / pass-through |
+| `Int` | `i64` | `Type::Int` | pass-through |
+| `Float` | `float` (via cache) | `Type::Float` | pass-through |
+
+### Rule: When a value is already `i64` (boxed), `ty` MUST be `Type::Int`
+
+This is the critical invariant. If a `TypedRegister` has `ty == Type::String`
+but its register is actually `i64` (because it was loaded from a state field
+that stores boxed values), `adapt_to_i64` will incorrectly emit
+`ptrtoint i8* %i64_reg to i64` — treating an integer as a pointer.
+
+### Where boxing happens
+
+| Action | Emits |
+|--------|-------|
+| Function param entry | `ptrtoint i8* %arg to i64` (String), `zext i32 %arg to i64` (Char), `zext i8 %arg to i64` (Bool) → `ty: Type::Int` |
+| State field load (`i8*` field) | `load i8*` then `ptrtoint` to i64 → `ty: Type::Int` |
+| State field load (`i8` field, Bool) | `load i8` then `trunc to i1` → `ty: Type::Bool` |
+| Literal emission (`LiteralExpr::Char`) | `zext i32 %char to i64` → `ty: Type::Int` |
+| Literal emission (`LiteralExpr::String`) | `ptrtoint i8* %ptr to i64` → `ty: Type::Int` |
+| Cast `Int → String` | `call i64 @__int_to_str` → `ty: Type::Int` |
+| Cast `String → Int` | `call i64 @__str_to_int` → value stays `i64` |
+
+### Where unboxing happens
+
+| Action | Emits |
+|--------|-------|
+| Guard condition | `icmp ne i64 %boxed, 0` (treats boxed Bool as non-zero = true) |
+| Internal call arg (Bool) | `adapt_to_i64` → `trunc i64 to i8` (C ABI uses `i8` for Bool) |
+| Internal call arg (String) | `adapt_to_i64` → `inttoptr i64 to i8*` |
+| FFI call arg (String) | `adapt_to_i64` → `inttoptr i64 to i8*` |
+| Field store to `i8` (Bool) | `adapt_to_i64` → `trunc i64 to i8` |
+| Comparison (`icmp`) | Both operands run through `adapt_to_i64` first |
+
+### `adapt_to_i64` — the canonical boxer
+
+Defined in `emit_stmt.rs` as `pub(super) fn adapt_to_i64`:
+
+```rust
+match r.ty {
+    Type::Bool => zext i1 %name to i64,
+    Type::Char => zext i32 %name to i64,
+    Type::String | Type::Data => ptrtoint i8* %name to i64,
+    _ => r.name.clone(),  // Type::Int or Type::Float → pass through
+}
+```
+
+This function must be called before:
+- Any `store i64` to a state field, tuple slot, or param slot
+- Any `trunc i64 to i8` (Bool) or `trunc i64 to i32` (Char) for field/ABI conversion
+- Any `inttoptr i64 to i8*` (String) for FFI/internal call arg passing
+- Any `icmp`/`fcmp` that expects `i64` operands
+
+### FFI Marshaling Convention (Updated 2026-06-16)
+
+The FFI boundary uses a different convention — C types, not internal types:
+
+| Brief type | C type | LLVM IR type | MarshaL |
+|------------|--------|-------------|---------|
+| `Int` | `int64_t` | `i64` | Direct |
+| `Bool` | `int64_t` | `i32` | `trunc i64 %boxed to i32` at FFI call site |
+| `Float` | `float` | `float` | `ensure_float_reg` |
+| `String` | `const char*` | `ptr` (`i8*`) | `inttoptr i64 %boxed to ptr` |
+| `Data` | `const char*` | `ptr` | Same as String |
+| `Char` | `int64_t` | `i32` | `trunc i64 %boxed to i32` |
+
+FFI calls at `emit_expr.rs:311-335` use the marshal table above.
+Intrinsics that call C functions (ReadFile, Spawn) must apply the same
+marshaling — this was the root cause of the `brief_read_file` bug (2026-06-14).
+
+## Known Backend Bugs (Fixed 2026-06-16)
 
 All bugs below were found during officina-cli compilation testing. Each
 produced invalid LLVM IR that `opt` or `llc` rejected.
@@ -142,6 +226,19 @@ produced invalid LLVM IR that `opt` or `llc` rejected.
 | 7 | Expr simplification exponential blowup | `equality_saturation.rs` | Fixpoint loop × recursive simplify on children = O(10^n) for 32-term `||` chain | Rewritten as bottom-up O(n) with hash-cons cache |
 | 8 | Wrong ret after terminated guard | `emit_stmt.rs`, `emit_toplevel.rs` | Unconditional `ret` fix created dead code after terminator | Reverted to conditional; Guarded handler emits `ret` for else-path itself |
 | 9 | Non-linear body with SSA insertvalue | `mod.rs`, `loop_engine.rs` | A005 SSA path used phi nodes even with non-exclusive guard conditions | Added `prove_linear()` check + A005b memory fallback |
+
+| 10 | `Type::String` on boxed i64 | `emit_expr.rs` (4 sites), `emit_stmt.rs` (3), `emit_toplevel.rs` (3), `features/literal.rs` (2) | `TypedRegister.ty` out of sync with LLVM type — `ptrtoint i8* %i64` invalid IR | `adapt_to_i64` canonical boxer; `Type::Int` for all boxed i64 values; 18 edits across 4 files |
+| 11 | `emit_fcmp` assumed `i64` operands | `emit_expr.rs` | `icmp eq i64 %i1, %i64` when one operand was native i1 Bool | `adapt_to_i64` both operands before `icmp` |
+| 12 | `emit_binop` assumed `i64` operands | `emit_expr.rs` | `add i64 %i1, %i64` when one operand was native i1 Bool | `adapt_to_i64` both operands before `i64` ops |
+| 13 | Tuple/List element stores used raw type | `emit_expr.rs` | `store i64 %i1, i64*` when element was native i1 Bool | `adapt_to_i64` each element before storing |
+| 14 | Guarded field store used raw type | `emit_stmt.rs` | `trunc i64 %i1 to i8` when value was native i1 | `adapt_to_i64` before trunc |
+| 15 | SSA `insertvalue` store used raw type | `emit_stmt.rs` | `insertvalue %State, i8 %i1` when value was native i1 | `adapt_to_i64` before trunc/insert |
+| 16 | Param slot store used raw type | `emit_stmt.rs` | `store i64 %i1, i64*` when value was native i1 | `adapt_to_i64` + store `Type::Int` in binding |
+| 17 | `emit_init_state` field store used raw type | `emit_toplevel.rs` | `trunc i64 %i1 to i8` when literal was native i1 | `adapt_to_i64` before trunc |
+| 18 | `CallableTxn` param binding used real type | `emit_toplevel.rs` | `let_binding_types["p"] = Type::Bool` for boxed i64 Bool | Store `Type::Int` for boxed types |
+| 19 | `Expr::Cast` returned `Type::String` for i64 | `emit_expr.rs` | `__int_to_str` returns i64 but `ty = String` | Return `Type::Int` for String/Data casts |
+| 20 | ReadFile/Spawn intrinsics returned `i8*` as `Type::String` | `emit_expr.rs` | Downstream code expected `i64` for string values | `ptrtoint` return to i64 + `Type::Int` |
+| 21 | `InlineConcat` assumed `i8*` operands | `emit_expr.rs` | `bitcast i8* %i64` when operand was already i64 (boxed) | `inttoptr i64` instead of `bitcast i8*` |
 
 **Verification**: After all fixes, `opt -O2` and `llc` pass on officina-cli
 (4,280-line IR) with zero SSA violations. 777 compiler tests pass. All 30
