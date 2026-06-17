@@ -69,11 +69,13 @@ impl LlvmBackend {
 
     pub(super) fn ensure_float_reg(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
         // Check cache first — even float-typed registers may have their
-        // native float counterpart cached (e.g. FFI return value boxed as i64).
+        // native float counterpart cached (e.g. parameter marshaling boxes
+        // float to i64 at function entry; the cache maps boxed→native).
         if let Some(cached) = self.reg_float_cache.get(&reg.name) {
             return cached.clone();
         }
         if reg.ty == Type::Float {
+            // Native float, not in cache → already a native float register.
             return reg.name.clone();
         }
         self.native_float_or_box(out, indent, &reg.name)
@@ -527,6 +529,7 @@ impl LlvmBackend {
                         let m = format!("%ai{}", i);
                         writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
                         writeln!(out, "  {} = zext i32 {} to i64", conv, m).ok();
+                        self.reg_float_cache.insert(conv.clone(), raw.to_string());
                     }
                     _ => {}
                 }

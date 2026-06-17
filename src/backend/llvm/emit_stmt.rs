@@ -179,8 +179,26 @@ impl LlvmBackend {
                 }
                 if let Some(e) = expr {
                     let r = self.emit_expr(out, e, indent);
+                    // 2026-06-17: Emit type conversion when annotation differs from emitted type.
+                    // e.g. `let c: Char = s[pos]` — s[pos] loads i64 (Type::Int) but annotation
+                    // is Type::Char (i32 native). Without the trunc, adapt_to_i64 would double-
+                    // zext i64→zext i32 i64, producing invalid LLVM IR.
+                    if let Some(ann_ty) = ty.as_ref() {
+                        if *ann_ty != r.ty {
+                            match (ann_ty, &r.ty) {
+                                (Type::Char, Type::Int | Type::UInt) => {
+                                    let cv = format!("%clv{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, cv, r.name).ok();
+                                    self.let_bindings.insert(name.clone(), cv.clone());
+                                    self.let_binding_types.insert(name.clone(), ann_ty.clone());
+                                    writeln!(out, "{}; let {} = {}", indent, name, cv).ok();
+                                    return;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     self.let_bindings.insert(name.clone(), r.name.clone());
-                    // Use type annotation if available (preserves Ptr<T> etc), otherwise fall back to emitted type
                     let resolved_ty = ty.clone().unwrap_or_else(|| r.ty.clone());
                     self.let_binding_types.insert(name.clone(), resolved_ty);
                     writeln!(out, "{}; let {} = {}", indent, name, r).ok();

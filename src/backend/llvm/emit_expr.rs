@@ -114,6 +114,18 @@ impl LlvmBackend {
                         if *ty == Type::Float {
                             return TypedRegister { name: reg.clone(), ty: Type::Float };
                         }
+                        if *ty == Type::Char {
+                            let z = format!("%iz_c{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, z, reg).ok();
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                            return TypedRegister { name: v, ty: Type::Int };
+                        }
+                        if *ty == Type::Bool {
+                            let z = format!("%iz_b{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = zext i1 {} to i64", indent, z, reg).ok();
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                            return TypedRegister { name: v, ty: Type::Int };
+                        }
                     }
                     writeln!(out, "{}{} = add i64 0, {}", indent, v, reg).ok();
                     if let Some(ty) = self.let_binding_types.get(name) {
@@ -413,7 +425,16 @@ impl LlvmBackend {
                             let parts: Vec<&str> = arg_reg.splitn(2, ' ').collect();
                             let rn = if parts.len() == 2 { parts[1] } else { arg_reg };
                             writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, pay_gep, p, ai + 1).ok();
-                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, rn, pay_gep).ok();
+                            // 2026-06-17: Box float to i64 for enum storage
+                            if parts.len() == 2 && (parts[0] == "float" || parts[0] == "float,") {
+                                let bi = format!("%fbe{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, rn).ok();
+                                let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, ze, pay_gep).ok();
+                            } else {
+                                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, rn, pay_gep).ok();
+                            }
                         }
                         writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
                     } else {

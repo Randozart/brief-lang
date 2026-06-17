@@ -99,8 +99,8 @@ defn json_get_by_index(v: JsonValue, i: Int) -> Result<JsonValue, String> {
 // ===== Whitespace Skipper =====
 
 txn skip_ws(s: String, pos: Int)
-    [pos < (s :> Size) && char.is_whitespace(s[pos])]
-    [pos >= (s :> Size) || !char.is_whitespace(s[pos])]
+    [pos < (s :> Size) && is_whitespace(s[pos])]
+    [pos >= (s :> Size) || !is_whitespace(s[pos])]
     -> Int
 {
     &pos = pos + 1;
@@ -130,10 +130,10 @@ defn parse_value(s: String, pos: Int) -> Result<ParseFrame, String> {
     [c == '{'] { term parse_object(s, p); };
     [c == '['] { term parse_array(s, p); };
     [c == '"'] { term parse_string(s, p); };
-    [c == '-' || char.is_digit(c)] { term parse_number(s, p); };
+    [c == '-' || is_digit(c)] { term parse_number(s, p); };
     [c == 't'] { term parse_keyword(s, p, "true", BoolVal(true)); };
     [c == 'f'] { term parse_keyword(s, p, "false", BoolVal(false)); };
-    [c == 'n'] { term parse_keyword(s, p, "null", Null); };
+    [c == 'n'] { term err_frame(e_utoken()); };
     term err_frame(e_utoken());
 };
 
@@ -198,15 +198,15 @@ txn parse_str_chars(s: String, pos: Int, sb: StringBuilder)
 
 defn parse_hex_escape(s: String, pos: Int) -> Result<Char, String> {
     [pos + 4 <= s :> Size
-        && char.is_hex_digit(s[pos])
-        && char.is_hex_digit(s[pos+1])
-        && char.is_hex_digit(s[pos+2])
-        && char.is_hex_digit(s[pos+3])]
+        && is_hex_digit(s[pos])
+        && is_hex_digit(s[pos+1])
+        && is_hex_digit(s[pos+2])
+        && is_hex_digit(s[pos+3])]
     {
-        let d0 = char.hex_digit_to_int(s[pos]);
-        let d1 = char.hex_digit_to_int(s[pos+1]);
-        let d2 = char.hex_digit_to_int(s[pos+2]);
-        let d3 = char.hex_digit_to_int(s[pos+3]);
+        let d0 = hex_digit_to_int(s[pos]);
+        let d1 = hex_digit_to_int(s[pos+1]);
+        let d2 = hex_digit_to_int(s[pos+2]);
+        let d3 = hex_digit_to_int(s[pos+3]);
         let code = d0 * 4096 + d1 * 256 + d2 * 16 + d3;
         term Ok(int_to_char(code));
     };
@@ -218,7 +218,7 @@ defn parse_hex_escape(s: String, pos: Int) -> Result<Char, String> {
 defn parse_number(s: String, pos: Int) -> Result<ParseFrame, String> {
     let is_neg: Bool = s[pos] == '-';
     let ipos: Int = choose_if(is_neg, pos + 1, pos);
-    [!char.is_digit(s[ipos])] {
+    [!is_digit(s[ipos])] {
         term err_frame(e_invnum());
     };
     let digits = parse_int_digits(s, ipos, 0);
@@ -245,11 +245,11 @@ defn parse_number(s: String, pos: Int) -> Result<ParseFrame, String> {
 };
 
 txn parse_int_digits(s: String, pos: Int, val: Int)
-    [pos < (s :> Size) && char.is_digit(s[pos])]
-    [pos >= (s :> Size) || !char.is_digit(s[pos])]
+    [pos < (s :> Size) && is_digit(s[pos])]
+    [pos >= (s :> Size) || !is_digit(s[pos])]
     -> Result<ParseFrame, String>
 {
-    let d = char.digit_to_int(s[pos]);
+    let d = digit_to_int(s[pos]);
     &val = val * 10 + d;
     &pos = pos + 1;
     term Ok(ParseFrame { value: IntVal(val), pos: pos });
@@ -257,7 +257,7 @@ txn parse_int_digits(s: String, pos: Int, val: Int)
 
 defn parse_float_remainder(s: String, pos: Int, is_neg: Bool, int_part: Int) -> Result<ParseFrame, String> {
     let frac_start = pos + 1;
-    [!char.is_digit(s[frac_start])] {
+    [!is_digit(s[frac_start])] {
         term err_frame(e_invnum());
     };
     let frac = parse_float_digits(s, frac_start, 0.0, 1.0);
@@ -287,11 +287,11 @@ defn parse_float_remainder(s: String, pos: Int, is_neg: Bool, int_part: Int) -> 
 };
 
 txn parse_float_digits(s: String, pos: Int, frac: Float, place: Float)
-    [pos < (s :> Size) && char.is_digit(s[pos])]
-    [pos >= (s :> Size) || !char.is_digit(s[pos])]
+    [pos < (s :> Size) && is_digit(s[pos])]
+    [pos >= (s :> Size) || !is_digit(s[pos])]
     -> Result<ParseFrame, String>
 {
-    let d = char.digit_to_int(s[pos]) as Float;
+    let d = digit_to_int(s[pos]) as Float;
     &frac = frac + d / (place * 10.0);
     &place = place * 10.0;
     &pos = pos + 1;
@@ -306,7 +306,7 @@ defn parse_exponent(s: String, pos: Int, base: JsonValue, base_is_neg: Bool) -> 
     let is_neg_exp: Bool = s[ep] == '-';
     let has_plus: Bool = s[ep] == '+';
     let exp_start: Int = choose_if(is_neg_exp || has_plus, ep + 1, ep);
-    [!char.is_digit(s[exp_start])] {
+    [!is_digit(s[exp_start])] {
         term err_frame(e_invnum());
     };
     let exp_val = parse_int_digits(s, exp_start, 0);
