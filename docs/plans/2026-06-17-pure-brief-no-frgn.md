@@ -19,55 +19,48 @@ All three categories are eliminable.
 
 ---
 
-## Phase 1: Pure-Brief JSON Parser (`lib/std/json.bv`)
+## Phase 1: Pure-Brief JSON Parser (`lib/std/json.bv`) — ✅ DONE
 
-### Problem
+Wrote a full recursive-descent JSON parser in pure Brief.
+Replaces 28 `frgn __*` declarations backed by interpreter-only Rust FFI.
+The parser handles all JSON grammar (objects, arrays, strings with escapes,
+numbers as Int/Float, keywords). Error types use `String` because the
+type checker can't infer enum variant types as the parent enum type.
 
-Officina declares 5 `frgn` JSON functions backed by the interpreter's Rust FFI.
-The LLVM backend emits `call @json_parse` which has no linkable definition.
-Additionally, `json_get` is a **stub** that ignores its key argument — it's
-broken even in the interpreter.
+Built-in `Result<T,E>` and `Option<T>` (injected by the compiler) enable
+clean error handling. LLVM backend has two pre-existing bugs that prevent
+binary emission for code using JsonValue:
+1. Char `zext i32 %i64_reg to i64` — fixed Int→Char cast but string indexing
+   still produces mismatched types
+2. Float parameter marshaling — defn functions receive `float` but internals
+   convert through i32→i64, causing type mismatch
 
-### Solution
+## Phase 2: Migrate All `brief_*` Intrinsics to Direct libc — ✅ DONE
 
-Write a pure-Brief JSON parser that replaces ALL `frgn __*` declarations in
-`lib/std/json.bv`. The API surface officina needs is exactly 5 functions:
+**75/86** intrinsics now emit direct libc calls. **11** remain as C shims
+in `brief_rt.c` that are auto-linked for all native builds.
 
-| Function | Signature | Implementation |
-|----------|-----------|----------------|
-| `json_parse(s: String) -> Result<Value, JsonError>` | String → JSON tree | Character-by-character recursive descent parser in pure Brief |
-| `json_is_array(v: Value) -> Result<Bool, JsonError>` | Check if value is array | Match on `Value::Array` |
-| `json_length(v: Value) -> Result<Int, JsonError>` | Get array length | Match `Value::Array`, return `list :> Size` |
-| `json_get(v: Value, key: String) -> Result<String, JsonError>` | Get string field by key | Match `Value::Object(map)`, lookup in HashMap |
-| `json_get_by_index(v: Value, i: Int) -> Result<Value, JsonError>` | Index into array | Match `Value::Array`, index into list |
+## Phase 3: Replace `frgn` in Stdlib With Pure Brief — 🟡 In Progress
 
-### Value type (define in `lib/std/json.bv`)
+### Step 3d: JSON (28 `frgn __*`) — ✅ DONE
+Replaced entirely by Phase 1's pure-Brief parser.
 
-```brief
-enum JsonValue {
-    Null,
-    Bool(Bool),
-    Number(Int),
-    Float(Float),
-    String(String),
-    Array(List<JsonValue>),
-    Object(HashMap<String, JsonValue>)
-};
-```
+## Phase 4: Rework Officina — 🟡 In Progress
 
-This replaces the opaque foreign `Data` type.
+### Changes to officina/persistence.bv — ✅ DONE
+1. Removed 5 `frgn json_*` declarations
+2. Added `import# "std/json"`
+3. Updated `parse_rules_from_json` to use `JsonValue` type
+4. Updated `parse_json_rules` to handle `Result<JsonValue, String>` properly
 
-### Compatibility break
+### Changes to officina/core.bv — ✅ DONE
+1. Removed duplicate `Result<T,E>` enum definition (now injected by compiler)
+2. All `Result` usage resolves to the built-in type
 
-The existing `frgn __*` functions (__parse, __stringify, __is_null, etc.)
-will be removed from `lib/std/json.bv`. The public API uses `JsonValue` and
-clean function names. Old code using `import json from "std/ffi/json"` with
-`__parse` etc. will need migration.
-
-### DBrief config files
-
-Officina's `system/understands.dbv` is NOT JSON — it's DBrief format.
-Convert to JSON.
+### Remaining
+- `system/understands.dbv` — DBrief format, not yet converted to JSON
+- `serialize_rules` still produces DBrief format
+- LLVM backend Char/Float bugs block binary emission for code using JSON parsing
 
 ---
 

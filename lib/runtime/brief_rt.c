@@ -1187,7 +1187,7 @@ int64_t brief_nanosleep(int64_t ns) {
     return (int64_t)nanosleep(&req, &rem);
 }
 
-/* ── Officina-local frgn (JSON, substring) ────────────────────────── */
+/* ── Officina-local frgn (substring only) ────────────────────────── */
 
 int64_t substring(const char* s) {
     if (!s) return 0;
@@ -1201,33 +1201,6 @@ int64_t substring(const char* s) {
         list[2 + i] = (int64_t)(unsigned char)s[i];
     }
     return (int64_t)list;
-}
-
-int64_t json_parse(const char* s) {
-    (void)s;
-    return 0;
-}
-
-int64_t json_is_array(int64_t v_val) {
-    (void)v_val;
-    return 0;
-}
-
-int64_t json_length(int64_t v_val) {
-    (void)v_val;
-    return 0;
-}
-
-int64_t json_get(int64_t v_val, int64_t key_val) {
-    (void)v_val;
-    (void)key_val;
-    return 0;
-}
-
-int64_t json_get_by_index(int64_t v_val, int64_t i_val) {
-    (void)v_val;
-    (void)i_val;
-    return 0;
 }
 
 /* ===================================================================

@@ -4,7 +4,7 @@
 // The public API matches officina's needs: parse, is_array, length,
 // get (by key), get_by_index.
 
-import "std/core/char";
+import# "std/core/char";
 
 // ===== Types =====
 
