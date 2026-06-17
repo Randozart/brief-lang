@@ -379,7 +379,19 @@ impl LlvmBackend {
                                 a_strs.push(format!("i64 {}", raw));
                             }
                         } else {
-                            a_strs.push(format!("i64 {}", raw));
+                            // 2026-06-17: zext Bool/Char to i64 for enum variant storage
+                            let stored = if raw.ty == Type::Bool {
+                                let z = format!("%cz{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = zext i1 {} to i64", indent, z, raw.name).ok();
+                                z
+                            } else if raw.ty == Type::Char {
+                                let z = format!("%czc{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, raw.name).ok();
+                                z
+                            } else {
+                                raw.name.clone()
+                            };
+                            a_strs.push(format!("i64 {}", stored));
                         }
                     }
                     if name.starts_with(|c: char| c.is_uppercase()) && !self.program_txns.contains(name) {
@@ -2312,9 +2324,7 @@ impl LlvmBackend {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             }
             (Type::Int | Type::UInt, Type::Char) => {
-                let tr = format!("%cctr{}", self.txn_counter); self.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
-                let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, tr);
+                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, dst, src);
             }
             // Char ↔ String (via __chr_to_str / load first byte)
             (Type::Char, Type::String) => {
