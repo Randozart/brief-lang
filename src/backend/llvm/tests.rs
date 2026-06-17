@@ -3811,3 +3811,173 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("and i1"),
             "Guard && should produce and i1. Got:\n{}", output);
     }
+
+    #[test]
+    fn test_arrow_push_emits_malloc_and_memcpy() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "list".to_string(), ty: Type::Int,
+                    expr: Some(Expr::ListLiteral(vec![])),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "push".into(), is_async: false, is_reactive: true,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::ArrowMut {
+                            dir: ArrowDir::Push,
+                            target: Box::new(Expr::OwnedRef("list".to_string())),
+                            index: Box::new(Expr::Term),
+                            value: Some(Box::new(Expr::Integer(42))),
+                        }),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("add i64 0, 0 ; push void")
+            || (output.contains("call noalias i8* @malloc")
+                && output.contains("llvm.memcpy.p0i8.p0i8.i64")
+                && output.contains("!tbaa !1")),
+            "Arrow push should emit malloc+memcpy with TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+    }
+
+    #[test]
+    fn test_arrow_pop_emits_element_load_and_alloc() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "list".to_string(), ty: Type::Int,
+                    expr: Some(Expr::ListLiteral(vec![])),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "pop_main".into(), is_async: false, is_reactive: true,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::ArrowMut {
+                            dir: ArrowDir::Pop,
+                            target: Box::new(Expr::OwnedRef("list".to_string())),
+                            index: Box::new(Expr::Term),
+                            value: None,
+                        }),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call noalias i8* @malloc")
+            && output.contains("!tbaa !1"),
+            "Arrow pop should emit malloc and TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+    }
+
+    #[test]
+    fn test_arrow_discard_emits_malloc_and_memcpy() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "list".to_string(), ty: Type::Int,
+                    expr: Some(Expr::ListLiteral(vec![])),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "discard".into(), is_async: false, is_reactive: true,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::ArrowDiscard {
+                            target: Box::new(Expr::OwnedRef("list".to_string())),
+                            index: Box::new(Expr::Term),
+                        }),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call noalias i8* @malloc")
+            && output.contains("llvm.memcpy.p0i8.p0i8.i64"),
+            "Arrow discard should emit malloc and memcpy. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+    }
+
+    #[test]
+    fn test_arrow_transfer_emits_combined_alloc() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "dest".to_string(), ty: Type::Int,
+                    expr: Some(Expr::ListLiteral(vec![])),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "src".to_string(), ty: Type::Int,
+                    expr: Some(Expr::ListLiteral(vec![])),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "transfer".into(), is_async: false, is_reactive: true,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::ArrowTransfer {
+                            dest: Box::new(Expr::OwnedRef("dest".to_string())),
+                            source: Box::new(Expr::OwnedRef("src".to_string())),
+                            filter: None,
+                        }),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call noalias i8* @malloc"),
+            "Arrow transfer should emit malloc for combined buffer. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+        assert!(output.contains("; transfer void"),
+            "Arrow transfer should contain transfer void marker. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+    }
