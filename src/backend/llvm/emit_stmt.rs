@@ -317,6 +317,18 @@ impl LlvmBackend {
                                     writeln!(out, "{}{} = insertvalue %State {}, i64 {}, {}", indent, new_reg, ssa_reg, val_boxed, idx).ok();
                                 }
                             }
+                            // 2026-06-17: Re-extract written field so intra-body reads
+                            // see the updated value. Without this, subsequent reads of
+                            // a field written earlier in the same body use the pre-tick
+                            // value from pre_extract_int_fields, not the freshly stored
+                            // value — causes incorrect results when a field is both
+                            // written and read in the same txn body (e.g. fannkuch_redux_sym:
+                            // &seed = p0 → checksum + seed % 13 reads p0_old, not seed_old).
+                            if ty != "float" {
+                                let re = format!("%re_{}_{}", fname, self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = extractvalue %State {}, {}", indent, re, new_reg, idx).ok();
+                                self.ssa_old_int_regs.insert(fname.clone(), re);
+                            }
                             self.ssa_state_reg = Some(new_reg);
                             return;
                         }

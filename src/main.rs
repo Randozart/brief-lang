@@ -2285,13 +2285,12 @@ fn run_llvm_compile(
             })
             .collect();
 
-        // Auto-link brief_rt.c when any @ link trigger is present.
-        // trg is a complete abstraction — the user writes only the declaration;
-        // the compiler injects the C runtime automatically.
-        let has_link_triggers = program.items.iter().any(|item| {
-            matches!(item, crate::ast::TopLevel::Trigger(t) if matches!(t.address, crate::ast::LinkRef::Linked(_)))
-        });
-        if has_link_triggers && !seen.contains("link/brief_rt.c") {
+        // Auto-link brief_rt.c for all native builds.
+        // brief_rt.c provides support for complex intrinsics (tty_raw_mode,
+        // read_file, spawn_with_output, etc.) and thread pool barriers.
+        // Even if no @ link triggers exist, these shims may be called by
+        // the LLVM backend output. The linker drops unused symbols.
+        if !seen.contains("link/brief_rt.c") {
             deps.push(crate::ast::LinkDependency {
                 path: "link/brief_rt.c".to_string(),
                 source_lang: crate::ast::LinkLanguage::C,

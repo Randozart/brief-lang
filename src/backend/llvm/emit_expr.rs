@@ -545,25 +545,83 @@ impl LlvmBackend {
                         return TypedRegister { name: v, ty: Type::Bool };
                     }
                     Intrinsic::TtySize => {
-                        writeln!(out, "{}{} = call i64 @brief_tty_size()", indent, v).ok();
+                        let ws = format!("%ttywsp{}", self.txn_counter); self.txn_counter += 1;
+                        let ws_bc = format!("%ttywsbc{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%ttyrv{}", self.txn_counter); self.txn_counter += 1;
+                        let is_err = format!("%ttyie{}", self.txn_counter); self.txn_counter += 1;
+                        let z_l = format!("tty_sz_z{}", self.txn_counter); self.txn_counter += 1;
+                        let o_l = format!("tty_sz_o{}", self.txn_counter); self.txn_counter += 1;
+                        let e_l = format!("tty_sz_e{}", self.txn_counter); self.txn_counter += 1;
+                        let row_p = format!("%ttyrp{}", self.txn_counter); self.txn_counter += 1;
+                        let col_p = format!("%ttycp{}", self.txn_counter); self.txn_counter += 1;
+                        let row = format!("%ttyrw{}", self.txn_counter); self.txn_counter += 1;
+                        let col = format!("%ttycw{}", self.txn_counter); self.txn_counter += 1;
+                        let row64 = format!("%ttyr64{}", self.txn_counter); self.txn_counter += 1;
+                        let col64 = format!("%ttyc64{}", self.txn_counter); self.txn_counter += 1;
+                        let shifted = format!("%ttysh{}", self.txn_counter); self.txn_counter += 1;
+                        let packed = format!("%ttypk{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = alloca {{ i16, i16, i16, i16 }}, align 2", indent, ws).ok();
+                        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, ws_bc, ws).ok();
+                        writeln!(out, "{}{} = call i32 @ioctl(i32 1, i64 21523, ptr {})", indent, rv, ws_bc).ok();
+                        writeln!(out, "{}{} = icmp eq i32 {}, -1", indent, is_err, rv).ok();
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_err, z_l, o_l).ok();
+                        writeln!(out, "{}{}:", indent, z_l).ok();
+                        writeln!(out, "{}  br label %{}", indent, e_l).ok();
+                        writeln!(out, "{}{}:", indent, o_l).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i16, i16, i16, i16 }}, ptr {}, i32 0, i32 0", indent, row_p, ws).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i16, i16, i16, i16 }}, ptr {}, i32 0, i32 1", indent, col_p, ws).ok();
+                        writeln!(out, "{}{} = load i16, ptr {}", indent, row, row_p).ok();
+                        writeln!(out, "{}{} = load i16, ptr {}", indent, col, col_p).ok();
+                        writeln!(out, "{}{} = zext i16 {} to i64", indent, row64, row).ok();
+                        writeln!(out, "{}{} = zext i16 {} to i64", indent, col64, col).ok();
+                        writeln!(out, "{}{} = shl i64 {}, 32", indent, shifted, row64).ok();
+                        writeln!(out, "{}{} = or i64 {}, {}", indent, packed, shifted, col64).ok();
+                        writeln!(out, "{}  br label %{}", indent, e_l).ok();
+                        writeln!(out, "{}{}:", indent, e_l).ok();
+                        writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, v, z_l, packed, o_l).ok();
                     }
                     Intrinsic::TtyReadKey => {
-                        let raw = format!("%trk{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = call i64 @brief_tty_read_key()", indent, raw).ok();
-                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, v, raw).ok();
+                        let cbuf = format!("%trkcb{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%trkrv{}", self.txn_counter); self.txn_counter += 1;
+                        let ok = format!("%trkok{}", self.txn_counter); self.txn_counter += 1;
+                        let err_l = format!("trk_err{}", self.txn_counter); self.txn_counter += 1;
+                        let ok_l = format!("trk_ok{}", self.txn_counter); self.txn_counter += 1;
+                        let end_l = format!("trk_end{}", self.txn_counter); self.txn_counter += 1;
+                        let c = format!("%trkc{}", self.txn_counter); self.txn_counter += 1;
+                        let tmp = format!("%trkt{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = alloca i8, align 1", indent, cbuf).ok();
+                        writeln!(out, "{}{} = call i64 @read(i32 0, ptr {}, i64 1)", indent, rv, cbuf).ok();
+                        writeln!(out, "{}{} = icmp ne i64 {}, 1", indent, ok, rv).ok();
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, ok, err_l, ok_l).ok();
+                        writeln!(out, "{}{}:", indent, err_l).ok();
+                        writeln!(out, "{}  br label %{}", indent, end_l).ok();
+                        writeln!(out, "{}{}:", indent, ok_l).ok();
+                        writeln!(out, "{}{} = load i8, ptr {}", indent, c, cbuf).ok();
+                        writeln!(out, "{}{} = zext i8 {} to i32", indent, tmp, c).ok();
+                        writeln!(out, "{}  br label %{}", indent, end_l).ok();
+                        writeln!(out, "{}{}:", indent, end_l).ok();
+                        writeln!(out, "{}{} = phi i32 [ -1, %{} ], [ {}, %{} ]", indent, v, err_l, tmp, ok_l).ok();
                         return TypedRegister { name: v, ty: Type::Char };
                     }
                     Intrinsic::IoCtl => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let req = self.emit_expr(out, &args[1], indent);
                         let arg = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_ioctl(i64 {}, i64 {}, i64 {})", indent, v, fd.name, req.name, arg.name).ok();
+                        let fdt = format!("%iofdt{}", self.txn_counter); self.txn_counter += 1;
+                        let ap = format!("%ioap{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%iorv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, arg.name).ok();
+                        writeln!(out, "{}{} = call i32 @ioctl(i32 {}, i64 {}, ptr {})", indent, rv, fdt, req.name, ap).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::IsTty => {
                         let fd = self.emit_expr(out, &args[0], indent);
-                        let raw = format!("%ist{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = call i64 @brief_isatty(i64 {})", indent, raw, fd.name).ok();
-                        writeln!(out, "{}{} = trunc i64 {} to i1", indent, v, raw).ok();
+                        let fdt = format!("%istfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%istrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = call i32 @isatty(i32 {})", indent, rv, fdt).ok();
+                        writeln!(out, "{}{} = trunc i32 {} to i1", indent, v, rv).ok();
                         return TypedRegister { name: v, ty: Type::Bool };
                     }
                     // ===== Phase A: Process (intrinsics.md D5) =====
@@ -594,110 +652,242 @@ impl LlvmBackend {
                         let path = self.emit_expr(out, &args[0], indent);
                         let flags = self.emit_expr(out, &args[1], indent);
                         let mode = self.emit_expr(out, &args[2], indent);
-                        let pp = self.ptrtoint_if_string(out, indent, &path);
-                        writeln!(out, "{}{} = call i64 @brief_open(i64 {}, i64 {}, i64 {})", indent, v, pp, flags.name, mode.name).ok();
+                        let sp = format!("%opsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%opdp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%opcp{}", self.txn_counter); self.txn_counter += 1;
+                        let ft = format!("%opft{}", self.txn_counter); self.txn_counter += 1;
+                        let mt = format!("%opmt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%oprv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ft, flags.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mode.name).ok();
+                        writeln!(out, "{}{} = call i32 @open(ptr {}, i32 {}, i32 {})", indent, rv, cp, ft, mt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Close => {
                         let fd = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_close(i64 {})", indent, v, fd.name).ok();
+                        let fdt = format!("%cfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%crv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = call i32 @close(i32 {})", indent, rv, fdt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Read => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let buf = self.emit_expr(out, &args[1], indent);
                         let count = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_read(i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, count.name).ok();
+                        let fdt = format!("%rfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%rbp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, buf.name).ok();
+                        writeln!(out, "{}{} = call i64 @read(i32 {}, ptr {}, i64 {})", indent, v, fdt, bp, count.name).ok();
                     }
                     Intrinsic::Write => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let buf = self.emit_expr(out, &args[1], indent);
                         let count = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_write(i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, count.name).ok();
+                        let fdt = format!("%wfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%wbp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, buf.name).ok();
+                        writeln!(out, "{}{} = call i64 @write(i32 {}, ptr {}, i64 {})", indent, v, fdt, bp, count.name).ok();
                     }
                     Intrinsic::LSeek => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let offset = self.emit_expr(out, &args[1], indent);
                         let whence = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_lseek(i64 {}, i64 {}, i64 {})", indent, v, fd.name, offset.name, whence.name).ok();
+                        let fdt = format!("%lfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let wt = format!("%lwt{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, wt, whence.name).ok();
+                        writeln!(out, "{}{} = call i64 @lseek(i32 {}, i64 {}, i32 {})", indent, v, fdt, offset.name, wt).ok();
                     }
                     Intrinsic::PRead => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let buf = self.emit_expr(out, &args[1], indent);
                         let count = self.emit_expr(out, &args[2], indent);
                         let offset = self.emit_expr(out, &args[3], indent);
-                        writeln!(out, "{}{} = call i64 @brief_pread(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, count.name, offset.name).ok();
+                        let fdt = format!("%prfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%prbp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, buf.name).ok();
+                        writeln!(out, "{}{} = call i64 @pread(i32 {}, ptr {}, i64 {}, i64 {})", indent, v, fdt, bp, count.name, offset.name).ok();
                     }
                     Intrinsic::PWrite => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let buf = self.emit_expr(out, &args[1], indent);
                         let count = self.emit_expr(out, &args[2], indent);
                         let offset = self.emit_expr(out, &args[3], indent);
-                        writeln!(out, "{}{} = call i64 @brief_pwrite(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, count.name, offset.name).ok();
+                        let fdt = format!("%pwfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%pwbp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, buf.name).ok();
+                        writeln!(out, "{}{} = call i64 @pwrite(i32 {}, ptr {}, i64 {}, i64 {})", indent, v, fdt, bp, count.name, offset.name).ok();
                     }
                     Intrinsic::Stat => {
                         let path = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_stat(i64 {})", indent, v, path.name).ok();
+                        let sp = format!("%stsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%stdp{}", self.txn_counter); self.txn_counter += 1;
+                        let buf = format!("%stbuf{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%strv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, buf, dp).ok();
+                        let st = format!("%stst{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = alloca i8, i64 200, align 8", indent, st).ok();
+                        writeln!(out, "{}{} = call i32 @stat(ptr {}, ptr {})", indent, rv, buf, st).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::FStat => {
                         let fd = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_fstat(i64 {})", indent, v, fd.name).ok();
+                        let fdt = format!("%fsfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let st = format!("%fsst{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%fsrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = alloca i8, i64 200, align 8", indent, st).ok();
+                        writeln!(out, "{}{} = call i32 @fstat(i32 {}, ptr {})", indent, rv, fdt, st).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Truncate => {
                         let path = self.emit_expr(out, &args[0], indent);
                         let len = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_truncate(i64 {}, i64 {})", indent, v, path.name, len.name).ok();
+                        let sp = format!("%ttsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%ttdp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%ttcp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%ttrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = call i32 @truncate(ptr {}, i64 {})", indent, rv, cp, len.name).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::FTruncate => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let len = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_ftruncate(i64 {}, i64 {})", indent, v, fd.name, len.name).ok();
+                        let fdt = format!("%ftfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%ftrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = call i32 @ftruncate(i32 {}, i64 {})", indent, rv, fdt, len.name).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::FSync => {
                         let fd = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_fsync(i64 {})", indent, v, fd.name).ok();
+                        let fdt = format!("%yfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%yrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = call i32 @fsync(i32 {})", indent, rv, fdt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::FDup => {
                         let fd = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_dup(i64 {})", indent, v, fd.name).ok();
+                        let fdt = format!("%dfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%drv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = call i32 @dup(i32 {})", indent, rv, fdt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::FDup2 => {
                         let old = self.emit_expr(out, &args[0], indent);
                         let newfd = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_dup2(i64 {}, i64 {})", indent, v, old.name, newfd.name).ok();
+                        let ot = format!("%d2ot{}", self.txn_counter); self.txn_counter += 1;
+                        let nt = format!("%d2nt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%d2rv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ot, old.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, nt, newfd.name).ok();
+                        writeln!(out, "{}{} = call i32 @dup2(i32 {}, i32 {})", indent, rv, ot, nt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::FCntl => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let cmd = self.emit_expr(out, &args[1], indent);
                         let arg = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_fcntl(i64 {}, i64 {}, i64 {})", indent, v, fd.name, cmd.name, arg.name).ok();
+                        let fdt = format!("%cnfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let ct = format!("%cnct{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%cnrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ct, cmd.name).ok();
+                        writeln!(out, "{}{} = call i32 @fcntl(i32 {}, i32 {}, i64 {})", indent, rv, fdt, ct, arg.name).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     // ===== Phase C: Filesystem (intrinsics.md D3) =====
                     Intrinsic::MkDir => {
                         let path = self.emit_expr(out, &args[0], indent);
                         let mode = self.emit_expr(out, &args[1], indent);
-                        let pp = self.ptrtoint_if_string(out, indent, &path);
-                        writeln!(out, "{}{} = call i64 @brief_mkdir(i64 {}, i64 {})", indent, v, pp, mode.name).ok();
+                        let sp = format!("%mksp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%mkdp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%mkcp{}", self.txn_counter); self.txn_counter += 1;
+                        let mt = format!("%mkmt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%mkrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mode.name).ok();
+                        writeln!(out, "{}{} = call i32 @mkdir(ptr {}, i32 {})", indent, rv, cp, mt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::RmDir => {
                         let path = self.emit_expr(out, &args[0], indent);
-                        let pp = self.ptrtoint_if_string(out, indent, &path);
-                        writeln!(out, "{}{} = call i64 @brief_rmdir(i64 {})", indent, v, pp).ok();
+                        let sp = format!("%rdsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%rddp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%rdcp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%rdrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = call i32 @rmdir(ptr {})", indent, rv, cp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Unlink => {
                         let path = self.emit_expr(out, &args[0], indent);
-                        let pp = self.ptrtoint_if_string(out, indent, &path);
-                        writeln!(out, "{}{} = call i64 @brief_unlink(i64 {})", indent, v, pp).ok();
+                        let sp = format!("%ulsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%uldp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%ulcp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%ulrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = call i32 @unlink(ptr {})", indent, rv, cp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Rename => {
                         let old = self.emit_expr(out, &args[0], indent);
                         let new = self.emit_expr(out, &args[1], indent);
-                        let op = self.ptrtoint_if_string(out, indent, &old);
-                        let np = self.ptrtoint_if_string(out, indent, &new);
-                        writeln!(out, "{}{} = call i64 @brief_rename(i64 {}, i64 {})", indent, v, op, np).ok();
+                        let osp = format!("%rosp{}", self.txn_counter); self.txn_counter += 1;
+                        let odp = format!("%rodp{}", self.txn_counter); self.txn_counter += 1;
+                        let nsp = format!("%rnsp{}", self.txn_counter); self.txn_counter += 1;
+                        let ndp = format!("%rndp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%rrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, osp, old.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, odp, osp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, nsp, new.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ndp, nsp).ok();
+                        let ocp = format!("%rocp{}", self.txn_counter); self.txn_counter += 1;
+                        let ncp = format!("%rncp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ocp, odp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ncp, ndp).ok();
+                        writeln!(out, "{}{} = call i32 @rename(ptr {}, ptr {})", indent, rv, ocp, ncp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::SymLink => {
                         let target = self.emit_expr(out, &args[0], indent);
                         let link = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_symlink(i64 {}, i64 {})", indent, v, target.name, link.name).ok();
+                        let tsp = format!("%sytsp{}", self.txn_counter); self.txn_counter += 1;
+                        let tdp = format!("%sytdp{}", self.txn_counter); self.txn_counter += 1;
+                        let lsp = format!("%sylsp{}", self.txn_counter); self.txn_counter += 1;
+                        let ldp = format!("%syldp{}", self.txn_counter); self.txn_counter += 1;
+                        let tcp = format!("%sytcp{}", self.txn_counter); self.txn_counter += 1;
+                        let lcp = format!("%sylcp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%syrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, tsp, target.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, tdp, tsp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, lsp, link.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ldp, lsp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, tcp, tdp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, lcp, ldp).ok();
+                        writeln!(out, "{}{} = call i32 @symlink(ptr {}, ptr {})", indent, rv, tcp, lcp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::ReadLink => {
                         let path = self.emit_expr(out, &args[0], indent);
@@ -706,14 +896,36 @@ impl LlvmBackend {
                     Intrinsic::Link => {
                         let old = self.emit_expr(out, &args[0], indent);
                         let new = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_link(i64 {}, i64 {})", indent, v, old.name, new.name).ok();
+                        let osp = format!("%lkosp{}", self.txn_counter); self.txn_counter += 1;
+                        let odp = format!("%lkodp{}", self.txn_counter); self.txn_counter += 1;
+                        let nsp = format!("%lknsp{}", self.txn_counter); self.txn_counter += 1;
+                        let ndp = format!("%lkndp{}", self.txn_counter); self.txn_counter += 1;
+                        let ocp = format!("%lkocp{}", self.txn_counter); self.txn_counter += 1;
+                        let ncp = format!("%lkncp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%lkrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, osp, old.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, odp, osp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, nsp, new.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ndp, nsp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ocp, odp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ncp, ndp).ok();
+                        writeln!(out, "{}{} = call i32 @link(ptr {}, ptr {})", indent, rv, ocp, ncp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::GetCwd => {
                         writeln!(out, "{}{} = call i64 @brief_getcwd()", indent, v).ok();
                     }
                     Intrinsic::ChDir => {
                         let path = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_chdir(i64 {})", indent, v, path.name).ok();
+                        let sp = format!("%chdsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%chddp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%chdcp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%chdrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = call i32 @chdir(ptr {})", indent, rv, cp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::ReadDir => {
                         let path = self.emit_expr(out, &args[0], indent);
@@ -722,22 +934,58 @@ impl LlvmBackend {
                     Intrinsic::ChMod => {
                         let path = self.emit_expr(out, &args[0], indent);
                         let mode = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_chmod(i64 {}, i64 {})", indent, v, path.name, mode.name).ok();
+                        let sp = format!("%chmsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%chmdp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%chmcp{}", self.txn_counter); self.txn_counter += 1;
+                        let mt = format!("%chmmt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%chmrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mode.name).ok();
+                        writeln!(out, "{}{} = call i32 @chmod(ptr {}, i32 {})", indent, rv, cp, mt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::ChOwn => {
                         let path = self.emit_expr(out, &args[0], indent);
                         let uid = self.emit_expr(out, &args[1], indent);
                         let gid = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_chown(i64 {}, i64 {}, i64 {})", indent, v, path.name, uid.name, gid.name).ok();
+                        let sp = format!("%chosp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%chodp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%chocp{}", self.txn_counter); self.txn_counter += 1;
+                        let ut = format!("%chout{}", self.txn_counter); self.txn_counter += 1;
+                        let gt = format!("%chogt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%chorv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ut, uid.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, gt, gid.name).ok();
+                        writeln!(out, "{}{} = call i32 @chown(ptr {}, i32 {}, i32 {})", indent, rv, cp, ut, gt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::UMask => {
                         let mask = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_umask(i64 {})", indent, v, mask.name).ok();
+                        let mt = format!("%ummt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%umrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mask.name).ok();
+                        writeln!(out, "{}{} = call i32 @umask(i32 {})", indent, rv, mt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Access => {
                         let path = self.emit_expr(out, &args[0], indent);
                         let mode = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_access(i64 {}, i64 {})", indent, v, path.name, mode.name).ok();
+                        let sp = format!("%acsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%acdp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%accp{}", self.txn_counter); self.txn_counter += 1;
+                        let mt = format!("%acmt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%acrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, path.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mode.name).ok();
+                        writeln!(out, "{}{} = call i32 @access(ptr {}, i32 {})", indent, rv, cp, mt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     // ===== Phase D: Memory (intrinsics.md D1) — Shim category =====
                     Intrinsic::Mmap => {
@@ -747,27 +995,55 @@ impl LlvmBackend {
                         let flags = self.emit_expr(out, &args[3], indent);
                         let fd = self.emit_expr(out, &args[4], indent);
                         let offset = self.emit_expr(out, &args[5], indent);
-                        writeln!(out, "{}{} = call i64 @brief_mmap(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, addr.name, length.name, prot.name, flags.name, fd.name, offset.name).ok();
+                        let ap = format!("%mmap{}", self.txn_counter); self.txn_counter += 1;
+                        let pt = format!("%mmpt{}", self.txn_counter); self.txn_counter += 1;
+                        let ft = format!("%mmft{}", self.txn_counter); self.txn_counter += 1;
+                        let fdt = format!("%mmfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let ret_ptr = format!("%mmret{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, addr.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, pt, prot.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ft, flags.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = call ptr @mmap(ptr {}, i64 {}, i32 {}, i32 {}, i32 {}, i64 {})", indent, ret_ptr, ap, length.name, pt, ft, fdt, offset.name).ok();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ret_ptr).ok();
                     }
                     Intrinsic::MUnmap => {
                         let addr = self.emit_expr(out, &args[0], indent);
                         let length = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_munmap(i64 {}, i64 {})", indent, v, addr.name, length.name).ok();
+                        let ap = format!("%mua{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%murv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, addr.name).ok();
+                        writeln!(out, "{}{} = call i32 @munmap(ptr {}, i64 {})", indent, rv, ap, length.name).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::MProtect => {
                         let addr = self.emit_expr(out, &args[0], indent);
                         let length = self.emit_expr(out, &args[1], indent);
                         let prot = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_mprotect(i64 {}, i64 {}, i64 {})", indent, v, addr.name, length.name, prot.name).ok();
+                        let ap = format!("%mpa{}", self.txn_counter); self.txn_counter += 1;
+                        let pt = format!("%mppt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%mprv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, addr.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, pt, prot.name).ok();
+                        writeln!(out, "{}{} = call i32 @mprotect(ptr {}, i64 {}, i32 {})", indent, rv, ap, length.name, pt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Brk => {
                         let addr = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_brk(i64 {})", indent, v, addr.name).ok();
+                        let ap = format!("%brap{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%brrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, addr.name).ok();
+                        writeln!(out, "{}{} = call i32 @brk(ptr {})", indent, rv, ap).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::MLock => {
                         let addr = self.emit_expr(out, &args[0], indent);
                         let length = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_mlock(i64 {}, i64 {})", indent, v, addr.name, length.name).ok();
+                        let ap = format!("%mla{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%mlrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, addr.name).ok();
+                        writeln!(out, "{}{} = call i32 @mlock(ptr {}, i64 {})", indent, rv, ap, length.name).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     // ===== Phase D: Synchronization (intrinsics.md D9) — Native category =====
                     Intrinsic::AtomicLoad => {
@@ -830,32 +1106,96 @@ impl LlvmBackend {
                     // ===== Phase E: IPC (intrinsics.md D11) — Shim =====
                     Intrinsic::Pipe => {
                         let fds = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_pipe(i64 {})", indent, v, fds.name).ok();
+                        let parr = format!("%pipearr{}", self.txn_counter); self.txn_counter += 1;
+                        let prv = format!("%piperv{}", self.txn_counter); self.txn_counter += 1;
+                        let p0 = format!("%pipep0{}", self.txn_counter); self.txn_counter += 1;
+                        let p1 = format!("%pipep1{}", self.txn_counter); self.txn_counter += 1;
+                        let pf0 = format!("%pipef0{}", self.txn_counter); self.txn_counter += 1;
+                        let pf1 = format!("%pipef1{}", self.txn_counter); self.txn_counter += 1;
+                        let zf0 = format!("%pipef0z{}", self.txn_counter); self.txn_counter += 1;
+                        let zf1 = format!("%pipef1z{}", self.txn_counter); self.txn_counter += 1;
+                        let dst1 = format!("%piped1{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%pipebp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = alloca [2 x i32], align 4", indent, parr).ok();
+                        writeln!(out, "{}{} = call i32 @pipe(ptr {})", indent, prv, parr).ok();
+                        writeln!(out, "{}{} = getelementptr [2 x i32], ptr {}, i64 0, i64 0", indent, p0, parr).ok();
+                        writeln!(out, "{}{} = getelementptr [2 x i32], ptr {}, i64 0, i64 1", indent, p1, parr).ok();
+                        writeln!(out, "{}{} = load i32, ptr {}", indent, pf0, p0).ok();
+                        writeln!(out, "{}{} = load i32, ptr {}", indent, pf1, p1).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, zf0, pf0).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, zf1, pf1).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, fds.name).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, zf0, bp).ok();
+                        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, dst1, bp).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, zf1, dst1).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, prv).ok();
                     }
                     Intrinsic::ShmOpen => {
                         let name = self.emit_expr(out, &args[0], indent);
                         let flags = self.emit_expr(out, &args[1], indent);
                         let mode = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_shm_open(i64 {}, i64 {}, i64 {})", indent, v, name.name, flags.name, mode.name).ok();
+                        let nsp = format!("%shnsp{}", self.txn_counter); self.txn_counter += 1;
+                        let ndp = format!("%shndp{}", self.txn_counter); self.txn_counter += 1;
+                        let ncp = format!("%shncp{}", self.txn_counter); self.txn_counter += 1;
+                        let ft = format!("%shft{}", self.txn_counter); self.txn_counter += 1;
+                        let mt = format!("%shmt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%shrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, nsp, name.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ndp, nsp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ncp, ndp).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ft, flags.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mode.name).ok();
+                        writeln!(out, "{}{} = call i32 @shm_open(ptr {}, i32 {}, i32 {})", indent, rv, ncp, ft, mt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::ShmUnlink => {
                         let name = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_shm_unlink(i64 {})", indent, v, name.name).ok();
+                        let nsp = format!("%slnsp{}", self.txn_counter); self.txn_counter += 1;
+                        let ndp = format!("%slndp{}", self.txn_counter); self.txn_counter += 1;
+                        let ncp = format!("%slncp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%slrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, nsp, name.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ndp, nsp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ncp, ndp).ok();
+                        writeln!(out, "{}{} = call i32 @shm_unlink(ptr {})", indent, rv, ncp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::SemOpen => {
                         let name = self.emit_expr(out, &args[0], indent);
                         let flags = self.emit_expr(out, &args[1], indent);
                         let mode = self.emit_expr(out, &args[2], indent);
                         let value = self.emit_expr(out, &args[3], indent);
-                        writeln!(out, "{}{} = call i64 @brief_sem_open(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, name.name, flags.name, mode.name, value.name).ok();
+                        let nsp = format!("%sonsp{}", self.txn_counter); self.txn_counter += 1;
+                        let ndp = format!("%sondp{}", self.txn_counter); self.txn_counter += 1;
+                        let ncp = format!("%soncp{}", self.txn_counter); self.txn_counter += 1;
+                        let ft = format!("%sonft{}", self.txn_counter); self.txn_counter += 1;
+                        let mt = format!("%sonmt{}", self.txn_counter); self.txn_counter += 1;
+                        let vt = format!("%sonvt{}", self.txn_counter); self.txn_counter += 1;
+                        let rp = format!("%sonrp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, nsp, name.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ndp, nsp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ncp, ndp).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ft, flags.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mode.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, vt, value.name).ok();
+                        writeln!(out, "{}{} = call ptr @sem_open(ptr {}, i32 {}, i32 {}, i32 {})", indent, rp, ncp, ft, mt, vt).ok();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, rp).ok();
                     }
                     Intrinsic::SemWait => {
                         let sem = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_sem_wait(i64 {})", indent, v, sem.name).ok();
+                        let sp = format!("%swsp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%swrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, sem.name).ok();
+                        writeln!(out, "{}{} = call i32 @sem_wait(ptr {})", indent, rv, sp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::SemPost => {
                         let sem = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_sem_post(i64 {})", indent, v, sem.name).ok();
+                        let sp = format!("%spsp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%sprv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, sem.name).ok();
+                        writeln!(out, "{}{} = call i32 @sem_post(ptr {})", indent, rv, sp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     // ===== Phase F: Signals (intrinsics.md D8) — Shim =====
                     Intrinsic::SigAction => {
@@ -871,7 +1211,13 @@ impl LlvmBackend {
                     Intrinsic::Kill => {
                         let pid = self.emit_expr(out, &args[0], indent);
                         let sig = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_kill(i64 {}, i64 {})", indent, v, pid.name, sig.name).ok();
+                        let pt = format!("%kpt{}", self.txn_counter); self.txn_counter += 1;
+                        let st = format!("%kst{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%krv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, pt, pid.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, st, sig.name).ok();
+                        writeln!(out, "{}{} = call i32 @kill(i32 {}, i32 {})", indent, rv, pt, st).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::SignalFd => {
                         let mask = self.emit_expr(out, &args[0], indent);
@@ -886,44 +1232,97 @@ impl LlvmBackend {
                         let domain = self.emit_expr(out, &args[0], indent);
                         let sock_type = self.emit_expr(out, &args[1], indent);
                         let protocol = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_socket(i64 {}, i64 {}, i64 {})", indent, v, domain.name, sock_type.name, protocol.name).ok();
+                        let dt = format!("%sodt{}", self.txn_counter); self.txn_counter += 1;
+                        let st = format!("%sost{}", self.txn_counter); self.txn_counter += 1;
+                        let pt = format!("%sopt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%sorv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, dt, domain.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, st, sock_type.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, pt, protocol.name).ok();
+                        writeln!(out, "{}{} = call i32 @socket(i32 {}, i32 {}, i32 {})", indent, rv, dt, st, pt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Bind => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let addr = self.emit_expr(out, &args[1], indent);
                         let addrlen = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_bind(i64 {}, i64 {}, i64 {})", indent, v, fd.name, addr.name, addrlen.name).ok();
+                        let fdt = format!("%bifdt{}", self.txn_counter); self.txn_counter += 1;
+                        let ap = format!("%bia{}", self.txn_counter); self.txn_counter += 1;
+                        let alt = format!("%bialt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%birv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, addr.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, alt, addrlen.name).ok();
+                        writeln!(out, "{}{} = call i32 @bind(i32 {}, ptr {}, i32 {})", indent, rv, fdt, ap, alt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Listen => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let backlog = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_listen(i64 {}, i64 {})", indent, v, fd.name, backlog.name).ok();
+                        let fdt = format!("%lifdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bt = format!("%libt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%lirv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, bt, backlog.name).ok();
+                        writeln!(out, "{}{} = call i32 @listen(i32 {}, i32 {})", indent, rv, fdt, bt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Accept => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let addr = self.emit_expr(out, &args[1], indent);
                         let addrlen = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_accept(i64 {}, i64 {}, i64 {})", indent, v, fd.name, addr.name, addrlen.name).ok();
+                        let fdt = format!("%acfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let ap = format!("%acap{}", self.txn_counter); self.txn_counter += 1;
+                        let als = format!("%acals{}", self.txn_counter); self.txn_counter += 1;
+                        let alt = format!("%acalt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%acrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, addr.name).ok();
+                        writeln!(out, "{}{} = alloca i32, align 4", indent, als).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, alt, addrlen.name).ok();
+                        writeln!(out, "{}store i32 {}, ptr {}, align 4", indent, alt, als).ok();
+                        writeln!(out, "{}{} = call i32 @accept(i32 {}, ptr {}, ptr {})", indent, rv, fdt, ap, als).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Connect => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let addr = self.emit_expr(out, &args[1], indent);
                         let addrlen = self.emit_expr(out, &args[2], indent);
-                        writeln!(out, "{}{} = call i64 @brief_connect(i64 {}, i64 {}, i64 {})", indent, v, fd.name, addr.name, addrlen.name).ok();
+                        let fdt = format!("%cofdt{}", self.txn_counter); self.txn_counter += 1;
+                        let ap = format!("%coap{}", self.txn_counter); self.txn_counter += 1;
+                        let alt = format!("%coalt{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%corv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ap, addr.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, alt, addrlen.name).ok();
+                        writeln!(out, "{}{} = call i32 @connect(i32 {}, ptr {}, i32 {})", indent, rv, fdt, ap, alt).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Send => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let buf = self.emit_expr(out, &args[1], indent);
                         let len = self.emit_expr(out, &args[2], indent);
                         let flags = self.emit_expr(out, &args[3], indent);
-                        writeln!(out, "{}{} = call i64 @brief_send(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, len.name, flags.name).ok();
+                        let fdt = format!("%sdfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%sdbp{}", self.txn_counter); self.txn_counter += 1;
+                        let ft = format!("%sdft{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, buf.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ft, flags.name).ok();
+                        writeln!(out, "{}{} = call i64 @send(i32 {}, ptr {}, i64 {}, i32 {})", indent, v, fdt, bp, len.name, ft).ok();
                     }
                     Intrinsic::Recv => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let buf = self.emit_expr(out, &args[1], indent);
                         let len = self.emit_expr(out, &args[2], indent);
                         let flags = self.emit_expr(out, &args[3], indent);
-                        writeln!(out, "{}{} = call i64 @brief_recv(i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, len.name, flags.name).ok();
+                        let fdt = format!("%rcfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%rcbp{}", self.txn_counter); self.txn_counter += 1;
+                        let ft = format!("%rcft{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, buf.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ft, flags.name).ok();
+                        writeln!(out, "{}{} = call i64 @recv(i32 {}, ptr {}, i64 {}, i32 {})", indent, v, fdt, bp, len.name, ft).ok();
                     }
                     Intrinsic::SendTo => {
                         let fd = self.emit_expr(out, &args[0], indent);
@@ -932,7 +1331,17 @@ impl LlvmBackend {
                         let flags = self.emit_expr(out, &args[3], indent);
                         let dest_addr = self.emit_expr(out, &args[4], indent);
                         let addrlen = self.emit_expr(out, &args[5], indent);
-                        writeln!(out, "{}{} = call i64 @brief_sendto(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, len.name, flags.name, dest_addr.name, addrlen.name).ok();
+                        let fdt = format!("%stofdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%stobp{}", self.txn_counter); self.txn_counter += 1;
+                        let ft = format!("%stoft{}", self.txn_counter); self.txn_counter += 1;
+                        let da = format!("%stoda{}", self.txn_counter); self.txn_counter += 1;
+                        let alt = format!("%stoalt{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, buf.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ft, flags.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, da, dest_addr.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, alt, addrlen.name).ok();
+                        writeln!(out, "{}{} = call i64 @sendto(i32 {}, ptr {}, i64 {}, i32 {}, ptr {}, i32 {})", indent, v, fdt, bp, len.name, ft, da, alt).ok();
                     }
                     Intrinsic::RecvFrom => {
                         let fd = self.emit_expr(out, &args[0], indent);
@@ -941,7 +1350,20 @@ impl LlvmBackend {
                         let flags = self.emit_expr(out, &args[3], indent);
                         let src_addr = self.emit_expr(out, &args[4], indent);
                         let addrlen = self.emit_expr(out, &args[5], indent);
-                        writeln!(out, "{}{} = call i64 @brief_recvfrom(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, buf.name, len.name, flags.name, src_addr.name, addrlen.name).ok();
+                        let fdt = format!("%rfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let bp = format!("%rbp{}", self.txn_counter); self.txn_counter += 1;
+                        let ft = format!("%rft{}", self.txn_counter); self.txn_counter += 1;
+                        let sa = format!("%rsa{}", self.txn_counter); self.txn_counter += 1;
+                        let als = format!("%rals{}", self.txn_counter); self.txn_counter += 1;
+                        let alt = format!("%ralt{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, bp, buf.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ft, flags.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sa, src_addr.name).ok();
+                        writeln!(out, "{}{} = alloca i32, align 4", indent, als).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, alt, addrlen.name).ok();
+                        writeln!(out, "{}store i32 {}, ptr {}, align 4", indent, alt, als).ok();
+                        writeln!(out, "{}{} = call i64 @recvfrom(i32 {}, ptr {}, i64 {}, i32 {}, ptr {}, ptr {})", indent, v, fdt, bp, len.name, ft, sa, als).ok();
                     }
                     Intrinsic::SetSockOpt => {
                         let fd = self.emit_expr(out, &args[0], indent);
@@ -949,7 +1371,19 @@ impl LlvmBackend {
                         let opt = self.emit_expr(out, &args[2], indent);
                         let val = self.emit_expr(out, &args[3], indent);
                         let len = self.emit_expr(out, &args[4], indent);
-                        writeln!(out, "{}{} = call i64 @brief_setsockopt(i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, level.name, opt.name, val.name, len.name).ok();
+                        let fdt = format!("%ssofdt{}", self.txn_counter); self.txn_counter += 1;
+                        let lt = format!("%ssolt{}", self.txn_counter); self.txn_counter += 1;
+                        let ot = format!("%ssoot{}", self.txn_counter); self.txn_counter += 1;
+                        let vp = format!("%ssovp{}", self.txn_counter); self.txn_counter += 1;
+                        let lt2 = format!("%ssolt2{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%ssorv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, lt, level.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ot, opt.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, vp, val.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, lt2, len.name).ok();
+                        writeln!(out, "{}{} = call i32 @setsockopt(i32 {}, i32 {}, i32 {}, ptr {}, i32 {})", indent, rv, fdt, lt, ot, vp, lt2).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::GetSockOpt => {
                         let fd = self.emit_expr(out, &args[0], indent);
@@ -957,12 +1391,33 @@ impl LlvmBackend {
                         let opt = self.emit_expr(out, &args[2], indent);
                         let val = self.emit_expr(out, &args[3], indent);
                         let len = self.emit_expr(out, &args[4], indent);
-                        writeln!(out, "{}{} = call i64 @brief_getsockopt(i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, fd.name, level.name, opt.name, val.name, len.name).ok();
+                        let fdt = format!("%gsofdt{}", self.txn_counter); self.txn_counter += 1;
+                        let lt = format!("%gsolt{}", self.txn_counter); self.txn_counter += 1;
+                        let ot = format!("%gsoot{}", self.txn_counter); self.txn_counter += 1;
+                        let vp = format!("%gsovp{}", self.txn_counter); self.txn_counter += 1;
+                        let ls = format!("%gsols{}", self.txn_counter); self.txn_counter += 1;
+                        let lt2 = format!("%gsolt2{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%gsorv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, lt, level.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ot, opt.name).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, vp, val.name).ok();
+                        writeln!(out, "{}{} = alloca i32, align 4", indent, ls).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, lt2, len.name).ok();
+                        writeln!(out, "{}store i32 {}, ptr {}, align 4", indent, lt2, ls).ok();
+                        writeln!(out, "{}{} = call i32 @getsockopt(i32 {}, i32 {}, i32 {}, ptr {}, ptr {})", indent, rv, fdt, lt, ot, vp, ls).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::Shutdown => {
                         let fd = self.emit_expr(out, &args[0], indent);
                         let how = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_shutdown(i64 {}, i64 {})", indent, v, fd.name, how.name).ok();
+                        let fdt = format!("%shfdt{}", self.txn_counter); self.txn_counter += 1;
+                        let ht = format!("%shht{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%shrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ht, how.name).ok();
+                        writeln!(out, "{}{} = call i32 @shutdown(i32 {}, i32 {})", indent, rv, fdt, ht).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::GetAddrInfo => {
                         let node = self.emit_expr(out, &args[0], indent);
@@ -972,30 +1427,119 @@ impl LlvmBackend {
                     // ===== Phase H: Everything Else (intrinsics.md D6, D7) — Shim =====
                     Intrinsic::GetEnv => {
                         let name = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_getenv(i64 {})", indent, v, name.name).ok();
+                        let sp = format!("%gesp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%gedp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%gecp{}", self.txn_counter); self.txn_counter += 1;
+                        let rp = format!("%gerp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, name.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, rp, cp).ok();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, rp).ok();
                     }
                     Intrinsic::SetEnv => {
                         let name = self.emit_expr(out, &args[0], indent);
                         let val = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_setenv(i64 {}, i64 {})", indent, v, name.name, val.name).ok();
+                        let nsp = format!("%senp{}", self.txn_counter); self.txn_counter += 1;
+                        let ndp = format!("%sendp{}", self.txn_counter); self.txn_counter += 1;
+                        let vsp = format!("%sevp{}", self.txn_counter); self.txn_counter += 1;
+                        let vdp = format!("%sevdp{}", self.txn_counter); self.txn_counter += 1;
+                        let ncp = format!("%secnp{}", self.txn_counter); self.txn_counter += 1;
+                        let vcp = format!("%secvp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%serv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, nsp, name.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ndp, nsp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, vsp, val.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, vdp, vsp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ncp, ndp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, vcp, vdp).ok();
+                        writeln!(out, "{}{} = call i32 @setenv(ptr {}, ptr {}, i32 1)", indent, rv, ncp, vcp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::UnsetEnv => {
                         let name = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_unsetenv(i64 {})", indent, v, name.name).ok();
+                        let sp = format!("%uensp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%uendp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%uencp{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%uenrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, name.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = call i32 @unsetenv(ptr {})", indent, rv, cp).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::GetPid => {
-                        writeln!(out, "{}{} = call i64 @brief_getpid()", indent, v).ok();
+                        let rv = format!("%gpidrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @getpid()", indent, rv).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::GetPPid => {
-                        writeln!(out, "{}{} = call i64 @brief_getppid()", indent, v).ok();
+                        let rv = format!("%gpprv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @getppid()", indent, rv).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::ClockGetTime => {
                         let clock_id = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_clock_gettime(i64 {})", indent, v, clock_id.name).ok();
+                        let ci = format!("%cgtci{}", self.txn_counter); self.txn_counter += 1;
+                        let ts = format!("%cgtts{}", self.txn_counter); self.txn_counter += 1;
+                        let _rv = format!("%cgtrv{}", self.txn_counter); self.txn_counter += 1;
+                        let sp = format!("%cgtsp{}", self.txn_counter); self.txn_counter += 1;
+                        let np = format!("%cgtnp{}", self.txn_counter); self.txn_counter += 1;
+                        let sec = format!("%cgtsec{}", self.txn_counter); self.txn_counter += 1;
+                        let nsec = format!("%cgtnsec{}", self.txn_counter); self.txn_counter += 1;
+                        let mulv = format!("%cgtmul{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, ci, clock_id.name).ok();
+                        writeln!(out, "{}{} = alloca {{ i64, i64 }}, align 8", indent, ts).ok();
+                        writeln!(out, "{}{} = call i32 @clock_gettime(i32 {}, ptr {})", indent, _rv, ci, ts).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i64, i64 }}, ptr {}, i32 0, i32 0", indent, sp, ts).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i64, i64 }}, ptr {}, i32 0, i32 1", indent, np, ts).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}", indent, sec, sp).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}", indent, nsec, np).ok();
+                        writeln!(out, "{}{} = mul i64 {}, 1000000000", indent, mulv, sec).ok();
+                        writeln!(out, "{}{} = add i64 {}, {}", indent, v, mulv, nsec).ok();
                     }
                     Intrinsic::NanoSleep => {
                         let ns = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_nanosleep(i64 {})", indent, v, ns.name).ok();
+                        let sec = format!("%nnsec{}", self.txn_counter); self.txn_counter += 1;
+                        let nsec = format!("%nnnsec{}", self.txn_counter); self.txn_counter += 1;
+                        let ts = format!("%nnts{}", self.txn_counter); self.txn_counter += 1;
+                        let tsp = format!("%nntsp{}", self.txn_counter); self.txn_counter += 1;
+                        let tsnp = format!("%nntsnp{}", self.txn_counter); self.txn_counter += 1;
+                        let rem = format!("%nnrem{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%nnrv{}", self.txn_counter); self.txn_counter += 1;
+                        let zero_c = format!("%nnzc{}", self.txn_counter); self.txn_counter += 1;
+                        let z_l = format!("nn_z{}", self.txn_counter); self.txn_counter += 1;
+                        let r_l = format!("nn_r{}", self.txn_counter); self.txn_counter += 1;
+                        let e_l = format!("nn_e{}", self.txn_counter); self.txn_counter += 1;
+                        let rsp = format!("%nnrsp{}", self.txn_counter); self.txn_counter += 1;
+                        let rnp = format!("%nnrnp{}", self.txn_counter); self.txn_counter += 1;
+                        let rsec = format!("%nnrsec{}", self.txn_counter); self.txn_counter += 1;
+                        let rnsec = format!("%nnrnsec{}", self.txn_counter); self.txn_counter += 1;
+                        let rmul = format!("%nnrmul{}", self.txn_counter); self.txn_counter += 1;
+                        let rns = format!("%nnrns{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = udiv i64 {}, 1000000000", indent, sec, ns.name).ok();
+                        writeln!(out, "{}{} = urem i64 {}, 1000000000", indent, nsec, ns.name).ok();
+                        writeln!(out, "{}{} = alloca {{ i64, i64 }}, align 8", indent, ts).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i64, i64 }}, ptr {}, i32 0, i32 0", indent, tsp, ts).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i64, i64 }}, ptr {}, i32 0, i32 1", indent, tsnp, ts).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}", indent, sec, tsp).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}", indent, nsec, tsnp).ok();
+                        writeln!(out, "{}{} = alloca {{ i64, i64 }}, align 8", indent, rem).ok();
+                        writeln!(out, "{}{} = call i32 @nanosleep(ptr {}, ptr {})", indent, rv, ts, rem).ok();
+                        writeln!(out, "{}{} = icmp eq i32 {}, 0", indent, zero_c, rv).ok();
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, zero_c, z_l, r_l).ok();
+                        writeln!(out, "{}{}:", indent, z_l).ok();
+                        writeln!(out, "{}  br label %{}", indent, e_l).ok();
+                        writeln!(out, "{}{}:", indent, r_l).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i64, i64 }}, ptr {}, i32 0, i32 0", indent, rsp, rem).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i64, i64 }}, ptr {}, i32 0, i32 1", indent, rnp, rem).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}", indent, rsec, rsp).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}", indent, rnsec, rnp).ok();
+                        writeln!(out, "{}{} = mul i64 {}, 1000000000", indent, rmul, rsec).ok();
+                        writeln!(out, "{}{} = add i64 {}, {}", indent, rns, rmul, rnsec).ok();
+                        writeln!(out, "{}  br label %{}", indent, e_l).ok();
+                        writeln!(out, "{}{}:", indent, e_l).ok();
+                        writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, v, z_l, rns, r_l).ok();
                     }
                     // Data intrinsics (stubs)
                     Intrinsic::Sort | Intrinsic::Reverse | Intrinsic::Range => {

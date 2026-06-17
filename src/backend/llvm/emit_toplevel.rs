@@ -33,89 +33,19 @@ impl LlvmBackend {
         writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
         writeln!(out, "declare ptr @brief_read_file(ptr)").ok();
         writeln!(out, "declare void @__exit()").ok();
-        // Phase A: Terminal intrinsics (intrinsics.md D4)
+        // Remaining brief_* shims (not yet migrated to direct libc)
         writeln!(out, "declare i64 @brief_tty_raw_mode(i64)").ok();
-        writeln!(out, "declare i64 @brief_tty_size()").ok();
-        writeln!(out, "declare i64 @brief_tty_read_key()").ok();
-        writeln!(out, "declare i64 @brief_ioctl(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_isatty(i64)").ok();
-        // Phase A: Process intrinsics (intrinsics.md D5)
         writeln!(out, "declare i64 @brief_spawn_with_output(i64)").ok();
         writeln!(out, "declare i64 @brief_spawn(i64)").ok();
-        // Phase B: Raw File I/O intrinsics (intrinsics.md D2)
-        writeln!(out, "declare i64 @brief_open(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_close(i64)").ok();
-        writeln!(out, "declare i64 @brief_read(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_write(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_lseek(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_pread(i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_pwrite(i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_stat(i64)").ok();
-        writeln!(out, "declare i64 @brief_fstat(i64)").ok();
-        writeln!(out, "declare i64 @brief_truncate(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_ftruncate(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_fsync(i64)").ok();
-        writeln!(out, "declare i64 @brief_dup(i64)").ok();
-        writeln!(out, "declare i64 @brief_dup2(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_fcntl(i64, i64, i64)").ok();
-        // Phase C: Filesystem intrinsics (intrinsics.md D3)
-        writeln!(out, "declare i64 @brief_mkdir(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_rmdir(i64)").ok();
-        writeln!(out, "declare i64 @brief_unlink(i64)").ok();
-        writeln!(out, "declare i64 @brief_rename(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_symlink(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_readlink(i64)").ok();
-        writeln!(out, "declare i64 @brief_link(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_getcwd()").ok();
-        writeln!(out, "declare i64 @brief_chdir(i64)").ok();
         writeln!(out, "declare i64 @brief_readdir(i64)").ok();
-        writeln!(out, "declare i64 @brief_chmod(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_chown(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_umask(i64)").ok();
-        writeln!(out, "declare i64 @brief_access(i64, i64)").ok();
-        // Phase D: Memory intrinsics (intrinsics.md D1)
-        writeln!(out, "declare i64 @brief_mmap(i64, i64, i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_munmap(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_mprotect(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_brk(i64)").ok();
-        writeln!(out, "declare i64 @brief_mlock(i64, i64)").ok();
-        // Phase D: Sync intrinsics — futex (Shim); atomic ops are Native (no declare needed)
         writeln!(out, "declare i64 @brief_futex(i64, i64, i64, i64, i64, i64)").ok();
-        // Phase E: IPC intrinsics (intrinsics.md D11)
-        writeln!(out, "declare i64 @brief_pipe(i64)").ok();
-        writeln!(out, "declare i64 @brief_shm_open(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_shm_unlink(i64)").ok();
-        writeln!(out, "declare i64 @brief_sem_open(i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_sem_wait(i64)").ok();
-        writeln!(out, "declare i64 @brief_sem_post(i64)").ok();
-        // Phase F: Signals intrinsics (intrinsics.md D8)
         writeln!(out, "declare i64 @brief_sigaction(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_sigprocmask(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_kill(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_signalfd(i64)").ok();
         writeln!(out, "declare i64 @brief_timerfd_create(i64)").ok();
-        // Phase G: Networking intrinsics (intrinsics.md D10)
-        writeln!(out, "declare i64 @brief_socket(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_bind(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_listen(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_accept(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_connect(i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_send(i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_recv(i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_sendto(i64, i64, i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_recvfrom(i64, i64, i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_setsockopt(i64, i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_getsockopt(i64, i64, i64, i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_shutdown(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_getaddrinfo(i64, i64)").ok();
-        // Phase H: Everything Else (intrinsics.md D6, D7)
-        writeln!(out, "declare i64 @brief_getenv(i64)").ok();
-        writeln!(out, "declare i64 @brief_setenv(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_unsetenv(i64)").ok();
-        writeln!(out, "declare i64 @brief_getpid()").ok();
-        writeln!(out, "declare i64 @brief_getppid()").ok();
-        writeln!(out, "declare i64 @brief_clock_gettime(i64)").ok();
-        writeln!(out, "declare i64 @brief_nanosleep(i64)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {

@@ -1,7 +1,34 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Status:** Phase H — Everything Else complete (2026-06-15). Phases A–G also complete. All planned intrinsic phases are done. Supersedes `as-intrinsic.md`.
+**Updated:** 2026-06-17 — majority migrated from Shim (C shim) to Direct (inline libc)
+**Status:** Phase H complete. 71/86 intrinsics emit direct libc calls. 15 remain as brief_rt.c shims.
+
+## Migration to Direct Libc (2026-06-16 — 2026-06-17)
+
+The initial intrinsic implementation used **Shim** (C functions in `brief_rt.c`).
+Over two sessions, ~60 of the 74 intrinsics were migrated to **Direct** (inline
+libc calls in LLVM IR), eliminating the C dependency for the common case.
+
+### Migration summary
+
+| Category | Total | Migrated | Remaining | Remaining reason |
+|----------|-------|----------|-----------|-----------------|
+| D1 Memory | 5 | 5 | 0 | — |
+| D2 File I/O | 15 | 15 | 0 | — |
+| D3 Filesystem | 14 | 11 | 3 | `readlink`, `getcwd`, `readdir` — Brief string/list boxing |
+| D4 Terminal | 5 | 4 | 1 | `tty_raw_mode` — `cfmakeraw` macro, 3-termios struct (~15 fields) |
+| D5 Process | 2 | 0 | 2 | `spawn` (`WEXITSTATUS` macro), `spawn_with_output` (popen+fread+pclose+boxing) |
+| D6 Environment | 5 | 5 | 0 | — |
+| D7 Timing | 2 | 2 | 0 | — |
+| D8 Signals | 5 | 1 | 4 | `sigaction`/`sigprocmask` — struct sigaction/sigset_t; `signalfd`/`timerfd_create` — Linux-specific |
+| D9 Sync (atomic) | 6 | 6 | 0 | — (all Native LLVM IR) |
+| D9 Sync (futex) | 1 | 0 | 1 | `futex` — already a stub, Linux-specific |
+| D10 Networking | 13 | 12 | 1 | `getaddrinfo` — linked list walk + struct construction |
+| D11 IPC | 6 | 6 | 0 | — |
+| Thread pool | 3 | 0 | 3 | `barrier_release`, `barrier_wait`, `thread_pool_init` — global state in C |
+| D19 Benchmarks | 4 | 4 | 0 | — |
+| **Total** | **86** | **71** | **15** | |
 
 ## Purpose
 
@@ -58,13 +85,14 @@ let encoded = tty_size#();
 ## The Three Codegen Categories
 
 | Category | What | How | Examples | Autarky effort |
-|---|---|---|---|---|
-| **Shim** | Complex multi-step ops | C function in `brief_rt.c`, compiler emits `declare`+`call` | `tty_raw_mode#`, `spawn_with_output#` | Rewrite `brief_rt.c` function |
-| **Direct** | Thin syscall wrappers | Inline asm in compiler's LLVM codegen | `open#`, `read#`, `fork#`, `mmap#` | Change codegen match arm |
+|---|---|---|---|---|---|
+| **Shim** | Complex multi-step ops | C function in `brief_rt.c`, compiler emits `declare`+`call` | `tty_raw_mode#`, `spawn_with_output#`, `readdir#` | Rewrite `brief_rt.c` function |
+| **Direct** | Thin syscall wrappers | Compiler emits inline libc calls in LLVM IR | `open#`, `read#`, `mmap#`, `socket#` | Change codegen match arm |
 | **Native** | LLVM-native instructions | Atomic LLVM IR directly | `atomic_load#`, `fence#` | Already native |
 
-**Phase A** uses **Shim** exclusively (wraps libc in `brief_rt.c`). Direct and
-Native are for later phases as each intrinsic is migrated to pure assembly.
+**Status (2026-06-17):** ~60/74 intrinsics migrated from Shim → Direct.
+The remaining 14 Shim intrinsics require multi-call sequences, heap string boxing,
+or C macros (`cfmakeraw`, `WEXITSTATUS`).` brief_rt.c` is auto-linked for all native builds.
 
 ## Complete Intrinsic Catalog (18 Domains, ~80 Intrinsics)
 

@@ -23,19 +23,19 @@ Dead backends: `verilog.rs`, `vhdl.rs`, `c.rs`, `rust.rs`, `cobol.rs`,
 
 ## LLVM Backend (Split into Subdirectory)
 
-The LLVM backend is at `src/backend/llvm/` (11 files, ~8,700 total lines;
+The LLVM backend is at `src/backend/llvm/` (11 files, ~9,400 total lines;
 original monolithic `llvm.rs` was ~7,800 lines).
 
 ### File Layout
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 1,776 | `LlvmBackend` struct (46 fields in 9 groups), `generate()` entry point, builder methods, codegen dispatch (A000-A006 decision), `build_field_index`, `validate_schema_types` |
+| `mod.rs` | 1,933 | `LlvmBackend` struct (46 fields in 9 groups), `generate()` entry point, builder methods, codegen dispatch (A000-A006 decision), `build_field_index`, `validate_schema_types` |
 | `emit_toplevel.rs` | 734 | Top-level emission: `emit_header`, `emit_declares`, `emit_init_state`, `emit_definition`, `emit_transaction`, `emit_callable_txn`, `emit_precondition_check`, `emit_pre_function`, `emit_async_body`, `emit_fused`, `emit_shape_guarded_body`, `emit_fused_composed`, `emit_trg_load`, `llvm_type`, `align_of`, `declare_state_type` |
-| `emit_expr.rs` | 1,037 | `emit_expr()` router — all 20+ Expr variant arms including ProjectionTarget (18 targets), BracketOp (MultiSlice), Slice, collection emissions, field access, match/pattern, tuple |
-| `emit_stmt.rs` | 477 | `emit_stmt()` router — all Statement variant arms with Guarded block handling, let_bindings save/restore across guard boundaries |
-| `loop_engine.rs` | 1,080 | Folded loop engine: `emit_folded_main`, `emit_folded_memory_main`, `emit_ssa_main`, `emit_folded_loop`, `emit_folded_pure_counter`, `emit_trg_step` (NEW), `pre_extract_float/int_fields`, `pre_load_all_fields` |
-| `reorder.rs` | 281 | Transaction body instruction reordering: read/write set analysis, dependency DAG, Kahn's topological sort for ILP (NEW 2026-06-15) |
+| `emit_expr.rs` | 2,523 | `emit_expr()` router — all Expr variant arms including ProjectionTarget (18 targets), ~60 migrated intrinsic dispatch arms (direct libc), BracketOp (MultiSlice), Slice, collection emissions, field access, match/pattern, tuple |
+| `emit_stmt.rs` | 586 | `emit_stmt()` router — all Statement variant arms with Guarded block handling, let_bindings save/restore across guard boundaries, SSA field-write re-extraction for intra-body consistency |
+| `loop_engine.rs` | 1,398 | Folded loop engine: `emit_folded_main`, `emit_folded_memory_main`, `emit_ssa_main`, `emit_folded_loop`, `emit_folded_pure_counter`, `emit_trg_step` (NEW), `pre_extract_float/int_fields`, `pre_load_all_fields` |
+| `reorder.rs` | 281 | Transaction body instruction reordering: read/write set analysis, dependency DAG, Kahn's topological sort for ILP |
 | `dispatch.rs` | 256 | Reactor dispatch: `emit_reactor`, `emit_parallel_reactor`, `extract_ranges` |
 | `optimizer.rs` | 280 | Decision tree: `select_optimization_strategy`, classify, extract trigger/enum keys |
 | `hazard.rs` | 249 | SLP hazard analysis: `estimate_slp_hazard`, `slp_attr`, `compute_peak_live_floats` |
@@ -335,6 +335,30 @@ If the `init_state` function body is inlined into `main()` before the `alloca`, 
 
 This makes both GEP+store and SSA insertvalue equally efficient, and enables LLVM
 to identify reductions through either path.
+
+### SSA Path B Bugfix: Intra-body Field Reads After Writes (2026-06-17)
+
+The SSA extract-all-at-entry pattern (`pre_extract_int_fields`) caused a
+correctness bug when a field is both written and read within the same
+transaction body. Example from `fannkuch_redux_sym.bv`:
+
+```brief
+&seed = p0;                    // writes seed field
+&checksum = checksum + seed % 13;  // reads seed — should see p0, not seed_old
+```
+
+Without the fix, `seed` in the second line reads the **pre-tick** `seed_old`
+extracted at body entry, not the `p0` that was just written. **Fix**
+(`emit_stmt.rs:317-328`): After each SSA-mode field write (`insertvalue`),
+re-extract the field from the new state and update `ssa_old_int_regs` so
+subsequent reads use the latest value.
+
+### Auto-Linking brief_rt.c (2026-06-17)
+
+`brief_rt.c` is now auto-linked for **all** native builds (not just programs
+with `@ link` triggers). The linker drops unused symbols, so this is safe
+even for programs that use no C shims. This unblocks officina-cli, which
+uses `#`-intrinsics via the stdlib but has no `import "link/..."` statements.
 
 ### stdout Buffering Policy
 
