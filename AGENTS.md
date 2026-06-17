@@ -685,7 +685,64 @@ Before every commit:
    grep '%State' opt.ll
    ```
 
-6. **Doc-per-cycle**: If this commit includes a new or migrated feature, write/update
-   `docs/architecture/features/<name>.md` in the same commit. Never batch documentation.
-6. Log bugs/gotchas in BUGS.md or docs/architecture/praetor-log.md
-7. Add Kani harnesses for all newly written or modified functions
+ 6. **Doc-per-cycle**: If this commit includes a new or migrated feature, write/update
+    `docs/architecture/features/<name>.md` in the same commit. Never batch documentation.
+ 6. Log bugs/gotchas in BUGS.md or docs/architecture/praetor-log.md
+ 7. Add Kani harnesses for all newly written or modified functions
+
+## Known Bugs Fixed
+
+### 2026-06-17: String state initializers store null instead of string constant
+
+**Root cause**: `emit_inline_init_stores` in `emit_toplevel.rs:468` had a special case
+that matched `Some(Expr::String(_))` and stored `i8* null` instead of the actual
+string constant pointer. All string state variables (e.g. `current_input: String = ""`,
+`target_os: String = "linux"`) were initialized as null pointers. The first tick
+that read any string field dereferenced null → **SIGSEGV**.
+
+**Fix**: Replace `null` with a `bitcast` of `@str.N` to `i8*`, identical to what
+`Expr::String` already emits in `emit_expr.rs:32`.
+
+**Lesson**: Every `Expr` handler that evaluates to a pointer must store the actual
+pointer, not a sentinel/placeholder. Unit test `test_string_state_init` added to
+verify string state fields get non-null initial values.
+
+### 2026-06-17: Wrong TFD_NONBLOCK / SFD_NONBLOCK constants in trigger init
+
+**Root cause**: `emit_toplevel.rs:104-105` had `tfd_nonblock = 0x400` and
+`sfd_nonblock = 0x400`. These should be `0x800` (same as `O_NONBLOCK` on Linux
+x86_64). The values `0x400` are `FD_CLOEXEC`, not `O_NONBLOCK`. The intrinsics
+themselves (`timerfd_create`, `signalfd`) already use the correct value `2048`
+(`0x800`) from the migration; only the trigger-init constants were wrong.
+
+**Fix**: Change both to `0x800`.
+
+**Lesson**: Hardcoded platform constants should be cross-referenced against kernel
+headers (`/usr/include/asm-generic/fcntl.h`). Use `O_NONBLOCK = 0o0004000 = 2048`
+for all `*_NONBLOCK` constants.
+
+### 2026-06-17: `read_file#` returns null instead of error — FFI must use `Result<T, E>`
+
+**Root cause**: `read_file#` returned `i8*` — either a valid C string or NULL if
+the file didn't exist. The Brief type system has no notion of "nullable pointer".
+When the file was missing, the code dereferenced a null string → **SIGSEGV**.
+
+**Fix**: Changed `read_file#` to return `Result<String, String>` — `Ok(contents)`
+on success, `Err("file not found")` on failure. The LLVM backend constructs a
+heap-allocated `Result` enum (malloc + discriminant + payload), consistent with
+the existing enum construction path at `emit_expr.rs:428-463`.
+
+**Architectural rule**: Every Brief `#`-intrinsic that can fail MUST return
+`Result<T, E>` where `E` describes the failure. Raw `String` returns that can
+be null are forbidden — they subvert the type system.
+
+Before:
+```
+read_file#(path) → String   // null on failure, cannot distinguish
+```
+After:
+```
+read_file#(path) → Result<String, String>  // Ok(contents) | Err(reason)
+```
+
+### 2026-06-17: `tfd_nonblock` / `sfd_nonblock` constants — typo fix

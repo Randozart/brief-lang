@@ -546,7 +546,7 @@ impl LlvmBackend {
             Statement::SyncBlock { body } => {
                 for s in body { self.emit_stmt(out, s, indent); }
             }
-            Statement::Unification { name, variant: _, fields, expr } => {
+            Statement::Unification { name, variant, fields, expr } => {
                 // Save/restore bindings — pattern variable bindings from the arm
                 // block must not leak past the merge block.
                 let saved_bindings = self.let_bindings.clone();
@@ -557,7 +557,10 @@ impl LlvmBackend {
                 let arm_l = format!("ua{}", self.txn_counter); self.txn_counter += 1;
                 let def_l = format!("ud{}", self.txn_counter); self.txn_counter += 1;
                 let merge_l = format!("um{}", self.txn_counter); self.txn_counter += 1;
-                let target = self.variant_disc.get(name.as_str())
+                // 2026-06-17: Look up the VARIANT name (Ok, Err) in variant_disc,
+                // not the VALUE name (json_res). Using name (the value) always
+                // returned 0 (Ok's disc), so Err was never matched.
+                let target = self.variant_disc.get(variant)
                     .map(|(_, d, _)| *d)
                     .unwrap_or(0);
                 writeln!(out, "{}switch i64 {}, label %{} [ i64 {}, label %{} ]", indent, disc, def_l, target, arm_l).ok();
@@ -578,7 +581,7 @@ impl LlvmBackend {
                 }
                 self.terminated = prev_terminated;
                 writeln!(out, "{}{}:", indent, def_l).ok();
-                writeln!(out, "{}  unreachable", indent).ok();
+                writeln!(out, "{}  br label %{}", indent, merge_l).ok();
                 writeln!(out, "{}{}:", indent, merge_l).ok();
                 self.let_bindings = saved_bindings;
                 self.let_binding_types = saved_types;

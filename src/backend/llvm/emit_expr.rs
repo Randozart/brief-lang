@@ -561,6 +561,9 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = call i64 @time(i64* null)", indent, v).ok();
                     }
                     Intrinsic::ReadFile => {
+                        // 2026-06-17: Return Result<String, String> — Ok(contents) on success,
+                        // Err("file not found") on failure. Null returns from brief_read_file
+                        // construct Err instead of propagating a null pointer.
                         if args.len() >= 1 {
                             let path_val = self.emit_expr(out, &args[0], indent);
                             let boxed = self.adapt_to_i64(out, indent, &path_val);
@@ -568,9 +571,67 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, pp, boxed).ok();
                             let raw = format!("%frraw{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = call i8* @brief_read_file(i8* {})", indent, raw, pp).ok();
-                            let ret_boxed = format!("%frbox{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, ret_boxed, raw).ok();
-                            return TypedRegister { name: ret_boxed, ty: Type::Int };
+                            let is_null = format!("%frisn{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = icmp eq i8* {}, null", indent, is_null, raw).ok();
+                            let el = format!("rf_err{}", self.txn_counter); self.txn_counter += 1;
+                            let ol = format!("rf_ok{}", self.txn_counter); self.txn_counter += 1;
+                            let dl = format!("rf_done{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_null, el, ol).ok();
+
+                            // Err("file not found") — packed Result: disc=1 low 8 bits,
+                            // payload=slot(ptrtoint @STR_READFILE_ERR) << 8
+                            writeln!(out, "{}{}:", indent, el).ok();
+                            let e_gp = format!("%rgep{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr [15 x i8], [15 x i8]* @STR_READFILE_ERR, i64 0, i64 0", indent, e_gp).ok();
+                            let e_pa = format!("%rfpa{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, e_pa, e_gp).ok();
+                            let e_sh = format!("%rfsh{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = shl i64 {}, 8", indent, e_sh, e_pa).ok();
+                            let e_re = format!("%rfer{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = or i64 {}, 1", indent, e_re, e_sh).ok();
+                            writeln!(out, "{}br label %{}", indent, dl).ok();
+
+                            // Ok(contents) — packed Result: disc=0 low 8 bits,
+                            // payload=boxed Brief string pointer << 8
+                            writeln!(out, "{}{}:", indent, ol).ok();
+                            // Boxing: strlen -> malloc -> store header -> memcpy chars -> null terminate
+                            // strlen(raw)
+                            let sl = format!("%rfosl{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = call i64 @strlen(i8* {})", indent, sl, raw).ok();
+                            // Total allocation: 16 (header) + len + 1 (null terminator)
+                            let hs = format!("%rfohs{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = add i64 16, {}", indent, hs, sl).ok();
+                            let as_ = format!("%rfoas{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = add i64 {}, 1", indent, as_, hs).ok();
+                            let hp = format!("%rfohp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, hp, as_).ok();
+                            // Store data_ptr (ptrtoint of chars area at offset 16)
+                            let hl = format!("%rfohl{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hl, hp).ok();
+                            let cp = format!("%rfocp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 16", indent, cp, hp).ok();
+                            let dv = format!("%rfodv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, dv, cp).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dv, hl).ok();
+                            // Store length
+                            let ls = format!("%rfols{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ls, hl).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, sl, ls).ok();
+                            // memcpy chars
+                            writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)", indent, cp, raw, sl).ok();
+                            // Null terminate
+                            let nt = format!("%rfon{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, nt, cp, sl).ok();
+                            writeln!(out, "{}store i8 0, i8* {}, align 1", indent, nt).ok();
+                            // Pack into Result with disc=0: payload << 8 (disc=0 is implicit)
+                            let o_pa = format!("%rfoi{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, o_pa, hp).ok();
+                            let o_re = format!("%rfor{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = shl i64 {}, 8", indent, o_re, o_pa).ok();
+                            writeln!(out, "{}br label %{}", indent, dl).ok();
+
+                            writeln!(out, "{}{}:", indent, dl).ok();
+                            writeln!(out, "{}{} = phi i64 [ {}, %{} ], [ {}, %{} ]", indent, v, e_re, el, o_re, ol).ok();
                         } else {
                             writeln!(out, "{}{} = add i64 0, 0 ; read_file: missing arg", indent, v).ok();
                         }

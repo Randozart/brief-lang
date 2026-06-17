@@ -101,8 +101,8 @@ impl LlvmBackend {
         let f_setfl = 4; // F_SETFL
         let o_nonblock = 0x800u32; // O_NONBLOCK
         let clo_monotonic = 1; // CLOCK_MONOTONIC
-        let tfd_nonblock = 0x400; // TFD_NONBLOCK
-        let sfd_nonblock = 0x400; // SFD_NONBLOCK
+        let tfd_nonblock = 0x800; // TFD_NONBLOCK = O_NONBLOCK = 2048 on x86_64
+        let sfd_nonblock = 0x800; // SFD_NONBLOCK = O_NONBLOCK = 2048 on x86_64
         let sig_block = 0; // SIG_BLOCK
 
         // epoll_create1(0)
@@ -350,8 +350,12 @@ impl LlvmBackend {
                     let v = if b { "1" } else { "0" };
                     writeln!(out, "  store i8 {}, i8* {}, align {}", v, p, self.align_of("i8")).ok();
                 }
-                Some(Expr::String(_)) => {
-                    writeln!(out, "  store i8* null, i8** {}, align {}", p, self.align_of("i8*")).ok();
+                Some(Expr::String(s)) => {
+                    let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                    let g = format!("@str.{}", si);
+                    let str_p = format!("%ip{}s", reg); reg += 1;
+                    writeln!(out, "  {} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", str_p, s.len() + 1, g).ok();
+                    writeln!(out, "  store i8* {}, i8** {}, align {}", str_p, p, self.align_of("i8*")).ok();
                 }
                 Some(Expr::Char(c)) => {
                     let v = c as i32;
@@ -465,8 +469,15 @@ impl LlvmBackend {
                     let v = if b { "1" } else { "0" };
                     writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, v, p, self.align_of("i8")).ok();
                 }
-                Some(Expr::String(_)) => {
-                    writeln!(out, "{}store i8* null, i8** {}, align {}", indent, p, self.align_of("i8*")).ok();
+                Some(Expr::String(s)) => {
+                    // 2026-06-17: Store actual string constant pointer, not null.
+                    // The string is stored as a bitcast of @str.N to i8*, matching
+                    // what Expr::String emits in emit_expr.rs:32.
+                    let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                    let g = format!("@str.{}", si);
+                    let str_p = format!("%ip_{}s", idx);
+                    writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, p, self.align_of("i8*")).ok();
                 }
                 Some(Expr::Char(c)) => {
                     let v = c as i32;

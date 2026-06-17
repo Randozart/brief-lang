@@ -906,6 +906,8 @@ self.emit_declares(&mut out);
         writeln!(out, "@FMT_INT = private unnamed_addr constant [5 x i8] c\"%ld\\0A\\00\"").ok();
         writeln!(out, "@FMT_FLOAT = private unnamed_addr constant [6 x i8] c\"%.9f\\0A\\00\"").ok();
         writeln!(out, "@FMT_STR = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\"").ok();
+        // Error message for read_file# — returned as Err's String payload
+        writeln!(out, "@STR_READFILE_ERR = private unnamed_addr constant [15 x i8] c\"file not found\\00\"").ok();
         // Declare libc functions used by direct-libc intrinsics
         writeln!(out, "@stdout = external global ptr").ok();
         writeln!(out, "declare i32 @fprintf(ptr, ptr, ...) #1").ok();
