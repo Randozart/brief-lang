@@ -690,8 +690,12 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = load i16, ptr {}", indent, col, col_p).ok();
                         writeln!(out, "{}{} = zext i16 {} to i64", indent, row64, row).ok();
                         writeln!(out, "{}{} = zext i16 {} to i64", indent, col64, col).ok();
-                        writeln!(out, "{}{} = shl i64 {}, 32", indent, shifted, row64).ok();
-                        writeln!(out, "{}{} = or i64 {}, {}", indent, packed, shifted, col64).ok();
+                        // 2026-06-17: Pack as col * 10000 + row (C convention used by
+                        // officina: term_width = encoded/10000, term_height = encoded%10000)
+                        let mult = format!("%ttym{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = mul i64 {}, 10000", indent, mult, col64).ok();
+                        let packed = format!("%ttypk{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = add i64 {}, {}", indent, packed, mult, row64).ok();
                         writeln!(out, "{}  br label %{}", indent, e_l).ok();
                         writeln!(out, "{}{}:", indent, e_l).ok();
                         writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, v, z_l, packed, o_l).ok();
