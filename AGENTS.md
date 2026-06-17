@@ -4,6 +4,14 @@ See CLAUDE.md for complete documentation. This file ensures OpenCode picks up th
 
 ## Quick Reference
 
+### Philosophy (One Sentence)
+
+Brief's contract system (`[pre][post]`) is not a correctness tax — it is
+information the compiler uses to optimize harder. Safety IS the
+optimization enabler. Full machine access is available through contracts
+proven at compile time, not `unsafe` blocks. See
+`docs/architecture/philosophy.md` for the full thesis.
+
 ### Commands
 - **Build**: `cargo build`
 - **Test**: `cargo test --lib`
