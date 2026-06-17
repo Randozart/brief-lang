@@ -400,6 +400,7 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
 - **Variadic `fprintf` syntax** fixed: 3 call sites now use `(ptr, ptr, ...)` prototype (loop_engine.rs:872, emit_expr.rs:1747, emit_expr.rs:1769)
 - **TBAA metadata** implemented: 6-node type tree (Brief/Int/Bool/Char/String/Float), annotated on all state field loads and stores + struct FieldAccess. Enables LLVM type-based alias analysis for i64-boxed types.
 - **`!range` metadata** implemented: replaces `@llvm.assume` for simple `[x < N]` precondition patterns with `!range !{ 0, N }` on the field load.
+- **`<-` arrow push** implemented for `List<T>`: reads header, allocates new buffer, copies elements, appends value, writes back to state field. No longer returns 0.
 - Three canonical backends: LLVM (native), Webstack (WASM+JS), CIRCT (MLIR→Verilog)
 - All other backends are dead code — zero fixes
 - Kani: 14 fast-group harnesses proven (2.5s), 96 full-group pass with `--features kani_full`

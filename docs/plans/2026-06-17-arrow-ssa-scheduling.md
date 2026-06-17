@@ -39,23 +39,27 @@ On `&list <- value`:
 - **List<T> only** (most common, covers officina's usage)
 - Pop, Discard, Transfer, HashMap/HashSet/Stack/Queue deferred
 
-## Work Item 2: Fix SSA Dispatch Selection for Trigger-Based Programs
+## Work Item 2: SSA Dispatch Selection (Investigated — No Fix Needed)
 
-### Current State
-Officina declares `reactor @30Hz;` and `trg keypress: Char @stdin#;`, yet
-the compiler selects SSA loop dispatch. The program spins in a busy loop
-with no `epoll_wait`, wasting CPU.
+### Finding
+The dispatch selection in `mod.rs:1501-1515` correctly identifies that
+programs with non-enumerable wake triggers (like `@stdin#`) should use
+the SSA loop with `__rt_wait()`. The path at line 1515 passes
+`has_wake_triggers = true` to `emit_ssa_main`, which emits
+`call void @__rt_wait()` between ticks.
 
-### Target State
-When a program has external triggers (`@stdin#`, `@linked`), the dispatch
-should select wake/reactor mode, which enters `epoll_wait` between ticks.
+The `__rt_wait()` call is verified present in the generated officina.ll.
+The program blocks on stdin rather than spinning — correct behavior.
 
-### Investigation Needed
-The dispatch selection logic is in `loop_engine.rs` or `mod.rs`. The flag
-`has_wake_triggers` is computed somewhere — check if trigger detection
-happens before or after the `emit_ssa_main` vs `emit_enum_main` decision.
+The "warning: program has wake triggers but no exit path" is about the
+missing `#!exit <condition>;` pragma, not about dispatch mode. Adding an
+exit condition is a user-facing feature (Ctrl+C handler), not a compiler bug.
+
+### No Fix Needed
+This item is resolved — the compiler makes the correct dispatch choice.
 
 ## Verification
 1. `cargo test --lib` — all tests pass
 2. Officina boots, `<-` operations no longer return 0
 3. Generated IR shows proper list mutation code
+4. `__rt_wait()` present in generated officina.ll
