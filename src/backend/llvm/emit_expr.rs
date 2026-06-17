@@ -1,4 +1,4 @@
-use crate::ast::{BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, Pattern, ProjectionTarget, SliceCoordinate, Statement, Type};
+use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, Pattern, ProjectionTarget, SliceCoordinate, Statement, Type};
 use crate::backend::llvm::{float_to_llvm_hex, LlvmBackend, TypedRegister};
 use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
 use std::collections::HashMap;
@@ -2257,8 +2257,69 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
-            Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } => {
-                self.warnings.push("LLVM backend stub: arrow operator (collect/discard/transfer) returns 0".into());
+            Expr::ArrowMut { dir: ArrowDir::Push, target, index: _, value: Some(val) } => {
+                let list_val = self.emit_expr(out, target, indent);
+                let elem_val = self.emit_expr(out, val, indent);
+                let list_boxed = self.adapt_to_i64(out, indent, &list_val);
+                let elem_boxed = self.adapt_to_i64(out, indent, &elem_val);
+                // Unbox list header: inttoptr i64 to i64*
+                let hp = format!("%ahp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_boxed).ok();
+                // Read current length from header slot 1
+                let lp = format!("%alp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                let old_len = format!("%aol{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, old_len, lp).ok();
+                // Allocate new buffer: (old_len + 3) * 8 bytes
+                let new_cnt = format!("%anc{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, 3", indent, new_cnt, old_len).ok();
+                let alloc_bytes = format!("%aab{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = mul i64 {}, 8", indent, alloc_bytes, new_cnt).ok();
+                let new_buf = format!("%anb{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, new_buf, alloc_bytes).ok();
+                // Set header: data_ptr at slot 0, new length at slot 1
+                let new_hp = format!("%anh{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, new_hp, new_buf).ok();
+                let base = format!("%aba{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, new_buf).ok();
+                let dp = format!("%adp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, dp, new_hp).ok();
+                let nlp = format!("%anp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, nlp, new_hp).ok();
+                let new_len = format!("%anl{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, 1", indent, new_len, old_len).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, new_len, nlp).ok();
+                // Copy old elements: memcpy from old_hp + 2 to new_hp + 2
+                let old_dp = format!("%aod{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, old_dp, hp).ok();
+                let new_dp = format!("%and{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, new_dp, new_hp).ok();
+                let copy_bytes = format!("%acb{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = mul i64 {}, 8", indent, copy_bytes, old_len).ok();
+                writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
+                    indent, new_dp, old_dp, copy_bytes).ok();
+                // Store new element at position old_len
+                let ne_ptr = format!("%aep{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ne_ptr, new_dp, old_len).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, elem_boxed, ne_ptr).ok();
+                // Store new list handle back to state field if target is OwnedRef
+                if let Expr::OwnedRef(field_name) = target.as_ref() {
+                    if let Some(&idx) = self.field_index_map.get(field_name) {
+                        let ap = format!("%aap{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ap, idx).ok();
+                        let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
+                    } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
+                    }
+                }
+                // Return new list handle (ptrtoint of new buffer)
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, new_buf).ok();
+                return TypedRegister { name: v, ty: Type::Int };
+            }
+            Expr::ArrowMut { dir: ArrowDir::Pop, .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } => {
+                self.warnings.push("LLVM backend stub: arrow operator (pop/discard/transfer) returns 0".into());
                 writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
