@@ -513,14 +513,54 @@ impl LlvmBackend {
                     Intrinsic::Bytes => {
                         writeln!(out, "{}{} = add i64 0, 8 ; bytes", indent, v).ok();
                     }
-                    Intrinsic::Size | Intrinsic::Pop => {
-                        writeln!(out, "{}{} = add i64 0, 0 ; size/pop stub", indent, v).ok();
+                    Intrinsic::Size => {
+                        if let Some(first) = args.first() {
+                            let list_val = self.emit_expr(out, first, indent);
+                            let list_boxed = self.adapt_to_i64(out, indent, &list_val);
+                            let hp = format!("%ishp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_boxed).ok();
+                            let lp = format!("%islp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
+                        } else { writeln!(out, "{}{} = add i64 0, 0 ; size no-arg", indent, v).ok(); }
+                    }
+                    Intrinsic::Pop => {
+                        if let Some(first) = args.first() {
+                            let list_val = self.emit_expr(out, first, indent);
+                            let list_boxed = self.adapt_to_i64(out, indent, &list_val);
+                            let hp = format!("%ipphp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_boxed).ok();
+                            let lp = format!("%ipplp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                            let len = format!("%ippln{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
+                            let dpp = format!("%ippdp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dpp, hp).ok();
+                            let pi = format!("%ippi{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = add i64 {}, -1", indent, pi, len).ok();
+                            let ep = format!("%ippep{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dpp, pi).ok();
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
+                        } else { writeln!(out, "{}{} = add i64 0, 0 ; pop no-arg", indent, v).ok(); }
                     }
                     Intrinsic::Contains => {
-                        writeln!(out, "{}{} = add i64 0, 0 ; contains stub", indent, v).ok();
+                        if args.len() >= 2 {
+                            let list_val = self.emit_expr(out, &args[0], indent);
+                            let elem_val = self.emit_expr(out, &args[1], indent);
+                            let list_boxed = self.adapt_to_i64(out, indent, &list_val);
+                            let elem_boxed = self.adapt_to_i64(out, indent, &elem_val);
+                            let cmp = format!("%isc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, list_boxed, elem_boxed).ok();
+                            writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                        } else { writeln!(out, "{}{} = add i64 0, 0 ; contains no-arg", indent, v).ok(); }
                     }
                     Intrinsic::Keys | Intrinsic::Values => {
-                        writeln!(out, "{}{} = add i64 0, 0 ; keys/values stub", indent, v).ok();
+                        if let Some(first) = args.first() {
+                            let list_val = self.emit_expr(out, first, indent);
+                            let list_boxed = self.adapt_to_i64(out, indent, &list_val);
+                            // Return the list as-is (Keys/Values of a List is the list itself)
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, list_boxed).ok();
+                        } else { writeln!(out, "{}{} = add i64 0, 0 ; kv no-arg", indent, v).ok(); }
                     }
                     // System I/O intrinsics (stubs — passthrough to frgn calls)
                     Intrinsic::Println => {
@@ -1875,7 +1915,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
                         let lp = format!("%plp{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
-                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, lp).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
                     }
                     ProjectionTarget::Bytes => {
                         let bs = match &src_val.ty {
@@ -2252,9 +2292,54 @@ impl LlvmBackend {
                 }
                 return self.emit_expr(out, last, indent);
             }
-            Expr::MapLiteral(_) | Expr::SetLiteral(_) => {
-                self.warnings.push("LLVM backend stub: MapLiteral/SetLiteral returns 0".into());
-                writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
+            Expr::MapLiteral(items) => {
+                let n = items.len() as i64;
+                let alloc_slots = n + 2;
+                let ai = format!("%mai{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, ai, (alloc_slots * 8 + 8)).ok();
+                let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, ai).ok();
+                let base = format!("%mba{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, ai).ok();
+                let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, dp, hp).ok();
+                let ml1 = format!("%mml1{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ml1, hp).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, n, ml1).ok();
+                // Store values (keys are compile-time in the source map literal)
+                for (i, (_key, val)) in items.iter().enumerate() {
+                    let kv = self.emit_expr(out, val, indent);
+                    let kvs = self.adapt_to_i64(out, indent, &kv);
+                    let ep = format!("%mep{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, kvs, ep).ok();
+                }
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ai).ok();
+                return TypedRegister { name: v, ty: Type::Int };
+            }
+            Expr::SetLiteral(items) => {
+                let n = items.len() as i64;
+                let ai = format!("%sai{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, ai, (n + 2) * 8 + 8).ok();
+                let hp = format!("%shp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, ai).ok();
+                let base = format!("%sba{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, ai).ok();
+                let dp = format!("%sdp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, dp, hp).ok();
+                let sl1 = format!("%ssl1{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, sl1, hp).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, n, sl1).ok();
+                for (i, item) in items.iter().enumerate() {
+                    let iv = self.emit_expr(out, item, indent);
+                    let ivs = self.adapt_to_i64(out, indent, &iv);
+                    let ep = format!("%sep{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, ivs, ep).ok();
+                }
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ai).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
             Expr::ArrowMut { dir: ArrowDir::Push, target, index: _, value: Some(val) } => {
