@@ -142,4 +142,50 @@ This is deterministic and knowsable before emission starts.
 
 ---
 
-Datetime: 2026-06-16T22:00:00-05:00
+## Results (2026-06-17)
+
+### What Worked: Guard Hoisting (Instead of All Three φ Approaches)
+
+The per-field phi approach was NOT needed because LLVM's SROA pass already
+decomposes the `%State` alloca into per-field phi nodes (`%ssa_phi_case.unpack*`).
+After the `call @init_state(%state)` was replaced with inline stores
+(`emit_inline_init_stores`), the alloca no longer escapes, and SROA decomposes it.
+
+The real bottleneck was **terminating guard branch checks**, not the alloca slot.
+Each unrolled iteration had an `icmp eq count, N-1; br` that was predicted
+correctly 99.9% of the time but still consumed decode/retire bandwidth.
+
+**Solution**: Hoist terminating guards from the loop body to post-loop emission.
+Implemented in commit `66de736`:
+- `hoist_terminating_guard()` function extracts `[count == N-1] { term! -> print; }`
+  from the body and stores field+intrinsic info in `self.pending_post_hoist`.
+- Post-loop prints emitted before `ret i32 0` in both `emit_folded_main` and
+  `emit_folded_memory_main`.
+
+### Benchmark Results
+
+| Benchmark | Before | After | C | Ratio |
+|-----------|--------|-------|---|-------|
+| fannkuch_redux | 0.078s | 0.071s | 0.065s | **1.090x** |
+| mandelbrot | — | — | — | Pre-existing IR bug |
+| knucleotide | — | — | — | Pre-existing IR bug |
+
+### Approach A Postmortem (Count-ALL Preds)
+
+The original `phi %State` approach failed because the predecessors of `case_hdr`
+are NOT `case_body4`/`case_body1` but the **else-block of the last Guarded
+statement** in each body section (e.g., `g459_e`, `g552_e`). These block names
+are generated dynamically and cannot be predicted before emission.
+
+The fix would be either:
+1. Create a dedicated latch block that both body sections branch to (adds a block)
+2. Use per-field phi nodes with 2 predecessors each (already done by SROA)
+
+### Next Steps
+
+1. Fix "multiple definition of local value 'tN'" bugs in mandelbrot, knucleotide
+   — caused by `txn_counter` contention across emission functions.
+2. Fasta buffer coalescing (putchar# → fwrite per line instead of fputc per char).
+3. Evaluate: do we still want per-field φ nodes if SROA already handles it?
+
+Datetime: 2026-06-16T22:00:00-05:00 (updated 2026-06-17T07:10)
