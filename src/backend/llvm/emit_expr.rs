@@ -1964,7 +1964,7 @@ impl LlvmBackend {
                 if found_offset {
                     let fp = format!("%fafp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, hp, offset).ok();
-                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, fp).ok();
+                    writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, fp).ok();
                     // 2026-06-17: Return Float type for float fields so downstream
                     // code (emit_binop) correctly identifies them. String/Data fields
                     // remain Type::Int (stored boxed as i64 in struct).

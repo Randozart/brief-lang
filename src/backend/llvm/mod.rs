@@ -410,6 +410,19 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type) -> &str {
     }
 }
 
+/// Map a field's LLVM storage type string to its TBAA metadata node index.
+/// Returns the !N index into the TBAA tree emitted at end of module.
+pub(super) fn tbaa_node(ty_str: &str) -> i32 {
+    match ty_str {
+        "i64" => 1,  // Int / UInt / boxed list/counter
+        "i8"  => 2,  // Bool
+        "i32" => 3,  // Char
+        "i8*" | "ptr" => 4,  // String / Data
+        "float" => 5, // Float
+        _ => 1,  // fallback: Int
+    }
+}
+
 /// Returns true if the expression is a direct reference to one of the given
 /// trigger names (i.e., the precondition is `trg_name` with no operators).
 
@@ -1662,6 +1675,18 @@ self.emit_declares(&mut out);
                 writeln!(out, "{}", m).ok();
             }
         }
+
+        // TBAA metadata tree for type-based alias analysis
+        // Each TBAA node defines a type in the Brief type hierarchy.
+        // LLVM uses this to disambiguate loads/stores: accesses tagged
+        // with different type trees are assumed to never alias.
+        writeln!(out).ok();
+        writeln!(out, "!0 = !{{!\"Brief\"}}").ok();
+        writeln!(out, "!1 = !{{!\"Int\", !0}}").ok();
+        writeln!(out, "!2 = !{{!\"Bool\", !0}}").ok();
+        writeln!(out, "!3 = !{{!\"Char\", !0}}").ok();
+        writeln!(out, "!4 = !{{!\"String\", !0}}").ok();
+        writeln!(out, "!5 = !{{!\"Float\", !0}}").ok();
 
         // Build optimization report if requested
         if self.optimize_report {

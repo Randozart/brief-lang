@@ -376,23 +376,24 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
                     let vol_str = if is_volatile { " volatile" } else { "" };
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
+                    let tn = crate::backend::llvm::tbaa_node(&ty);
                     match ty.as_str() {
                         "i8" => {
                             let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val_boxed).ok();
-                            writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, vol_str, tr, p, self.align_of(&ty)).ok();
+                            writeln!(out, "{}store{} i8 {}, i8* {}, align {}, !tbaa !{}", indent, vol_str, tr, p, self.align_of(&ty), tn).ok();
                         }
                         "float" => {
                             let fl = self.native_float_or_box(out, indent, &val.to_string());
-                            writeln!(out, "{}store{} float {}, float* {}, align {}", indent, vol_str, fl, p, self.align_of(&ty)).ok();
+                            writeln!(out, "{}store{} float {}, float* {}, align {}, !tbaa !{}", indent, vol_str, fl, p, self.align_of(&ty), tn).ok();
                         }
                         s if s == "i8*" || s == "ptr" => {
                             let fp = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, fp, val_boxed).ok();
-                            writeln!(out, "{}store{} i8* {}, i8** {}, align {}", indent, vol_str, fp, p, self.align_of(&ty)).ok();
+                            writeln!(out, "{}store{} i8* {}, i8** {}, align {}, !tbaa !{}", indent, vol_str, fp, p, self.align_of(&ty), tn).ok();
                         }
                         _ => {
-                            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty)).ok();
+                            writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty), tn).ok();
                         }
                     }
                 } else if let Some(slot) = self.param_slots.get(&fname).cloned() {

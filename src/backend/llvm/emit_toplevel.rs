@@ -832,7 +832,33 @@ impl LlvmBackend {
         writeln!(out, "{}{}:", indent, panic_l).ok();
         writeln!(out, "{}  unreachable", indent).ok();
         writeln!(out, "{}{}:", indent, safe_l).ok();
-        writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
+        // Replace @llvm.assume with !range metadata for simple patterns.
+        // Pattern: [x < N] on a state field known to ssa_old_int_regs.
+        // We emit a re-load of x with !range { 0, N } — the extra load is
+        // GVN-eliminated if the bound is already provable by LLVM.
+        match pre {
+            Expr::Lt(lhs, rhs) if matches!(rhs.as_ref(), Expr::Integer(_)) => {
+                if let Expr::Identifier(name) = lhs.as_ref() {
+                    if let Some(&idx) = self.field_index_map.get(name) {
+                        let bound = if let Expr::Integer(b) = rhs.as_ref() { *b } else { 0 };
+                        let gep = format!("%prg{}", self.txn_counter); self.txn_counter += 1;
+                        let ty = &self.field_types[idx];
+                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, gep, idx).ok();
+                        let rl = format!("%prl{}", self.txn_counter); self.txn_counter += 1;
+                        let tn = crate::backend::llvm::tbaa_node(ty);
+                        writeln!(out, "{}{} = load {}, {}* {}, align {}, !tbaa !{}, !range !{{{}, {}}}",
+                            indent, rl, ty, ty, gep, self.align_of(ty), tn, 0i64, bound).ok();
+                    } else {
+                        writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
+                    }
+                } else {
+                    writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
+                }
+            }
+            _ => {
+                writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
+            }
+        }
     }
 
     pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {

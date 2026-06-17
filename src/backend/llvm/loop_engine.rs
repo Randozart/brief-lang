@@ -217,7 +217,8 @@ impl LlvmBackend {
             writeln!(out, "  {} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", gep, state_ptr, field_idx).ok();
             let old_reg = format!("%{}_old_{}", field_name, self.txn_counter);
             self.txn_counter += 1;
-            writeln!(out, "  {} = load {}, {}* {}, align {}", old_reg, ty_str, ty_str, gep, self.align_of(ty_str)).ok();
+            let tn = crate::backend::llvm::tbaa_node(ty_str);
+            writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", old_reg, ty_str, ty_str, gep, self.align_of(ty_str), tn).ok();
             if ty_str == "float" {
                 self.ssa_old_float_regs.insert(field_name.clone(), old_reg);
             } else {
