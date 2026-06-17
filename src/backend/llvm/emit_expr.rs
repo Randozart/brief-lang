@@ -2318,10 +2318,98 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, new_buf).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
-            Expr::ArrowMut { dir: ArrowDir::Pop, .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } => {
-                self.warnings.push("LLVM backend stub: arrow operator (pop/discard/transfer) returns 0".into());
+            Expr::ArrowMut { dir: ArrowDir::Pop, target, index, value: None } => {
+                let list_val = self.emit_expr(out, target, indent);
+                let list_boxed = self.adapt_to_i64(out, indent, &list_val);
+                // Unbox list header
+                let hp = format!("%php{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_boxed).ok();
+                // Read length
+                let lp = format!("%plp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                let len = format!("%pln{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
+                // Compute target index: len - 1 (pop from end) or expression value
+                let pop_idx = format!("%ppi{}", self.txn_counter); self.txn_counter += 1;
+                match index.as_ref() {
+                    Expr::Term => {
+                        writeln!(out, "{}{} = add i64 {}, -1", indent, pop_idx, len).ok();
+                    }
+                    other => {
+                        let idx_val = self.emit_expr(out, other, indent);
+                        let idx_boxed = self.adapt_to_i64(out, indent, &idx_val);
+                        writeln!(out, "{}{} = add i64 {}, 0", indent, pop_idx, idx_boxed).ok();
+                    }
+                }
+                // Load popped element from data_ptr[pop_idx]
+                let dp = format!("%pdp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp, hp).ok();
+                let ep = format!("%pep{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dp, pop_idx).ok();
+                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
+                let popped = v.clone();
+                // Allocate new buffer: (len + 1) * 8 (2 header + len - 1 elements)
+                let new_cnt = format!("%pnc{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, 1", indent, new_cnt, len).ok();
+                let alloc_bytes = format!("%pab{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = mul i64 {}, 8", indent, alloc_bytes, new_cnt).ok();
+                let new_buf = format!("%pnb{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, new_buf, alloc_bytes).ok();
+                // Set header
+                let new_hp = format!("%pnh{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, new_hp, new_buf).ok();
+                let base = format!("%pba{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, new_buf).ok();
+                let new_dp_val = format!("%pnd{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, 16", indent, new_dp_val, base).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, new_dp_val, new_hp).ok();
+                let nlp = format!("%pnp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, nlp, new_hp).ok();
+                let new_len = format!("%pnl{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, -1", indent, new_len, len).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, new_len, nlp).ok();
+                // Copy elements before pop_idx
+                let ndp = format!("%pndp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, ndp, new_hp).ok();
+                let bef_bytes = format!("%pbb{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = mul i64 {}, 8", indent, bef_bytes, pop_idx).ok();
+                writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
+                    indent, ndp, dp, bef_bytes).ok();
+                // Copy elements after pop_idx
+                let after_off = format!("%pao{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 {}, 1", indent, after_off, pop_idx).ok();
+                let aft_src = format!("%pas{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, aft_src, dp, after_off).ok();
+                let aft_dst = format!("%pad{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, aft_dst, ndp, pop_idx).ok();
+                let aft_cnt = format!("%pac{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = sub i64 {}, {}", indent, aft_cnt, new_len, pop_idx).ok();
+                let aft_bytes = format!("%pab2{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = mul i64 {}, 8", indent, aft_bytes, aft_cnt).ok();
+                writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
+                    indent, aft_dst, aft_src, aft_bytes).ok();
+                // Store updated list back
+                if let Expr::OwnedRef(field_name) = target.as_ref() {
+                    if let Some(&idx) = self.field_index_map.get(field_name) {
+                        let ap = format!("%pap{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ap, idx).ok();
+                        let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
+                    } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
+                    }
+                }
+                return TypedRegister { name: popped, ty: Type::Int };
+            }
+            Expr::ArrowDiscard { target, index } => {
+                self.warnings.push("LLVM backend stub: arrow discard returns 0".into());
                 writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
-                return TypedRegister { name: v, ty: Type::Int };
+                return TypedRegister { name: v, ty: Type::Void };
+            }
+            Expr::ArrowTransfer { dest, source, filter: _ } => {
+                self.warnings.push("LLVM backend stub: arrow transfer returns 0".into());
+                writeln!(out, "{}{} = add i64 0, 0 ; stub", indent, v).ok();
+                return TypedRegister { name: v, ty: Type::Void };
             }
             Expr::Cast(inner, target_ty) => {
                 let inner_val = self.emit_expr(out, inner, indent);

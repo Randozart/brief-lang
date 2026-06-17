@@ -351,11 +351,45 @@ pub enum Token {
     Float(f64),
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
-        // Remove surrounding quotes and handle escapes
         let inner = &s[1..s.len()-1];
-        // For simplicity, just return the string slice without unescaping for now
-        // A full implementation would handle escape sequences properly
-        Some(inner.to_string())
+        let mut out = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some('t') => out.push('\t'),
+                    Some('\\') => out.push('\\'),
+                    Some('"') => out.push('"'),
+                    Some('0') => out.push('\0'),
+                    Some('x') => {
+                        // Hex escape: \x03 → char 3
+                        let hex_str: String = chars.by_ref().take(2).collect();
+                        if let Ok(h) = u8::from_str_radix(&hex_str, 16) {
+                            out.push(h as char);
+                        }
+                    }
+                    Some('u') => {
+                        // Unicode escape: \u{1F600}
+                        if chars.next() == Some('{') {
+                            let mut hex = String::new();
+                            while let Some(h) = chars.next() {
+                                if h == '}' { break; }
+                                hex.push(h);
+                            }
+                            if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                                out.push(char::from_u32(cp).unwrap_or('?'));
+                            }
+                        }
+                    }
+                    Some(c) => { out.push('\\'); out.push(c); }
+                    None => out.push('\\'),
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        Some(out)
     })]
     String(String),
     #[regex(r"'([^'\\]|\\.)*'", |lex| {
@@ -382,6 +416,12 @@ pub enum Token {
         }
         if inner == "\\'" {
             return Some('\'');
+        }
+        if inner.len() == 4 && inner.starts_with("\\x") {
+            // Hex escape: \x03 → char 3
+            if let Ok(h) = u8::from_str_radix(&inner[2..], 16) {
+                return Some(h as char);
+            }
         }
         if inner.starts_with("\\u{") && inner.ends_with('}') {
             // Unicode escape: \u{1F600}
