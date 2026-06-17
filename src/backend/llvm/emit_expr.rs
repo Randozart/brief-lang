@@ -308,6 +308,12 @@ impl LlvmBackend {
             Expr::Concat(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); return self.emit_inline_concat(out, indent, &a.name, &b.name); }
             // Call
             Expr::Call(name, args) => {
+                // 2026-06-17: Inline negated (stdlib projection, not defined as a function)
+                if name == "negated" && args.len() >= 1 {
+                    let val = self.emit_expr(out, &args[0], indent);
+                    writeln!(out, "{}{} = sub i64 0, {}", indent, v, val.name).ok();
+                    return TypedRegister { name: v, ty: Type::Int };
+                }
                 // Clone foreign info upfront to avoid borrow conflict with emit_expr
                 let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType)> = self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone()));
                 if let Some((inputs, ret_type)) = frgn_sig {
@@ -391,7 +397,7 @@ impl LlvmBackend {
                                 a_strs.push(format!("i64 {}", raw));
                             }
                         } else {
-                            // 2026-06-17: zext Bool/Char to i64 for enum variant storage
+                            // 2026-06-17: zext Bool/Char/Float to i64 for enum variant storage
                             let stored = if raw.ty == Type::Bool {
                                 let z = format!("%cz{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = zext i1 {} to i64", indent, z, raw.name).ok();
@@ -400,6 +406,12 @@ impl LlvmBackend {
                                 let z = format!("%czc{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = zext i32 {} to i64", indent, z, raw.name).ok();
                                 z
+                            } else if raw.ty == Type::Float {
+                                let bi = format!("%cfb{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, raw.name).ok();
+                                let ze = format!("%cfz{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                                ze
                             } else {
                                 raw.name.clone()
                             };
@@ -433,6 +445,7 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
                                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, ze, pay_gep).ok();
                             } else {
+                                eprintln!("DBG_store: arg_reg={:?}, parts={:?}, rn={:?}", arg_reg, parts, rn);
                                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, rn, pay_gep).ok();
                             }
                         }
@@ -2292,11 +2305,10 @@ impl LlvmBackend {
         }
         match (&src_ty, target) {
             (Type::Int | Type::UInt, Type::Float) => {
-                let si = format!("%csf{}", self.txn_counter); self.txn_counter += 1;
-                let fi = format!("%cfi{}", self.txn_counter); self.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = sitofp i64 {} to float", indent, si, src);
-                let _ = writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, si);
-                let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, fi);
+                // 2026-06-17: Native float, not boxed i64. Downstream
+                // code (emit_binop, enum constructors) converts to/from
+                // i64 as needed via ensure_float_reg / native_float_or_box.
+                let _ = writeln!(out, "{}{} = sitofp i64 {} to float", indent, dst, src);
             }
             (Type::Float, Type::Int | Type::UInt) => {
                 let tr = format!("%ctr{}", self.txn_counter); self.txn_counter += 1;

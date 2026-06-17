@@ -25,6 +25,13 @@ impl LlvmBackend {
             let p = format!("%rp{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
             p
+        } else if r.ty == Type::Float {
+            // 2026-06-17: Box native float to i64 for uniform storage
+            let bi = format!("%rbi{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, r.name).ok();
+            let ze = format!("%rze{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+            ze
         } else {
             r.name.clone()
         }
@@ -64,6 +71,9 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, r.name).ok();
                                 writeln!(out, "{}ret i32 {}", indent, tr).ok();
                             }
+                        } else if self.fn_ret_ty == "float" {
+                            let fl = self.ensure_float_reg(out, indent, &r);
+                            writeln!(out, "{}ret float {}", indent, fl).ok();
                         } else if self.fn_ret_ty == "i64" {
                             let adapted = self.adapt_to_i64(out, indent, &r);
                             writeln!(out, "{}ret i64 {}", indent, adapted).ok();
@@ -73,6 +83,8 @@ impl LlvmBackend {
                         }
                     } else if self.fn_ret_ty == "i32" {
                         writeln!(out, "{}ret i32 0", indent).ok();
+                    } else if self.fn_ret_ty == "float" {
+                        writeln!(out, "{}ret float 0.0", indent).ok();
                     } else if self.returns_i64 {
                         writeln!(out, "{}ret i64 0", indent).ok();
                     } else {
@@ -437,7 +449,13 @@ impl LlvmBackend {
                                     _ => {
                                         let ld = format!("%gl{}", self.txn_counter); self.txn_counter += 1;
                                         writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
-                                        writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, se, i1, av, ld).ok();
+                                        // 2026-06-17: Box float to i64 for uniform i64 store
+                                        let av_i64 = if av.ty == Type::Float {
+                                            self.adapt_to_i64(out, indent, &av)
+                                        } else {
+                                            av.name.clone()
+                                        };
+                                        writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, se, i1, av_i64, ld).ok();
                                         writeln!(out, "{}store{} i64 {}, i64* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }
                                 }

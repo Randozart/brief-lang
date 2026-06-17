@@ -42,6 +42,8 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @brief_sigaction(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_sigprocmask(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_getaddrinfo(i64, i64)").ok();
+        // Some externally-linked functions called by intrinsics
+        writeln!(out, "declare i32 @ioctl(i32, i64, ptr)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {
@@ -509,7 +511,12 @@ impl LlvmBackend {
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.pending_cleanup.clear();
         self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
-        write!(out, "define i64 @{}(", d.name).ok();
+        // 2026-06-17: Use correct LLVM return type (float for Float, otherwise i64)
+        let is_float_fn = d.outputs.iter().any(|t| matches!(t, Type::Float));
+        let ll_ret_ty = if is_float_fn { "float" } else { "i64" };
+        self.fn_ret_ty = ll_ret_ty.to_string();
+        self.returns_i64 = !is_float_fn;
+        write!(out, "define {} @{}(", ll_ret_ty, d.name).ok();
         write!(out, "%State* noalias nocapture %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
@@ -549,12 +556,17 @@ impl LlvmBackend {
         }
         self.txn_counter = 0;
         self.terminated = false;
-        self.returns_i64 = true;
         for s in &d.body {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
-        if !self.terminated { writeln!(out, "  ret i64 0").ok(); }
+        if !self.terminated {
+            if is_float_fn {
+                writeln!(out, "  ret float 0.0").ok();
+            } else {
+                writeln!(out, "  ret i64 0").ok();
+            }
+        }
         writeln!(out, "}}").ok();
     }
     // 2026-06-13: Added %State* %state param — definitions can access global state.

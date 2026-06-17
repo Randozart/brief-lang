@@ -170,6 +170,7 @@ impl ImportResolver {
                 // use features the Rust TypeChecker doesn't fully support yet.
                 let safe_core_modules = [
                     "ptr.bv",
+                    "string_builder.bv",
                 ];
                 for module in safe_core_modules {
                     items.insert(0, TopLevel::Import(Import {
