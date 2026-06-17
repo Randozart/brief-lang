@@ -638,14 +638,35 @@ impl LlvmBackend {
                     }
                     Intrinsic::Spawn => {
                         let cmd = self.emit_expr(out, &args[0], indent);
-                        let boxed = self.adapt_to_i64(out, indent, &cmd);
-                        let pp = format!("%spp{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, pp, boxed).ok();
-                        let raw = format!("%sp{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = call i8* @brief_spawn(i8* {})", indent, raw, pp).ok();
-                            let ret_boxed = format!("%spbox{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, ret_boxed, raw).ok();
-                            return TypedRegister { name: ret_boxed, ty: Type::Int };
+                        let sp = format!("%spwnsp{}", self.txn_counter); self.txn_counter += 1;
+                        let dp = format!("%spwndp{}", self.txn_counter); self.txn_counter += 1;
+                        let cp = format!("%spwncp{}", self.txn_counter); self.txn_counter += 1;
+                        let st = format!("%spwnst{}", self.txn_counter); self.txn_counter += 1;
+                        let neg = format!("%spwnng{}", self.txn_counter); self.txn_counter += 1;
+                        let wst = format!("%spwnws{}", self.txn_counter); self.txn_counter += 1;
+                        let andv = format!("%spwnan{}", self.txn_counter); self.txn_counter += 1;
+                        let val = format!("%spwnvl{}", self.txn_counter); self.txn_counter += 1;
+                        let el = format!("spwn_er{}", self.txn_counter); self.txn_counter += 1;
+                        let ol = format!("spwn_ok{}", self.txn_counter); self.txn_counter += 1;
+                        let _el = format!("spwn_en{}", self.txn_counter); self.txn_counter += 1;
+                        // 2026-06-17: Direct libc — system() + WEXITSTATUS
+                        // system() returns int(i32): -1 on error, else waitpid status.
+                        // WEXITSTATUS = ((status & 0xff00) >> 8)
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, cmd.name).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                        writeln!(out, "{}{} = call i32 @system(ptr {})", indent, st, cp).ok();
+                        writeln!(out, "{}{} = icmp slt i32 {}, 0", indent, neg, st).ok();
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, neg, el, ol).ok();
+                        writeln!(out, "{}{}:", indent, el).ok();
+                        writeln!(out, "{}  br label %{}", indent, _el).ok();
+                        writeln!(out, "{}{}:", indent, ol).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, wst, st).ok();
+                        writeln!(out, "{}{} = and i64 {}, 0xff00", indent, andv, wst).ok();
+                        writeln!(out, "{}{} = lshr i64 {}, 8", indent, val, andv).ok();
+                        writeln!(out, "{}  br label %{}", indent, _el).ok();
+                        writeln!(out, "{}{}:", indent, _el).ok();
+                        writeln!(out, "{}{} = phi i64 [ -1, %{} ], [ {}, %{} ]", indent, v, el, val, ol).ok();
                     }
                     // ===== Phase B: Raw File I/O (intrinsics.md D2) =====
                     Intrinsic::Open => {
@@ -1095,13 +1116,18 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = add i64 0, 0 ; fence returns void, stub", indent, v).ok();
                     }
                     Intrinsic::Futex => {
-                        let uaddr = self.emit_expr(out, &args[0], indent);
-                        let op = self.emit_expr(out, &args[1], indent);
-                        let val = self.emit_expr(out, &args[2], indent);
-                        let timeout = self.emit_expr(out, &args[3], indent);
-                        let uaddr2 = self.emit_expr(out, &args[4], indent);
-                        let val3 = self.emit_expr(out, &args[5], indent);
-                        writeln!(out, "{}{} = call i64 @brief_futex(i64 {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})", indent, v, uaddr.name, op.name, val.name, timeout.name, uaddr2.name, val3.name).ok();
+                        // Evaluate all arguments for side effects (futex is a real
+                        // syscall with observable behavior when implemented).
+                        let _uaddr = self.emit_expr(out, &args[0], indent);
+                        let _op = self.emit_expr(out, &args[1], indent);
+                        let _val = self.emit_expr(out, &args[2], indent);
+                        let _timeout = self.emit_expr(out, &args[3], indent);
+                        let _uaddr2 = self.emit_expr(out, &args[4], indent);
+                        let _val3 = self.emit_expr(out, &args[5], indent);
+                        // 2026-06-17: Inline stub — C brief_futex was already a
+                        // stub returning -1 (futex is Linux-specific, architecture-
+                        // dependent). A real implementation would use @syscall.
+                        writeln!(out, "{}{} = add i64 0, -1", indent, v).ok();
                     }
                     // ===== Phase E: IPC (intrinsics.md D11) — Shim =====
                     Intrinsic::Pipe => {
@@ -1220,12 +1246,58 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::SignalFd => {
-                        let mask = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_signalfd(i64 {})", indent, v, mask.name).ok();
+                        // 2026-06-17: Direct libc — alloca sigset_t + memset + signalfd.
+                        // The C shim ignored the mask arg and created an empty set.
+                        let _mask = self.emit_expr(out, &args[0], indent);
+                        let set = format!("%sigfds{}", self.txn_counter); self.txn_counter += 1;
+                        let bc = format!("%sigfdbc{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%sigfdrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = alloca [16 x i64], align 8", indent, set).ok();
+                        writeln!(out, "{}{} = bitcast [16 x i64]* {} to ptr", indent, bc, set).ok();
+                        writeln!(out, "{}call void @llvm.memset.p0i8.i64(ptr {}, i8 0, i64 128, i1 false)", indent, bc).ok();
+                        writeln!(out, "{}{} = call i32 @signalfd(i32 -1, ptr {}, i32 2048)", indent, rv, bc).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::TimerFdCreate => {
+                        // 2026-06-17: Direct libc — timerfd_create + alloca itimerspec + timerfd_settime.
+                        // itimerspec layout on x86_64: {i64,i64,i64,i64} = {interval_sec, interval_nsec,
+                        // value_sec, value_nsec}
                         let hz = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_timerfd_create(i64 {})", indent, v, hz.name).ok();
+                        let nsec = format!("%tfnsec{}", self.txn_counter); self.txn_counter += 1;
+                        let fd = format!("%tffd{}", self.txn_counter); self.txn_counter += 1;
+                        let spec = format!("%tfspec{}", self.txn_counter); self.txn_counter += 1;
+                        let sp = format!("%tfspp{}", self.txn_counter); self.txn_counter += 1;
+                        let is0 = format!("%tfis0{}", self.txn_counter); self.txn_counter += 1;
+                        let z_l = format!("tf_z{}", self.txn_counter); self.txn_counter += 1;
+                        let s_l = format!("tf_s{}", self.txn_counter); self.txn_counter += 1;
+                        let e_l = format!("tf_e{}", self.txn_counter); self.txn_counter += 1;
+                        let rv = format!("%tfrv{}", self.txn_counter); self.txn_counter += 1;
+                        let phiv = format!("%tfphi{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = udiv i64 {}, 1000000000", indent, nsec, hz.name).ok();
+                        writeln!(out, "{}{} = call i32 @timerfd_create(i32 1, i32 2048)", indent, fd).ok();
+                        writeln!(out, "{}{} = icmp sgt i64 {}, 0", indent, is0, hz.name).ok();
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is0, s_l, z_l).ok();
+                        writeln!(out, "{}{}:", indent, z_l).ok();
+                        writeln!(out, "{}  br label %{}", indent, e_l).ok();
+                        writeln!(out, "{}{}:", indent, s_l).ok();
+                        writeln!(out, "{}{} = alloca {{ i64, i64, i64, i64 }}, align 8", indent, spec).ok();
+                        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, sp, spec).ok();
+                        writeln!(out, "{}call void @llvm.memset.p0i8.i64(ptr {}, i8 0, i64 32, i1 false)", indent, sp).ok();
+                        let iv_ns = format!("%tfivns{}", self.txn_counter); self.txn_counter += 1;
+                        let vl_ns = format!("%tfvlns{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = urem i64 {}, 1000000000", indent, iv_ns, hz.name).ok();
+                        writeln!(out, "{}{} = urem i64 {}, 1000000000", indent, vl_ns, hz.name).ok();
+                        let iv_off = format!("%tfiiv{}", self.txn_counter); self.txn_counter += 1;
+                        let vl_off = format!("%tfivl{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 8", indent, iv_off, sp).ok();
+                        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 24", indent, vl_off, sp).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, iv_ns, iv_off).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, vl_ns, vl_off).ok();
+                        writeln!(out, "{}{} = call i32 @timerfd_settime(i32 {}, i32 0, ptr {}, ptr null)", indent, rv, fd, sp).ok();
+                        writeln!(out, "{}  br label %{}", indent, e_l).ok();
+                        writeln!(out, "{}{}:", indent, e_l).ok();
+                        writeln!(out, "{}{} = phi i32 [ {}, %{} ], [ {}, %{} ]", indent, phiv, fd, z_l, rv, s_l).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, phiv).ok();
                     }
                     // ===== Phase G: Networking (intrinsics.md D10) — Shim =====
                     Intrinsic::Socket => {

@@ -36,15 +36,11 @@ impl LlvmBackend {
         // Remaining brief_* shims (not yet migrated to direct libc)
         writeln!(out, "declare i64 @brief_tty_raw_mode(i64)").ok();
         writeln!(out, "declare i64 @brief_spawn_with_output(i64)").ok();
-        writeln!(out, "declare i64 @brief_spawn(i64)").ok();
         writeln!(out, "declare i64 @brief_readlink(i64)").ok();
         writeln!(out, "declare i64 @brief_getcwd()").ok();
         writeln!(out, "declare i64 @brief_readdir(i64)").ok();
-        writeln!(out, "declare i64 @brief_futex(i64, i64, i64, i64, i64, i64)").ok();
         writeln!(out, "declare i64 @brief_sigaction(i64, i64)").ok();
         writeln!(out, "declare i64 @brief_sigprocmask(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_signalfd(i64)").ok();
-        writeln!(out, "declare i64 @brief_timerfd_create(i64)").ok();
         writeln!(out, "declare i64 @brief_getaddrinfo(i64, i64)").ok();
     }
 

@@ -2,7 +2,7 @@
 
 **Date added:** 2026-06-15
 **Updated:** 2026-06-17 — majority migrated from Shim (C shim) to Direct (inline libc)
-**Status:** Phase H complete. 71/86 intrinsics emit direct libc calls. 15 remain as brief_rt.c shims.
+**Status:** Phase H complete. **75/86** intrinsics emit direct libc calls. **11** remain as brief_rt.c shims.
 
 ## Migration to Direct Libc (2026-06-16 — 2026-06-17)
 
@@ -18,12 +18,12 @@ libc calls in LLVM IR), eliminating the C dependency for the common case.
 | D2 File I/O | 15 | 15 | 0 | — |
 | D3 Filesystem | 14 | 11 | 3 | `readlink`, `getcwd`, `readdir` — Brief string/list boxing |
 | D4 Terminal | 5 | 4 | 1 | `tty_raw_mode` — `cfmakeraw` macro, 3-termios struct (~15 fields) |
-| D5 Process | 2 | 0 | 2 | `spawn` (`WEXITSTATUS` macro), `spawn_with_output` (popen+fread+pclose+boxing) |
+| D5 Process | 2 | 1 | 1 | `spawn` ✅ — `system()`+`WEXITSTATUS` | `spawn_with_output` — popen+fread+pclose+string boxing |
 | D6 Environment | 5 | 5 | 0 | — |
 | D7 Timing | 2 | 2 | 0 | — |
-| D8 Signals | 5 | 1 | 4 | `sigaction`/`sigprocmask` — struct sigaction/sigset_t; `signalfd`/`timerfd_create` — Linux-specific |
+| D8 Signals | 5 | 3 | 2 | `signalfd` ✅, `timerfd_create` ✅ | `sigaction`/`sigprocmask` — struct sigaction/sigset_t, Linux-specific |
 | D9 Sync (atomic) | 6 | 6 | 0 | — (all Native LLVM IR) |
-| D9 Sync (futex) | 1 | 0 | 1 | `futex` — already a stub, Linux-specific |
+| D9 Sync (futex) | 1 | 1 | 0 | `futex` ✅ — stub (was already a stub in C, now `add i64 0, -1`) |
 | D10 Networking | 13 | 12 | 1 | `getaddrinfo` — linked list walk + struct construction |
 | D11 IPC | 6 | 6 | 0 | — |
 | Thread pool | 3 | 0 | 3 | `barrier_release`, `barrier_wait`, `thread_pool_init` — global state in C |
