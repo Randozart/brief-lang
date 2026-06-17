@@ -401,6 +401,10 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
 - **TBAA metadata** implemented: 6-node type tree (Brief/Int/Bool/Char/String/Float), annotated on all state field loads and stores + struct FieldAccess. Enables LLVM type-based alias analysis for i64-boxed types.
 - **`!range` metadata** implemented: replaces `@llvm.assume` for simple `[x < N]` precondition patterns with `!range !{ 0, N }` on the field load.
 - **`<-` arrow push** implemented for `List<T>`: reads header, allocates new buffer, copies elements, appends value, writes back to state field. No longer returns 0.
+- **`<-` arrow pop** implemented for `List<T>`: reads header, loads element at index, allocates buffer with len-1, copies before/after elements, writes back to state.
+- **`<-` arrow discard** implemented for `List<T>`: removes element at index, allocates buffer with len-1, stores updated list back.
+- **`<-` arrow transfer** implemented for `List<T>`: moves all elements from source to dest, stores both updated lists back.
+- **String/char escape sequences** fully implemented: `\0`, `\n`, `\t`, `\\`, `\'`, `\"`, `\xHH`, `\u{...}` all handled in both string and char literals.
 - Three canonical backends: LLVM (native), Webstack (WASM+JS), CIRCT (MLIR→Verilog)
 - All other backends are dead code — zero fixes
 - Kani: 14 fast-group harnesses proven (2.5s), 96 full-group pass with `--features kani_full`
