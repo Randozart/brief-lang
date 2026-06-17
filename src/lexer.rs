@@ -368,6 +368,9 @@ pub enum Token {
         if inner.len() == 1 {
             return Some(inner.chars().next().unwrap());
         }
+        if inner == "\\0" {
+            return Some('\0');
+        }
         if inner == "\\n" {
             return Some('\n');
         }

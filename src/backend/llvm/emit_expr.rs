@@ -1744,7 +1744,7 @@ impl LlvmBackend {
                         let fmt = format!("%pfi{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                         writeln!(out, "{}{} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", indent, fmt).ok();
-                        writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, i64 {})",
+                        writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, i64 {})",
                             indent, v, so, fmt, n).ok();
                     }
                     Intrinsic::PutChar => {
@@ -1766,7 +1766,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = fpext float {} to double", indent, fd, fl).ok();
                         writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                         writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt).ok();
-                        writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, double {})",
+                        writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
                             indent, v, so, fmt, fd).ok();
                     }
                     Intrinsic::GetEnvInt => {
@@ -2773,6 +2773,11 @@ impl LlvmBackend {
             }
             Expr::BinaryOp(bo) if bo.kind == crate::features::binary_op::BinaryOpKind::Add => {
                 self.is_string_chain(&bo.left) || self.is_string_chain(&bo.right)
+            }
+            Expr::Call(name, _) => {
+                self.defn_return_types.get(name.as_str())
+                    .map(|types| types.iter().any(|t| *t == Type::String || *t == Type::Data))
+                    .unwrap_or(false)
             }
             _ => false,
         }

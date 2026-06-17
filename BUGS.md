@@ -7,6 +7,103 @@
 - **Fix**: How it was resolved
 - **Lesson**: How to avoid next time
 
+## 2026-06-17 — `is_string_chain` missing `Expr::Call` arm (SIGSEGV crash)
+
+**Issue**: `draw_prompt` in officina-cli crashes with SIGSEGV when rendering
+the prompt. `int_to_str(23)` returns a garbage pointer (two string struct
+pointers added together as `i64`), which is dereferenced as a string struct,
+causing segfault.
+
+**Root Cause**: `is_string_chain` in `src/backend/llvm/emit_expr.rs:2763`
+detects whether a `+` expression operates on strings (triggering inline concat
+emission). It handles `Expr::String`, `Expr::Literal(String)`,
+`Expr::Identifier` (with String let-binding type), and recursive
+`Expr::Add`/`Expr::Concat`. But it does **not** handle `Expr::Call`.
+
+When `int_to_str` needs to emit `int_to_str(2) + int_to_str(3)` (the `n >= 10`
+arm), both operands are `Expr::Call("int_to_str", ...)`. `is_string_chain`
+returns `false` for both, so the backend emits `add i64 %t52, %t58` — adding
+two string struct pointers together — instead of allocating a new buffer and
+copying characters. The resulting garbage pointer is dereferenced by
+`draw_prompt`, causing SIGSEGV.
+
+By contrast, `"-" + int_to_str(-n)` (the `n < 0` arm) worked because
+`Expr::String("-")` IS recognized by `is_string_chain`, triggering proper
+`malloc`+`memcpy` concat.
+
+**Fix**: Added `Expr::Call(name, _)` arm to `is_string_chain` that checks
+`defn_return_types` for String/Data return types. `defn_return_types` was
+already populated and accessible from emit_expr.rs.
+
+**Lesson**: Any expression type that can return a String must be in
+`is_string_chain`'s match. `Expr::Call` is the most common — it covers
+function calls, txns, and method invocations that return strings. Always
+cross-reference `is_string_chain` when adding new expression types.
+
+**Files**: `src/backend/llvm/emit_expr.rs:2777-2783`
+
+---
+
+## 2026-06-17 — `\0` char escape not handled in lexer
+
+**Issue**: `'\0'` (null character literal) parsed as backslash character
+(ASCII 92). The precondition `[booted && keypress != '\0']]` became
+`booted && keypress != 92` instead of `booted && keypress != 0`. Since
+`keypress` initializes to 0, the precondition was `true && true` instead of
+`true && false` — causing `process_input` to fire spuriously on every tick,
+concatenating the null char string to `current_input` each iteration,
+corrupting the heap.
+
+**Root Cause**: `src/lexer.rs:371-382` handles char escape sequences for
+`\n`, `\t`, `\\`, `\'`, and `\u{...}`, but NOT `\0` (null). When the lexer
+sees `'\0'`, the inner string is `\0` (2 chars). It falls through to the
+default at line 390: `inner.chars().next()` which returns `\` (backslash,
+ASCII 92).
+
+**Fix**: Added `if inner == "\\0" { return Some('\0'); }` before the other
+escape sequence checks.
+
+**Lesson**: All C-style escape sequences in char literals must be handled.
+`\0` (null) is a common pattern for trigger comparisons (keypress != '\0').
+When adding escape sequences, match the most common ones first: `\0`, `\n`,
+`\t`, `\\`, `\'`, `\r`, `\xHH`, `\u{...}`.
+
+**Files**: `src/lexer.rs:371-374`
+
+---
+
+## 2026-06-17 — `done_{name}` SSA dispatch skips to exit instead of next txn
+
+**Issue**: After the `\0` fix, officina rendered output briefly then exited
+before the render txn could fire. The SSA dispatch loop's `done_process_input`
+label branched to `%done` (program exit) instead of `%s_process_input` (next
+txn's skip label), skipping the render txn entirely.
+
+**Root Cause**: `src/backend/llvm/loop_engine.rs:772-778` in
+`emit_ssa_main`: the `done_l` label (emitted when a txn's precondition is
+false) unconditionally branches to `%done` instead of `%{skip_l}`. This means
+the FIRST txn whose precondition is false causes an immediate return from
+`main()`. This affects ALL txns equally — boot, process_input, render — any
+txn with a false precondition exits the program.
+
+The June-14 fix claimed to address this but only covered `done_boot` while
+the `done_l` template continued emitting `br label %done` for all other txns.
+
+**Fix**: Changed line 778 from `writeln!(out, "  br label %done").ok()` to
+`writeln!(out, "  br label %{}", skip_l).ok()`. When a txn's precondition
+is false, control passes to `skip_l`, which chains to the next txn's
+preamble. After the last txn, `skip_l` falls through to the post-loop code
+(exit condition check or tick loop continuation).
+
+**Lesson**: The `done_l` → `%done` pattern is always wrong for multi-txn
+SSA dispatch. The done label should chain to `skip_l` for the current txn,
+which naturally leads to the next txn or post-loop code. Only the post-loop
+code (exit condition, tick loop) should decide whether to exit.
+
+**Files**: `src/backend/llvm/loop_engine.rs:778`
+
+---
+
 ## 2026-05-28 — Overriding `from "..."` location in typechecker
 
 **Issue**: `__read_file` FFI call failed with `location: <profile:__read_file>` instead of `"std::fs::read_to_string"`.

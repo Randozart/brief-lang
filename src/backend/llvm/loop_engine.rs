@@ -770,12 +770,12 @@ impl LlvmBackend {
                 self.ssa_old_int_regs.clear();
                 writeln!(out, "  br label %{}", skip_l).ok();
                 writeln!(out, "  {}:", done_l).ok();
-                // Post-loop: emit hoisted field-based prints, then exit
+                // Post-loop: emit hoisted field-based prints, then chain to next txn
                 self.emit_hoisted_post_loop_prints(out, &post_hoist);
                 if self.phi_induction_reg.is_some() {
                     writeln!(out, "  br label %platch").ok();
                 } else {
-                    writeln!(out, "  br label %done").ok();
+                    writeln!(out, "  br label %{}", skip_l).ok();
                 }
                 writeln!(out, "  {}:", skip_l).ok();
             } else {
@@ -869,7 +869,7 @@ impl LlvmBackend {
         match name {
             "print_int" => {
                 writeln!(out, "{}{} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", indent, fmt_reg).ok();
-                writeln!(out, "{}{} = call i32 @fprintf(ptr {}, ptr {}, i64 {})", indent, res, so, fmt_reg, reg).ok();
+                writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, i64 {})", indent, res, so, fmt_reg, reg).ok();
             }
             "print_float" => {
                 let fd = format!("%ppl_f{}", self.txn_counter); self.txn_counter += 1;
