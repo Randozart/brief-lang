@@ -225,4 +225,4 @@ knucleotide_c
 benchmarks/knucleotide
 # Binaries igignore
 benchmarks/mandelbrot
-benchmarks/mandelbrot_c
+benchmarks/mandelbrot_cofficina

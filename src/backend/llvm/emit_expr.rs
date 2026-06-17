@@ -698,7 +698,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = add i64 {}, {}", indent, packed, mult, row64).ok();
                         writeln!(out, "{}  br label %{}", indent, e_l).ok();
                         writeln!(out, "{}{}:", indent, e_l).ok();
-                        writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, v, z_l, packed, o_l).ok();
+                        writeln!(out, "{}{} = phi i64 [ 800024, %{} ], [ {}, %{} ]", indent, v, z_l, packed, o_l).ok();
                     }
                     Intrinsic::TtyReadKey => {
                         let cbuf = format!("%trkcb{}", self.txn_counter); self.txn_counter += 1;
