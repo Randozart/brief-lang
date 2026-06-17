@@ -508,6 +508,8 @@ impl LlvmBackend {
         }
         let uf = if !use_phi && body.is_some() { 4 } else { 1 };
         self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body, uf, false, None);
+        let saved = std::mem::take(&mut self.pending_post_hoist);
+        self.emit_hoisted_post_loop_prints(out, &saved);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -571,6 +573,8 @@ impl LlvmBackend {
         writeln!(out, "  store i64 {}, i64* {}, align 8", inc, sg).ok();
         writeln!(out, "  br label %_hdr").ok();
         writeln!(out, "_done:").ok();
+        let saved = std::mem::take(&mut self.pending_post_hoist);
+        self.emit_hoisted_post_loop_prints(out, &saved);
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();

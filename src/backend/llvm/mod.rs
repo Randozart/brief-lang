@@ -63,6 +63,75 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
         _ => None,
     }
 }
+/// Detect terminating guard at end of body and hoist it.
+/// Returns (body_without_guard, vec_of_(field_name, intrinsic_name)).
+pub(crate) fn hoist_terminating_guard(
+    body: &[Statement],
+    field_index_map: &std::collections::HashMap<String, usize>,
+) -> (Vec<Statement>, Vec<(String, String)>) {
+    let mut stmts: Vec<&Statement> = body.iter()
+        .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
+        .collect();
+    let mut hoist: Vec<(String, String)> = Vec::new();
+    let mut let_to_field: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for stmt in body {
+        if let Statement::Assignment { lhs: Expr::OwnedRef(fname), expr, .. } = stmt {
+            if field_index_map.contains_key(fname) {
+                let s = format!("{:?}", expr);
+                if let Some(let_name) = s.strip_prefix("Identifier(\"").and_then(|s| s.split('"').next()) {
+                    let_to_field.insert(let_name.to_string(), fname.clone());
+                }
+            }
+        }
+    }
+    while let Some(last_idx) = stmts.len().checked_sub(1) {
+        if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
+            let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang { .. }));
+            if !is_terminating { break; }
+            for s in statements {
+                if let Statement::Expression(Expr::IntrinsicCall { intrinsic, args }) = s {
+                    let intrinsic_name = intrinsic.name();
+                    if let Some(Expr::Identifier(fname)) = args.first() {
+                        if field_index_map.contains_key(fname) {
+                            hoist.push((fname.clone(), intrinsic_name.to_string()));
+                        }
+                    }
+                }
+                if let Statement::TermBang { values, swan_song, .. } = s {
+                    for v in values {
+                        if let Some(Expr::IntrinsicCall { intrinsic, args }) = v {
+                            let intrinsic_name = intrinsic.name();
+                            if let Some(Expr::Identifier(fname)) = args.first() {
+                                if field_index_map.contains_key(fname) {
+                                    hoist.push((fname.clone(), intrinsic_name.to_string()));
+                                }
+                            }
+                        }
+                    }
+                    if let Some(ss) = swan_song {
+                        if let Statement::Expression(Expr::IntrinsicCall { intrinsic, args }) = ss.as_ref() {
+                            let intrinsic_name = intrinsic.name();
+                            if let Some(Expr::Identifier(fname)) = args.first() {
+                                if field_index_map.contains_key(fname) {
+                                    hoist.push((fname.clone(), intrinsic_name.to_string()));
+                                } else if let Some(mapped_field) = let_to_field.get(fname) {
+                                    hoist.push((mapped_field.clone(), intrinsic_name.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !hoist.is_empty() {
+                stmts.pop();
+            }
+            break;
+        } else { break; }
+    }
+    let body_vec: Vec<Statement> = stmts.into_iter().cloned().collect();
+    (body_vec, hoist)
+}
+
 use crate::ast::{
     ArrowDir, BracketOp, DispatchMode, Expr, ForeignSignature, MatchArm, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
 };
@@ -1180,17 +1249,19 @@ self.emit_declares(&mut out);
                                 true
                             }
                         } else {
-                            let body = &txns[0].1.body;
-                            let has_guards = body.iter().any(|s| matches!(s, crate::ast::Statement::Guarded { .. } | crate::ast::Statement::Escape(_) | crate::ast::Statement::SyncBlock { .. }));
-                            if has_guards && !crate::proof_engine::prove_linear(body) {
+                            let raw_body = &txns[0].1.body;
+                            let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.field_index_map);
+                            self.pending_post_hoist = post_hoist;
+                            let has_guards = body_stmts.iter().any(|s| matches!(s, crate::ast::Statement::Guarded { .. } | crate::ast::Statement::Escape(_) | crate::ast::Statement::SyncBlock { .. }));
+                            if has_guards && !crate::proof_engine::prove_linear(&body_stmts) {
                                 // A005b: non-linear body with branching guards → memory path (no phi)
                                 self.warnings.push(format!("info: txn '{}' dispatched via folded (memory, no phi — not provably linear)", &node.name));
-                                self.emit_folded_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, body);
+                                self.emit_folded_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts);
                             } else {
                                 // A005a: straight-line or provably linear body → SSA insertvalue path
                                 self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (inline, {})", &node.name,
                                     if has_guards { "proven linear" } else { "straight-line" }));
-                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(body));
+                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
                             }
                             true
                         }
