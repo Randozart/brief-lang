@@ -774,12 +774,11 @@ fn empty_program() -> Program {
         default_sig_modifier: None,
         };
         let output = backend.generate(&program);
-        // Float literal emits bitcast i32 <hex> to float directly (no i64 boxing)
+        // 2026-06-17: Float literal emits bitcast i32 directly (native float).
+        // When stored to a state field, the float is boxed to i64 via
+        // bitcast float → i32 → zext i32 → i64, which includes "zext i32".
         assert!(output.contains("bitcast i32"),
             "Float literal should emit bitcast i32 to float: {}", output);
-        // The float value should NOT be boxed through i32->i64
-        assert!(!output.contains("zext i32"),
-            "Float should not be boxed to i64: {}", output);
     }
 
     #[test]

@@ -1830,15 +1830,15 @@ impl LlvmBackend {
                     let fv = self.emit_expr(out, fval, indent);
                     let fp = format!("%sfp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, ai, i as i64).ok();
-                    let stored = if fv.ty == Type::Bool || fv.ty == Type::Char {
-                        self.adapt_to_i64(out, indent, &fv)
-                    } else { fv.name.clone() };
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
-                }
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
-                return TypedRegister { name: v, ty: Type::Custom(name.clone()) };
-            }
-            // ── ObjectLiteral ───────────────────────────────────
+                     let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float {
+                         self.adapt_to_i64(out, indent, &fv)
+                     } else { fv.name.clone() };
+                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
+                 }
+                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                 return TypedRegister { name: v, ty: Type::Custom(name.clone()) };
+             }
+             // ── ObjectLiteral ───────────────────────────────────
             Expr::ObjectLiteral(fields) => {
                 let n = fields.len() as i64;
                 let ai = format!("%oai{}", self.txn_counter); self.txn_counter += 1;
@@ -1847,7 +1847,7 @@ impl LlvmBackend {
                     let fv = self.emit_expr(out, fval, indent);
                     let fp = format!("%ofp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, ai, i as i64).ok();
-                    let stored = if fv.ty == Type::Bool || fv.ty == Type::Char {
+                    let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float {
                         self.adapt_to_i64(out, indent, &fv)
                     } else { fv.name.clone() };
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
@@ -1891,6 +1891,39 @@ impl LlvmBackend {
                     let fp = format!("%fafp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, hp, offset).ok();
                     writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, fp).ok();
+                    // 2026-06-17: Return Float type for float fields so downstream
+                    // code (emit_binop) correctly identifies them. String/Data fields
+                    // remain Type::Int (stored boxed as i64 in struct).
+                    let lookup_ty = || -> Option<Type> {
+                        if let Expr::Identifier(name) = obj.as_ref() {
+                            if let Some(Type::Custom(struct_name)) = self.let_binding_types.get(name) {
+                                if let Some(fields) = self.struct_types.get(struct_name) {
+                                    let fi = offset as usize;
+                                    if fi < fields.len() {
+                                        let (_, field_ty) = &fields[fi];
+                                        if matches!(field_ty, Type::Float) {
+                                            return Some(field_ty.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Type::Custom(struct_name) = &obj_val.ty {
+                            if let Some(fields) = self.struct_types.get(struct_name) {
+                                let fi = offset as usize;
+                                if fi < fields.len() {
+                                    let (_, field_ty) = &fields[fi];
+                                    if matches!(field_ty, Type::Float) {
+                                        return Some(field_ty.clone());
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    };
+                    if let Some(ft) = lookup_ty() {
+                        return TypedRegister { name: v, ty: ft };
+                    }
                 } else {
                     writeln!(out, "{}{} = add i64 0, 0 ; field", indent, v).ok();
                 }
@@ -2525,12 +2558,22 @@ impl LlvmBackend {
             // String concatenation via inline concat (native i8*)
             self.emit_inline_concat(out, indent, &a.name, &b.name)
         } else if a.ty == Type::Float || b.ty == Type::Float {
-            let fa = self.ensure_float_reg(out, indent, &a);
-            let fb = self.ensure_float_reg(out, indent, &b);
-            let fr = format!("%bfr{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = {} fast float {}, {}", indent, fr, float_op, fa, fb).ok();
-            self.reg_float_cache.insert(fr.clone(), fr.clone());
-            TypedRegister { name: fr, ty: Type::Float }
+            // 2026-06-17: Skip float path if either operand is String/Data
+            // (prevents pointer→float corruption, e.g. String + Float).
+            if a.ty == Type::String || a.ty == Type::Data || b.ty == Type::String || b.ty == Type::Data {
+                let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                let a_i64 = self.adapt_to_i64(out, indent, &a);
+                let b_i64 = self.adapt_to_i64(out, indent, &b);
+                writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
+                TypedRegister { name: v, ty: Type::Int }
+            } else {
+                let fa = self.ensure_float_reg(out, indent, &a);
+                let fb = self.ensure_float_reg(out, indent, &b);
+                let fr = format!("%bfr{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = {} fast float {}, {}", indent, fr, float_op, fa, fb).ok();
+                self.reg_float_cache.insert(fr.clone(), fr.clone());
+                TypedRegister { name: fr, ty: Type::Float }
+            }
         } else {
             let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             let a_i64 = self.adapt_to_i64(out, indent, &a);

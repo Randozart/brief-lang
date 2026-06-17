@@ -1067,6 +1067,7 @@ mod tests {
         let core_dir = stdlib_root.join("std").join("core");
         fs::create_dir_all(&core_dir).unwrap();
         fs::write(core_dir.join("ptr.bv"), "defn p_fn -> Int { term 0; };").unwrap();
+        fs::write(core_dir.join("string_builder.bv"), "defn s_fn -> Int { term 0; };").unwrap();
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
@@ -1080,7 +1081,7 @@ mod tests {
         let defns: Vec<&TopLevel> = result.items.iter().filter(|i| matches!(i, TopLevel::Definition(_))).collect();
         assert!(!defns.is_empty(), "should have auto-injected definitions");
         if let Some(TopLevel::Definition(d)) = defns.first() {
-            assert_eq!(d.name, "p_fn");
+            assert_eq!(d.name, "s_fn", "string_builder.bv injected first (last in safe_core_modules)");
         }
     }
 
