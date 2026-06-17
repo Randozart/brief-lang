@@ -1347,6 +1347,50 @@ rollback. Each must independently ensure every basic block has a
 terminator. The `post:` label pattern is unique to callable txns and
 was missed by the first 8-site pass.
 
+## 2026-06-17 — SSA extractvalue path missing return → duplicate register definitions
+
+**Issue**: `mandelbrot.bv` and `knucleotide.bv` compiled to LLVM IR with
+duplicate register definitions (`%t207` defined twice: once as `add i64 0, %ev208`
+and once as `load i64, i64* %fdp209`). `llc` rejected: `error: multiple definition
+of local value named 't207'`.
+
+**Root Cause**: In `emit_expr.rs:105-108`, the `match ll_ty.as_str()` dispatch for
+SSA state field reads had four arms (`"i8"`, `"float"`, `"i8*"`, `_`). The first
+three all `return` a `TypedRegister`. The `_` default case wrote:
+```rust
+_ => {
+    writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
+    Type::Int   // ← just a value, NOT a return!
+}
+```
+Without a `return`, execution fell through the `if let Some(&idx)` and
+`if let Some(ref ssa_reg)` blocks, then continued checking `let_bindings`,
+`trigger_names`, `constants`, `mmio_fields`, and finally `field_index_map`
+**again** — the alloca fallback path at line 202. This generated a second
+`%tN = load i64, i64* %fdp{M}` definition for the same `v` register.
+
+The bug was latent until a Guarded block appeared before the field-reference
+in the transaction body. The Guarded handler clears `ssa_old_int_regs` (line 488),
+which causes Identifier lookups for fields to enter the SSA extractvalue path
+instead of the pre-extracted shortcut — exposing the missing `return`.
+
+**How discovered**: `mandelbrot.bv` and `knucleotide.bv` both have a guard
+before the `&count = count + 1` assignment (`[count % 5000000 == 0]` and
+`[count % freq == 0]`). The guard clears `ssa_old_int_regs`, so the subsequent
+identifier `count` in the update expression enters the SSA extractvalue path,
+falls through without returning, and hits the alloca fallback path with the
+same register name.
+
+**Fix** (`emit_expr.rs:107`): Added `return TypedRegister { name: v, ty: Type::Int };`
+after the `writeln!` in the `_` case.
+
+**Lesson**: Every match arm in `emit_expr` that allocates `v` must `return`.
+The `Type::Int` expression at the end of the `_` arm was silently discarded.
+When adding a new type-specific code path to `emit_expr`, verify all cases
+have a `return` — especially the `_` default case.
+
+---
+
 ## 2026-06-13 — SSA dominance violations: values from guard then-path used in merge path
 
 **Issue**: `opt` and `llc` reported "Instruction does not dominate all

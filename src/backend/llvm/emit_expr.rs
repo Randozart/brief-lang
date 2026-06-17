@@ -104,7 +104,7 @@ impl LlvmBackend {
                             }
                             _ => {
                                 writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
-                                Type::Int
+                                return TypedRegister { name: v, ty: Type::Int };
                             }
                         };
                     }
