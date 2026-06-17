@@ -385,7 +385,7 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 902 tests pass, 0 fail
+- 911 tests pass, 0 fail
 - **trg reactive dirty-flag architecture** complete (Phases 1–6):
   - Phase 1: `DependencyGraph` — variable-level DAG, Kahn's sort, cycle detection
   - Phase 2: `DirtyFlags(u64)` — bitmask with mark/clear/merge/any/none
@@ -397,6 +397,9 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
 - **foreach** complete: LLVM loop IR via alloca-based index, `!llvm.loop.vectorize.enable` SIMD metadata, feature file migration to `src/features/stmt/foreach.rs`, docs
 - **`?#` proof oracle** complete: AST/parser, interpreter with fuel injection + state rollback + handler, structural recursion checker (P021), all match arms
 - **Instruction reordering** complete: read/write set analysis, dependency DAG, Kahn's topological sort ILP optimization
+- **Variadic `fprintf` syntax** fixed: 3 call sites now use `(ptr, ptr, ...)` prototype (loop_engine.rs:872, emit_expr.rs:1747, emit_expr.rs:1769)
+- **TBAA metadata** implemented: 6-node type tree (Brief/Int/Bool/Char/String/Float), annotated on all state field loads and stores + struct FieldAccess. Enables LLVM type-based alias analysis for i64-boxed types.
+- **`!range` metadata** implemented: replaces `@llvm.assume` for simple `[x < N]` precondition patterns with `!range !{ 0, N }` on the field load.
 - Three canonical backends: LLVM (native), Webstack (WASM+JS), CIRCT (MLIR→Verilog)
 - All other backends are dead code — zero fixes
 - Kani: 14 fast-group harnesses proven (2.5s), 96 full-group pass with `--features kani_full`
@@ -754,3 +757,89 @@ read_file#(path) → Result<String, String>  // Ok(contents) | Err(reason)
 ```
 
 ### 2026-06-17: `tfd_nonblock` / `sfd_nonblock` constants — typo fix
+
+### 2026-06-17: `is_string_chain` missing `Expr::Call` arm — officina SIGSEGV
+
+**Root cause**: `is_string_chain` in `emit_expr.rs:2763` detects string `+`
+for inline concat but does not handle `Expr::Call`. When `int_to_str(2) + int_to_str(3)`
+(the `n >= 10` arm) is compiled, both operands are `Expr::Call`. `is_string_chain`
+returns `false`, and the backend emits `add i64` (adding two struct pointers
+together) instead of allocating a buffer and copying characters. The returned
+garbage value is dereferenced in `draw_prompt` → SIGSEGV.
+
+**Fix**: Added `Expr::Call(name, _)` arm checking `defn_return_types` for
+`String`/`Data` return type.
+
+**File**: `src/backend/llvm/emit_expr.rs:2777-2783`
+
+### 2026-06-17: `\0` char escape not handled in lexer
+
+**Root cause**: `src/lexer.rs:371-382` handles `\n`, `\t`, `\\`, `\'`,
+and `\u{...}` escape sequences in char literals, but NOT `\0` (null).
+`'\0'` falls through to `inner.chars().next()` → `\` (backslash, ASCII 92).
+The precondition `keypress != '\0'` compiled as `keypress != 92`, so
+`process_input` fired on every tick even when `keypress` was null (0).
+
+**Fix**: Added `if inner == "\\0" { return Some('\0'); }` before the other
+escape checks.
+
+**File**: `src/lexer.rs:371-374`
+
+### 2026-06-17: `done_{name}` SSA dispatch branches to exit instead of next txn
+
+**Root cause**: `src/backend/llvm/loop_engine.rs:778`: the `done_l` label
+(emitted when a txn's precondition is false) unconditionally branches to
+`%done` (program exit) instead of `%{skip_l}` (next txn's skip label).
+The FIRST txn whose precondition is false causes an early return from
+`main()`, never reaching subsequent txns. The June-14 fix claimed to
+address this but only covered `done_boot` while the template kept
+`br label %done` for all txns.
+
+**Fix**: Changed `br label %done` to `br label %{skip_l}`.
+
+**File**: `src/backend/llvm/loop_engine.rs:778`
+
+### 2026-06-17: TBAA metadata tree for `i64`-boxed types
+
+**Implementation**: Added 6-node TBAA metadata tree (Brief root + Int, Bool,
+Char, String, Float sub-types). Annotated ALL state field loads
+(`pre_load_all_fields`), non-SSA state stores, and struct `FieldAccess`
+loads with `!tbaa !N` metadata. This enables LLVM's type-based alias
+analysis to disambiguate accesses at different type roots even though all
+values are stored as `i64` at the IR level.
+
+**Nodes defined**: `mod.rs:1669-1675`
+- `!0 = !{!"Brief"}`
+- `!1 = !{!"Int", !0}`   — i64-stored values
+- `!2 = !{!"Bool", !0}`  — i8-stored Bool
+- `!3 = !{!"Char", !0}`  — i32-stored Char
+- `!4 = !{!"String", !0}` — i8*-stored String
+- `!5 = !{!"Float", !0}` — float-stored Float
+
+**Helper function**: `pub(super) fn tbaa_node(ty_str: &str) -> i32` in
+`mod.rs:412-424`.
+
+### 2026-06-17: `!range` metadata replaces `@llvm.assume` for simple patterns
+
+**Implementation**: `emit_precondition_check` in `emit_toplevel.rs:820-856`
+detects simple `[x < N]` precondition patterns (`Expr::Lt(Expr::Identifier, Expr::Integer)`)
+and emits a re-load of the field with `!range !{ 0, N }` metadata instead
+of `call void @llvm.assume(i1 %cond)`. Complex patterns keep `@llvm.assume`.
+
+**File**: `src/backend/llvm/emit_toplevel.rs:850-856`
+
+### 2026-06-17: Variadic `fprintf` missing `(ptr, ptr, ...)` prototype
+
+**Root cause**: Three `fprintf` call sites in the LLVM backend omit the
+explicit variadic function type `(ptr, ptr, ...)` from the `call`
+instruction. LLVM requires the call type to match the declare
+(`declare i32 @fprintf(ptr, ptr, ...)`). These would fail the LLVM
+verifier if exercised by any program using `PrintInt` or `PrintFloat`
+intrinsics.
+
+**Fix**: Added `(ptr, ptr, ...)` to all three call sites.
+
+**Files**:
+- `src/backend/llvm/loop_engine.rs:872` (print_int in emit_post_print)
+- `src/backend/llvm/emit_expr.rs:1747` (Intrinsic::PrintInt)
+- `src/backend/llvm/emit_expr.rs:1769` (Intrinsic::PrintFloat)
