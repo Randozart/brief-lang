@@ -514,6 +514,9 @@ pub struct LlvmBackend {
     pending_cleanup: Vec<Statement>,
     pub(crate) let_bindings: HashMap<String, String>,
     pub(crate) let_binding_types: HashMap<String, Type>,
+    /// 2026-06-17: Original type before boxing (e.g. String→Int).
+    /// Used by is_string_chain to detect string parameters stored as Type::Int.
+    pub(crate) let_original_types: HashMap<String, Type>,
     terminated: bool,
     returns_i64: bool,
     fn_ret_ty: String,
@@ -600,6 +603,7 @@ impl LlvmBackend {
             pending_cleanup: Vec::new(),
             let_bindings: HashMap::new(),
             let_binding_types: HashMap::new(),
+            let_original_types: HashMap::new(),
             terminated: false,
             returns_i64: false,
             fn_ret_ty: "void".to_string(),

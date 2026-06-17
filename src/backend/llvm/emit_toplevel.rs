@@ -350,6 +350,17 @@ impl LlvmBackend {
                     let v = if b { "1" } else { "0" };
                     writeln!(out, "  store i8 {}, i8* {}, align {}", v, p, self.align_of("i8")).ok();
                 }
+                Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
+                    let s = match lit.as_ref() {
+                        crate::features::literal::LiteralExpr::String(s) => s,
+                        _ => unreachable!(),
+                    };
+                    let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                    let g = format!("@str.{}", si);
+                    let str_p = format!("%ip{}s", reg); reg += 1;
+                    writeln!(out, "  {} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", str_p, s.len() + 1, g).ok();
+                    writeln!(out, "  store i8* {}, i8** {}, align {}", str_p, p, self.align_of("i8*")).ok();
+                }
                 Some(Expr::String(s)) => {
                     let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
                     let g = format!("@str.{}", si);
@@ -469,6 +480,18 @@ impl LlvmBackend {
                     let v = if b { "1" } else { "0" };
                     writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, v, p, self.align_of("i8")).ok();
                 }
+                Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
+                    // 2026-06-17: Store string constant pointer for LiteralExpr::String
+                    let s = match lit.as_ref() {
+                        crate::features::literal::LiteralExpr::String(s) => s,
+                        _ => unreachable!(),
+                    };
+                    let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                    let g = format!("@str.{}", si);
+                    let str_p = format!("%ip_{}s", idx);
+                    writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, p, self.align_of("i8*")).ok();
+                }
                 Some(Expr::String(s)) => {
                     // 2026-06-17: Store actual string constant pointer, not null.
                     // The string is stored as a bitcast of @str.N to i8*, matching
@@ -521,7 +544,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.pending_cleanup.clear();
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         // 2026-06-17: Use correct LLVM return type (float for Float, otherwise i64)
         let is_float_fn = d.outputs.iter().any(|t| matches!(t, Type::Float));
         let ll_ret_ty = if is_float_fn { "float" } else { "i64" };
@@ -559,11 +582,14 @@ impl LlvmBackend {
             // Boxed params (Bool/Char/String/Data) are stored as i64,
             // so mark them as Type::Int so downstream doesn't treat them
             // as native i1/i32/i8*. Float stays Type::Float (handled specially).
-            if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data) {
-                self.let_binding_types.insert(n.clone(), Type::Int);
-            } else {
-                self.let_binding_types.insert(n.clone(), t.clone());
-            }
+                if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data) {
+                    self.let_binding_types.insert(n.clone(), Type::Int);
+                    // 2026-06-17: Save original type for String/Data params so
+                    // is_string_chain can detect string variables by original type.
+                    self.let_original_types.insert(n.clone(), t.clone());
+                } else {
+                    self.let_binding_types.insert(n.clone(), t.clone());
+                }
         }
         self.txn_counter = 0;
         self.terminated = false;
@@ -622,7 +648,7 @@ impl LlvmBackend {
             writeln!(out, "  br i1 true, label %body, label %rollback").ok();
             writeln!(out, "  body:").ok();
             self.txn_counter = 0;
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             self.returns_i64 = false;
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
@@ -652,7 +678,7 @@ impl LlvmBackend {
             writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             self.txn_counter = 0;
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             self.returns_i64 = false;
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
@@ -672,7 +698,7 @@ impl LlvmBackend {
         self.pending_cleanup.clear();
         self.let_bindings.clear();
         self.let_binding_types.clear();
-        self.reg_float_cache.clear();
+        self.let_original_types.clear(); self.reg_float_cache.clear();
         self.reg_type_cache.clear();
         self.param_slots.clear();
 
@@ -814,7 +840,7 @@ impl LlvmBackend {
         writeln!(out, "define internal i1 @pre_{}(%State* noalias nocapture %state) #0 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         if cond.ty == Type::Bool {
             writeln!(out, "  ret i1 {}", cond).ok();
@@ -832,7 +858,7 @@ impl LlvmBackend {
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = if cond.ty == Type::Bool {
             cond.name.clone()
@@ -864,7 +890,7 @@ impl LlvmBackend {
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");
@@ -879,7 +905,7 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();         self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();         self.terminated = false; self.returns_i64 = false;
         for s in body {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");
@@ -905,7 +931,7 @@ impl LlvmBackend {
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");

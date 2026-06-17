@@ -252,14 +252,8 @@ impl LlvmBackend {
             // Binary ops
             Expr::Add(l, r) => {
                 // 2026-06-17: String + String → inline concat. Both typed as
-                // Type::Int (boxed), so check the AST directly.
-                let is_str = |e: &Expr| -> bool {
-                    if matches!(e, Expr::String(_)) { return true; }
-                    if let Expr::Literal(lit) = e {
-                        matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_))
-                    } else { false }
-                };
-                if is_str(l.as_ref()) || is_str(r.as_ref()) {
+                // Type::Int (boxed), so check the AST recursively.
+                if self.is_string_chain(l) || self.is_string_chain(r) {
                     let a = self.emit_expr(out, l, indent);
                     let b = self.emit_expr(out, r, indent);
                     return self.emit_inline_concat(out, indent, &a, &b);
@@ -2609,9 +2603,7 @@ impl LlvmBackend {
         writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)", indent, dest_off, b_chars, lb).ok();
         let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, v, result).ok();
-        // 2026-06-17: Return Type::Int (boxed string pointer) — consistent with how
-        // all string values are represented. Type::String would cause ptr→i64
-        // mismatches in downstream code (print#, intrinsics, etc.).
+        // Box to i64 — downstream code expects i64 (ptrtoint).
         let vi = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, vi, v).ok();
         TypedRegister { name: vi, ty: Type::Int }
@@ -2639,11 +2631,7 @@ impl LlvmBackend {
             }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
-        if int_op == "add" && (a.ty == Type::String || a.ty == Type::Data || b.ty == Type::String || b.ty == Type::Data) {
-            // 2026-06-17: String concat — either operand can be String/Data.
-            // Boxed string parameters have ty=Type::Int but are still strings.
-            self.emit_inline_concat(out, indent, &a, &b)
-        } else if a.ty == Type::Float || b.ty == Type::Float {
+        if a.ty == Type::Float || b.ty == Type::Float {
             // 2026-06-17: Skip float path if either operand is String/Data
             // (prevents pointer→float corruption, e.g. String + Float).
             if a.ty == Type::String || a.ty == Type::Data || b.ty == Type::String || b.ty == Type::Data {
@@ -2763,5 +2751,26 @@ impl LlvmBackend {
             writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a_i64, b_i64).ok();
         }
         TypedRegister { name: c, ty: Type::Bool }
+    }
+
+    /// Recursively check if an expression chain produces a string value.
+    /// This catches `literal + identifier` and `result_of_concat + literal`
+    /// where all values are boxed as Type::Int (i64).
+    fn is_string_chain(&self, e: &Expr) -> bool {
+        match e {
+            Expr::String(_) => true,
+            Expr::Literal(lit) => matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)),
+            Expr::Identifier(name) => {
+                matches!(self.let_binding_types.get(name), Some(t) if *t == Type::String || *t == Type::Data)
+                || matches!(self.let_original_types.get(name), Some(t) if *t == Type::String || *t == Type::Data)
+            }
+            Expr::Add(l, r) | Expr::Concat(l, r) => {
+                self.is_string_chain(l) || self.is_string_chain(r)
+            }
+            Expr::BinaryOp(bo) if bo.kind == crate::features::binary_op::BinaryOpKind::Add => {
+                self.is_string_chain(&bo.left) || self.is_string_chain(&bo.right)
+            }
+            _ => false,
+        }
     }
 }
