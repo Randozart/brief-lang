@@ -250,7 +250,22 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, 0 ; @{}", indent, v, name).ok();
             }
             // Binary ops
-            Expr::Add(l, r) => { return self.emit_binop(out, indent, l, r, "add", "fadd"); }
+            Expr::Add(l, r) => {
+                // 2026-06-17: String + String → inline concat. Both typed as
+                // Type::Int (boxed), so check the AST directly.
+                let is_str = |e: &Expr| -> bool {
+                    if matches!(e, Expr::String(_)) { return true; }
+                    if let Expr::Literal(lit) = e {
+                        matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_))
+                    } else { false }
+                };
+                if is_str(l.as_ref()) || is_str(r.as_ref()) {
+                    let a = self.emit_expr(out, l, indent);
+                    let b = self.emit_expr(out, r, indent);
+                    return self.emit_inline_concat(out, indent, &a, &b);
+                }
+                return self.emit_binop(out, indent, l, r, "add", "fadd");
+            }
             Expr::Sub(l, r) => { return self.emit_binop(out, indent, l, r, "sub", "fsub"); }
             Expr::Mul(l, r) => { return self.emit_binop(out, indent, l, r, "mul", "fmul"); }
             Expr::Div(l, r) => { return self.emit_binop(out, indent, l, r, "sdiv", "fdiv"); }
@@ -305,7 +320,7 @@ impl LlvmBackend {
             Expr::BitNot(e) => { let inner = self.emit_expr(out, e, indent); writeln!(out, "{}{} = xor i64 {}, -1", indent, v, inner).ok(); }
             Expr::Shl(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = shl i64 {}, {}", indent, v, a, b).ok(); }
             Expr::Shr(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = lshr i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::Concat(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); return self.emit_inline_concat(out, indent, &a.name, &b.name); }
+            Expr::Concat(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); return self.emit_inline_concat(out, indent, &a, &b); }
             // Call
             Expr::Call(name, args) => {
                 // 2026-06-17: Inline negated (stdlib projection, not defined as a function)
@@ -1891,7 +1906,7 @@ impl LlvmBackend {
                     let fv = self.emit_expr(out, fval, indent);
                     let fp = format!("%sfp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, ai, i as i64).ok();
-                     let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float {
+                     let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float || fv.ty == Type::String {
                          self.adapt_to_i64(out, indent, &fv)
                      } else { fv.name.clone() };
                      writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
@@ -1908,7 +1923,7 @@ impl LlvmBackend {
                     let fv = self.emit_expr(out, fval, indent);
                     let fp = format!("%ofp{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, ai, i as i64).ok();
-                    let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float {
+                    let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float || fv.ty == Type::String {
                         self.adapt_to_i64(out, indent, &fv)
                     } else { fv.name.clone() };
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
@@ -2541,9 +2556,13 @@ impl LlvmBackend {
     /// Emit inline string concatenation: malloc + header setup + memcpy.
     /// Both operands are i8* (Brief header pointers). Returns i8*.
     /// No buffer reuse — ownership analysis doesn't exist yet.
-    fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &str, b: &str) -> TypedRegister {
+    fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &TypedRegister, b: &TypedRegister) -> TypedRegister {
+        // Box both inputs to i64 — string values may be ptr (Type::String, native)
+        // or i64 (boxed from parameters). adapt_to_i64 does ptrtoint for String/Data.
+        let a_boxed = self.adapt_to_i64(out, indent, a);
+        let b_boxed = self.adapt_to_i64(out, indent, b);
         let ha = format!("%cha{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, ha, a).ok();
+        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, ha, a_boxed).ok();
         let la_ptr = format!("%clp{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, la_ptr, ha).ok();
         let la = format!("%cla{}", self.txn_counter); self.txn_counter += 1;
@@ -2590,7 +2609,12 @@ impl LlvmBackend {
         writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)", indent, dest_off, b_chars, lb).ok();
         let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, v, result).ok();
-        TypedRegister { name: v, ty: Type::String }
+        // 2026-06-17: Return Type::Int (boxed string pointer) — consistent with how
+        // all string values are represented. Type::String would cause ptr→i64
+        // mismatches in downstream code (print#, intrinsics, etc.).
+        let vi = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, vi, v).ok();
+        TypedRegister { name: vi, ty: Type::Int }
     }
 
     pub(crate) fn emit_binop(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) -> TypedRegister {
@@ -2615,9 +2639,10 @@ impl LlvmBackend {
             }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
-        if int_op == "add" && (a.ty == Type::String || a.ty == Type::Data) && (b.ty == Type::String || b.ty == Type::Data) {
-            // String concatenation via inline concat (native i8*)
-            self.emit_inline_concat(out, indent, &a.name, &b.name)
+        if int_op == "add" && (a.ty == Type::String || a.ty == Type::Data || b.ty == Type::String || b.ty == Type::Data) {
+            // 2026-06-17: String concat — either operand can be String/Data.
+            // Boxed string parameters have ty=Type::Int but are still strings.
+            self.emit_inline_concat(out, indent, &a, &b)
         } else if a.ty == Type::Float || b.ty == Type::Float {
             // 2026-06-17: Skip float path if either operand is String/Data
             // (prevents pointer→float corruption, e.g. String + Float).
