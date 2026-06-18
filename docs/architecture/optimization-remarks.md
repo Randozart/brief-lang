@@ -59,3 +59,32 @@ remark: #?vectorize on line 42 did not vectorize
 2. Store `remarks: Vec<OptimizationRemark>` on `LlvmBackend`
 3. Emit remarks at each directive resolution site
 4. Print remarks after compilation when `--remarks` is set
+
+## Concat Memory Leak Fix — Tagged Pointer Approach (2026-06-18)
+
+The `s1 + s2` string concatenation previously leaked both operand buffers.
+The fix uses a tagged-pointer scheme to distinguish heap-allocated strings
+from static string constants:
+
+### Tagging
+
+- **Static strings** (`@str.N` globals): tagged with bit 0 = 1
+  (`or i64 %ptr, 1`) at the `Expr::String` emission site in
+  `emit_expr.rs:31-33`.
+- **Heap strings** (`malloc` results): bit 0 naturally clear due to 8-byte
+  alignment.
+
+### Freedom
+
+In `emit_inline_concat`:
+1. Bit 0 is masked off (`and i64, -2`) before reading string headers.
+2. After copying both operands' data into the new buffer, bit 0 is tested.
+3. If clear → heap → emit `free`.
+4. If set → static constant → skip free.
+
+This is safe because `malloc` guarantees at least 8-byte alignment on all
+platforms Brief targets, so bit 0 is always usable as a tag.
+
+### Files
+- `emit_expr.rs` — `Expr::String` handler (tagging) and `emit_inline_concat`
+  (mask + conditional free).
