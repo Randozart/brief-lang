@@ -1388,6 +1388,10 @@ impl TypeChecker {
                     Intrinsic::GetEnvInt => Type::Int,
                     // Math intrinsics
                     Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow => Type::Float,
+                    // GPU compute intrinsics (2026-06-18)
+                    Intrinsic::GetGlobalId | Intrinsic::GetLocalId
+                    | Intrinsic::GetGroupId | Intrinsic::GetNumGroups => Type::Int,
+                    Intrinsic::SubGroupBarrier => Type::Bool,
                     // String conversion intrinsics
                     Intrinsic::FloatToStr | Intrinsic::ToStr => Type::String,
                     // Macro/template intrinsics (compile-time only)

@@ -183,6 +183,9 @@ fn is_gpu_safe_intrinsic(intrinsic: &Intrinsic) -> bool {
     matches!(intrinsic,
         Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
         | Intrinsic::Sqrt | Intrinsic::Fabs
+        | Intrinsic::GetGlobalId | Intrinsic::GetLocalId
+        | Intrinsic::GetGroupId | Intrinsic::GetNumGroups
+        | Intrinsic::SubGroupBarrier
     )
 }
 
@@ -301,7 +304,19 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str("\n");
     ir.push_str("target datalayout = \"e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024\"\n");
     ir.push_str("target triple = \"spirv64-unknown-unknown\"\n\n");
-    ir.push_str("declare i64 @_Z13get_global_idj(i32)\n\n");
+    // SPIR-V built-in function declares
+    ir.push_str("declare i64 @_Z13get_global_idj(i32) #0\n");
+    ir.push_str("declare i64 @_Z12get_local_idj(i32) #0\n");
+    ir.push_str("declare i64 @_Z12get_group_idj(i32) #0\n");
+    ir.push_str("declare i64 @_Z16get_num_groupsj(i32) #0\n");
+    ir.push_str("declare void @_Z8barrierj(i32) #0\n");
+    // Math intrinsic declares (GPU-native in SPIR-V)
+    ir.push_str("declare float @llvm.sin.f32(float) #0\n");
+    ir.push_str("declare float @llvm.cos.f32(float) #0\n");
+    ir.push_str("declare float @llvm.pow.f32(float, float) #0\n");
+    ir.push_str("declare float @llvm.sqrt.f32(float) #0\n");
+    ir.push_str("declare float @llvm.fabs.f32(float) #0\n");
+    ir.push_str("\n");
 
     ir.push_str(&format!(
         "define spir_kernel void @{}(i8* nocapture %buffer, i64 %N) {{\n",
@@ -389,6 +404,26 @@ fn emit_spirv_stmt(
             ir.push_str(&format!("{}br label %{}\n", indent, merge_l));
             ir.push_str(&format!("{}:\n", merge_l));
         }
+        // Expression statement — emit void-returning calls (e.g. barrier#()) or
+        // expression-evaluation-only statements. Non-void expressions are evaluated
+        // and the result discarded.
+        Statement::Expression(expr) => {
+            match expr {
+                Expr::IntrinsicCall { intrinsic: Intrinsic::SubGroupBarrier, args } => {
+                    // barrier#() maps to SPIR-V's void-returning @_Z8barrierj
+                    let dim = if args.is_empty() {
+                        "0".to_string()
+                    } else {
+                        emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs)
+                    };
+                    ir.push_str(&format!("{}call void @_Z8barrierj(i32 {})\n", indent, dim));
+                }
+                _ => {
+                    // Non-void expression — evaluate and discard
+                    let _val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -443,8 +478,77 @@ fn emit_spirv_expr(
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
         }
+        // GPU intrinsics: thread/block ID queries map to SPIR-V built-in functions.
+        // Math intrinsics (Sin, Cos, Pow, Sqrt, Fabs) handled when float support is added.
+        Expr::IntrinsicCall { intrinsic, args } => {
+            emit_spirv_intrinsic(intrinsic, args, ir, indent, field_offsets, loaded_regs)
+        }
         _ => {
             ir.push_str(&format!("{}; error: unsupported expression in GPU kernel\n", indent));
+            "0".to_string()
+        }
+    }
+}
+
+/// Emit a GPU intrinsic call as SPIR-V-compatible LLVM IR,
+/// returning the SSA register name holding the result.
+///
+/// Thread/block ID queries map to SPIR-V built-in function calls.
+/// Math intrinsics (Sin, Cos, Pow, Sqrt, Fabs) are stubs until float
+/// arithmetic is added (Phase 3) and will then emit `@llvm.*.f32` calls.
+/// SubGroupBarrier as an expression returns 1 (true — barrier succeeded).
+fn emit_spirv_intrinsic(
+    intrinsic: &Intrinsic,
+    args: &[Expr],
+    ir: &mut String,
+    indent: &str,
+    field_offsets: &HashMap<String, u64>,
+    loaded_regs: &mut HashMap<String, String>,
+) -> String {
+    match intrinsic {
+        Intrinsic::GetGlobalId | Intrinsic::GetLocalId
+        | Intrinsic::GetGroupId | Intrinsic::GetNumGroups => {
+            let dim = if let Some(first) = args.first() {
+                emit_spirv_expr(first, ir, indent, field_offsets, loaded_regs)
+            } else {
+                "0".to_string()
+            };
+            let (fn_name, ret_ty) = match intrinsic {
+                Intrinsic::GetGlobalId => ("_Z13get_global_idj", "i64"),
+                Intrinsic::GetLocalId => ("_Z12get_local_idj", "i64"),
+                Intrinsic::GetGroupId => ("_Z12get_group_idj", "i64"),
+                Intrinsic::GetNumGroups => ("_Z16get_num_groupsj", "i64"),
+                _ => unreachable!(),
+            };
+            let reg = format!("%tid{}", ir.len());
+            ir.push_str(&format!("{}{} = call {} @{}(i32 {})\n",
+                indent, reg, ret_ty, fn_name, dim));
+            reg
+        }
+        Intrinsic::SubGroupBarrier => {
+            // barrier#() returns Bool in Brief; in SPIR-V it's void.
+            // Emit the void call and return 1 (true, barrier succeeded).
+            let dim = if let Some(first) = args.first() {
+                emit_spirv_expr(first, ir, indent, field_offsets, loaded_regs)
+            } else {
+                "0".to_string()
+            };
+            ir.push_str(&format!("{}call void @_Z8barrierj(i32 {})\n", indent, dim));
+            "1".to_string()
+        }
+        // Math intrinsics: stub until float arithmetic (Phase 3).
+        // These must not crash — return 0 so the kernel can at least compile.
+        Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
+        | Intrinsic::Sqrt | Intrinsic::Fabs => {
+            // Emit all argument loads to keep the expression evaluator consistent,
+            // then return 0. Phase 3 replaces this with proper @llvm.*.f32 calls.
+            for arg in args {
+                let _ = emit_spirv_expr(arg, ir, indent, field_offsets, loaded_regs);
+            }
+            "0".to_string()
+        }
+        _ => {
+            ir.push_str(&format!("{}; error: unsupported intrinsic in GPU kernel\n", indent));
             "0".to_string()
         }
     }
@@ -711,5 +815,119 @@ mod tests {
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "unsafe intrinsic in guard should be ineligible");
+    }
+
+    // ── SPIR-V intrinsic emission (Phase 2) ─────────────────────
+
+    #[test]
+    fn test_emit_spirv_get_global_id() {
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("r".to_string()),
+                expr: Expr::IntrinsicCall {
+                    intrinsic: Intrinsic::GetGlobalId,
+                    args: vec![Expr::Integer(0)],
+                },
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("gtid_test", &body, Expr::Integer(100), &[]);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("call i64 @_Z13get_global_idj(i32 0)"),
+            "SPIR-V IR should contain get_global_id call");
+    }
+
+    #[test]
+    fn test_emit_spirv_get_local_id() {
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("r".to_string()),
+                expr: Expr::IntrinsicCall {
+                    intrinsic: Intrinsic::GetLocalId,
+                    args: vec![Expr::Integer(1)],
+                },
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("ltid_test", &body, Expr::Integer(100), &[]);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("call i64 @_Z12get_local_idj(i32 1)"),
+            "SPIR-V IR should contain get_local_id call");
+    }
+
+    #[test]
+    fn test_emit_spirv_get_group_id() {
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("r".to_string()),
+                expr: Expr::IntrinsicCall {
+                    intrinsic: Intrinsic::GetGroupId,
+                    args: vec![Expr::Integer(0)],
+                },
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("grid_test", &body, Expr::Integer(100), &[]);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("call i64 @_Z12get_group_idj(i32 0)"),
+            "SPIR-V IR should contain get_group_id call");
+    }
+
+    #[test]
+    fn test_emit_spirv_barrier() {
+        let body = vec![
+            Statement::Expression(Expr::IntrinsicCall {
+                intrinsic: Intrinsic::SubGroupBarrier,
+                args: vec![],
+            }),
+        ];
+        let kernel = extract_kernel("bar_test", &body, Expr::Integer(100), &[]);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("call void @_Z8barrierj(i32 0)"),
+            "SPIR-V IR should contain barrier call");
+    }
+
+    #[test]
+    fn test_emit_spirv_all_declares_present() {
+        let body = vec![];
+        let kernel = extract_kernel("decl_test", &body, Expr::Integer(1), &[]);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("@_Z13get_global_idj"), "should declare get_global_id");
+        assert!(ir.contains("@_Z12get_local_idj"), "should declare get_local_id");
+        assert!(ir.contains("@_Z12get_group_idj"), "should declare get_group_id");
+        assert!(ir.contains("@_Z16get_num_groupsj"), "should declare get_num_groups");
+        assert!(ir.contains("@_Z8barrierj"), "should declare barrier");
+        assert!(ir.contains("@llvm.sin.f32"), "should declare sin intrinsic");
+        assert!(ir.contains("@llvm.cos.f32"), "should declare cos intrinsic");
+        assert!(ir.contains("@llvm.pow.f32"), "should declare pow intrinsic");
+        assert!(ir.contains("@llvm.sqrt.f32"), "should declare sqrt intrinsic");
+        assert!(ir.contains("@llvm.fabs.f32"), "should declare fabs intrinsic");
+    }
+
+    #[test]
+    fn test_check_eligibility_gpu_intrinsic_allowed() {
+        let body = vec![
+            Statement::Expression(Expr::IntrinsicCall {
+                intrinsic: Intrinsic::GetGlobalId,
+                args: vec![Expr::Integer(0)],
+            }),
+        ];
+        let result = check_eligibility(&body);
+        assert!(result.eligible, "get_global_id should be GPU-eligible");
+    }
+
+    #[test]
+    fn test_check_eligibility_barrier_allowed() {
+        let body = vec![
+            Statement::Expression(Expr::IntrinsicCall {
+                intrinsic: Intrinsic::SubGroupBarrier,
+                args: vec![],
+            }),
+        ];
+        let result = check_eligibility(&body);
+        assert!(result.eligible, "barrier should be GPU-eligible");
     }
 }

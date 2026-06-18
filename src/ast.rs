@@ -601,6 +601,18 @@ pub enum Intrinsic {
     /// pow#(Float, Float) -> Float — float exponentiation
     Pow,
 
+    // ===== GPU compute intrinsics (2026-06-18) =====
+    /// get_global_id#(dim: Int) -> Int — global work-item ID for the given dimension
+    GetGlobalId,
+    /// get_local_id#(dim: Int) -> Int — local work-item ID within workgroup
+    GetLocalId,
+    /// get_group_id#(dim: Int) -> Int — workgroup ID for the given dimension
+    GetGroupId,
+    /// get_num_groups#(dim: Int) -> Int — number of workgroups in the given dimension
+    GetNumGroups,
+    /// barrier#() -> Bool — workgroup-level synchronization barrier
+    SubGroupBarrier,
+
     // ===== String conversion intrinsics (2026-06-18) =====
     /// float_to_str#(Float) -> String — format float to string
     FloatToStr,
@@ -633,6 +645,9 @@ impl Intrinsic {
             | Intrinsic::IntToStr
             | Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
             | Intrinsic::FloatToStr | Intrinsic::ToStr
+            // GPU compute queries — pure (read-only state queries)
+            | Intrinsic::GetGlobalId | Intrinsic::GetLocalId
+            | Intrinsic::GetGroupId | Intrinsic::GetNumGroups
             => false,
             // Everything else is observable — cannot fold
             _ => true,
@@ -677,6 +692,12 @@ impl Intrinsic {
             "sin" => Some(Intrinsic::Sin),
             "cos" => Some(Intrinsic::Cos),
             "pow" => Some(Intrinsic::Pow),
+            // GPU compute intrinsics (2026-06-18)
+            "get_global_id" => Some(Intrinsic::GetGlobalId),
+            "get_local_id" => Some(Intrinsic::GetLocalId),
+            "get_group_id" => Some(Intrinsic::GetGroupId),
+            "get_num_groups" => Some(Intrinsic::GetNumGroups),
+            "barrier" => Some(Intrinsic::SubGroupBarrier),
             "float_to_str" => Some(Intrinsic::FloatToStr),
             "to_str" => Some(Intrinsic::ToStr),
             // Phase A: Terminal
@@ -819,6 +840,11 @@ impl Intrinsic {
             Intrinsic::Sin => "sin",
             Intrinsic::Cos => "cos",
             Intrinsic::Pow => "pow",
+            Intrinsic::GetGlobalId => "get_global_id",
+            Intrinsic::GetLocalId => "get_local_id",
+            Intrinsic::GetGroupId => "get_group_id",
+            Intrinsic::GetNumGroups => "get_num_groups",
+            Intrinsic::SubGroupBarrier => "barrier",
             Intrinsic::FloatToStr => "float_to_str",
             Intrinsic::ToStr => "to_str",
             // Phase A: Terminal

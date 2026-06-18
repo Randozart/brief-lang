@@ -3630,6 +3630,22 @@ impl Interpreter {
                             .as_nanos());
                         Ok(Value::String(sym))
                     }
+                    // GPU compute intrinsics — interpreter stubs (no GPU simulation)
+                    Intrinsic::GetGlobalId => {
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::GetLocalId => {
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::GetGroupId => {
+                        Ok(Value::Int(0))
+                    }
+                    Intrinsic::GetNumGroups => {
+                        Ok(Value::Int(1))
+                    }
+                    Intrinsic::SubGroupBarrier => {
+                        Ok(Value::Bool(true))
+                    }
                 }
             }
             // Legacy collection variants — delegate through feature structs

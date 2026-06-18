@@ -2108,6 +2108,36 @@ impl LlvmBackend {
                     Intrinsic::MacroGenSym => {
                         panic!("gensym#() called at runtime — this is a compiler bug");
                     }
+                    // GPU compute intrinsics (2026-06-18)
+                    // CPU fallback: emit C runtime calls that return sensible defaults.
+                    Intrinsic::GetGlobalId => {
+                        let dim = if !args.is_empty() {
+                            self.emit_expr(out, &args[0], indent).name.clone()
+                        } else { "0".to_string() };
+                        writeln!(out, "{}  {} = call i64 @__get_global_id(i32 {})", indent, v, dim).ok();
+                    }
+                    Intrinsic::GetLocalId => {
+                        let dim = if !args.is_empty() {
+                            self.emit_expr(out, &args[0], indent).name.clone()
+                        } else { "0".to_string() };
+                        writeln!(out, "{}  {} = call i64 @__get_local_id(i32 {})", indent, v, dim).ok();
+                    }
+                    Intrinsic::GetGroupId => {
+                        let dim = if !args.is_empty() {
+                            self.emit_expr(out, &args[0], indent).name.clone()
+                        } else { "0".to_string() };
+                        writeln!(out, "{}  {} = call i64 @__get_group_id(i32 {})", indent, v, dim).ok();
+                    }
+                    Intrinsic::GetNumGroups => {
+                        let dim = if !args.is_empty() {
+                            self.emit_expr(out, &args[0], indent).name.clone()
+                        } else { "0".to_string() };
+                        writeln!(out, "{}  {} = call i64 @__get_num_groups(i32 {})", indent, v, dim).ok();
+                    }
+                    Intrinsic::SubGroupBarrier => {
+                        writeln!(out, "{}  call void @__barrier__()", indent).ok();
+                        writeln!(out, "{}  {} = add i64 0, 1 ; barrier returns true", indent, v).ok();
+                    }
                 }
             }
             // ── ListLiteral ──────────────────────────────────────
