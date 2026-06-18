@@ -96,7 +96,8 @@ pub fn run_peephole(program: &Program, analysis: &AnalysisResults) -> Program {
 pub fn supported_hashtags(backend: &str) -> Vec<&'static str> {
     match backend {
         "c" | "x86_64" | "aarch64" | "llvm" => {
-            vec!["volatile", "sfence", "lfence", "mfence", "aligned", "packed"]
+            vec!["volatile", "sfence", "lfence", "mfence", "aligned", "packed",
+                 "inline", "unroll", "vectorize", "gpu"]
         }
         "rust" => {
             vec!["volatile", "sync", "aligned", "repr", "packed"]
@@ -151,6 +152,10 @@ fn is_scoped_elsewhere(tag: &Hashtag, backend: &str) -> bool {
 fn validate_single_hashtag(tag: &Hashtag, supported: &[&'static str]) -> HashtagValidation {
     if supported.contains(&tag.name.as_str()) {
         return HashtagValidation::Supported;
+    }
+    // Speculative tags are always advisory — never produce UnsupportedMandatory.
+    if tag.speculative {
+        return HashtagValidation::UnsupportedAdvisory(tag.name.clone());
     }
     if tag.mandatory && has_supported_fallback(tag, supported) {
         return HashtagValidation::Supported;
@@ -827,7 +832,7 @@ mod tests {
     /// Intent: Verify the C backend supports the volatile hashtag.
     #[test]
     fn test_c_backend_supports_volatile() {
-        let tag = Hashtag { name: "volatile".into(), value: None, mandatory: false, fallback: vec![], scoped: None };
+        let tag = Hashtag { name: "volatile".into(), value: None, mandatory: false, speculative: false, fallback: vec![], scoped: None };
         let results = validate_hashtags(&[tag], "c");
         assert_eq!(results[0], HashtagValidation::Supported);
     }
@@ -835,7 +840,7 @@ mod tests {
     /// Intent: Verify the C backend rejects an unknown advisory hashtag.
     #[test]
     fn test_c_backend_rejects_unknown_advisory() {
-        let tag = Hashtag { name: "thermal_sense".into(), value: None, mandatory: false, fallback: vec![], scoped: None };
+        let tag = Hashtag { name: "thermal_sense".into(), value: None, mandatory: false, speculative: false, fallback: vec![], scoped: None };
         let results = validate_hashtags(&[tag], "c");
         assert_eq!(results[0], HashtagValidation::UnsupportedAdvisory("thermal_sense".to_string()));
     }
@@ -843,7 +848,7 @@ mod tests {
     /// Intent: Verify the C backend rejects an unknown mandatory hashtag.
     #[test]
     fn test_c_backend_rejects_unknown_mandatory() {
-        let tag = Hashtag { name: "thermal_sense".into(), value: None, mandatory: true, fallback: vec![], scoped: None };
+        let tag = Hashtag { name: "thermal_sense".into(), value: None, mandatory: true, speculative: false, fallback: vec![], scoped: None };
         let results = validate_hashtags(&[tag], "c");
         assert_eq!(results[0], HashtagValidation::UnsupportedMandatory("thermal_sense".to_string()));
     }
@@ -855,6 +860,7 @@ mod tests {
             name: "unknown_op".into(),
             value: None,
             mandatory: true,
+            speculative: false,
             fallback: vec!["lfence".to_string(), "mfence".to_string()],
             scoped: None,
         };
@@ -869,6 +875,7 @@ mod tests {
             name: "unknown_op".into(),
             value: None,
             mandatory: true,
+            speculative: false,
             fallback: vec!["nope1".to_string(), "nope2".to_string()],
             scoped: None,
         };
@@ -883,6 +890,7 @@ mod tests {
             name: "volatile".into(),
             value: None,
             mandatory: false,
+            speculative: false,
             fallback: vec![],
             scoped: Some("verilog".to_string()),
         };
@@ -897,6 +905,7 @@ mod tests {
             name: "clock".into(),
             value: None,
             mandatory: false,
+            speculative: false,
             fallback: vec![],
             scoped: Some("verilog".to_string()),
         };
