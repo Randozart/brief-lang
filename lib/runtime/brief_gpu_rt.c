@@ -289,17 +289,24 @@ static int brief_gpu_init_vulkan_inner() {
     // Get the compute queue
     vkGetDeviceQueue(vk_device, vk_queue_family_index, 0, &vk_queue);
 
-    // Create descriptor set layout (one storage buffer binding)
-    struct { uint32_t binding; uint32_t type; uint32_t count; uint32_t stage_flags; void* samplers; } binding_desc = {
-        .binding = 0,
-        .type = 7,  // VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-        .count = 1,
-        .stage_flags = 0x20,  // VK_SHADER_STAGE_COMPUTE_BIT
-        .samplers = NULL,
-    };
+    // Create descriptor set layout — support up to MAX_GPU_BUFFERS storage buffers
+    struct {
+        uint32_t binding;
+        uint32_t type;
+        uint32_t count;
+        uint32_t stage_flags;
+        void* samplers;
+    } binding_descs[MAX_GPU_BUFFERS];
+    for (int i = 0; i < MAX_GPU_BUFFERS; i++) {
+        binding_descs[i].binding = (uint32_t)i;
+        binding_descs[i].type = 7;  // VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+        binding_descs[i].count = 1;
+        binding_descs[i].stage_flags = 0x20;  // VK_SHADER_STAGE_COMPUTE_BIT
+        binding_descs[i].samplers = NULL;
+    }
     struct { uint32_t count; void* bindings; } desc_layout_info = {
-        .count = 1,
-        .bindings = &binding_desc,
+        .count = MAX_GPU_BUFFERS,
+        .bindings = binding_descs,
     };
     vkCreateDescriptorSetLayout(vk_device, &desc_layout_info, NULL, &vk_desc_set_layout);
 
@@ -312,14 +319,13 @@ static int brief_gpu_init_vulkan_inner() {
     };
     vkCreatePipelineLayout(vk_device, &pipe_layout_info, NULL, &vk_pipeline_layout);
 
-    // Create descriptor pool
+    // Create descriptor pool — pool for MAX_GPU_BUFFERS storage buffer descriptors
     struct { uint32_t max_sets; uint32_t pool_size_count; void* pool_sizes; } desc_pool_info = {
         .max_sets = 1,
         .pool_size_count = 1,
         .pool_sizes = NULL,
     };
-    // Simple pool — one storage buffer descriptor
-    uint32_t pool_sizes_data[2] = { 7, 1 };  // type=STORAGE_BUFFER, count=1
+    uint32_t pool_sizes_data[2] = { 7, MAX_GPU_BUFFERS };  // type=STORAGE_BUFFER, count=MAX_GPU_BUFFERS
     desc_pool_info.pool_sizes = pool_sizes_data;
     vkCreateDescriptorPool(vk_device, &desc_pool_info, NULL, &vk_desc_pool);
 
@@ -514,20 +520,39 @@ void brief_gpu_launch(
     };
     vkAllocateDescriptorSets(vk_device, &desc_alloc, &desc_set);
 
-    // For each buffer, create a storage buffer descriptor
-    // In a simplified implementation, bind the first buffer
-    if (num_buffers > 0) {
-        int slot = (int)(buffer_handles[0] - 1);
-        if (slot >= 0 && slot < MAX_GPU_BUFFERS && gpu_buffers[slot].used) {
-            struct { uint32_t dst_set; uint32_t binding; uint32_t count; uint32_t type; void* info; } write_desc = {
-                .dst_set = (uint32_t)(uintptr_t)desc_set,  // simplified
-                .binding = 0,
-                .count = 1,
-                .type = 7,  // STORAGE_BUFFER
-                .info = NULL,
-            };
-            // Would use vkUpdateDescriptorSets in production
-        }
+    // Build descriptor buffer infos and write entries for each buffer handle.
+    struct { uint64_t buffer; uint64_t offset; uint64_t range; } buf_infos[MAX_GPU_BUFFERS];
+    struct {
+        void* next;
+        uint32_t dst_set;
+        uint32_t dst_binding;
+        uint32_t dst_array_element;
+        uint32_t descriptor_count;
+        uint32_t descriptor_type;
+        void* p_buffer_info;
+        void* p_tex_info;
+        void* p_tex_view;
+    } write_descs[MAX_GPU_BUFFERS];
+    int num_valid = 0;
+    for (int i = 0; i < num_buffers && i < MAX_GPU_BUFFERS; i++) {
+        int slot = (int)(buffer_handles[i] - 1);
+        if (slot < 0 || slot >= MAX_GPU_BUFFERS || !gpu_buffers[slot].used) continue;
+        buf_infos[num_valid].buffer = (uint64_t)(uintptr_t)&gpu_buffers[slot];
+        buf_infos[num_valid].offset = 0;
+        buf_infos[num_valid].range = gpu_buffers[slot].size;
+        write_descs[num_valid].next = NULL;
+        write_descs[num_valid].dst_set = (uint32_t)(uintptr_t)desc_set;
+        write_descs[num_valid].dst_binding = (uint32_t)i;
+        write_descs[num_valid].dst_array_element = 0;
+        write_descs[num_valid].descriptor_count = 1;
+        write_descs[num_valid].descriptor_type = 7;  // VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+        write_descs[num_valid].p_buffer_info = &buf_infos[num_valid];
+        write_descs[num_valid].p_tex_info = NULL;
+        write_descs[num_valid].p_tex_view = NULL;
+        num_valid++;
+    }
+    if (num_valid > 0) {
+        vkUpdateDescriptorSets(vk_device, (uint32_t)num_valid, write_descs, 0, NULL);
     }
 
     // Record command buffer
@@ -692,6 +717,36 @@ static int brief_gpu_init_opencl_inner() {
 
     cl_available = 1;
     return 1;
+}
+
+// ── CPU fallback stubs for GPU intrinsics ──────────────────────
+//
+// These are called by the CPU codegen path when a program uses GPU
+// intrinsics (get_global_id#, barrier#, etc.) but runs on CPU.
+// All return single-thread default values.
+
+int64_t __get_global_id(int32_t dim) {
+    (void)dim;
+    return 0;  // single-thread CPU: always thread 0
+}
+
+int64_t __get_local_id(int32_t dim) {
+    (void)dim;
+    return 0;
+}
+
+int64_t __get_group_id(int32_t dim) {
+    (void)dim;
+    return 0;
+}
+
+int64_t __get_num_groups(int32_t dim) {
+    (void)dim;
+    return 1;  // one workgroup on CPU
+}
+
+void __barrier__(void) {
+    // no-op on single-thread CPU
 }
 
 

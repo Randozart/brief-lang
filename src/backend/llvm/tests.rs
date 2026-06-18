@@ -413,6 +413,111 @@ fn empty_program() -> Program {
     }
 
     #[test]
+    fn test_gpu_intrinsic_get_global_id_cpu() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                state_count(),
+                TopLevel::Transaction(Transaction {
+                    name: "gtid_cpu".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("count".to_string()),
+                            expr: Expr::IntrinsicCall {
+                                intrinsic: Intrinsic::GetGlobalId,
+                                args: vec![Expr::Integer(0)],
+                            },
+                            timeout: None,
+                            modifiers: vec![],
+                        },
+                    ],
+                    is_async: false,
+                    is_reactive: true,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: Vec::new(),
+                    output_type: None,
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call i64 @__get_global_id"),
+            "CPU IR should call __get_global_id for get_global_id# intrinsic");
+    }
+
+    #[test]
+    fn test_gpu_intrinsic_barrier_cpu() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                state_count(),
+                TopLevel::Transaction(Transaction {
+                    name: "bar_cpu".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::IntrinsicCall {
+                            intrinsic: Intrinsic::SubGroupBarrier,
+                            args: vec![],
+                        }),
+                    ],
+                    is_async: false,
+                    is_reactive: true,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: Vec::new(),
+                    output_type: None,
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("call void @__barrier__"),
+            "CPU IR should call __barrier__ for barrier# intrinsic");
+        assert!(output.contains("add i64 0, 1"),
+            "CPU IR should return true for barrier#");
+    }
+
+    #[test]
     fn test_llvm_event_model_lowering() {
         let mut backend = LlvmBackend::new();
         let program = Program {
