@@ -365,6 +365,7 @@ Preserve contract information in codegen so the optimizer can reason about it.
 13. **Architecture docs**: Update `docs/architecture/` in the same commit as structural changes.
 14. **Kani**: Add proof harnesses for all new safety-critical code.
 15. **Praetor**: Run on new/changed files; verify complexity ≤ 15, lines ≤ 100, params ≤ 6.
+16. **ALWAYS FINISH WHAT YOU START**: Never leave stubs, placeholders, `todo!()`, `unreachable!()`, or `; TODO:` comments in committed code. Every feature must be fully wired through the entire pipeline — parser → AST → analysis → codegen → tests. If a function is too complex to finish in one session, break it into concrete sub-functions and implement each one. If a module is added, it must be called from at least one real code path. Stubs in committed code are bugs.
 
 ## Self-Hosting Pipeline
 

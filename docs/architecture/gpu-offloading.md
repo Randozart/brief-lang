@@ -8,7 +8,7 @@
 ## Architecture
 
 Brief's GPU offloading uses a **dual compilation** model. When `--gpu-offload`
-is active (or `#gpu`/`#gpu?` directives are present), the compiler emits TWO
+is active (or `#gpu`/`#?gpu` directives are present), the compiler emits TWO
 outputs from a single source:
 
 1. **Native CPU binary** via the existing LLVM x86/ARM backend
