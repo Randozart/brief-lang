@@ -686,10 +686,42 @@ impl LlvmBackend {
                         }
                     }
                     Intrinsic::WriteFile => {
-                        writeln!(out, "{}{} = add i64 0, 1 ; write_file stub", indent, v).ok();
+                        // WriteFile(path: String, data: String) -> Bool
+                        // Brief strings are passed as boxed i64 (ptrtoint of header).
+                        let path_val = self.emit_expr(out, &args[0], indent);
+                        let data_val = self.emit_expr(out, &args[1], indent);
+                        let path_boxed = self.adapt_to_i64(out, indent, &path_val);
+                        let data_boxed = self.adapt_to_i64(out, indent, &data_val);
+                        let wf_ret = format!("%wfr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i64 @brief_write_file(i64 {}, i64 {})", indent, wf_ret, path_boxed, data_boxed).ok();
+                        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, v, wf_ret).ok();
+                        return TypedRegister { name: v, ty: Type::Bool };
                     }
                     Intrinsic::Sleep => {
-                        writeln!(out, "{}{} = add i64 0, 1 ; sleep stub", indent, v).ok();
+                        // Sleep takes milliseconds, converts to seconds + nanoseconds for nanosleep
+                        let ms = self.emit_expr(out, &args[0], indent);
+                        let micro = format!("%slmc{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = mul i64 {}, 1000", indent, micro, ms.name).ok();
+                        let sec = format!("%slsc{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = udiv i64 {}, 1000000", indent, sec, micro).ok();
+                        let usec = format!("%sluc{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = urem i64 {}, 1000000", indent, usec, micro).ok();
+                        let nsec = format!("%slnec{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = mul i64 {}, 1000", indent, nsec, usec).ok();
+                        // Allocate and fill timespec
+                        let ts = format!("%slts{}", self.txn_counter); self.txn_counter += 1;
+                        let tsp = format!("%sltsp{}", self.txn_counter); self.txn_counter += 1;
+                        let tsnp = format!("%sltsn{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = alloca {{ i64, i64 }}, align 8", indent, ts).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i64, i64 }}, ptr {}, i32 0, i32 0", indent, tsp, ts).ok();
+                        writeln!(out, "{}{} = getelementptr {{ i64, i64 }}, ptr {}, i32 0, i32 1", indent, tsnp, ts).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}", indent, sec, tsp).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}", indent, nsec, tsnp).ok();
+                        // Call nanosleep (ignore remainder)
+                        let rv = format!("%slrv{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @nanosleep(ptr {}, ptr null)", indent, rv, ts).ok();
+                        // Return true (Bool)
+                        writeln!(out, "{}{} = add i64 0, 1 ; sleep done", indent, v).ok();
                     }
                     // ===== Phase A: Terminal (intrinsics.md D4) =====
                     Intrinsic::TtyRawMode => {
@@ -1930,8 +1962,116 @@ impl LlvmBackend {
                         };
                         writeln!(out, "{}{} = add i64 0, {}", indent, v, bs).ok();
                     }
+                    ProjectionTarget::Ptr => {
+                        writeln!(out, "{}{} = add i64 0, {} ; ptr", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::Alignment => {
+                        writeln!(out, "{}{} = add i64 0, 8 ; alignment", indent, v).ok();
+                    }
+                    ProjectionTarget::Type => {
+                        let tid = match src_val.ty {
+                            Type::Int | Type::UInt => 1i64,
+                            Type::Bool => 2,
+                            Type::Char => 3,
+                            Type::String | Type::Data => 4,
+                            Type::Float => 5,
+                            Type::Custom(_) => 6,
+                            Type::Void => 0,
+                            _ => 0,
+                        };
+                        writeln!(out, "{}{} = add i64 0, {} ; type", indent, v, tid).ok();
+                    }
+                    ProjectionTarget::Popcount => {
+                        writeln!(out, "{}{} = call i64 @llvm.ctpop.i64(i64 {})", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::LeadingZeros => {
+                        writeln!(out, "{}{} = call i64 @llvm.ctlz.i64(i64 {}, i1 false)", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::TrailingZeros => {
+                        writeln!(out, "{}{} = call i64 @llvm.cttz.i64(i64 {}, i1 false)", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::Absolute => {
+                        writeln!(out, "{}{} = call i64 @llvm.abs.i64(i64 {}, i1 false)", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::BitReverse => {
+                        writeln!(out, "{}{} = call i64 @llvm.bitreverse.i64(i64 {})", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::Keys | ProjectionTarget::Values
+                    | ProjectionTarget::AsStack | ProjectionTarget::AsQueue => {
+                        writeln!(out, "{}{} = add i64 0, {} ; keys/values/as/as", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::Index(i) => {
+                        let hp = format!("%pihp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                        let dp = format!("%pidp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, dp, hp, (*i as i64) + 2).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, dp).ok();
+                    }
+                    ProjectionTarget::Pop => {
+                        let hp = format!("%pphp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                        let lp = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                        let len = format!("%ppln{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
+                        let pi = format!("%pppi{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = add i64 {}, -1", indent, pi, len).ok();
+                        let dpp = format!("%ppdp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dpp, hp).ok();
+                        let ep = format!("%ppep{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dpp, pi).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
+                    }
+                    ProjectionTarget::PtrBang => {
+                        let hp = format!("%pbhp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, hp).ok();
+                    }
+                    ProjectionTarget::Contains(expr) => {
+                        // Linear search over list elements
+                        let search_val = self.emit_expr(out, expr, indent);
+                        let search_boxed = self.adapt_to_i64(out, indent, &search_val);
+                        let hp = format!("%pchp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                        let lp = format!("%pclp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                        let len = format!("%pcln{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
+                        let dp = format!("%pcdp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp, hp).ok();
+                        // Emit a linear search loop
+                        let e_l = format!("pc_entry{}", self.txn_counter); self.txn_counter += 1;
+                        let h_l = format!("pc_hdr{}", self.txn_counter); self.txn_counter += 1;
+                        let b_l = format!("pc_body{}", self.txn_counter); self.txn_counter += 1;
+                        let f_l = format!("pc_found{}", self.txn_counter); self.txn_counter += 1;
+                        let d_l = format!("pc_done{}", self.txn_counter); self.txn_counter += 1;
+                        let i_r = format!("%pci{}", self.txn_counter); self.txn_counter += 1;
+                        let c_r = format!("%pcc{}", self.txn_counter); self.txn_counter += 1;
+                        let el_r = format!("%pce{}", self.txn_counter); self.txn_counter += 1;
+                        let eq_r = format!("%pceq{}", self.txn_counter); self.txn_counter += 1;
+                        let n_r = format!("%pcn{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}br label %{}", indent, e_l).ok();
+                        writeln!(out, "{}{}:", indent, e_l).ok();
+                        writeln!(out, "{}br label %{}", indent, h_l).ok();
+                        writeln!(out, "{}{}:", indent, h_l).ok();
+                        writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, i_r, e_l, n_r, b_l).ok();
+                        writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, c_r, i_r, len).ok();
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, c_r, b_l, d_l).ok();
+                        writeln!(out, "{}{}:", indent, b_l).ok();
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, el_r, dp, i_r).ok();
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, eq_r, el_r).ok();
+                        writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, eq_r, eq_r, search_boxed).ok();
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, eq_r, f_l, h_l).ok();
+                        writeln!(out, "{}{} = add i64 {}, 1", indent, n_r, i_r).ok();
+                        writeln!(out, "{}br label %{}", indent, h_l).ok();
+                        writeln!(out, "{}{}:", indent, f_l).ok();
+                        writeln!(out, "{}br label %{}", indent, d_l).ok();
+                        writeln!(out, "{}{}:", indent, d_l).ok();
+                        writeln!(out, "{}{} = phi i1 [ false, %{} ], [ true, %{} ]", indent, v, e_l, f_l).ok();
+                        return TypedRegister { name: v, ty: Type::Bool };
+                    }
                     _ => {
-                        writeln!(out, "{}{} = add i64 0, 0 ; projection", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 0, 0 ; projection catch-all", indent, v).ok();
                     }
                 }
             }
@@ -2189,15 +2329,13 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = add i64 0, {}", indent, count_reg, src_len_reg).ok();
                 }
 
-                // Allocate new list header: N+2 slots
+                // Allocate new list header via malloc (avoids invalid dynamic alloca in non-entry block)
+                let ab = format!("%sab{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = mul i64 {}, 8", indent, ab, count_reg).ok();
+                let rm = format!("%srm{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, rm, ab).ok();
                 let ai = format!("%sai{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = alloca i64, i64 {}", indent, ai, count_reg).ok();
-                // We don't know count at compile time, overallocate and store later
-                // Actually alloca with dynamic size: alloca i64, i64 %count
-                // But LLVM doesn't support runtime alloca count with i64 type directly…
-                // Use a fixed max allocation. For test: 3 elements, start=1, end=3 => count=2
-                // The test doesn't check for correct allocation, just for phi + icmp slt
-                // Let's use a fixed large allocation and not worry about size
+                writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, ai, rm).ok();
                 let _ = mask; // silence unused warning
                 let _ = stride; // silence unused warning
 
@@ -2227,13 +2365,13 @@ impl LlvmBackend {
                 let src_ep = format!("%ssep{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, src_ep, de, src_idx).ok();
                 let elem = format!("%selem{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, elem, src_ep).ok();
+                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, elem, src_ep).ok();
                 // Store to dest[2 + i]
                 let dst_idx = format!("%sdi{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 2", indent, dst_idx, i_reg).ok();
                 let dst_ep = format!("%sdep{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, dst_ep, ai, dst_idx).ok();
-                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, elem, dst_ep).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, elem, dst_ep).ok();
                 writeln!(out, "{}{} = add i64 {}, 1", indent, next_reg, i_reg).ok();
                 writeln!(out, "{}br label %{}", indent, header_label).ok();
                 writeln!(out, "{}{}:", indent, done_label).ok();
@@ -2244,10 +2382,10 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
                 let s0 = format!("%ss0{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, ai).ok();
-                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp_val, s0).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, dp_val, s0).ok();
                 let s1 = format!("%ss1{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, ai).ok();
-                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, count_reg, s1).ok();
+                writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, count_reg, s1).ok();
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
             }
             // — Subtype projection (e.g. list :> Size) —
@@ -2355,6 +2493,10 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
                 let old_len = format!("%aol{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, old_len, lp).ok();
+                // Free old buffer before allocating new one
+                let old_ptr = format!("%aop{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
+                writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
                 // Allocate new buffer: (old_len + 3) * 8 bytes
                 let new_cnt = format!("%anc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 3", indent, new_cnt, old_len).ok();
@@ -2433,6 +2575,10 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dp, pop_idx).ok();
                 writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
                 let popped = v.clone();
+                // Free old buffer before allocating new one
+                let old_ptr = format!("%pop{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
+                writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
                 // Allocate new buffer: (len + 1) * 8 (2 header + len - 1 elements)
                 let new_cnt = format!("%pnc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 1", indent, new_cnt, len).ok();
@@ -2505,6 +2651,10 @@ impl LlvmBackend {
                     let ib = self.adapt_to_i64(out, indent, &iv);
                     writeln!(out, "{}{} = add i64 {}, 0", indent, discard_idx, ib).ok();
                 }
+                // Free old buffer before allocating new one
+                let old_ptr = format!("%dop{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
+                writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
                 // Allocate new buffer: (len + 1) slots (2 header + len - 1 elements)
                 let new_cnt = format!("%dnc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 1", indent, new_cnt, len).ok();
@@ -2558,8 +2708,8 @@ impl LlvmBackend {
                         writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
                     }
                 }
-                writeln!(out, "{}{} = add i64 0, 0 ; discard void", indent, v).ok();
-                return TypedRegister { name: v, ty: Type::Void };
+                writeln!(out, "{}{} = add i64 0, {} ; discard", indent, v, base).ok();
+                return TypedRegister { name: v, ty: Type::Int };
             }
             Expr::ArrowTransfer { dest, source, filter: _ } => {
                 // Unfiltered: move all elements from source to dest
@@ -2583,6 +2733,13 @@ impl LlvmBackend {
                 // Total = dest_len + src_len
                 let total = format!("%ttl{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, {}", indent, total, dlen, slen).ok();
+                // Free old buffers before allocating new one
+                let dold = format!("%tdop{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, dold, dest_boxed).ok();
+                writeln!(out, "{}call void @free(i8* {})", indent, dold).ok();
+                let sold = format!("%tsop{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, sold, src_boxed).ok();
+                writeln!(out, "{}call void @free(i8* {})", indent, sold).ok();
                 // Allocate new dest buffer: (total + 2) * 8
                 let alloc_slots = format!("%tas{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 2", indent, alloc_slots, total).ok();
@@ -2650,8 +2807,8 @@ impl LlvmBackend {
                         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, ebase, ap, tn).ok();
                     }
                 }
-                writeln!(out, "{}{} = add i64 0, 0 ; transfer void", indent, v).ok();
-                return TypedRegister { name: v, ty: Type::Void };
+                writeln!(out, "{}{} = add i64 0, {} ; transfer", indent, v, dbase).ok();
+                return TypedRegister { name: v, ty: Type::Int };
             }
             Expr::Cast(inner, target_ty) => {
                 let inner_val = self.emit_expr(out, inner, indent);

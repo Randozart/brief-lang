@@ -8,24 +8,57 @@ impl LlvmBackend {
     /// Recursively evaluate a boolean expression for the exit condition check.
     /// All values are emitted as `i64` for uniformity; comparisons are zext'd from `i1`.
     pub(crate) fn emit_exit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> String {
-        // Leaf expressions: delegate integer/bool to emit_expr for constant
-        // inlining. Keep Identifier/OwnedRef local because exit conditions
-        // Access %state pointer (passed as parameter or via alloca in main)
-        match expr {
-            Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Neg(_) => {
-                return self.emit_expr(out, expr, indent).name;
-            }
-            _ => {}
-        }
+
         let v = format!("%t{}", self.txn_counter);
         self.txn_counter += 1;
         match expr {
+            Expr::Integer(n) => { return self.emit_expr(out, expr, indent).name; }
+            Expr::Bool(_) | Expr::Float(_) | Expr::Neg(_) | Expr::String(_) => {
+                return self.emit_expr(out, expr, indent).name;
+            }
+            Expr::Char(c) => {
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, *c as i32).ok();
+                return v;
+            }
+            Expr::Literal(lit) => {
+                match lit.as_ref() {
+                    crate::features::literal::LiteralExpr::Char(c) => {
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, *c as i32).ok();
+                        return v;
+                    }
+                    _ => return self.emit_expr(out, expr, indent).name,
+                }
+            }
             Expr::Identifier(name) => {
                 if let Some(&idx) = self.field_index_map.get(name) {
                     let p = format!("%gep_exit_{}", self.txn_counter);
                     self.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
-                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok();
+                    let ft = &self.field_types[idx];
+                    match ft.as_str() {
+                        "i64" => { writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok(); }
+                        "i32" => {
+                            let l = format!("%exit_l{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, l, p).ok();
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, v, l).ok();
+                        }
+                        "i8" => {
+                            let l = format!("%exit_l{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, l, p).ok();
+                            writeln!(out, "{}{} = zext i8 {} to i64", indent, v, l).ok();
+                        }
+                        s if s == "i8*" || s == "ptr" => {
+                            let l = format!("%exit_l{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, l, p).ok();
+                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, l).ok();
+                        }
+                        "float" => {
+                            let l = format!("%exit_l{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load float, float* {}, align 4", indent, l, p).ok();
+                            writeln!(out, "{}{} = bitcast float {} to i64", indent, v, l).ok();
+                        }
+                        _ => { writeln!(out, "{}{} = add i64 0, 0 ; unknown field type", indent, v).ok(); }
+                    }
                 } else if self.constants.contains_key(name) {
                     writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
                 } else if self.trigger_names.contains(name) {
@@ -738,7 +771,7 @@ impl LlvmBackend {
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
-                self.loop_exit_label = Some("done".into());
+                self.loop_exit_label = Some("pdoneloop".into());
                 for s in body_stmts { self.emit_stmt(out, s, "  "); }
                 self.loop_exit_label = None;
                 self.ssa_old_float_regs.clear();

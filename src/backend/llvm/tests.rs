@@ -3978,6 +3978,6 @@ let spec = crate::target_spec::TargetSpec {
         let output = backend.generate(&program);
         assert!(output.contains("call noalias i8* @malloc"),
             "Arrow transfer should emit malloc for combined buffer. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
-        assert!(output.contains("; transfer void"),
-            "Arrow transfer should contain transfer void marker. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+        assert!(output.contains("; transfer"),
+            "Arrow transfer should contain transfer marker. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }

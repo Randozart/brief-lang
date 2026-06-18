@@ -440,6 +440,28 @@ char* brief_read_file(const char* path) {
     return data;
 }
 
+// Forward declaration for brief_str_to_c (defined in section 7)
+char* brief_str_to_c(int64_t bstr);
+
+/* Write data (Brief string) to path (Brief string). Returns 1 (true) on success, 0 (false) on failure. */
+int64_t brief_write_file(int64_t path_bstr, int64_t data_bstr) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return 0;
+    
+    int64_t* dh = (int64_t*)data_bstr;
+    if (!dh) { free(c_path); return 0; }
+    int64_t data_len = dh[1];
+    char* data = (char*)(dh + 2);
+    
+    FILE* fp = fopen(c_path, "w");
+    free(c_path);
+    if (!fp) return 0;
+    
+    fwrite(data, 1, (size_t)data_len, fp);
+    fclose(fp);
+    return 1;
+}
+
 /* ===================================================================
  * 6. Wrapper symbols — bridge frgn names to runtime implementations
  *
@@ -459,7 +481,7 @@ char* brief_read_file(const char* path) {
 #include <sys/wait.h>
 
 /* ── Helpers (forward declarations from section 7) ─────────────────── */
-static char*   brief_str_to_c(int64_t bstr);
+char*   brief_str_to_c(int64_t bstr);
 static int64_t cstr_to_brief(const char* s);
 static int64_t buf_to_brief(const char* buf, int64_t len);
 
@@ -1216,7 +1238,7 @@ int64_t substring(const char* s) {
  * =================================================================== */
 
 /* Convert a Brief string pointer to a null-terminated C string. Caller frees. */
-static char* brief_str_to_c(int64_t bstr) {
+char* brief_str_to_c(int64_t bstr) {
     int64_t* h = (int64_t*)bstr;
     if (!h) return NULL;
     int64_t len = h[1];
