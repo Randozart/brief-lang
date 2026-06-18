@@ -332,9 +332,9 @@ impl LlvmBackend {
                     return TypedRegister { name: v, ty: Type::Int };
                 }
                 // Clone foreign info upfront to avoid borrow conflict with emit_expr
-                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType, bool, Option<crate::ast::Expr>)> =
-                    self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone(), s.is_pipe, s.fallback.clone()));
-                if let Some((inputs, ret_type, is_pipe, fallback)) = frgn_sig {
+                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType, bool, Option<crate::ast::Expr>, Vec<(String, Type)>)> =
+                    self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone(), s.is_pipe, s.fallback.clone(), s.success_output.clone()));
+                if let Some((inputs, ret_type, is_pipe, fallback, success_output)) = frgn_sig {
                     let mut marshaled: Vec<String> = Vec::new();
                     for (i, (_, arg_ty)) in inputs.iter().enumerate() {
                         if i < args.len() {
@@ -377,19 +377,59 @@ impl LlvmBackend {
                     let call_result = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = call {} @{}({})", indent, call_result, call_ret, name, args_str).ok();
 
-                    // Pipe-syntax frgn: currently emits raw call result (no sentinel check).
-                    // TODO: Full sentinel-based error detection + Result enum construction.
-                    // The interpreter handles pipe frgns correctly with Ok/Err wrapping.
+                    // Pipe-syntax frgn: emit sentinel checks using select (branchless).
+                    // String/Data: null pointer → use fallback
+                    // Float: NaN/Inf → use fallback
+                    // Int/UInt/Bool/Char: always valid (no sentinel needed)
                     if is_pipe {
-                        if is_float_ret {
-                            let bi = format!("%fbi{}", self.txn_counter); self.txn_counter += 1;
-                            let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, call_result).ok();
-                            writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
-                            self.reg_float_cache.insert(ze.clone(), call_result.clone());
-                            return TypedRegister { name: ze, ty: Type::Float };
+                        let success_ty = success_output.first()
+                            .map(|(_, t)| t)
+                            .cloned()
+                            .unwrap_or(Type::Void);
+                        let fallback_reg = fallback.as_ref().map(|e| self.emit_expr(out, e, indent));
+
+                        match (&success_ty, is_float_ret) {
+                            (Type::String | Type::Data, _) => {
+                                // Null pointer check for i8* returns
+                                let is_null = format!("%pipe_null{}", self.txn_counter); self.txn_counter += 1;
+                                // call_result is i64 (boxed ptr). Convert to i8* for null check.
+                                let ptr = format!("%pipe_ptr{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ptr, call_result).ok();
+                                writeln!(out, "{}{} = icmp eq i8* {}, null", indent, is_null, ptr).ok();
+                                let select_reg = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                                let fbr = fallback_reg.as_ref().map(|r| r.name.as_str()).unwrap_or("null");
+                                writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}",
+                                    indent, select_reg, is_null, fbr, call_result).ok();
+                                return TypedRegister { name: select_reg, ty: Type::Int };
+                            }
+                            (Type::Float, _) => {
+                                // NaN check for float returns
+                                let is_nan = format!("%pipe_nan{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = fcmp uno float {}, {}", indent, is_nan, call_result, call_result).ok();
+                                let select_reg = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                                let fbr = fallback_reg.as_ref().map(|r| r.name.as_str()).unwrap_or("0.0");
+                                writeln!(out, "{}{} = select i1 {}, float {}, float {}",
+                                    indent, select_reg, is_nan, fbr, call_result).ok();
+                                let bi = format!("%fbi{}", self.txn_counter); self.txn_counter += 1;
+                                let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, select_reg).ok();
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                                self.reg_float_cache.insert(ze.clone(), select_reg.clone());
+                                return TypedRegister { name: ze, ty: Type::Float };
+                            }
+                            _ => {
+                                // Int/UInt/Bool/Char: always valid, just pass through
+                                if is_float_ret {
+                                    let bi = format!("%fbi{}", self.txn_counter); self.txn_counter += 1;
+                                    let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, call_result).ok();
+                                    writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                                    self.reg_float_cache.insert(ze.clone(), call_result.clone());
+                                    return TypedRegister { name: ze, ty: Type::Float };
+                                }
+                                return TypedRegister { name: call_result, ty: Type::Int };
+                            }
                         }
-                        return TypedRegister { name: call_result, ty: Type::Int };
                     }
 
                     if is_float_ret {

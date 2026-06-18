@@ -991,6 +991,19 @@ impl TypeChecker {
         // Pipe syntax frgns skip TOML binding validation entirely.
         // The fallback expression provides the error value directly.
         if signature.is_pipe {
+            // Validate the fallback expression is compile-time evaluable
+            if let Some(ref fallback) = signature.fallback {
+                if !Self::is_compile_time_expr(fallback) {
+                    self.errors.borrow_mut().push(TypeError::FFIError {
+                        message: format!(
+                            "Fallback expression in frgn '{}' must be compile-time evaluable \
+                             (literals, constructor calls with literal args). Found non-evaluable \
+                             expression: {:?}",
+                            name, fallback
+                        ),
+                    });
+                }
+            }
             return;
         }
 
@@ -1096,6 +1109,28 @@ impl TypeChecker {
             self.errors.borrow_mut().push(TypeError::FFIError {
                 message: format!("Binding validation failed for '{}': {}", name, err),
             });
+        }
+    }
+
+    /// Check if an expression is compile-time evaluable (no variable references,
+    /// no runtime state, no function calls to user-defined functions).
+    /// Used to validate pipe frgn fallback expressions.
+    fn is_compile_time_expr(expr: &Expr) -> bool {
+        match expr {
+            // Literals: always compile-time
+            Expr::Integer(_) | Expr::Float(_) | Expr::String(_)
+            | Expr::Bool(_) | Expr::Char(_) | Expr::Term
+            | Expr::RegexLiteral(_) => true,
+            // Constructor calls: allowed if all args are compile-time
+            Expr::Call(_, args) => args.iter().all(|a| Self::is_compile_time_expr(a)),
+            // Tuples of compile-time items
+            Expr::Tuple(items) => items.iter().all(|i| Self::is_compile_time_expr(i)),
+            // List literal of compile-time items
+            Expr::ListLiteral(items) => items.iter().all(|i| Self::is_compile_time_expr(i)),
+            // Disallow variable/function references and runtime state
+            Expr::Identifier(_) | Expr::OwnedRef(_) | Expr::PriorState(_) => false,
+            // Everything else (operators, blocks, etc.) is rejected for safety
+            _ => false,
         }
     }
 

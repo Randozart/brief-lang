@@ -7505,6 +7505,80 @@ mod tests {
         // Fuel exhausted — handler sets x = 999
         assert_eq!(i.state.get("x"), Some(&Value::Int(999)));
     }
+
+    fn mock_pipe_fn_int_42(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+        Ok(Value::Int(42))
+    }
+
+    fn mock_pipe_fn_float_nan(_args: Vec<Value>) -> Result<Value, RuntimeError> {
+        Ok(Value::Float(f64::NAN))
+    }
+
+    #[test]
+    fn test_pipe_frgn_integration_through_call_dispatch() {
+        let mut i = Interpreter::new();
+        // Register a pipe frgn with a mock function that returns an int
+        let sig = ForeignSignature {
+            name: "integration_pipe".into(),
+            location: "mock:integration_pipe".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Int)],
+            result_type: ResultType::Projection(vec![Type::Int]),
+            error_type_name: "".into(), error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::Integer(-1)),
+            span: None,
+        };
+        i.ffi_bindings.insert("integration_pipe".into(), sig.clone());
+        i.ffi_name_to_location.insert("integration_pipe".into(), "mock:integration_pipe".into());
+        i.foreign_functions.insert("mock:integration_pipe".into(), mock_pipe_fn_int_42);
+
+        let expr = Expr::Call("integration_pipe".into(), vec![]);
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::Enum(e, v, fields) if e == "Result" && v == "Ok" => {
+                assert_eq!(fields.get("value"), Some(&Value::Int(42)));
+            }
+            other => panic!("Expected Ok(42) from integration dispatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_pipe_frgn_integration_nan_float() {
+        let mut i = Interpreter::new();
+        let sig = ForeignSignature {
+            name: "integration_pipe_nan".into(),
+            location: "mock:integration_pipe_nan".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Float)],
+            result_type: ResultType::Projection(vec![Type::Float]),
+            error_type_name: "".into(), error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::Float(0.0)),
+            span: None,
+        };
+        i.ffi_bindings.insert("integration_pipe_nan".into(), sig.clone());
+        i.ffi_name_to_location.insert("integration_pipe_nan".into(), "mock:integration_pipe_nan".into());
+        i.foreign_functions.insert("mock:integration_pipe_nan".into(), mock_pipe_fn_float_nan);
+
+        let expr = Expr::Call("integration_pipe_nan".into(), vec![]);
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::Enum(e, v, fields) if e == "Result" && v == "Err" => {
+                match fields.get("value") {
+                    Some(Value::Float(f)) => assert_eq!(*f, 0.0),
+                    other => panic!("Expected fallback Float(0.0), got {:?}", other),
+                }
+            }
+            other => panic!("Expected Err(0.0) from NaN dispatch, got {:?}", other),
+        }
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
@@ -9320,4 +9394,5 @@ mod kani_full_tests {
             other => panic!("Expected Ok(\"hello\"), got {:?}", other),
         }
     }
+
 }

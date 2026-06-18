@@ -3423,6 +3423,8 @@ fn run_rbv(
 
     println!("  Resolved imports");
 
+    program.synthesize_init_txn();
+
     let mut desug = desugarer::Desugarer::new();
     let mut program = desug.desugar(&program);
 
