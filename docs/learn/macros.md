@@ -170,16 +170,6 @@ Macros can emit template calls (they're re-expanded in a second Phase 1a pass). 
 
 ## 6. Common Patterns
 
-### Conditional compilation
-
-```brief
-macro if_target(name: String, body: Block) -> Block {
-    let current_target: String = sys#("uname -s");
-    [current_target == @name] { return @body; };
-    return quote { /* no-op */ };
-};
-```
-
 ### Lookup table generation
 
 ```brief
@@ -187,8 +177,8 @@ macro sine_lut(n: Int) -> Block {
     let code: String = "state sine_table: Array<Float> = [";
     let i: Int = 0;
     [i < @n] {
-        let val: Float = math#.sin(2.0 * 3.14159 * i / @n);
-        code = code ++ float_to_str(val) ++ ", ";
+        let val: Float = sin#(2.0 * 3.14159 * i / @n);
+        code = code ++ float_to_str#(val) ++ ", ";
         &i = i + 1;
     };
     code = code ++ "];";

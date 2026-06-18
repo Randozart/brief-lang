@@ -56,6 +56,11 @@ compile#("state @{name}_head: Int = 0;")
 | `error#(msg)` | `error#("bad arg")` | Emit compiler error |
 | `warn#(msg)` | `warn#("deprecated")` | Emit compiler warning |
 | `gensym#()` | `gensym#()` | Generate unique identifier |
+| `sin#(f)` | `sin#(Float) -> Float` | Trigonometric sine |
+| `cos#(f)` | `cos#(Float) -> Float` | Trigonometric cosine |
+| `pow#(b, e)` | `pow#(Float, Float) -> Float` | Float exponentiation |
+| `float_to_str#(f)` | `float_to_str#(Float) -> String` | Format float to string |
+| `to_str#(v)` | `to_str#(Int|Float|Char|Bool) -> String` | Generic value to string |
 
 ## Phase Architecture
 
