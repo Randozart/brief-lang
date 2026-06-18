@@ -32,8 +32,16 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @time(i64*) nounwind").ok();
         writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(i8*) nounwind").ok();
-        writeln!(out, "declare ptr @brief_read_file(ptr)").ok();
+        writeln!(out, "declare i64 @brief_read_file(i64)").ok();
         writeln!(out, "declare i64 @brief_write_file(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_readln()").ok();
+        writeln!(out, "declare i64 @brief_sort_list(i64)").ok();
+        writeln!(out, "declare i64 @brief_reverse_list(i64)").ok();
+        writeln!(out, "declare i64 @brief_range(i64)").ok();
+        writeln!(out, "declare i64 @brief_stack_top(i64)").ok();
+        writeln!(out, "declare i64 @brief_queue_front(i64)").ok();
+        writeln!(out, "declare i64 @brief_hashmap_get(i64, i64)").ok();
+        writeln!(out, "declare i64 @brief_hashset_elements(i64)").ok();
         writeln!(out, "declare void @__exit()").ok();
         // Remaining brief_* shims (not yet migrated to direct libc)
         writeln!(out, "declare i64 @brief_tty_raw_mode(i64)").ok();

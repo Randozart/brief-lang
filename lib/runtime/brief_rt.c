@@ -399,45 +399,52 @@ void brief_thread_pool_shutdown(void) {
 #endif
 }
 
+// Forward declaration for brief_str_to_c (defined in section 7)
+char* brief_str_to_c(int64_t bstr);
+
 /* ===================================================================
  * 5. Brief String I/O — read_file intrinsic
  *
- * The LLVM backend marshals String as i8*, so both path and return
- * value are C strings (null-terminated char*). The interpreter uses
- * Rust std::fs::read_to_string and never calls this function.
+ * Takes a Brief string (i64 = ptrtoint of [data_ptr, len, chars...])
+ * and returns a new Brief string (i64 = ptrtoint) on success, or 0 on
+ * failure. The interpreter uses Rust std::fs::read_to_string and never
+ * calls this function.
+ *
+ * Brief string layout (tightly packed):
+ *   [data_ptr(i64), len(i64), char_bytes(len bytes)]
  * =================================================================== */
 
-char* brief_read_file(const char* path) {
-    if (!path) return NULL;
+int64_t brief_read_file(int64_t path_bstr) {
+    char* c_path = brief_str_to_c(path_bstr);
+    if (!c_path) return 0;
 
-    FILE* fp = fopen(path, "rb");
-    if (!fp) return NULL;
+    FILE* fp = fopen(c_path, "rb");
+    free(c_path);
+    if (!fp) return 0;
 
     fseek(fp, 0, SEEK_END);
     long file_size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
-    if (file_size <= 0) {
-        fclose(fp);
-        return NULL;
-    }
+    if (file_size <= 0) { fclose(fp); return 0; }
 
     char* data = malloc((size_t)file_size + 1);
-    if (!data) {
-        fclose(fp);
-        return NULL;
-    }
+    if (!data) { fclose(fp); return 0; }
 
     size_t bytes_read = fread(data, 1, (size_t)file_size, fp);
     fclose(fp);
 
-    if (bytes_read == 0) {
-        free(data);
-        return NULL;
-    }
-
+    if (bytes_read == 0) { free(data); return 0; }
     data[bytes_read] = '\0';
-    return data;
+
+    // Tightly packed Brief string: 16 byte header + tight bytes
+    int64_t* h = malloc(((size_t)bytes_read + 2) * sizeof(int64_t));
+    if (!h) { free(data); return 0; }
+    h[0] = (int64_t)((char*)h + 16);
+    h[1] = (int64_t)bytes_read;
+    memcpy((char*)h + 16, data, bytes_read);
+    free(data);
+    return (int64_t)h;
 }
 
 // Forward declaration for brief_str_to_c (defined in section 7)
@@ -552,6 +559,94 @@ int64_t brief_tty_read_key(void) {
     ssize_t n = read(STDIN_FILENO, &ch, 1);
     if (n > 0) return (int64_t)ch;
     return -1;
+}
+
+/* ── Data/IO intrinsics (readln, sort, reverse, range) ───────────── */
+
+static int brief_sort_cmp(const void* a, const void* b) {
+    int64_t va = *(const int64_t*)a;
+    int64_t vb = *(const int64_t*)b;
+    if (va < vb) return -1;
+    if (va > vb) return 1;
+    return 0;
+}
+
+int64_t brief_readln(void) {
+    char buf[65536];
+    if (!fgets(buf, sizeof(buf), stdin)) return 0;
+    size_t len = strlen(buf);
+    while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = '\0';
+    return buf_to_brief(buf, (int64_t)len);
+}
+
+int64_t brief_sort_list(int64_t list_bstr) {
+    int64_t* h = (int64_t*)list_bstr;
+    if (!h) return 0;
+    int64_t len = h[1];
+    if (len <= 1) return list_bstr;
+    qsort(h + 2, (size_t)len, sizeof(int64_t), brief_sort_cmp);
+    return list_bstr;
+}
+
+int64_t brief_reverse_list(int64_t list_bstr) {
+    int64_t* h = (int64_t*)list_bstr;
+    if (!h) return 0;
+    int64_t len = h[1];
+    if (len <= 1) return list_bstr;
+    int64_t* elems = h + 2;
+    for (int64_t i = 0, j = len - 1; i < j; i++, j--) {
+        int64_t tmp = elems[i];
+        elems[i] = elems[j];
+        elems[j] = tmp;
+    }
+    return list_bstr;
+}
+
+int64_t brief_range(int64_t end) {
+    if (end <= 0) return 0;
+    int64_t* h = malloc(((size_t)end + 2) * sizeof(int64_t));
+    if (!h) return 0;
+    h[0] = (int64_t)(h + 2);
+    h[1] = end;
+    for (int64_t i = 0; i < end; i++) {
+        h[i + 2] = i;
+    }
+    return (int64_t)h;
+}
+
+/* ── Collection projection helpers (Top, Front, Get, Elements) ─────
+ * Returns packed Option: Some(val<<8) on found, 1 (None) on empty.
+ * Option representation: (payload << 8) | disc, disc=0 for Some, disc=1 for None.
+ * ================================================================== */
+
+int64_t brief_stack_top(int64_t list_bstr) {
+    int64_t* h = (int64_t*)list_bstr;
+    if (!h || h[1] <= 0) return 1;
+    int64_t val = h[2 + h[1] - 1];
+    return val << 8;
+}
+
+int64_t brief_queue_front(int64_t list_bstr) {
+    int64_t* h = (int64_t*)list_bstr;
+    if (!h || h[1] <= 0) return 1;
+    return h[2] << 8;
+}
+
+int64_t brief_hashmap_get(int64_t map_bstr, int64_t key_val) {
+    int64_t* h = (int64_t*)map_bstr;
+    if (!h || h[1] <= 0) return 1;
+    int64_t len = h[1];
+    int64_t* slots = h + 2;
+    for (int64_t i = 0; i < len; i++) {
+        if (slots[i * 2] == key_val) {
+            return slots[i * 2 + 1] << 8;
+        }
+    }
+    return 1;
+}
+
+int64_t brief_hashset_elements(int64_t set_bstr) {
+    return set_bstr;
 }
 
 int64_t brief_ioctl(int64_t fd, int64_t request, int64_t arg) {
@@ -1228,11 +1323,12 @@ int64_t substring(const char* s) {
 /* ===================================================================
  * 7. Brief String Helpers — convert between Brief string format and C
  *
- * Brief string format:
- *   int64_t header[2 + len]
- *   header[0] = data pointer (address of header[2])
- *   header[1] = length (int64_t)
- *   header[2..2+len] = character data (one int64_t per char)
+ * Brief string format (tightly packed):
+ *   [data_ptr(i64), len(i64), char_bytes(len bytes)]
+ *
+ * header[0] = data pointer (ptrtoint of char_bytes start = header + 16 bytes)
+ * header[1] = length (int64_t, number of chars = bytes)
+ * header[16..16+len] = character data (tightly packed bytes, one per char)
  *
  * An int64_t parameter is ptrtoint(header) — a pointer to header[0].
  * =================================================================== */
@@ -1245,9 +1341,8 @@ char* brief_str_to_c(int64_t bstr) {
     if (len <= 0) return NULL;
     char* s = malloc((size_t)len + 1);
     if (!s) return NULL;
-    for (int64_t i = 0; i < len; i++) {
-        s[i] = (char)(h[i + 2] & 0xFF);
-    }
+    const char* chars = (const char*)h + 16;
+    memcpy(s, chars, (size_t)len);
     s[len] = '\0';
     return s;
 }
@@ -1260,11 +1355,9 @@ static int64_t cstr_to_brief(const char* s) {
     if (len == 0) return 0;
     int64_t* h = malloc((len + 2) * sizeof(int64_t));
     if (!h) return 0;
-    h[0] = (int64_t)(h + 2);
+    h[0] = (int64_t)((char*)h + 16);
     h[1] = (int64_t)len;
-    for (size_t i = 0; i < len; i++) {
-        h[i + 2] = (int64_t)((unsigned char)s[i]);
-    }
+    memcpy((char*)h + 16, s, len);
     return (int64_t)h;
 }
 
@@ -1273,13 +1366,13 @@ static int64_t buf_to_brief(const char* buf, int64_t len) {
     if (!buf || len <= 0) return 0;
     int64_t* h = malloc(((size_t)len + 2) * sizeof(int64_t));
     if (!h) return 0;
-    h[0] = (int64_t)(h + 2);
+    h[0] = (int64_t)((char*)h + 16);
     h[1] = len;
-    for (int64_t i = 0; i < len; i++) {
-        h[i + 2] = (int64_t)((unsigned char)buf[i]);
-    }
+    memcpy((char*)h + 16, buf, (size_t)len);
     return (int64_t)h;
 }
+
+/* Constructor wrapper — ensures init runs even without the generated main() */
 
 /* Constructor wrapper — ensures init runs even without the generated main() */
 __attribute__((constructor))

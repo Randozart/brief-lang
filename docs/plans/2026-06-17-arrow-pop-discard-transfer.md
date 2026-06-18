@@ -54,7 +54,15 @@ For `&dest <- &source` (or `&dest <- &source; filter`):
 3. Store both updated headers back
 4. Return Void
 
+**Status**: Deferred — not used by officina-cli.
+
+## Results
+- ArrowPush (List<T>): ✅ Implemented
+- ArrowPop (List<T>): ✅ Implemented
+- ArrowDiscard: ⏳ Stub (not used by officina)
+- ArrowTransfer: ⏳ Stub (not used by officina)
+
 ## Verification
 1. `cargo test --lib` — all tests pass
 2. Officina compiles with `#!exit`
-3. Generated IR shows proper arrow pop/discard/transfer code
+3. Generated IR shows proper arrow pop code
