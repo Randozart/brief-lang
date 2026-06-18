@@ -821,6 +821,15 @@ fn run_check(
     let mut desug = desugarer::Desugarer::new();
     let mut program = desug.desugar(&program);
 
+    // Phase 1a/1b: Template and macro expansion
+    if verbose {
+        println!("[MacroExpander] Expanding templates and macros...");
+    }
+    {
+        let mut macro_ctx = brief_compiler::features::macros::context::MacroContext::new();
+        let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
+    }
+
     if verbose {
         println!("[TypeChecker] Running type checks...");
     }
@@ -2273,6 +2282,12 @@ fn run_llvm_compile(
 
     let mut desug = desugarer::Desugarer::new();
     let mut program = desug.desugar(&program);
+
+    // Phase 1a/1b: Template and macro expansion
+    {
+        let mut macro_ctx = brief_compiler::features::macros::context::MacroContext::new();
+        let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
+    }
 
     let link_deps: Vec<crate::ast::LinkDependency> = {
         let mut seen = std::collections::HashSet::new();
