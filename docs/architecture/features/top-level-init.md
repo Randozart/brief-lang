@@ -1,6 +1,7 @@
 # Top-Level `__init` — Scripting with Atomic Boot Safety
 
 **Date added:** 2026-06-11
+**Last updated:** 2026-06-18
 **Status:** Implementation complete
 
 ## Purpose
@@ -85,11 +86,30 @@ The `synthesize_init_txn()` call is added in `run_llvm_compile()` and
 processes the synthesized `__init` transaction through the normal
 `emit_direct_ssa_main()` path.
 
-### Interpreter
+### RBV (Rendered Brief) Backend
 
-Not yet wired for top-level `Statement` dispatch (the interpreter handles
-program items in its own run loop — `TopLevel::Statement` dispatch must be
-added alongside the async/reactor work).
+`synthesize_init_txn()` is also called in `run_rbv()` in `main.rs`, so
+top-level statements work in `.rbv`/`.srbv` files as well.
+
+### Optimizer Treatment
+
+The synthesized `__init` transaction is treated like any other `rct txn` by
+the optimizer. Key details:
+
+- The `!__booted_N` precondition and `&__booted_N = 1` body do **not** match
+  the counter-loop patterns (`Lt`/`Le` precondition + `n + 1` increment) that
+  trigger chain-based folding or pure-counter precomputation. This is correct:
+  a one-shot init is not an iterative loop.
+- **Normal precomputation still applies**: if the script body is pure (no FFI
+  calls), all inputs are compile-time known, and the complexity is within
+  `--optimize-budget`, the compiler may fully precompute it — just as it would
+  for any other transaction. This is correct behavior.
+- **FFI calls prevent precomputation**: most scripts contain observable side
+  effects (`__print_int`, file I/O, etc.). The region analyzer detects FFI
+  calls and correctly emits a runtime loop. See [benchmark-strategy.md](../benchmark-strategy.md)
+  for the observability-as-liveness philosophy.
+- The `__init` transaction passes through all standard optimization passes:
+  dead-field elimination, SROA, SLP vectorization, equality saturation, etc.
 
 ## Key Files
 
@@ -97,8 +117,4 @@ added alongside the async/reactor work).
 |------|---------------|
 | `src/ast.rs` | `TopLevel::Statement(Box<Statement>)`, `Program::synthesize_init_txn()`, collision-avoiding `find_unique_booted_name()` |
 | `src/parser.rs` | Top-level statement parsing, `seen_top_level_stmt` flag, declaration-before-statement enforcement |
-| `src/main.rs` | `program.synthesize_init_txn()` call after import resolution (in `run_llvm_compile`, `run_check`) |
-
-## Remaining Work
-
-- Interpreter dispatch for `TopLevel::Statement` (see async/reactor/triggers plan)
+| `src/main.rs` | `program.synthesize_init_txn()` call after import resolution (in `run_llvm_compile`, `run_check`, `run_rbv`) |

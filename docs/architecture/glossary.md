@@ -1,4 +1,4 @@
-<!-- 2026-06-12 -->
+<!-- 2026-06-18 -->
 
 # Brief Compiler Glossary
 
@@ -16,7 +16,7 @@
 | **ReactorTick** | Codegen strategy that emits a `@reactor_tick` function for programs with async triggers or MMIO. |
 | **compute_peak_live_floats** | Liveness-interval analysis for SLP hazard. Counts float temps whose def/last-use intervals overlap, not all float temps. |
 | **loop_exit_label** | `Option<String>` on `LlvmBackend` (set to `"done"` in direct SSA loops). `term!` inside reactive loops emits `br %label` instead of `ret`, enabling LLVM loop unrolling. |
-| **synthesize_init_txn** | `Program` method that collects all `TopLevel::Statement` items and wraps them in a synthesized `rct txn __init`. |
+| **synthesize_init_txn** | `Program` method that collects all `TopLevel::Statement` items (top-level executable statements) and wraps them in a synthesized `rct txn __init [!__booted_N][__booted_N]` that fires once at startup. Called after import resolution in `run_llvm_compile`, `run_check`, and `run_rbv`. The `!__booted_N` / `&booted = 1` pattern avoids counter-loop folding paths (correct for a one-shot init). Subject to normal precomputation: pure const scripts may be precomputed; FFI calls emit a runtime loop. |
 | **decompose_atomic_to_chars** | Converts Int/Float/Bool/Char to `Vec<char>` of their visual representation for Universal Bracket operations. |
 | **reconstruct_from_chars** | Parses filtered `Vec<char>` back to the original atomic type. |
 | **eval_mask_condition** | Evaluates a `BracketOp::Mask` expression against an item. Handles `Value::Bool`, `Value::Regex`, and `Value::String`. |

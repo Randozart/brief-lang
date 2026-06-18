@@ -59,7 +59,46 @@ txn increment [counter < 100][counter == @counter + 1] {
 - `@counter` = counter's value at transaction start
 - `counter` = counter's current value
 
-## 4. Calling Transactions
+## 4. Scripting Mode (Top-Level Statements)
+
+Instead of wrapping every program in a `txn`, you can write statements directly at
+global scope. The compiler automatically wraps them in a synthesized
+`rct txn __init` that fires once on start:
+
+```brief
+let message: String = "Hello, Brief!";
+println(message);       // scripting — no txn wrapper needed
+```
+
+This is equivalent to:
+
+```brief
+let message: String = "Hello, Brief!";
+rct txn __init [!__booted][__booted] {
+    println(message);
+    &__booted = 1;
+    term;
+};
+```
+
+**Rules:**
+- All declarations (`let`, `const`, `struct`, `enum`, `defn`, `txn`) must come
+  **before** any executable statements
+- Once a top-level statement appears, no more declarations are allowed
+- Statements execute in order, exactly once, then the program exits
+- `escape` inside a top-level statement atomically rolls back all changes
+
+**Optimization behavior:** Scripting code goes through the same optimizer as
+any other transaction. If a script is pure (no FFI calls like `println`) with
+all-const inputs, the compiler may fully precompute it. Scripts with FFI calls
+always emit runtime code.
+
+**When to use scripting vs explicit transactions:**
+- **Scripting**: quick scripts, one-shot initialization, simple programs
+- **Explicit `txn`/`rct txn`**: programs with loops, state machines, reactive chains,
+  or multiple independent operations that need their own contracts
+
+## 5. Calling Transactions
 
 Transactions can be called explicitly:
 
@@ -86,7 +125,7 @@ rct txn auto_increment [counter < 10][counter == @counter + 1] {
 
 We'll cover reactive transactions in detail in [03-reactive.md](03-reactive.md).
 
-## 5. Guards (Conditional Execution)
+## 6. Guards (Conditional Execution)
 
 Instead of `if/else`, Brief uses guards:
 
@@ -116,7 +155,7 @@ txn process [x > 0 || x <= 0][result >= 0] {
 - No nesting required
 - Postconditions must be satisfied on ALL paths
 
-## 6. Escape (Rollback)
+## 7. Escape (Rollback)
 
 Use `escape` to rollback a transaction:
 
@@ -130,7 +169,7 @@ txn validate(x: Int) [x >= 0][state == @state] {
 };
 ```
 
-## 7. Complete Example
+## 8. Complete Example
 
 ```brief
 // counter.bv

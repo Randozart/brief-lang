@@ -1,4 +1,4 @@
-<!-- 2026-06-12 -->
+<!-- 2026-06-18 -->
 
 # Channel Map — Data Flow Between Compiler Passes
 
@@ -26,8 +26,12 @@ Import Resolver ──► Program (resolved paths, validated imports, synthesize
   │                 Filters sed items from exported symbols via filter_items()
   │                 Cache: HashMap<String, (Program, Vec<String>)>
   │
-  ├──► Program::synthesize_init_txn() — wraps TopLevel::Statement in __init txn
-  │     (called in run_llvm_compile and run_check after import resolution)
+   ├──► Program::synthesize_init_txn() — wraps TopLevel::Statement in __init txn
+   │     (called in run_llvm_compile, run_check, and run_rbv after import resolution)
+   │      The __init txn is treated like any other rct txn by the optimizer.
+   │      The !__booted_N + &booted=1 pattern avoids counter-loop folding
+   │      (correct — it's a one-shot, not an iterative loop). Normal
+   │      precomputation still applies; FFI calls prevent it.
   ▼
 Desugarer ────────► Program (sugar constructs lowered to core AST)
   │                 @"..." → Expr::RegexLiteral

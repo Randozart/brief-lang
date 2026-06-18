@@ -98,8 +98,11 @@ sentinel checking or Result enum construction. Full implementation requires:
 | `test_parse_frgn_pipe_does_not_break_result` | `parser.rs` | `Result<T,E>` still works |
 | `test_frgn_pipe_registers_signature` | `typechecker.rs` | Pipe sig stored/retrieved |
 | `test_frgn_pipe_skips_toml_validation` | `typechecker.rs` | No error for pipe without TOML |
+| `test_is_compile_time_expr_*` (9 tests) | `typechecker.rs` | Compile-time expr validation (literals, constructors, identifiers rejected) |
 | `test_is_valid_ffi_return_*` (6 tests) | `interpreter.rs` | Per-type sentinel validation |
 | `test_call_pipe_frgn_*` (4 tests) | `interpreter.rs` | Ok/Err wrapping for valid/invalid |
+| `test_pipe_frgn_integration_*` (2 tests) | `interpreter.rs` | Full dispatch through `Expr::Call` with mock FFI |
+| `test_llvm_pipe_frgn_*` (4 tests) | `backend/llvm/tests.rs` | LLVM IR: declare, null check, NaN check, no-sentinel for Int |
 
 ## Future Work
 

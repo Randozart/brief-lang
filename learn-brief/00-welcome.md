@@ -61,17 +61,22 @@ Create `hello.bv`:
 ```brief
 let message: String = "Hello, Brief!";
 
-txn main() [true][true] {
-    println(message);
-    term;
-};
+println(message);     // scripting — no transaction wrapper needed
 ```
+
+Brief lets you write statements directly at global scope. The compiler
+automatically wraps them in a synthesized `rct txn __init` that fires
+once on start. No boilerplate needed.
 
 Run it:
 
 ```bash
-brief run hello.bv
+brief check hello.bv
 ```
+
+For more complex programs, you can still write explicit transactions
+(see [01-basics.md](01-basics.md)). Scripting mode is syntactic sugar
+for simple programs — all the same safety guarantees apply.
 
 ### Learning Path
 
@@ -97,5 +102,5 @@ Start with [01-basics.md](01-basics.md) to learn the fundamentals!
 
 ---
 
-*Last updated: 2026-06-08*  
+*Last updated: 2026-06-18*  
 *Version: Brief v0.16.0*

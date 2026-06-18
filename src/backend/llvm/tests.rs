@@ -4204,3 +4204,233 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("; transfer"),
             "Arrow transfer should contain transfer marker. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }
+
+    #[test]
+    fn test_llvm_pipe_frgn_declares_function() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::ForeignBinding {
+                    name: "get_value".to_string(),
+                    toml_path: String::new(),
+                    target: ForeignTarget::Native,
+                    signature: ForeignSignature {
+                        name: "get_value".to_string(),
+                        location: String::new(),
+                        wasm_impl: None, wasm_setup: None,
+                        inputs: vec![],
+                        success_output: vec![("result".into(), Type::String)],
+                        result_type: ResultType::Projection(vec![Type::String]),
+                        error_type_name: String::new(), error_fields: vec![],
+                        input_layout: None, output_layout: None,
+                        precondition: None, postcondition: None,
+                        buffer_mode: None, ffi_kind: None, is_out: false,
+                        is_pipe: true,
+                        fallback: Some(Expr::String("default".to_string())),
+                        span: None,
+                    },
+                    span: None,
+                },
+                TopLevel::Definition(Definition {
+                    name: "main".to_string(),
+                    type_params: vec![],
+                    parameters: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                    output_names: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::Call("get_value".into(), vec![])),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_lambda: false,
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Should declare the frgn function
+        assert!(output.contains("declare i64 @get_value()"),
+            "Pipe frgn should declare get_value. Got:\n{}", &output[..std::cmp::min(2000, output.len())]);
+    }
+
+    #[test]
+    fn test_llvm_pipe_frgn_string_sentinel_check() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::ForeignBinding {
+                    name: "get_str".to_string(),
+                    toml_path: String::new(),
+                    target: ForeignTarget::Native,
+                    signature: ForeignSignature {
+                        name: "get_str".to_string(),
+                        location: String::new(),
+                        wasm_impl: None, wasm_setup: None,
+                        inputs: vec![],
+                        success_output: vec![("result".into(), Type::String)],
+                        result_type: ResultType::Projection(vec![Type::String]),
+                        error_type_name: String::new(), error_fields: vec![],
+                        input_layout: None, output_layout: None,
+                        precondition: None, postcondition: None,
+                        buffer_mode: None, ffi_kind: None, is_out: false,
+                        is_pipe: true,
+                        fallback: Some(Expr::String("fallback".to_string())),
+                        span: None,
+                    },
+                    span: None,
+                },
+                TopLevel::Definition(Definition {
+                    name: "main".to_string(),
+                    type_params: vec![],
+                    parameters: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                    output_names: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::Call("get_str".into(), vec![])),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_lambda: false,
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // The pipe frgn for String should have a null-pointer check
+        assert!(output.contains("icmp eq i8*"),
+            "Pipe frgn should emit null pointer check. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+        // Should use select with the fallback
+        assert!(output.contains("select i1"),
+            "Pipe frgn should use select for branchless fallback. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+    }
+
+    #[test]
+    fn test_llvm_pipe_frgn_float_sentinel_check() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::ForeignBinding {
+                    name: "get_float".to_string(),
+                    toml_path: String::new(),
+                    target: ForeignTarget::Native,
+                    signature: ForeignSignature {
+                        name: "get_float".to_string(),
+                        location: String::new(),
+                        wasm_impl: None, wasm_setup: None,
+                        inputs: vec![],
+                        success_output: vec![("result".into(), Type::Float)],
+                        result_type: ResultType::Projection(vec![Type::Float]),
+                        error_type_name: String::new(), error_fields: vec![],
+                        input_layout: None, output_layout: None,
+                        precondition: None, postcondition: None,
+                        buffer_mode: None, ffi_kind: None, is_out: false,
+                        is_pipe: true,
+                        fallback: Some(Expr::Float(0.0)),
+                        span: None,
+                    },
+                    span: None,
+                },
+                TopLevel::Definition(Definition {
+                    name: "main".to_string(),
+                    type_params: vec![],
+                    parameters: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                    output_names: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::Call("get_float".into(), vec![])),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_lambda: false,
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // The pipe frgn for Float should have a NaN check
+        assert!(output.contains("fcmp uno"),
+            "Pipe frgn should emit NaN check for float. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+    }
+
+    #[test]
+    fn test_llvm_pipe_frgn_int_no_sentinel() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::ForeignBinding {
+                    name: "get_int".to_string(),
+                    toml_path: String::new(),
+                    target: ForeignTarget::Native,
+                    signature: ForeignSignature {
+                        name: "get_int".to_string(),
+                        location: String::new(),
+                        wasm_impl: None, wasm_setup: None,
+                        inputs: vec![],
+                        success_output: vec![("result".into(), Type::Int)],
+                        result_type: ResultType::Projection(vec![Type::Int]),
+                        error_type_name: String::new(), error_fields: vec![],
+                        input_layout: None, output_layout: None,
+                        precondition: None, postcondition: None,
+                        buffer_mode: None, ffi_kind: None, is_out: false,
+                        is_pipe: true,
+                        fallback: Some(Expr::Integer(0)),
+                        span: None,
+                    },
+                    span: None,
+                },
+                TopLevel::Definition(Definition {
+                    name: "main".to_string(),
+                    type_params: vec![],
+                    parameters: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                    output_names: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None,
+                        watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Expression(Expr::Call("get_int".into(), vec![])),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_lambda: false,
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Int returns should NOT have icmp eq i8* (no null check for ints)
+        assert!(!output.contains("pipe_null"),
+            "Int pipe frgn should not emit null check. Got:\n{}", &output[..std::cmp::min(2000, output.len())]);
+        // Should just have a raw call
+        assert!(output.contains("call i64 @get_int()"),
+            "Int pipe frgn should emit raw call. Got:\n{}", &output[..std::cmp::min(2000, output.len())]);
+    }

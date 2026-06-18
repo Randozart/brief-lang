@@ -1,7 +1,7 @@
 # Brief Language Reference Guide
 
 **Version:** v0.12.0
-**Date:** 2026-04-23
+**Date:** 2026-06-18
 **Status:** Development
 
 ---
@@ -12,7 +12,8 @@
 2. [Types](#types)
 3. [State Declarations](#state-declarations)
 4. [Constants](#constants)
-5. [Transactions](#transactions)
+5. [Top-Level Statements (Scripting Mode)](#top-level-statements-scripting-mode)
+6. [Transactions](#transactions)
 6. [Contracts](#contracts)
 7. [Definitions (defn)](#definitions-defn)
 8. [Structs](#structs)
@@ -222,6 +223,46 @@ const MAX_SIZE: Int = 100;
 const VERSION: String = "1.0.0";
 const FLAGS: UInt = 0xFF;
 ```
+
+---
+
+## Top-Level Statements (Scripting Mode)
+
+Executable statements written at global scope are automatically wrapped in a
+synthesized `rct txn __init` that fires once at startup.
+
+```brief
+let message: String = "Hello, Brief!";
+println(message);           // top-level — no txn wrapper needed
+```
+
+The compiler generates a one-shot transaction equivalent to:
+
+```brief
+let message: String = "Hello, Brief!";
+let __booted_0: Int = 0;
+rct txn __init [!__booted_0][__booted_0] {
+    println(message);
+    &__booted_0 = 1;
+    term;
+};
+```
+
+**Rules:**
+- All declarations (`let`, `const`, `struct`, `enum`, `defn`, `txn`, `frgn`)
+  must precede top-level statements. A declaration after a statement is a
+  compile error.
+- Statements execute in program order, exactly once, then the program exits.
+- `escape` inside a top-level statement atomically rolls back all state
+  changes.
+- The `__init` transaction is subject to normal optimizer treatment:
+  pure const scripts may be precomputed; scripts with FFI emit runtime code.
+
+**Pipeline position:** `Program::synthesize_init_txn()` is called after
+import resolution, before desugaring, in `run_llvm_compile`, `run_check`,
+and `run_rbv`.
+
+Requires `.bv`, `.sbv`, `.rbv`, `.srbv` extensions (standard or strict tiers).
 
 ---
 

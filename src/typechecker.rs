@@ -2539,6 +2539,130 @@ mod tests {
         // Unknown function is silently skipped — no crash
         assert!(errors.is_empty(), "Expected no errors for unknown fn, got: {:?}", errors);
     }
+
+    #[test]
+    fn test_frgn_pipe_registers_signature() {
+        let mut tc = super::TypeChecker::new();
+        let sig = ForeignSignature {
+            name: "pipe_fn".into(), location: "".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![("x".into(), Type::Int)],
+            success_output: vec![("result".into(), Type::String)],
+            result_type: ResultType::Projection(vec![Type::String]),
+            error_type_name: "".into(),
+            error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::String("".to_string())),
+            span: None,
+        };
+        tc.foreign_bindings.insert("pipe_fn".into(), sig.clone());
+        assert!(tc.foreign_bindings.contains_key("pipe_fn"));
+        let stored = tc.foreign_bindings.get("pipe_fn").unwrap();
+        assert!(stored.is_pipe);
+        assert!(stored.fallback.is_some());
+    }
+
+    #[test]
+    fn test_frgn_pipe_skips_toml_validation() {
+        let mut tc = super::TypeChecker::new();
+        let mut sig = ForeignSignature {
+            name: "no_toml_fn".into(), location: "".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Int)],
+            result_type: ResultType::Projection(vec![Type::Int]),
+            error_type_name: "".into(),
+            error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::Integer(0)),
+            span: None,
+        };
+        tc.check_frgn_binding("no_toml_fn", "", &mut sig);
+        assert!(tc.errors.borrow().is_empty(),
+            "Pipe frgn should not produce TOML validation errors: {:?}", tc.errors.borrow());
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_literals() {
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Integer(42)));
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Float(3.14)));
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::String("hello".into())));
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Bool(true)));
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Char('x')));
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Term));
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::RegexLiteral(".*".into())));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_constructor_call() {
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Call(
+            "Error".into(),
+            vec![Expr::String("msg".into())],
+        )));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_nested_constructor() {
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Call(
+            "CustomError".into(),
+            vec![
+                Expr::String("code".into()),
+                Expr::Integer(42),
+            ],
+        )));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_tuple() {
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Tuple(vec![
+            Expr::Integer(1),
+            Expr::String("a".into()),
+        ])));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_list_literal() {
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::ListLiteral(vec![
+            Expr::Integer(1),
+            Expr::Integer(2),
+            Expr::Integer(3),
+        ])));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_rejects_identifier() {
+        assert!(!super::TypeChecker::is_compile_time_expr(&Expr::Identifier("x".into())));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_rejects_owned_ref() {
+        assert!(!super::TypeChecker::is_compile_time_expr(&Expr::OwnedRef("x".into())));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_rejects_prior_state() {
+        assert!(!super::TypeChecker::is_compile_time_expr(&Expr::PriorState("x".into())));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_rejects_addition() {
+        assert!(!super::TypeChecker::is_compile_time_expr(&Expr::Add(
+            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Integer(2)),
+        )));
+    }
+
+    #[test]
+    fn test_is_compile_time_expr_rejects_call_with_identifier_arg() {
+        assert!(!super::TypeChecker::is_compile_time_expr(&Expr::Call(
+            "Error".into(),
+            vec![Expr::Identifier("msg".into())],
+        )));
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
@@ -3698,54 +3822,5 @@ mod kani_full_tests {
         let ty = ctx.infer_expression(&expr);
         assert_eq!(ty, Type::Char, "Cast Int -> Char should return Char");
         assert!(ctx.errors.borrow().is_empty(), "Int -> Char should be valid");
-    }
-
-    #[test]
-    fn test_frgn_pipe_registers_signature() {
-        let mut tc = super::TypeChecker::new();
-        let sig = ForeignSignature {
-            name: "pipe_fn".into(), location: "".into(),
-            wasm_impl: None, wasm_setup: None,
-            inputs: vec![("x".into(), Type::Int)],
-            success_output: vec![("result".into(), Type::String)],
-            result_type: ResultType::Projection(vec![Type::String]),
-            error_type_name: "".into(),
-            error_fields: vec![],
-            input_layout: None, output_layout: None,
-            precondition: None, postcondition: None,
-            buffer_mode: None, ffi_kind: None, is_out: false,
-            is_pipe: true, fallback: Some(Expr::String("".to_string())),
-            span: None,
-        };
-        // Pipe frgns should be insertable and retrievable
-        tc.foreign_bindings.insert("pipe_fn".into(), sig.clone());
-        assert!(tc.foreign_bindings.contains_key("pipe_fn"));
-        let stored = tc.foreign_bindings.get("pipe_fn").unwrap();
-        assert!(stored.is_pipe);
-        assert!(stored.fallback.is_some());
-    }
-
-    #[test]
-    fn test_frgn_pipe_skips_toml_validation() {
-        let mut tc = super::TypeChecker::new();
-        // A pipe frgn with no toml_path and empty location should not error
-        let mut sig = ForeignSignature {
-            name: "no_toml_fn".into(), location: "".into(),
-            wasm_impl: None, wasm_setup: None,
-            inputs: vec![],
-            success_output: vec![("result".into(), Type::Int)],
-            result_type: ResultType::Projection(vec![Type::Int]),
-            error_type_name: "".into(),
-            error_fields: vec![],
-            input_layout: None, output_layout: None,
-            precondition: None, postcondition: None,
-            buffer_mode: None, ffi_kind: None, is_out: false,
-            is_pipe: true, fallback: Some(Expr::Integer(0)),
-            span: None,
-        };
-        tc.check_frgn_binding("no_toml_fn", "", &mut sig);
-        // No errors should be accumulated
-        assert!(tc.errors.borrow().is_empty(),
-            "Pipe frgn should not produce TOML validation errors: {:?}", tc.errors.borrow());
     }
 }

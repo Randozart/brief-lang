@@ -1,7 +1,7 @@
 # Learn Brief - Complete Tutorial
 
 **Version:** 0.16.0  
-**Last Updated:** 2026-06-14  
+**Last Updated:** 2026-06-18  
 **Status:** Complete ✅
 
 ---
@@ -24,6 +24,7 @@
    - State declarations (`let`)
    - Basic types (Int, String, Bool, Char)
    - Transaction syntax
+   - Scripting mode (top-level statements)
    - Guards and escape
 
 3. **[02-contracts.md](02-contracts.md)** - Preconditions & Postconditions
