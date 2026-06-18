@@ -1997,6 +1997,10 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]",
                             indent, v, nul_l, av, ok_l).ok();
                     }
+                    Intrinsic::Compile => {
+                        // compile#() is compile-time only — should never reach LLVM backend
+                        panic!("compile#() called at runtime — this is a compiler bug");
+                    }
                 }
             }
             // ── ListLiteral ──────────────────────────────────────

@@ -3469,6 +3469,29 @@ impl Interpreter {
                             .unwrap_or(0);
                         Ok(Value::Int(val))
                     }
+                    Intrinsic::Compile => {
+                        let code = match values.remove(0) {
+                            Value::String(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("compile# requires String, got {:?}", v))),
+                        };
+                        // Parse the code string as Brief source
+                        let mut parser = crate::parser::Parser::new(&code);
+                        match parser.parse() {
+                            Ok(prog) => {
+                                // Extract all TopLevel::Statement bodies into a flat Block
+                                let mut stmts = Vec::new();
+                                for item in prog.items {
+                                    if let crate::ast::TopLevel::Statement(stmt) = item {
+                                        stmts.push(*stmt);
+                                    }
+                                }
+                                Ok(Value::Block(stmts))
+                            }
+                            Err(e) => Err(RuntimeError::TypeMismatch(
+                                format!("compile#: parse error: {}", e))),
+                        }
+                    }
                 }
             }
             // Legacy collection variants — delegate through feature structs

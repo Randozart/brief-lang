@@ -585,6 +585,10 @@ pub enum Intrinsic {
     PutChar,
     PrintFloat,
     GetEnvInt,
+
+    // ===== Macro/Template intrinsics =====
+    /// compile#(code: String) -> Block — parse string as Brief code at compile time
+    Compile,
 }
 
 impl Intrinsic {
@@ -734,6 +738,8 @@ impl Intrinsic {
             "putchar" => Some(Intrinsic::PutChar),
             "print_float" => Some(Intrinsic::PrintFloat),
             "getenv_int" => Some(Intrinsic::GetEnvInt),
+            // Macro/template intrinsics
+            "compile" => Some(Intrinsic::Compile),
             _ => None,
         }
     }
@@ -866,6 +872,7 @@ impl Intrinsic {
             Intrinsic::PutChar => "putchar",
             Intrinsic::PrintFloat => "print_float",
             Intrinsic::GetEnvInt => "getenv_int",
+            Intrinsic::Compile => "compile",
         }
     }
 }
