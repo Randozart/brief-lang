@@ -1353,11 +1353,11 @@ fn empty_program() -> Program {
     fn test_async_barrier_calls_in_main() {
         let program = make_async_pair_program();
         let output = LlvmBackend::new().generate(&program);
-        assert!(output.contains("call void @brief_thread_pool_init"),
+        assert!(output.contains("call void @__thread_pool_init__"),
             "Main should call thread_pool_init");
-        assert!(output.contains("call void @brief_barrier_release"),
+        assert!(output.contains("call void @__barrier_release__"),
             "Main should call barrier_release");
-        assert!(output.contains("call void @brief_barrier_wait"),
+        assert!(output.contains("call void @__barrier_wait__"),
             "Main should call barrier_wait");
     }
 
@@ -1367,9 +1367,9 @@ fn empty_program() -> Program {
         let output = LlvmBackend::new().generate(&program);
         assert!(!output.contains("@llvm.thread_pool"),
             "No thread pool metadata without async txns");
-        assert!(!output.contains("call void @brief_barrier"),
+        assert!(!output.contains("call void @__barrier__"),
             "No barrier calls without async txns");
-        assert!(!output.contains("call void @brief_thread_pool_init"),
+        assert!(!output.contains("call void @__thread_pool_init__"),
             "No thread pool init without async txns");
     }
 

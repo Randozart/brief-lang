@@ -122,11 +122,15 @@ static int setup_timer(timer_t* tid, int signo, long sec, long nsec) {
     return timer_settime(*tid, 0, &its, NULL);
 }
 
+char* brief_str_to_c(int64_t bstr);
+
 /* ===================================================================
  * 1.5 I/O helpers (std/io.bv)
  * =================================================================== */
-int64_t __print(const char* msg) {
-    if (msg) fputs(msg, stdout);
+int64_t __print(int64_t msg_bstr) {
+    char* c_msg = brief_str_to_c(msg_bstr);
+    if (c_msg) fputs(c_msg, stdout);
+    free(c_msg);
     fflush(stdout);
     return 1;
 }
@@ -348,7 +352,7 @@ static void* brief_worker_main(void* arg) {
 }
 #endif /* BRIEF_THREAD_POOL */
 
-void brief_thread_pool_init(unsigned num_workers, void** fn_ptrs) {
+void __thread_pool_init__(unsigned num_workers, void** fn_ptrs) {
 #if defined(BRIEF_THREAD_POOL)
     if (g_thread_pool_active) return;
     if (num_workers == 0) return;
@@ -372,14 +376,14 @@ void brief_thread_pool_init(unsigned num_workers, void** fn_ptrs) {
 #endif
 }
 
-void brief_barrier_release(void) {
+void __barrier_release__(void) {
 #if defined(BRIEF_THREAD_POOL)
     if (!g_thread_pool_active || g_num_workers == 0) return;
     brief_barrier_wait_impl(&g_barrier_enter);
 #endif
 }
 
-void brief_barrier_wait(void) {
+void __barrier_wait__(void) {
 #if defined(BRIEF_THREAD_POOL)
     if (!g_thread_pool_active || g_num_workers == 0) return;
     brief_barrier_wait_impl(&g_barrier_exit);
@@ -399,22 +403,7 @@ void brief_thread_pool_shutdown(void) {
 #endif
 }
 
-// Forward declaration for brief_str_to_c (defined in section 7)
-char* brief_str_to_c(int64_t bstr);
-
-/* ===================================================================
- * 5. Brief String I/O — read_file intrinsic
- *
- * Takes a Brief string (i64 = ptrtoint of [data_ptr, len, chars...])
- * and returns a new Brief string (i64 = ptrtoint) on success, or 0 on
- * failure. The interpreter uses Rust std::fs::read_to_string and never
- * calls this function.
- *
- * Brief string layout (tightly packed):
- *   [data_ptr(i64), len(i64), char_bytes(len bytes)]
- * =================================================================== */
-
-int64_t brief_read_file(int64_t path_bstr) {
+int64_t __read_file__(int64_t path_bstr) {
     char* c_path = brief_str_to_c(path_bstr);
     if (!c_path) return 0;
 
@@ -447,11 +436,9 @@ int64_t brief_read_file(int64_t path_bstr) {
     return (int64_t)h;
 }
 
-// Forward declaration for brief_str_to_c (defined in section 7)
-char* brief_str_to_c(int64_t bstr);
 
 /* Write data (Brief string) to path (Brief string). Returns 1 (true) on success, 0 (false) on failure. */
-int64_t brief_write_file(int64_t path_bstr, int64_t data_bstr) {
+int64_t __write_file__(int64_t path_bstr, int64_t data_bstr) {
     char* c_path = brief_str_to_c(path_bstr);
     if (!c_path) return 0;
     
@@ -488,7 +475,6 @@ int64_t brief_write_file(int64_t path_bstr, int64_t data_bstr) {
 #include <sys/wait.h>
 
 /* ── Helpers (forward declarations from section 7) ─────────────────── */
-char*   brief_str_to_c(int64_t bstr);
 static int64_t cstr_to_brief(const char* s);
 static int64_t buf_to_brief(const char* buf, int64_t len);
 
@@ -527,7 +513,7 @@ int64_t tty_size(void) {
 #include <termios.h>
 #include <sys/ioctl.h>
 
-int64_t brief_tty_raw_mode(int64_t enable) {
+int64_t __tty_raw_mode__(int64_t enable) {
     static struct termios orig_termios;
     static int saved = 0;
     if (enable) {
@@ -546,7 +532,7 @@ int64_t brief_tty_raw_mode(int64_t enable) {
     }
 }
 
-int64_t brief_tty_size(void) {
+int64_t __tty_size__(void) {
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
         return (int64_t)(ws.ws_col) * 10000 + ws.ws_row;
@@ -554,7 +540,7 @@ int64_t brief_tty_size(void) {
     return (int64_t)(80 * 10000 + 24);
 }
 
-int64_t brief_tty_read_key(void) {
+int64_t __tty_read_key__(void) {
     unsigned char ch = 0;
     ssize_t n = read(STDIN_FILENO, &ch, 1);
     if (n > 0) return (int64_t)ch;
@@ -571,7 +557,7 @@ static int brief_sort_cmp(const void* a, const void* b) {
     return 0;
 }
 
-int64_t brief_readln(void) {
+int64_t __readln__(void) {
     char buf[65536];
     if (!fgets(buf, sizeof(buf), stdin)) return 0;
     size_t len = strlen(buf);
@@ -579,7 +565,7 @@ int64_t brief_readln(void) {
     return buf_to_brief(buf, (int64_t)len);
 }
 
-int64_t brief_sort_list(int64_t list_bstr) {
+int64_t __sort_list__(int64_t list_bstr) {
     int64_t* h = (int64_t*)list_bstr;
     if (!h) return 0;
     int64_t len = h[1];
@@ -588,7 +574,7 @@ int64_t brief_sort_list(int64_t list_bstr) {
     return list_bstr;
 }
 
-int64_t brief_reverse_list(int64_t list_bstr) {
+int64_t __reverse_list__(int64_t list_bstr) {
     int64_t* h = (int64_t*)list_bstr;
     if (!h) return 0;
     int64_t len = h[1];
@@ -602,7 +588,7 @@ int64_t brief_reverse_list(int64_t list_bstr) {
     return list_bstr;
 }
 
-int64_t brief_range(int64_t end) {
+int64_t __range__(int64_t end) {
     if (end <= 0) return 0;
     int64_t* h = malloc(((size_t)end + 2) * sizeof(int64_t));
     if (!h) return 0;
@@ -619,20 +605,20 @@ int64_t brief_range(int64_t end) {
  * Option representation: (payload << 8) | disc, disc=0 for Some, disc=1 for None.
  * ================================================================== */
 
-int64_t brief_stack_top(int64_t list_bstr) {
+int64_t __stack_top__(int64_t list_bstr) {
     int64_t* h = (int64_t*)list_bstr;
     if (!h || h[1] <= 0) return 1;
     int64_t val = h[2 + h[1] - 1];
     return val << 8;
 }
 
-int64_t brief_queue_front(int64_t list_bstr) {
+int64_t __queue_front__(int64_t list_bstr) {
     int64_t* h = (int64_t*)list_bstr;
     if (!h || h[1] <= 0) return 1;
     return h[2] << 8;
 }
 
-int64_t brief_hashmap_get(int64_t map_bstr, int64_t key_val) {
+int64_t __hashmap_get__(int64_t map_bstr, int64_t key_val) {
     int64_t* h = (int64_t*)map_bstr;
     if (!h || h[1] <= 0) return 1;
     int64_t len = h[1];
@@ -645,19 +631,19 @@ int64_t brief_hashmap_get(int64_t map_bstr, int64_t key_val) {
     return 1;
 }
 
-int64_t brief_hashset_elements(int64_t set_bstr) {
+int64_t __hashset_elements__(int64_t set_bstr) {
     return set_bstr;
 }
 
-int64_t brief_ioctl(int64_t fd, int64_t request, int64_t arg) {
+int64_t __ioctl__(int64_t fd, int64_t request, int64_t arg) {
     return (int64_t)ioctl((int)fd, (unsigned long)request, (void*)(uintptr_t)arg);
 }
 
-int64_t brief_isatty(int64_t fd) {
+int64_t __isatty__(int64_t fd) {
     return (int64_t)isatty((int)fd);
 }
 
-int64_t brief_spawn_with_output(int64_t cmd_bstr) {
+int64_t __spawn_with_output__(int64_t cmd_bstr) {
     char* c_cmd = brief_str_to_c(cmd_bstr);
     if (!c_cmd) return 0;
 
@@ -679,7 +665,7 @@ int64_t brief_spawn_with_output(int64_t cmd_bstr) {
     return status == 0 ? cstr_to_brief("") : 0;
 }
 
-int64_t brief_spawn(int64_t cmd_bstr) {
+int64_t __spawn__(int64_t cmd_bstr) {
     char* c_cmd = brief_str_to_c(cmd_bstr);
     if (!c_cmd) return -1;
 
@@ -690,21 +676,19 @@ int64_t brief_spawn(int64_t cmd_bstr) {
     return (int64_t)WEXITSTATUS(status);
 }
 
-/* ── Stdlib __ functions ──────────────────────────────────────────── */
+/* ── Intrinsic string functions (called from name# handlers) ──────── */
 
-int64_t __trim_left(const char* s) {
+int64_t __trim_left__(const char* s) {
     if (!s) return 0;
-    const char* start = s;
-    while (*start && (unsigned char)*start <= 32) start++;
-    return cstr_to_brief(start);
+    while (*s && (unsigned char)*s <= 32) s++;
+    return cstr_to_brief(s);
 }
 
-int64_t __trim_right(const char* s) {
+int64_t __trim_right__(const char* s) {
     if (!s) return 0;
     size_t len = strlen(s);
     const char* end = s + len;
     while (end > s && (unsigned char)*(end - 1) <= 32) end--;
-    // Copy since we need to null-terminate
     char buf[65536];
     size_t new_len = (size_t)(end - s);
     if (new_len >= sizeof(buf)) new_len = sizeof(buf) - 1;
@@ -713,7 +697,7 @@ int64_t __trim_right(const char* s) {
     return cstr_to_brief(buf);
 }
 
-int64_t __to_lower(const char* s) {
+int64_t __to_lower__(const char* s) {
     if (!s) return 0;
     size_t len = strlen(s);
     if (len > 65535) len = 65535;
@@ -725,27 +709,25 @@ int64_t __to_lower(const char* s) {
     return cstr_to_brief(buf);
 }
 
-int64_t __contains_at(const char* haystack, const char* needle, int64_t start) {
+int64_t __contains_at__(const char* haystack, const char* needle, int64_t start) {
     if (!haystack || !needle) return 0;
     const char* pos = strstr(haystack + (size_t)start, needle);
     return pos ? 1 : 0;
 }
 
-int64_t __find_from(const char* s, const char* needle, int64_t start) {
+int64_t __find_from__(const char* s, const char* needle, int64_t start) {
     if (!s || !needle) return -1;
     const char* found = strstr(s + (size_t)start, needle);
     return found ? (int64_t)(found - s) : -1;
 }
 
-int64_t __int_to_str(int64_t n) {
+int64_t __int_to_str__(int64_t n) {
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
-    int64_t result = buf_to_brief(buf, (int64_t)len);
-    fprintf(stderr, "DEBUG __int_to_str(%lld) = 0x%llx\n", (long long)n, (unsigned long long)result);
-    return result;
+    return buf_to_brief(buf, (int64_t)len);
 }
 
-int64_t __splitn(const char* s, const char* delim, int64_t n_val) {
+int64_t __splitn__(const char* s, const char* delim, int64_t n_val) {
     (void)n_val;
     if (!s || !delim) return 0;
     size_t slen = strlen(s);
@@ -754,12 +736,10 @@ int64_t __splitn(const char* s, const char* delim, int64_t n_val) {
     memcpy(tmp, s, slen);
     tmp[slen] = '\0';
     size_t dlen = strlen(delim);
-    // Count tokens
     int64_t count = 1;
     for (char* p = tmp; *p; p++) {
         if (strncmp(p, delim, dlen) == 0) { count++; p += dlen - 1; }
     }
-    // Allocate list header: [data_ptr, length, elem0, elem1, ...]
     int64_t* list = malloc(sizeof(int64_t) * (2 + count));
     list[0] = (int64_t)(list + 2);
     list[1] = count;
@@ -771,25 +751,6 @@ int64_t __splitn(const char* s, const char* delim, int64_t n_val) {
         tok = strtok(NULL, delim);
     }
     return (int64_t)list;
-}
-
-/* ── Process ──────────────────────────────────────────────────────── */
-
-int64_t __spawn_with_output(const char* cmd, int64_t args_val) {
-    (void)args_val;
-    if (!cmd) return 0;
-    FILE* fp = popen(cmd, "r");
-    if (!fp) return 0;
-    char buf[65536];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
-    int status = pclose(fp);
-    if (n > 0) {
-        buf[n] = '\0';
-        while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) n--;
-        buf[n] = '\0';
-        return cstr_to_brief(buf);
-    }
-    return status == 0 ? cstr_to_brief("") : 0;
 }
 
 /* ===================================================================
@@ -944,7 +905,7 @@ int64_t brief_symlink(int64_t target_bstr, int64_t link_bstr) {
     return (int64_t)ret;
 }
 
-int64_t brief_readlink(int64_t path_bstr) {
+int64_t __readlink__(int64_t path_bstr) {
     char* c_path = brief_str_to_c(path_bstr);
     if (!c_path) return 0;
     char buf[4096];
@@ -965,7 +926,7 @@ int64_t brief_link(int64_t old_bstr, int64_t new_bstr) {
     return (int64_t)ret;
 }
 
-int64_t brief_getcwd(void) {
+int64_t __getcwd__(void) {
     char buf[4096];
     if (!getcwd(buf, sizeof(buf))) return 0;
     return cstr_to_brief(buf);
@@ -979,7 +940,7 @@ int64_t brief_chdir(int64_t path_bstr) {
     return (int64_t)ret;
 }
 
-int64_t brief_readdir(int64_t path_bstr) {
+int64_t __readdir__(int64_t path_bstr) {
     char* c_path = brief_str_to_c(path_bstr);
     if (!c_path) return 0;
     DIR* dir = opendir(c_path);
@@ -1141,7 +1102,7 @@ int64_t brief_sem_post(int64_t sem) {
 #include <sys/signalfd.h>
 #include <sys/timerfd.h>
 
-int64_t brief_sigaction(int64_t signum, int64_t handler) {
+int64_t __sigaction__(int64_t signum, int64_t handler) {
     struct sigaction sa;
     struct sigaction old;
     sa.sa_handler = (void(*)(int))(uintptr_t)handler;
@@ -1150,7 +1111,7 @@ int64_t brief_sigaction(int64_t signum, int64_t handler) {
     return (int64_t)sigaction((int)signum, &sa, &old);
 }
 
-int64_t brief_sigprocmask(int64_t how, int64_t mask) {
+int64_t __sigprocmask__(int64_t how, int64_t mask) {
     sigset_t set;
     (void)mask;
     sigemptyset(&set);
@@ -1246,14 +1207,44 @@ int64_t brief_shutdown(int64_t fd, int64_t how) {
     return (int64_t)shutdown((int)fd, (int)how);
 }
 
-int64_t brief_getaddrinfo(int64_t node, int64_t service) {
+int64_t __getaddrinfo__(int64_t node_bstr, int64_t service_bstr) {
     struct addrinfo hints;
     struct addrinfo *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    int ret = getaddrinfo((const char*)(uintptr_t)node, (const char*)(uintptr_t)service, &hints, &result);
+    char* c_node = node_bstr ? brief_str_to_c(node_bstr) : NULL;
+    char* c_service = service_bstr ? brief_str_to_c(service_bstr) : NULL;
+    int ret = getaddrinfo(c_node, c_service, &hints, &result);
+    free(c_node); free(c_service);
     if (ret == 0 && result) freeaddrinfo(result);
+    return (int64_t)ret;
+}
+
+int64_t brief_getenv(int64_t name_bstr) {
+    char* c_name = brief_str_to_c(name_bstr);
+    if (!c_name) return 0;
+    const char* val = getenv(c_name);
+    free(c_name);
+    if (!val) return 0;
+    return cstr_to_brief(val);
+}
+
+int64_t brief_setenv(int64_t name_bstr, int64_t value_bstr) {
+    char* c_name = brief_str_to_c(name_bstr);
+    if (!c_name) return -1;
+    char* c_value = brief_str_to_c(value_bstr);
+    if (!c_value) { free(c_name); return -1; }
+    int ret = setenv(c_name, c_value, 1);
+    free(c_name); free(c_value);
+    return (int64_t)ret;
+}
+
+int64_t brief_unsetenv(int64_t name_bstr) {
+    char* c_name = brief_str_to_c(name_bstr);
+    if (!c_name) return -1;
+    int ret = unsetenv(c_name);
+    free(c_name);
     return (int64_t)ret;
 }
 
@@ -1265,20 +1256,6 @@ int64_t brief_getaddrinfo(int64_t node, int64_t service) {
 
 #include <unistd.h>
 #include <time.h>
-
-int64_t brief_getenv(int64_t name) {
-    const char* s = getenv((const char*)(uintptr_t)name);
-    if (!s) return 0;
-    return (int64_t)s;
-}
-
-int64_t brief_setenv(int64_t name, int64_t value) {
-    return (int64_t)setenv((const char*)(uintptr_t)name, (const char*)(uintptr_t)value, 1);
-}
-
-int64_t brief_unsetenv(int64_t name) {
-    return (int64_t)unsetenv((const char*)(uintptr_t)name);
-}
 
 int64_t brief_getpid(void) {
     return (int64_t)getpid();
@@ -1306,18 +1283,16 @@ int64_t brief_nanosleep(int64_t ns) {
 
 /* ── Officina-local frgn (substring only) ────────────────────────── */
 
-int64_t substring(const char* s) {
+int64_t __substring__(const char* s) {
     if (!s) return 0;
     int64_t len = (int64_t)strlen(s);
-    // List header: [data_ptr, length, char0, char1, ...]
-    // Each char is stored as int64_t with the byte in the low 8 bits
-    int64_t* list = malloc(sizeof(int64_t) * (size_t)(2 + len));
-    list[0] = (int64_t)(list + 2);
-    list[1] = len;
-    for (int64_t i = 0; i < len; i++) {
-        list[2 + i] = (int64_t)(unsigned char)s[i];
-    }
-    return (int64_t)list;
+    // Tightly packed Brief string: 16 byte header + tight chars
+    int64_t* h = malloc(((size_t)len + 2) * sizeof(int64_t));
+    if (!h) return 0;
+    h[0] = (int64_t)((char*)h + 16);
+    h[1] = len;
+    memcpy((char*)h + 16, s, (size_t)len);
+    return (int64_t)h;
 }
 
 /* ===================================================================

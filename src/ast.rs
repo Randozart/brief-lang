@@ -464,6 +464,7 @@ pub enum Intrinsic {
     Values,
     // System I/O intrinsics (Pass A - 2026-06-11)
     Println,
+    Print,
     Readln,
     Exit,
     Time,
@@ -474,6 +475,14 @@ pub enum Intrinsic {
     Sort,
     Reverse,
     Range,
+    // String intrinsics (2026-06-18) — C functions use __name__ convention
+    TrimLeft,
+    TrimRight,
+    ToLower,
+    ContainsAt,
+    FindFrom,
+    SplitN,
+    IntToStr,
 
     // ===== Phase A: Terminal / TTY (intrinsics.md D4) =====
     TtyRawMode,
@@ -587,6 +596,10 @@ impl Intrinsic {
             | Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz
             | Intrinsic::Abs | Intrinsic::Bitreverse
             | Intrinsic::Bytes | Intrinsic::Size
+            | Intrinsic::TrimLeft | Intrinsic::TrimRight
+            | Intrinsic::ToLower | Intrinsic::ContainsAt
+            | Intrinsic::FindFrom | Intrinsic::SplitN
+            | Intrinsic::IntToStr
             => false,
             // Everything else is observable — cannot fold
             _ => true,
@@ -620,6 +633,14 @@ impl Intrinsic {
             "sort" => Some(Intrinsic::Sort),
             "reverse" => Some(Intrinsic::Reverse),
             "range" => Some(Intrinsic::Range),
+            "print" => Some(Intrinsic::Print),
+            "trim_left" => Some(Intrinsic::TrimLeft),
+            "trim_right" => Some(Intrinsic::TrimRight),
+            "to_lower" => Some(Intrinsic::ToLower),
+            "contains_at" => Some(Intrinsic::ContainsAt),
+            "find_from" => Some(Intrinsic::FindFrom),
+            "splitn" => Some(Intrinsic::SplitN),
+            "int_to_str" => Some(Intrinsic::IntToStr),
             // Phase A: Terminal
             "tty_raw_mode" => Some(Intrinsic::TtyRawMode),
             "tty_size" => Some(Intrinsic::TtySize),
@@ -744,6 +765,14 @@ impl Intrinsic {
             Intrinsic::Sort => "sort",
             Intrinsic::Reverse => "reverse",
             Intrinsic::Range => "range",
+            Intrinsic::Print => "print",
+            Intrinsic::TrimLeft => "trim_left",
+            Intrinsic::TrimRight => "trim_right",
+            Intrinsic::ToLower => "to_lower",
+            Intrinsic::ContainsAt => "contains_at",
+            Intrinsic::FindFrom => "find_from",
+            Intrinsic::SplitN => "splitn",
+            Intrinsic::IntToStr => "int_to_str",
             // Phase A: Terminal
             Intrinsic::TtyRawMode => "tty_raw_mode",
             Intrinsic::TtySize => "tty_size",

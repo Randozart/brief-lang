@@ -1293,6 +1293,13 @@ impl TypeChecker {
                     Intrinsic::Time | Intrinsic::Socket | Intrinsic::Accept => Type::Int,
                     Intrinsic::Sort | Intrinsic::Reverse => Type::Bool,
                     Intrinsic::Range => Type::Custom("List".to_string()),
+                    // String intrinsics (2026-06-18)
+                    Intrinsic::Print => Type::Bool,
+                    Intrinsic::TrimLeft | Intrinsic::TrimRight | Intrinsic::ToLower => Type::String,
+                    Intrinsic::ContainsAt => Type::Bool,
+                    Intrinsic::FindFrom => Type::Int,
+                    Intrinsic::SplitN => Type::Custom("List".to_string()),
+                    Intrinsic::IntToStr => Type::String,
                     Intrinsic::TtyRawMode | Intrinsic::TtySize => Type::Int,
                     Intrinsic::TtyReadKey => Type::Int,
                     Intrinsic::IoCtl => Type::Int,

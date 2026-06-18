@@ -26,32 +26,31 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @llvm.abs.i64(i64, i1) #1").ok();
         writeln!(out, "declare i64 @llvm.bitreverse.i64(i64) #1").ok();
         // Runtime support functions
-        writeln!(out, "declare void @brief_barrier_release()").ok();
-        writeln!(out, "declare void @brief_barrier_wait()").ok();
-        writeln!(out, "declare void @brief_thread_pool_init(i32, i8**)").ok();
+        writeln!(out, "declare void @__barrier_release__()").ok();
+        writeln!(out, "declare void @__barrier_wait__()").ok();
+        writeln!(out, "declare void @__thread_pool_init__(i32, i8**)").ok();
         writeln!(out, "declare i64 @time(i64*) nounwind").ok();
         writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(i8*) nounwind").ok();
-        writeln!(out, "declare i64 @brief_read_file(i64)").ok();
-        writeln!(out, "declare i64 @brief_write_file(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_readln()").ok();
-        writeln!(out, "declare i64 @brief_sort_list(i64)").ok();
-        writeln!(out, "declare i64 @brief_reverse_list(i64)").ok();
-        writeln!(out, "declare i64 @brief_range(i64)").ok();
-        writeln!(out, "declare i64 @brief_stack_top(i64)").ok();
-        writeln!(out, "declare i64 @brief_queue_front(i64)").ok();
-        writeln!(out, "declare i64 @brief_hashmap_get(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_hashset_elements(i64)").ok();
+        writeln!(out, "declare i64 @__read_file__(i64)").ok();
+        writeln!(out, "declare i64 @__write_file__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__readln__()").ok();
+        writeln!(out, "declare i64 @__sort_list__(i64)").ok();
+        writeln!(out, "declare i64 @__reverse_list__(i64)").ok();
+        writeln!(out, "declare i64 @__range__(i64)").ok();
+        writeln!(out, "declare i64 @__stack_top__(i64)").ok();
+        writeln!(out, "declare i64 @__queue_front__(i64)").ok();
+        writeln!(out, "declare i64 @__hashmap_get__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__hashset_elements__(i64)").ok();
         writeln!(out, "declare void @__exit()").ok();
-        // Remaining brief_* shims (not yet migrated to direct libc)
-        writeln!(out, "declare i64 @brief_tty_raw_mode(i64)").ok();
-        writeln!(out, "declare i64 @brief_spawn_with_output(i64)").ok();
-        writeln!(out, "declare i64 @brief_readlink(i64)").ok();
-        writeln!(out, "declare i64 @brief_getcwd()").ok();
-        writeln!(out, "declare i64 @brief_readdir(i64)").ok();
-        writeln!(out, "declare i64 @brief_sigaction(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_sigprocmask(i64, i64)").ok();
-        writeln!(out, "declare i64 @brief_getaddrinfo(i64, i64)").ok();
+        writeln!(out, "declare i64 @__tty_raw_mode__(i64)").ok();
+        writeln!(out, "declare i64 @__spawn_with_output__(i64)").ok();
+        writeln!(out, "declare i64 @__readlink__(i64)").ok();
+        writeln!(out, "declare i64 @__getcwd__()").ok();
+        writeln!(out, "declare i64 @__readdir__(i64)").ok();
+        writeln!(out, "declare i64 @__sigaction__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__sigprocmask__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__getaddrinfo__(i64, i64)").ok();
         // Some externally-linked functions called by intrinsics
         writeln!(out, "declare i32 @ioctl(i32, i64, ptr)").ok();
     }

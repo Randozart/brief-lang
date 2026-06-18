@@ -2,47 +2,6 @@
 # Provides string manipulation operations
 
 [[functions]]
-name = "__to_lower"
-location = "brief_ffi_native::__to_lower"
-target = "native"
-mapper = "rust"
-description = "Convert to lowercase"
-
-[functions.input]
-s = "String"
-
-[functions.output.success]
-result = "String"
-
-[functions.output.error]
-type = "StringError"
-code = "Int"
-message = "String"
-
-
-
-# ==================================================
-# __to_lower - WASM implementation
-# ==================================================
-[[functions]]
-name = "__to_lower"
-location = "__to_lower"
-target = "wasm"
-mapper = "wasm"
-description = "Convert to lowercase (WASM)"
-wasm_impl = """function __to_lower(s) {
-    return s.toLowerCase();
-}"""
-
-[functions.input]
-s = "String"
-[functions.output.success]
-result = "String"
-[functions.output.error]
-type = "StringError"
-code = "Int"
-message = "String"
-[[functions]]
 name = "__to_upper"
 location = "brief_ffi_native::__to_upper"
 target = "native"
@@ -338,92 +297,6 @@ description = "Check if numeric (WASM)"
 s = "String"
 [functions.output.success]
 result = "Bool"
-[functions.output.error]
-type = "StringError"
-code = "Int"
-message = "String"
-[[functions]]
-name = "__contains_at"
-location = "brief_ffi_native::__contains_at"
-target = "native"
-mapper = "rust"
-description = "Check if contains at position"
-
-[functions.input]
-haystack = "String"
-needle = "String"
-start = "Int"
-
-[functions.output.success]
-result = "Bool"
-
-[functions.output.error]
-type = "StringError"
-code = "Int"
-message = "String"
-
-
-
-# ==================================================
-# __contains_at - WASM implementation
-# ==================================================
-[[functions]]
-name = "__contains_at"
-location = "__contains_at"
-target = "wasm"
-mapper = "wasm"
-description = "Check if contains at position (WASM)"
-wasm_impl = """function __contains_at(s, sub, pos) {
-    return s.indexOf(sub, pos) !== -1;
-}"""
-
-[functions.input]
-haystack = "String"
-needle = "String"
-start = "Int"
-[functions.output.success]
-result = "Bool"
-[functions.output.error]
-type = "StringError"
-code = "Int"
-message = "String"
-[[functions]]
-name = "__find_from"
-location = "brief_ffi_native::__find_from"
-target = "native"
-mapper = "rust"
-description = "Find substring from position"
-
-[functions.input]
-s = "String"
-needle = "String"
-start = "Int"
-
-[functions.output.success]
-result = "Int"
-
-[functions.output.error]
-type = "StringError"
-code = "Int"
-message = "String"
-
-
-
-# ==================================================
-# __find_from - WASM implementation
-# ==================================================
-[[functions]]
-name = "__find_from"
-location = "__find_from"
-target = "wasm"
-mapper = "wasm"
-description = "Find substring from position (WASM)"
-[functions.input]
-s = "String"
-needle = "String"
-start = "Int"
-[functions.output.success]
-result = "Int"
 [functions.output.error]
 type = "StringError"
 code = "Int"
@@ -800,47 +673,6 @@ old = "String"
 new = "String"
 [functions.output.success]
 result = "String"
-[functions.output.error]
-type = "StringError"
-code = "Int"
-message = "String"
-[[functions]]
-name = "__splitn"
-location = "brief_ffi_native::__splitn"
-target = "native"
-mapper = "rust"
-description = "Split with limit"
-
-[functions.input]
-s = "String"
-delim = "String"
-n = "Int"
-
-[functions.output.success]
-result = "List"
-
-[functions.output.error]
-type = "StringError"
-code = "Int"
-message = "String"
-
-
-
-# ==================================================
-# __splitn - WASM implementation
-# ==================================================
-[[functions]]
-name = "__splitn"
-location = "__splitn"
-target = "wasm"
-mapper = "wasm"
-description = "Split with limit (WASM)"
-[functions.input]
-s = "String"
-delim = "String"
-n = "Int"
-[functions.output.success]
-result = "List"
 [functions.output.error]
 type = "StringError"
 code = "Int"

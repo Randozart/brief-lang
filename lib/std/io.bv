@@ -34,21 +34,17 @@ frgn __wait_for_event() -> Void ;
 
 // ===== CONSOLE IO (Native) =====
 // Uses transparent FFI — no compiler magic.
-// __print and __print_int are provided by brief_rt.c (linked via "link/brief_rt.c").
-
-frgn #out __print(msg: String) -> Bool ;
-frgn #out __print_int(n: Int) -> Bool ;
 
 defn print(msg: String) -> Bool [msg != ""][term == true] {
-    term __print(msg);
+    term print#(msg);
 };
 
 defn println(msg: String) -> Bool [msg != ""][term == true] {
-    term __print(msg + "\n");
+    term print#(msg + "\n");
 };
 
 defn print_int(n: Int) -> Bool [[term == true] {
-    term __print_int(n);
+    term print_int#(n);
 };
 
 defn input() -> String [true][term :> Size >= 0] {

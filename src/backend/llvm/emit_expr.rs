@@ -591,8 +591,30 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = add i64 0, 1 ; println no arg", indent, v).ok();
                         }
                     }
+                    Intrinsic::Print => {
+                        // Print a Brief String WITHOUT newline.
+                        // Load hdr[0] (data pointer) and call fprintf.
+                        if !args.is_empty() {
+                            let msg = self.emit_expr(out, &args[0], indent);
+                            let sptr = format!("%ppls{}", self.txn_counter); self.txn_counter += 1;
+                            let sp = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
+                            let data_ptr = format!("%ppld{}", self.txn_counter); self.txn_counter += 1;
+                            let str_ptr = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
+                            let so = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, msg).ok();
+                            writeln!(out, "{}{} = bitcast ptr {} to i64*", indent, sp, sptr).ok();
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, data_ptr, sp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
+                            writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                            let fr = format!("%ppfr{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = call i32 @fputs(ptr {}, ptr {})",
+                                indent, v, str_ptr, so).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 1 ; print no arg", indent, v).ok();
+                        }
+                    }
                     Intrinsic::Readln => {
-                        writeln!(out, "{}{} = call i64 @brief_readln()", indent, v).ok();
+                        writeln!(out, "{}{} = call i64 @__readln__()", indent, v).ok();
                     }
                     Intrinsic::Exit => {
                         // Call libc exit to terminate the program
@@ -616,7 +638,7 @@ impl LlvmBackend {
                             let path_val = self.emit_expr(out, &args[0], indent);
                             let boxed = self.adapt_to_i64(out, indent, &path_val);
                             let raw = format!("%frraw{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = call i64 @brief_read_file(i64 {})", indent, raw, boxed).ok();
+                            writeln!(out, "{}{} = call i64 @__read_file__(i64 {})", indent, raw, boxed).ok();
                             let is_zero = format!("%frisz{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, is_zero, raw).ok();
                             let el = format!("rf_err{}", self.txn_counter); self.txn_counter += 1;
@@ -658,7 +680,7 @@ impl LlvmBackend {
                         let path_boxed = self.adapt_to_i64(out, indent, &path_val);
                         let data_boxed = self.adapt_to_i64(out, indent, &data_val);
                         let wf_ret = format!("%wfr{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = call i64 @brief_write_file(i64 {}, i64 {})", indent, wf_ret, path_boxed, data_boxed).ok();
+                        writeln!(out, "{}{} = call i64 @__write_file__(i64 {}, i64 {})", indent, wf_ret, path_boxed, data_boxed).ok();
                         writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, v, wf_ret).ok();
                         return TypedRegister { name: v, ty: Type::Bool };
                     }
@@ -693,7 +715,7 @@ impl LlvmBackend {
                         let arg = self.emit_expr(out, &args[0], indent);
                         let arg64 = self.adapt_to_i64(out, indent, &arg);
                         let raw = format!("%trm{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = call i64 @brief_tty_raw_mode(i64 {})", indent, raw, arg64).ok();
+                        writeln!(out, "{}{} = call i64 @__tty_raw_mode__(i64 {})", indent, raw, arg64).ok();
                         writeln!(out, "{}{} = trunc i64 {} to i1", indent, v, raw).ok();
                         return TypedRegister { name: v, ty: Type::Bool };
                     }
@@ -787,7 +809,7 @@ impl LlvmBackend {
                         let boxed = self.adapt_to_i64(out, indent, &cmd);
                         let raw = format!("%sp{}", self.txn_counter); self.txn_counter += 1;
                         // brief_spawn_with_output takes i64 (Brief string ptr), returns i64
-                        writeln!(out, "{}{} = call i64 @brief_spawn_with_output(i64 {})", indent, raw, boxed).ok();
+                        writeln!(out, "{}{} = call i64 @__spawn_with_output__(i64 {})", indent, raw, boxed).ok();
                         return TypedRegister { name: raw, ty: Type::Int };
                     }
                     Intrinsic::Spawn => {
@@ -1066,7 +1088,7 @@ impl LlvmBackend {
                     }
                     Intrinsic::ReadLink => {
                         let path = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_readlink(i64 {})", indent, v, path.name).ok();
+                        writeln!(out, "{}{} = call i64 @__readlink__(i64 {})", indent, v, path.name).ok();
                     }
                     Intrinsic::Link => {
                         let old = self.emit_expr(out, &args[0], indent);
@@ -1088,7 +1110,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
                     Intrinsic::GetCwd => {
-                        writeln!(out, "{}{} = call i64 @brief_getcwd()", indent, v).ok();
+                        writeln!(out, "{}{} = call i64 @__getcwd__()", indent, v).ok();
                     }
                     Intrinsic::ChDir => {
                         let path = self.emit_expr(out, &args[0], indent);
@@ -1104,7 +1126,7 @@ impl LlvmBackend {
                     }
                     Intrinsic::ReadDir => {
                         let path = self.emit_expr(out, &args[0], indent);
-                        writeln!(out, "{}{} = call i64 @brief_readdir(i64 {})", indent, v, path.name).ok();
+                        writeln!(out, "{}{} = call i64 @__readdir__(i64 {})", indent, v, path.name).ok();
                     }
                     Intrinsic::ChMod => {
                         let path = self.emit_expr(out, &args[0], indent);
@@ -1381,12 +1403,12 @@ impl LlvmBackend {
                     Intrinsic::SigAction => {
                         let signum = self.emit_expr(out, &args[0], indent);
                         let handler = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_sigaction(i64 {}, i64 {})", indent, v, signum.name, handler.name).ok();
+                        writeln!(out, "{}{} = call i64 @__sigaction__(i64 {}, i64 {})", indent, v, signum.name, handler.name).ok();
                     }
                     Intrinsic::SigProcMask => {
                         let how = self.emit_expr(out, &args[0], indent);
                         let mask = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_sigprocmask(i64 {}, i64 {})", indent, v, how.name, mask.name).ok();
+                        writeln!(out, "{}{} = call i64 @__sigprocmask__(i64 {}, i64 {})", indent, v, how.name, mask.name).ok();
                     }
                     Intrinsic::Kill => {
                         let pid = self.emit_expr(out, &args[0], indent);
@@ -1648,7 +1670,7 @@ impl LlvmBackend {
                     Intrinsic::GetAddrInfo => {
                         let node = self.emit_expr(out, &args[0], indent);
                         let service = self.emit_expr(out, &args[1], indent);
-                        writeln!(out, "{}{} = call i64 @brief_getaddrinfo(i64 {}, i64 {})", indent, v, node.name, service.name).ok();
+                        writeln!(out, "{}{} = call i64 @__getaddrinfo__(i64 {}, i64 {})", indent, v, node.name, service.name).ok();
                     }
                     // ===== Phase H: Everything Else (intrinsics.md D6, D7) — Shim =====
                     Intrinsic::GetEnv => {
@@ -1771,7 +1793,7 @@ impl LlvmBackend {
                         if let Some(first) = args.first() {
                             let list_val = self.emit_expr(out, first, indent);
                             let boxed = self.adapt_to_i64(out, indent, &list_val);
-                            writeln!(out, "{}{} = call i64 @brief_sort_list(i64 {})", indent, v, boxed).ok();
+                            writeln!(out, "{}{} = call i64 @__sort_list__(i64 {})", indent, v, boxed).ok();
                         } else {
                             writeln!(out, "{}{} = add i64 0, 0 ; sort no-arg", indent, v).ok();
                         }
@@ -1780,7 +1802,7 @@ impl LlvmBackend {
                         if let Some(first) = args.first() {
                             let list_val = self.emit_expr(out, first, indent);
                             let boxed = self.adapt_to_i64(out, indent, &list_val);
-                            writeln!(out, "{}{} = call i64 @brief_reverse_list(i64 {})", indent, v, boxed).ok();
+                            writeln!(out, "{}{} = call i64 @__reverse_list__(i64 {})", indent, v, boxed).ok();
                         } else {
                             writeln!(out, "{}{} = add i64 0, 0 ; reverse no-arg", indent, v).ok();
                         }
@@ -1789,9 +1811,127 @@ impl LlvmBackend {
                         if let Some(first) = args.first() {
                             let end_val = self.emit_expr(out, first, indent);
                             let boxed = self.adapt_to_i64(out, indent, &end_val);
-                            writeln!(out, "{}{} = call i64 @brief_range(i64 {})", indent, v, boxed).ok();
+                            writeln!(out, "{}{} = call i64 @__range__(i64 {})", indent, v, boxed).ok();
                         } else {
                             writeln!(out, "{}{} = add i64 0, 0 ; range no-arg", indent, v).ok();
+                        }
+                    }
+                    // String intrinsics (2026-06-18) — load hdr[0], pass const char* to __name__ C function
+                    Intrinsic::TrimLeft => {
+                        if let Some(first) = args.first() {
+                            let s = self.emit_expr(out, first, indent);
+                            let sp = format!("%tls{}", self.txn_counter); self.txn_counter += 1;
+                            let dp = format!("%tld{}", self.txn_counter); self.txn_counter += 1;
+                            let cp = format!("%tlc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, s).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                            writeln!(out, "{}{} = call i64 @__trim_left__(ptr {})", indent, v, cp).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; trim_left no-arg", indent, v).ok();
+                        }
+                    }
+                    Intrinsic::TrimRight => {
+                        if let Some(first) = args.first() {
+                            let s = self.emit_expr(out, first, indent);
+                            let sp = format!("%trs{}", self.txn_counter); self.txn_counter += 1;
+                            let dp = format!("%trd{}", self.txn_counter); self.txn_counter += 1;
+                            let cp = format!("%trc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, s).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                            writeln!(out, "{}{} = call i64 @__trim_right__(ptr {})", indent, v, cp).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; trim_right no-arg", indent, v).ok();
+                        }
+                    }
+                    Intrinsic::ToLower => {
+                        if let Some(first) = args.first() {
+                            let s = self.emit_expr(out, first, indent);
+                            let sp = format!("%tlrs{}", self.txn_counter); self.txn_counter += 1;
+                            let dp = format!("%tlrd{}", self.txn_counter); self.txn_counter += 1;
+                            let cp = format!("%tlrc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, s).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                            writeln!(out, "{}{} = call i64 @__to_lower__(ptr {})", indent, v, cp).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; to_lower no-arg", indent, v).ok();
+                        }
+                    }
+                    Intrinsic::ContainsAt => {
+                        if args.len() >= 3 {
+                            let haystack = self.emit_expr(out, &args[0], indent);
+                            let needle = self.emit_expr(out, &args[1], indent);
+                            let start = self.emit_expr(out, &args[2], indent);
+                            let sp = format!("%cas{}", self.txn_counter); self.txn_counter += 1;
+                            let dp = format!("%cad{}", self.txn_counter); self.txn_counter += 1;
+                            let cp = format!("%cac{}", self.txn_counter); self.txn_counter += 1;
+                            let sp2 = format!("%cbs{}", self.txn_counter); self.txn_counter += 1;
+                            let dp2 = format!("%cbd{}", self.txn_counter); self.txn_counter += 1;
+                            let cp2 = format!("%cbc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, haystack).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp2, needle).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp2, sp2).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp2, dp2).ok();
+                            writeln!(out, "{}{} = call i64 @__contains_at__(ptr {}, ptr {}, i64 {})", indent, v, cp, cp2, start).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; contains_at needs 3 args", indent, v).ok();
+                        }
+                    }
+                    Intrinsic::FindFrom => {
+                        if args.len() >= 3 {
+                            let s = self.emit_expr(out, &args[0], indent);
+                            let needle = self.emit_expr(out, &args[1], indent);
+                            let start = self.emit_expr(out, &args[2], indent);
+                            let sp = format!("%ffs{}", self.txn_counter); self.txn_counter += 1;
+                            let dp = format!("%ffd{}", self.txn_counter); self.txn_counter += 1;
+                            let cp = format!("%ffc{}", self.txn_counter); self.txn_counter += 1;
+                            let sp2 = format!("%fns{}", self.txn_counter); self.txn_counter += 1;
+                            let dp2 = format!("%fnd{}", self.txn_counter); self.txn_counter += 1;
+                            let cp2 = format!("%fnc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, s).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp2, needle).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp2, sp2).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp2, dp2).ok();
+                            writeln!(out, "{}{} = call i64 @__find_from__(ptr {}, ptr {}, i64 {})", indent, v, cp, cp2, start).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 -1, 0 ; find_from needs 3 args", indent, v).ok();
+                        }
+                    }
+                    Intrinsic::SplitN => {
+                        if args.len() >= 3 {
+                            let s = self.emit_expr(out, &args[0], indent);
+                            let delim = self.emit_expr(out, &args[1], indent);
+                            let n_val = self.emit_expr(out, &args[2], indent);
+                            let sp = format!("%sps{}", self.txn_counter); self.txn_counter += 1;
+                            let dp = format!("%spd{}", self.txn_counter); self.txn_counter += 1;
+                            let cp = format!("%spc{}", self.txn_counter); self.txn_counter += 1;
+                            let sp2 = format!("%sds{}", self.txn_counter); self.txn_counter += 1;
+                            let dp2 = format!("%sdd{}", self.txn_counter); self.txn_counter += 1;
+                            let cp2 = format!("%sdc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp, s).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, sp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sp2, delim).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp2, sp2).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp2, dp2).ok();
+                            writeln!(out, "{}{} = call i64 @__splitn__(ptr {}, ptr {}, i64 {})", indent, v, cp, cp2, n_val).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; splitn needs 3 args", indent, v).ok();
+                        }
+                    }
+                    Intrinsic::IntToStr => {
+                        if let Some(first) = args.first() {
+                            let n = self.emit_expr(out, first, indent);
+                            let boxed = self.adapt_to_i64(out, indent, &n);
+                            writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, v, boxed).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; int_to_str no-arg", indent, v).ok();
                         }
                     }
                     // Benchmark intrinsics (2026-06-16) — direct libc, no brief_rt.c shims
@@ -2064,15 +2204,15 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
                     }
                     ProjectionTarget::Top => {
-                        writeln!(out, "{}{} = call i64 @brief_stack_top(i64 {})", indent, v, src_val.name).ok();
+                        writeln!(out, "{}{} = call i64 @__stack_top__(i64 {})", indent, v, src_val.name).ok();
                     }
                     ProjectionTarget::Front => {
-                        writeln!(out, "{}{} = call i64 @brief_queue_front(i64 {})", indent, v, src_val.name).ok();
+                        writeln!(out, "{}{} = call i64 @__queue_front__(i64 {})", indent, v, src_val.name).ok();
                     }
                     ProjectionTarget::Get(expr) => {
                         let key_val = self.emit_expr(out, expr, indent);
                         let key_boxed = self.adapt_to_i64(out, indent, &key_val);
-                        writeln!(out, "{}{} = call i64 @brief_hashmap_get(i64 {}, i64 {})", indent, v, src_val.name, key_boxed).ok();
+                        writeln!(out, "{}{} = call i64 @__hashmap_get__(i64 {}, i64 {})", indent, v, src_val.name, key_boxed).ok();
                     }
                     ProjectionTarget::Elements => {
                         writeln!(out, "{}{} = add i64 0, {} ; elements", indent, v, src_val.name).ok();
@@ -2919,10 +3059,10 @@ impl LlvmBackend {
     /// reactor, wait for workers. Used by emit_main and emit_enum_main.
     pub(crate) fn emit_async_phase(&self, out: &mut String) {
         if !self.has_async_txns || self.is_lightweight_async { return; }
-        writeln!(out, "  call void @brief_barrier_release()").ok();
+        writeln!(out, "  call void @__barrier_release__()").ok();
         // Sequential reactor runs in main thread concurrently with workers
         writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
-        writeln!(out, "  call void @brief_barrier_wait()").ok();
+        writeln!(out, "  call void @__barrier_wait__()").ok();
     }
 
     // ── FUSABLE PAIRS ────────────────────────────────────────

@@ -157,7 +157,7 @@ impl LlvmBackend {
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
-            writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
+            writeln!(out, "  call void @__thread_pool_init__(i32 {}, i8** %tp_fn_ptr)", count).ok();
         }
         // Line-buffer stdout so \n auto-flushes (matching default TTY behavior)
         writeln!(out, "  %so_init = load ptr, ptr @stdout").ok();
@@ -975,7 +975,7 @@ impl LlvmBackend {
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (%State*)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
-            writeln!(out, "  call void @brief_thread_pool_init(i32 {}, i8** %tp_fn_ptr)", count).ok();
+            writeln!(out, "  call void @__thread_pool_init__(i32 {}, i8** %tp_fn_ptr)", count).ok();
         }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "tick:").ok();

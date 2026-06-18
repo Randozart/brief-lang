@@ -1623,6 +1623,11 @@ impl Interpreter {
                         println!("{}", v);
                         Ok(Value::Bool(true))
                     }
+                    Intrinsic::Print => {
+                        let v = values.remove(0);
+                        print!("{}", v);
+                        Ok(Value::Bool(true))
+                    }
                     Intrinsic::Readln => {
                         let mut buf = String::new();
                         let _ = std::io::stdin().read_line(&mut buf);
@@ -3309,6 +3314,107 @@ impl Interpreter {
                         };
                         let list: Vec<Value> = (0..end).map(Value::Int).collect();
                         Ok(Value::List(list))
+                    }
+                    // String intrinsics (2026-06-18)
+                    Intrinsic::TrimLeft => {
+                        let s = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("trim_left requires String, got {:?}", v))),
+                        };
+                        Ok(Value::String(s.trim_start().to_string()))
+                    }
+                    Intrinsic::TrimRight => {
+                        let s = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("trim_right requires String, got {:?}", v))),
+                        };
+                        Ok(Value::String(s.trim_end().to_string()))
+                    }
+                    Intrinsic::ToLower => {
+                        let s = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("to_lower requires String, got {:?}", v))),
+                        };
+                        Ok(Value::String(s.to_lowercase()))
+                    }
+                    Intrinsic::ContainsAt => {
+                        let haystack = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("contains_at haystack requires String, got {:?}", v))),
+                        };
+                        let needle = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("contains_at needle requires String, got {:?}", v))),
+                        };
+                        let start = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("contains_at start requires Int, got {:?}", v))),
+                        };
+                        if start < 0 || (start as usize) >= haystack.len() {
+                            return Ok(Value::Bool(false));
+                        }
+                        Ok(Value::Bool(haystack[(start as usize)..].contains(&needle)))
+                    }
+                    Intrinsic::FindFrom => {
+                        let s = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("find_from s requires String, got {:?}", v))),
+                        };
+                        let needle = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("find_from needle requires String, got {:?}", v))),
+                        };
+                        let start = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("find_from start requires Int, got {:?}", v))),
+                        };
+                        if start < 0 || (start as usize) >= s.len() {
+                            return Ok(Value::Int(-1));
+                        }
+                        match s[(start as usize)..].find(&needle) {
+                            Some(idx) => Ok(Value::Int((start as usize + idx) as i64)),
+                            None => Ok(Value::Int(-1)),
+                        }
+                    }
+                    Intrinsic::SplitN => {
+                        let s = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("splitn s requires String, got {:?}", v))),
+                        };
+                        let delim = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("splitn delim requires String, got {:?}", v))),
+                        };
+                        let _n = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("splitn n requires Int, got {:?}", v))),
+                        };
+                        let parts: Vec<Value> = if delim.is_empty() {
+                            s.chars().map(|c| Value::String(c.to_string())).collect()
+                        } else {
+                            s.split(&delim).map(|p| Value::String(p.to_string())).collect()
+                        };
+                        Ok(Value::List(parts))
+                    }
+                    Intrinsic::IntToStr => {
+                        let n = match values.remove(0) {
+                            Value::Int(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("int_to_str requires Int, got {:?}", v))),
+                        };
+                        Ok(Value::String(n.to_string()))
                     }
                     // Benchmark intrinsics (2026-06-16)
                     Intrinsic::PrintInt => {
