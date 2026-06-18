@@ -241,6 +241,7 @@ fn is_gpu_safe_intrinsic(intrinsic: &Intrinsic) -> bool {
         | Intrinsic::GetGlobalId | Intrinsic::GetLocalId
         | Intrinsic::GetGroupId | Intrinsic::GetNumGroups
         | Intrinsic::SubGroupBarrier
+        | Intrinsic::Ceil | Intrinsic::Floor
     )
 }
 
@@ -373,6 +374,8 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str("declare float @llvm.pow.f32(float, float) #0\n");
     ir.push_str("declare float @llvm.sqrt.f32(float) #0\n");
     ir.push_str("declare float @llvm.fabs.f32(float) #0\n");
+    ir.push_str("declare float @llvm.ceil.f32(float) #0\n");
+    ir.push_str("declare float @llvm.floor.f32(float) #0\n");
     ir.push_str("\n");
 
     // Emit shared memory globals (addrspace(3)) for any SharedMem expressions
@@ -438,6 +441,7 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
         Expr::IntrinsicCall { intrinsic, .. } => matches!(intrinsic,
             Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
             | Intrinsic::Sqrt | Intrinsic::Fabs
+            | Intrinsic::Ceil | Intrinsic::Floor
         ),
         _ => false,
     }
@@ -896,6 +900,18 @@ fn emit_spirv_intrinsic(
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fabs{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.fabs.f32(float {})\n", indent, reg, v));
+            reg
+        }
+        Intrinsic::Ceil => {
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let reg = format!("%ceil{}", ir.len());
+            ir.push_str(&format!("{}{} = call float @llvm.ceil.f32(float {})\n", indent, reg, v));
+            reg
+        }
+        Intrinsic::Floor => {
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let reg = format!("%floor{}", ir.len());
+            ir.push_str(&format!("{}{} = call float @llvm.floor.f32(float {})\n", indent, reg, v));
             reg
         }
         _ => {

@@ -58,6 +58,48 @@ static void* vk_lib = NULL;
 static int vk_initialized = 0;
 static int vk_available = 0;
 
+// OpenCL type declarations (needed before state variables)
+typedef void* cl_platform_id;
+typedef void* cl_device_id;
+typedef void* cl_context;
+typedef void* cl_command_queue;
+typedef void* cl_program;
+typedef void* cl_kernel;
+typedef void* cl_mem;
+typedef struct { void* data; } cl_event;
+
+// OpenCL state — declared early so brief_gpu_is_available can check both backends
+static void* cl_lib = NULL;
+static int cl_available = 0;
+static cl_platform_id cl_platform;
+static cl_device_id cl_device;
+static cl_context cl_ctx;
+static cl_command_queue cl_queue;
+
+// OpenCL function pointer declarations (used by dispatch functions below)
+static cl_platform_id* (*clGetPlatformIDs)(uint32_t, cl_platform_id*, uint32_t*) = NULL;
+static int (*clGetDeviceIDs)(cl_platform_id, uint64_t, uint32_t, cl_device_id*, uint32_t*) = NULL;
+static cl_context (*clCreateContext)(void*, uint32_t, cl_device_id*, void*, void*, int*) = NULL;
+static cl_command_queue (*clCreateCommandQueue)(cl_context, cl_device_id, uint64_t, int*) = NULL;
+static cl_program (*clCreateProgramWithIL)(cl_context, const void*, size_t, int*) = NULL;
+static int (*clBuildProgram)(cl_program, uint32_t, const cl_device_id*, const char*, void*, void*) = NULL;
+static cl_kernel (*clCreateKernel)(cl_program, const char*, int*) = NULL;
+static int (*clSetKernelArgSVMPointer)(cl_kernel, uint32_t, void*) = NULL;
+static int (*clSetKernelArg)(cl_kernel, uint32_t, size_t, const void*) = NULL;
+static int (*clEnqueueNDRangeKernel)(cl_command_queue, cl_kernel, uint32_t, const size_t*, const size_t*, const size_t*, uint32_t, const cl_event*, cl_event*) = NULL;
+static int (*clEnqueueReadBuffer)(cl_command_queue, cl_mem, int, size_t, size_t, void*, uint32_t, const cl_event*, cl_event*) = NULL;
+static int (*clEnqueueWriteBuffer)(cl_command_queue, cl_mem, int, size_t, size_t, const void*, uint32_t, const cl_event*, cl_event*) = NULL;
+static int (*clFinish)(cl_command_queue) = NULL;
+static int (*clReleaseKernel)(cl_kernel) = NULL;
+static int (*clReleaseProgram)(cl_program) = NULL;
+static int (*clReleaseCommandQueue)(cl_command_queue) = NULL;
+static int (*clReleaseContext)(cl_context) = NULL;
+static int (*clReleaseMemObject)(cl_mem) = NULL;
+static void* (*clSVMAlloc)(cl_context, uint64_t, size_t, uint32_t) = NULL;
+static int (*clSVMFree)(cl_context, void*) = NULL;
+static cl_mem (*clCreateBuffer)(cl_context, uint64_t, size_t, void*, int*) = NULL;
+static int (*clGetProgramBuildInfo)(cl_program, cl_device_id, uint32_t, size_t, void*, size_t*) = NULL;
+
 static VkInstance vk_instance;
 static VkDevice vk_device;
 static VkPipelineLayout vk_pipeline_layout;
@@ -351,12 +393,15 @@ static int brief_gpu_init_vulkan_inner() {
     return 1;
 }
 
-/// Returns 1 if Vulkan is available and initialized, 0 otherwise.
+/// Returns 1 if a GPU backend (Vulkan or OpenCL) is available and initialized, 0 otherwise.
 int brief_gpu_is_available() {
-    if (!vk_initialized) {
-        brief_gpu_init();
+    if (!vk_initialized && !cl_available) {
+        brief_gpu_init();  // tries Vulkan first
+        if (!vk_available) {
+            brief_gpu_init_opencl_inner();  // fallback to OpenCL
+        }
     }
-    return vk_available;
+    return vk_available || cl_available;
 }
 
 /// Allocate a GPU buffer of `bytes` size.
@@ -466,6 +511,19 @@ void brief_gpu_memcpy(int64_t dst_handle, int64_t src_handle, size_t bytes, int 
 /// `block_x` — local workgroup size in X dimension
 /// `buffer_handles` — array of buffer handle int64_ts
 /// `num_buffers` — count of buffer handles
+
+// Forward declarations for backend-specific dispatch functions
+static void brief_gpu_launch_vulkan(
+    const void* kernel_spirv, size_t kernel_size,
+    int grid_x, int grid_y, int grid_z, int block_x,
+    const int64_t* buffer_handles, int num_buffers
+);
+static void brief_gpu_launch_opencl(
+    const void* kernel_spirv, size_t kernel_size,
+    int grid_x, int grid_y, int grid_z, int block_x,
+    const int64_t* buffer_handles, int num_buffers
+);
+
 void brief_gpu_launch(
     const void* kernel_spirv,
     size_t kernel_size,
@@ -476,8 +534,28 @@ void brief_gpu_launch(
     const int64_t* buffer_handles,
     int num_buffers
 ) {
-    if (!vk_available) return;
+    if (vk_available) {
+        brief_gpu_launch_vulkan(kernel_spirv, kernel_size, grid_x, grid_y, grid_z, block_x, buffer_handles, num_buffers);
+        return;
+    }
+    if (cl_available) {
+        brief_gpu_launch_opencl(kernel_spirv, kernel_size, grid_x, grid_y, grid_z, block_x, buffer_handles, num_buffers);
+        return;
+    }
+}
 
+// ── Vulkan dispatch (primary) ──────────────────────────────────
+
+static void brief_gpu_launch_vulkan(
+    const void* kernel_spirv,
+    size_t kernel_size,
+    int grid_x,
+    int grid_y,
+    int grid_z,
+    int block_x,
+    const int64_t* buffer_handles,
+    int num_buffers
+) {
     // Create shader module from SPIR-V
     struct { void* next; uint32_t flags; size_t code_size; const uint32_t* code; } shader_info = {
         .next = NULL,
@@ -585,6 +663,125 @@ void brief_gpu_launch(
     vkDestroyShaderModule(vk_device, shader_module, NULL);
 }
 
+// ── OpenCL dispatch (fallback when Vulkan is unavailable) ──────
+
+static void brief_gpu_launch_opencl(
+    const void* kernel_spirv,
+    size_t kernel_size,
+    int grid_x,
+    int grid_y,
+    int grid_z,
+    int block_x,
+    const int64_t* buffer_handles,
+    int num_buffers
+) {
+    int err;
+
+    // Create program from SPIR-V IL
+    cl_program program = clCreateProgramWithIL(cl_ctx, kernel_spirv, kernel_size, &err);
+    if (!program || err != 0) return;
+
+    // Build the program
+    err = clBuildProgram(program, 0, NULL, "", NULL, NULL);
+    if (err != 0) {
+        // Build failure — try to get build log for diagnostics
+        char log_buf[4096];
+        size_t log_size = 0;
+        if (clGetProgramBuildInfo(program, cl_device, 0x1000, sizeof(log_buf), log_buf, &log_size) == 0) {
+            (void)log_buf;  // diagnostics available if needed
+        }
+        clReleaseProgram(program);
+        return;
+    }
+
+    // Create kernel
+    cl_kernel kernel = clCreateKernel(program, "main", &err);
+    if (!kernel || err != 0) { clReleaseProgram(program); return; }
+
+    // Total work items = grid * block_x (per dimension)
+    size_t global_size[3];
+    global_size[0] = (size_t)grid_x * (size_t)(block_x > 0 ? block_x : 1);
+    global_size[1] = (size_t)(grid_y > 0 ? grid_y : 1);
+    global_size[2] = (size_t)(grid_z > 0 ? grid_z : 1);
+
+    // Local work size
+    size_t local_size[3] = {
+        (size_t)(block_x > 0 ? block_x : 64),
+        1, 1
+    };
+
+    // Copy host data to OpenCL buffers and set kernel args
+    // The SPIR-V kernel signature is: kernel(i8* %in_buf, i8* %out_buf, i64 %N)
+    // where arg 0 = input buffer, arg 1 = output buffer, arg 2 = N (total elements)
+    cl_mem cl_bufs[MAX_GPU_BUFFERS];
+    int num_cl_bufs = 0;
+
+    for (int i = 0; i < num_buffers && i < MAX_GPU_BUFFERS; i++) {
+        int slot = (int)(buffer_handles[i] - 1);
+        if (slot < 0 || slot >= MAX_GPU_BUFFERS || !gpu_buffers[slot].used) continue;
+
+        // Create OpenCL buffer using the host pointer data
+        cl_bufs[num_cl_bufs] = clCreateBuffer(cl_ctx, 3,  // CL_MEM_READ_WRITE
+            gpu_buffers[slot].size, NULL, &err);
+        if (!cl_bufs[num_cl_bufs] || err != 0) {
+            for (int j = 0; j < num_cl_bufs; j++) clReleaseMemObject(cl_bufs[j]);
+            clReleaseKernel(kernel);
+            clReleaseProgram(program);
+            return;
+        }
+
+        // Write host data to device buffer before dispatch
+        clEnqueueWriteBuffer(cl_queue, cl_bufs[num_cl_bufs], 0, 0,
+            gpu_buffers[slot].size, gpu_buffers[slot].host_ptr, 0, NULL, NULL);
+
+        // Set kernel arg — bind to the kernel parameter index i
+        err = clSetKernelArg(kernel, (uint32_t)i, sizeof(cl_mem), &cl_bufs[num_cl_bufs]);
+        if (err != 0) {
+            for (int j = 0; j <= num_cl_bufs; j++) clReleaseMemObject(cl_bufs[j]);
+            clReleaseKernel(kernel);
+            clReleaseProgram(program);
+            return;
+        }
+        num_cl_bufs++;
+    }
+
+    // Set the N parameter (total element count) as the next kernel arg
+    int64_t total_n = (int64_t)global_size[0] * (int64_t)global_size[1] * (int64_t)global_size[2];
+    err = clSetKernelArg(kernel, (uint32_t)num_cl_bufs, sizeof(int64_t), &total_n);
+    if (err != 0) {
+        for (int j = 0; j < num_cl_bufs; j++) clReleaseMemObject(cl_bufs[j]);
+        clReleaseKernel(kernel);
+        clReleaseProgram(program);
+        return;
+    }
+
+    // Dispatch
+    err = clEnqueueNDRangeKernel(cl_queue, kernel, 3, NULL, global_size, local_size, 0, NULL, NULL);
+    if (err != 0) {
+        for (int j = 0; j < num_cl_bufs; j++) clReleaseMemObject(cl_bufs[j]);
+        clReleaseKernel(kernel);
+        clReleaseProgram(program);
+        return;
+    }
+
+    // Wait for completion
+    clFinish(cl_queue);
+
+    // Read data back from device to host
+    for (int i = 0; i < num_cl_bufs; i++) {
+        int slot = (int)(buffer_handles[i] - 1);
+        if (slot < 0 || slot >= MAX_GPU_BUFFERS || !gpu_buffers[slot].used) continue;
+        clEnqueueReadBuffer(cl_queue, cl_bufs[i], 0, 0,
+            gpu_buffers[slot].size, gpu_buffers[slot].host_ptr, 0, NULL, NULL);
+    }
+    clFinish(cl_queue);
+
+    // Cleanup
+    for (int i = 0; i < num_cl_bufs; i++) clReleaseMemObject(cl_bufs[i]);
+    clReleaseKernel(kernel);
+    clReleaseProgram(program);
+}
+
 /// Shutdown the GPU runtime, releasing all Vulkan resources.
 void brief_gpu_shutdown() {
     if (!vk_available) return;
@@ -620,39 +817,7 @@ void brief_gpu_shutdown() {
 // SPIR-V is consumed natively by OpenCL via clCreateProgramWithIL.
 // This path is used when --gpu-backend includes 'opencl' and Vulkan init
 // failed.
-
-static void* cl_lib = NULL;
-static int cl_available = 0;
-
-typedef void* cl_platform_id;
-typedef void* cl_device_id;
-typedef void* cl_context;
-typedef void* cl_command_queue;
-typedef void* cl_program;
-typedef void* cl_kernel;
-typedef void* cl_mem;
-typedef struct { void* data; } cl_event;
-
-// Simplified OpenCL function pointers
-static cl_platform_id* (*clGetPlatformIDs)(uint32_t, cl_platform_id*, uint32_t*) = NULL;
-static int (*clGetDeviceIDs)(cl_platform_id, uint64_t, uint32_t, cl_device_id*, uint32_t*) = NULL;
-static cl_context (*clCreateContext)(void*, uint32_t, cl_device_id*, void*, void*, int*) = NULL;
-static cl_command_queue (*clCreateCommandQueue)(cl_context, cl_device_id, uint64_t, int*) = NULL;
-static cl_program (*clCreateProgramWithIL)(cl_context, const void*, size_t, int*) = NULL;
-static int (*clBuildProgram)(cl_program, uint32_t, const cl_device_id*, const char*, void*, void*) = NULL;
-static cl_kernel (*clCreateKernel)(cl_program, const char*, int*) = NULL;
-static int (*clSetKernelArgSVMPointer)(cl_kernel, uint32_t, void*) = NULL;
-static int (*clEnqueueNDRangeKernel)(cl_command_queue, cl_kernel, uint32_t, const size_t*, const size_t*, const size_t*, uint32_t, const cl_event*, cl_event*) = NULL;
-static int (*clEnqueueReadBuffer)(cl_command_queue, cl_mem, int, size_t, size_t, void*, uint32_t, const cl_event*, cl_event*) = NULL;
-static int (*clEnqueueWriteBuffer)(cl_command_queue, cl_mem, int, size_t, size_t, const void*, uint32_t, const cl_event*, cl_event*) = NULL;
-static int (*clFinish)(cl_command_queue) = NULL;
-static int (*clReleaseKernel)(cl_kernel) = NULL;
-static int (*clReleaseProgram)(cl_program) = NULL;
-static int (*clReleaseCommandQueue)(cl_command_queue) = NULL;
-static int (*clReleaseContext)(cl_context) = NULL;
-static int (*clReleaseMemObject)(cl_mem) = NULL;
-static void* (*clSVMAlloc)(cl_context, uint64_t, size_t, uint32_t) = NULL;
-static int (*clSVMFree)(cl_context, void*) = NULL;
+// (Types and function pointers declared above alongside the Vulkan state.)
 
 static int load_opencl_symbols() {
 #define CL_LOAD(name) do { \
@@ -678,14 +843,12 @@ static int load_opencl_symbols() {
     CL_LOAD(clReleaseMemObject);
     CL_LOAD(clSVMAlloc);
     CL_LOAD(clSVMFree);
+    CL_LOAD(clCreateBuffer);
+    CL_LOAD(clSetKernelArg);
+    CL_LOAD(clGetProgramBuildInfo);
     return 1;
 #undef CL_LOAD
 }
-
-static cl_platform_id cl_platform;
-static cl_device_id cl_device;
-static cl_context cl_ctx;
-static cl_command_queue cl_queue;
 
 static int brief_gpu_init_opencl_inner() {
     cl_lib = dlopen("libOpenCL.so.1", RTLD_LAZY | RTLD_LOCAL);

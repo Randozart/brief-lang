@@ -145,6 +145,16 @@ fn count_expr_ops(expr: &Expr) -> u64 {
         Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
             1 + count_expr_ops(e)
         }
+        // Intrinsic calls — count float math ops as 1 each, recurse into args
+        Expr::IntrinsicCall { intrinsic, args } => {
+            let intrinsic_op = if matches!(intrinsic,
+                Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
+                | Intrinsic::Sqrt | Intrinsic::Fabs
+                | Intrinsic::Ceil | Intrinsic::Floor
+            ) { 1 } else { 0 };
+            let args_ops: u64 = args.iter().map(|a| count_expr_ops(a)).sum();
+            intrinsic_op + args_ops
+        }
         _ => 0,
     }
 }
