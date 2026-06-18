@@ -232,6 +232,8 @@ pub struct ForeignSignature {
     pub buffer_mode: Option<String>, // stack | heap | static
     pub ffi_kind: Option<FfiKind>,   // NEW: frgn, frgn!, syscall, syscall!
     pub is_out: bool,                // #out modifier — function has observable output
+    pub is_pipe: bool,               // true if pipe syntax `-> T | fallback` was used
+    pub fallback: Option<Expr>,      // fallback expression for pipe syntax
     pub span: Option<Span>,
 }
 
@@ -309,6 +311,11 @@ impl ForeignBinding {
             postcondition: sig.postcondition.clone(),
             buffer_mode: sig.buffer_mode.clone(),
         }
+    }
+
+    /// True if this binding came from a pipe-syntax frgn declaration.
+    pub fn is_pipe(&self) -> bool {
+        false // ForeignBinding (TOML) never has pipe syntax
     }
 }
 

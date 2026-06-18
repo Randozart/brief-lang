@@ -32,6 +32,12 @@ pub fn validate_frgn_against_binding(
     frgn: &ForeignSignature,
     binding: &ForeignBinding,
 ) -> Result<(), FfiError> {
+    // Pipe-syntax frgns skip TOML validation entirely.
+    // The fallback expression provides the error value directly.
+    if frgn.is_pipe {
+        return Ok(());
+    }
+
     // Check name matches
     if frgn.name != binding.name {
         return Err(FfiError::ValidationError(format!(
@@ -151,6 +157,8 @@ mod tests {
             buffer_mode: None,
             ffi_kind: None,
             is_out: false,
+            is_pipe: false,
+            fallback: None,
             span: None,
         };
 
@@ -199,6 +207,8 @@ mod tests {
             buffer_mode: None,
             ffi_kind: None,
             is_out: false,
+            is_pipe: false,
+            fallback: None,
             span: None,
         };
 

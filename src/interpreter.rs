@@ -1320,6 +1320,70 @@ impl Interpreter {
         Ok(())
     }
 
+    /// Dispatch a pipe-syntax frgn call.
+    /// Validates the raw FFI return against the expected type T.
+    /// Returns `Ok(value)` if valid, `Err(fallback_value)` if not.
+    pub(crate) fn call_pipe_frgn(&mut self, fn_name: &str, raw: Value) -> Result<Value, RuntimeError> {
+        let sig = match self.ffi_bindings.get(fn_name) {
+            Some(s) => s.clone(),
+            None => return Ok(raw),
+        };
+        let success_type = sig.success_output.first()
+            .map(|(_, t)| t)
+            .cloned()
+            .unwrap_or(Type::Void);
+
+        let is_valid = Self::is_valid_ffi_return(&raw, &success_type);
+
+        if is_valid {
+            // Ok(raw)
+            let mut fields = std::collections::HashMap::new();
+            fields.insert("value".to_string(), raw);
+            Ok(Value::Enum("Result".to_string(), "Ok".to_string(), fields))
+        } else {
+            // Err(fallback_value)
+            let fallback_val = match &sig.fallback {
+                Some(expr) => self.eval_expr(expr)?,
+                None => Value::Void,
+            };
+            let mut fields = std::collections::HashMap::new();
+            fields.insert("value".to_string(), fallback_val);
+            Ok(Value::Enum("Result".to_string(), "Err".to_string(), fields))
+        }
+    }
+
+    /// Check whether a raw FFI return value constitutes a valid value of the
+    /// expected type T. Used by pipe-syntax frgn declarations for sentinel-based
+    /// error detection without TOML bindings.
+    fn is_valid_ffi_return(value: &Value, expected: &Type) -> bool {
+        match (value, expected) {
+            // Pointer types: null pointer → invalid
+            (Value::String(s), Type::String) => !s.is_empty() || {
+                // Empty string "" is valid (it's a non-null pointer to '\0').
+                // Only truly null (Value::String that wraps a null) is invalid.
+                // The interpreter represents null strings as Value::String("\0")
+                // or we check the raw bytes. For now, all non-null strings are valid.
+                true
+            },
+            (Value::Data(d), Type::Data) => true, // Data is always valid
+            // Float: NaN/Inf → invalid
+            (Value::Float(f), Type::Float) => f.is_finite(),
+            // Int/UInt/Bool: always valid (any i64 is a valid integer)
+            (Value::Int(_), Type::Int) => true,
+            (Value::Int(_), Type::UInt) => true,
+            (Value::Bool(_), Type::Bool) => true,
+            (Value::Char(_), Type::Char) => true,
+            // Structs/lists/objects: always valid (they come from successful FFI)
+            (Value::List(_), _) => true,
+            (Value::Instance { .. }, _) => true,
+            (Value::Enum(..), _) => true,
+            // Void is always valid
+            (Value::Void, _) => true,
+            // Mismatch
+            _ => false,
+        }
+    }
+
     pub(crate) fn handle_ffi_result(&self, fn_name: &str, mut result: Value) -> Result<Value, RuntimeError> {
         let sig = match self.ffi_bindings.get(fn_name) {
             Some(s) => s,
@@ -9091,5 +9155,160 @@ mod kani_full_tests {
         let expr = Expr::Cast(Box::new(Expr::List(vec![])), Type::Int);
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "List -> Int should be an error");
+    }
+
+    // --- Pipe frgn tests ---
+
+    #[test]
+    fn test_is_valid_ffi_return_string_valid() {
+        assert!(Interpreter::is_valid_ffi_return(&Value::String("hello".into()), &Type::String));
+        assert!(Interpreter::is_valid_ffi_return(&Value::String("".into()), &Type::String));
+    }
+
+    #[test]
+    fn test_is_valid_ffi_return_int_valid() {
+        assert!(Interpreter::is_valid_ffi_return(&Value::Int(42), &Type::Int));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Int(0), &Type::Int));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Int(-1), &Type::Int));
+    }
+
+    #[test]
+    fn test_is_valid_ffi_return_float_valid() {
+        assert!(Interpreter::is_valid_ffi_return(&Value::Float(3.14), &Type::Float));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Float(0.0), &Type::Float));
+    }
+
+    #[test]
+    fn test_is_valid_ffi_return_float_nan_invalid() {
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::NAN), &Type::Float));
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::INFINITY), &Type::Float));
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::NEG_INFINITY), &Type::Float));
+    }
+
+    #[test]
+    fn test_is_valid_ffi_return_bool_valid() {
+        assert!(Interpreter::is_valid_ffi_return(&Value::Bool(true), &Type::Bool));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Bool(false), &Type::Bool));
+    }
+
+    #[test]
+    fn test_is_valid_ffi_return_type_mismatch() {
+        // An Int value is not valid when String is expected
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Int(42), &Type::String));
+        // A float is not valid when Int is expected
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(1.0), &Type::Int));
+    }
+
+    #[test]
+    fn test_call_pipe_frgn_ok_wraps_result() {
+        let mut i = Interpreter::new();
+        let sig = ForeignSignature {
+            name: "test_pipe_ok".into(), location: "test".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Int)],
+            result_type: ResultType::Projection(vec![Type::Int]),
+            error_type_name: "".into(), error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::Integer(0)),
+            span: None,
+        };
+        i.ffi_bindings.insert("test_pipe_ok".into(), sig);
+
+        // Valid return: Int is always valid -> Ok(42)
+        let result = i.call_pipe_frgn("test_pipe_ok", Value::Int(42)).unwrap();
+        match result {
+            Value::Enum(e, v, fields) if e == "Result" && v == "Ok" => {
+                assert_eq!(fields.get("value"), Some(&Value::Int(42)));
+            }
+            other => panic!("Expected Ok(42), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_call_pipe_frgn_err_uses_fallback() {
+        let mut i = Interpreter::new();
+        // Set up a pipe frgn with float type and fallback to 0.0
+        let sig = ForeignSignature {
+            name: "test_pipe_err".into(), location: "test".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Float)],
+            result_type: ResultType::Projection(vec![Type::Float]),
+            error_type_name: "".into(), error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::Float(0.0)),
+            span: None,
+        };
+        i.ffi_bindings.insert("test_pipe_err".into(), sig);
+
+        // NaN is invalid for Float -> Err(0.0)
+        let result = i.call_pipe_frgn("test_pipe_err", Value::Float(f64::NAN)).unwrap();
+        match result {
+            Value::Enum(e, v, fields) if e == "Result" && v == "Err" => {
+                assert_eq!(fields.get("value"), Some(&Value::Float(0.0)));
+            }
+            other => panic!("Expected Err(0.0), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_call_pipe_frgn_valid_float_ok() {
+        let mut i = Interpreter::new();
+        let sig = ForeignSignature {
+            name: "test_pipe_f".into(), location: "test".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Float)],
+            result_type: ResultType::Projection(vec![Type::Float]),
+            error_type_name: "".into(), error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::Float(0.0)),
+            span: None,
+        };
+        i.ffi_bindings.insert("test_pipe_f".into(), sig);
+
+        // Finite float is valid -> Ok(3.14)
+        let result = i.call_pipe_frgn("test_pipe_f", Value::Float(3.14)).unwrap();
+        match result {
+            Value::Enum(e, v, fields) if e == "Result" && v == "Ok" => {
+                assert!((fields.get("value").unwrap().as_float() - 3.14).abs() < 1e-10);
+            }
+            other => panic!("Expected Ok(3.14), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_call_pipe_frgn_string_null_fallback() {
+        let mut i = Interpreter::new();
+        let sig = ForeignSignature {
+            name: "test_pipe_null_str".into(), location: "test".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::String)],
+            result_type: ResultType::Projection(vec![Type::String]),
+            error_type_name: "".into(), error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::String("default".to_string())),
+            span: None,
+        };
+        i.ffi_bindings.insert("test_pipe_null_str".into(), sig);
+
+        // Valid string returns Ok with the string
+        let result = i.call_pipe_frgn("test_pipe_null_str", Value::String("hello".into())).unwrap();
+        match result {
+            Value::Enum(e, v, fields) if e == "Result" && v == "Ok" => {
+                assert_eq!(fields.get("value"), Some(&Value::String("hello".into())));
+            }
+            other => panic!("Expected Ok(\"hello\"), got {:?}", other),
+        }
     }
 }

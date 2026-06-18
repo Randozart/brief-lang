@@ -90,6 +90,11 @@ impl ExprEval for CallExpr {
         if let Some(location) = ctx.ffi_name_to_location.get(fn_name) {
             if let Some(frgn_fn) = ctx.foreign_functions.get(location) {
                 if let Some(sig) = ctx.ffi_bindings.get(fn_name) {
+                    // Pipe-syntax frgn: sentinel-based validation with fallback value
+                    if sig.is_pipe {
+                        let raw = frgn_fn(arg_values)?;
+                        return ctx.call_pipe_frgn(fn_name, raw);
+                    }
                     if sig.input_layout.is_some() || sig.output_layout.is_some() {
                         let binding = crate::ast::ForeignBinding::from_signature(sig);
                         return ctx.orchestrator.call(&binding, arg_values, *frgn_fn);

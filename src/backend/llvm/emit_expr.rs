@@ -332,8 +332,9 @@ impl LlvmBackend {
                     return TypedRegister { name: v, ty: Type::Int };
                 }
                 // Clone foreign info upfront to avoid borrow conflict with emit_expr
-                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType)> = self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone()));
-                if let Some((inputs, ret_type)) = frgn_sig {
+                let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType, bool, Option<crate::ast::Expr>)> =
+                    self.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone(), s.is_pipe, s.fallback.clone()));
+                if let Some((inputs, ret_type, is_pipe, fallback)) = frgn_sig {
                     let mut marshaled: Vec<String> = Vec::new();
                     for (i, (_, arg_ty)) in inputs.iter().enumerate() {
                         if i < args.len() {
@@ -373,15 +374,33 @@ impl LlvmBackend {
                     };
                     let call_ret = if is_float_ret { "float" } else { "i64" };
                     let args_str = marshaled.join(", ");
-                    writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, name, args_str).ok();
+                    let call_result = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = call {} @{}({})", indent, call_result, call_ret, name, args_str).ok();
+
+                    // Pipe-syntax frgn: currently emits raw call result (no sentinel check).
+                    // TODO: Full sentinel-based error detection + Result enum construction.
+                    // The interpreter handles pipe frgns correctly with Ok/Err wrapping.
+                    if is_pipe {
+                        if is_float_ret {
+                            let bi = format!("%fbi{}", self.txn_counter); self.txn_counter += 1;
+                            let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, call_result).ok();
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                            self.reg_float_cache.insert(ze.clone(), call_result.clone());
+                            return TypedRegister { name: ze, ty: Type::Float };
+                        }
+                        return TypedRegister { name: call_result, ty: Type::Int };
+                    }
+
                     if is_float_ret {
                         let bi = format!("%fbi{}", self.txn_counter); self.txn_counter += 1;
                         let ze = format!("%fze{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, v).ok();
+                        writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, call_result).ok();
                         writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
-                        self.reg_float_cache.insert(ze.clone(), v.clone());
+                        self.reg_float_cache.insert(ze.clone(), call_result.clone());
                         return TypedRegister { name: ze, ty: Type::Float };
                     }
+                    return TypedRegister { name: call_result, ty: Type::Int };
                 } else {
                     // Internal call — marshal i64 back to real types per definition
                     let def_tys: Option<Vec<Type>> = self.defn_params.get(name).cloned();

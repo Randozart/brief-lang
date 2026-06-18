@@ -1490,15 +1490,13 @@ impl<'a> Parser<'a> {
         self.expect(Token::RParen)?;
 
         // Parse return type
-        let success_output = if ffi_kind == FfiKind::FrgnBang || ffi_kind == FfiKind::SyscallBang {
-            // Fire-and-forget or fire-and-forget syscall: no return type expected
-            Vec::new()
-        } else {
+        let mut success_output = Vec::new();
+        let mut is_result = false;
+        if ffi_kind != FfiKind::FrgnBang && ffi_kind != FfiKind::SyscallBang {
             self.expect(Token::Arrow)?;
 
-            // Expect "Result<T, E>" or plain type
-            let mut success_output = Vec::new();
-            let is_result = matches!(self.current_token(), Some(Ok(Token::Identifier(id))) if id == "Result");
+            // Expect "Result<T, E>" or plain type, optionally followed by `| fallback`
+            is_result = matches!(self.current_token(), Some(Ok(Token::Identifier(id))) if id == "Result");
             if is_result {
                 self.advance();
                 // Parse <SuccessType, E>
@@ -1537,8 +1535,31 @@ impl<'a> Parser<'a> {
                 let plain_type = self.parse_type()?;
                 success_output.push(("result".to_string(), plain_type));
             }
-            success_output
-        };
+        }
+
+        // Check for pipe syntax: `-> T | fallback_expr`
+        // Only valid with plain return type (not Result<T,E>).
+        let mut fallback = None;
+        let mut is_pipe = false;
+        if let Some(Ok(Token::Pipe)) = self.current_token() {
+            if is_result {
+                return self.spanned_err(
+                    "Cannot combine 'Result<T, E>' syntax with pipe '|' fallback. \
+                     Use either `-> Result<T, E>` or `-> T | fallback`, not both."
+                        .to_string(),
+                );
+            }
+            if ffi_kind == FfiKind::FrgnBang || ffi_kind == FfiKind::SyscallBang {
+                return self.spanned_err(
+                    "Cannot use pipe '|' fallback with fire-and-forget frgn!/syscall! \
+                     (they have no return type)."
+                        .to_string(),
+                );
+            }
+            self.advance();
+            is_pipe = true;
+            fallback = Some(self.parse_expression()?);
+        }
 
         // Parse optional from "location" clause
         let location = if let Some(Ok(Token::From)) = self.current_token() {
@@ -1578,6 +1599,8 @@ impl<'a> Parser<'a> {
             result_type,
             ffi_kind: Some(ffi_kind),
             is_out,
+            is_pipe,
+            fallback,
             span: None,
         };
 
@@ -9014,6 +9037,80 @@ mod kani_full_tests {
             assert_eq!(imp.path.join("/"), "std/core/*");
         } else {
             panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_frgn_pipe_literal() {
+        let s = "frgn read_file(path: String) -> String | \"\" ;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "frgn with pipe literal should parse: {:?}", result.err());
+        if let TopLevel::ForeignBinding { signature, .. } = &result.unwrap().items[0] {
+            assert!(signature.is_pipe, "should be marked as pipe");
+            assert!(signature.fallback.is_some(), "should have fallback expression");
+            assert_eq!(signature.success_output.len(), 1);
+            assert_eq!(signature.success_output[0].1, Type::String);
+        } else {
+            panic!("Expected ForeignBinding");
+        }
+    }
+
+    #[test]
+    fn test_parse_frgn_pipe_constructor() {
+        let s = "frgn get_value() -> String | Error(\"not found\") from \"libtest.so\";";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "frgn with pipe constructor should parse: {:?}", result.err());
+        if let TopLevel::ForeignBinding { signature, .. } = &result.unwrap().items[0] {
+            assert!(signature.is_pipe, "should be marked as pipe");
+            assert!(signature.fallback.is_some(), "should have fallback expression");
+            assert_eq!(signature.success_output[0].1, Type::String);
+            assert_eq!(signature.location, "libtest.so");
+        } else {
+            panic!("Expected ForeignBinding");
+        }
+    }
+
+    #[test]
+    fn test_parse_frgn_pipe_with_from() {
+        let s = "frgn get_int(x: Int) -> Int | 0 from \"libc.so\";";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "frgn with pipe + from should parse: {:?}", result.err());
+        if let TopLevel::ForeignBinding { signature, .. } = &result.unwrap().items[0] {
+            assert!(signature.is_pipe, "should be marked as pipe");
+            assert!(signature.fallback.is_some(), "should have fallback expression");
+            assert_eq!(signature.location, "libc.so");
+        } else {
+            panic!("Expected ForeignBinding");
+        }
+    }
+
+    #[test]
+    fn test_parse_frgn_pipe_does_not_break_plain() {
+        let s = "frgn plain_fn(x: Int) -> Int;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "plain frgn should still parse: {:?}", result.err());
+        if let TopLevel::ForeignBinding { signature, .. } = &result.unwrap().items[0] {
+            assert!(!signature.is_pipe, "plain frgn should not be pipe");
+            assert!(signature.fallback.is_none(), "plain frgn should have no fallback");
+        } else {
+            panic!("Expected ForeignBinding");
+        }
+    }
+
+    #[test]
+    fn test_parse_frgn_pipe_does_not_break_result() {
+        let s = "frgn result_fn(x: Int) -> Result<String, IoError> from \"std::test\";";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Result<T,E> frgn should still parse: {:?}", result.err());
+        if let TopLevel::ForeignBinding { signature, .. } = &result.unwrap().items[0] {
+            assert!(!signature.is_pipe, "Result<T,E> frgn should not be pipe");
+        } else {
+            panic!("Expected ForeignBinding");
         }
     }
 

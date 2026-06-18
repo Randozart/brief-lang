@@ -988,6 +988,12 @@ impl TypeChecker {
         toml_path: &str,
         signature: &mut ForeignSignature,
     ) {
+        // Pipe syntax frgns skip TOML binding validation entirely.
+        // The fallback expression provides the error value directly.
+        if signature.is_pipe {
+            return;
+        }
+
         // If toml_path is empty, we're using the new FFI syntax with profile-based resolution
         // Skip binding loading and use profile defaults
         if toml_path.is_empty() {
@@ -2158,17 +2164,22 @@ Expr::ObjectLiteral(fields) => {
             Expr::Call(name, args) => {
                 if self.foreign_bindings.contains_key(name) {
                     let binding = self.foreign_bindings.get(name).unwrap();
-                    if !binding.success_output.is_empty() || binding.error_type_name != "Error" {
+                    if binding.is_pipe || !binding.success_output.is_empty() || binding.error_type_name != "Error" {
+                        let hint = if binding.is_pipe {
+                            "Use unification to handle both branches: Ok(val) = func()"
+                        } else {
+                            "Use unification to handle both branches: Success(val) = func()"
+                        };
                         let mut diag = Diagnostic::new(
                             "T001",
                             Severity::Info,
                             "FFI call returns Result type",
                         )
                         .with_explanation(&format!(
-                            "FFI function '{}' returns Result. Ensure both Success and Error branches are handled.",
+                            "FFI function '{}' returns Result. Ensure both Ok and Err branches are handled.",
                             name
                         ))
-                        .with_hint("Use unification to handle both branches: Success(val) = func()");
+                        .with_hint(hint);
                         self.diagnostics.borrow_mut().push(diag);
                     }
                     if !args.is_empty() && args.len() != binding.inputs.len() {
@@ -2378,6 +2389,7 @@ mod tests {
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: false, fallback: None,
             span: None,
         };
         tc.foreign_bindings.insert("my_fn".into(), sig.clone());
@@ -3651,5 +3663,54 @@ mod kani_full_tests {
         let ty = ctx.infer_expression(&expr);
         assert_eq!(ty, Type::Char, "Cast Int -> Char should return Char");
         assert!(ctx.errors.borrow().is_empty(), "Int -> Char should be valid");
+    }
+
+    #[test]
+    fn test_frgn_pipe_registers_signature() {
+        let mut tc = super::TypeChecker::new();
+        let sig = ForeignSignature {
+            name: "pipe_fn".into(), location: "".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![("x".into(), Type::Int)],
+            success_output: vec![("result".into(), Type::String)],
+            result_type: ResultType::Projection(vec![Type::String]),
+            error_type_name: "".into(),
+            error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::String("".to_string())),
+            span: None,
+        };
+        // Pipe frgns should be insertable and retrievable
+        tc.foreign_bindings.insert("pipe_fn".into(), sig.clone());
+        assert!(tc.foreign_bindings.contains_key("pipe_fn"));
+        let stored = tc.foreign_bindings.get("pipe_fn").unwrap();
+        assert!(stored.is_pipe);
+        assert!(stored.fallback.is_some());
+    }
+
+    #[test]
+    fn test_frgn_pipe_skips_toml_validation() {
+        let mut tc = super::TypeChecker::new();
+        // A pipe frgn with no toml_path and empty location should not error
+        let mut sig = ForeignSignature {
+            name: "no_toml_fn".into(), location: "".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Int)],
+            result_type: ResultType::Projection(vec![Type::Int]),
+            error_type_name: "".into(),
+            error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true, fallback: Some(Expr::Integer(0)),
+            span: None,
+        };
+        tc.check_frgn_binding("no_toml_fn", "", &mut sig);
+        // No errors should be accumulated
+        assert!(tc.errors.borrow().is_empty(),
+            "Pipe frgn should not produce TOML validation errors: {:?}", tc.errors.borrow());
     }
 }
