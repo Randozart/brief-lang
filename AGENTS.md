@@ -286,6 +286,32 @@ Assignment, Let, InlineAsm, Expression, Term (with optional swan song), TermBang
 - **Interpreter built-in method dispatch**: `dispatch_method_by_type` still matches on function name strings. Deferred — should use FFI registry (Path A: register all operations under `"std::HashMap::insert"` etc., resolve through `ffi_name_to_location`).
 - **LLVM backend**: Slice/MultiSlice/Tuple/MapLiteral/SetLiteral/ArrowTransfer/projection stubs remain (see Backend Gaps below).
 
+### Feature Modules (`src/features/`)
+
+New features follow the Pattern-B convention: a single directory with `mod.rs` + per-aspect files implementing the trait dispatch system.
+
+| Feature module | Files | Status |
+|----------------|-------|--------|
+| `literal/` | `mod.rs` | ✅ |
+| `binary_op/` | `mod.rs` | ✅ |
+| `call/` | `mod.rs` | ✅ |
+| `projection/` | `mod.rs` | ✅ |
+| `collection/` | `mod.rs` | ✅ |
+| `tuple/` | `mod.rs` | ✅ |
+| `field/` | `mod.rs` | ✅ |
+| `pattern/` | `mod.rs` | ✅ |
+| `block/` | `mod.rs` | ✅ |
+| `arrow/` | `mod.rs` | ✅ |
+| `subtype/` | `mod.rs` | ✅ |
+| `sigcall/` | `mod.rs` | ✅ |
+| `dbvl/` | `mod.rs` | ✅ |
+| `ellipsis/` | `mod.rs` | ✅ |
+| `stmt/` | `mod.rs` | ✅ |
+| `toplevel/` | `mod.rs` | ✅ |
+| `macros/` | `context.rs`, `expand.rs`, `template.rs`, `hygiene.rs`, `macro_.rs` | ✅ |
+
+Note: Rust 2021 reserves `macro` as a keyword, so the directory is `macros/` (plural) and the macro-specific expansion file is `macro_.rs` (trailing underscore).
+
 ## LLVM Backend Gaps
 
 Additive only — never weaken existing optimization paths.
@@ -335,6 +361,7 @@ Preserve contract information in codegen so the optimizer can reason about it.
 10. **Benchmarks on our own terms**: End-to-end results. Features for benchmarks must add language value.
 11. **NEVER discard staged or uncommitted work without asking.** The git index (staging area) holds work-in-progress from prior sessions that may be uncommitted but critical. Before any destructive action (`git checkout --`, `git restore`, `rm -f`, `git reset --hard`), inspect everything that will be destroyed. If in doubt, `git stash` instead of discard — stashes are recoverable, `git checkout --` is not. A single `git restore --staged .` followed by `git checkout -- <files>` can erase hours of uncommitted work with no recovery path.
 12. **Plan files**: Every plan-driven session writes a `docs/plans/YYYY-MM-DD-<topic>.md` with datetime stamp before starting work. The plan is committed alongside the implementation code.
+13. **main.rs edit safety**: `main.rs` has many call sites with long arg lists. When adding or removing function parameters, anchor `oldString` to the exact `)` boundary — never match multi-line blocks that could capture beyond the intended scope. A single `oldString` spanning 50+ lines can accidentally delete half the file if the file state is inconsistent.
 13. **Architecture docs**: Update `docs/architecture/` in the same commit as structural changes.
 14. **Kani**: Add proof harnesses for all new safety-critical code.
 15. **Praetor**: Run on new/changed files; verify complexity ≤ 15, lines ≤ 100, params ≤ 6.
@@ -375,6 +402,7 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 - **MapLiteral / SetLiteral** — `{"a": 1}` evaluates to `Value::HashMap`, `{1, 2, 3}` to `Value::HashSet`. ObjectLiteral `{field: val}` preserved.
 - **Value::Tuple** — true distinct variant. `Expr::Tuple` evaluates to `Value::Tuple`. Tuple destructure handles both `List` and `Tuple`.
 - **ProjectionTarget::Index(usize)** — tuple indexing via `pair :> 0`.
+- **`$`/`$!` macro system (Phase 1a/1b)** — `$` for hygienic templates, `$!` for high-power macros. `quote { }` with `@`-interpolation. `compile#()`/`error#()`/`warn#()`/`gensym#()` compile-time intrinsics with `is_compile_time_only()` annotation. Phase 1a (template) → Phase 1b (macro) → re-expand 1a → TypeChecker. Gensym hygiene for local `let` bindings (`__gensym_N`). Three canonical flags: `--macro-budget`, `--unlimited-macros`, `--safe-compile`.
 - **MultiSlice mask/stride evaluation** — `BracketOp::Mask` and `BracketOp::Stride` ops now evaluated in interpreter. `_` bound as implicit element variable. `Expr::Slice.mask` also implemented. ArrowTransfer filter implemented with same `_`-binding pattern.
 
 ### Not a Priority
@@ -385,7 +413,7 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 911 tests pass, 0 fail
+- 952 tests pass, 0 fail
 - **trg reactive dirty-flag architecture** complete (Phases 1–6):
   - Phase 1: `DependencyGraph` — variable-level DAG, Kahn's sort, cycle detection
   - Phase 2: `DirtyFlags(u64)` — bitmask with mark/clear/merge/any/none
