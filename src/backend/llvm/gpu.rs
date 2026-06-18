@@ -6,6 +6,7 @@
 //! the loop in the main CPU binary with a Vulkan compute dispatch call.
 
 use crate::ast::*;
+use std::collections::HashMap;
 
 /// Result of a GPU eligibility check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,15 +127,74 @@ pub fn extract_kernel(
     kernel
 }
 
+/// Collect all field identifiers referenced in a list of statements.
+/// Returns a deduplicated list in order of first appearance.
+fn collect_all_fields(body: &[Statement]) -> Vec<String> {
+    let mut fields = Vec::new();
+    for stmt in body {
+        collect_stmt_fields(stmt, &mut fields);
+    }
+    fields
+}
+
+fn collect_stmt_fields(stmt: &Statement, fields: &mut Vec<String>) {
+    match stmt {
+        Statement::Assignment { lhs, expr, .. } => {
+            if let Expr::Identifier(f) = lhs {
+                if !fields.contains(f) { fields.push(f.clone()); }
+            }
+            collect_expr_fields(expr, fields);
+        }
+        Statement::Guarded { condition, statements, .. } => {
+            collect_expr_fields(condition, fields);
+            for s in statements {
+                collect_stmt_fields(s, fields);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_expr_fields(expr: &Expr, fields: &mut Vec<String>) {
+    match expr {
+        Expr::Identifier(name) => {
+            if !fields.contains(name) { fields.push(name.clone()); }
+        }
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+        | Expr::And(l, r) | Expr::Or(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r)
+        | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
+        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+            collect_expr_fields(l, fields);
+            collect_expr_fields(r, fields);
+        }
+        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+            collect_expr_fields(e, fields);
+        }
+        _ => {}
+    }
+}
+
 /// Emit an LLVM IR module string targeting `spirv64-unknown-unknown`.
 ///
 /// Walks the kernel body AST and emits actual LLVM IR instructions for
 /// assignment statements with integer arithmetic. Each state field is
-/// accessed by computing `buffer + gtid * 8 + field_offset_in_bytes`
+/// accessed by computing `buffer + gtid + field_offset_in_bytes`
 /// from the single `i8*` storage buffer parameter.
+///
+/// Each field referenced in an expression is loaded from its correct
+/// buffer offset into a unique SSA register — unlike the old approach
+/// that reused a single `%old` register for the LHS field.
 pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     let mut ir = String::new();
     let mut label_counter = 0u64;
+
+    // Build field offset map from all fields in the body
+    let all_fields = collect_all_fields(&kernel.body);
+    let field_offsets: HashMap<String, u64> = all_fields.iter()
+        .enumerate()
+        .map(|(i, name)| (name.clone(), (i as u64) * 8))
+        .collect();
 
     let next_label = |counter: &mut u64| -> String {
         let l = format!(".L{}", counter);
@@ -162,8 +222,12 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str(&format!("  br i1 %cmp, label %{}, label %{}\n", body_label, exit_label));
     ir.push_str(&format!("{}:\n", body_label));
 
+    // Compute base pointer once: buffer + gtid
+    ir.push_str("  %base = getelementptr i8, i8* %buffer, i64 %gtid\n");
+
+    let mut loaded_regs: HashMap<String, String> = HashMap::new();
     for stmt in &kernel.body {
-        emit_spirv_stmt(stmt, &mut ir, "  ", &kernel.write_fields, &mut label_counter);
+        emit_spirv_stmt(stmt, &mut ir, "  ", &field_offsets, &mut loaded_regs, &mut label_counter);
     }
 
     ir.push_str(&format!("  br label %{}\n", exit_label));
@@ -174,46 +238,59 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir
 }
 
+/// Load a field from the buffer, emitting a unique GEP + load sequence,
+/// and cache the register name in `loaded_regs` for reuse.
+fn ensure_field_loaded(
+    field: &str,
+    ir: &mut String,
+    indent: &str,
+    field_offsets: &HashMap<String, u64>,
+    loaded_regs: &mut HashMap<String, String>,
+) -> String {
+    if let Some(reg) = loaded_regs.get(field) {
+        return reg.clone();
+    }
+    let offset = field_offsets.get(field).copied().unwrap_or(0);
+    let gep = format!("%gep_{}", loaded_regs.len());
+    let reg = format!("%lv_{}", loaded_regs.len());
+    ir.push_str(&format!("{}{} = getelementptr i8, i8* %base, i64 {}\n", indent, gep, offset));
+    ir.push_str(&format!("{}{} = load i64, i8* {}, align 8\n", indent, reg, gep));
+    loaded_regs.insert(field.to_string(), reg.clone());
+    reg
+}
+
 /// Emit a single Brief statement as SPIR-V-compatible LLVM IR.
 fn emit_spirv_stmt(
     stmt: &Statement,
     ir: &mut String,
     indent: &str,
-    write_fields: &[String],
+    field_offsets: &HashMap<String, u64>,
+    loaded_regs: &mut HashMap<String, String>,
     label_counter: &mut u64,
 ) {
     match stmt {
         Statement::Assignment { lhs, expr, .. } => {
-            let field_name = if let Expr::Identifier(f) = lhs { f } else { return };
-            let field_idx = write_fields.iter().position(|f| f == field_name)
-                .unwrap_or(0);
-            let offset = (field_idx as u64) * 8;
+            let lhs_name = if let Expr::Identifier(f) = lhs { f.clone() } else { return };
 
-            // Load current value from buffer[gtid * 8 + field_offset]
-            ir.push_str(&format!(
-                "{}%bc = getelementptr i8, i8* %buffer, i64 %gtid\n", indent
-            ));
-            ir.push_str(&format!(
-                "{}%fptr = getelementptr i8, i8* %bc, i64 {}\n", indent, offset
-            ));
-            ir.push_str(&format!(
-                "{}%old = load i64, i8* %fptr, align 8\n", indent
-            ));
+            // Ensure all fields in the expression are loaded before computing.
+            // No need to pre-load the LHS field unless it appears in the RHS.
+            let val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs);
 
-            // Compute the new value from expr
-            let val = emit_spirv_expr(expr, ir, indent, "%old", write_fields);
-
-            ir.push_str(&format!("{}store i64 {}, i8* %fptr, align 8\n", indent, val));
+            // Store result to LHS field's buffer offset
+            let lhs_offset = field_offsets.get(&lhs_name).copied().unwrap_or(0);
+            let gep = format!("%st_{}", loaded_regs.len());
+            ir.push_str(&format!("{}{} = getelementptr i8, i8* %base, i64 {}\n", indent, gep, lhs_offset));
+            ir.push_str(&format!("{}store i64 {}, i8* {}, align 8\n", indent, val, gep));
         }
         Statement::Guarded { condition, statements, .. } => {
-            let cond = emit_spirv_expr(condition, ir, indent, "%old", write_fields);
+            let cond = emit_spirv_expr(condition, ir, indent, field_offsets, loaded_regs);
             let then_l = format!(".L{}", { let l = *label_counter; *label_counter += 1; l });
             let merge_l = format!(".L{}", { let l = *label_counter; *label_counter += 1; l });
             ir.push_str(&format!("{}%cond = icmp ne i64 {}, 0\n", indent, cond));
             ir.push_str(&format!("{}br i1 %cond, label %{}, label %{}\n", indent, then_l, merge_l));
             ir.push_str(&format!("{}:\n", then_l));
             for s in statements {
-                emit_spirv_stmt(s, ir, &format!("  {}", indent), write_fields, label_counter);
+                emit_spirv_stmt(s, ir, &format!("  {}", indent), field_offsets, loaded_regs, label_counter);
             }
             ir.push_str(&format!("{}br label %{}\n", indent, merge_l));
             ir.push_str(&format!("{}:\n", merge_l));
@@ -224,12 +301,15 @@ fn emit_spirv_stmt(
 
 /// Emit a Brief expression as SPIR-V-compatible LLVM IR,
 /// returning the SSA register name holding the result.
+///
+/// Field identifiers are looked up in `field_offsets` and loaded
+/// via `ensure_field_loaded`, which caches loads in `loaded_regs`.
 fn emit_spirv_expr(
     expr: &Expr,
     ir: &mut String,
     indent: &str,
-    _old_reg: &str,
-    _write_fields: &[String],
+    field_offsets: &HashMap<String, u64>,
+    loaded_regs: &mut HashMap<String, String>,
 ) -> String {
     match expr {
         Expr::Integer(n) => format!("{}", n),
@@ -237,45 +317,39 @@ fn emit_spirv_expr(
             if *b { "1".to_string() } else { "0".to_string() }
         }
         Expr::Identifier(name) => {
-            // TODO: in a full impl, load from buffer offset for this field.
-            // For now, just reference the previously loaded %old value.
-            // If the field matches, reuse %old; otherwise use a load.
-            format!("%old")
+            ensure_field_loaded(name, ir, indent, field_offsets, loaded_regs)
         }
         Expr::Add(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, _old_reg, _write_fields);
-            let r = emit_spirv_expr(rhs, ir, indent, _old_reg, _write_fields);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs);
             let reg = format!("%add{}", ir.len());
             ir.push_str(&format!("{}{} = add i64 {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Sub(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, _old_reg, _write_fields);
-            let r = emit_spirv_expr(rhs, ir, indent, _old_reg, _write_fields);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs);
             let reg = format!("%sub{}", ir.len());
             ir.push_str(&format!("{}{} = sub i64 {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Mul(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, _old_reg, _write_fields);
-            let r = emit_spirv_expr(rhs, ir, indent, _old_reg, _write_fields);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs);
             let reg = format!("%mul{}", ir.len());
             ir.push_str(&format!("{}{} = mul i64 {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Lt(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, _old_reg, _write_fields);
-            let r = emit_spirv_expr(rhs, ir, indent, _old_reg, _write_fields);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs);
             let reg = format!("%cmp{}", ir.len());
             ir.push_str(&format!("{}{} = icmp slt i64 {}, {}\n", indent, reg, l, r));
-            // SPIR-V bool → i64: zext
             let ext = format!("%zext{}", ir.len());
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
         }
         _ => {
-            // Unsupported expression: emit comment in IR, return 0.
-            // Caller should ensure eligibility check prevents this at compile time.
             ir.push_str(&format!("{}; error: unsupported expression in GPU kernel\n", indent));
             "0".to_string()
         }
@@ -442,6 +516,27 @@ mod tests {
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("add i64"), "should emit integer add");
         assert!(!ir.contains("TODO"), "should not contain placeholder comments");
+    }
+
+    #[test]
+    fn test_emit_spirv_module_loads_correct_field() {
+        // x = y + 1 — should load y, NOT reuse x's value
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("y".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("cross_field", &body, Expr::Integer(10), &[]);
+        let ir = emit_spirv_module(&kernel);
+        // Should have two separate load instructions (x and y are different fields)
+        assert!(ir.contains("%lv_0"), "should load first field (y) into register lv_0");
+        assert!(ir.contains("%base"), "should reference base pointer");
     }
 
     #[test]
