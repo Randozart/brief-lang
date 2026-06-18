@@ -1573,4 +1573,66 @@ mod tests {
         let sizes = collect_shared_mem_sizes(&body);
         assert_eq!(sizes, vec![128, 32], "should collect both shared memory sizes");
     }
+
+    // ── Multi-dimensional grid (Phase 6) ───────────────────
+
+    #[test]
+    fn test_emit_spirv_module_2d_grid() {
+        let mut ft = HashMap::new();
+        ft.insert("x".to_string(), "i64".to_string());
+        ft.insert("y".to_string(), "i64".to_string());
+        // Kernel using both get_global_id(0) and get_global_id(1)
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: Expr::IntrinsicCall {
+                    intrinsic: Intrinsic::GetGlobalId,
+                    args: vec![Expr::Integer(0)],
+                },
+                timeout: None,
+                modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::Identifier("y".to_string()),
+                expr: Expr::IntrinsicCall {
+                    intrinsic: Intrinsic::GetGlobalId,
+                    args: vec![Expr::Integer(1)],
+                },
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("grid2d", &body, Expr::Integer(100), &[], ft);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("call i64 @_Z13get_global_idj(i32 1)"),
+            "2D kernel should call get_global_id(1)");
+        assert!(ir.contains("call i64 @_Z13get_global_idj(i32 0)"),
+            "2D kernel should call get_global_id(0)");
+    }
+
+    #[test]
+    fn test_emit_spirv_module_1d_grid_no_overhead() {
+        let mut ft = HashMap::new();
+        ft.insert("x".to_string(), "i64".to_string());
+        // Kernel using only get_global_id(0)
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: Expr::IntrinsicCall {
+                    intrinsic: Intrinsic::GetGlobalId,
+                    args: vec![Expr::Integer(0)],
+                },
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("grid1d", &body, Expr::Integer(100), &[], ft);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("call i64 @_Z13get_global_idj(i32 0)"),
+            "1D kernel should have get_global_id(0)");
+        assert!(!ir.contains("get_global_idj(i32 1)"),
+            "1D kernel should NOT have get_global_id(1)");
+        assert!(!ir.contains("get_global_idj(i32 2)"),
+            "1D kernel should NOT have get_global_id(2)");
+    }
 }

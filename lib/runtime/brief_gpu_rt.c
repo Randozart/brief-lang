@@ -464,6 +464,8 @@ void brief_gpu_launch(
     const void* kernel_spirv,
     size_t kernel_size,
     int grid_x,
+    int grid_y,
+    int grid_z,
     int block_x,
     const int64_t* buffer_handles,
     int num_buffers
@@ -533,7 +535,7 @@ void brief_gpu_launch(
     vkBeginCommandBuffer(vk_cmd_buf, &begin_info);
 
     vkCmdBindPipeline(vk_cmd_buf, 0x4000, pipeline);  // VK_PIPELINE_BIND_POINT_COMPUTE
-    vkCmdDispatch(vk_cmd_buf, (uint32_t)grid_x, 1, 1);
+    vkCmdDispatch(vk_cmd_buf, (uint32_t)grid_x, (uint32_t)grid_y, (uint32_t)grid_z);
 
     vkEndCommandBuffer(vk_cmd_buf);
 
