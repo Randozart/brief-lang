@@ -36,6 +36,25 @@ Desugarer ────────► Program (sugar constructs lowered to core 
   │                   before state generation. Handles chain inheritance,
   │                   detects field name collisions, preserves parent link
   │                   for type system queries.
+  │
+  ├──► Phase 1a: Template Expansion (features::macros::expand::expand_templates)
+  │     Collects TopLevel::TemplateDef from program into MacroContext
+  │     Walks AST for Expr::TemplateCall nodes → executes template bodies
+  │     @-interpolation substitution via features::macros::template
+  │     Hygiene: local let bindings prefixed with __gensym_N
+  │     TemplateDef nodes removed from program (metadata only)
+  │
+  ├──► Phase 1b: Macro Expansion (features::macros::expand::expand_macros)
+  │     Collects TopLevel::MacroDef from program into MacroContext
+  │     Walks AST for Expr::MacroCall nodes → executes macro bodies
+  │     Sandboxed interpreter executes macro body with bound args
+  │     compile#(): parse string → Value::Block (string mixin)
+  │     error#()/warn#(): compile-time diagnostics
+  │     gensym#(): unique identifier generation
+  │     Re-runs Phase 1a on macro output (macros can emit template calls)
+  │     validate_no_compile_time_intrinsics: ensures no compile-time-
+  │       only intrinsics survive (is_compile_time_only() annotation)
+  │
   ▼
 Typechecker ──────► Program (annotated with types), TypecheckContext
   │                 Routes Expr variants through ExprTypecheck trait
