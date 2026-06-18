@@ -517,6 +517,61 @@ fn empty_program() -> Program {
             "CPU IR should return true for barrier#");
     }
 
+    // ── End-to-end GPU compilation tests ───────────────────
+
+    #[test]
+    fn test_gpu_e2e_simple_add() {
+        // A GPU txn with a simple integer add should produce SPIR-V IR
+        // with the correct kernel signature and body.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                state_count(),
+                make_gpu_txn("e2e_add", vec![Hashtag::new("gpu".to_string())]),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let _output = backend.generate(&program);
+        assert!(backend.spirv_kernels.len() >= 1,
+            "e2e: GPU txn should produce at least one SPIR-V kernel");
+        let ir = &backend.spirv_kernels[0];
+        assert!(ir.contains("spir_kernel"), "should be a SPIR-V kernel");
+        assert!(ir.contains("add i64"), "kernel body should have integer add");
+    }
+
+    #[test]
+    fn test_gpu_e2e_invocation_count() {
+        // When --gpu-offload is set, all eligible txns produce kernels
+        let mut backend = LlvmBackend::new().with_gpu_offload(true);
+        let program = Program {
+            items: vec![
+                state_count(),
+                make_gpu_txn("k1", vec![]),
+                make_gpu_txn("k2", vec![]),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let _output = backend.generate(&program);
+        assert!(backend.spirv_kernels.len() == 2,
+            "e2e: two txns with --gpu-offload should produce 2 kernels");
+    }
+
     #[test]
     fn test_llvm_event_model_lowering() {
         let mut backend = LlvmBackend::new();
