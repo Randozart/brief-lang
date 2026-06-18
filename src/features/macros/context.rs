@@ -1,10 +1,13 @@
 use crate::ast::{MacroArgType, Statement};
+use crate::errors::Span;
 use std::collections::HashMap;
 
 /// Shared state for macro/template expansion.
 pub struct MacroContext {
     pub gensym_counter: u64,
     pub budget: u64,
+    pub call_site_span: Option<Span>,
+    pub warnings: Vec<String>,
     pub templates: HashMap<String, TemplateDef>,
     pub macros: HashMap<String, MacroDef>,
 }
@@ -30,8 +33,23 @@ impl MacroContext {
         MacroContext {
             gensym_counter: 0,
             budget: 10_000,
+            call_site_span: None,
+            warnings: Vec::new(),
             templates: HashMap::new(),
             macros: HashMap::new(),
+        }
+    }
+
+    pub fn add_warning(&mut self, msg: &str) {
+        self.warnings.push(msg.to_string());
+        eprintln!("warning: {}", msg);
+    }
+
+    pub fn emit_error(&self, msg: &str) -> String {
+        if let Some(ref span) = self.call_site_span {
+            format!("error at line {}: {}", span.line, msg)
+        } else {
+            format!("error: {}", msg)
         }
     }
 

@@ -3592,7 +3592,7 @@ impl Interpreter {
                 Err(RuntimeError::TypeMismatch("Pattern B variant not yet evaluated".into()))
             }
             // Template/macro nodes
-            Expr::TemplateCall { name, args, block } => {
+            Expr::TemplateCall { name, .. } => {
                 Err(RuntimeError::TypeMismatch(format!("macro not expanded: {}", name)))
             }
             Expr::MacroCall { name, .. } => {

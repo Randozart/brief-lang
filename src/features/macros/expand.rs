@@ -121,12 +121,15 @@ fn expand_macro_call_in_stmt(
     stmt: &Statement,
     ctx: &mut MacroContext,
 ) -> Result<Vec<Statement>, String> {
-    if let Statement::Expression(Expr::MacroCall { name, args, block }) = stmt {
+    if let Statement::Expression(Expr::MacroCall { name, args, block, span }) = stmt {
         let def = ctx.macros.get(name)
             .ok_or_else(|| format!("undefined macro '{}'", name))?
             .clone();
+        ctx.call_site_span = span.clone();
         let mut interpreter = crate::interpreter::Interpreter::new();
-        let value = template::expand_macro(ctx, &mut interpreter, &def, args, block.clone())?;
+        let value = template::expand_macro(ctx, &mut interpreter, &def, args, block.clone());
+        ctx.call_site_span = None;
+        let value = value?;
         Ok(template::value_to_statements(&value))
     } else {
         Ok(vec![stmt.clone()])
@@ -165,9 +168,9 @@ fn expand_template_call_in_expr(
     expr: &mut Expr,
     ctx: &mut MacroContext,
 ) -> Result<Option<Expr>, String> {
-    let (name, args, block) = match expr {
-        Expr::TemplateCall { name, args, block } => {
-            (name.clone(), args.clone(), block.clone())
+    let (name, args, block, span) = match expr {
+        Expr::TemplateCall { name, args, block, span } => {
+            (name.clone(), args.clone(), block.clone(), span.clone())
         }
         _ => return Ok(None),
     };
@@ -274,6 +277,31 @@ mod tests {
         assert!(program.items.is_empty(), "TemplateDefs should be removed from program");
         assert!(ctx.templates.contains_key("foo"));
         assert!(ctx.templates.contains_key("bar"));
+    }
+
+    #[test]
+    fn test_call_site_span_propagated() {
+        let mut ctx = MacroContext::new();
+        let span = crate::errors::Span::new(10, 20, 5, 3);
+        let stmt = Statement::Expression(Expr::MacroCall {
+            name: "foo".to_string(),
+            args: vec![],
+            block: None,
+            span: Some(span.clone()),
+        });
+        ctx.macros.insert("foo".to_string(), MacroDef {
+            name: "foo".to_string(),
+            params: vec![],
+            return_type: None,
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Integer(42))],
+                swan_song: None,
+                modifiers: vec![],
+            }],
+        });
+        let result = expand_macro_call_in_stmt(&stmt, &mut ctx);
+        assert!(result.is_ok(), "Expected expansion to succeed: {:?}", result.err());
+        let _value = result.unwrap();
     }
 
     #[test]

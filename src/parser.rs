@@ -6437,7 +6437,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         let prog = parser.parse().unwrap();
         match &prog.items[0] {
             TopLevel::Statement(stmt) => {
-                if let Statement::Expression(Expr::TemplateCall { name, args, block }) = stmt.as_ref() {
+                if let Statement::Expression(Expr::TemplateCall { name, args, block, .. }) = stmt.as_ref() {
                     assert_eq!(name, "unless");
                     assert_eq!(args.len(), 1);
                     assert!(block.is_some());
@@ -6458,7 +6458,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         let prog = parser.parse().unwrap();
         match &prog.items[0] {
             TopLevel::Statement(stmt) => {
-                if let Statement::Expression(Expr::MacroCall { name, args, block }) = stmt.as_ref() {
+                if let Statement::Expression(Expr::MacroCall { name, args, block, .. }) = stmt.as_ref() {
                     assert_eq!(name, "circular_buffer");
                     assert_eq!(args.len(), 2);
                     assert!(block.is_none());
@@ -6508,7 +6508,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         let prog = parser.parse().unwrap();
         match &prog.items[0] {
             TopLevel::Statement(stmt) => {
-                if let Statement::Expression(Expr::TemplateCall { name, args, block }) = stmt.as_ref() {
+                if let Statement::Expression(Expr::TemplateCall { name, args, block, .. }) = stmt.as_ref() {
                     assert_eq!(name, "double");
                     assert_eq!(args.len(), 1);
                     assert!(block.is_none());
@@ -6567,11 +6567,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             None
         };
 
-        Ok(Expr::TemplateCall { name, args, block })
+        let span = self.current_span();
+        Ok(Expr::TemplateCall { name, args, block, span })
     }
 
     fn parse_macro_call(&mut self) -> Result<Expr, SyntaxError> {
         let name = self.expect_identifier()?;
+        let span = self.current_span();
         self.expect(Token::LParen)?;
         let mut args = Vec::new();
         if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
@@ -6599,7 +6601,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             None
         };
 
-        Ok(Expr::MacroCall { name, args, block })
+        Ok(Expr::MacroCall { name, args, block, span })
     }
 
     fn parse_quote_block(&mut self) -> Result<Expr, SyntaxError> {

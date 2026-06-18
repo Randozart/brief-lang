@@ -1004,12 +1004,14 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
         block: Option<Block>,
+        span: Option<Span>,
     },
     /// $!name(args) or $!name(args) { block } — macro call
     MacroCall {
         name: String,
         args: Vec<Expr>,
         block: Option<Block>,
+        span: Option<Span>,
     },
     /// Compiler-known intrinsic call: `name#(args)` — e.g. `sqrt#(x)`, `pop#(list)`
     IntrinsicCall {
