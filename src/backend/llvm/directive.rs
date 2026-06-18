@@ -23,6 +23,9 @@ pub enum DirectiveEffect {
     /// Emit a `!llvm.loop.*` metadata key with the given value.
     /// The caller formats the key-value into the appropriate metadata node.
     LoopMetadata(String, String),
+    /// Request GPU offloading for the current loop/txn body.
+    /// The optional string is a user-specified threshold or config.
+    GpuOffload(Option<String>),
     /// No effect in this context — directive is not applicable.
     None,
 }
@@ -38,6 +41,7 @@ pub fn resolve_directives(tags: &[Hashtag], context: DirectiveCtx) -> Vec<Direct
             "inline" => resolve_inline(tag, context),
             "unroll" => resolve_unroll(tag, context),
             "vectorize" => resolve_vectorize(tag, context),
+            "gpu" => resolve_gpu(tag, context),
             _ => None,
         };
         if let Some(e) = effect {
@@ -97,6 +101,17 @@ fn resolve_vectorize(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEf
                     "true".to_string(),
                 ))
             }
+        }
+        _ => None,
+    }
+}
+
+/// Resolve #gpu / #?gpu / #!gpu for the given context.
+fn resolve_gpu(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> {
+    match context {
+        // GPU offloading is applicable to both loops and full transaction bodies.
+        DirectiveCtx::Loop | DirectiveCtx::Transaction | DirectiveCtx::CallableTxn => {
+            Some(DirectiveEffect::GpuOffload(tag.value.clone()))
         }
         _ => None,
     }
@@ -290,6 +305,47 @@ mod tests {
         );
         // inline has no effect on Loop; unroll does
         assert_eq!(effects.len(), 1);
+    }
+
+    #[test]
+    fn test_gpu_directive_on_loop() {
+        let effects = resolve_directives(&[tag("gpu")], DirectiveCtx::Loop);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            DirectiveEffect::GpuOffload(val) => {
+                assert_eq!(*val, None);
+            }
+            _ => panic!("Expected GpuOffload"),
+        }
+    }
+
+    #[test]
+    fn test_gpu_directive_with_value() {
+        let t = Hashtag { name: "gpu".into(), value: Some("threshold=1000".into()), mandatory: false, speculative: false, fallback: vec![], scoped: None };
+        let effects = resolve_directives(&[t], DirectiveCtx::Transaction);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            DirectiveEffect::GpuOffload(val) => {
+                assert_eq!(val.as_deref(), Some("threshold=1000"));
+            }
+            _ => panic!("Expected GpuOffload"),
+        }
+    }
+
+    #[test]
+    fn test_speculative_gpu_directive() {
+        let effects = resolve_directives(&[spec_tag("gpu")], DirectiveCtx::Loop);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            DirectiveEffect::GpuOffload(_) => {} // OK
+            _ => panic!("Expected GpuOffload"),
+        }
+    }
+
+    #[test]
+    fn test_gpu_directive_on_body_is_none() {
+        let effects = resolve_directives(&[tag("gpu")], DirectiveCtx::Body);
+        assert_eq!(effects.len(), 0, "gpu should have no effect on Body context");
     }
 
     #[test]

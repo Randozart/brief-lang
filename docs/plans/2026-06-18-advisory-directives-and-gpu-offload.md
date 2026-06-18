@@ -307,15 +307,47 @@ Propagate to `LlvmBackend` via a builder method:
 
 ---
 
-## Phase 4: GPU Offloading Infrastructure
+## Phase 4: GPU Offloading Infrastructure (SPIR-V + Vulkan)
 
 This is the largest and most architecturally significant feature.
 It breaks into five sub-phases.
 
+### Design Decision: SPIR-V + Vulkan Compute
+
+After research, the target is **SPIR-V** emitted via LLVM's built-in
+`spirv64-unknown-unknown` backend, dispatched via **Vulkan compute**.
+
+**Why SPIR-V:**
+- LLVM includes a full SPIR-V backend (`llvm/lib/Target/SPIRV/`) with
+  instruction selection, legalizer, and code gen — already compiled into
+  the LLVM Brief depends on.
+- SPIR-V is the most portable GPU IR: runs on NVIDIA (NVK), AMD (RADV),
+  Intel (ANV), Apple (MoltenVK), and software (LLVMPipe/Mesa).
+
+**Why Vulkan:**
+- Modern, actively maintained by all GPU vendors via Mesa.
+- OpenCL is legacy but consumes the same SPIR-V — secondary runtime
+  path (`--gpu-backend vulkan,opencl`) is a compile-time flag.
+
+**Dual compilation model:**
+
+When `#gpu` or `--gpu-offload` is active, the compiler emits TWO outputs:
+1. **CPU binary** via existing LLVM x86/ARM backend (GPU loops become
+   dispatch calls with CPU fallback).
+2. **SPIR-V blobs** via separate `spirv64` codegen pass, embedded in the
+   executable's `.rodata` as opaque byte arrays.
+
+At runtime, `brief_gpu_rt.c` (Vulkan compute runtime) handles:
+- Vulkan instance/device creation
+- SPIR-V shader module loading
+- Device memory allocation + upload/download
+- Compute pipeline dispatch
+- Graceful CPU fallback when Vulkan is unavailable
+
 ### 4.1 Sub-phase A: Kernel Extraction
 
 **Goal:** Extract a transaction body (or loop body) into a standalone
-GPU kernel function and generate host-side orchestration code.
+SPIR-V kernel function and generate host-side Vulkan dispatch calls.
 
 **Location:** New module `src/backend/llvm/gpu.rs`.
 
@@ -328,18 +360,22 @@ A transaction is GPU-eligible when:
 4. Bounded iteration count (known or provably finite)
 5. No `term`/`term!`/`unification`/`escape` statements
 6. Only operates on integer and float types (no string/struct/enum)
+7. No `String`/`struct`/`HashMap`/`enum` — SPIR-V storage buffers
+   support only flat data types with known byte offsets.
 
 **Extraction algorithm:**
 
 1. Clone the transaction body AST
 2. Wrap it in a function `@kernel_<name>(i8* %state, i64 %N)`
-3. Replace state field accesses with parameter-based array accesses
-   (`state.field[i]` → `%data[i]`)
-4. Emit as a separate LLVM module with NVPTX/AMDGPU target triple
-5. In the main module, replace the loop body with host-side calls:
-   - `malloc` device memory + `memcpy` host→device
-   - `cudaLaunchKernel` / `hipLaunchKernel` call
-   - `memcpy` device→host + free
+3. Replace state field accesses with SPIR-V storage buffer accesses:
+   `state.field[i]` → `%buffer_base[i * stride + field_offset]`
+4. Emit as a separate LLVM module with `spirv64-unknown-unknown` triple:
+   ```bash
+   llc --mtriple=spirv64-unknown-unknown kernel.ll -o kernel.spv
+   ```
+5. In the main CPU module, replace the loop body with Vulkan dispatch:
+   - `brief_gpu_init()` → one-time Vulkan instance creation
+   - `brief_gpu_malloc()` → `vkAllocateMemory`
 
 **Control flow:**
 
@@ -348,12 +384,25 @@ Original:
   [i < N] { data[i] = sin(data[i]) * cos(data[i]); }
 
 After #gpu:
-  // Host code:
-  %dev = call i8* @cudaMalloc(i64 %N * 8)
-  call void @cudaMemcpy(i8* %dev, i8* %host, i64 %N*8, i32 0)  // H2D
-  call void @cudaLaunchKernel(i8* @kernel_sin_cos, i32 %N, i32 256, i8* %dev, i64 %N)
-  call void @cudaMemcpy(i8* %host, i8* %dev, i64 %N*8, i32 1)  // D2H
-  call void @cudaFree(i8* %dev)
+  // Host code (CPU binary):
+  %gpu_ok = call i1 @brief_gpu_is_available()
+  br i1 %gpu_ok, label %gpu_path, label %cpu_path
+
+gpu_path:
+  %dev = call i64 @brief_gpu_malloc(i64 %N * 8)
+  call void @brief_gpu_memcpy(i64 %dev, i64 %host, i64 %N*8, i32 0)  // H2D
+  call void @brief_gpu_launch(i64 @kernel_0, i32 %N, i32 256, i64 %dev)
+  call void @brief_gpu_memcpy(i64 %host, i64 %dev, i64 %N*8, i32 1)  // D2H
+  call void @brief_gpu_free(i64 %dev)
+  br label %merge
+
+cpu_path:
+  // Straight-line CPU loop (identical to un-annotated code)
+  [i < N] { data[i] = sin(data[i]) * cos(data[i]); }
+  br label %merge
+
+merge:
+  ...
 ```
 
 ### 4.2 Sub-phase B: The Arithmetic Intensity Cost Model
@@ -430,23 +479,43 @@ If `--pgo-generate` + `--gpu-offload` are combined:
 3. This enables the cost model to make exactly correct offload decisions
    based on real-world data sizes
 
-### 4.5 Sub-phase E: Runtime Support Library
+### 4.5 Sub-phase E: Runtime Support Library (Vulkan Compute)
 
-Create (or extend) `brief_gpu_rt.c` alongside `brief_rt.c` with:
+Create `brief_gpu_rt.c` alongside `brief_rt.c` implementing a lightweight
+Vulkan compute runtime:
 
 ```c
-void* brief_gpu_malloc(size_t bytes);
-void  brief_gpu_free(void* ptr);
-void  brief_gpu_memcpy_h2d(void* dst, void* src, size_t bytes);
-void  brief_gpu_memcpy_d2h(void* dst, void* src, size_t bytes);
-void  brief_gpu_launch(void* kernel, int grid_dim, int block_dim, void** args);
+// One-time init — creates Vulkan instance, picks a compute-capable device.
+int   brief_gpu_init();
+// Returns 1 if Vulkan is available and a compute device was found.
+int   brief_gpu_is_available();
+// Allocate device memory (vkAllocateMemory).
+int64_t brief_gpu_malloc(size_t bytes);
+// Free device memory.
+void    brief_gpu_free(int64_t handle);
+// Copy host→device (vkMapMemory + memcpy or vkCmdCopyBuffer).
+void    brief_gpu_memcpy(int64_t dst, int64_t src, size_t bytes, int dir);
+// Load SPIR-V blob as a shader module and dispatch compute.
+// kernel_idx indexes into the embedded SPIR-V array.
+void    brief_gpu_launch(int kernel_idx, int grid_x, int block_x,
+                         int64_t* buffer_handles, int num_buffers);
+// Cleanup.
+void    brief_gpu_shutdown();
 ```
 
-At link time, these resolve to CUDA, ROCm, or a stub (CPU fallback)
-depending on the target.
+**Linking model:**
 
-For `#gpu?` runtime dispatch, the stub emits the CPU path. This ensures
-that `--gpu-offload` compiled binaries work on machines without a GPU.
+At link time, there are three possible resolutions:
+1. **Vulkan available** (`vulkan_loader`): dlopen `libvulkan.so.1` at
+   runtime, resolve all vk* function pointers lazily. Graceful if missing.
+2. **OpenCL fallback** (`--gpu-backend opencl`): consume the same SPIR-V
+   blob via `clCreateProgramWithIL`.
+3. **CPU fallback** (no GPU runtime): `brief_gpu_is_available()` returns 0.
+   All GPU loops execute the CPU path. Zero additional dependencies.
+
+For `#gpu?` runtime dispatch, this means the compiled binary works on
+any machine — with or without a GPU — and transparently picks the right
+path at startup.
 
 ### 4.6 Testing
 
@@ -564,10 +633,11 @@ No existing optimization path is weakened — all changes are additive
 |------|--------|------------|
 | `#?` collides with `#` in logos lexer | Silent parse errors | Place `HashQuestion` BEFORE `Hash`; add lexer test for both `#inline` and `#?inline` |
 | `Hashtag` struct grows — existing code doesn't set `speculative` | Tests fail or fields default to wrong value | Default `speculative` to `false` for backward compat; audit ALL `Hashtag` construction sites (there are many: `parser.rs`, `proof_engine.rs`, tests, etc.) |
-| GPU kernel extraction creates IR that LLVM cannot optimize | Silent performance degradation | Add `opt -O3 -verify` step for the kernel module in tests |
+| GPU kernel extraction creates IR that LLVM cannot optimize | Silent performance degradation | Add `opt -O3 -verify` step for the SPIR-V module in tests |
 | Runtime dispatch branch (`#gpu?`) causes binary bloat | Large binaries from dead paths | Emit only the needed path when N is compile-time known; use linker GC for dead sections |
 | `--gpu-offload` + PGO creates complex interaction | Wrong offload decisions | Validate against synthetic benchmarks with known crossover points |
-| Upstream LLVM lacks NVPTX/AMDGPU in CI | CI fails on GPU tests | Make GPU tests conditional on `--features gpu`; test with stub runtime on CI |
+| SPIR-V backend not enabled in the build's LLVM | `spirv64` target triple fails | Make SPIR-V emission conditional: `--features spirv` enables it; fallback emits remark and CPU-only binary |
+| Vulkan runtime dlopen fails | GPU path silently falls back to CPU | `brief_gpu_is_available()` returns 0; CPU path always compiled as fallback |
 
 ---
 

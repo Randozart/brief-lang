@@ -3,6 +3,7 @@ pub mod dispatch;
 pub mod emit_expr;
 pub mod emit_stmt;
 pub mod emit_toplevel;
+pub mod gpu;
 pub mod hazard;
 pub mod loop_engine;
 pub mod optimizer;
