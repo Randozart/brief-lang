@@ -1,14 +1,17 @@
 use crate::ast::{Expr, Statement};
 use crate::features::macros::context::{MacroContext, MacroDef, TemplateDef};
 
-/// Expand a template by substituting @-interpolation markers with bound arguments.
+/// Expand a template by substituting @-interpolation markers, then executing
+/// the body in a sandboxed interpreter.  This evaluates [guard] conditions,
+/// evaluates @{expr} computed interpolations, and runs control flow.
 pub fn expand_template(
-    _ctx: &mut MacroContext,
-    _interpreter: &mut crate::interpreter::Interpreter,
+    ctx: &mut MacroContext,
+    interpreter: &mut crate::interpreter::Interpreter,
     def: &TemplateDef,
     args: &[Expr],
     block: Option<crate::ast::Block>,
 ) -> Result<crate::interpreter::Value, String> {
+    // Build bindings from @-interpolation markers to argument AST
     let mut bindings: Vec<(String, Expr)> = Vec::new();
     for (i, (param_name, _)) in def.params.iter().enumerate() {
         if i < args.len() {
@@ -24,8 +27,21 @@ pub fn expand_template(
             trailing_expr: b.trailing_expr,
         }));
     }
-    let stmts: Vec<Statement> = def.body.iter().map(|s| substitute_in_stmt(s, &bindings)).collect();
-    Ok(crate::interpreter::Value::Block(stmts))
+
+    // Substitute @-markers in the body, bind args as state variables
+    let substituted: Vec<Statement> = def.body.iter().map(|s| substitute_in_stmt(s, &bindings)).collect();
+
+    // Execute each statement through the interpreter (evaluates guards, control flow)
+    for stmt in &substituted {
+        interpreter.exec_stmt(stmt)
+            .map_err(|e| format!("template '{}' body error: {:?}", def.name, e))?;
+        if let Some(val) = interpreter.return_value.take() {
+            return Ok(val);
+        }
+    }
+
+    // No term statement — return the substituted body as Block (backwards-compat)
+    Ok(crate::interpreter::Value::Block(substituted))
 }
 
 /// Expand a macro by executing its body in a sandboxed interpreter.
@@ -74,7 +90,7 @@ pub fn value_to_statements(value: &crate::interpreter::Value) -> Vec<Statement> 
     }
 }
 
-fn expr_from_value(value: &crate::interpreter::Value) -> Expr {
+pub(crate) fn expr_from_value(value: &crate::interpreter::Value) -> Expr {
     match value {
         crate::interpreter::Value::Int(n) => Expr::Integer(*n),
         crate::interpreter::Value::Float(f) => Expr::Float(*f),
