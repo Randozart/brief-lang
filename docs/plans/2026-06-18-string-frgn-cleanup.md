@@ -83,20 +83,30 @@ So only `Keys` and `Values` actually need new C helpers. `AsStack` and `AsQueue`
 
 ---
 
-## Sprint E4: ProjectionTarget::Match Stub
+## Sprint E4: ProjectionTarget::Match Stub — CANCELLED (Planning Error)
 
-`ProjectionTarget::Match(expr)` falls through to the catch-all (returns 0). The interpreter evaluates the match expression against the source value and returns a boolean (whether they match).
+**`ProjectionTarget::Match` was intentionally removed from the language.**
+The parser at `src/parser.rs:5719-5721` returns:
 
-**Fix:** Compare source value with match expression, return `Bool`. Same pattern as `Contains` but with a simple equality check instead of a linear search loop.
+```
+Match projection is no longer supported; use the `<:` operator instead
+```
+
+There is no stub to fix — the variant was deliberately retired in favor
+of the `<:` operator. The original plan was based on an incorrect
+assumption that the variant existed in the `ProjectionTarget` enum.
+It never did (it exists only in the `Pattern` enum for regex matching).
+
+**Lesson:** Verify enum variant existence before planning a stub fix.
 
 ---
 
 ## Execution Order
 
-1. **E1** — Fix getaddrinfo, getenv, setenv, unsetenv (C only, 4 functions, ~20 min)
-2. **E2** — Fix 8+ frgn functions (C only, signature + brief_str_to_c conversion, ~30 min)
-3. **E3** — Add `brief_map_keys`/`brief_map_values` C helpers + LLVM IR matches (~20 min)
-4. **E4** — Add `Match` projection match arm in emit_expr.rs (~10 min)
-5. **Build + Test + Commit**
+1. **E1** — Fix getaddrinfo, getenv, setenv, unsetenv (C only, 4 functions) ✅ Done
+2. **E2** — Fix 8+ frgn functions (Rust + C, signature + brief_str_to_c conversion) ✅ Done
+3. **E3** — Add `__map_keys__`/`__map_values__` C helpers + LLVM IR matches ✅ Done
+4. **E4** — ❌ Cancelled (planning error — `ProjectionTarget::Match` does not exist)
+5. **Build + Test + Commit** ⏳
 
 Each step: `cargo build && cargo test --lib` must pass before moving to next.

@@ -51,6 +51,8 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__sigaction__(i64, i64)").ok();
         writeln!(out, "declare i64 @__sigprocmask__(i64, i64)").ok();
         writeln!(out, "declare i64 @__getaddrinfo__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__map_keys__(i64)").ok();
+        writeln!(out, "declare i64 @__map_values__(i64)").ok();
         // Some externally-linked functions called by intrinsics
         writeln!(out, "declare i32 @ioctl(i32, i64, ptr)").ok();
     }

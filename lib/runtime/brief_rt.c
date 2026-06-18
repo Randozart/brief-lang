@@ -1347,7 +1347,33 @@ static int64_t buf_to_brief(const char* buf, int64_t len) {
     return (int64_t)h;
 }
 
-/* Constructor wrapper — ensures init runs even without the generated main() */
+int64_t __map_keys__(int64_t map_bstr) {
+    int64_t* h = (int64_t*)map_bstr;
+    if (!h) return 0;
+    int64_t len = h[1];
+    int64_t* new_buf = (int64_t*)malloc(((size_t)len + 2) * sizeof(int64_t));
+    if (!new_buf) return 0;
+    new_buf[0] = (int64_t)(new_buf + 2);
+    new_buf[1] = len;
+    for (int64_t i = 0; i < len; i++) {
+        new_buf[2 + i] = h[2 + 2 * i];
+    }
+    return (int64_t)new_buf;
+}
+
+int64_t __map_values__(int64_t map_bstr) {
+    int64_t* h = (int64_t*)map_bstr;
+    if (!h) return 0;
+    int64_t len = h[1];
+    int64_t* new_buf = (int64_t*)malloc(((size_t)len + 2) * sizeof(int64_t));
+    if (!new_buf) return 0;
+    new_buf[0] = (int64_t)(new_buf + 2);
+    new_buf[1] = len;
+    for (int64_t i = 0; i < len; i++) {
+        new_buf[2 + i] = h[2 + 2 * i + 1];
+    }
+    return (int64_t)new_buf;
+}
 
 /* Constructor wrapper — ensures init runs even without the generated main() */
 __attribute__((constructor))

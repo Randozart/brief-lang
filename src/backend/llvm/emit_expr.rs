@@ -2121,9 +2121,14 @@ impl LlvmBackend {
                     ProjectionTarget::BitReverse => {
                         writeln!(out, "{}{} = call i64 @llvm.bitreverse.i64(i64 {})", indent, v, src_val.name).ok();
                     }
-                    ProjectionTarget::Keys | ProjectionTarget::Values
-                    | ProjectionTarget::AsStack | ProjectionTarget::AsQueue => {
-                        writeln!(out, "{}{} = add i64 0, {} ; keys/values/as/as", indent, v, src_val.name).ok();
+                    ProjectionTarget::Keys => {
+                        writeln!(out, "{}{} = call i64 @__map_keys__(i64 {})", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::Values => {
+                        writeln!(out, "{}{} = call i64 @__map_values__(i64 {})", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::AsStack | ProjectionTarget::AsQueue => {
+                        writeln!(out, "{}{} = add i64 0, {} ; as_stack/as_queue (identity)", indent, v, src_val.name).ok();
                     }
                     ProjectionTarget::Index(i) => {
                         let hp = format!("%pihp{}", self.txn_counter); self.txn_counter += 1;
