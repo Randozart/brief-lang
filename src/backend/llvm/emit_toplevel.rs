@@ -740,6 +740,11 @@ impl LlvmBackend {
             if !self.terminated { writeln!(out, "  ret void").ok(); }
             writeln!(out, "}}").ok();
         }
+
+        // Collect GPU kernel for this transaction if it has #gpu / #!gpu / #?gpu.
+        if self.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
+            self.collect_gpu_kernel(name, &txn.body);
+        }
     }
 
     pub(super) fn emit_callable_txn(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
@@ -940,6 +945,11 @@ impl LlvmBackend {
             writeln!(out, "  ret i1 {}", i1).ok();
         }
         writeln!(out, "}}").ok();
+
+        // Collect GPU kernel for callable txns with #gpu directives.
+        if self.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
+            self.collect_gpu_kernel(name, &txn.body);
+        }
     }
 
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {

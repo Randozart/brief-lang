@@ -600,6 +600,10 @@ pub struct LlvmBackend {
 
     // ── GPU Offloading ─────────────────────────────────────
     gpu_offload: bool,
+    /// Collected SPIR-V kernel IR strings (one per extracted kernel).
+    pub(crate) spirv_kernels: Vec<String>,
+    /// Compiled SPIR-V binary blobs for embedding in the output.
+    pub(crate) spirv_blobs: Vec<Vec<u8>>,
 }
 
 impl LlvmBackend {
@@ -680,6 +684,8 @@ impl LlvmBackend {
             remarks: Vec::new(),
             emit_remarks: false,
             gpu_offload: false,
+            spirv_kernels: Vec::new(),
+            spirv_blobs: Vec::new(),
         }
     }
 
@@ -740,6 +746,40 @@ impl LlvmBackend {
     pub fn with_gpu_offload(mut self, offload: bool) -> Self {
         self.gpu_offload = offload;
         self
+    }
+
+    /// Collect SPIR-V kernel IR for any GPU-eligible transactions.
+    /// Called during codegen after each transaction is emitted.
+    /// The SPIR-V blobs are embedded at the end of the output module.
+    pub(crate) fn collect_gpu_kernel(&mut self, txn_name: &str, body: &[Statement]) {
+        let eligibility = gpu::check_eligibility(body);
+        if !eligibility.eligible {
+            return;
+        }
+
+        let kernel = gpu::extract_kernel(txn_name, body, crate::ast::Expr::Integer(0), &[]);
+        let spirv_ir = gpu::emit_spirv_module(&kernel);
+        self.spirv_kernels.push(spirv_ir.clone());
+
+        // Try to compile to SPIR-V binary; if llc isn't available, skip silently.
+        if let Ok(binary) = gpu::compile_to_spirv(&spirv_ir) {
+            self.spirv_blobs.push(binary);
+        }
+    }
+
+    /// Append embedded SPIR-V blobs to the output IR string.
+    /// Called at the end of `generate()` after all transactions are emitted.
+    pub(crate) fn emit_spirv_embeds(&self) -> String {
+        let mut out = String::new();
+        if self.spirv_blobs.is_empty() && self.spirv_kernels.is_empty() {
+            return out;
+        }
+        out.push_str("\n; === GPU Kernel Blobs ===\n");
+        for (i, blob) in self.spirv_blobs.iter().enumerate() {
+            let name = format!("kernel_{}", i);
+            out.push_str(&gpu::embed_spirv_blob(blob, &name));
+        }
+        out
     }
 
     pub(crate) fn push_remark(&mut self, remark: crate::backend::llvm::directive::OptimizationRemark) {
@@ -1878,6 +1918,11 @@ self.emit_declares(&mut out);
                     }
                 }
             }
+        }
+
+        // Append any compiled SPIR-V kernel blobs to the output for embedding.
+        if self.gpu_offload || !self.spirv_blobs.is_empty() {
+            out.push_str(&self.emit_spirv_embeds());
         }
 
         out

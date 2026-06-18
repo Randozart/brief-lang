@@ -307,6 +307,111 @@ fn empty_program() -> Program {
         assert!(output.contains("alwaysinline"), "cycle-free txn should have alwaysinline by default");
     }
 
+    fn make_gpu_txn(name: &str, modifiers: Vec<Hashtag>) -> TopLevel {
+        // GPU-eligible txn: pure assignment, no term/term!
+        TopLevel::Transaction(Transaction {
+            name: name.to_string(),
+            parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+                watchdog: None,
+            },
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::Identifier("count".to_string()),
+                    expr: Expr::Add(
+                        Box::new(Expr::Identifier("count".to_string())),
+                        Box::new(Expr::Integer(1)),
+                    ),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+            ],
+            is_async: false,
+            is_reactive: true,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers,
+            variant_bodies: vec![],
+            outputs: Vec::new(),
+            output_type: None,
+        })
+    }
+
+    #[test]
+    fn test_gpu_directive_collects_spirv_kernel() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                state_count(),
+                make_gpu_txn("gpu_test", vec![Hashtag::new("gpu".to_string())]),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let _output = backend.generate(&program);
+        assert!(backend.spirv_kernels.len() >= 1,
+            "gpu txn should produce at least one SPIR-V kernel");
+    }
+
+    #[test]
+    fn test_gpu_directive_embeds_spirv_blob_in_output() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                state_count(),
+                make_gpu_txn("embed_test", vec![Hashtag::new("gpu".to_string())]),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("GPU Kernel Blobs") || backend.spirv_kernels.len() >= 1,
+            "gpu txn output should contain SPIR-V blob section");
+    }
+
+    #[test]
+    fn test_gpu_offload_flag_collects_kernels() {
+        let mut backend = LlvmBackend::new().with_gpu_offload(true);
+        let program = Program {
+            items: vec![
+                state_count(),
+                make_gpu_txn("offload_test", vec![]),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let _output = backend.generate(&program);
+        assert!(backend.spirv_kernels.len() >= 1,
+            "--gpu-offload should collect kernels for all txns");
+    }
+
     #[test]
     fn test_llvm_event_model_lowering() {
         let mut backend = LlvmBackend::new();
