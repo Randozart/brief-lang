@@ -182,6 +182,21 @@ pub enum Token {
     #[token("MATCH")]
     Match,
 
+    #[token("template")]
+    #[token("TEMPLATE")]
+    Template,
+    #[token("macro")]
+    #[token("MACRO")]
+    Macro,
+    #[token("quote")]
+    #[token("QUOTE")]
+    Quote,
+
+    #[token("$")]
+    Dollar,
+    #[token("$!")]
+    DollarBang,
+
     #[token("foreach")]
     #[token("FOREACH")]
     Foreach,
@@ -528,6 +543,11 @@ impl std::fmt::Display for Token {
             Token::Ok => write!(f, "Ok"),
             Token::Err => write!(f, "Err"),
             Token::Match => write!(f, "match"),
+            Token::Template => write!(f, "template"),
+            Token::Macro => write!(f, "macro"),
+            Token::Quote => write!(f, "quote"),
+            Token::Dollar => write!(f, "$"),
+            Token::DollarBang => write!(f, "$!"),
             Token::Foreach => write!(f, "foreach"),
             Token::Pvt => write!(f, "pvt"),
             Token::Sed => write!(f, "sed"),
@@ -687,6 +707,34 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::Lt)));
         assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
         assert_eq!(lexer.next(), Some(Ok(Token::Shr)));  // >> is Shr
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_template_macro_keywords() {
+        let mut lexer = Token::lexer("template macro quote");
+        assert_eq!(lexer.next(), Some(Ok(Token::Template)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Macro)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Quote)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_dollar_tokens() {
+        let mut lexer = Token::lexer("$unless $!circular_buffer");
+        assert_eq!(lexer.next(), Some(Ok(Token::Dollar)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("unless".to_string()))));
+        assert_eq!(lexer.next(), Some(Ok(Token::DollarBang)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("circular_buffer".to_string()))));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_dollar_bang_as_single_token() {
+        // $! must be lexed as a single DollarBang token, not Dollar + Not
+        let mut lexer = Token::lexer("$!x");
+        assert_eq!(lexer.next(), Some(Ok(Token::DollarBang)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("x".to_string()))));
         assert_eq!(lexer.next(), None);
     }
 }

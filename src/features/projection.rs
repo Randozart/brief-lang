@@ -80,6 +80,9 @@ impl ExprEval for ProjectionExpr {
                     Value::Stack(_) => 12, Value::Queue(_) => 13,
                     Value::Instance { .. } => 14, Value::Enum(..) => 15,
                     Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Regex(_) => 18, Value::Void => 0,
+                    Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Type(..) => {
+                        unreachable!("compile-time only value")
+                    }
                 };
                 Ok(Value::Int(discriminant))
             }

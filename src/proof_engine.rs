@@ -2562,6 +2562,10 @@ impl ProofEngine {
             Expr::SubtypeProjection { source, .. } => {
                 self.collect_identifiers(source, vars);
             }
+            // Macro/template nodes — should be expanded before reaching analysis
+            Expr::TemplateCall { .. } | Expr::MacroCall { .. } | Expr::Interpolate(..) | Expr::InterpolateExpr(..) | Expr::QuoteBlock { .. } => {
+                unreachable!("macro/template should have been expanded")
+            }
         }
     }
 

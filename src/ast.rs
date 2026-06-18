@@ -967,6 +967,19 @@ pub enum Expr {
     Call(String, Vec<Expr>),
     // Pattern B — packed call
     CallExpr(CallExpr),
+
+    /// $name(args) or $name(args) { block } — template call
+    TemplateCall {
+        name: String,
+        args: Vec<Expr>,
+        block: Option<Block>,
+    },
+    /// $!name(args) or $!name(args) { block } — macro call
+    MacroCall {
+        name: String,
+        args: Vec<Expr>,
+        block: Option<Block>,
+    },
     /// Compiler-known intrinsic call: `name#(args)` — e.g. `sqrt#(x)`, `pop#(list)`
     IntrinsicCall {
         intrinsic: Intrinsic,
@@ -1029,6 +1042,16 @@ pub enum Expr {
     Block(Vec<Statement>, Box<Expr>),
     // Pattern B — packed block
     BlockExpr(BlockExpr),
+
+    /// @ident — interpolation marker inside quote { } (from input arg)
+    Interpolate(String),
+    /// @{expr} — computed interpolation inside quote { } or compile#()
+    InterpolateExpr(Box<Expr>),
+    /// quote { stmts...; last_expr } — AST quasiquoting block
+    QuoteBlock {
+        statements: Vec<Statement>,
+        trailing_expr: Option<Box<Expr>>,
+    },
     // Tuple destructuring: let (a, b) = expr;
     TupleDestructure(Vec<String>, Box<Expr>),
     // Pattern B — packed tuple destructure
@@ -1716,6 +1739,41 @@ pub enum TopLevel {
     },
     /// Top-level executable statement — desugared to `__init` transaction at Pass 2.
     Statement(Box<Statement>),
+
+    /// template name(params) { body } — hygienic template definition
+    TemplateDef {
+        name: String,
+        params: Vec<(String, MacroArgType)>,
+        return_type: Option<MacroArgType>,
+        body: Vec<Statement>,
+    },
+    /// macro name(params) { body } — procedural macro definition
+    MacroDef {
+        name: String,
+        params: Vec<(String, MacroArgType)>,
+        return_type: Option<MacroArgType>,
+        body: Vec<Statement>,
+    },
+}
+
+/// A block of statements with an optional trailing expression.
+/// Used for trailing block arguments in template/macro calls.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    pub statements: Vec<Statement>,
+    pub trailing_expr: Option<Box<Expr>>,
+}
+
+/// Argument types for template/macro parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MacroArgType {
+    Expr,
+    Stmt,
+    Block,
+    Type,
+    Int,
+    String,
+    Bool,
 }
 
 #[derive(Debug, Clone)]

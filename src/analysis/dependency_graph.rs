@@ -515,6 +515,10 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             }
         }
         Expr::DbvlTable { .. } | Expr::DbvlTableExpr(_) => {}
+        // Macro/template nodes — should be expanded before reaching analysis
+        Expr::TemplateCall { .. } | Expr::MacroCall { .. } | Expr::Interpolate(..) | Expr::InterpolateExpr(..) | Expr::QuoteBlock { .. } => {
+            unreachable!("macro/template should have been expanded")
+        }
     }
 }
 

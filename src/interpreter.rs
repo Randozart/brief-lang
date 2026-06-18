@@ -87,6 +87,12 @@ pub enum Value {
     DbvlTable(Arc<DbvlTableInner>),
     /// Compiled regex pattern from `@"..."` literal.
     Regex(crate::analysis::dfa::RegexPattern),
+
+    /// Compile-time AST node values (for template/macro return values)
+    Expr(Box<crate::ast::Expr>),
+    Stmt(Box<crate::ast::Statement>),
+    Block(Vec<crate::ast::Statement>),
+    Type(crate::ast::Type),
 }
 
 impl fmt::Display for Value {
@@ -118,6 +124,10 @@ impl fmt::Display for Value {
                 write!(f, "<DbvlTable {} '{}' ({} entries, lazy)>", schema, t.path, t.key_offsets.len())
             }
             Value::Regex(r) => write!(f, "<Regex {:?}>", r.pattern),
+            Value::Expr(_) => write!(f, "<Expr>"),
+            Value::Stmt(_) => write!(f, "<Stmt>"),
+            Value::Block(_) => write!(f, "<Block>"),
+            Value::Type(t) => write!(f, "<Type {:?}>", t),
         }
     }
 }
@@ -188,6 +198,9 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
             JsonValue::Object(map)
         }
         Value::Regex(_) => JsonValue::Null,
+        Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Type(..) => {
+            unreachable!("compile-time only value")
+        }
     }
 }
 
@@ -3528,6 +3541,19 @@ impl Interpreter {
             | Expr::SigCallExpr(_) | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_)
             | Expr::TypeRef(_) => {
                 Err(RuntimeError::TypeMismatch("Pattern B variant not yet evaluated".into()))
+            }
+            // Template/macro nodes
+            Expr::TemplateCall { name, args, block } => {
+                Err(RuntimeError::TypeMismatch(format!("macro not expanded: {}", name)))
+            }
+            Expr::MacroCall { name, .. } => {
+                Err(RuntimeError::TypeMismatch(format!("macro not expanded: {}", name)))
+            }
+            Expr::Interpolate(_) | Expr::InterpolateExpr(_) => {
+                unreachable!("should have been substituted")
+            }
+            Expr::QuoteBlock { statements, .. } => {
+                Ok(Value::Block(statements.clone()))
             }
         }
     }

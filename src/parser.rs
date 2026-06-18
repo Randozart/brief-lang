@@ -49,6 +49,8 @@ pub struct Parser<'a> {
     seen_top_level_stmt: bool,
     /// Names of top-level items marked with `sed` (file-private).
     sed_item_names: Vec<String>,
+    /// When true, @ident and @{expr} produce interpolation markers (inside quote { })
+    in_quote_block: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -68,6 +70,7 @@ impl<'a> Parser<'a> {
             strict_mode: StrictMode::Off,
             seen_top_level_stmt: false,
             sed_item_names: Vec::new(),
+            in_quote_block: false,
         }
     }
 
@@ -1002,6 +1005,14 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Enum)) => {
                 let enum_def = self.parse_enum()?;
                 Ok(wrap_test(TopLevel::Enum(enum_def), &test_groups))
+            }
+            Some(Ok(Token::Template)) => {
+                let (name, params, return_type, body) = self.parse_template_def()?;
+                Ok(wrap_test(TopLevel::TemplateDef { name, params, return_type, body }, &test_groups))
+            }
+            Some(Ok(Token::Macro)) => {
+                let (name, params, return_type, body) = self.parse_macro_def()?;
+                Ok(wrap_test(TopLevel::MacroDef { name, params, return_type, body }, &test_groups))
             }
             Some(Ok(Token::Type)) => {
                 let type_def = self.parse_type_def()?;
@@ -3675,6 +3686,96 @@ let span = self.current_span();
         })
     }
 
+    fn parse_template_def(&mut self) -> Result<(String, Vec<(String, MacroArgType)>, Option<MacroArgType>, Vec<Statement>), SyntaxError> {
+        self.expect(Token::Template)?;
+        let name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut params = Vec::new();
+        if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+            loop {
+                let param_name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let arg_type = self.parse_macro_arg_type()?;
+                params.push((param_name, arg_type));
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RParen)?;
+
+        let return_type = if let Some(Ok(Token::Arrow)) = self.current_token() {
+            self.advance();
+            Some(self.parse_macro_arg_type()?)
+        } else {
+            None
+        };
+
+        self.expect(Token::LBrace)?;
+        let body = self.parse_body()?;
+        self.expect(Token::RBrace)?;
+
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
+
+        Ok((name, params, return_type, body))
+    }
+
+    fn parse_macro_def(&mut self) -> Result<(String, Vec<(String, MacroArgType)>, Option<MacroArgType>, Vec<Statement>), SyntaxError> {
+        self.expect(Token::Macro)?;
+        let name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut params = Vec::new();
+        if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+            loop {
+                let param_name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let arg_type = self.parse_macro_arg_type()?;
+                params.push((param_name, arg_type));
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RParen)?;
+
+        let return_type = if let Some(Ok(Token::Arrow)) = self.current_token() {
+            self.advance();
+            Some(self.parse_macro_arg_type()?)
+        } else {
+            None
+        };
+
+        self.expect(Token::LBrace)?;
+        let body = self.parse_body()?;
+        self.expect(Token::RBrace)?;
+
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
+
+        Ok((name, params, return_type, body))
+    }
+
+    fn parse_macro_arg_type(&mut self) -> Result<MacroArgType, SyntaxError> {
+        let ident = self.expect_identifier()?;
+        match ident.as_str() {
+            "Expr" => Ok(MacroArgType::Expr),
+            "Stmt" => Ok(MacroArgType::Stmt),
+            "Block" => Ok(MacroArgType::Block),
+            "Type" => Ok(MacroArgType::Type),
+            "Int" => Ok(MacroArgType::Int),
+            "String" => Ok(MacroArgType::String),
+            "Bool" => Ok(MacroArgType::Bool),
+            _ => self.spanned_err(format!("Invalid macro argument type: '{}'. Expected Expr, Stmt, Block, Type, Int, String, or Bool", ident)),
+        }
+    }
+
     fn parse_output_types(&mut self) -> Result<Vec<Type>, SyntaxError> {
         let mut outputs = Vec::new();
         outputs.push(self.parse_type()?);
@@ -5561,6 +5662,19 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         },
                     }
                 }
+                Ok(Token::At) if self.in_quote_block => {
+                    self.advance();
+                    if let Some(Ok(Token::LBrace)) = self.current_token() {
+                        // @{expr} — computed interpolation inside quote { }
+                        self.advance();
+                        let expr = self.parse_expression()?;
+                        self.expect(Token::RBrace)?;
+                        return Ok(Expr::InterpolateExpr(Box::new(expr)));
+                    }
+                    // @ident — variable interpolation inside quote { }
+                    let name = self.expect_identifier()?;
+                    return Ok(Expr::Interpolate(name));
+                }
                 Ok(Token::At) => {
                     self.advance();
                     // @"..." — regex literal; @ident — prior state
@@ -5855,6 +5969,24 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
     }
 
     fn parse_primary(&mut self) -> Result<Expr, SyntaxError> {
+        // Handle $name(args) — template call
+        if let Some(Ok(Token::Dollar)) = self.current_token() {
+            self.advance();
+            return self.parse_template_call();
+        }
+
+        // Handle $!name(args) — macro call
+        if let Some(Ok(Token::DollarBang)) = self.current_token() {
+            self.advance();
+            return self.parse_macro_call();
+        }
+
+        // Handle quote { ... } — quasiquoting
+        if let Some(Ok(Token::Quote)) = self.current_token() {
+            self.advance();
+            return self.parse_quote_block();
+        }
+
         match self.current_token() {
             Some(Ok(Token::Integer(val))) => {
                 let val = *val;
@@ -6255,9 +6387,139 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                                         self.advance();
                                     } else {
                                         break;
-                                    }
-                                }
-                            }
+        }
+    }
+
+    #[test]
+    fn test_parse_template_def() {
+        let src = "template unless(cond: Expr, body: Block) -> Stmt { return quote { [@cond] { @body } }; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::TemplateDef { name, params, return_type, body } => {
+                assert_eq!(name, "unless");
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0].0, "cond");
+                assert_eq!(params[0].1, MacroArgType::Expr);
+                assert_eq!(params[1].0, "body");
+                assert_eq!(params[1].1, MacroArgType::Block);
+                assert!(return_type == &Some(MacroArgType::Stmt));
+                assert!(!body.is_empty());
+            }
+            other => panic!("Expected TemplateDef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_def() {
+        let src = "macro circular_buffer(name: String, size: Int) -> Block { [size <= 0] { $error(\"bad size\"); }; return compile#(\"state @{name}_head: Int = 0;\"); };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::MacroDef { name, params, return_type, body } => {
+                assert_eq!(name, "circular_buffer");
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0].0, "name");
+                assert_eq!(params[0].1, MacroArgType::String);
+                assert_eq!(params[1].0, "size");
+                assert_eq!(params[1].1, MacroArgType::Int);
+                assert!(return_type == &Some(MacroArgType::Block));
+                assert!(!body.is_empty());
+            }
+            other => panic!("Expected MacroDef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_template_call() {
+        let src = "$unless(sensor_tripped) { keep_moving(); };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Statement(stmt) => {
+                if let Statement::Expression(Expr::TemplateCall { name, args, block }) = stmt.as_ref() {
+                    assert_eq!(name, "unless");
+                    assert_eq!(args.len(), 1);
+                    assert!(block.is_some());
+                    let b = block.as_ref().unwrap();
+                    assert_eq!(b.statements.len(), 1);
+                } else {
+                    panic!("Expected TemplateCall expression, got {:?}", stmt);
+                }
+            }
+            other => panic!("Expected Statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_call() {
+        let src = "$!circular_buffer(\"rx\", 256);";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Statement(stmt) => {
+                if let Statement::Expression(Expr::MacroCall { name, args, block }) = stmt.as_ref() {
+                    assert_eq!(name, "circular_buffer");
+                    assert_eq!(args.len(), 2);
+                    assert!(block.is_none());
+                } else {
+                    panic!("Expected MacroCall expression, got {:?}", stmt);
+                }
+            }
+            other => panic!("Expected Statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_quote_block() {
+        let src = "let x = quote { state @name: Int = 0; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Statement(stmt) => {
+                if let Statement::Let { expr: Some(Expr::QuoteBlock { statements, .. }), .. } = stmt.as_ref() {
+                    assert!(!statements.is_empty(), "QuoteBlock should contain statements");
+                } else {
+                    panic!("Expected Let with QuoteBlock, got {:?}", stmt);
+                }
+            }
+            other => panic!("Expected Statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_template_def_no_return_type() {
+        let src = "template foo(x: Int) { return $bar(x); };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::TemplateDef { name, return_type, .. } => {
+                assert_eq!(name, "foo");
+                assert!(return_type.is_none());
+            }
+            other => panic!("Expected TemplateDef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_template_call_no_block() {
+        let src = "$double(5);";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Statement(stmt) => {
+                if let Statement::Expression(Expr::TemplateCall { name, args, block }) = stmt.as_ref() {
+                    assert_eq!(name, "double");
+                    assert_eq!(args.len(), 1);
+                    assert!(block.is_none());
+                } else {
+                    panic!("Expected TemplateCall, got {:?}", stmt);
+                }
+            }
+            other => panic!("Expected Statement, got {:?}", other),
+        }
+    }
+}
                             self.expect(Token::RParen)?;
                             Ok(Expr::Call(name, args))
                         } else {
@@ -6274,6 +6536,95 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
             }
         }
+    }
+
+    fn parse_template_call(&mut self) -> Result<Expr, SyntaxError> {
+        let name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+            loop {
+                args.push(self.parse_expression()?);
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RParen)?;
+
+        // Optional trailing block: $name(args) { ... }
+        let block = if let Some(Ok(Token::LBrace)) = self.current_token() {
+            self.advance();
+            let saved = self.in_quote_block;
+            self.in_quote_block = false;
+            let stmts = self.parse_body()?;
+            self.in_quote_block = saved;
+            self.expect(Token::RBrace)?;
+            Some(crate::ast::Block { statements: stmts, trailing_expr: None })
+        } else {
+            None
+        };
+
+        Ok(Expr::TemplateCall { name, args, block })
+    }
+
+    fn parse_macro_call(&mut self) -> Result<Expr, SyntaxError> {
+        let name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut args = Vec::new();
+        if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+            loop {
+                args.push(self.parse_expression()?);
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RParen)?;
+
+        // Optional trailing block: $!name(args) { ... }
+        let block = if let Some(Ok(Token::LBrace)) = self.current_token() {
+            self.advance();
+            let saved = self.in_quote_block;
+            self.in_quote_block = false;
+            let stmts = self.parse_body()?;
+            self.in_quote_block = saved;
+            self.expect(Token::RBrace)?;
+            Some(crate::ast::Block { statements: stmts, trailing_expr: None })
+        } else {
+            None
+        };
+
+        Ok(Expr::MacroCall { name, args, block })
+    }
+
+    fn parse_quote_block(&mut self) -> Result<Expr, SyntaxError> {
+        // Set in_quote_block so @ident / @{expr} produce interpolation markers
+        let saved = self.in_quote_block;
+        self.in_quote_block = true;
+
+        self.expect(Token::LBrace)?;
+        let statements = self.parse_body()?;
+        // Check for trailing expression (the last statement might be an expression)
+        let trailing_expr: Option<Box<Expr>> = if self.in_quote_block {
+            // Inside quote block, we only parse statements
+            // The body parsing already handles everything
+            None
+        } else {
+            None
+        };
+        self.expect(Token::RBrace)?;
+
+        self.in_quote_block = saved;
+
+        Ok(Expr::QuoteBlock {
+            statements,
+            trailing_expr: None,
+        })
     }
 
     fn parse_match_expr(&mut self) -> Result<Expr, SyntaxError> {

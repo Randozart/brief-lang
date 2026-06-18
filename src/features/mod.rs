@@ -72,6 +72,9 @@ pub mod stmt;
 // TopLevel features
 pub mod toplevel;
 
+// Macro/template system
+pub mod macros;
+
 #[cfg(all(kani, feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
