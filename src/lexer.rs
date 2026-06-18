@@ -320,6 +320,8 @@ pub enum Token {
     Pragma,
     #[token("#!pragma")]
     PragmaBang,
+    #[token("#?")]
+    HashQuestion,
     #[token("#")]
     Hash,
     #[token("#!")]
@@ -591,6 +593,7 @@ impl std::fmt::Display for Token {
             Token::HashBangBracket => write!(f, "#!["),
             Token::Pragma => write!(f, "#pragma"),
             Token::PragmaBang => write!(f, "#!pragma"),
+            Token::HashQuestion => write!(f, "#?"),
             Token::Hash => write!(f, "#"),
             Token::HashBang => write!(f, "#!"),
             Token::Semicolon => write!(f, ";"),
@@ -736,5 +739,20 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::DollarBang)));
         assert_eq!(lexer.next(), Some(Ok(Token::Identifier("x".to_string()))));
         assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_hash_question_as_single_token() {
+        // #? must be lexed as a single HashQuestion token, not Hash + Question
+        let mut lexer = Token::lexer("#?inline");
+        assert_eq!(lexer.next(), Some(Ok(Token::HashQuestion)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("inline".to_string()))));
+        assert_eq!(lexer.next(), None);
+
+        // Verify # is still lexed correctly for normal hashtags
+        let mut lexer2 = Token::lexer("#volatile");
+        assert_eq!(lexer2.next(), Some(Ok(Token::Hash)));
+        assert_eq!(lexer2.next(), Some(Ok(Token::Identifier("volatile".to_string()))));
+        assert_eq!(lexer2.next(), None);
     }
 }

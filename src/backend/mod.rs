@@ -913,6 +913,35 @@ mod tests {
         assert_eq!(results[0], HashtagValidation::Supported);
     }
 
+    /// Intent: Verify a speculative hashtag produces advisory (not mandatory) when unsupported.
+    #[test]
+    fn test_speculative_hashtag_is_always_advisory() {
+        let tag = Hashtag { name: "unknown_gpu_feature".into(), value: None, mandatory: false, speculative: true, fallback: vec![], scoped: None };
+        let results = validate_hashtags(&[tag], "c");
+        assert_eq!(results[0], HashtagValidation::UnsupportedAdvisory("unknown_gpu_feature".to_string()),
+            "Speculative hashtags should never produce UnsupportedMandatory");
+    }
+
+    /// Intent: Verify a speculative hashtag on a supported directive succeeds.
+    #[test]
+    fn test_speculative_hashtag_supported() {
+        let tag = Hashtag { name: "inline".into(), value: None, mandatory: false, speculative: true, fallback: vec![], scoped: None };
+        let results = validate_hashtags(&[tag], "llvm");
+        assert_eq!(results[0], HashtagValidation::Supported,
+            "Speculative inline should be supported by LLVM backend");
+    }
+
+    /// Intent: Verify new directive names are recognized by LLVM backend.
+    #[test]
+    fn test_llvm_backend_supports_new_directives() {
+        for name in &["inline", "unroll", "vectorize", "gpu"] {
+            let tag = Hashtag { name: name.to_string(), value: None, mandatory: false, speculative: false, fallback: vec![], scoped: None };
+            let results = validate_hashtags(&[tag], "llvm");
+            assert_eq!(results[0], HashtagValidation::Supported,
+                "LLVM backend should support #{}", name);
+        }
+    }
+
     #[test]
     fn test_dirty_flags_mark_and_is_set() {
         let mut df = DirtyFlags::default();

@@ -338,6 +338,41 @@ impl<'a> Parser<'a> {
         let mut mods = Vec::new();
         loop {
             match self.current_token() {
+                Some(Ok(Token::HashQuestion)) => {
+                    self.advance();
+                    let name = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                        let n = n.clone();
+                        self.advance();
+                        n
+                    } else {
+                        return Ok(mods);
+                    };
+                    let value = if let Some(Ok(Token::LParen)) = self.current_token() {
+                        self.advance();
+                        let val = if let Some(Ok(Token::String(s))) = self.current_token() {
+                            let s = s.clone();
+                            self.advance();
+                            s
+                        } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                            let s = n.to_string();
+                            self.advance();
+                            s
+                        } else if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                            let n = n.clone();
+                            self.advance();
+                            n
+                        } else {
+                            String::new()
+                        };
+                        if let Some(Ok(Token::RParen)) = self.current_token() {
+                            self.advance();
+                        }
+                        Some(val)
+                    } else {
+                        None
+                    };
+                    mods.push(Hashtag { name, value, mandatory: false, speculative: true, fallback: Vec::new(), scoped: None });
+                }
                 Some(Ok(Token::Hash)) => {
                     self.advance();
                     let name = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
@@ -371,7 +406,7 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    mods.push(Hashtag { name, value, mandatory: false, fallback: Vec::new(), scoped: None });
+                    mods.push(Hashtag { name, value, mandatory: false, speculative: false, fallback: Vec::new(), scoped: None });
                 }
                 Some(Ok(Token::HashBang)) => {
                     self.advance();
@@ -417,7 +452,7 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    mods.push(Hashtag { name, value, mandatory: true, fallback, scoped: None });
+                    mods.push(Hashtag { name, value, mandatory: true, speculative: false, fallback, scoped: None });
                 }
                 Some(Ok(Token::HashBracket)) => {
                     self.advance();
@@ -7648,6 +7683,62 @@ mod parser_tests {
                     assert_eq!(modifiers[0].value.as_deref(), Some("4096"));
                 }
                 _ => panic!("Expected Let"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_speculative_hashtag() {
+        let s = r#"txn Foo [true][n >= 0] { &x = 1 #?inline; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse speculative hashtag: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Assignment { modifiers, .. } => {
+                    assert_eq!(modifiers.len(), 1);
+                    assert!(modifiers[0].speculative, "Hashtag should be speculative");
+                    assert!(!modifiers[0].mandatory, "Speculative hashtag should not be mandatory");
+                    assert_eq!(modifiers[0].name, "inline");
+                }
+                _ => panic!("Expected Assignment"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_speculative_hashtag_on_let() {
+        let s = r#"txn Foo [true][n >= 0] { let x: Int #?volatile; term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse speculative hashtag on let: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Let { modifiers, .. } => {
+                    assert_eq!(modifiers.len(), 1);
+                    assert!(modifiers[0].speculative);
+                    assert_eq!(modifiers[0].name, "volatile");
+                }
+                _ => panic!("Expected Let"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_speculative_hashtag_with_value() {
+        let s = r#"txn Foo [true][n >= 0] { &x = 1 #?gpu(1024); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse speculative hashtag with value: {:?}", result.err());
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::Assignment { modifiers, .. } => {
+                    assert_eq!(modifiers.len(), 1);
+                    assert!(modifiers[0].speculative);
+                    assert_eq!(modifiers[0].name, "gpu");
+                    assert_eq!(modifiers[0].value.as_deref(), Some("1024"));
+                }
+                _ => panic!("Expected Assignment"),
             }
         }
     }

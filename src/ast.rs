@@ -1904,17 +1904,22 @@ pub struct Hashtag {
     pub name: String,
     pub value: Option<String>,
     pub mandatory: bool,
+    pub speculative: bool,
     pub fallback: Vec<String>,
     pub scoped: Option<String>,
 }
 
 impl Hashtag {
     pub fn new(name: String) -> Self {
-        Hashtag { name, value: None, mandatory: false, fallback: Vec::new(), scoped: None }
+        Hashtag { name, value: None, mandatory: false, speculative: false, fallback: Vec::new(), scoped: None }
     }
 
     pub fn mandatory(name: String) -> Self {
-        Hashtag { name, value: None, mandatory: true, fallback: Vec::new(), scoped: None }
+        Hashtag { name, value: None, mandatory: true, speculative: false, fallback: Vec::new(), scoped: None }
+    }
+
+    pub fn speculative(name: String) -> Self {
+        Hashtag { name, value: None, mandatory: false, speculative: true, fallback: Vec::new(), scoped: None }
     }
 }
 
