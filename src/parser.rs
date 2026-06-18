@@ -4569,11 +4569,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 self.expect(Token::LBrace)?;
                 let body = self.parse_body()?;
                 self.expect(Token::RBrace)?;
+                let modifiers = self.parse_hashtag_modifiers()?;
                 self.expect(Token::Semicolon)?;
                 Ok(Statement::Foreach {
                     item,
                     list: Box::new(list),
                     body,
+                    modifiers,
                 })
             }
             Some(Ok(Token::Question)) => {

@@ -1241,7 +1241,7 @@ impl Interpreter {
                     self.exec_stmt(stmt)?;
                 }
             }
-            Statement::Foreach { item, list, body } => {
+            Statement::Foreach { item, list, body, .. } => {
                 let list_val = self.eval_expr(list)?;
                 match list_val {
                     Value::List(items) => {
@@ -7265,6 +7265,7 @@ mod tests {
             item: "x".to_string(),
             list: Box::new(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)])),
             body: vec![],
+            modifiers: vec![],
         };
         i.exec_stmt(&stmt).unwrap();
         // Just verify no error — basic loop completion
@@ -7277,6 +7278,7 @@ mod tests {
         let stmt = Statement::Foreach {
             item: "x".to_string(),
             list: Box::new(Expr::ListLiteral(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
+            modifiers: vec![],
             body: vec![
                 Statement::Assignment {
                     lhs: Expr::OwnedRef("sum".to_string()),

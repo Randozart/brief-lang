@@ -362,7 +362,7 @@ impl Reactor {
                 Ok(StmtResult::Continue)
             }
             Statement::Alka(_) | Statement::OnExit { .. } => Ok(StmtResult::Continue),
-            Statement::Foreach { item, list, body } => {
+            Statement::Foreach { item, list, body, .. } => {
                 let list_val = interp.eval_expr(list)?;
                 if let Value::List(items) = list_val {
                     for elem in items {

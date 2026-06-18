@@ -592,11 +592,12 @@ impl LlvmBackend {
             Statement::OnExit { body, .. } => { self.pending_cleanup.extend(body.iter().cloned()); }
             Statement::Alka(b) => { for l in b.content.lines() { let _ = writeln!(out, "{}{}", indent, l); } }
             Statement::InlineAsm { asm_string, .. } => { writeln!(out, "{}{}", indent, asm_string).ok(); }
-            Statement::Foreach { item, list, body } => {
+            Statement::Foreach { item, list, body, modifiers } => {
                 crate::features::stmt::foreach::ForeachStmt {
                     item: item.clone(),
                     list: list.clone(),
                     body: body.clone(),
+                    modifiers: modifiers.clone(),
                 }.emit_llvm(self, out, &StmtDispatch, indent);
             }
             Statement::Oracle { body, handler, .. } => {

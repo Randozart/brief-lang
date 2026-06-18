@@ -1,3 +1,4 @@
+pub mod directive;
 pub mod dispatch;
 pub mod emit_expr;
 pub mod emit_stmt;

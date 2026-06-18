@@ -1471,6 +1471,7 @@ pub enum Statement {
         item: String,
         list: Box<Expr>,
         body: Vec<Statement>,
+        modifiers: Vec<Hashtag>,
     },
 
     // Proof oracle: ?#[handler] { body };

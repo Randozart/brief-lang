@@ -1,7 +1,7 @@
 # Advisory Directives (`#?`)
 
 **Date added:** 2026-06-18
-**Phase:** 1 — Lexer/Parser/AST infrastructure
+**Phase:** 1–2 — Lexer/Parser/AST infrastructure + LLVM metadata mapping
 
 ---
 
@@ -75,6 +75,55 @@ Speculative directives produce **optimization remarks** (see
 - `#?gpu` → "offloaded to GPU" or "CPU retained (arithmetic intensity too low)"
 
 ---
+
+## LLVM Metadata Mapping (Phase 2)
+
+The `directive.rs` module (`src/backend/llvm/directive.rs`) centralizes the
+mapping from directive hashtags to LLVM IR annotations.
+
+### `DirectiveCtx`
+
+```rust
+pub enum DirectiveCtx {
+    Transaction,    // reactive txn → function attr
+    CallableTxn,    // callable txn/defn → function attr  
+    Loop,           // foreach or counted loop → loop metadata
+    Body,           // general guarded body
+}
+```
+
+### `DirectiveEffect`
+
+```rust
+pub enum DirectiveEffect {
+    FunctionAttribute(String),  // e.g. "alwaysinline"
+    LoopMetadata(String, String),  // e.g. ("llvm.loop.unroll.full", "")
+    None,
+}
+```
+
+### Integration Points
+
+| Location | Context | Directives |
+|----------|---------|------------|
+| `emit_toplevel.rs:emit_transaction()` | Transaction | `#inline` → `alwaysinline`, `#?inline` → `inlinehint` |
+| `emit_toplevel.rs:emit_callable_txn()` | CallableTxn | `#inline` → `alwaysinline`, `#?inline` → `inlinehint` |
+| `foreach.rs:emit_llvm()` | Loop | `#unroll` → `!llvm.loop.unroll.full`, `#?unroll` → `!llvm.loop.unroll.enable` |
+| `foreach.rs:emit_llvm()` | Loop | `#vectorize`/`#?vectorize` → `!llvm.loop.vectorize.enable = true` |
+
+### Foreach Modifiers
+
+`Statement::Foreach` now carries `modifiers: Vec<Hashtag>` (added to the
+AST, parser, and all match sites). The `ForeachStmt` codegen struct
+includes the modifiers and resolves them via `resolve_directives()` in
+the `Loop` context.
+
+### Default Behavior
+
+When no vectorize directive is present on a foreach loop, the codegen
+still emits `!llvm.loop.vectorize.enable = true` (matching pre-existing
+behavior). Loop directives are additive — they do not disable the
+default vectorization unless explicitly overridden.
 
 ## Per-backend notes
 

@@ -189,6 +189,124 @@ fn empty_program() -> Program {
         assert!(!output.is_empty());
     }
 
+    fn make_txn(name: &str, modifiers: Vec<Hashtag>) -> TopLevel {
+        TopLevel::Transaction(Transaction {
+            name: name.to_string(),
+            parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+                watchdog: None,
+            },
+            body: vec![
+                Statement::Assignment {
+                    lhs: Expr::Identifier("count".to_string()),
+                    expr: Expr::Integer(1),
+                    timeout: None,
+                    modifiers: vec![],
+                },
+                Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+            ],
+            is_async: false,
+            is_reactive: true,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers,
+            variant_bodies: vec![],
+            outputs: Vec::new(),
+            output_type: None,
+        })
+    }
+
+    fn state_count() -> TopLevel {
+        TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(),
+            ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None,
+            bit_range: None,
+            is_override: false,
+            os_mode: false,
+            span: None,
+            attrs: vec![],
+            range_constraint: None,
+        })
+    }
+
+    #[test]
+    fn test_inline_directive_emits_alwaysinline() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                state_count(),
+                make_txn("inline_txn", vec![Hashtag::new("inline".to_string())]),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("alwaysinline"), "#inline should emit alwaysinline");
+    }
+
+    #[test]
+    fn test_speculative_inline_emits_inlinehint() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                state_count(),
+                make_txn("hinted_txn", vec![Hashtag::speculative("inline".to_string())]),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("inlinehint"), "#?inline should emit inlinehint");
+    }
+
+    #[test]
+    fn test_inline_directive_absent_no_extra_attr() {
+        // When no inline directive is present, no inline attribute should appear
+        // (unless the txn is cycle-free, which it is for a single-txn program).
+        // A cycle-free txn emits alwaysinline by default.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                state_count(),
+                make_txn("plain_txn", vec![]),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        // Cycle-free reactive txn always gets alwaysinline by default.
+        assert!(output.contains("alwaysinline"), "cycle-free txn should have alwaysinline by default");
+    }
+
     #[test]
     fn test_llvm_event_model_lowering() {
         let mut backend = LlvmBackend::new();

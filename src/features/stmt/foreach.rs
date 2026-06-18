@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Statement, Type};
+use crate::ast::{Expr, Hashtag, Statement, Type};
 use crate::errors::TypeError;
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
@@ -8,6 +8,7 @@ pub struct ForeachStmt {
     pub item: String,
     pub list: Box<Expr>,
     pub body: Vec<Statement>,
+    pub modifiers: Vec<Hashtag>,
 }
 
 impl StmtTypecheck for ForeachStmt {
@@ -85,11 +86,42 @@ impl StmtCodegenLLVM for ForeachStmt {
         let next_idx = format!("%fe_next_{}", tc);
         writeln!(out, "{0}{1} = add i64 {2}, 1", indent, next_idx, cur_idx).ok();
         writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, next_idx, idx_slot).ok();
+        // Resolve loop directives (#unroll, #vectorize, etc.) from modifiers.
+        let dir_effects = crate::backend::llvm::directive::resolve_directives(
+            &self.modifiers,
+            crate::backend::llvm::directive::DirectiveCtx::Loop,
+        );
+        // Build loop metadata nodes. Always emit the canonical self-referencing
+        // loop metadata node. Additional nodes are added for each directive.
+        let mut md_count = 1; // count of metadata operands beyond self-ref
+        let mut md_entries = Vec::new();
+        for effect in &dir_effects {
+            if let crate::backend::llvm::directive::DirectiveEffect::LoopMetadata(key, val) = effect {
+                let entry_md = ctx.metadata_counter + md_count;
+                if val.is_empty() {
+                    writeln!(out, "!{0} = !{{!\"{1}\"}}", entry_md, key).ok();
+                } else {
+                    writeln!(out, "!{0} = !{{!\"{1}\", {2}}}", entry_md, key, val).ok();
+                }
+                md_entries.push(format!("!{}", entry_md));
+                md_count += 1;
+            }
+        }
+        // Default: emit !llvm.loop.vectorize.enable = true if no vectorize directive present.
+        let has_vectorize = dir_effects.iter().any(|e| {
+            matches!(e, crate::backend::llvm::directive::DirectiveEffect::LoopMetadata(k, _) if k == "llvm.loop.vectorize.enable")
+        });
+        if !has_vectorize {
+            let vd_md = ctx.metadata_counter + md_count;
+            writeln!(out, "!{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}", vd_md).ok();
+            md_entries.push(format!("!{}", vd_md));
+            md_count += 1;
+        }
         let md_idx = ctx.metadata_counter;
-        ctx.metadata_counter += 2;
+        let entries = md_entries.join(", ");
+        writeln!(out, "!{0} = !{{!{0}, {1}}}", md_idx, entries).ok();
         writeln!(out, "{}br label %{} !llvm.loop !{}", indent, hdr_l, md_idx).ok();
-        writeln!(out, "!{0} = !{{!{0}, !{1}}}", md_idx, md_idx + 1).ok();
-        writeln!(out, "!{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}", md_idx + 1).ok();
+        ctx.metadata_counter += md_count;
         writeln!(out, "{}{}:", indent, done_l).ok();
     }
 }

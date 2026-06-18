@@ -139,11 +139,12 @@ fn substitute_in_stmt(stmt: &Statement, bindings: &[(String, Expr)]) -> Statemen
                 modifiers: modifiers.clone(),
             }
         }
-        Statement::Foreach { item, list, body } => {
+        Statement::Foreach { item, list, body, modifiers } => {
             Statement::Foreach {
                 item: item.clone(),
                 list: Box::new(substitute_in_expr(list, bindings)),
                 body: body.iter().map(|s| substitute_in_stmt(s, bindings)).collect(),
+                modifiers: modifiers.clone(),
             }
         }
         Statement::Assignment { lhs, expr, timeout, modifiers } => {

@@ -637,7 +637,30 @@ impl LlvmBackend {
                 self.field_to_meta_idx.insert(f.clone(), mi);
             }
         }
-        let alwaysinline = if !self.has_cycles { " alwaysinline" } else { "" };
+        // Resolve #inline / #?inline directives from transaction modifiers.
+        // #inline forces alwaysinline regardless of cycles.
+        // #?inline emits inlinehint (safe with cycles).
+        // If neither, fall back to cycle-based alwaysinline.
+        let alwaysinline = {
+            let dirs = super::directive::resolve_directives(
+                &txn.modifiers,
+                super::directive::DirectiveCtx::Transaction,
+            );
+            let inline_attr = dirs.iter().find_map(|e| {
+                if let super::directive::DirectiveEffect::FunctionAttribute(a) = e {
+                    Some(a.as_str())
+                } else {
+                    None
+                }
+            });
+            match inline_attr {
+                Some("alwaysinline") => " alwaysinline",
+                Some("inlinehint") => " inlinehint",
+                _ => {
+                    if !self.has_cycles { " alwaysinline" } else { "" }
+                }
+            }
+        };
         let txn_attr = self.slp_attr(name, "#0");
 
         let assume_action: Option<&str> = txn.modifiers.iter()
@@ -724,12 +747,28 @@ impl LlvmBackend {
         };
         let ret_llvm = if has_return { "i64" } else { "void" };
 
+        // Resolve #inline / #?inline directives for callable txns.
+        let inline_attr = {
+            let dirs = super::directive::resolve_directives(
+                &txn.modifiers,
+                super::directive::DirectiveCtx::CallableTxn,
+            );
+            dirs.iter().find_map(|e| {
+                if let super::directive::DirectiveEffect::FunctionAttribute(a) = e {
+                    Some(format!(" {}", a))
+                } else {
+                    None
+                }
+            })
+        };
+        let inline_str = inline_attr.as_deref().unwrap_or("");
+
         write!(out, "define {} @{}(", ret_llvm, name).ok();
         write!(out, "%State* noalias nocapture %state").ok();
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
         }
-        writeln!(out, ") local_unnamed_addr #0 {{").ok();
+        writeln!(out, ") local_unnamed_addr #0{} {{", inline_str).ok();
         writeln!(out, "  entry:").ok();
 
         writeln!(out, "  %result = alloca i64, align 8").ok();
