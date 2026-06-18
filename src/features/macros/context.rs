@@ -6,6 +6,7 @@ use std::collections::HashMap;
 pub struct MacroContext {
     pub gensym_counter: u64,
     pub budget: u64,
+    pub safe_mode: bool,
     pub call_site_span: Option<Span>,
     pub warnings: Vec<String>,
     pub templates: HashMap<String, TemplateDef>,
@@ -33,6 +34,7 @@ impl MacroContext {
         MacroContext {
             gensym_counter: 0,
             budget: 10_000,
+            safe_mode: false,
             call_site_span: None,
             warnings: Vec::new(),
             templates: HashMap::new(),
@@ -57,5 +59,31 @@ impl MacroContext {
         let n = self.gensym_counter;
         self.gensym_counter += 1;
         format!("__gensym_{}", n)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_budget() {
+        let ctx = MacroContext::new();
+        assert_eq!(ctx.budget, 10_000);
+        assert!(!ctx.safe_mode);
+    }
+
+    #[test]
+    fn test_unlimited_budget() {
+        let mut ctx = MacroContext::new();
+        ctx.budget = u64::MAX;
+        assert_eq!(ctx.budget, u64::MAX);
+    }
+
+    #[test]
+    fn test_safe_mode() {
+        let mut ctx = MacroContext::new();
+        ctx.safe_mode = true;
+        assert!(ctx.safe_mode);
     }
 }

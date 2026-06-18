@@ -773,6 +773,8 @@ fn run_check(
     codicil_mode: bool,
     strict: bool,
     optimize: bool,
+    safe_compile: bool,
+    macro_budget: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
@@ -827,8 +829,14 @@ fn run_check(
     }
     {
         let mut macro_ctx = brief_compiler::features::macros::context::MacroContext::new();
-        let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
-        let _ = brief_compiler::features::macros::expand::expand_macros(&mut program, &mut macro_ctx);
+        macro_ctx.safe_mode = safe_compile;
+        if let Some(budget) = macro_budget {
+            macro_ctx.budget = budget;
+        }
+        if !safe_compile {
+            let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
+            let _ = brief_compiler::features::macros::expand::expand_macros(&mut program, &mut macro_ctx);
+        }
         // Validate no compile-time-only intrinsics survived expansion
         if let Err(e) = brief_compiler::features::macros::expand::validate_no_compile_time_intrinsics(&program) {
             eprintln!("{}", e);
@@ -983,7 +991,7 @@ fn run_build(
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone());
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1283,6 +1291,8 @@ fn run_watch(
                     codicil_mode,
                     strict,
                     optimize,
+                    false,  // safe_compile
+                    None,   // macro_budget
                 ) {
                     eprintln!("Rebuild failed: {}", e);
                 }
@@ -1692,7 +1702,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
     let result: Option<PathBuf> = match backend.as_str() {
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, None, no_stdlib, stdlib_path.clone()) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, None, no_stdlib, stdlib_path.clone(), false, None) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -2148,6 +2158,8 @@ fn run_llvm_compile(
     simplify_budget: Option<u64>,
     no_stdlib: bool,
     stdlib_path: Option<PathBuf>,
+    safe_compile: bool,
+    macro_budget: Option<u64>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -2292,8 +2304,14 @@ fn run_llvm_compile(
     // Phase 1a/1b: Template and macro expansion
     {
         let mut macro_ctx = brief_compiler::features::macros::context::MacroContext::new();
-        let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
-        let _ = brief_compiler::features::macros::expand::expand_macros(&mut program, &mut macro_ctx);
+        macro_ctx.safe_mode = safe_compile;
+        if let Some(budget) = macro_budget {
+            macro_ctx.budget = budget;
+        }
+        if !safe_compile {
+            let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
+            let _ = brief_compiler::features::macros::expand::expand_macros(&mut program, &mut macro_ctx);
+        }
         // Validate no compile-time-only intrinsics survived expansion
         if let Err(e) = brief_compiler::features::macros::expand::validate_no_compile_time_intrinsics(&program) {
             eprintln!("{}", e);
@@ -3939,6 +3957,14 @@ fn main() {
             if let Some(path) = file_path {
                 let codicil_mode = detect_codicil_project(&path);
                 let strict = strict_flag || is_strict_extension(&path);
+                let safe_compile = args.contains(&"--safe-compile".to_string());
+                let mut macro_budget = args.iter()
+                    .position(|a| a == "--macro-budget")
+                    .and_then(|i| args.get(i + 1))
+                    .and_then(|s| s.parse::<u64>().ok());
+                if args.contains(&"--unlimited-macros".to_string()) {
+                    macro_budget = Some(u64::MAX);
+                }
                 if let Err(_e) = run_check(
                     &path,
                     verbose,
@@ -3948,6 +3974,8 @@ fn main() {
                     codicil_mode,
                     strict,
                     optimize_flag,
+                    safe_compile,
+                    macro_budget,
                 ) {
                     std::process::exit(1);
                 }
@@ -4113,8 +4141,16 @@ fn main() {
 
             if let Some(path) = file_path {
                 let strict = strict_flag || is_strict_extension(&path);
+                let safe_compile = args.contains(&"--safe-compile".to_string());
+                let mut macro_budget: Option<u64> = args.iter()
+                    .position(|a| a == "--macro-budget")
+                    .and_then(|i| args.get(i + 1))
+                    .and_then(|s| s.parse().ok());
+                if args.contains(&"--unlimited-macros".to_string()) {
+                    macro_budget = Some(u64::MAX);
+                }
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone());
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
@@ -5001,7 +5037,7 @@ fn main() {
                 let path = PathBuf::from(command);
                 let codicil_mode = detect_codicil_project(&path);
                 let strict = is_strict_extension(&path);
-                if let Err(_e) = run_check(&path, false, false, false, None, codicil_mode, strict, optimize_flag) {
+                if let Err(_e) = run_check(&path, false, false, false, None, codicil_mode, strict, optimize_flag, false, None) {
                     std::process::exit(1);
                 }
             } else if command.ends_with(".rbv") || command.ends_with(".srbv") {
