@@ -600,6 +600,7 @@ pub struct LlvmBackend {
 
     // ── GPU Offloading ─────────────────────────────────────
     gpu_offload: bool,
+    gpu_backend: String,
     /// Collected SPIR-V kernel IR strings (one per extracted kernel).
     pub(crate) spirv_kernels: Vec<String>,
     /// Compiled SPIR-V binary blobs for embedding in the output.
@@ -684,6 +685,7 @@ impl LlvmBackend {
             remarks: Vec::new(),
             emit_remarks: false,
             gpu_offload: false,
+            gpu_backend: "vulkan".to_string(),
             spirv_kernels: Vec::new(),
             spirv_blobs: Vec::new(),
         }
@@ -748,12 +750,15 @@ impl LlvmBackend {
         self
     }
 
-    /// Collect SPIR-V kernel IR for any GPU-eligible transactions.
-    /// Called during codegen after each transaction is emitted.
-    /// The SPIR-V blobs are embedded at the end of the output module.
-    ///
-    /// For `#?gpu` (speculative), the cost model determines whether to offload.
-    /// For `#gpu` (imperative) or `--gpu-offload`, all eligible bodies are collected.
+    pub fn with_gpu_backend(mut self, backend: String) -> Self {
+        self.gpu_backend = backend;
+        self
+    }
+
+    pub fn gpu_backend(&self) -> &str {
+        &self.gpu_backend
+    }
+
     pub(crate) fn collect_gpu_kernel(
         &mut self,
         txn_name: &str,
@@ -769,9 +774,17 @@ impl LlvmBackend {
             return;
         }
 
+        // Determine N for cost model: prefer PGO-derived bound, fall back to 0 (runtime).
+        let pgo_bound = if self.pgo_profile.is_some() {
+            let max_count = self.pgo_profile.as_ref().unwrap().branch_counts.values()
+                .map(|(t, f)| *t.max(f)).max().unwrap_or(0);
+            if max_count > 0 { Some(max_count) } else { None }
+        } else { None };
+        let cost_N = pgo_bound.unwrap_or(0);
+
         // Run cost model for speculative directives.
         if is_speculative {
-            let est = crate::analysis::gpu_cost::estimate(body, 0);
+            let est = crate::analysis::gpu_cost::estimate(body, cost_N);
             match est.recommended {
                 crate::analysis::gpu_cost::OffloadDecision::Cpu => {
                     self.push_remark(directive::OptimizationRemark::skipped("gpu",

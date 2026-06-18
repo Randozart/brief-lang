@@ -217,5 +217,50 @@ fire_due_async_txns logic:
   for each transaction with is_async && reactor_speed.is_some():
     interval_ms = 1000 / hz
     if last_fired[idx].elapsed() >= interval_ms:
+
+## GPU Offloading Flow (2026-06-18)
+
+```
+Program with #gpu / #?gpu directives or --gpu-offload flag
+  │
+  ▼
+Backend::generate()
+  │
+  ├──► Normal LLVM codegen (emit_toplevel.rs)
+  │      After each transaction is emitted:
+  │        if txn has #gpu or --gpu-offload:
+  │          collect_gpu_kernel(txn_name, body, is_speculative)
+  │            ├── check_eligibility() — purity, no term/FFI, flat types
+  │            ├── [#?gpu only] gpu_cost::estimate(body, N)
+  │            │     ├── count_operations() — arithmetic ops in body
+  │            │     ├── count_bytes_transferred() — field reads/writes
+  │            │     ├── compute crossover point N_c
+  │            │     └── decision: Gpu / Cpu / Runtime
+  │            ├── emit optimization remark with analysis
+  │            ├── gpu::extract_kernel() — clone body, classify fields
+  │            ├── gpu::emit_spirv_module() — produce LLVM IR for spirv64 target
+  │            └── gpu::compile_to_spirv() — llc --mtriple=spirv64 → .spv
+  │
+  └──► At end of generate():
+         emit_spirv_embeds() — append @brief_kernel_N byte arrays to .ll output
+
+  │
+  ▼
+run_llvm_compile() (main.rs)
+  ├──► Normal .ll → native binary (existing pipeline)
+  └──► If --gpu-offload with kernels:
+         compile .spv file alongside .ll binary
+
+  │
+  ▼
+Runtime (brief_gpu_rt.c)
+  brief_gpu_init()
+    ├── dlopen("libvulkan.so.1") → Vulkan compute dispatch (preferred)
+    └── dlopen("libOpenCL.so.1") → clCreateProgramWithIL (fallback)
+  brief_gpu_launch(kernel_spirv, size, grid, block, buffer_handles)
+    ├── Vulkan: vkCreateShaderModule + vkCmdDispatch
+    └── OpenCL: clCreateProgramWithIL + clEnqueueNDRangeKernel
+  brief_gpu_is_available() → 0 if neither Vulkan nor OpenCL found (CPU fallback)
+```
       mark dirty, fire transaction, update last_fired[idx]
 ```

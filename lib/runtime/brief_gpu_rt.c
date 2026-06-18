@@ -181,26 +181,43 @@ static int load_vulkan_symbols() {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Initialize the Vulkan compute runtime.
-/// Returns 1 on success, 0 on failure (Vulkan unavailable).
+static int brief_gpu_init_vulkan_inner();
+static int brief_gpu_init_opencl_inner();
+
+/// Initialize GPU compute runtime (Vulkan preferred, OpenCL fallback).
+/// Returns 1 on success, 0 on failure (no GPU runtime available).
 /// Safe to call multiple times; subsequent calls are no-ops.
 int brief_gpu_init() {
     if (vk_initialized) return vk_available;
 
     vk_initialized = 1;
 
-    // Load libvulkan.so.1 dynamically
+    // Try Vulkan first
     vk_lib = dlopen("libvulkan.so.1", RTLD_LAZY | RTLD_LOCAL);
-    if (!vk_lib) {
-        // Vulkan not available — CPU fallback
-        return 0;
+    if (vk_lib) {
+        if (load_vulkan_symbols()) {
+            if (brief_gpu_init_vulkan_inner()) {
+                vk_available = 1;
+                return 1;
+            }
+            dlclose(vk_lib);
+            vk_lib = NULL;
+        } else {
+            dlclose(vk_lib);
+            vk_lib = NULL;
+        }
     }
 
-    if (!load_vulkan_symbols()) {
-        dlclose(vk_lib);
-        vk_lib = NULL;
-        return 0;
+    // Vulkan failed — try OpenCL
+    if (brief_gpu_init_opencl_inner()) {
+        vk_available = 1;
+        return 1;
     }
+
+    return 0;
+}
+
+static int brief_gpu_init_vulkan_inner() {
 
     // Create Vulkan instance (no extensions needed for compute-only)
     struct { uint32_t version; uint32_t count; const char** names; } app_info = {
@@ -569,3 +586,110 @@ void brief_gpu_shutdown() {
     vk_available = 0;
     vk_initialized = 0;
 }
+
+// ---------------------------------------------------------------------------
+// OpenCL backend (fallback when Vulkan is unavailable)
+// ---------------------------------------------------------------------------
+// SPIR-V is consumed natively by OpenCL via clCreateProgramWithIL.
+// This path is used when --gpu-backend includes 'opencl' and Vulkan init
+// failed.
+
+static void* cl_lib = NULL;
+static int cl_available = 0;
+
+typedef void* cl_platform_id;
+typedef void* cl_device_id;
+typedef void* cl_context;
+typedef void* cl_command_queue;
+typedef void* cl_program;
+typedef void* cl_kernel;
+typedef void* cl_mem;
+typedef struct { void* data; } cl_event;
+
+// Simplified OpenCL function pointers
+static cl_platform_id* (*clGetPlatformIDs)(uint32_t, cl_platform_id*, uint32_t*) = NULL;
+static int (*clGetDeviceIDs)(cl_platform_id, uint64_t, uint32_t, cl_device_id*, uint32_t*) = NULL;
+static cl_context (*clCreateContext)(void*, uint32_t, cl_device_id*, void*, void*, int*) = NULL;
+static cl_command_queue (*clCreateCommandQueue)(cl_context, cl_device_id, uint64_t, int*) = NULL;
+static cl_program (*clCreateProgramWithIL)(cl_context, const void*, size_t, int*) = NULL;
+static int (*clBuildProgram)(cl_program, uint32_t, const cl_device_id*, const char*, void*, void*) = NULL;
+static cl_kernel (*clCreateKernel)(cl_program, const char*, int*) = NULL;
+static int (*clSetKernelArgSVMPointer)(cl_kernel, uint32_t, void*) = NULL;
+static int (*clEnqueueNDRangeKernel)(cl_command_queue, cl_kernel, uint32_t, const size_t*, const size_t*, const size_t*, uint32_t, const cl_event*, cl_event*) = NULL;
+static int (*clEnqueueReadBuffer)(cl_command_queue, cl_mem, int, size_t, size_t, void*, uint32_t, const cl_event*, cl_event*) = NULL;
+static int (*clEnqueueWriteBuffer)(cl_command_queue, cl_mem, int, size_t, size_t, const void*, uint32_t, const cl_event*, cl_event*) = NULL;
+static int (*clFinish)(cl_command_queue) = NULL;
+static int (*clReleaseKernel)(cl_kernel) = NULL;
+static int (*clReleaseProgram)(cl_program) = NULL;
+static int (*clReleaseCommandQueue)(cl_command_queue) = NULL;
+static int (*clReleaseContext)(cl_context) = NULL;
+static int (*clReleaseMemObject)(cl_mem) = NULL;
+static void* (*clSVMAlloc)(cl_context, uint64_t, size_t, uint32_t) = NULL;
+static int (*clSVMFree)(cl_context, void*) = NULL;
+
+static int load_opencl_symbols() {
+#define CL_LOAD(name) do { \
+    *(void**)(&name) = dlsym(cl_lib, #name); \
+    if (!name) return 0; \
+} while(0)
+    CL_LOAD(clGetPlatformIDs);
+    CL_LOAD(clGetDeviceIDs);
+    CL_LOAD(clCreateContext);
+    CL_LOAD(clCreateCommandQueue);
+    CL_LOAD(clCreateProgramWithIL);
+    CL_LOAD(clBuildProgram);
+    CL_LOAD(clCreateKernel);
+    CL_LOAD(clSetKernelArgSVMPointer);
+    CL_LOAD(clEnqueueNDRangeKernel);
+    CL_LOAD(clEnqueueReadBuffer);
+    CL_LOAD(clEnqueueWriteBuffer);
+    CL_LOAD(clFinish);
+    CL_LOAD(clReleaseKernel);
+    CL_LOAD(clReleaseProgram);
+    CL_LOAD(clReleaseCommandQueue);
+    CL_LOAD(clReleaseContext);
+    CL_LOAD(clReleaseMemObject);
+    CL_LOAD(clSVMAlloc);
+    CL_LOAD(clSVMFree);
+    return 1;
+#undef CL_LOAD
+}
+
+static cl_platform_id cl_platform;
+static cl_device_id cl_device;
+static cl_context cl_ctx;
+static cl_command_queue cl_queue;
+
+static int brief_gpu_init_opencl_inner() {
+    cl_lib = dlopen("libOpenCL.so.1", RTLD_LAZY | RTLD_LOCAL);
+    if (!cl_lib) return 0;
+    if (!load_opencl_symbols()) { dlclose(cl_lib); cl_lib = NULL; return 0; }
+
+    uint32_t num_platforms = 0;
+    if (clGetPlatformIDs(0, NULL, &num_platforms) != 0 || num_platforms == 0) {
+        dlclose(cl_lib); cl_lib = NULL; return 0;
+    }
+    if (clGetPlatformIDs(1, &cl_platform, NULL) != 0) {
+        dlclose(cl_lib); cl_lib = NULL; return 0;
+    }
+
+    uint32_t num_devices = 0;
+    if (clGetDeviceIDs(cl_platform, (uint64_t)1 << 4, 0, NULL, &num_devices) != 0 || num_devices == 0) {
+        dlclose(cl_lib); cl_lib = NULL; return 0;
+    }
+    if (clGetDeviceIDs(cl_platform, (uint64_t)1 << 4, 1, &cl_device, NULL) != 0) {
+        dlclose(cl_lib); cl_lib = NULL; return 0;
+    }
+
+    int err = 0;
+    cl_ctx = clCreateContext(NULL, 1, &cl_device, NULL, NULL, &err);
+    if (!cl_ctx || err != 0) { dlclose(cl_lib); cl_lib = NULL; return 0; }
+
+    cl_queue = clCreateCommandQueue(cl_ctx, cl_device, 0, &err);
+    if (!cl_queue || err != 0) { clReleaseContext(cl_ctx); dlclose(cl_lib); cl_lib = NULL; return 0; }
+
+    cl_available = 1;
+    return 1;
+}
+
+
