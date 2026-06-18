@@ -3492,6 +3492,32 @@ impl Interpreter {
                                 format!("compile#: parse error: {}", e))),
                         }
                     }
+                    Intrinsic::MacroError => {
+                        let msg = match values.remove(0) {
+                            Value::String(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("error# requires String, got {:?}", v))),
+                        };
+                        return Err(RuntimeError::TypeMismatch(
+                            format!("compile-time macro error: {}", msg)));
+                    }
+                    Intrinsic::MacroWarn => {
+                        let msg = match values.remove(0) {
+                            Value::String(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("warn# requires String, got {:?}", v))),
+                        };
+                        eprintln!("warning: {}", msg);
+                        Ok(Value::Void)
+                    }
+                    Intrinsic::MacroGenSym => {
+                        // gensym#() without a macro context returns a runtime fallback
+                        let sym = format!("__gensym_rt_{}", std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos());
+                        Ok(Value::String(sym))
+                    }
                 }
             }
             // Legacy collection variants — delegate through feature structs

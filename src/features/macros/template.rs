@@ -1,5 +1,17 @@
 use crate::ast::{Expr, Statement};
-use crate::features::macros::context::{MacroContext, TemplateDef};
+use crate::features::macros::context::{MacroContext, MacroDef, TemplateDef};
+
+/// Expand a macro by executing its body in a sandboxed interpreter.
+pub fn expand_macro(
+    _ctx: &mut MacroContext,
+    _interpreter: &mut crate::interpreter::Interpreter,
+    def: &MacroDef,
+    _args: &[Expr],
+    _block: Option<crate::ast::Block>,
+) -> Result<crate::interpreter::Value, String> {
+    // TODO: implement full macro body execution (M3.2)
+    Err(format!("macro '{}' expansion not yet implemented", def.name))
+}
 
 fn substitute_in_stmt(stmt: &Statement, bindings: &[(String, Expr)]) -> Statement {
     match stmt {

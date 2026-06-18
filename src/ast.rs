@@ -586,9 +586,15 @@ pub enum Intrinsic {
     PrintFloat,
     GetEnvInt,
 
-    // ===== Macro/Template intrinsics =====
+    // ===== Macro/Template intrinsics (compile-time only) =====
     /// compile#(code: String) -> Block — parse string as Brief code at compile time
     Compile,
+    /// error#(msg: String) — emit compiler error during macro expansion
+    MacroError,
+    /// warn#(msg: String) — emit compiler warning during macro expansion
+    MacroWarn,
+    /// gensym#() -> String — generate unique identifier during macro expansion
+    MacroGenSym,
 }
 
 impl Intrinsic {
@@ -738,8 +744,11 @@ impl Intrinsic {
             "putchar" => Some(Intrinsic::PutChar),
             "print_float" => Some(Intrinsic::PrintFloat),
             "getenv_int" => Some(Intrinsic::GetEnvInt),
-            // Macro/template intrinsics
+            // Macro/template intrinsics (compile-time only)
             "compile" => Some(Intrinsic::Compile),
+            "error" => Some(Intrinsic::MacroError),
+            "warn" => Some(Intrinsic::MacroWarn),
+            "gensym" => Some(Intrinsic::MacroGenSym),
             _ => None,
         }
     }
@@ -873,7 +882,22 @@ impl Intrinsic {
             Intrinsic::PrintFloat => "print_float",
             Intrinsic::GetEnvInt => "getenv_int",
             Intrinsic::Compile => "compile",
+            Intrinsic::MacroError => "error",
+            Intrinsic::MacroWarn => "warn",
+            Intrinsic::MacroGenSym => "gensym",
         }
+    }
+
+    /// Returns true for intrinsics that are only valid during macro/template expansion.
+    /// These should never appear in runtime code — the compiler errors if they survive
+    /// past Phase 1b.
+    pub fn is_compile_time_only(&self) -> bool {
+        matches!(self,
+            Intrinsic::Compile
+            | Intrinsic::MacroError
+            | Intrinsic::MacroWarn
+            | Intrinsic::MacroGenSym
+        )
     }
 }
 

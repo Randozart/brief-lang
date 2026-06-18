@@ -2001,6 +2001,15 @@ impl LlvmBackend {
                         // compile#() is compile-time only — should never reach LLVM backend
                         panic!("compile#() called at runtime — this is a compiler bug");
                     }
+                    Intrinsic::MacroError => {
+                        panic!("error#() called at runtime — this is a compiler bug");
+                    }
+                    Intrinsic::MacroWarn => {
+                        panic!("warn#() called at runtime — this is a compiler bug");
+                    }
+                    Intrinsic::MacroGenSym => {
+                        panic!("gensym#() called at runtime — this is a compiler bug");
+                    }
                 }
             }
             // ── ListLiteral ──────────────────────────────────────

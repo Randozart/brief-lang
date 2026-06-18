@@ -1346,7 +1346,8 @@ impl TypeChecker {
                     Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat => Type::Bool,
                     Intrinsic::GetEnvInt => Type::Int,
                     // Macro/template intrinsics (compile-time only)
-                    Intrinsic::Compile => Type::Data,
+                    Intrinsic::Compile | Intrinsic::MacroError
+                    | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Data,
                 }
             }
             Expr::Call(name, args) => {

@@ -129,6 +129,60 @@ fn expand_template_call_in_expr(
     Ok(None)
 }
 
+/// Validate that no compile-time-only intrinsics remain after macro expansion.
+/// If any are found, it means the expansion pass failed to expand them.
+pub fn validate_no_compile_time_intrinsics(program: &Program) -> Result<(), String> {
+    for item in &program.items {
+        match item {
+            TopLevel::Statement(stmt) => {
+                if let Err(msg) = check_stmt_for_intrinsics(stmt) {
+                    return Err(msg);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn check_stmt_for_intrinsics(stmt: &crate::ast::Statement) -> Result<(), String> {
+    match stmt {
+        crate::ast::Statement::Expression(expr) => {
+            check_expr_for_intrinsics(expr)
+        }
+        crate::ast::Statement::Let { expr, .. } => {
+            if let Some(e) = expr {
+                check_expr_for_intrinsics(e)
+            } else {
+                Ok(())
+            }
+        }
+        crate::ast::Statement::Guarded { condition, statements } => {
+            check_expr_for_intrinsics(condition)?;
+            for s in statements {
+                check_stmt_for_intrinsics(s)?;
+            }
+            Ok(())
+        }
+        crate::ast::Statement::Term { values, .. } => {
+            for v in values.iter().flatten() {
+                check_expr_for_intrinsics(v)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn check_expr_for_intrinsics(expr: &Expr) -> Result<(), String> {
+    match expr {
+        Expr::IntrinsicCall { intrinsic, .. } if intrinsic.is_compile_time_only() => {
+            Err(format!("compile-time-only intrinsic {}/# survived expansion — this is a compiler bug", intrinsic.name()))
+        }
+        _ => Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +220,24 @@ mod tests {
         assert!(program.items.is_empty(), "TemplateDefs should be removed from program");
         assert!(ctx.templates.contains_key("foo"));
         assert!(ctx.templates.contains_key("bar"));
+    }
+
+    #[test]
+    fn test_validate_no_compile_time_intrinsics_ok() {
+        let program = Program {
+            items: vec![
+                TopLevel::Statement(Box::new(crate::ast::Statement::Expression(Expr::Integer(42)))),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: crate::ast::StrictMode::Off,
+            dispatch_mode: crate::ast::DispatchMode::Sequential,
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        assert!(validate_no_compile_time_intrinsics(&program).is_ok());
     }
 }

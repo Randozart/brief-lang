@@ -828,6 +828,11 @@ fn run_check(
     {
         let mut macro_ctx = brief_compiler::features::macros::context::MacroContext::new();
         let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
+        // Validate no compile-time-only intrinsics survived expansion
+        if let Err(e) = brief_compiler::features::macros::expand::validate_no_compile_time_intrinsics(&program) {
+            eprintln!("{}", e);
+            return Err("Macro expansion validation failed".into());
+        }
     }
 
     if verbose {
@@ -2287,6 +2292,11 @@ fn run_llvm_compile(
     {
         let mut macro_ctx = brief_compiler::features::macros::context::MacroContext::new();
         let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
+        // Validate no compile-time-only intrinsics survived expansion
+        if let Err(e) = brief_compiler::features::macros::expand::validate_no_compile_time_intrinsics(&program) {
+            eprintln!("{}", e);
+            return Err("Macro expansion validation failed".into());
+        }
     }
 
     let link_deps: Vec<crate::ast::LinkDependency> = {
