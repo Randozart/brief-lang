@@ -29,7 +29,15 @@ impl LlvmBackend {
             Expr::String(s) | Expr::RegexLiteral(s) => {
                 let si = self.string_constants.iter().position(|x| x == s).unwrap_or(0);
                 let g = format!("@str.{}", si);
-                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, v, s.len() + 1, g).ok();
+                let bp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, bp, s.len() + 1, g).ok();
+                // Tag static string pointers with bit 0 (=1) so concat can distinguish
+                // them from heap-allocated strings and avoid freeing static data.
+                let pi = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, pi, bp).ok();
+                let ori = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = or i64 {}, 1", indent, ori, pi).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, v, ori).ok();
                 return TypedRegister { name: v, ty: Type::String };
             }
             Expr::Char(c) => {
@@ -3297,20 +3305,24 @@ impl LlvmBackend {
 
     /// Emit inline string concatenation: malloc + header setup + memcpy.
     /// Both operands are i8* (Brief header pointers). Returns i8*.
-    /// No buffer reuse — ownership analysis doesn't exist yet.
+    /// Frees heap-allocated operands after copying (detected by bit-0 tag:
+    /// string constants are tagged with 1, heap strings have bit 0 clear).
     fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &TypedRegister, b: &TypedRegister) -> TypedRegister {
-        // Box both inputs to i64 — string values may be ptr (Type::String, native)
-        // or i64 (boxed from parameters). adapt_to_i64 does ptrtoint for String/Data.
         let a_boxed = self.adapt_to_i64(out, indent, a);
         let b_boxed = self.adapt_to_i64(out, indent, b);
+        // Mask off bit 0 (static string tag) before reading headers
+        let a_clean = format!("%cam{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = and i64 {}, -2", indent, a_clean, a_boxed).ok();
+        let b_clean = format!("%cbm{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = and i64 {}, -2", indent, b_clean, b_boxed).ok();
         let ha = format!("%cha{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, ha, a_boxed).ok();
+        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, ha, a_clean).ok();
         let la_ptr = format!("%clp{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, la_ptr, ha).ok();
         let la = format!("%cla{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, la, la_ptr).ok();
         let hb = format!("%chb{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hb, b_boxed).ok();
+        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hb, b_clean).ok();
         let lb_ptr = format!("%clq{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lb_ptr, hb).ok();
         let lb = format!("%clb{}", self.txn_counter); self.txn_counter += 1;
@@ -3352,6 +3364,32 @@ impl LlvmBackend {
         let nt = format!("%cnt{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, nt, dest_start, total).ok();
         writeln!(out, "{}store i8 0, i8* {}, align 1", indent, nt).ok();
+        // Free operand A if heap-allocated (bit 0 clear means heap)
+        let a_tag = format!("%cat{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = and i64 {}, 1", indent, a_tag, a_boxed).ok();
+        let a_is_heap = format!("%cah{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, a_is_heap, a_tag).ok();
+        let free_a_l = format!(".cfree_a{}", self.txn_counter); self.txn_counter += 1;
+        let skip_a_l = format!(".cskip_a{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, a_is_heap, free_a_l, skip_a_l).ok();
+        writeln!(out, "{}{}:", indent, free_a_l).ok();
+        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, format!("%cap{}", self.txn_counter), a_boxed).ok();
+        writeln!(out, "{}call void @free(i8* {})", indent, format!("%cap{}", self.txn_counter)).ok();
+        writeln!(out, "{}br label %{}", indent, skip_a_l).ok();
+        writeln!(out, "{}{}:", indent, skip_a_l).ok();
+        // Free operand B if heap-allocated
+        let b_tag = format!("%cbt{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = and i64 {}, 1", indent, b_tag, b_boxed).ok();
+        let b_is_heap = format!("%cbh{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, b_is_heap, b_tag).ok();
+        let free_b_l = format!(".cfree_b{}", self.txn_counter); self.txn_counter += 1;
+        let skip_b_l = format!(".cskip_b{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, b_is_heap, free_b_l, skip_b_l).ok();
+        writeln!(out, "{}{}:", indent, free_b_l).ok();
+        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, format!("%cbp{}", self.txn_counter), b_boxed).ok();
+        writeln!(out, "{}call void @free(i8* {})", indent, format!("%cbp{}", self.txn_counter)).ok();
+        writeln!(out, "{}br label %{}", indent, skip_b_l).ok();
+        writeln!(out, "{}{}:", indent, skip_b_l).ok();
         let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, v, result).ok();
         // Box to i64 — downstream code expects i64 (ptrtoint).

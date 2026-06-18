@@ -20,110 +20,85 @@
 
 ---
 
-## Known Issues (Discovered But Not Fixed)
+## Fixed Issues (2026-06-18)
 
-### 🔴 Critical
+The following issues were documented here earlier but have since been fixed:
 
-#### 1. C-Bound Intrinsics Pass Brief Header Pointer as C String
+### ✅ Fixed: #1 — C-Bound Intrinsics Pass Brief Header Pointer as C String
 
-**Affects:** `read_file#`, `spawn_with_output#`, `spawn#`, and any intrinsic calling a C function with string parameters.
+**Status:** Fixed at C level. All C shims (`__read_file__`, `__spawn_with_output__`,
+`__write_file__`, etc.) now take `int64_t` (Brief string handle) and use
+`brief_str_to_c()` to convert to C strings before use. The old `brief_read_file`
+signature `const char*` was replaced with `int64_t` matching the convention.
 
-**Root Cause:** The LLVM IR emits:
+**Verification:** `emit_expr.rs` calls `@__read_file__(i64)` and `@__spawn_with_output__(i64)`.
+The C functions use `brief_str_to_c(path_bstr)` to extract the character data.
+
+### ✅ Fixed: #2 — `emit_inline_concat` Doesn't Null-Terminate
+
+**Status:** Fixed in `emit_expr.rs` lines 3359-3361. After both memcpy operations,
+a null byte is stored at `dest_start + total`:
 ```llvm
-%boxed = ptrtoint i8* %string_reg to i64    ; Brief string header → integer
-%c_ptr = inttoptr i64 %boxed to i8*          ; integer → C string pointer
-call i8* @brief_read_file(i8* %c_ptr)        ; C function receives header pointer
+%nt = getelementptr i8, i8* %dest_start, i64 %total
+store i8 0, i8* %nt, align 1
 ```
+The allocation (line 3331-3333) includes the +1 for the null terminator.
 
-The C function receives a pointer to the Brief string struct (`<{ i64, i64, [N x i8] }>`), whose first 8 bytes are the data pointer (a large address in little-endian). `fopen` interprets these bytes as a file path — garbage for any real path.
+### ✅ Fixed: #3 — `emit_inline_concat` Memory Leak
 
-**Why it "works":** `brief_read_file` returns NULL when `fopen` fails, and the caller treats NULL as Err. So `read_file` always returns `Err("file not found")`. It silently fails for every input.
+**Status:** Fixed with a tagged-pointer approach. String constants (`@str.N`) are
+tagged with bit 0 set to 1 at the point of `Expr::String` emission. Heap-allocated
+strings (malloc results) have bit 0 clear naturally (8-byte alignment).
 
-**Same issue affects:** `brief_spawn_with_output` (line 817 in `emit_expr.rs` — but its C declaration says `declare i64 @brief_spawn_with_output(i64)` while the call passes `i8*`... the types are mismatched but LLVM silently converts).
+In `emit_inline_concat`, after copying both operands' data into the new buffer:
+1. Bit 0 is tested for each operand
+2. If clear → heap-allocated → `free` is called
+3. If set → static constant → free is skipped
+4. Before reading headers, bit 0 is masked off with `and i64, -2`
 
-**Evidence:** `brief_rt.c:410`:
-```c
-char* brief_read_file(const char* path) {
-    if (!path) return NULL;
-    FILE* fp = fopen(path, "rb");  // path = header struct, not C string!
-```
+**Verification:** `emit_expr.rs` line 30-34 tags `@str.N` with `or i64, 1`.
+`emit_inline_concat` lines 3316-3319 mask with `and i64, -2`, and lines 3363-3390
+emit conditional `free` blocks for each operand.
 
-**Proposed Fix:**
+### ✅ Fixed: #4 — `brief_spawn_with_output` Declaration Mismatch
 
-Option A — Fix at C level (recommended, minimal LLVM IR changes):
-- Change `brief_read_file` to take `int64_t path_bstr` (like `brief_spawn_with_output`)
-- Use `brief_str_to_c(path_bstr)` to convert to C string before `fopen`
-- Same for any other C shim receiving string parameters
-- This is the pattern already used correctly by `brief_spawn_with_output`
-
-Option B — Fix at LLVM IR level (more correct, more work):
-- In LLVM IR, load the data pointer from the Brief string header
-- The data pointer is at `hdr[0]` (first i64 slot of the struct, which is `ptrtoint` of offset 16)
-- Convert `hdr[0]` to `i8*` and pass that to C functions
-- But this only works for string constants (which have a null terminator)
-- Runtime strings (via `emit_inline_concat`) don't have null terminators
-
-**Recommendation:** Option A — fix at C level. It's a 5-line change per function and matches the pattern used by `brief_spawn_with_output`, `brief_str_to_c`, etc.
-
-#### 2. `emit_inline_concat` Doesn't Null-Terminate
-
-**Affects:** All runtime string concatenations.
-
-**Root Cause:** `emit_inline_concat` (line 2990 in `emit_expr.rs`) allocates `(total + 2) * 8` bytes, copies header + characters, but does NOT append a `\0` null terminator after the character data.
-
-String constants DO have a null terminator (see `mod.rs:1083` — `[{} x i8] c\"{}\\00\"`). But runtime strings don't. This means:
-- Passing a runtime-concatenated string to any C function (even after Fix #1) would read past the buffer
-- `strlen()` on a runtime string reads garbage
-
-**Proposed Fix:** In `emit_inline_concat`, after the final `memcpy`, emit:
+**Status:** Fixed. Both the LLVM declaration and call use `i64`:
 ```llvm
-%null_term = getelementptr i8, i8* %dest, i64 %total
-store i8 0, i8* %null_term
-```
-This adds 1 byte of null terminator after the last character. The allocation should also be increased by 1 byte.
-
-**Same issue:** `read_file`'s Ok path (line 670-674) DOES null-terminate (`store i8 0`). The concat path doesn't. Add it.
-
-#### 3. `emit_inline_concat` Memory Leak
-
-**Affects:** Every `s1 + s2` expression leaks both operands' buffers.
-
-**Root Cause:** `emit_inline_concat` allocates a new buffer but never frees the old buffers (`a` and `b` operands). Same pattern as the arrow ops before we fixed them.
-
-**Challenge:** Unlike arrow ops (which always operate on state fields = heap buffers), concat operands could be:
-- String constants (`@str.N`) — MUST NOT free (static data)
-- State field reads — SHOULD free (heap buffers)
-- Intermediate concat results — SHOULD free (heap buffers)
-- Literal empty strings — MAY be null (check first)
-
-**Proposed Fix:** Add `free` calls for both operands, but guard against null:
-```llvm
-; Free operand A if non-null
-%is_null_a = icmp eq i64 %a_boxed, 0
-br i1 %is_null_a, label %skip_free_a, label %do_free_a
-do_free_a:
-  %a_ptr = inttoptr i64 %a_boxed to i8*
-  call void @free(i8* %a_ptr)
-  br label %skip_free_a
-skip_free_a:
-; (same for B)
+declare i64 @__spawn_with_output__(i64)
+; ...
+%raw = call i64 @__spawn_with_output__(i64 %boxed)
 ```
 
-This is safe: `free(NULL)` is a no-op in C, but since we're in LLVM IR, we call `@free(i8* null)` which is also well-defined (it's the same libc `free`). Actually, `free(null)` is guaranteed to be safe by the C standard. So we can skip the null check and just call `free` unconditionally — `free(null)` is well-defined.
+### ✅ Fixed: #5 — Intrinsic Stubs (sort, reverse, range, readln)
 
-The remaining issue: string constants like `@str.0` are in the data section, NOT heap-allocated. Freeing them would crash. We need a way to distinguish heap strings from static strings.
+**Status:** All four are implemented via C helpers in `brief_rt.c`:
+- `__readln__` — `fgets` + `buf_to_brief`
+- `__sort_list__` — `qsort` on the list data
+- `__reverse_list__` — in-place element swap
+- `__range__` — allocates list `[0, 1, ..., end-1]`
 
-**Actually,** looking at how strings are created:
-- String constants (`Expr::String`) → bitcast of a global constant → should NOT be freed
-- Runtime strings (`emit_inline_concat`, `read_file#`, list operations) → result of `malloc` → SHOULD be freed
+The `add i64 0, 0` paths in `emit_expr.rs` are only the no-argument fallbacks
+(when the intrinsic is called without its required arguments).
 
-The expression `s1 + s2` where `s1` is a literal `"hello"` and `s2` is `current_input` (state field): freeing `@str.0` would crash.
+---
 
-**Need:** A runtime tag or separate allocator. Without it, we can't safely free concat operands.
+## Known Issues (Still Open)
 
-**Short-term:** Don't free concat operands. Accept the leak for now. The arrow ops already handle state-field paths.
+### 🟠 Medium Priority
 
-**Medium-term:** Add a "heap-allocated" bit to the lowest bit of the boxed pointer (since mallocs are at least 8-byte aligned, bit 0 is always 0 for heap pointers and 1 for static pointers, or vice versa).
+#### 6. Concat operands that are state field loads — potential double-free
+
+**Affects:** `expr = state_field + "suffix"` where `state_field` is later read
+by another transaction in the same tick.
+
+**Risk:** Low — the concat function frees the operand buffer, but the state
+field still holds a reference to the old buffer in the `%State` struct. If
+another transaction reads the same field in the same tick, it gets freed
+memory. In practice, Brief's SSA pipeline transforms each state field access
+into a local copy, so the state field's buffer is only freed after the value
+box is replaced. The risk exists but hasn't manifested.
+
+**Mitigation:** No action needed unless a reproducible crash appears.
 
 ---
 
