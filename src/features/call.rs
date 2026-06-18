@@ -54,6 +54,20 @@ impl ExprEval for CallExpr {
 
         // Check dynamically linked FFI
         if ctx.frgn_registry.declarations.contains_key(fn_name) {
+            // Pipe-syntax frgn with dynamic linking: unwrap the registry's Ok wrapping,
+            // validate the raw value, and wrap in Ok/Err with the fallback.
+            if let Some(sig) = ctx.ffi_bindings.get(fn_name) {
+                if sig.is_pipe {
+                    let reg_result = ctx.frgn_registry.call(fn_name, &arg_values)?;
+                    let raw = match &reg_result {
+                        Value::Enum(_, v, fields) if v == "Ok" => {
+                            fields.get("value").cloned().unwrap_or(Value::Void)
+                        }
+                        _ => return Ok(reg_result),
+                    };
+                    return ctx.call_pipe_frgn(fn_name, raw);
+                }
+            }
             return ctx.frgn_registry.call(fn_name, &arg_values);
         }
 

@@ -1355,31 +1355,37 @@ impl Interpreter {
     /// Check whether a raw FFI return value constitutes a valid value of the
     /// expected type T. Used by pipe-syntax frgn declarations for sentinel-based
     /// error detection without TOML bindings.
+    ///
+    /// Sentinel detection applies to primitive types:
+    ///   - Float: NaN/Inf → invalid
+    ///   - String/Data: at the interpreter level, null pointers never reach here
+    ///     (the FFI layer converts them before constructing Value). Real null
+    ///     checks belong in the LLVM backend at the C ABI level.
+    ///   - Int/UInt/Bool/Char: any valid value is accepted
+    ///
+    /// Complex types (List, Instance, Enum, etc.) returned by FFI handlers
+    /// are always considered valid — the handler constructed them correctly.
     fn is_valid_ffi_return(value: &Value, expected: &Type) -> bool {
         match (value, expected) {
-            // Pointer types: null pointer → invalid
-            (Value::String(s), Type::String) => !s.is_empty() || {
-                // Empty string "" is valid (it's a non-null pointer to '\0').
-                // Only truly null (Value::String that wraps a null) is invalid.
-                // The interpreter represents null strings as Value::String("\0")
-                // or we check the raw bytes. For now, all non-null strings are valid.
-                true
-            },
-            (Value::Data(d), Type::Data) => true, // Data is always valid
+            // Primitive types: variant must match expected type
+            (Value::String(_), Type::String) => true,
+            (Value::Data(_), Type::Data) => true,
             // Float: NaN/Inf → invalid
             (Value::Float(f), Type::Float) => f.is_finite(),
-            // Int/UInt/Bool: always valid (any i64 is a valid integer)
-            (Value::Int(_), Type::Int) => true,
-            (Value::Int(_), Type::UInt) => true,
+            // Int/UInt/Bool/Char: any valid value is accepted
+            (Value::Int(_), Type::Int | Type::UInt) => true,
             (Value::Bool(_), Type::Bool) => true,
             (Value::Char(_), Type::Char) => true,
-            // Structs/lists/objects: always valid (they come from successful FFI)
-            (Value::List(_), _) => true,
+            (Value::Void, Type::Void) => true,
+            // Complex types from FFI handlers: always valid
+            (Value::List(_) | Value::Tuple(_), _) => true,
+            (Value::HashMap(_) | Value::HashSet(_), _) => true,
+            (Value::Stack(_) | Value::Queue(_), _) => true,
+            (Value::StringBuilder(_), _) => true,
             (Value::Instance { .. }, _) => true,
             (Value::Enum(..), _) => true,
-            // Void is always valid
-            (Value::Void, _) => true,
-            // Mismatch
+            (Value::DbvlTable(_) | Value::Regex(_), _) => true,
+            // Primitive type mismatch
             _ => false,
         }
     }
@@ -9278,7 +9284,10 @@ mod kani_full_tests {
         let result = i.call_pipe_frgn("test_pipe_f", Value::Float(3.14)).unwrap();
         match result {
             Value::Enum(e, v, fields) if e == "Result" && v == "Ok" => {
-                assert!((fields.get("value").unwrap().as_float() - 3.14).abs() < 1e-10);
+                match fields.get("value") {
+                    Some(Value::Float(f)) => assert!((f - 3.14).abs() < 1e-10),
+                    other => panic!("Expected Float(3.14), got {:?}", other),
+                }
             }
             other => panic!("Expected Ok(3.14), got {:?}", other),
         }
