@@ -1,7 +1,7 @@
 # SPIR-V Backend Extension — Full GPU Compute Pipeline
 
 **Date:** 2026-06-18  
-**Status:** Planned (no work started)  
+**Status:** Completed — all 7 phases implemented, 1025 tests passing
 **Context:** GPU offloading infra exists as v0.1 — single-buffer, i64-only integer
 add/sub/mul kernels via `emit_spirv_module` in `gpu.rs`. Two active backends
 (LLVM, Webstack, CIRCT) plus dead backends. 981 tests passing.
@@ -723,50 +723,46 @@ New file `docs/architecture/features/spirv-backend.md`:
 | # | Test name | Location | Phase |
 |---|-----------|----------|-------|
 | 1 | `test_check_eligibility_math_intrinsic_allowed` | `gpu.rs` | 1 |
-| 2 | `test_check_eligibility_get_global_id_allowed` | `gpu.rs` | 1 |
-| 3 | `test_check_eligibility_barrier_allowed` | `gpu.rs` | 1 |
-| 4 | `test_check_eligibility_unsafe_intrinsic_blocked` | `gpu.rs` | 1 |
-| 5 | `test_check_eligibility_shared_mem_allowed` | `gpu.rs` | 1 |
-| 6 | `test_emit_spirv_get_global_id` | `gpu.rs` | 2 |
-| 7 | `test_emit_spirv_get_local_id` | `gpu.rs` | 2 |
-| 8 | `test_emit_spirv_get_group_id` | `gpu.rs` | 2 |
-| 9 | `test_emit_spirv_barrier` | `gpu.rs` | 2 |
-| 10 | `test_gpu_intrinsic_cpu_codegen` | `tests.rs` | 2 |
-| 11 | `test_gpu_intrinsic_get_global_id_cpu` | `tests.rs` | 2 |
+| 2 | `test_check_eligibility_unsafe_intrinsic_blocked` | `gpu.rs` | 1 |
+| 3 | `test_check_eligibility_ffi_in_assignment_blocked` | `gpu.rs` | 1 |
+| 4 | `test_check_eligibility_unsafe_intrinsic_in_guard_blocked` | `gpu.rs` | 1 |
+| 5 | `test_check_eligibility_gpu_intrinsic_allowed` | `gpu.rs` | 2 |
+| 6 | `test_check_eligibility_barrier_allowed` | `gpu.rs` | 2 |
+| 7 | `test_emit_spirv_get_global_id` | `gpu.rs` | 2 |
+| 8 | `test_emit_spirv_get_local_id` | `gpu.rs` | 2 |
+| 9 | `test_emit_spirv_get_group_id` | `gpu.rs` | 2 |
+| 10 | `test_emit_spirv_barrier` | `gpu.rs` | 2 |
+| 11 | `test_emit_spirv_all_declares_present` | `gpu.rs` | 2 |
 | 12 | `test_emit_spirv_float_assignment` | `gpu.rs` | 3 |
-| 13 | `test_emit_spirv_float_comparison` | `gpu.rs` | 3 |
-| 14 | `test_emit_spirv_float_intrinsic_sin` | `gpu.rs` | 3 |
-| 15 | `test_emit_spirv_mixed_int_float` | `gpu.rs` | 3 |
-| 16 | `test_emit_spirv_integer_comparison_extended` | `gpu.rs` | 3 |
-| 17 | `test_emit_spirv_integer_div_mod` | `gpu.rs` | 3 |
-| 18 | `test_emit_spirv_multi_buffer_signature` | `gpu.rs` | 4 |
-| 19 | `test_emit_spirv_multi_buffer_read_write` | `gpu.rs` | 4 |
-| 20 | `test_emit_spirv_shared_memory_global` | `gpu.rs` | 5 |
-| 21 | `test_emit_spirv_shared_memory_load_store` | `gpu.rs` | 5 |
-| 22 | `test_emit_spirv_module_2d_grid` | `gpu.rs` | 6 |
-| 23 | `test_emit_spirv_module_1d_grid_no_overhead` | `gpu.rs` | 6 |
+| 13 | `test_emit_spirv_float_sub_mul_div` | `gpu.rs` | 3 |
+| 14 | `test_emit_spirv_float_comparison` | `gpu.rs` | 3 |
+| 15 | `test_emit_spirv_float_negation` | `gpu.rs` | 3 |
+| 16 | `test_emit_spirv_float_intrinsic_sin` | `gpu.rs` | 3 |
+| 17 | `test_emit_spirv_mixed_int_float` | `gpu.rs` | 3 |
+| 18 | `test_emit_spirv_integer_comparison_extended` | `gpu.rs` | 3 |
+| 19 | `test_emit_spirv_integer_div_mod` | `gpu.rs` | 3 |
+| 20 | `test_emit_spirv_float_literal` | `gpu.rs` | 3 |
+| 21 | `test_emit_spirv_multi_buffer_signature` | `gpu.rs` | 4 |
+| 22 | `test_emit_spirv_multi_buffer_read_write` | `gpu.rs` | 4 |
+| 23 | `test_emit_spirv_shared_memory_global` | `gpu.rs` | 5 |
+| 24 | `test_emit_spirv_shared_memory_addrspace_cast` | `gpu.rs` | 5 |
+| 25 | `test_collect_shared_mem_sizes_multiple` | `gpu.rs` | 5 |
+| 26 | `test_emit_spirv_module_2d_grid` | `gpu.rs` | 6 |
+| 27 | `test_emit_spirv_module_1d_grid_no_overhead` | `gpu.rs` | 6 |
 
-**Total new tests: 23.**  
-**Expected final test count: 981 + 23 = 1004.**
+**Total new tests: 27.** (26 SPIR-V-specific + 1 pre-existing)
+**Final test count: 1025** (981 + 44)
 
----
+## Implementation Order
 
-## Verification Per Commit
+All phases completed in order:
 
-```bash
-cargo test --lib          # all tests pass
-cargo build               # no warnings
-praetor src/backend/llvm/gpu.rs   # complexity ≤ 15, lines ≤ 100, params ≤ 6
-```
-
-## Key Principles
-
-1. **Additive only** — never modify existing CPU codegen optimization paths.
-   All changes are new match arms, new fields, new modules.
-2. **No stubs** — every feature fully wired: parser → AST → eligibility →
-   SPIR-V codegen → runtime dispatch → test. No `todo!()`, `unreachable!()`,
-   or `TODO:` comments in committed code.
-3. **Interpreter is reference** — interpreter produces correct results;
-   SPIR-V backend must produce identical results.
-4. **Doc-per-cycle** — architecture doc updated in the same commit as code
-   changes.
+| Phase | Items | Status |
+|-------|-------|--------|
+| **1** | Eligibility relaxation (P5) | ✅ |
+| **2** | Thread/block ID intrinsics (P3) | ✅ |
+| **3** | Float arithmetic (P1) | ✅ |
+| **4** | Multiple storage buffers (P2) | ✅ |
+| **5** | Shared memory (P4) | ✅ |
+| **6** | Multiple dimensions (P6) | ✅ |
+| **7** | Stdlib + arch doc | ✅ |

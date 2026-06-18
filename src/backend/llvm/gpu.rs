@@ -392,7 +392,11 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
     }
 }
 
-/// Convert an f64 value to its f32 bit pattern hex string for LLVM IR bitcast.
+/// Convert an f64 Brief float to an f32 SPIR-V float bit pattern.
+///
+/// SPIR-V uses native 32-bit float, unlike the CPU backend which boxes
+/// floats as i64. This truncates f64→f32 then produces the i32 bit pattern
+/// for `bitcast i32 <hex> to float` emission.
 fn float_to_spirv_hex(val: f64) -> String {
     let bits = (val as f32).to_bits();
     format!("i32 {}", bits)
@@ -729,6 +733,13 @@ fn emit_spirv_expr(
             let ext = format!("%zext{}", ir.len());
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
+        }
+        // Float negation
+        Expr::Neg(e) if is_float_context(expr, field_types) => {
+            let v = emit_spirv_expr(e, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let reg = format!("%fneg{}", ir.len());
+            ir.push_str(&format!("{}{} = fneg float {}\n", indent, reg, v));
+            reg
         }
         // Int negation
         Expr::Neg(e) => {
@@ -1285,6 +1296,25 @@ mod tests {
         assert!(ir.contains("fmul float"), "should emit fmul");
         assert!(ir.contains("fsub float"), "should emit fsub");
         assert!(ir.contains("fdiv float"), "should emit fdiv");
+    }
+
+    #[test]
+    fn test_emit_spirv_float_negation() {
+        let mut ft = HashMap::new();
+        ft.insert("x".to_string(), "float".to_string());
+        ft.insert("y".to_string(), "float".to_string());
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("y".to_string()),
+                expr: Expr::Neg(Box::new(Expr::Identifier("x".to_string()))),
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("fneg", &body, Expr::Integer(10), &[], ft);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("fneg float"), "should emit fneg for float negation");
+        assert!(!ir.contains("sub i64"), "should not use sub i64 for float");
     }
 
     #[test]
