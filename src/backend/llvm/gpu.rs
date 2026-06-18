@@ -52,6 +52,7 @@ pub struct GpuKernel {
 pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
     let mut reasons = Vec::new();
     let mut write_fields = Vec::new();
+    let mut touched_fields = Vec::new();
 
     for stmt in body {
         match stmt {
@@ -66,25 +67,35 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
             }
             Statement::Expression(expr) => {
                 collect_unsafe_ffi(expr, &mut reasons);
+                collect_touched_fields(expr, &mut touched_fields);
             }
             Statement::Let { expr: Some(e), .. } => {
                 collect_unsafe_ffi(e, &mut reasons);
+                collect_touched_fields(e, &mut touched_fields);
             }
             Statement::Assignment { lhs, expr, .. } => {
                 if let Expr::Identifier(field) = lhs {
                     if !write_fields.contains(field) {
                         write_fields.push(field.clone());
                     }
+                    if !touched_fields.contains(field) {
+                        touched_fields.push(field.clone());
+                    }
                 }
                 collect_unsafe_ffi(expr, &mut reasons);
+                collect_touched_fields(expr, &mut touched_fields);
             }
             Statement::Guarded { condition, statements, .. } => {
                 collect_unsafe_ffi(condition, &mut reasons);
+                collect_touched_fields(condition, &mut touched_fields);
                 let inner = check_eligibility(statements);
                 reasons.extend(inner.reasons);
                 for f in inner.buffer_fields {
                     if !write_fields.contains(&f) {
-                        write_fields.push(f);
+                        write_fields.push(f.clone());
+                    }
+                    if !touched_fields.contains(&f) {
+                        touched_fields.push(f);
                     }
                 }
             }
@@ -96,7 +107,47 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
     GpuEligibility {
         eligible,
         reasons,
-        buffer_fields: write_fields,
+        buffer_fields: touched_fields,
+    }
+}
+
+/// Collect all field identifier names referenced in an expression tree.
+/// This is used to track which state fields a kernel touches (reads or writes).
+fn collect_touched_fields(expr: &Expr, fields: &mut Vec<String>) {
+    match expr {
+        Expr::Identifier(name) => {
+            if !fields.contains(name) {
+                fields.push(name.clone());
+            }
+        }
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
+        | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r)
+        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+            collect_touched_fields(l, fields);
+            collect_touched_fields(r, fields);
+        }
+        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
+            collect_touched_fields(e, fields);
+        }
+        Expr::Call(_, args) | Expr::IntrinsicCall { args, .. } => {
+            for arg in args {
+                collect_touched_fields(arg, fields);
+            }
+        }
+        Expr::ListLiteral(items) | Expr::SetLiteral(items) => {
+            for item in items {
+                collect_touched_fields(item, fields);
+            }
+        }
+        Expr::MapLiteral(pairs) => {
+            for (k, v) in pairs {
+                collect_touched_fields(k, fields);
+                collect_touched_fields(v, fields);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -399,7 +450,7 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
 /// for `bitcast i32 <hex> to float` emission.
 fn float_to_spirv_hex(val: f64) -> String {
     let bits = (val as f32).to_bits();
-    format!("i32 {}", bits)
+    format!("{}", bits)
 }
 
 /// Scan through statements and collect all SharedMem sizes for addrspace(3) globals.
@@ -1485,6 +1536,8 @@ mod tests {
         let kernel = extract_kernel("float_lit", &body, Expr::Integer(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("bitcast i32"), "float literal should use bitcast");
+        assert!(!ir.contains("bitcast i32 i32"), "bitcast should not have double i32 type");
+        assert!(ir.contains("to float"), "should produce float value");
     }
 
     // ── Multi-buffer (Phase 4) ─────────────────────────────
