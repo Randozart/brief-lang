@@ -91,6 +91,37 @@ impl StmtCodegenLLVM for ForeachStmt {
             &self.modifiers,
             crate::backend::llvm::directive::DirectiveCtx::Loop,
         );
+        // Emit optimization remarks for speculative loop directives.
+        for tag in &self.modifiers {
+            if !tag.speculative { continue; }
+            match tag.name.as_str() {
+                "unroll" => {
+                    let is_full = dir_effects.iter().any(|e| {
+                        matches!(e, crate::backend::llvm::directive::DirectiveEffect::LoopMetadata(k, _) if k == "llvm.loop.unroll.full")
+                    });
+                    let is_enable = dir_effects.iter().any(|e| {
+                        matches!(e, crate::backend::llvm::directive::DirectiveEffect::LoopMetadata(k, _) if k == "llvm.loop.unroll.enable")
+                    });
+                    if is_full {
+                        ctx.push_remark(crate::backend::llvm::directive::OptimizationRemark::applied(
+                            "unroll", "full unroll applied via foreach".to_string()));
+                    } else if is_enable {
+                        ctx.push_remark(crate::backend::llvm::directive::OptimizationRemark::applied(
+                            "unroll", "heuristic unroll enabled via foreach".to_string()));
+                    }
+                }
+                "vectorize" => {
+                    let is_enabled = dir_effects.iter().any(|e| {
+                        matches!(e, crate::backend::llvm::directive::DirectiveEffect::LoopMetadata(k, _) if k == "llvm.loop.vectorize.enable")
+                    });
+                    if is_enabled {
+                        ctx.push_remark(crate::backend::llvm::directive::OptimizationRemark::applied(
+                            "vectorize", "vectorization enabled via foreach".to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
         // Build loop metadata nodes. Always emit the canonical self-referencing
         // loop metadata node. Additional nodes are added for each directive.
         let mut md_count = 1; // count of metadata operands beyond self-ref

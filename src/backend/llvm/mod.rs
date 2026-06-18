@@ -751,19 +751,70 @@ impl LlvmBackend {
     /// Collect SPIR-V kernel IR for any GPU-eligible transactions.
     /// Called during codegen after each transaction is emitted.
     /// The SPIR-V blobs are embedded at the end of the output module.
-    pub(crate) fn collect_gpu_kernel(&mut self, txn_name: &str, body: &[Statement]) {
+    ///
+    /// For `#?gpu` (speculative), the cost model determines whether to offload.
+    /// For `#gpu` (imperative) or `--gpu-offload`, all eligible bodies are collected.
+    pub(crate) fn collect_gpu_kernel(
+        &mut self,
+        txn_name: &str,
+        body: &[Statement],
+        is_speculative: bool,
+    ) {
         let eligibility = gpu::check_eligibility(body);
         if !eligibility.eligible {
+            if is_speculative {
+                let msg = format!("txn '{}' not eligible: {}", txn_name, eligibility.reasons.join(", "));
+                self.push_remark(directive::OptimizationRemark::skipped("gpu", msg));
+            }
             return;
+        }
+
+        // Run cost model for speculative directives.
+        if is_speculative {
+            let est = crate::analysis::gpu_cost::estimate(body, 0);
+            match est.recommended {
+                crate::analysis::gpu_cost::OffloadDecision::Cpu => {
+                    self.push_remark(directive::OptimizationRemark::skipped("gpu",
+                        format!("txn '{}' kept on CPU — intensity {:.2} ops/byte, crossover N={}",
+                            txn_name, est.arithmetic_intensity, est.crossover_point))
+                        .with_analysis(vec![
+                            format!("ops: {}, bytes: {}, intensity: {:.2}",
+                                est.total_ops, est.total_bytes, est.arithmetic_intensity),
+                            format!("estimated CPU: {:.0}ns, estimated GPU (incl. PCIe): {:.0}ns",
+                                est.estimated_cpu_ns, est.estimated_gpu_ns),
+                        ])
+                        .with_hints(vec![
+                            "Use #gpu (imperative) to force GPU offloading".to_string(),
+                        ]));
+                    return;
+                }
+                crate::analysis::gpu_cost::OffloadDecision::Runtime => {
+                    // N is runtime-determined — emit dispatch branch.
+                    self.push_remark(directive::OptimizationRemark::applied("gpu",
+                        format!("txn '{}' will dispatch at runtime — crossover N={}",
+                            txn_name, est.crossover_point))
+                        .with_analysis(vec![
+                            format!("crossing point: {} iterations", est.crossover_point),
+                        ]));
+                    // Fall through to collect kernel.
+                }
+                crate::analysis::gpu_cost::OffloadDecision::Gpu => {
+                    self.push_remark(directive::OptimizationRemark::applied("gpu",
+                        format!("txn '{}' offloaded to GPU — intensity {:.2} ops/byte",
+                            txn_name, est.arithmetic_intensity)));
+                }
+            }
         }
 
         let kernel = gpu::extract_kernel(txn_name, body, crate::ast::Expr::Integer(0), &[]);
         let spirv_ir = gpu::emit_spirv_module(&kernel);
         self.spirv_kernels.push(spirv_ir.clone());
 
-        // Try to compile to SPIR-V binary; if llc isn't available, skip silently.
         if let Ok(binary) = gpu::compile_to_spirv(&spirv_ir) {
             self.spirv_blobs.push(binary);
+        } else if self.emit_remarks {
+            // llc not available — emit warning.
+            self.warnings.push("info: GPU kernel SPIR-V compilation skipped — llc not found. Install LLVM tools or use --no-gpu to suppress.".to_string());
         }
     }
 
@@ -790,6 +841,10 @@ impl LlvmBackend {
 
     pub fn remarks(&self) -> &[crate::backend::llvm::directive::OptimizationRemark] {
         &self.remarks
+    }
+
+    pub fn spirv_kernels(&self) -> &[String] {
+        &self.spirv_kernels
     }
 
     pub fn generate(&mut self, program: &Program) -> String {

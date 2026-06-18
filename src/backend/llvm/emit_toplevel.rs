@@ -743,7 +743,9 @@ impl LlvmBackend {
 
         // Collect GPU kernel for this transaction if it has #gpu / #!gpu / #?gpu.
         if self.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
-            self.collect_gpu_kernel(name, &txn.body);
+            let is_speculative = txn.modifiers.iter()
+                .any(|m| m.name == "gpu" && m.speculative);
+            self.collect_gpu_kernel(name, &txn.body, is_speculative);
         }
     }
 
@@ -948,7 +950,9 @@ impl LlvmBackend {
 
         // Collect GPU kernel for callable txns with #gpu directives.
         if self.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
-            self.collect_gpu_kernel(name, &txn.body);
+            let is_speculative = txn.modifiers.iter()
+                .any(|m| m.name == "gpu" && m.speculative);
+            self.collect_gpu_kernel(name, &txn.body, is_speculative);
         }
     }
 

@@ -2474,6 +2474,21 @@ fn run_llvm_compile(
     fs::write(&output_file, &output)?;
     println!("  Output: {}", output_file.display());
 
+    // If --gpu-offload was used, attempt SPIR-V compilation as well.
+    if gpu_offload && !llvm_backend.spirv_kernels().is_empty() {
+        let spv_file = out_dir.unwrap_or_else(|| std::path::Path::new(".")).join(format!("{}.spv", stem));
+        let mut spirv_total = Vec::new();
+        for kernel_ir in llvm_backend.spirv_kernels() {
+            if let Ok(binary) = crate::backend::llvm::gpu::compile_to_spirv(kernel_ir) {
+                spirv_total.extend_from_slice(&binary);
+            }
+        }
+        if !spirv_total.is_empty() {
+            fs::write(&spv_file, &spirv_total)?;
+            println!("  GPU kernels: {} ({} bytes)", spv_file.display(), spirv_total.len());
+        }
+    }
+
     if !link_deps.is_empty() {
         let out_base = out_dir.unwrap_or(std::path::Path::new("."));
         let exe_path = out_base.join(stem);

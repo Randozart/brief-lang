@@ -11,6 +11,7 @@ pub mod protocol;
 pub mod range;
 pub mod roofline;
 pub mod struct_generator;
+pub mod gpu_cost;
 pub mod region;
 pub mod schema_validator;
 pub mod transition_graph;

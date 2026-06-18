@@ -273,7 +273,12 @@ fn emit_spirv_expr(
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
         }
-        _ => "0".to_string(), // fallback
+        _ => {
+            // Unsupported expression: emit comment in IR, return 0.
+            // Caller should ensure eligibility check prevents this at compile time.
+            ir.push_str(&format!("{}; error: unsupported expression in GPU kernel\n", indent));
+            "0".to_string()
+        }
     }
 }
 
