@@ -2472,15 +2472,37 @@ fn run_llvm_compile(
             return Ok(output_file);
         }
 
-        // LTO not available — fall back to standard cc compilation and object linking.
-        // Copy the runtime C source from lib/runtime/ for the standard path.
+        // Try LTO pipeline with brief_rt.c first (enables cross-module inlining)
         let source_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
         let rt_c_path = resolve_link_source("link/brief_rt.c", source_dir)
             .unwrap_or_else(|| out_base.join("brief_rt.c"));
         let rt_o_path = out_base.join("brief_rt.o");
         let ll_o_path = out_base.join(format!("{}.o", stem));
 
-        // Compile runtime with cc
+        if rt_c_path.exists() {
+            let lto_module = LinkModule { source: rt_c_path.clone(), lang: ast::LinkLanguage::C };
+            if let Some(lto_obj) = link_and_optimize(
+                &out_base, stem, &output_file, &[lto_module], &llvm_flags, has_thread_pool
+            ) {
+                println!("  LTO: program + brief_rt.c bitcode merged and optimized");
+                let mut link_cmd = std::process::Command::new("cc");
+                link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj);
+                link_cmd.arg("-lm");
+                if has_wake {
+                    link_cmd.args(["-lrt", "-lpthread"]);
+                } else if has_thread_pool {
+                    link_cmd.arg("-lpthread");
+                }
+                if link_cmd.status().ok().map_or(true, |s| !s.success()) {
+                    eprintln!("  Warning: LTO linking failed. Trying cc fallback.");
+                } else {
+                    println!("  Binary: {}", exe_path.display());
+                    return Ok(output_file);
+                }
+            }
+        }
+
+        // LTO not available or failed — fall back to standard cc compilation and object linking.
         let cc_status = {
             let mut cmd = std::process::Command::new("cc");
             cmd.args(["-c", "-O2", "-ffreestanding", "-fno-stack-protector", "-fno-builtin"]);

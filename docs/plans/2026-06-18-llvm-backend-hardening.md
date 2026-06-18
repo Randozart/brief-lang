@@ -236,3 +236,20 @@ After each phase:
 Final:
 4. Commit plan document alongside code
 5. Document root causes in docs/architecture/praetor-log.md if applicable
+
+## Clang IR Reference Workflow
+
+Use Clang as a reference for correct LLVM IR patterns:
+
+```bash
+# See how Clang emits variadic function calls, structs, loops, etc.
+clang -S -emit-llvm -O3 -fno-discard-value-names test.c -o -
+# Pre-compile C shims to bitcode for cross-module inlining:
+clang -O3 -emit-llvm -c brief_rt.c -o brief_rt.bc
+# Merge with generated Brief IR:
+llvm-link program.ll brief_rt.bc -S -o final.ll
+# The compiler now auto-detects brief_rt.c and runs this pipeline
+# before falling back to cc compilation.
+```
+
+This would have caught the `fprintf` variadic syntax bug instantly. Use for any construct where the emitted IR is uncertain.
