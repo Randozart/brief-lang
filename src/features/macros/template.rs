@@ -1,16 +1,88 @@
 use crate::ast::{Expr, Statement};
 use crate::features::macros::context::{MacroContext, MacroDef, TemplateDef};
 
-/// Expand a macro by executing its body in a sandboxed interpreter.
-pub fn expand_macro(
+/// Expand a template by substituting @-interpolation markers with bound arguments.
+pub fn expand_template(
     _ctx: &mut MacroContext,
     _interpreter: &mut crate::interpreter::Interpreter,
+    def: &TemplateDef,
+    args: &[Expr],
+    block: Option<crate::ast::Block>,
+) -> Result<crate::interpreter::Value, String> {
+    let mut bindings: Vec<(String, Expr)> = Vec::new();
+    for (i, (param_name, _)) in def.params.iter().enumerate() {
+        if i < args.len() {
+            bindings.push((param_name.clone(), args[i].clone()));
+        } else {
+            return Err(format!("Template '{}': missing argument for parameter '{}'",
+                def.name, param_name));
+        }
+    }
+    if let Some(b) = block {
+        bindings.push(("__block".to_string(), Expr::QuoteBlock {
+            statements: b.statements,
+            trailing_expr: b.trailing_expr,
+        }));
+    }
+    let stmts: Vec<Statement> = def.body.iter().map(|s| substitute_in_stmt(s, &bindings)).collect();
+    Ok(crate::interpreter::Value::Block(stmts))
+}
+
+/// Expand a macro by executing its body in a sandboxed interpreter.
+pub fn expand_macro(
+    ctx: &mut MacroContext,
+    interpreter: &mut crate::interpreter::Interpreter,
     def: &MacroDef,
-    _args: &[Expr],
+    args: &[Expr],
     _block: Option<crate::ast::Block>,
 ) -> Result<crate::interpreter::Value, String> {
-    // TODO: implement full macro body execution (M3.2)
-    Err(format!("macro '{}' expansion not yet implemented", def.name))
+    // Evaluate arguments and bind to parameter names
+    for (i, (param_name, _)) in def.params.iter().enumerate() {
+        if i < args.len() {
+            let value = interpreter.eval_expr(&args[i])
+                .map_err(|e| format!("macro '{}': error evaluating arg '{}': {:?}", def.name, param_name, e))?;
+            interpreter.state.insert(param_name.clone(), value);
+        } else {
+            return Err(format!("macro '{}': missing argument for parameter '{}'", def.name, param_name));
+        }
+    }
+
+    // Execute macro body statements, checking for return_value after each
+    for stmt in &def.body {
+        interpreter.exec_stmt(stmt)
+            .map_err(|e| format!("macro '{}' body error: {:?}", def.name, e))?;
+        if let Some(val) = interpreter.return_value.take() {
+            return Ok(val);
+        }
+    }
+
+    Err(format!("macro '{}' body did not return a value via `term`", def.name))
+}
+
+/// Convert a Value to a Vec of AST Statements for injection into the program.
+pub fn value_to_statements(value: &crate::interpreter::Value) -> Vec<Statement> {
+    match value {
+        crate::interpreter::Value::Block(stmts) => stmts.clone(),
+        crate::interpreter::Value::Stmt(stmt) => vec![*stmt.clone()],
+        crate::interpreter::Value::Expr(expr) => {
+            vec![Statement::Expression(*expr.clone())]
+        }
+        other => {
+            // Wrap non-AST values as expression statements
+            vec![Statement::Expression(expr_from_value(other))]
+        }
+    }
+}
+
+fn expr_from_value(value: &crate::interpreter::Value) -> Expr {
+    match value {
+        crate::interpreter::Value::Int(n) => Expr::Integer(*n),
+        crate::interpreter::Value::Float(f) => Expr::Float(*f),
+        crate::interpreter::Value::String(s) => Expr::String(s.clone()),
+        crate::interpreter::Value::Bool(b) => Expr::Bool(*b),
+        crate::interpreter::Value::Char(c) => Expr::Char(*c),
+        _ => Expr::Term,
+    }
 }
 
 fn substitute_in_stmt(stmt: &Statement, bindings: &[(String, Expr)]) -> Statement {
