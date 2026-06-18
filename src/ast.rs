@@ -586,6 +586,20 @@ pub enum Intrinsic {
     PrintFloat,
     GetEnvInt,
 
+    // ===== Math intrinsics (2026-06-18) — trigonometric =====
+    /// sin#(Float) -> Float — trigonometric sine
+    Sin,
+    /// cos#(Float) -> Float — trigonometric cosine
+    Cos,
+    /// pow#(Float, Float) -> Float — float exponentiation
+    Pow,
+
+    // ===== String conversion intrinsics (2026-06-18) =====
+    /// float_to_str#(Float) -> String — format float to string
+    FloatToStr,
+    /// to_str#(Int|Float|Char|Bool) -> String — generic value to string
+    ToStr,
+
     // ===== Macro/Template intrinsics (compile-time only) =====
     /// compile#(code: String) -> Block — parse string as Brief code at compile time
     Compile,
@@ -610,6 +624,8 @@ impl Intrinsic {
             | Intrinsic::ToLower | Intrinsic::ContainsAt
             | Intrinsic::FindFrom | Intrinsic::SplitN
             | Intrinsic::IntToStr
+            | Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
+            | Intrinsic::FloatToStr | Intrinsic::ToStr
             => false,
             // Everything else is observable — cannot fold
             _ => true,
@@ -651,6 +667,11 @@ impl Intrinsic {
             "find_from" => Some(Intrinsic::FindFrom),
             "splitn" => Some(Intrinsic::SplitN),
             "int_to_str" => Some(Intrinsic::IntToStr),
+            "sin" => Some(Intrinsic::Sin),
+            "cos" => Some(Intrinsic::Cos),
+            "pow" => Some(Intrinsic::Pow),
+            "float_to_str" => Some(Intrinsic::FloatToStr),
+            "to_str" => Some(Intrinsic::ToStr),
             // Phase A: Terminal
             "tty_raw_mode" => Some(Intrinsic::TtyRawMode),
             "tty_size" => Some(Intrinsic::TtySize),
@@ -788,6 +809,11 @@ impl Intrinsic {
             Intrinsic::FindFrom => "find_from",
             Intrinsic::SplitN => "splitn",
             Intrinsic::IntToStr => "int_to_str",
+            Intrinsic::Sin => "sin",
+            Intrinsic::Cos => "cos",
+            Intrinsic::Pow => "pow",
+            Intrinsic::FloatToStr => "float_to_str",
+            Intrinsic::ToStr => "to_str",
             // Phase A: Terminal
             Intrinsic::TtyRawMode => "tty_raw_mode",
             Intrinsic::TtySize => "tty_size",

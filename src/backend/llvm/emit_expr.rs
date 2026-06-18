@@ -487,9 +487,32 @@ impl LlvmBackend {
                 };
                 match intrinsic {
                     Intrinsic::Sqrt => { return emit_intrinsic_float_unary(self, out, indent, &v, "sqrt", &args[0]); }
+                    Intrinsic::Sin => { return emit_intrinsic_float_unary(self, out, indent, &v, "sin", &args[0]); }
+                    Intrinsic::Cos => { return emit_intrinsic_float_unary(self, out, indent, &v, "cos", &args[0]); }
+                    Intrinsic::Pow => {
+                        let a = self.emit_expr(out, &args[0], indent);
+                        let b = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}{} = call double @pow(double {}, double {})", indent, v, a.name, b.name).ok();
+                        return TypedRegister { name: v.to_string(), ty: Type::Float };
+                    }
                     Intrinsic::Fabs => { return emit_intrinsic_float_unary(self, out, indent, &v, "fabs", &args[0]); }
                     Intrinsic::Ceil => { return emit_intrinsic_float_unary(self, out, indent, &v, "ceil", &args[0]); }
                     Intrinsic::Floor => { return emit_intrinsic_float_unary(self, out, indent, &v, "floor", &args[0]); }
+                    Intrinsic::FloatToStr => {
+                        if !args.is_empty() {
+                            let a_raw = self.emit_expr(out, &args[0], indent);
+                            let a_f = self.ensure_float_reg(out, indent, &a_raw);
+                            writeln!(out, "{}{} = call i8* @__float_to_str(float {})", indent, v, a_f).ok();
+                        }
+                        return TypedRegister { name: v.to_string(), ty: Type::String };
+                    }
+                    Intrinsic::ToStr => {
+                        if !args.is_empty() {
+                            let a_raw = self.emit_expr(out, &args[0], indent);
+                            writeln!(out, "{}{} = call i8* @__to_str(i64 {})", indent, v, a_raw.name).ok();
+                        }
+                        return TypedRegister { name: v.to_string(), ty: Type::String };
+                    }
                     Intrinsic::Ctpop => {
                         let raw = self.emit_expr(out, &args[0], indent);
                         writeln!(out, "{}{} = call i64 @llvm.ctpop.i64(i64 {})", indent, v, raw).ok();
@@ -1933,6 +1956,14 @@ impl LlvmBackend {
                         } else {
                             writeln!(out, "{}{} = add i64 0, 0 ; int_to_str no-arg", indent, v).ok();
                         }
+                    }
+                    Intrinsic::FloatToStr => {
+                        // TODO: use snprintf or brief_rt.c helper for float→string
+                        panic!("float_to_str not yet implemented in LLVM backend");
+                    }
+                    Intrinsic::ToStr => {
+                        // TODO: dispatch on type and format accordingly
+                        panic!("to_str not yet implemented in LLVM backend");
                     }
                     // Benchmark intrinsics (2026-06-16) — direct libc, no brief_rt.c shims
                     Intrinsic::PrintInt => {

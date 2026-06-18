@@ -1345,6 +1345,10 @@ impl TypeChecker {
                     // Benchmark intrinsics (2026-06-16)
                     Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat => Type::Bool,
                     Intrinsic::GetEnvInt => Type::Int,
+                    // Math intrinsics
+                    Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow => Type::Float,
+                    // String conversion intrinsics
+                    Intrinsic::FloatToStr | Intrinsic::ToStr => Type::String,
                     // Macro/template intrinsics (compile-time only)
                     Intrinsic::Compile | Intrinsic::MacroError
                     | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Data,

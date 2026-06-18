@@ -1552,6 +1552,28 @@ impl Interpreter {
                             v => Err(RuntimeError::TypeMismatch(format!("bitreverse requires Int, got {:?}", v))),
                         }
                     }
+                    Intrinsic::Sin => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Float(f) => Ok(Value::Float(f.sin())),
+                            v => Err(RuntimeError::TypeMismatch(format!("sin# requires Float, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Cos => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Float(f) => Ok(Value::Float(f.cos())),
+                            v => Err(RuntimeError::TypeMismatch(format!("cos# requires Float, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::Pow => {
+                        let base = values.remove(0);
+                        let exp = values.remove(0);
+                        match (base, exp) {
+                            (Value::Float(b), Value::Float(e)) => Ok(Value::Float(b.powf(e))),
+                            (b, e) => Err(RuntimeError::TypeMismatch(format!("pow# requires (Float, Float), got ({:?}, {:?})", b, e))),
+                        }
+                    }
                     Intrinsic::Bytes => {
                         let v = values.remove(0);
                         match v {
@@ -3428,6 +3450,26 @@ impl Interpreter {
                                 format!("int_to_str requires Int, got {:?}", v))),
                         };
                         Ok(Value::String(n.to_string()))
+                    }
+                    Intrinsic::FloatToStr => {
+                        let f = match values.remove(0) {
+                            Value::Float(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("float_to_str requires Float, got {:?}", v))),
+                        };
+                        Ok(Value::String(format!("{:.9}", f)))
+                    }
+                    Intrinsic::ToStr => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::Int(n) => Ok(Value::String(n.to_string())),
+                            Value::Float(f) => Ok(Value::String(format!("{:.9}", f))),
+                            Value::Char(c) => Ok(Value::String(c.to_string())),
+                            Value::Bool(b) => Ok(Value::String(b.to_string())),
+                            Value::String(s) => Ok(Value::String(s)),
+                            v => Err(RuntimeError::TypeMismatch(
+                                format!("to_str requires Int|Float|Char|Bool|String, got {:?}", v))),
+                        }
                     }
                     // Benchmark intrinsics (2026-06-16)
                     Intrinsic::PrintInt => {
