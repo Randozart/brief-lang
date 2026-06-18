@@ -41,7 +41,7 @@ pub struct GpuKernel {
 /// Check whether a list of statements is GPU-eligible.
 ///
 /// A transaction or loop body is GPU-eligible when:
-/// 1. No FFI calls in the body (purity)
+/// 1. No user FFI calls in the body (only well-known GPU intrinsics allowed)
 /// 2. No loop-carried dependencies (parallelizable)
 /// 3. Contiguous memory access patterns (coalesced reads/writes)
 /// 4. Bounded iteration count (known or provably finite)
@@ -62,13 +62,27 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
             Statement::Unification { .. } => {
                 reasons.push("GPU kernel contains unification — unsupported".to_string());
             }
-            Statement::Expression(Expr::Call(name, _)) => {
-                reasons.push(format!("GPU kernel contains FFI call '{}' — unsupported", name));
+            Statement::Expression(expr) => {
+                collect_unsafe_ffi(expr, &mut reasons);
             }
-            Statement::Assignment { lhs, .. } => {
+            Statement::Let { expr: Some(e), .. } => {
+                collect_unsafe_ffi(e, &mut reasons);
+            }
+            Statement::Assignment { lhs, expr, .. } => {
                 if let Expr::Identifier(field) = lhs {
                     if !write_fields.contains(field) {
                         write_fields.push(field.clone());
+                    }
+                }
+                collect_unsafe_ffi(expr, &mut reasons);
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                collect_unsafe_ffi(condition, &mut reasons);
+                let inner = check_eligibility(statements);
+                reasons.extend(inner.reasons);
+                for f in inner.buffer_fields {
+                    if !write_fields.contains(&f) {
+                        write_fields.push(f);
                     }
                 }
             }
@@ -80,16 +94,96 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
     GpuEligibility {
         eligible,
         reasons,
-        buffer_fields: {
-            let mut all: Vec<String> = Vec::new();
-            for f in &write_fields {
-                if !all.contains(f) {
-                    all.push(f.clone());
-                }
-            }
-            all
-        },
+        buffer_fields: write_fields,
     }
+}
+
+/// Recursively walk an expression tree and collect reasons for any unsafe FFI
+/// calls or intrinsics that would make the kernel ineligible for GPU offloading.
+///
+/// `Expr::Call` (user FFI) is always unsafe. `Expr::IntrinsicCall` is only
+/// unsafe if the intrinsic is not in the GPU-safe allowlist. `Expr::SharedMem`
+/// is always allowed (it is GPU-native).
+fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
+    match expr {
+        Expr::Call(name, _) => {
+            reasons.push(format!("GPU kernel contains FFI call '{}' — unsupported", name));
+        }
+        Expr::IntrinsicCall { intrinsic, .. } => {
+            if !is_gpu_safe_intrinsic(intrinsic) {
+                reasons.push(format!("GPU kernel contains unsafe intrinsic '{:?}'", intrinsic));
+            }
+        }
+        // Binary ops — recurse into both operands
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
+        | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r)
+        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+            collect_unsafe_ffi(l, reasons);
+            collect_unsafe_ffi(r, reasons);
+        }
+        // Unary ops — recurse into operand
+        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+            collect_unsafe_ffi(e, reasons);
+        }
+        // Collection literals — recurse into elements
+        Expr::ListLiteral(items) | Expr::SetLiteral(items) => {
+            for item in items {
+                collect_unsafe_ffi(item, reasons);
+            }
+        }
+        Expr::MapLiteral(pairs) => {
+            for (k, v) in pairs {
+                collect_unsafe_ffi(k, reasons);
+                collect_unsafe_ffi(v, reasons);
+            }
+        }
+        // List index — recurse into value and index
+        Expr::ListIndex(v, i) => {
+            collect_unsafe_ffi(v, reasons);
+            collect_unsafe_ffi(i, reasons);
+        }
+        // Slice — recurse into value and optional bounds
+        Expr::Slice { value, start, end, stride, mask } => {
+            collect_unsafe_ffi(value, reasons);
+            for opt in [start, end, stride, mask].into_iter().flatten() {
+                collect_unsafe_ffi(opt, reasons);
+            }
+        }
+        // Concat / Cast / Projection — recurse into operands
+        Expr::Concat(l, r) => {
+            collect_unsafe_ffi(l, reasons);
+            collect_unsafe_ffi(r, reasons);
+        }
+        Expr::Cast(e, _) => collect_unsafe_ffi(e, reasons),
+        Expr::Projection { source, .. } => collect_unsafe_ffi(source, reasons),
+        // Field access — recurse into the struct expression
+        Expr::FieldAccess(obj, _) => {
+            collect_unsafe_ffi(obj, reasons);
+        }
+        // Terminals — no sub-expressions
+        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
+        | Expr::String(_) | Expr::Term | Expr::Identifier(_)
+        | Expr::OwnedRef(_) | Expr::PriorState(_)
+        | Expr::Ellipsis | Expr::TypeRef(_) => {}
+        // Catch-all for remaining expression types — conservatively reject
+        _ => {
+            reasons.push("GPU kernel contains unsupported expression type".to_string());
+        }
+    }
+}
+
+/// Returns true if the intrinsic is safe to execute on GPU.
+///
+/// Well-known math intrinsics (sin, cos, pow, sqrt, fabs) map directly to
+/// SPIR-V / GPU instructions. GPU query intrinsics (get_global_id, barrier)
+/// are added alongside their Intrinsic enum entries.
+fn is_gpu_safe_intrinsic(intrinsic: &Intrinsic) -> bool {
+    matches!(intrinsic,
+        Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
+        | Intrinsic::Sqrt | Intrinsic::Fabs
+    )
 }
 
 /// Extract a GPU kernel from a transaction body.
@@ -546,5 +640,76 @@ mod tests {
         assert!(s.contains("@brief_kernel_test_kernel"));
         assert!(s.contains("[4 x i8]"));
         assert!(s.contains("\\03"));
+    }
+
+    // ── Eligibility relaxation (Phase 1) ──────────────────────────
+
+    #[test]
+    fn test_check_eligibility_math_intrinsic_allowed() {
+        // sin#(x_float) inside an expression should be allowed
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("r".to_string()),
+                expr: Expr::IntrinsicCall {
+                    intrinsic: Intrinsic::Sin,
+                    args: vec![Expr::Identifier("x".to_string())],
+                },
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let result = check_eligibility(&body);
+        assert!(result.eligible, "math intrinsic sin# should be GPU-eligible");
+        assert!(result.reasons.is_empty(), "should have no rejection reasons");
+    }
+
+    #[test]
+    fn test_check_eligibility_unsafe_intrinsic_blocked() {
+        // print_int# has side effects — should be blocked
+        let body = vec![
+            Statement::Expression(Expr::IntrinsicCall {
+                intrinsic: Intrinsic::PrintInt,
+                args: vec![Expr::Integer(42)],
+            }),
+        ];
+        let result = check_eligibility(&body);
+        assert!(!result.eligible, "unsafe intrinsic should be ineligible");
+        assert!(result.reasons.iter().any(|r| r.contains("unsafe intrinsic")),
+            "reason should mention unsafe intrinsic");
+    }
+
+    #[test]
+    fn test_check_eligibility_ffi_in_assignment_blocked() {
+        // FFI call inside assignment RHS should be caught
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: Expr::Call("read_file".to_string(), vec![Expr::String("foo.txt".to_string())]),
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let result = check_eligibility(&body);
+        assert!(!result.eligible, "FFI in assignment RHS should be ineligible");
+        assert!(result.reasons.iter().any(|r| r.contains("FFI")),
+            "reason should mention FFI");
+    }
+
+    #[test]
+    fn test_check_eligibility_unsafe_intrinsic_in_guard_blocked() {
+        // Unsafe intrinsic inside a guarded statement should be caught via recursion
+        let body = vec![
+            Statement::Guarded {
+                condition: Expr::Bool(true),
+                statements: vec![
+                    Statement::Expression(Expr::IntrinsicCall {
+                        intrinsic: Intrinsic::ReadFile,
+                        args: vec![Expr::String("test".to_string())],
+                    }),
+                ],
+            },
+        ];
+        let result = check_eligibility(&body);
+        assert!(!result.eligible, "unsafe intrinsic in guard should be ineligible");
     }
 }
