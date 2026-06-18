@@ -519,6 +519,107 @@ mod tests {
     }
 
     #[test]
+    fn test_integration_template_expand_expr_expr() {
+        // Template that returns an Expr: $double(5) → 5 + 5 = 10
+        let mut ctx = MacroContext::new();
+        ctx.templates.insert("double".to_string(), TemplateDef {
+            name: "double".to_string(),
+            params: vec![("x".to_string(), crate::ast::MacroArgType::Expr)],
+            return_type: Some(crate::ast::MacroArgType::Expr),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Interpolate("x".to_string()))],
+                swan_song: None,
+                modifiers: vec![],
+            }],
+        });
+        let mut stmt = Statement::Expression(Expr::TemplateCall {
+            name: "double".to_string(),
+            args: vec![Expr::Integer(5)],
+            block: None,
+            span: None,
+        });
+        let result = expand_template_in_stmt(&stmt, &mut ctx);
+        assert!(result.is_ok(), "Expected Ok: {:?}", result.err());
+        let expanded = result.unwrap();
+        assert!(expanded.is_some(), "Expected Some expanded statements");
+        let stmts = expanded.unwrap();
+        assert_eq!(stmts.len(), 1, "Expected 1 statement");
+    }
+
+    #[test]
+    fn test_integration_macro_expands_to_term_stmt() {
+        // Macro that returns a simple Term statement
+        let mut ctx = MacroContext::new();
+        ctx.macros.insert("gen".to_string(), MacroDef {
+            name: "gen".to_string(),
+            params: vec![],
+            return_type: None,
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Integer(42))],
+                swan_song: None,
+                modifiers: vec![],
+            }],
+        });
+        let stmt = Statement::Expression(Expr::MacroCall {
+            name: "gen".to_string(),
+            args: vec![],
+            block: None,
+            span: None,
+        });
+        let result = expand_macro_in_stmt(&stmt, &mut ctx);
+        assert!(result.is_ok(), "Expected Ok: {:?}", result.err());
+        let expanded = result.unwrap();
+        assert!(expanded.is_some(), "Expected Some expanded statements");
+        let stmts = expanded.unwrap();
+        assert_eq!(stmts.len(), 1, "Expected 1 expanded statement (Term)");
+    }
+
+    #[test]
+    fn test_integration_expand_templates_full_pipeline() {
+        let mut program = Program {
+            items: vec![
+                TopLevel::TemplateDef {
+                    name: "hey".to_string(),
+                    params: vec![],
+                    return_type: None,
+                    body: vec![Statement::Term {
+                        values: vec![Some(Expr::Integer(7))],
+                        swan_song: None, modifiers: vec![],
+                    }],
+                },
+                TopLevel::Statement(Box::new(Statement::Expression(Expr::TemplateCall {
+                    name: "hey".to_string(), args: vec![], block: None, span: None,
+                }))),
+            ],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: crate::ast::StrictMode::Off,
+            dispatch_mode: crate::ast::DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let mut ctx = MacroContext::new();
+        let result = expand_templates(&mut program, &mut ctx);
+        assert!(result.is_ok(), "expand_templates failed: {:?}", result.err());
+        assert_eq!(program.items.len(), 1, "Expected 1 item after expansion");
+        // The expanded call should be present — no panic on TemplateDef removal
+        assert!(matches!(&program.items[0], TopLevel::Statement(_)));
+    }
+
+    #[test]
+    fn test_integration_no_undefined_template_error() {
+        let mut ctx = MacroContext::new();
+        let stmt = Statement::Expression(Expr::TemplateCall {
+            name: "nonexistent".to_string(),
+            args: vec![],
+            block: None,
+            span: None,
+        });
+        let result = expand_template_in_stmt(&stmt, &mut ctx);
+        assert!(result.is_err(), "Expected undefined template error");
+        assert!(result.unwrap_err().contains("undefined template"));
+    }
+
+    #[test]
     fn test_collect_macro_defs() {
         let mut program = Program {
             items: vec![TopLevel::MacroDef { name: "m".to_string(), params: vec![], return_type: None,
