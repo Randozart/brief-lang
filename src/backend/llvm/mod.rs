@@ -597,6 +597,9 @@ pub struct LlvmBackend {
     // ── Optimization Remarks ───────────────────────────────
     pub(crate) remarks: Vec<crate::backend::llvm::directive::OptimizationRemark>,
     emit_remarks: bool,
+
+    // ── GPU Offloading ─────────────────────────────────────
+    gpu_offload: bool,
 }
 
 impl LlvmBackend {
@@ -676,6 +679,7 @@ impl LlvmBackend {
             explain: false,
             remarks: Vec::new(),
             emit_remarks: false,
+            gpu_offload: false,
         }
     }
 
@@ -730,6 +734,11 @@ impl LlvmBackend {
 
     pub fn with_emit_remarks(mut self, emit: bool) -> Self {
         self.emit_remarks = emit;
+        self
+    }
+
+    pub fn with_gpu_offload(mut self, offload: bool) -> Self {
+        self.gpu_offload = offload;
         self
     }
 
