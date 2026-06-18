@@ -22,6 +22,7 @@ proven at compile time, not `unsafe` blocks. See
 ### File Types
 - **.bv** - Brief (standard Brief file, cosmopolitan tier — any FFI, any language, OS assumed)
 - **.sbv** - Strict Brief (full contracts required, no sugar defaults)
+- **.gbv** - Graphic Brief (native GPU compilation — always compiles to SPIR-V, no FFI, restricted types, GPU intrinsics only)
 - **.rbv** - Rendered Brief (Brief + View, compiles to web frontend. Like `.tsx` is to `.ts`)
 - **.srbv** - Strict Rendered Brief (full contracts required in web target)
 - **.ebv** - Embedded Brief (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned)
@@ -46,9 +47,7 @@ first one opens an empty precondition (defaults to `true`), the second opens the
 postcondition (defaults to `true`).
 
 **Banned in**: `.sbv`, `.srbv`, `.sebv`, `.hebv` (strict tiers require explicit both-sided contracts).
-
-**Preferred in**: `.bv`, `.ebv`, `.rbv` stdlib examples. Use the sugar to keep code readable
-while teaching users the pattern.
+**Allowed in**: `.gbv`, `.bv`, `.ebv`, `.rbv` (sugar is the recommended style).
 
 ### Critical Philosophy
 

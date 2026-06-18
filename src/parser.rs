@@ -79,6 +79,13 @@ impl<'a> Parser<'a> {
         self
     }
 
+    pub fn with_gpu_mode(mut self, gpu: bool) -> Self {
+        if gpu {
+            self.strict_mode = StrictMode::Gpu;
+        }
+        self
+    }
+
     pub fn take_sed_item_names(&mut self) -> Vec<String> {
         std::mem::take(&mut self.sed_item_names)
     }

@@ -500,6 +500,11 @@ impl TypeChecker {
 
         self.register_stdlib_signatures();
 
+        // GPU (.gbv) validation — enforce type and intrinsic restrictions
+        if program.strict_mode.is_gpu() {
+            self.validate_gpu_program(program);
+        }
+
         // Pass 1: Collect all signatures and definitions for global visibility
         for item in &program.items {
             match item {
@@ -696,6 +701,145 @@ impl TypeChecker {
                 }
             }
             other => other,
+        }
+    }
+
+    /// Validate GPU (.gbv) restrictions on the program.
+    /// Called only when `strict_mode == StrictMode::Gpu`.
+    fn validate_gpu_program(&self, program: &Program) {
+        for item in &program.items {
+            match item {
+                TopLevel::ForeignBinding { name, .. } => {
+                    let mut diag = Diagnostic::new("G001", Severity::Error, "FFI not allowed in GPU kernel")
+                        .with_explanation(&format!(
+                            "`frgn` declaration '{}' is not allowed in .gbv files. \
+                             Use only built-in GPU intrinsics (sin#, cos#, get_global_id#, etc.)",
+                            name
+                        ));
+                    self.diagnostics.borrow_mut().push(diag);
+                    self.errors.borrow_mut().push(TypeError::FFIError {
+                        message: format!("frgn '{}' not allowed in .gbv", name),
+                    });
+                }
+                TopLevel::Transaction(txn) => {
+                    // Check for missing contracts — warn but don't error
+                    let has_pre = txn.contract.pre_condition != Expr::Bool(true);
+                    let has_post = txn.contract.post_condition != Expr::Bool(true);
+                    if !has_pre && !has_post {
+                        let diag = Diagnostic::new("G002", Severity::Warning, "GPU transaction without contracts")
+                            .with_explanation(&format!(
+                                "`{}` has no contracts — add [pre][post] for better GPU optimization",
+                                txn.name
+                            ));
+                        self.diagnostics.borrow_mut().push(diag);
+                    }
+                    // Validate types and intrinsics in body statements
+                    for stmt in &txn.body {
+                        self.validate_gpu_stmt(stmt);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Validate types and intrinsics in a GPU statement body.
+    fn validate_gpu_stmt(&self, stmt: &Statement) {
+        match stmt {
+            Statement::Let { ty: Some(t), expr, .. } => {
+                self.validate_gpu_type(t);
+                if let Some(e) = expr {
+                    self.validate_gpu_expr(e);
+                }
+            }
+            Statement::Assignment { expr, .. } => {
+                self.validate_gpu_expr(expr);
+            }
+            Statement::Expression(e) => {
+                self.validate_gpu_expr(e);
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                self.validate_gpu_expr(condition);
+                for s in statements {
+                    self.validate_gpu_stmt(s);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Validate that a type is allowed in .gbv context.
+    fn validate_gpu_type(&self, ty: &Type) {
+        match ty {
+            Type::Int | Type::UInt | Type::Float | Type::Bool | Type::Char => {}
+            Type::String => {} // allowed for constants
+            Type::Vector(elem, _) => self.validate_gpu_type(elem),
+            _ => {
+                let diag = Diagnostic::new("G003", Severity::Error, "Type not allowed in GPU kernel")
+                    .with_explanation(&format!(
+                        "Type `{:?}` is not supported in .gbv files. \
+                         Allowed types: Int, Float, Bool, Char, String (const), and [T; N]",
+                        ty
+                    ));
+                self.diagnostics.borrow_mut().push(diag);
+                self.errors.borrow_mut().push(TypeError::InvalidOperation {
+                    operation: "type validation".to_string(),
+                    type_name: format!("{:?}", ty),
+                });
+            }
+        }
+    }
+
+    /// Check that only allowed GPU intrinsics and no FFI calls are used.
+    fn validate_gpu_expr(&self, expr: &Expr) {
+        match expr {
+            Expr::IntrinsicCall { intrinsic, .. } => {
+                let allowed = matches!(intrinsic,
+                    Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
+                    | Intrinsic::Sqrt | Intrinsic::Fabs
+                    | Intrinsic::Ceil | Intrinsic::Floor
+                    | Intrinsic::GetGlobalId | Intrinsic::GetLocalId
+                    | Intrinsic::GetGroupId | Intrinsic::GetNumGroups
+                    | Intrinsic::SubGroupBarrier
+                );
+                if !allowed {
+                    let diag = Diagnostic::new("G004", Severity::Error, "Intrinsic not allowed in GPU kernel")
+                        .with_explanation(&format!(
+                            "`{:?}#` is not a GPU-safe intrinsic. \
+                             Allowed: sin, cos, pow, sqrt, fabs, ceil, floor, \
+                             get_global_id, get_local_id, get_group_id, get_num_groups, barrier",
+                            intrinsic
+                        ));
+                    self.diagnostics.borrow_mut().push(diag);
+                    self.errors.borrow_mut().push(TypeError::InvalidOperation {
+                        operation: format!("{:?}#", intrinsic),
+                        type_name: "intrinsic".to_string(),
+                    });
+                }
+            }
+            Expr::Call(name, _) => {
+                let diag = Diagnostic::new("G001", Severity::Error, "FFI not allowed in GPU kernel")
+                    .with_explanation(&format!(
+                        "Function call `{}()` is not allowed in .gbv files. \
+                         Use only built-in GPU intrinsics.",
+                        name
+                    ));
+                self.diagnostics.borrow_mut().push(diag);
+                self.errors.borrow_mut().push(TypeError::FFIError {
+                    message: format!("call '{}' not allowed in .gbv", name),
+                });
+            }
+            // Recurse
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+            | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
+            | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+                self.validate_gpu_expr(l);
+                self.validate_gpu_expr(r);
+            }
+            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+                self.validate_gpu_expr(e);
+            }
+            _ => {}
         }
     }
 

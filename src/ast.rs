@@ -1989,11 +1989,17 @@ impl Hashtag {
 pub enum StrictMode {
     Off,
     Strict,
+    /// Graphic Brief (`.gbv`) — always compiles to GPU, no FFI, restricted types.
+    /// Contracts are optional (warned about, not required).
+    Gpu,
 }
 
 impl StrictMode {
     pub fn is_strict(self) -> bool {
         matches!(self, StrictMode::Strict)
+    }
+    pub fn is_gpu(self) -> bool {
+        matches!(self, StrictMode::Gpu)
     }
 }
 

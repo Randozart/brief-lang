@@ -376,6 +376,7 @@ fn print_usage(program: &str) {
     eprintln!("File Extensions:");
     eprintln!("  .bv, .br            Core Brief (specification)");
     eprintln!("  .rbv                Rendered Brief (Brief + View)");
+    eprintln!("  .gbv                Graphic Brief (native GPU compilation)");
     eprintln!("  .ebv                Embedded Brief (hardware targets)");
     eprintln!("  .hebv               Hardware Embedded Brief (logic graph, synthesizable only)");
     eprintln!("  .sbv                Strict Brief (requires full contracts)");
@@ -763,6 +764,12 @@ fn is_strict_extension(file_path: &PathBuf) -> bool {
     matches!(ext, "sbv" | "sebv" | "srbv" | "hebv")
 }
 
+/// Intent: is GPU (`.gbv`) extension — always compiles to SPIR-V.
+fn is_gpu_extension(file_path: &PathBuf) -> bool {
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    ext == "gbv"
+}
+
 /// Intent: run check.
 fn run_check(
     file_path: &PathBuf,
@@ -997,6 +1004,33 @@ fn run_build(
                     let exe_path = out.join(stem);
                     if exe_path.exists() {
                         println!("  Built executable: {}", exe_path.display());
+                        Ok(exe_path)
+                    } else {
+                        eprintln!("  LLVM output at: {}", ll_path.display());
+                        Ok(ll_path)
+                    }
+                }
+                Err(e) => Err(e),
+            }
+        }
+        "gbv" => {
+            // .gbv files: Compile to GPU — always enables SPIR-V offload
+            println!("Building Graphic Brief (.gbv) file: compiling via GPU...");
+            if prod_mode {
+                println!("  Production mode: full optimization enabled");
+            }
+            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, true, "vulkan");
+            match result {
+                Ok(ll_path) => {
+                    let exe_path = out.join(stem);
+                    if exe_path.exists() {
+                        println!("  Built executable: {} (with embedded SPIR-V)", exe_path.display());
+                        let spv_path = out.join(format!("{}.spv", stem));
+                        if spv_path.exists() {
+                            println!("  Standalone SPIR-V: {}", spv_path.display());
+                        }
                         Ok(exe_path)
                     } else {
                         eprintln!("  LLVM output at: {}", ll_path.display());
@@ -2164,12 +2198,19 @@ fn run_llvm_compile(
     gpu_offload: bool,
     gpu_backend: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    println!("Compiling to LLVM IR: {}", file_path.display());
+    let is_gpu = is_gpu_extension(file_path);
+    // Force GPU offload for .gbv files
+    let gpu_offload = gpu_offload || is_gpu;
+
+    println!("Compiling to LLVM IR: {} {}", file_path.display(),
+        if is_gpu { "(GPU — .gbv)" } else { "" });
 
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
 
-    let mut parser = parser::Parser::new(&clean_source).with_strict_mode(_strict);
+    let mut parser = parser::Parser::new(&clean_source)
+        .with_strict_mode(_strict)
+        .with_gpu_mode(is_gpu);
     let mut program = parser
         .parse()
         .map_err(|e| format!("Parse error: {}", e))?;
