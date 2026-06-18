@@ -783,6 +783,7 @@ fn run_check(
     safe_compile: bool,
     macro_budget: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let is_gpu = is_gpu_extension(file_path);
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
 
@@ -797,7 +798,9 @@ fn run_check(
         println!("[Lexer] Tokenizing...");
     }
 
-    let mut parser = parser::Parser::new(&processed_source).with_strict_mode(strict);
+    let mut parser = parser::Parser::new(&processed_source)
+        .with_strict_mode(strict)
+        .with_gpu_mode(is_gpu);
     let program = match parser.parse() {
         Ok(prog) => prog,
         Err(e) => {
@@ -980,9 +983,13 @@ fn run_build(
     _optimize: bool,
     prod_mode: bool,
     simplify_budget: Option<u64>,
+    gpu_offload: bool,
+    gpu_backend: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Detect source type from extension
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    // Force GPU offload for .gbv files
+    let gpu_offload = gpu_offload || ext == "gbv";
     
     match ext {
         "bv" | "sbv" => {
@@ -998,7 +1005,7 @@ fn run_build(
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan");
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1021,7 +1028,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, true, "vulkan");
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -4050,7 +4057,7 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
+                eprintln!("Error: No .bv, .gbv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
                 eprintln!("Usage: {} check <file>", args[0]);
                 std::process::exit(1);
             }
@@ -4065,6 +4072,8 @@ fn main() {
             let mut out_dir = None;
             let mut prod_mode = false;
             let mut simplify_budget: Option<u64> = None;
+            let mut gpu_offload = false;
+            let mut gpu_backend = "vulkan".to_string();
 
             let mut i = 2;
             while i < args.len() {
@@ -4084,8 +4093,15 @@ fn main() {
                 } else if arg == "--simplify-budget" && i + 1 < args.len() {
                     simplify_budget = Some(args[i + 1].parse::<u64>().unwrap_or(0));
                     i += 2;
+                } else if arg == "--gpu-offload" {
+                    gpu_offload = true;
+                    i += 1;
+                } else if arg == "--gpu-backend" && i + 1 < args.len() {
+                    gpu_backend = args[i + 1].clone();
+                    i += 2;
                 } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".hebv")
-                    || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv") {
+                    || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv")
+                    || arg.ends_with(".gbv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -4096,7 +4112,7 @@ fn main() {
             if let Some(path) = file_path {
                 let out = out_dir.as_deref();
                 let strict = strict_flag || is_strict_extension(&path);
-                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format, strict, optimize_flag, prod_mode, simplify_budget) {
+                match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format, strict, optimize_flag, prod_mode, simplify_budget, gpu_offload, &gpu_backend) {
                     Ok(output) => {
                         println!("Build complete: {}", output.display());
                     }
@@ -4106,9 +4122,10 @@ fn main() {
                     }
                 }
             } else {
-                eprintln!("Error: No .bv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
+                eprintln!("Error: No .bv, .gbv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
                 eprintln!("Usage: {} build <file> [--out <dir>] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
                 eprintln!("  .bv/.sbv files → compile via LLVM to native binary");
+                eprintln!("  .gbv file      → compile via LLVM + SPIR-V (GPU) to native binary + .spv");
                 eprintln!("  .rbv/.srbv files → WASM + JS + frontend");
                 eprintln!("  .ebv/.sebv files → requires explicit target (see: brief compile --help)");
                 std::process::exit(1);
@@ -4238,8 +4255,8 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} llvm <file.bv> [--out <dir>] [--hw-handoff <system.xsa|xparameters.h>] [--hw-target <board>] [--target-dbv <target.dbv>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
+                eprintln!("Error: No .bv, .gbv, .sbv, .ebv, or .sebv file specified");
+                eprintln!("Usage: {} llvm <file.bv|file.gbv> [--out <dir>] [--hw-handoff <system.xsa|xparameters.h>] [--hw-target <board>] [--target-dbv <target.dbv>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
                 std::process::exit(1);
             }
         }
