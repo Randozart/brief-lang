@@ -323,7 +323,7 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str("\n");
 
     ir.push_str(&format!(
-        "define spir_kernel void @{}(i8* nocapture %buffer, i64 %N) {{\n",
+        "define spir_kernel void @{}(i8* nocapture readonly %in_buf, i8* nocapture %out_buf, i64 %N) {{\n",
         kernel.name
     ));
     ir.push_str("entry:\n");
@@ -335,13 +335,15 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str(&format!("  br i1 %cmp, label %{}, label %{}\n", body_label, exit_label));
     ir.push_str(&format!("{}:\n", body_label));
 
-    // Compute base pointer once: buffer + gtid
-    ir.push_str("  %base = getelementptr i8, i8* %buffer, i64 %gtid\n");
+    // Compute both base pointers: in_buf for reads, out_buf for writes
+    ir.push_str("  %base_in = getelementptr i8, i8* %in_buf, i64 %gtid\n");
+    ir.push_str("  %base_out = getelementptr i8, i8* %out_buf, i64 %gtid\n");
 
     let mut loaded_regs: HashMap<String, String> = HashMap::new();
     let field_types = &kernel.field_types;
+    let write_fields: Vec<String> = kernel.write_fields.clone();
     for stmt in &kernel.body {
-        emit_spirv_stmt(stmt, &mut ir, "  ", &field_offsets, &mut loaded_regs, &mut label_counter, field_types);
+        emit_spirv_stmt(stmt, &mut ir, "  ", &field_offsets, &mut loaded_regs, &mut label_counter, field_types, &write_fields);
     }
 
     ir.push_str(&format!("  br label %{}\n", exit_label));
@@ -392,6 +394,7 @@ fn ensure_field_loaded(
     field_offsets: &HashMap<String, u64>,
     loaded_regs: &mut HashMap<String, String>,
     field_types: &HashMap<String, String>,
+    write_fields: &[String],
 ) -> String {
     if let Some(reg) = loaded_regs.get(field) {
         return reg.clone();
@@ -400,14 +403,18 @@ fn ensure_field_loaded(
     let gep = format!("%gep_{}", loaded_regs.len());
     let reg = format!("%lv_{}", loaded_regs.len());
 
+    // Fields that are written use the output buffer (read-write);
+    // read-only fields use the input buffer.
+    let base = if write_fields.contains(&field.to_string()) { "%base_out" } else { "%base_in" };
+
     let is_float = field_types.get(field).map(|t| t == "float").unwrap_or(false);
     if is_float {
-        ir.push_str(&format!("{}{} = getelementptr i8, i8* %base, i64 {}\n", indent, gep, offset));
+        ir.push_str(&format!("{}{} = getelementptr i8, i8* {}, i64 {}\n", indent, gep, base, offset));
         let bc = format!("%bc_{}", loaded_regs.len());
         ir.push_str(&format!("{}{} = bitcast i8* {} to float*\n", indent, bc, gep));
         ir.push_str(&format!("{}{} = load float, float* {}, align 4\n", indent, reg, bc));
     } else {
-        ir.push_str(&format!("{}{} = getelementptr i8, i8* %base, i64 {}\n", indent, gep, offset));
+        ir.push_str(&format!("{}{} = getelementptr i8, i8* {}, i64 {}\n", indent, gep, base, offset));
         ir.push_str(&format!("{}{} = load i64, i8* {}, align 8\n", indent, reg, gep));
     }
     loaded_regs.insert(field.to_string(), reg.clone());
@@ -423,19 +430,18 @@ fn emit_spirv_stmt(
     loaded_regs: &mut HashMap<String, String>,
     label_counter: &mut u64,
     field_types: &HashMap<String, String>,
+    write_fields: &[String],
 ) {
     match stmt {
         Statement::Assignment { lhs, expr, .. } => {
             let lhs_name = if let Expr::Identifier(f) = lhs { f.clone() } else { return };
 
-            // Ensure all fields in the expression are loaded before computing.
-            // No need to pre-load the LHS field unless it appears in the RHS.
-            let val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs, field_types);
+            let val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
 
-            // Store result to LHS field's buffer offset
+            // Store result to LHS field at output buffer offset
             let lhs_offset = field_offsets.get(&lhs_name).copied().unwrap_or(0);
             let gep = format!("%st_{}", loaded_regs.len());
-            ir.push_str(&format!("{}{} = getelementptr i8, i8* %base, i64 {}\n", indent, gep, lhs_offset));
+            ir.push_str(&format!("{}{} = getelementptr i8, i8* %base_out, i64 {}\n", indent, gep, lhs_offset));
             let is_float = field_types.get(&lhs_name).map(|t| t == "float").unwrap_or(false);
             if is_float {
                 let bc = format!("%stbc_{}", loaded_regs.len());
@@ -446,33 +452,30 @@ fn emit_spirv_stmt(
             }
         }
         Statement::Guarded { condition, statements, .. } => {
-            let cond = emit_spirv_expr(condition, ir, indent, field_offsets, loaded_regs, field_types);
+            let cond = emit_spirv_expr(condition, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let then_l = format!(".L{}", { let l = *label_counter; *label_counter += 1; l });
             let merge_l = format!(".L{}", { let l = *label_counter; *label_counter += 1; l });
             ir.push_str(&format!("{}%cond = icmp ne i64 {}, 0\n", indent, cond));
             ir.push_str(&format!("{}br i1 %cond, label %{}, label %{}\n", indent, then_l, merge_l));
             ir.push_str(&format!("{}:\n", then_l));
             for s in statements {
-                emit_spirv_stmt(s, ir, &format!("  {}", indent), field_offsets, loaded_regs, label_counter, field_types);
+                emit_spirv_stmt(s, ir, &format!("  {}", indent), field_offsets, loaded_regs, label_counter, field_types, write_fields);
             }
             ir.push_str(&format!("{}br label %{}\n", indent, merge_l));
             ir.push_str(&format!("{}:\n", merge_l));
         }
-        // Expression statement — emit void-returning calls (e.g. barrier#()) or
-        // expression-evaluation-only statements. Non-void expressions are evaluated
-        // and the result discarded.
         Statement::Expression(expr) => {
             match expr {
                 Expr::IntrinsicCall { intrinsic: Intrinsic::SubGroupBarrier, args } => {
                     let dim = if args.is_empty() {
                         "0".to_string()
                     } else {
-                        emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types)
+                        emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields)
                     };
                     ir.push_str(&format!("{}call void @_Z8barrierj(i32 {})\n", indent, dim));
                 }
                 _ => {
-                    let _val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs, field_types);
+                    let _val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
                 }
             }
         }
@@ -492,6 +495,7 @@ fn emit_spirv_expr(
     field_offsets: &HashMap<String, u64>,
     loaded_regs: &mut HashMap<String, String>,
     field_types: &HashMap<String, String>,
+    write_fields: &[String],
 ) -> String {
     match expr {
         // Float literal: bitcast from i32 hex (f32 precision)
@@ -506,69 +510,69 @@ fn emit_spirv_expr(
             if *b { "1".to_string() } else { "0".to_string() }
         }
         Expr::Identifier(name) => {
-            ensure_field_loaded(name, ir, indent, field_offsets, loaded_regs, field_types)
+            ensure_field_loaded(name, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
         }
         // Float arithmetic
         Expr::Add(lhs, rhs) if is_float_context(expr, field_types) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fadd{}", ir.len());
             ir.push_str(&format!("{}{} = fadd float {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Sub(lhs, rhs) if is_float_context(expr, field_types) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fsub{}", ir.len());
             ir.push_str(&format!("{}{} = fsub float {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Mul(lhs, rhs) if is_float_context(expr, field_types) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fmul{}", ir.len());
             ir.push_str(&format!("{}{} = fmul float {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Div(lhs, rhs) if is_float_context(expr, field_types) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fdiv{}", ir.len());
             ir.push_str(&format!("{}{} = fdiv float {}, {}\n", indent, reg, l, r));
             reg
         }
         // Integer arithmetic
         Expr::Add(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%add{}", ir.len());
             ir.push_str(&format!("{}{} = add i64 {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Sub(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%sub{}", ir.len());
             ir.push_str(&format!("{}{} = sub i64 {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Mul(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%mul{}", ir.len());
             ir.push_str(&format!("{}{} = mul i64 {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Div(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%div{}", ir.len());
             ir.push_str(&format!("{}{} = sdiv i64 {}, {}\n", indent, reg, l, r));
             reg
         }
         Expr::Mod(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%rem{}", ir.len());
             ir.push_str(&format!("{}{} = srem i64 {}, {}\n", indent, reg, l, r));
             reg
@@ -581,8 +585,8 @@ fn emit_spirv_expr(
                 | Expr::Eq(l, r) | Expr::Ne(l, r) => (l, r),
                 _ => unreachable!(),
             };
-            let lv = emit_spirv_expr(l, ir, indent, field_offsets, loaded_regs, field_types);
-            let rv = emit_spirv_expr(r, ir, indent, field_offsets, loaded_regs, field_types);
+            let lv = emit_spirv_expr(l, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let rv = emit_spirv_expr(r, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let cond = match cmp {
                 Expr::Lt(_, _) => "olt",
                 Expr::Le(_, _) => "ole",
@@ -600,8 +604,8 @@ fn emit_spirv_expr(
         }
         // Integer comparisons
         Expr::Lt(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
             ir.push_str(&format!("{}{} = icmp slt i64 {}, {}\n", indent, reg, l, r));
             let ext = format!("%zext{}", ir.len());
@@ -609,8 +613,8 @@ fn emit_spirv_expr(
             ext
         }
         Expr::Le(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
             ir.push_str(&format!("{}{} = icmp sle i64 {}, {}\n", indent, reg, l, r));
             let ext = format!("%zext{}", ir.len());
@@ -618,8 +622,8 @@ fn emit_spirv_expr(
             ext
         }
         Expr::Gt(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
             ir.push_str(&format!("{}{} = icmp sgt i64 {}, {}\n", indent, reg, l, r));
             let ext = format!("%zext{}", ir.len());
@@ -627,8 +631,8 @@ fn emit_spirv_expr(
             ext
         }
         Expr::Ge(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
             ir.push_str(&format!("{}{} = icmp sge i64 {}, {}\n", indent, reg, l, r));
             let ext = format!("%zext{}", ir.len());
@@ -636,8 +640,8 @@ fn emit_spirv_expr(
             ext
         }
         Expr::Eq(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
             ir.push_str(&format!("{}{} = icmp eq i64 {}, {}\n", indent, reg, l, r));
             let ext = format!("%zext{}", ir.len());
@@ -645,8 +649,8 @@ fn emit_spirv_expr(
             ext
         }
         Expr::Ne(lhs, rhs) => {
-            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types);
-            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types);
+            let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
             ir.push_str(&format!("{}{} = icmp ne i64 {}, {}\n", indent, reg, l, r));
             let ext = format!("%zext{}", ir.len());
@@ -655,14 +659,14 @@ fn emit_spirv_expr(
         }
         // Int negation
         Expr::Neg(e) => {
-            let v = emit_spirv_expr(e, ir, indent, field_offsets, loaded_regs, field_types);
+            let v = emit_spirv_expr(e, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%neg{}", ir.len());
             ir.push_str(&format!("{}{} = sub i64 0, {}\n", indent, reg, v));
             reg
         }
         // GPU intrinsics
         Expr::IntrinsicCall { intrinsic, args } => {
-            emit_spirv_intrinsic(intrinsic, args, ir, indent, field_offsets, loaded_regs, field_types)
+            emit_spirv_intrinsic(intrinsic, args, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
         }
         _ => {
             ir.push_str(&format!("{}; error: unsupported expression in GPU kernel\n", indent));
@@ -685,12 +689,13 @@ fn emit_spirv_intrinsic(
     field_offsets: &HashMap<String, u64>,
     loaded_regs: &mut HashMap<String, String>,
     field_types: &HashMap<String, String>,
+    write_fields: &[String],
 ) -> String {
     match intrinsic {
         Intrinsic::GetGlobalId | Intrinsic::GetLocalId
         | Intrinsic::GetGroupId | Intrinsic::GetNumGroups => {
             let dim = if let Some(first) = args.first() {
-                emit_spirv_expr(first, ir, indent, field_offsets, loaded_regs, field_types)
+                emit_spirv_expr(first, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
             } else {
                 "0".to_string()
             };
@@ -708,7 +713,7 @@ fn emit_spirv_intrinsic(
         }
         Intrinsic::SubGroupBarrier => {
             let dim = if let Some(first) = args.first() {
-                emit_spirv_expr(first, ir, indent, field_offsets, loaded_regs, field_types)
+                emit_spirv_expr(first, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
             } else {
                 "0".to_string()
             };
@@ -717,32 +722,32 @@ fn emit_spirv_intrinsic(
         }
         // Math intrinsics: emit @llvm.*.f32 calls native to SPIR-V.
         Intrinsic::Sin => {
-            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types);
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%sin{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.sin.f32(float {})\n", indent, reg, v));
             reg
         }
         Intrinsic::Cos => {
-            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types);
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cos{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.cos.f32(float {})\n", indent, reg, v));
             reg
         }
         Intrinsic::Pow => {
-            let a = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types);
-            let b = emit_spirv_expr(&args[1], ir, indent, field_offsets, loaded_regs, field_types);
+            let a = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let b = emit_spirv_expr(&args[1], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%pow{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.pow.f32(float {}, float {})\n", indent, reg, a, b));
             reg
         }
         Intrinsic::Sqrt => {
-            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types);
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%sqrt{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.sqrt.f32(float {})\n", indent, reg, v));
             reg
         }
         Intrinsic::Fabs => {
-            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types);
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fabs{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.fabs.f32(float {})\n", indent, reg, v));
             reg
@@ -1366,5 +1371,59 @@ mod tests {
         let kernel = extract_kernel("float_lit", &body, Expr::Integer(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("bitcast i32"), "float literal should use bitcast");
+    }
+
+    // ── Multi-buffer (Phase 4) ─────────────────────────────
+
+    #[test]
+    fn test_emit_spirv_multi_buffer_signature() {
+        let mut ft = HashMap::new();
+        ft.insert("x".to_string(), "i64".to_string());
+        ft.insert("y".to_string(), "i64".to_string());
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("y".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("multi_buf", &body, Expr::Integer(100), &[], ft);
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("%in_buf"), "kernel should have in_buf param");
+        assert!(ir.contains("%out_buf"), "kernel should have out_buf param");
+        assert!(ir.contains("nocapture readonly %in_buf"), "in_buf should be readonly");
+        assert!(ir.contains("%base_in"), "should have base_in GEP");
+        assert!(ir.contains("%base_out"), "should have base_out GEP");
+    }
+
+    #[test]
+    fn test_emit_spirv_multi_buffer_read_write() {
+        // y = x + 1 — x is read-only (in_buf), y is written (out_buf)
+        let mut ft = HashMap::new();
+        ft.insert("x".to_string(), "i64".to_string());
+        ft.insert("y".to_string(), "i64".to_string());
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("y".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("rw_test", &body, Expr::Integer(100), &[], ft);
+        let ir = emit_spirv_module(&kernel);
+        // x is read-only → load from in_buf
+        assert!(ir.contains("getelementptr i8, i8* %base_in"),
+            "read-only field x should load from in_buf");
+        // y is written → store to out_buf
+        assert!(ir.contains("store i64"),
+            "write field y should store value");
     }
 }
