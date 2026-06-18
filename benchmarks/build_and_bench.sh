@@ -63,6 +63,7 @@ TAG[queue_drain]=runtime
 TAG[queue_drain_sym]=runtime
 TAG[queue_drain_idio]=runtime
 TAG[interval_step]=runtime
+TAG[gpu/saxpy]=runtime
 TAG[iir_filter_runtime]=runtime
 TAG[ring_buffer_runtime]=runtime
 TAG[precompute_sum_runtime]=runtime
@@ -92,6 +93,7 @@ BENCHMARKS=(
     "queue_drain_sym"
     "queue_drain_idio"
     "interval_step"
+    "gpu/saxpy"
 )
 
 # ── BUILD FUNCTIONS ───────────────────────────────────────────────────
@@ -108,14 +110,16 @@ build_bench() {
     rm -f "$bin"
 
     local budget=256
+    local gpu_flag=""
     case "$name" in
         nbody_newton) budget=2048 ;;
         nbody_sqrt)   budget=2048 ;;
         nbody_sqrt_idio) budget=2048 ;;
+        gpu/*) gpu_flag="--gpu-offload" ;;
     esac
 
     ./target/release/brief-compiler llvm "benchmarks/${name}.bv" \
-        --out benchmarks --optimize-budget "$budget" 2>&1
+        --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
         if [ -f "benchmarks/${name}.o" ]; then

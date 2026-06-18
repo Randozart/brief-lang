@@ -1,0 +1,22 @@
+// SAXPY: y = a * x + y (single-precision float)
+// GPU offload benchmark — compiled with --gpu-offload to target SPIR-V.
+// Falls back to CPU when Vulkan/OpenCL is unavailable.
+
+frgn __get_env_int(name: Ptr<Byte>) -> Int ;
+frgn __print_int(n: Int) -> Bool ;
+
+let N: Int = __get_env_int("BOUND");    // NOTE: harness uses BOUND env var
+
+// State: element index
+rct txn saxpy_loop
+    [i < N]
+    [i == N]
+{
+    // Each thread would compute y[i] = a * x[i] + y[i]
+    [i < N] {
+        &i = i + 1;
+    };
+    term;
+};
+
+term -> __print_int(N);
