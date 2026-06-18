@@ -95,12 +95,16 @@ fn expand_template_in_stmt(
         let value = template::expand_template(ctx, &mut interpreter, &def, args, block.clone());
         ctx.call_site_span = None;
         let value = value?;
-        return Ok(Some(match &value {
-            crate::interpreter::Value::Block(stmts) => stmts.clone(),
+        let mut stmts = match &value {
+            crate::interpreter::Value::Block(s) => s.clone(),
             crate::interpreter::Value::Stmt(s) => vec![*s.clone()],
             crate::interpreter::Value::Expr(e) => vec![Statement::Expression(*e.clone())],
             other => vec![Statement::Expression(template::expr_from_value(other))],
-        }));
+        };
+        // Apply hygiene: rename local let bindings with __gensym_N to prevent capture
+        let mut gensym = || ctx.next_gensym();
+        crate::features::macros::hygiene::apply_hygiene(&mut stmts, &mut gensym);
+        return Ok(Some(stmts));
     }
     // Recurse into nested statements for sub-expression template calls
     let mut changed = false;
