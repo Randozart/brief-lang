@@ -1025,6 +1025,8 @@ pub enum Expr {
     Le(Box<Expr>, Box<Expr>),
     Gt(Box<Expr>, Box<Expr>),
     Ge(Box<Expr>, Box<Expr>),
+    // GPU shared memory: __shared(N) → pointer to addrspace(3) memory
+    SharedMem(usize),
     /// Runtime/compile-time type check: `x is Int` or `x is Some`
     IsType(Box<Expr>, IsTarget),
     /// Derivation check: `x from Foo` (type or value against ancestor type)

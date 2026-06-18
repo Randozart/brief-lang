@@ -169,6 +169,8 @@ fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
         | Expr::String(_) | Expr::Term | Expr::Identifier(_)
         | Expr::OwnedRef(_) | Expr::PriorState(_)
         | Expr::Ellipsis | Expr::TypeRef(_) => {}
+        // Shared memory — always allowed in GPU kernels
+        Expr::SharedMem(_) => {}
         // Catch-all for remaining expression types — conservatively reject
         _ => {
             reasons.push("GPU kernel contains unsupported expression type".to_string());
@@ -322,6 +324,15 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str("declare float @llvm.fabs.f32(float) #0\n");
     ir.push_str("\n");
 
+    // Emit shared memory globals (addrspace(3)) for any SharedMem expressions
+    let shared_mem_sizes = collect_shared_mem_sizes(&kernel.body);
+    for (i, size) in shared_mem_sizes.iter().enumerate() {
+        ir.push_str(&format!("@shared_buf_{} = internal unnamed_addr addrspace(3) global [{} x i64] zeroinitializer\n", i, size));
+    }
+    if !shared_mem_sizes.is_empty() {
+        ir.push_str("\n");
+    }
+
     ir.push_str(&format!(
         "define spir_kernel void @{}(i8* nocapture readonly %in_buf, i8* nocapture %out_buf, i64 %N) {{\n",
         kernel.name
@@ -386,7 +397,60 @@ fn float_to_spirv_hex(val: f64) -> String {
     let bits = (val as f32).to_bits();
     format!("i32 {}", bits)
 }
+
+/// Scan through statements and collect all SharedMem sizes for addrspace(3) globals.
+fn collect_shared_mem_sizes(body: &[Statement]) -> Vec<usize> {
+    let mut sizes = Vec::new();
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { expr, .. } => {
+                collect_shared_mem_sizes_expr(expr, &mut sizes);
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                collect_shared_mem_sizes_expr(condition, &mut sizes);
+                sizes.extend(collect_shared_mem_sizes(statements));
+            }
+            Statement::Let { expr: Some(e), .. } => {
+                collect_shared_mem_sizes_expr(e, &mut sizes);
+            }
+            Statement::Expression(e) => {
+                collect_shared_mem_sizes_expr(e, &mut sizes);
+            }
+            _ => {}
+        }
+    }
+    sizes
+}
+
+fn collect_shared_mem_sizes_expr(expr: &Expr, sizes: &mut Vec<usize>) {
+    match expr {
+        Expr::SharedMem(n) => sizes.push(*n),
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
+        | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r)
+        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+            collect_shared_mem_sizes_expr(l, sizes);
+            collect_shared_mem_sizes_expr(r, sizes);
+        }
+        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
+            collect_shared_mem_sizes_expr(e, sizes);
+        }
+        Expr::IntrinsicCall { args, .. } | Expr::Call(_, args) => {
+            for arg in args {
+                collect_shared_mem_sizes_expr(arg, sizes);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Load a field from the buffer, emitting a unique GEP + load sequence,
 /// and cache the register name in `loaded_regs` for reuse.
+///
+/// Loads the correct LLVM type based on `field_types`: `float` for float
+/// fields, `i64` for integer/bool fields. Selects `%base_in` or `%base_out`
+/// based on whether the field is in `write_fields`.
 fn ensure_field_loaded(
     field: &str,
     ir: &mut String,
@@ -463,6 +527,15 @@ fn emit_spirv_stmt(
             }
             ir.push_str(&format!("{}br label %{}\n", indent, merge_l));
             ir.push_str(&format!("{}:\n", merge_l));
+        }
+        // Let binding — evaluate the expression and register the result
+        // so Identifier references can resolve to local SSA values.
+        Statement::Let { name, expr: Some(e), .. } => {
+            let val = emit_spirv_expr(e, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            loaded_regs.insert(name.clone(), val);
+        }
+        Statement::Let { expr: None, .. } => {
+            // let with no initializer — no-op in SPIR-V kernel context
         }
         Statement::Expression(expr) => {
             match expr {
@@ -662,6 +735,17 @@ fn emit_spirv_expr(
             let v = emit_spirv_expr(e, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%neg{}", ir.len());
             ir.push_str(&format!("{}{} = sub i64 0, {}\n", indent, reg, v));
+            reg
+        }
+        // GPU shared memory: emit addrspace(3) global and return i8* pointer
+        Expr::SharedMem(n) => {
+            let sh_idx = loaded_regs.len();
+            let gv_name = format!("@shared_buf_{}", sh_idx);
+            ir.push_str(&format!("{}; shared memory: {} x i64\n", indent, n));
+            ir.push_str(&format!("{}%sh_base = addrspacecast [{} x i64] addrspace(3)* {} to i8*\n",
+                indent, n, gv_name));
+            let reg = format!("%sh_ptr{}", sh_idx);
+            ir.push_str(&format!("{}{} = ptrtoint i8* %sh_base to i64\n", indent, reg));
             reg
         }
         // GPU intrinsics
@@ -1425,5 +1509,68 @@ mod tests {
         // y is written → store to out_buf
         assert!(ir.contains("store i64"),
             "write field y should store value");
+    }
+
+    // ── Shared memory (Phase 5) ────────────────────────────
+
+    #[test]
+    fn test_emit_spirv_shared_memory_global() {
+        let body = vec![
+            Statement::Let {
+                name: "buf".to_string(),
+                ty: None,
+                expr: Some(Expr::SharedMem(256)),
+                address: None,
+                address_expr: None,
+                bit_range: None,
+                range_constraint: None,
+                is_override: false,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("shmem_test", &body, Expr::Integer(10), &[], HashMap::new());
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("addrspace(3)"), "should declare addrspace(3) global");
+        assert!(ir.contains("[256 x i64]"), "should declare [256 x i64] array");
+        assert!(ir.contains("@shared_buf_0"), "should use shared_buf_0 name");
+    }
+
+    #[test]
+    fn test_emit_spirv_shared_memory_addrspace_cast() {
+        let body = vec![
+            Statement::Let {
+                name: "buf".to_string(),
+                ty: None,
+                expr: Some(Expr::SharedMem(64)),
+                address: None,
+                address_expr: None,
+                bit_range: None,
+                range_constraint: None,
+                is_override: false,
+                modifiers: vec![],
+            },
+        ];
+        let kernel = extract_kernel("shmem_cast", &body, Expr::Integer(10), &[], HashMap::new());
+        let ir = emit_spirv_module(&kernel);
+        assert!(ir.contains("addrspacecast"), "should emit addrspacecast");
+        assert!(ir.contains("ptrtoint"), "should convert to i64 pointer");
+    }
+
+    #[test]
+    fn test_collect_shared_mem_sizes_multiple() {
+        let body = vec![
+            Statement::Let {
+                name: "a".to_string(), ty: None, expr: Some(Expr::SharedMem(128)),
+                address: None, address_expr: None, bit_range: None,
+                range_constraint: None, is_override: false, modifiers: vec![],
+            },
+            Statement::Let {
+                name: "b".to_string(), ty: None, expr: Some(Expr::SharedMem(32)),
+                address: None, address_expr: None, bit_range: None,
+                range_constraint: None, is_override: false, modifiers: vec![],
+            },
+        ];
+        let sizes = collect_shared_mem_sizes(&body);
+        assert_eq!(sizes, vec![128, 32], "should collect both shared memory sizes");
     }
 }

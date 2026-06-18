@@ -3729,6 +3729,8 @@ impl Interpreter {
             Expr::Interpolate(_) | Expr::InterpolateExpr(_) => {
                 unreachable!("should have been substituted")
             }
+            // GPU shared memory — interpreter returns 0 (no GPU simulation)
+            Expr::SharedMem(_) => Ok(Value::Int(0)),
             Expr::QuoteBlock { statements, .. } => {
                 Ok(Value::Block(statements.clone()))
             }

@@ -353,7 +353,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
         // Literal leaves — no identifiers
         Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_)
         | Expr::Bool(_) | Expr::Term | Expr::Ellipsis | Expr::TypeRef(_)
-        | Expr::RegexLiteral(_) => {}
+        | Expr::RegexLiteral(_) | Expr::SharedMem(_) => {}
         // Pattern B wrappers — literal leaves, no identifiers
         Expr::Literal(_) => {}
         Expr::BinaryOp(op) => {
