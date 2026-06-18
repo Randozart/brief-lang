@@ -767,6 +767,7 @@ impl LlvmBackend {
         is_speculative: bool,
     ) {
         let eligibility = gpu::check_eligibility(body);
+        eprintln!("[DBG] collect_gpu_kernel: txn={}, body_len={}, eligible={}, reasons={:?}", txn_name, body.len(), eligibility.eligible, eligibility.reasons);
         if !eligibility.eligible {
             if is_speculative {
                 let msg = format!("txn '{}' not eligible: {}", txn_name, eligibility.reasons.join(", "));

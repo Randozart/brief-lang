@@ -7597,6 +7597,104 @@ mod tests {
             other => panic!("Expected Err(0.0) from NaN dispatch, got {:?}", other),
         }
     }
+
+    #[test]
+    fn test_pipe_frgn_dynamic_ffi_getpid() {
+        // Tests the dynamic FFI pipe interceptor path by registering a real
+        // libc function (getpid) through the FrgnRegistry with a pipe binding.
+        use crate::ffi::dynamic::{FrgnDecl, FrgnType};
+
+        let mut i = Interpreter::new();
+
+        // Register the dynamic FFI declaration for getpid (0 args → Int)
+        let decl = FrgnDecl {
+            name: "getpid".into(),
+            params: vec![],
+            ret: FrgnType::Int,
+            lib: "libc.so.6".into(),
+        };
+        i.frgn_registry.register(decl);
+
+        // Register the pipe frgn binding
+        let sig = ForeignSignature {
+            name: "getpid".into(),
+            location: "libc.so.6".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Int)],
+            result_type: ResultType::Projection(vec![Type::Int]),
+            error_type_name: "".into(), error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true,
+            fallback: Some(Expr::Integer(-1)),
+            span: None,
+        };
+        i.ffi_bindings.insert("getpid".into(), sig);
+
+        // Call via Expr::Call — hits dynamic FFI path first
+        let expr = Expr::Call("getpid".into(), vec![]);
+        let result = i.eval_expr(&expr).unwrap();
+        match result {
+            Value::Enum(e, v, fields) if e == "Result" && v == "Ok" => {
+                match fields.get("value") {
+                    Some(Value::Int(pid)) => {
+                        // getpid always returns a positive pid
+                        assert!(*pid > 0, "PID should be positive, got {}", pid);
+                    }
+                    other => panic!("Expected Int pid in Ok, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Ok(pid) from dynamic FFI pipe, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_pipe_frgn_dynamic_ffi_unwraps_ok() {
+        // Tests that the pipe interceptor correctly unwraps the registry's
+        // Ok(value) and re-wraps through call_pipe_frgn.
+        // Uses a String-returning libc function via dlopen.
+        use crate::ffi::dynamic::{FrgnDecl, FrgnType};
+
+        let mut i = Interpreter::new();
+
+        // getenv("HOME") returns a string — dynamic FFI supports 1-arg String→Int
+        // but NOT String→String. So we use getpid which is 0-args→Int.
+        // For the pipe path we just need to verify the wrapping is correct.
+        let decl = FrgnDecl {
+            name: "getpid".into(),
+            params: vec![],
+            ret: FrgnType::Int,
+            lib: "libc.so.6".into(),
+        };
+        i.frgn_registry.register(decl);
+
+        let sig = ForeignSignature {
+            name: "getpid".into(),
+            location: "libc.so.6".into(),
+            wasm_impl: None, wasm_setup: None,
+            inputs: vec![],
+            success_output: vec![("result".into(), Type::Int)],
+            result_type: ResultType::Projection(vec![Type::Int]),
+            error_type_name: "".into(), error_fields: vec![],
+            input_layout: None, output_layout: None,
+            precondition: None, postcondition: None,
+            buffer_mode: None, ffi_kind: None, is_out: false,
+            is_pipe: true,
+            fallback: Some(Expr::Integer(-1)),
+            span: None,
+        };
+        i.ffi_bindings.insert("getpid".into(), sig);
+
+        let expr = Expr::Call("getpid".into(), vec![]);
+        let result = i.eval_expr(&expr).unwrap();
+        // The pipe interceptor unwraps the registry's Ok, validates the int
+        // (always valid), and re-wraps in Ok. We should get Ok(pid).
+        assert!(matches!(&result,
+            Value::Enum(_, v, _) if v == "Ok"),
+            "Expected Ok variant, got {:?}", result);
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]

@@ -56,8 +56,16 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
 
     for stmt in body {
         match stmt {
-            Statement::Term { .. } | Statement::TermBang { .. } => {
-                reasons.push("GPU kernel contains term/term! — unsupported".to_string());
+            Statement::TermBang { .. } => {
+                reasons.push("GPU kernel contains term! — unsupported".to_string());
+            }
+            Statement::Term { swan_song, .. } => {
+                // term is allowed in GPU kernels (no-op convergence signal).
+                // Check the swan song for GPU eligibility if present.
+                if let Some(swan) = swan_song {
+                    let inner = check_eligibility(&[swan.as_ref().clone()]);
+                    reasons.extend(inner.reasons);
+                }
             }
             Statement::Escape { .. } => {
                 reasons.push("GPU kernel contains escape — unsupported".to_string());
@@ -162,9 +170,12 @@ fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
         Expr::Call(name, _) => {
             reasons.push(format!("GPU kernel contains FFI call '{}' — unsupported", name));
         }
-        Expr::IntrinsicCall { intrinsic, .. } => {
+        Expr::IntrinsicCall { intrinsic, args } => {
             if !is_gpu_safe_intrinsic(intrinsic) {
                 reasons.push(format!("GPU kernel contains unsafe intrinsic '{:?}'", intrinsic));
+            }
+            for arg in args {
+                collect_unsafe_ffi(arg, reasons);
             }
         }
         // Binary ops — recurse into both operands
@@ -238,10 +249,11 @@ fn is_gpu_safe_intrinsic(intrinsic: &Intrinsic) -> bool {
     matches!(intrinsic,
         Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
         | Intrinsic::Sqrt | Intrinsic::Fabs
+        | Intrinsic::Ceil | Intrinsic::Floor
         | Intrinsic::GetGlobalId | Intrinsic::GetLocalId
         | Intrinsic::GetGroupId | Intrinsic::GetNumGroups
         | Intrinsic::SubGroupBarrier
-        | Intrinsic::Ceil | Intrinsic::Floor
+        | Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat
     )
 }
 
@@ -387,10 +399,19 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
         ir.push_str("\n");
     }
 
-    ir.push_str(&format!(
-        "define spir_kernel void @{}(i8* nocapture readonly %in_buf, i8* nocapture %out_buf, i64 %N) {{\n",
-        kernel.name
-    ));
+    let has_print = has_print_intrinsics(&kernel.body);
+
+    if has_print {
+        ir.push_str(&format!(
+            "define spir_kernel void @{}(i8* nocapture readonly %in_buf, i8* nocapture %out_buf, i8* nocapture %print_buf, i64 %N) {{\n",
+            kernel.name
+        ));
+    } else {
+        ir.push_str(&format!(
+            "define spir_kernel void @{}(i8* nocapture readonly %in_buf, i8* nocapture %out_buf, i64 %N) {{\n",
+            kernel.name
+        ));
+    }
     ir.push_str("entry:\n");
     ir.push_str("  %gtid = call i64 @_Z13get_global_idj(i32 0)\n");
     ir.push_str("  %cmp = icmp ult i64 %gtid, %N\n");
@@ -400,9 +421,12 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str(&format!("  br i1 %cmp, label %{}, label %{}\n", body_label, exit_label));
     ir.push_str(&format!("{}:\n", body_label));
 
-    // Compute both base pointers: in_buf for reads, out_buf for writes
+    // Compute base pointers: in_buf for reads, out_buf for writes, print_buf for I/O
     ir.push_str("  %base_in = getelementptr i8, i8* %in_buf, i64 %gtid\n");
     ir.push_str("  %base_out = getelementptr i8, i8* %out_buf, i64 %gtid\n");
+    if has_print {
+        ir.push_str("  %base_print = getelementptr i8, i8* %print_buf, i64 %gtid\n");
+    }
 
     let mut loaded_regs: HashMap<String, String> = HashMap::new();
     let field_types = &kernel.field_types;
@@ -442,6 +466,7 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
             Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
             | Intrinsic::Sqrt | Intrinsic::Fabs
             | Intrinsic::Ceil | Intrinsic::Floor
+            | Intrinsic::PrintFloat
         ),
         _ => false,
     }
@@ -501,6 +526,43 @@ fn collect_shared_mem_sizes_expr(expr: &Expr, sizes: &mut Vec<usize>) {
             }
         }
         _ => {}
+    }
+}
+
+/// Scan the kernel body for print I/O intrinsics (print_int#, print_float#,
+/// put_char#). When present, a print buffer parameter is added to the kernel.
+fn has_print_intrinsics(body: &[Statement]) -> bool {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { expr, .. }
+            | Statement::Let { expr: Some(expr), .. }
+            | Statement::Expression(expr) => {
+                if has_print_intrinsics_expr(expr) {
+                    return true;
+                }
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                if has_print_intrinsics_expr(condition) { return true; }
+                if has_print_intrinsics(statements) { return true; }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn has_print_intrinsics_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::IntrinsicCall { intrinsic, .. } => matches!(intrinsic,
+            Intrinsic::PrintInt | Intrinsic::PrintFloat | Intrinsic::PutChar
+        ),
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
+        | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+            has_print_intrinsics_expr(l) || has_print_intrinsics_expr(r)
+        }
+        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => has_print_intrinsics_expr(e),
+        _ => false,
     }
 }
 
@@ -609,6 +671,12 @@ fn emit_spirv_stmt(
                 _ => {
                     let _val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
                 }
+            }
+        }
+        // Term — convergence signal (no-op in SPIR-V). Execute swan song if present.
+        Statement::Term { swan_song, .. } => {
+            if let Some(swan) = swan_song {
+                emit_spirv_stmt(swan, ir, indent, field_offsets, loaded_regs, label_counter, field_types, write_fields);
             }
         }
         _ => {}
@@ -914,6 +982,29 @@ fn emit_spirv_intrinsic(
             ir.push_str(&format!("{}{} = call float @llvm.floor.f32(float {})\n", indent, reg, v));
             reg
         }
+        // GPU I/O intrinsics — write to print buffer, host drains after dispatch.
+        // These use %base_print, which is emitted in emit_spirv_module only when
+        // has_print_intrinsics() returns true (guaranteed by the caller).
+        Intrinsic::PrintInt => {
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let reg = format!("%pr{}", ir.len());
+            ir.push_str(&format!("{}store i64 {}, i8* %base_print, align 8\n", indent, v));
+            reg
+        }
+        Intrinsic::PrintFloat => {
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let bc = format!("%prbc{}", ir.len());
+            let reg = format!("%pr{}", ir.len());
+            ir.push_str(&format!("{}{} = bitcast i8* %base_print to float*\n", indent, bc));
+            ir.push_str(&format!("{}store float {}, float* {}, align 4\n", indent, v, bc));
+            reg
+        }
+        Intrinsic::PutChar => {
+            let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+            let reg = format!("%pr{}", ir.len());
+            ir.push_str(&format!("{}store i8 {}, i8* %base_print, align 1\n", indent, v));
+            reg
+        }
         _ => {
             ir.push_str(&format!("{}; error: unsupported intrinsic in GPU kernel\n", indent));
             "0".to_string()
@@ -1009,12 +1100,21 @@ mod tests {
     }
 
     #[test]
-    fn test_check_eligibility_term_is_ineligible() {
+    fn test_check_eligibility_term_is_eligible() {
         let body = vec![
             Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
         ];
         let result = check_eligibility(&body);
-        assert!(!result.eligible, "term statement should be ineligible");
+        assert!(result.eligible, "term statement should be GPU-eligible (no-op in SPIR-V)");
+    }
+
+    #[test]
+    fn test_check_eligibility_termbang_is_ineligible() {
+        let body = vec![
+            Statement::TermBang { values: vec![], swan_song: None, modifiers: vec![] },
+        ];
+        let result = check_eligibility(&body);
+        assert!(!result.eligible, "term! statement should be ineligible");
     }
 
     #[test]
@@ -1136,11 +1236,11 @@ mod tests {
 
     #[test]
     fn test_check_eligibility_unsafe_intrinsic_blocked() {
-        // print_int# has side effects — should be blocked
+        // ReadFile# has side effects and no SPIR-V mapping — should be blocked
         let body = vec![
             Statement::Expression(Expr::IntrinsicCall {
-                intrinsic: Intrinsic::PrintInt,
-                args: vec![Expr::Integer(42)],
+                intrinsic: Intrinsic::ReadFile,
+                args: vec![Expr::String("test".to_string())],
             }),
         ];
         let result = check_eligibility(&body);

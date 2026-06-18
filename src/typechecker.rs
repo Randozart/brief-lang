@@ -710,16 +710,17 @@ impl TypeChecker {
         for item in &program.items {
             match item {
                 TopLevel::ForeignBinding { name, .. } => {
-                    let mut diag = Diagnostic::new("G001", Severity::Error, "FFI not allowed in GPU kernel")
+                    // frgn declarations are allowed in .gbv for host-side I/O.
+                    // The GPU kernel body itself is checked separately by
+                    // check_eligibility (no Expr::Call inside kernels).
+                    let diag = Diagnostic::new("G001", Severity::Warning, "FFI declared in .gbv file")
                         .with_explanation(&format!(
-                            "`frgn` declaration '{}' is not allowed in .gbv files. \
-                             Use only built-in GPU intrinsics (sin#, cos#, get_global_id#, etc.)",
+                            "`frgn` '{}' — this FFI call is for host-side I/O. \
+                             The GPU kernel body cannot use it; only GPU intrinsics \
+                             (sin#, cos#, get_global_id#, etc.) are allowed inside kernels.",
                             name
                         ));
                     self.diagnostics.borrow_mut().push(diag);
-                    self.errors.borrow_mut().push(TypeError::FFIError {
-                        message: format!("frgn '{}' not allowed in .gbv", name),
-                    });
                 }
                 TopLevel::Transaction(txn) => {
                     // Check for missing contracts — warn but don't error

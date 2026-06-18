@@ -58,6 +58,14 @@ postcondition (defaults to `true`).
 - If a `.bv` file needs `None`, import `option` from `"std/option.bv"` — NOT pre-populating state.
 - The FFI system (`frgn from "..."`) and the standard library are the transparent paths. Use them.
 
+**INTRINSICS BEFORE FRGN**: Before reaching for a `frgn` declaration, check if
+an `Intrinsic` variant already exists that does the same thing. This is
+especially critical in `.gbv` (Graphic Brief) files, where `frgn` is banned:
+  - Need to print? → `print_int#`, `print_float#`, `put_char#` (already exist)
+  - Need input? → `get_env_int#`, `read_stdin#` (already exist)
+  - Need GPU thread ID? → `get_global_id#`, `get_local_id#` (already exist)
+  If no suitable intrinsic exists, add one to `src/ast.rs` — never add `frgn`.
+
 **SELF-DOCUMENTING FAILURE**: Before fixing any issue:
 1. Understand WHY the fix works (not just THAT it works)
 2. Document the root cause in BUGS.md
