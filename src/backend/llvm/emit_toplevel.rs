@@ -653,6 +653,20 @@ impl LlvmBackend {
                     None
                 }
             });
+            // Emit remarks for speculative #?inline directives.
+            if txn.modifiers.iter().any(|m| m.name == "inline" && m.speculative) {
+                let remark = match inline_attr {
+                    Some("inlinehint") => {
+                        super::directive::OptimizationRemark::applied("inline",
+                            format!("inlinehint applied to txn '{}'", name))
+                    }
+                    _ => {
+                        super::directive::OptimizationRemark::skipped("inline",
+                            "inlinehint not applicable for this context".to_string())
+                    }
+                };
+                self.push_remark(remark);
+            }
             match inline_attr {
                 Some("alwaysinline") => " alwaysinline",
                 Some("inlinehint") => " inlinehint",

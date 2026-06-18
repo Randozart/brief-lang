@@ -102,6 +102,91 @@ fn resolve_vectorize(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEf
     }
 }
 
+// ---------------------------------------------------------------------------
+// Optimization Remarks
+// ---------------------------------------------------------------------------
+
+/// The compiler's decision about a speculative directive.
+#[derive(Debug, Clone)]
+pub enum RemarkDecision {
+    /// The optimization was applied successfully.
+    Applied { detail: String },
+    /// The optimization was skipped (benign reason).
+    Skipped { reason: String },
+    /// The optimization failed (structural impossibility).
+    Failed { error: String },
+}
+
+/// A structured diagnostic message explaining the compiler's decision
+/// for a `#?` speculative directive.
+#[derive(Debug, Clone)]
+pub struct OptimizationRemark {
+    /// The directive name (e.g. "vectorize", "inline", "unroll", "gpu").
+    pub directive: String,
+    /// The decision the compiler made.
+    pub decision: RemarkDecision,
+    /// Bullet-point analysis explaining the math or reasoning.
+    pub analysis: Vec<String>,
+    /// Actionable hints for the developer.
+    pub hints: Vec<String>,
+}
+
+impl OptimizationRemark {
+    pub fn applied(directive: &str, detail: String) -> Self {
+        OptimizationRemark {
+            directive: directive.to_string(),
+            decision: RemarkDecision::Applied { detail },
+            analysis: Vec::new(),
+            hints: Vec::new(),
+        }
+    }
+
+    pub fn skipped(directive: &str, reason: String) -> Self {
+        OptimizationRemark {
+            directive: directive.to_string(),
+            decision: RemarkDecision::Skipped { reason },
+            analysis: Vec::new(),
+            hints: Vec::new(),
+        }
+    }
+
+    pub fn failed(directive: &str, error: String) -> Self {
+        OptimizationRemark {
+            directive: directive.to_string(),
+            decision: RemarkDecision::Failed { error },
+            analysis: Vec::new(),
+            hints: Vec::new(),
+        }
+    }
+
+    pub fn with_analysis(mut self, lines: Vec<String>) -> Self {
+        self.analysis = lines;
+        self
+    }
+
+    pub fn with_hints(mut self, lines: Vec<String>) -> Self {
+        self.hints = lines;
+        self
+    }
+
+    /// Format this remark as a human-readable string.
+    pub fn format(&self) -> String {
+        let decision_str = match &self.decision {
+            RemarkDecision::Applied { detail } => format!("applied: {}", detail),
+            RemarkDecision::Skipped { reason } => format!("skipped: {}", reason),
+            RemarkDecision::Failed { error } => format!("failed: {}", error),
+        };
+        let mut out = format!("remark: #?{} {}", self.directive, decision_str);
+        for line in &self.analysis {
+            out.push_str(&format!("\n  analysis:\n    - {}", line));
+        }
+        for line in &self.hints {
+            out.push_str(&format!("\n  help:\n    - {}", line));
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +296,38 @@ mod tests {
     fn test_unknown_directive_is_ignored() {
         let effects = resolve_directives(&[tag("volatile")], DirectiveCtx::Transaction);
         assert_eq!(effects.len(), 0, "unknown directives should be ignored");
+    }
+
+    // ── Remark tests ──────────────────────────────────────
+
+    #[test]
+    fn test_remark_applied_format() {
+        let r = OptimizationRemark::applied("inline", "inlined successfully".to_string());
+        let s = r.format();
+        assert!(s.contains("remark: #?inline applied: inlined successfully"));
+    }
+
+    #[test]
+    fn test_remark_skipped_format() {
+        let r = OptimizationRemark::skipped("vectorize", "loop-carried dependency".to_string());
+        let s = r.format();
+        assert!(s.contains("remark: #?vectorize skipped: loop-carried dependency"));
+    }
+
+    #[test]
+    fn test_remark_failed_format() {
+        let r = OptimizationRemark::failed("gpu", "unsafe side effects".to_string());
+        let s = r.format();
+        assert!(s.contains("remark: #?gpu failed: unsafe side effects"));
+    }
+
+    #[test]
+    fn test_remark_with_analysis_and_hints() {
+        let r = OptimizationRemark::skipped("unroll", "trip count too small".to_string())
+            .with_analysis(vec!["trip count = 3".to_string(), "minimum = 8".to_string()])
+            .with_hints(vec!["use #unroll to force unrolling".to_string()]);
+        let s = r.format();
+        assert!(s.contains("trip count = 3"));
+        assert!(s.contains("use #unroll to force unrolling"));
     }
 }

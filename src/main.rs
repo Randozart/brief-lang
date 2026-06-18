@@ -991,7 +991,7 @@ fn run_build(
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1702,7 +1702,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
     let result: Option<PathBuf> = match backend.as_str() {
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, None, no_stdlib, stdlib_path.clone(), false, None) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, None, no_stdlib, stdlib_path.clone(), false, None, false) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -2160,6 +2160,7 @@ fn run_llvm_compile(
     stdlib_path: Option<PathBuf>,
     safe_compile: bool,
     macro_budget: Option<u64>,
+    emit_remarks: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     println!("Compiling to LLVM IR: {}", file_path.display());
 
@@ -2382,7 +2383,8 @@ fn run_llvm_compile(
         .with_optimize_budget(optimize_budget)
         .with_optimize_report(optimize_report)
         .with_schema_aliases(schema_aliases)
-        .with_explain(explain);
+        .with_explain(explain)
+        .with_emit_remarks(emit_remarks);
     if dead_info_disabled {
         llvm_backend = llvm_backend.with_dead_info_disabled(true);
     }
@@ -2451,6 +2453,12 @@ fn run_llvm_compile(
 
     for warning in llvm_backend.warnings() {
         eprintln!("{}", warning);
+    }
+
+    if emit_remarks {
+        for remark in llvm_backend.remarks() {
+            eprintln!("{}", remark.format());
+        }
     }
 
     if optimize_report {
@@ -4068,6 +4076,7 @@ fn main() {
             let mut explain = false;
             let mut prod_mode = false;
             let mut simplify_budget: Option<u64> = None;
+            let mut emit_remarks = false;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
@@ -4102,6 +4111,9 @@ fn main() {
                     i += 1;
                 } else if arg == "--explain" {
                     explain = true;
+                    i += 1;
+                } else if arg == "--remarks" {
+                    emit_remarks = true;
                     i += 1;
                 } else if arg == "--prod" || arg == "--release" {
                     prod_mode = true;
@@ -4150,7 +4162,7 @@ fn main() {
                     macro_budget = Some(u64::MAX);
                 }
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget, emit_remarks);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);

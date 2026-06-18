@@ -592,6 +592,10 @@ pub struct LlvmBackend {
     warnings: Vec<String>,
     llvm_extra_flags: Vec<String>,
     dead_info_disabled: bool,
+
+    // ── Optimization Remarks ───────────────────────────────
+    pub(crate) remarks: Vec<crate::backend::llvm::directive::OptimizationRemark>,
+    emit_remarks: bool,
 }
 
 impl LlvmBackend {
@@ -669,6 +673,8 @@ impl LlvmBackend {
             enum_types: HashMap::new(),
             variant_disc: HashMap::new(),
             explain: false,
+            remarks: Vec::new(),
+            emit_remarks: false,
         }
     }
 
@@ -719,6 +725,21 @@ impl LlvmBackend {
     pub fn with_pgo_profile(mut self, profile: crate::analysis::pgo::PgoProfile) -> Self {
         self.pgo_profile = Some(profile);
         self
+    }
+
+    pub fn with_emit_remarks(mut self, emit: bool) -> Self {
+        self.emit_remarks = emit;
+        self
+    }
+
+    pub(crate) fn push_remark(&mut self, remark: crate::backend::llvm::directive::OptimizationRemark) {
+        if self.emit_remarks {
+            self.remarks.push(remark);
+        }
+    }
+
+    pub fn remarks(&self) -> &[crate::backend::llvm::directive::OptimizationRemark] {
+        &self.remarks
     }
 
     pub fn generate(&mut self, program: &Program) -> String {
