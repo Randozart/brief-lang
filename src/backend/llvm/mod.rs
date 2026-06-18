@@ -819,7 +819,11 @@ impl LlvmBackend {
             }
         }
 
-        let kernel = gpu::extract_kernel(txn_name, body, crate::ast::Expr::Integer(0), &[]);
+        // Build field type map from the backend's field_index_map + field_types
+        let field_types_map: std::collections::HashMap<String, String> = self.field_index_map.iter()
+            .map(|(name, idx)| (name.clone(), self.field_types[*idx].clone()))
+            .collect();
+        let kernel = gpu::extract_kernel(txn_name, body, crate::ast::Expr::Integer(0), &[], field_types_map);
         let spirv_ir = gpu::emit_spirv_module(&kernel);
         self.spirv_kernels.push(spirv_ir.clone());
 
