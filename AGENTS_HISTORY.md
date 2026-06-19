@@ -836,3 +836,210 @@ across the entire codebase, including alternative names for all tiers.
 
 ### Verification
 - All 1072 tests pass, 0 fail
+
+---
+
+# Session: 2026-06-19 — Officina Keyboard Input Fix + const trg Design
+
+## The Problem
+
+Officina-cli is a Brief terminal application that takes keyboard input. The Char→String cast
+`(String)k` in `process_input` produced `"116121121..."` (garbage) instead of `"t"` because
+the LLVM backend lost type information for `Char` state fields — they were stored as `i32`
+at the LLVM level but treated as `i64` (boxed) by downstream code, causing LLVM IR type errors
+and incorrect intrinsic dispatch.
+
+## Root Causes Found
+
+### 1. `adapt_to_i64` double-zext (`src/backend/llvm/emit_stmt.rs:20-23`)
+
+The `adapt_to_i64` function had a `Type::Char` arm that emitted `zext i32 %r to i64`. But
+ALL Char registers from `emit_expr` are already `i64` (boxed). The zext was a second
+widening of an already-i64 value, producing an LLVM IR type error.
+
+**Fix**: Return `r.name.clone()` for `Type::Char` (no-op).
+
+### 2. TtyReadKey intrinsic i32 phi (`src/backend/llvm/emit_expr.rs:895-897`)
+
+The `TtyReadKey` intrinsic emitted a `phi i32` for the character value, but the result
+was typed as `Type::Char`. Downstream `adapt_to_i64` tried to zext the already-i32 phi
+to i64, but `phi i32` is not `i64`.
+
+**Fix**: Changed to `zext i32 %phi to i64`, producing a proper i64 boxed value.
+
+### 3. Enum storage double-zext (`src/backend/llvm/emit_expr.rs:505-508`)
+
+Same pattern as adapt_to_i64: enum variant storage for `Type::Char` emitted `zext i32 %raw to i64`
+when the register was already i64.
+
+**Fix**: Return `raw.name.clone()` for `Type::Char` (no-op).
+
+### 4. `emit_trg_load_finish` wrong output type (`src/backend/llvm/emit_toplevel.rs:305-306`)
+
+Trigger event loads from GEP produce `i32` (the stored type). `emit_trg_load_finish` for
+`Type::Char` emitted `add i32 0, %raw` producing an i32 register, but all downstream
+code expected i64.
+
+**Fix**: Changed to `zext i32 %raw to i64`.
+
+### 5. Let-binding identifier path (`src/backend/llvm/emit_expr.rs:134-144`)
+
+When resolving `let k = keypress`, the let-binding lookup found the register but assumed
+it was `i32`. It emitted `zext i32 %reg to i64`, but the register was already i64.
+
+**Fix**: Removed the zext; just emit `add i64 0, %reg` (same as the `Int` fallthrough).
+
+### 6. SSA extractvalue missing `"i32"` arm (`src/backend/llvm/emit_expr.rs:115-118`)
+
+The SSA extractvalue `_` default returned `Type::Int` for `"i32"` field types instead of
+`Type::Char`. Latent safety net — currently unreachable because all fields are pre-extracted
+before extractvalue.
+
+**Fix**: Added `"i32"` arm returning `Type::Char` with `zext i32 %ev to i64`.
+
+### 7. Missing `"i32"` truncation arm in assignment (`src/backend/llvm/emit_stmt.rs:406-410`)
+
+The `Statement::Assignment` handler had match arms for `"i8"`, `"float"`, `"i8*"`, and a
+default `_` arm. The default arm used the field type string directly:
+```rust
+writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_boxed, ty, p, ...)
+```
+For `ty = "i32"`, this emitted `store i32 %val_boxed, i32* %ptr` where `%val_boxed` was
+already widened to `i64` by `adapt_to_i64`. LLVM IR type error.
+
+**Fix**: Added `"i32"` arm that truncates i64 to i32 before storing. Applied to both the
+SSA `insertvalue` path (line 352) and the GEP+store path (line 406).
+
+### 8. Trigger variable never cleared (`officina.bv:79`)
+
+The `@stdin#` trigger stores the character to `keypress` via the epoll handler, but nothing
+ever reset it back to `'\0'`. The guard `[booted && keypress != '\0']` stayed true for the
+character value. In interactive terminal mode, spurious epoll wakeups caused repeated firing.
+
+**Fix**: Added `&keypress = '\0';` before `term;` in `process_input`. This clears the local
+copy of the trigger after consumption — the external stdin source doesn't see or care.
+
+### 9. Spurious epoll wakeup: unchecked `read()` return (`src/backend/llvm/loop_engine.rs:1436`)
+
+The epoll stdin handler called `read(0, buf, 1)` but discarded the return value. On some
+Linux kernels, `epoll_wait` on a TTY with `O_NONBLOCK` + raw mode can return spurious
+wakeups. When `read()` returns `-1/EAGAIN`, the uninitialized `alloca` buffer contained
+stack garbage that was stored to `keypress` — causing `process_input` to fire with garbage
+values in a tight loop (100% CPU, character repeats until Enter or `\x03`).
+
+**Fix**: Check `read() > 0` before storing the byte. If `read()` returns ≤ 0, skip the
+store and `step()` entirely. Restructured the epoll match arms so each arm handles its
+own `step()` call instead of sharing a post-match common path.
+
+### 10. `step()` type-mismatched load/store (`src/backend/llvm/loop_engine.rs:1264-1272`)
+
+`emit_trg_step` hardcoded `load volatile i64` / `store volatile i64` for all trigger
+fields regardless of their actual LLVM type (`i32` for Char, `i8` for Bool, `i8*` for String).
+With opaque pointers this silently read/wrote adjacent struct bytes.
+
+**Fix**: Match on `self.field_types[idx]` and emit the correct typed load/store (i32, i8,
+i8*, i64, float) for all three sub-locations: trigger volatile loads, dependency field loads,
+and proxy store.
+
+### 11. `step()` proxy store type mismatch (`src/backend/llvm/loop_engine.rs:1358`)
+
+The proxy store (placeholder for recomputation) loaded the first dependency's value with
+the dependency's type but stored it with the destination's type. When types differed
+(e.g., first dep is `i64`, destination is `i32`), the `store i32 %i64_val` was a type error.
+
+**Fix**: Use the destination variable's type for both the load and store.
+
+## The const trg Design
+
+**Motivation**: Writing to a trigger is semantically correct for software triggers
+(`@stdin#` — you consumed the event, clearing your local copy), but semantically wrong
+for hardware triggers (`@0xFFFF0000` — the register is sovereign; writing to the shadow
+state field is a bug).
+
+**Design**: `const` on a `trg` means "I, the code, cannot mutate this." Without `const`,
+writing is allowed.
+
+| Declaration | Code can write? | External writer |
+|---|---|---|
+| `trg x: Char @stdin#;` | ✅ Yes | stdin event |
+| `const trg x: Char @stdin#;` | ❌ No | stdin event |
+| `const trg y: Int @0xFFFF0000;` | ❌ No | hardware register |
+| `trg y: Int @0xFFFF0000;` | ❌ Error: "must be declared const trg" | (parse-time error) |
+
+**Compiler errors:**
+- `&const_trg_name = expr` → `"; error: cannot write to const trigger 'name'"`
+- `trg name @0x...` (without `const`) → `"hardware-addressed triggers must be declared 'const trg'"`
+
+**Implementation** (commit 5e9d757):
+- `src/ast.rs`: added `is_const: bool` to `TriggerDeclaration`
+- `src/parser.rs`: `const` before `trg` detected in `parse_top_level()` via `peek_token()`;
+  validation for explicit address triggers; test triggers updated
+- `src/backend/llvm/emit_stmt.rs`: const trigger write check in both SSA and GEP paths
+
+## The Macro Decorator Vision (Phase B — not yet implemented)
+
+The keyboard debacle taught us that `trg @stdin#` + guard + clearing is boilerplate
+every terminal program needs. The long-term solution is a `$!keyboard_input` decorator
+macro that sits before a `rct txn` and automatically:
+- Gensyms a trigger variable (`__kb_N: Char @stdin#;`)
+- Appends `&& __kb_N != '\0'` to the guard
+- Injects default handlers for `\n` (enter), `\x7f` (backspace), `\x03` (ctrl+c), and regular chars
+- Implicitly clears the trigger after processing
+
+This requires adding `TopLevel` emission to the macro system (so macros can emit `trg`
+declarations). Planned but not yet started.
+
+## Files Changed (2026-06-19)
+
+### Commits
+- `b43c2c0` — LLVM backend hardening, D12–D18 intrinsics, macro system gaps (parallel agent)
+- `792e94e` — docs: known limitations to backend-strategy.md
+- `db7af33` — docs: update plan status, example, architecture for Phase B (parallel agent)
+- `28e2195` — Fix trigger variable not cleared + step() type mismatch + missing i32 store arm
+- `5e9d757` — Add const trg: enforce read-only triggers + hardware address validation
+- `11e78b9` — Add tests for const trg: parser + backend assignment error
+- `6e6ab51` — Fix WASM FFI validation: use ForeignBinding.target instead of missing frgn_target
+
+### Key files modified
+| File | Change |
+|---|---|
+| `src/backend/llvm/emit_stmt.rs` | i32 trunc arm, const trg check, adapt_to_i64 Char fix |
+| `src/backend/llvm/loop_engine.rs` | step() types, spurious wakeup guard, proxy store fix |
+| `src/backend/llvm/emit_expr.rs` | TtyReadKey i64, enum storage, let-binding, SSA extractvalue |
+| `src/backend/llvm/emit_toplevel.rs` | emit_trg_load_finish zext |
+| `src/parser.rs` | const trg syntax + validation + tests |
+| `src/ast.rs` | is_const on TriggerDeclaration |
+| `src/main.rs` | WASM FFI validation fix |
+| `src/analysis/region.rs`, `watchdog.rs`, `dependency_graph.rs` | is_const in test constructors |
+| `src/backend/circt.rs` | is_const in test constructors |
+| `src/reactor.rs`, `src/fuzzing/ast_generator.rs` | is_const in test constructors |
+| `docs/plans/2026-06-19-trigger-variable-not-cleared.md` | Full plan document |
+
+## Lessons Learned
+
+1. **Context matters**: Pipe tests and interactive terminal tests have different behavior.
+   The spurious epoll wakeup only manifests in real interactive use.
+
+2. **Trigger variables are not magic**: A `trg` is just a state field that the event system
+   sets. Code can read and write it — but should be aware of the source's sovereignty.
+   `const trg` codifies this.
+
+3. **Every Expr handler that evaluates to a pointer must store the actual pointer**,
+   never a sentinel/placeholder. The string state init null bug was a classic example.
+
+4. **LLVM IR type tracking is pervasive**: A single mistyped load (i64 instead of i32)
+   in `step()` can silently read/write adjacent struct bytes with opaque pointers.
+   Always use the field's declared type, not a hardcoded type.
+
+5. **The `read()` return value must always be checked** when reading from a TTY fd,
+   even if `epoll_wait` guarantees data availability. Spurious wakeups happen on some kernel versions.
+
+6. **SEMANTIC CONSERVATION**: Never weaken contracts or scribble lazy code. The right fix
+   is to understand why the system behaved as it did, then correct the system.
+
+## Test Count
+- Initial: 1068
+- After Phase A fixes: 1073 (+5 from parallel agent)
+- After const trg: 1078 (+5 from new tests)
+- After test additions: 1082 (+4 from const trg tests)
+- Final: **1082 passed, 0 failed**

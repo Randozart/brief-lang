@@ -1,7 +1,7 @@
 # Plan: Keyboard Input — Immediate Fix + Macro Decorator Architecture
 
 **Date:** 2026-06-19  
-**Status:** Written (awaiting execution request)  
+**Status:** ✅ Complete — all phases implemented  
 
 ## Overview
 
@@ -323,13 +323,21 @@ The first catches any write to a const trigger. The second catches the common em
 
 Same rule applies. a front-end button press emits a one-time signal into a `trg`. Brief can read and optionally write back (`&trg = ...`), but the front end never listens. The mailbox is one-directional regardless.
 
-### Implementation
+### Implementation (committed)
 
-| Change | File | Detail |
+| Change | File | Status |
 |--------|------|--------|
-| AST | `src/ast.rs` | Add `is_const: bool` to `TriggerDeclaration` |
-| Parser | `src/parser.rs` | Accept `const` before `trg` in `parse_trigger()` |
-| Resolver/Analysis | `src/analysis/` | Validate address-bound triggers have `const` |
-| Codegen | `src/backend/llvm/emit_stmt.rs` | Error on write to `const` trigger in assignment |
-| Docs | `docs/architecture/glossary.md` | Document `const trg` |
-| Plan | `docs/plans/...` | This document |
+| AST | `src/ast.rs` | ✅ `is_const: bool` added |
+| Parser | `src/parser.rs` | ✅ `const trg` syntax + validation |
+| Codegen | `src/backend/llvm/emit_stmt.rs` | ✅ Write error in SSA + GEP paths |
+| Tests | `src/parser.rs` + `src/backend/llvm/tests.rs` | ✅ 4 new tests (1082 total) |
+| Docs | `AGENTS_HISTORY.md` | ✅ Session log written |
+| Plan | `docs/plans/...` | ✅ This document |
+
+### Verification
+
+```bash
+cargo test --lib                     # 1082 passed, 0 failed
+./target/release/brief-compiler build officina.bv
+printf "hello\x03" | timeout 3 ./officina   # each char once, exit 0
+```
