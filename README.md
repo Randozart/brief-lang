@@ -57,10 +57,20 @@ Most programming languages are built around _operations in sequence_. Brief desc
     *   Programs are declared through a combination of variables, definitions and transactions.
     *   The entire program runs on a non-polling reactor loop. It indexes which variable changes lead to which `rct txn` preconditions to be fulfilled, and fires them automatically when it's their time to act.
     *   Because these paths are laid out predictably, the compiler has great leeway in folding these paths. If X through A, B and C will always lead to Y with side-effect Z, the compiler will simply draw a short route from X to YZ.
-*   **No magic.**
-    *   Every function and keyword in Brief must be traceable to a source following the same rules as every other definition.
-    *   The compiler is not allowed to have any baked in function calls. These must all trace to a library file.
-    *   Anything interacting with an external language or interrupt source must be declared explicitly through the Metropolitan FFI interface.
+*   **No magic — but I had to compromise somewhere.**
+    *   Every function and keyword in Brief must be traceable to a source following the same rules as every other definition. If it looks like `foo(x)`, it's user-defined. Period.
+    *   The exception: `#`-suffixed intrinsics like `print_int#`, `sqrt#`, `put_char#`. Yes, these are baked into `Expr::IntrinsicCall` in the AST. But they're *explicitly* marked with the `#` at every call site — you can never mistake `sqrt` for `sqrt#`. The `#` is the compiler saying "I have a hand in this one." It's a compromise I made, but it's an honest one.
+    *   The "coding" system — where top-level `let` declarations and guarded blocks get implicitly wrapped into a reactive transaction — is the one invisible transformation the compiler does. But it's not *hidden* magic: it's the same transformation for every program, it's predictable, and it's the practical muscle behind "execution is inferred, not prescribed." The compiler tells you what it inferred. You can always look at the expanded form.
+    *   Anything interacting with an external language or interrupt source must be declared explicitly. Which FFI path that takes depends on your target:
+        *   **LLVM target** (`.bv`, `.ebv`): `frgn from "c"` resolved via `brief_rt.c` — you get C interop.
+        *   **Web target** (`.rbv`): `frgn from "javascript"` — the implementation is inlined into the generated TypeScript.
+        *   **Hardware target** (`.cbv`): no FFI allowed at all. If you need something external, it has to come through an intrinsic. This is the strictest tier, because you're describing copper.
+        *   **GPU target** (`.abv`): intrinsics only, same as hardware — the `#`-suffixed operations are your only bridge to the outside.
+*   **Contracts are optimization fuel, not a correctness tax.**
+    *   This is the one that makes Brief weird, and I mean that as a compliment. In most languages, writing a precondition is you doing the compiler a favor — you're holding its hand through your logic so it can check your work. In Brief, the contract *is* the optimization input. The more you declare, the more the compiler proves, and the faster your program runs. Safety *enables* speed.
+    *   A precondition like `[x < N]` doesn't just guard the transaction — the compiler uses it to emit `!range` metadata on the field load, which lets LLVM eliminate bounds checks in the loop body. No contract, no metadata, slower code. The optimizer *feeds* on what the prover proves.
+    *   This is why strict variants (`.sbv`, `.cbv`) ban sugar syntax. If you're writing hardware or safety-critical code, I don't want you taking shortcuts. The full `[pre][post]` contract is not busywork — it's the compiler's primary optimization signal. When you omit one side, you're leaving performance on the table.
+    *   The old way of thinking: "contracts slow me down, I'll add them later." The Brief way: "the compiler can't optimize what it can't prove." Write the contract first. The performance follows.
 
 ## Quick Start
 
@@ -154,15 +164,15 @@ Each variant has a different *contract baseline* and *feature set* appropriate t
 
 | Variant | Contract Sugar | FFI Targets Allowed | Intrinsics vs `frgn` | Typical Use |
 |---------|---------------|---------------------|---------------------|-------------|
-| `.bv` (Brief) | ✅ `[[post]`, `[pre]]` | C, Rust, Python, Java, JavaScript | `frgn` and full intrinsics | General-purpose |
-| `.abv` (Accel) | ✅ sugar allowed | None (GPU only) | Prefer intrinsics; `frgn` banned | GPU compute |
-| `.rbv` (Render) | ✅ sugar allowed | JavaScript (+ C/Rust via WASM) | Special `frgn` handling and full intrinsics| Web frontends |
-| `.ebv` (Embed) | ✅ sugar allowed | C, Rust (Python/Java warned) | Prefer `frgn` | Bare-metal MCU |
-| `.cbv` (Circuit) | **❌ sugar banned** — full contracts required | None (FFI banned) | Prefer intrinsics; `frgn` banned | Hardware synthesis |
+| `.bv` (Brief) | `[[post]`, `[pre]]` | C, Rust, Python, Java, JavaScript | `frgn` and full intrinsics | General-purpose |
+| `.abv` (Accel) | sugar allowed | None (GPU only) | Prefer intrinsics; `frgn` banned | GPU compute |
+| `.rbv` (Render) | sugar allowed | JavaScript (+ C/Rust via WASM) | Special `frgn` handling and full intrinsics| Web frontends |
+| `.ebv` (Embed) | sugar allowed | C, Rust (Python/Java warned) | Partial intrinsics and `frgn` | Bare-metal MCU |
+| `.cbv` (Circuit) | **❌ sugar banned** — full contracts required | None (FFI banned) | Partial intrinsics; `frgn` banned | Hardware synthesis |
 | `.dbv` (Data) | No contracts | None | No codegen | Configuration |
 | **Strict** (`.sbv`, `.sebv`, `.srbv`) | **❌ sugar banned** — same as base variant but full `[pre][post]` required | Same as base variant | Same as base variant | Safety-critical, formal verification |
 
-The rationale: **contracts are optimization information**. The more complete your contracts, the more the compiler can prove, and the faster your program runs. Sugar syntax (`[[post]]`, `[pre]]`) is a convenience for prototyping, but strict variants force you to commit to full specifications. This is what makes Brief different from total languages (Coq, Agda — must prove everything upfront) and mainstream languages (C, Rust — prove nothing by default).
+The rationale: **contracts are optimization information**. The more complete your contracts, the more the compiler can prove, and the faster your program runs. Sugar syntax (`[[post]`, `[pre]]`) is a convenience for prototyping, but strict variants force you to commit to full specifications. This is what makes Brief different from total languages (Coq, Agda — must prove everything upfront) and mainstream languages (C, Rust — prove nothing by default).
 
 **Planned:** COBOL backend (future target for enterprise integration).
 
