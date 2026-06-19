@@ -1261,14 +1261,36 @@ impl LlvmBackend {
         writeln!(out, "  {} = alloca i64, align 8", dirty_slot).ok();
         writeln!(out, "  store i64 %dirty_in, i64* {}, align 8", dirty_slot).ok();
         // Volatile-load all trigger variables (liveness anchor + value observation)
+        // Use the correct LLVM type for each trigger field to avoid reading/writing
+        // adjacent struct bytes (i32 for Char, i8 for Bool, i8* for String).
         for trg_name in trigger_names {
             if let Some(&idx) = self.field_index_map.get(trg_name) {
+                let ty_str = &self.field_types[idx];
                 let gep = format!("%gtrg_{}", tc); tc += 1;
                 writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gep, idx).ok();
                 let ld = format!("%ltrg_{}", tc); tc += 1;
-                writeln!(out, "  {} = load volatile i64, i64* {}, align 8", ld, gep).ok();
-                // Volatile store back — liveness anchor prevents elimination
-                writeln!(out, "  store volatile i64 {}, i64* {}, align 8", ld, gep).ok();
+                match ty_str.as_str() {
+                    "i32" => {
+                        writeln!(out, "  {} = load volatile i32, i32* {}, align 4", ld, gep).ok();
+                        writeln!(out, "  store volatile i32 {}, i32* {}, align 4", ld, gep).ok();
+                    }
+                    "i8" => {
+                        writeln!(out, "  {} = load volatile i8, i8* {}, align 1", ld, gep).ok();
+                        writeln!(out, "  store volatile i8 {}, i8* {}, align 1", ld, gep).ok();
+                    }
+                    "i8*" | "ptr" => {
+                        writeln!(out, "  {} = load volatile i8*, i8** {}, align 8", ld, gep).ok();
+                        writeln!(out, "  store volatile i8* {}, i8** {}, align 8", ld, gep).ok();
+                    }
+                    "float" => {
+                        writeln!(out, "  {} = load volatile float, float* {}, align 4", ld, gep).ok();
+                        writeln!(out, "  store volatile float {}, float* {}, align 4", ld, gep).ok();
+                    }
+                    _ => {
+                        writeln!(out, "  {} = load volatile i64, i64* {}, align 8", ld, gep).ok();
+                        writeln!(out, "  store volatile i64 {}, i64* {}, align 8", ld, gep).ok();
+                    }
+                }
             }
         }
         // For each non-trg variable in topological order:
@@ -1315,27 +1337,48 @@ impl LlvmBackend {
             let skip_label = format!("%step_skip_{}", var_name);
             writeln!(out, "  br i1 {}, label %{}, label %{}", cond, body_label, skip_label).ok();
             writeln!(out, "{}:", body_label).ok();
-            // Load all dependency values and store as placeholder
-            // (full recomputation requires tracking each StateDecl's expr)
+            // Load all dependency values with correct types
             for dep_name in deps {
                 if let Some(&dep_idx) = self.field_index_map.get(dep_name) {
+                    let dep_ty = &self.field_types[dep_idx];
                     let gdep = format!("%gdep_{}", tc); tc += 1;
                     writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gdep, dep_idx).ok();
                     let ldep = format!("%ldep_{}", tc); tc += 1;
-                    writeln!(out, "  {} = load i64, i64* {}, align 8", ldep, gdep).ok();
+                    match dep_ty.as_str() {
+                        "i32" => { writeln!(out, "  {} = load i32, i32* {}, align 4", ldep, gdep).ok(); }
+                        "i8" => { writeln!(out, "  {} = load i8, i8* {}, align 1", ldep, gdep).ok(); }
+                        "i8*" | "ptr" => { writeln!(out, "  {} = load i8*, i8** {}, align 8", ldep, gdep).ok(); }
+                        "float" => { writeln!(out, "  {} = load float, float* {}, align 4", ldep, gdep).ok(); }
+                        _ => { writeln!(out, "  {} = load i64, i64* {}, align 8", ldep, gdep).ok(); }
+                    }
                     let _ = ldep; // consumed by future recompute expr
                 }
             }
             // Store first dependency value as proxy (placeholder for recomputation)
+            // Use the destination variable's type for both load and store, since
+            // this is a proxy for the destination field's value, not the source's.
             if let Some(first_dep) = deps.first() {
                 if let Some(&first_idx) = self.field_index_map.get(first_dep) {
+                    let dst_ty = &self.field_types[idx];
                     let gsrc = format!("%gsrc_{}", tc); tc += 1;
                     writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gsrc, first_idx).ok();
                     let lsrc = format!("%lsrc_{}", tc); tc += 1;
-                    writeln!(out, "  {} = load i64, i64* {}, align 8", lsrc, gsrc).ok();
+                    match dst_ty.as_str() {
+                        "i32" => { writeln!(out, "  {} = load i32, i32* {}, align 4", lsrc, gsrc).ok(); }
+                        "i8" => { writeln!(out, "  {} = load i8, i8* {}, align 1", lsrc, gsrc).ok(); }
+                        "i8*" | "ptr" => { writeln!(out, "  {} = load i8*, i8** {}, align 8", lsrc, gsrc).ok(); }
+                        "float" => { writeln!(out, "  {} = load float, float* {}, align 4", lsrc, gsrc).ok(); }
+                        _ => { writeln!(out, "  {} = load i64, i64* {}, align 8", lsrc, gsrc).ok(); }
+                    }
                     let gdst = format!("%gdst_{}", tc); tc += 1;
                     writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", gdst, idx).ok();
-                    writeln!(out, "  store i64 {}, i64* {}, align 8 ; recompute {}", lsrc, gdst, var_name).ok();
+                    match dst_ty.as_str() {
+                        "i32" => { writeln!(out, "  store i32 {}, i32* {}, align 4 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        "i8" => { writeln!(out, "  store i8 {}, i8* {}, align 1 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        "i8*" | "ptr" => { writeln!(out, "  store i8* {}, i8** {}, align 8 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        "float" => { writeln!(out, "  store float {}, float* {}, align 4 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        _ => { writeln!(out, "  store i64 {}, i64* {}, align 8 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                    }
                 }
             }
             writeln!(out, "  br label %{}", skip_label).ok();

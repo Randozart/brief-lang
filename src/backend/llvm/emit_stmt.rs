@@ -349,6 +349,11 @@ impl LlvmBackend {
                                     writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val_boxed).ok();
                                     writeln!(out, "{}{} = insertvalue %State {}, i8 {}, {}", indent, new_reg, ssa_reg, tr, idx).ok();
                                 }
+                                "i32" => {
+                                    let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val_boxed).ok();
+                                    writeln!(out, "{}{} = insertvalue %State {}, i32 {}, {}", indent, new_reg, ssa_reg, tr, idx).ok();
+                                }
                                 "float" => {
                                     let fl = self.native_float_or_box(out, indent, &val.to_string());
                                     writeln!(out, "{}{} = insertvalue %State {}, float {}, {}", indent, new_reg, ssa_reg, fl, idx).ok();
@@ -397,6 +402,11 @@ impl LlvmBackend {
                             let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val_boxed).ok();
                             writeln!(out, "{}store{} i8 {}, i8* {}, align {}, !tbaa !{}", indent, vol_str, tr, p, self.align_of(&ty), tn).ok();
+                        }
+                        "i32" => {
+                            let tr = format!("%tri{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val_boxed).ok();
+                            writeln!(out, "{}store{} i32 {}, i32* {}, align {}, !tbaa !{}", indent, vol_str, tr, p, self.align_of(&ty), tn).ok();
                         }
                         "float" => {
                             let fl = self.native_float_or_box(out, indent, &val.to_string());
