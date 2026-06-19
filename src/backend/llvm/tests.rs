@@ -1224,6 +1224,64 @@ fn empty_program() -> Program {
     }
 
     #[test]
+    fn test_const_trg_write_emits_error() {
+        // Writing to a const trigger should emit an error comment
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Trigger(TriggerDeclaration {
+                    name: "locked".to_string(),
+                    ty: Type::Bool,
+                    address: LinkRef::Explicit(0x1000),
+                    bit_range: None,
+                    stages: vec![],
+                    condition: None,
+                    is_wake: false,
+                    is_const: true,
+                    span: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None, watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("locked".to_string()),
+                            expr: Expr::Bool(true),
+                            timeout: None,
+                            modifiers: vec![],
+                        },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_async: false, is_reactive: false,
+                    reactor_speed: None, span: None,
+                    is_lambda: false, dependencies: vec![],
+                    attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: Vec::new(),
+                    output_type: None,
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("cannot write to const trigger 'locked'"),
+            "Assign to const trigger should emit error comment. Got:\n{}", &output[..output.len().min(2000)]);
+    }
+
+    #[test]
     fn test_tfd_sfd_nonblock_constants() {
         // 2026-06-17: Verify TFD_NONBLOCK and SFD_NONBLOCK are 0x800 (O_NONBLOCK),
         // not 0x400 (FD_CLOEXEC). Wrong constants cause timerfd/signalfd to fail.

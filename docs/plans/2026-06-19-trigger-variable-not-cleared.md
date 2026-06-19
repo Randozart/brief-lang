@@ -284,7 +284,7 @@ printf "hello\x03" | timeout 3 ./officina    # pipe test still works
 
 1. ~~Phase A fixes (committed at 28e2195)~~
 2. ~~Phase C — spurious epoll guard (committed)~~
-3. **Phase D — `const trg` design (next)**
+3. ~~Phase D — `const trg` design (committed at 5e9d757)~~
 4. Phase B architecture (requires AST + parser + expander + stdlib changes)
 5. Future: per-instance reactive structs (when game-engine work begins)
 

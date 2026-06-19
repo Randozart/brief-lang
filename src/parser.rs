@@ -7718,6 +7718,49 @@ mod parser_tests {
         assert!(result.is_ok(), "Top-level trg without ! should parse: {:?}", result.err());
         if let TopLevel::Trigger(trg) = &result.unwrap().items[0] {
             assert_eq!(trg.name, "button");
+            assert!(trg.is_const, "const trg should have is_const = true");
+        } else {
+            panic!("Expected Trigger item");
+        }
+    }
+
+    #[test]
+    fn test_parse_const_trg_with_stdin() {
+        // const trg is optional for software triggers
+        let s = r#"const trg keypress: Char @stdin#;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "const trg with @stdin# should parse: {:?}", result.err());
+        if let TopLevel::Trigger(trg) = &result.unwrap().items[0] {
+            assert!(trg.is_const, "const trg should have is_const = true");
+            assert!(matches!(trg.address, crate::ast::LinkRef::Stdin));
+        } else {
+            panic!("Expected Trigger item");
+        }
+    }
+
+    #[test]
+    fn test_parse_trg_explicit_address_requires_const() {
+        // Explicit address without const must error
+        let s = r#"trg led: Bool @ 0x1000;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_err(), "trg @address without const should error");
+        let err = result.err().unwrap();
+        let err_msg = format!("{}", err);
+        assert!(err_msg.contains("must be declared 'const trg'"),
+            "Error should mention const trg, got: {}", err_msg);
+    }
+
+    #[test]
+    fn test_parse_trg_unbound_no_address() {
+        // Unbound trigger (no @) should work without const
+        let s = r#"trg flag: Bool;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Unbound trg should parse without const: {:?}", result.err());
+        if let TopLevel::Trigger(trg) = &result.unwrap().items[0] {
+            assert!(!trg.is_const, "Unbound trg should have is_const = false");
         } else {
             panic!("Expected Trigger item");
         }
