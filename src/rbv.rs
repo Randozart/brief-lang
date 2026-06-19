@@ -24,8 +24,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum RbvError {
-    #[error("Missing <script> block")]
-    MissingScript,
     #[error("Missing <view> block")]
     MissingView,
     #[error("Parse error: {0}")]
@@ -42,17 +40,27 @@ pub struct RbvFile {
 }
 
 impl RbvFile {
+    /// Parse an `.rbv` file.
+    ///
+    /// Brief code is the default content — everything outside `<view>` and
+    /// `<style>` tags is treated as Brief source.
+    ///
+    /// Backward compatible: if `<script>` or `<script type="brief">` tags are
+    /// present, their content is used instead (old format).
     pub fn parse(source: &str) -> Result<Self, RbvError> {
-        let script = extract_tag(source, "<script>", "</script>")
-            .or_else(|| extract_tag(source, "<script type=\"brief\">", "</script>"))
-            .ok_or(RbvError::MissingScript)?;
-
         let view = extract_tag(source, "<view>", "</view>").ok_or(RbvError::MissingView)?;
 
         let style = extract_tag(source, "<style>", "</style>");
 
+        let brief_source = if let Some(script) = extract_script_tags(source) {
+            script.trim().to_string()
+        } else {
+            let stripped = strip_known_blocks(source);
+            stripped.trim().to_string()
+        };
+
         Ok(RbvFile {
-            brief_source: script.trim().to_string(),
+            brief_source,
             view_html: view.trim().to_string(),
             style_css: style.map(|s| s.trim().to_string()),
         })
@@ -65,12 +73,34 @@ fn extract_tag(source: &str, start_tag: &str, end_tag: &str) -> Option<String> {
     Some(source[start..end].to_string())
 }
 
+fn extract_script_tags(source: &str) -> Option<String> {
+    extract_tag(source, "<script type=\"brief\">", "</script>")
+        .or_else(|| extract_tag(source, "<script>", "</script>"))
+}
+
+fn strip_known_blocks(source: &str) -> String {
+    let known_blocks: [(&str, &str); 4] = [
+        ("<view>", "</view>"),
+        ("<style>", "</style>"),
+        ("<script>", "</script>"),
+        ("<script type=\"brief\">", "</script>"),
+    ];
+    let mut result = source.to_string();
+    for &(start_tag, end_tag) in &known_blocks {
+        while let (Some(start), Some(end)) = (result.find(start_tag), result.find(end_tag)) {
+            let block_end = end + end_tag.len();
+            result.drain(start..block_end);
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_rbv() {
+    fn test_parse_rbv_script_backward_compat() {
         let source = r#"
 <script type="brief">
 let count: Int = 0;
@@ -88,5 +118,48 @@ p { color: red; }
         assert!(rbv.brief_source.contains("count"));
         assert!(rbv.view_html.contains("b-text"));
         assert!(rbv.style_css.is_some());
+    }
+
+    #[test]
+    fn test_parse_rbv_brief_as_default() {
+        let source = r#"
+let count: Int = 0;
+
+txn increment [true][@count + 1 == count] {
+    &count = count + 1;
+    term;
+};
+
+<view>
+<p b-text="count">0</p>
+<button b-trigger:click="increment">+</button>
+</view>
+"#;
+        let rbv = RbvFile::parse(source).unwrap();
+        assert!(rbv.brief_source.contains("count"));
+        assert!(rbv.brief_source.contains("increment"));
+        assert!(rbv.view_html.contains("b-text"));
+        assert!(rbv.style_css.is_none());
+    }
+
+    #[test]
+    fn test_parse_rbv_no_script_style_is_extracted() {
+        // Brief code interleaved with view — everything outside <view> is source
+        let source = r#"
+let x: Int = 42;
+
+<view>
+<span b-text="x">42</span>
+</view>
+
+txn double [true][@x * 2 == x] {
+    &x = x * 2;
+    term;
+};
+"#;
+        let rbv = RbvFile::parse(source).unwrap();
+        assert!(rbv.brief_source.contains("let x: Int = 42"));
+        assert!(rbv.brief_source.contains("txn double"));
+        assert!(rbv.view_html.contains("b-text"));
     }
 }
