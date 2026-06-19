@@ -1,10 +1,10 @@
 # Brief
 
-<img src="assets/brief-icon.svg" alt="Brief" width="200"/><img src="assets/r-brief-icon.svg" alt="Rendered Brief" width="200"/> 
+<img src="assets/brief-logo.svg" alt="Brief" width="200"/><img src="assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/> 
 
-<img src="assets/e-brief-icon.svg" alt="Embedded Brief" width="200"/><img src="assets/d-brief-icon.svg" alt="Data Brief" width="200"/>
+<img src="assets/e-brief-logo.svg" alt="Embedded Brief" width="200"/><img src="assets/d-brief-logo.svg" alt="Data Brief" width="200"/>
 
-<img src="assets/a-brief-icon.svg" alt="Accelerated Brief" width="200"/><img src="assets/c-brief-icon.svg" alt="Circuit Brief" width="200"/>
+<img src="assets/a-brief-logo.svg" alt="Accelerated Brief" width="200"/><img src="assets/c-brief-logo.svg" alt="Circuit Brief" width="200"/>
 
 
 ## Brief Doesn't Break
