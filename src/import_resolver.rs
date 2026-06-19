@@ -177,6 +177,7 @@ impl ImportResolver {
                         is_magic: true,
                         path: vec!["std".to_string(), "core".to_string(), module.to_string()],
                         items: vec![],
+                        target: crate::ast::ImportTarget::Native,
                     }));
                 }
             }
@@ -732,6 +733,7 @@ impl ImportResolver {
                     is_magic: import.is_magic,
                     path: path_components,
                     items: vec![],
+                    target: import.target.clone(),
                 })
             })
             .collect();
@@ -876,7 +878,7 @@ mod tests {
 
     fn import_program(path: Vec<&str>, items: Vec<ImportItem>) -> Program {
         Program {
-            items: vec![TopLevel::Import(Import { is_magic: false, path: path.iter().map(|s| s.to_string()).collect(), items })],
+            items: vec![TopLevel::Import(Import { is_magic: false, target: crate::ast::ImportTarget::Native, path: path.iter().map(|s| s.to_string()).collect(), items })],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
@@ -1014,6 +1016,7 @@ mod tests {
                 is_magic: true,
                 path: vec!["std".to_string(), "core".to_string(), "test_magic.bv".to_string()],
                 items: vec![],
+                target: crate::ast::ImportTarget::Native,
             })],
             ..prog
         };
@@ -1049,6 +1052,7 @@ mod tests {
                 is_magic: true,
                 path: vec!["std".to_string(), "core".to_string(), "*".to_string()],
                 items: vec![],
+                target: crate::ast::ImportTarget::Native,
             })],
             ..prog
         };

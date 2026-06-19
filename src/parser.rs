@@ -1129,6 +1129,33 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_import(&mut self) -> Result<TopLevel, SyntaxError> {
+        // Parse optional import target: (wasm), (circt), (native), (javascript)
+        let mut target = crate::ast::ImportTarget::Native;
+        if let Some(Ok(Token::LParen)) = self.current_token() {
+            self.advance();
+            if let Some(Ok(Token::Identifier(kw))) = self.current_token() {
+                match kw.as_str() {
+                    "wasm" | "native" | "circt" | "javascript" => {
+                        target = match kw.as_str() {
+                            "wasm" => crate::ast::ImportTarget::Wasm,
+                            "circt" => crate::ast::ImportTarget::Circt,
+                            "javascript" => crate::ast::ImportTarget::Javascript,
+                            _ => crate::ast::ImportTarget::Native,
+                        };
+                        self.advance();
+                        self.expect(Token::RParen)?;
+                    }
+                    _ => {
+                        return self.spanned_err(
+                            format!("Unknown import target: '({})'. Valid: (wasm), (circt), (native), (javascript)", kw)
+                        );
+                    }
+                }
+            } else {
+                return self.spanned_err("Expected target name after '(' in import target specifier. Use: (wasm) import".to_string());
+            }
+        }
+
         self.expect(Token::Import)?;
 
         // import# — compiler-relative path resolution (resolved against BRIEF_STDLIB_PATH)
@@ -1247,7 +1274,7 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(Token::Semicolon)?;
-        Ok(TopLevel::Import(Import { items, path, is_magic }))
+        Ok(TopLevel::Import(Import { items, path, is_magic, target }))
     }
 
     fn parse_signature(&mut self) -> Result<Signature, SyntaxError> {
@@ -9077,6 +9104,46 @@ mod kani_full_tests {
         if let TopLevel::Import(imp) = &result.unwrap().items[0] {
             assert!(imp.is_magic, "import# should set is_magic = true");
             assert_eq!(imp.path.join("/"), "std/core/*");
+        } else {
+            panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_wasm_target() {
+        let s = r#"(wasm) import physics from "physics.bv"; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "(wasm) import should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert_eq!(imp.target, crate::ast::ImportTarget::Wasm);
+            assert_eq!(imp.path.join("/"), "physics.bv");
+        } else {
+            panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_circt_target() {
+        let s = r#"(circt) import alu from "alu.cbv"; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "(circt) import should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert_eq!(imp.target, crate::ast::ImportTarget::Circt);
+        } else {
+            panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_javascript_target() {
+        let s = r#"(javascript) import greet from "greet.js"; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "(javascript) import should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert_eq!(imp.target, crate::ast::ImportTarget::Javascript);
         } else {
             panic!("Expected Import");
         }

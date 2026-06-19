@@ -8,6 +8,9 @@
 // Custom `frgn from "c"` in the imported .bv is a compile-time error — WASM
 // modules can only use built-in intrinsics and pure Brief logic.
 //
+// Other import targets: (circt) for hardware compilation, (javascript) for
+// inline JS/TS functions, (native) for default (no prefix needed).
+//
 // Usage:
 //   brief build wasm-import.rbv    → emits wasm-import.ts + wasm-import.html
 //   The physics.wasm sidecar is base64-embedded in the .ts file.

@@ -1962,11 +1962,30 @@ pub struct Constant {
     pub expr: Expr,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportTarget {
+    /// Default — import as inline TS (webstack) or LLVM (native)
+    Native,
+    /// Compile to WASM sidecar module (wasm32 target)
+    Wasm,
+    /// Compile to CIRCT / hardware via esp-circt
+    Circt,
+    /// Inline JavaScript/TypeScript (only valid in webstack)
+    Javascript,
+}
+
+impl Default for ImportTarget {
+    fn default() -> Self {
+        ImportTarget::Native
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Import {
     pub items: Vec<ImportItem>,
     pub path: Vec<String>,
     pub is_magic: bool,
+    pub target: ImportTarget,
 }
 
 #[derive(Debug, Clone)]
