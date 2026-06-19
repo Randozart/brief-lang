@@ -1433,7 +1433,13 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
             crate::ast::LinkRef::Stdin => {
                 let ch_slot = format!("%ch_{}_{}", tc, name);
                 writeln!(out, "  {} = alloca i8, i64 1, align 1", ch_slot).ok();
-                writeln!(out, "  %rd_{}_{} = call i64 @read(i32 0, i8* {}, i64 1)", tc, name, ch_slot).ok();
+                let rd_res = format!("%rd_{}_{}", tc, name);
+                writeln!(out, "  {} = call i64 @read(i32 0, i8* {}, i64 1)", rd_res, ch_slot).ok();
+                let rd_ok = format!("%rdok_{}_{}", tc, name);
+                writeln!(out, "  {} = icmp sgt i64 {}, 0", rd_ok, rd_res).ok();
+                let store_lbl = format!("rds_{}_{}", tc, name);
+                writeln!(out, "  br i1 {}, label %{}, label %{}", rd_ok, store_lbl, t_skip).ok();
+                writeln!(out, "{}:", store_lbl).ok();
                 if let Some(&idx) = backend.field_index_map.get(name) {
                     let sge = format!("%sge_{}_{}", tc, name);
                     writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sge, idx).ok();
@@ -1456,6 +1462,10 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                         }
                     }
                 }
+                let drx = format!("%drx_{}_{}", tc, name);
+                writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
+                writeln!(out, "  call void @step(%State* %state, i64 {})", drx).ok();
+                writeln!(out, "  br label %{}", t_skip).ok();
             }
             crate::ast::LinkRef::Timer(_hz) => {
                 if let Some(&idx) = backend.field_index_map.get(name) {
@@ -1467,6 +1477,10 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                     writeln!(out, "  {} = add i64 {}, 1", inc, cur).ok();
                     writeln!(out, "  store i64 {}, i64* {}, align 8", inc, sge).ok();
                 }
+                let drx = format!("%drx_{}_{}", tc, name);
+                writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
+                writeln!(out, "  call void @step(%State* %state, i64 {})", drx).ok();
+                writeln!(out, "  br label %{}", t_skip).ok();
             }
             crate::ast::LinkRef::Signal(_sig) => {
                 if let Some(&idx) = backend.field_index_map.get(name) {
@@ -1474,13 +1488,18 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                     writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sge, idx).ok();
                     writeln!(out, "  store i64 1, i64* {}, align 8", sge).ok();
                 }
+                let drx = format!("%drx_{}_{}", tc, name);
+                writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
+                writeln!(out, "  call void @step(%State* %state, i64 {})", drx).ok();
+                writeln!(out, "  br label %{}", t_skip).ok();
             }
-            _ => {}
+            _ => {
+                let drx = format!("%drx_{}_{}", tc, name);
+                writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
+                writeln!(out, "  call void @step(%State* %state, i64 {})", drx).ok();
+                writeln!(out, "  br label %{}", t_skip).ok();
+            }
         }
-        let drx = format!("%drx_{}_{}", tc, name);
-        writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
-        writeln!(out, "  call void @step(%State* %state, i64 {})", drx).ok();
-        writeln!(out, "  br label %{}", t_skip).ok();
         writeln!(out, "{}:", t_skip).ok();
     }
     writeln!(out, "  br label %{}", ev_done).ok();

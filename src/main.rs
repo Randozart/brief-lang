@@ -2845,7 +2845,7 @@ fn run_rbv(
     let mut program = desug.desugar(&program);
 
     let mut tc = typechecker::TypeChecker::new()
-        .with_stdlib_config(no_stdlib, stdlib_path)
+        .with_stdlib_config(no_stdlib, stdlib_path.clone())
         .with_target(typechecker::CompilationTarget::Wasm);
     println!("  Type checking...");
     let type_errors = tc.check_program(&mut program);
@@ -2965,7 +2965,46 @@ fn run_rbv(
 
     let _analysis = backend::analyze_program(&program, false);
 
+    // Compile (wasm) import modules to .wasm binaries
+    let mut wasm_module_binaries: Vec<(String, Vec<u8>)> = Vec::new();
+    for item in &program.items {
+        if let ast::TopLevel::Import(import) = item {
+            if import.target == ast::ImportTarget::Wasm {
+                let path_str = import.path.join("/");
+                let source_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+                let import_path = source_dir.join(&path_str);
+                if import_path.exists() {
+                    match compile_wasm32_module(&import_path, &output_path, no_stdlib, stdlib_path.clone()) {
+                        Ok(wasm_path) => {
+                            match fs::read(&wasm_path) {
+                                Ok(binary) => {
+                                    let module_name = import.items.first()
+                                        .map(|i| i.name.clone())
+                                        .unwrap_or_else(|| {
+                                            import_path.file_stem()
+                                                .and_then(|s| s.to_str())
+                                                .unwrap_or("wasm_module")
+                                                .to_string()
+                                        });
+                                    wasm_module_binaries.push((module_name, binary));
+                                    println!("    WASM module ready: {}", wasm_path.display());
+                                }
+                                Err(e) => eprintln!("  Warning: could not read WASM binary: {}", e),
+                            }
+                        }
+                        Err(e) => eprintln!("  Warning: WASM compilation failed for {}: {}", path_str, e),
+                    }
+                } else {
+                    eprintln!("  Warning: (wasm) import file not found: {}", import_path.display());
+                }
+            }
+        }
+    }
+
     let mut wasm_gen = backend::webstack::WebstackGenerator::new();
+    for (module_name, binary) in &wasm_module_binaries {
+        wasm_gen = wasm_gen.with_wasm_module(module_name.clone(), binary.clone());
+    }
     if let Some(speed) = program.reactor_speed {
         wasm_gen.set_reactor_speed(speed);
     }
@@ -3003,101 +3042,15 @@ fn run_rbv(
     fs::write(&html_path, &html)?;
     println!("  Generated: {}", html_path.display());
 
-    let src_dir = output_path.join("src");
-    fs::create_dir_all(&src_dir)?;
-
-    let wasm_rs = output.ts_code.clone();
-    let module_name = if stem == "main" { "app" } else { stem };
-    fs::write(src_dir.join(format!("{}.rs", module_name)), wasm_rs)?;
-
-    let lib_rs = format!(
-        "mod {};\npub use {}::{{State}};\n",
-        module_name, module_name
-    );
-    fs::write(src_dir.join("lib.rs"), lib_rs)?;
-
-    fs::write(src_dir.join("main.rs"), "fn main() {}\n")?;
-
-    let cargo_toml = format!(
-        r#"[package]
-name = "{}"
-version = "0.1.0"
-edition = "2021"
-
-[workspace]
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-wasm-bindgen = "0.2"
-js-sys = "0.3"
-
-[profile.release]
-opt-level = "s"
-lto = true
-
-[package.metadata.wasm-pack.profile.release]
-wasm-opt = false
-"#,
-        stem
-    );
-    fs::write(output_path.join("Cargo.toml"), cargo_toml)?;
-    println!("  Generated: {}/Cargo.toml", output_path.display());
-    println!("  Generated: {}/src/lib.rs", output_path.display());
-    println!("  Generated: {}/src/main.rs", output_path.display());
+    // Write TypeScript output
+    let ts_code = output.ts_code.clone();
+    let ts_path = output_path.join(format!("{}.ts", stem));
+    fs::write(&ts_path, &ts_code)?;
+    println!("  Generated: {}", ts_path.display());
 
     if build_wasm {
-        println!("\n  Building WASM with wasm-pack...");
-        let output_dir = output_path.join("pkg");
-
-        // Check if WASM needs rebuild by comparing source timestamps
-        let src_file = src_dir.join(format!("{}.rs", stem));
-        let wasm_bin = output_dir.join(format!("{}_bg.wasm", stem));
-
-        let needs_rebuild = !wasm_bin.exists() || {
-            // Check if source is newer than WASM binary
-            if let (Ok(src_meta), Ok(wasm_meta)) =
-                (fs::metadata(&src_file), fs::metadata(&wasm_bin))
-            {
-                if let (Ok(src_modified), Ok(wasm_modified)) =
-                    (src_meta.modified(), wasm_meta.modified())
-                {
-                    src_modified > wasm_modified
-                } else {
-                    true
-                }
-            } else {
-                true
-            }
-        };
-
-        if !needs_rebuild {
-            println!("  WASM already built and source unchanged");
-        } else {
-            // Remove old pkg directory to force clean rebuild
-            if output_dir.exists() {
-                fs::remove_dir_all(&output_dir)?;
-            }
-
-            let wasm_pack_path = if let Ok(home) = std::env::var("HOME") {
-                format!("{}/.cargo/bin/wasm-pack", home)
-            } else {
-                "wasm-pack".to_string()
-            };
-
-            let status = std::process::Command::new(&wasm_pack_path)
-                .args(["build", "--target", "web"])
-                .current_dir(&output_path)
-                .status()?;
-
-            if !status.success() {
-                return Err(
-                    format!("wasm-pack build failed with exit code: {:?}", status.code()).into(),
-                );
-            }
-            println!("  WASM build complete");
-        }
+        // WASM compilation via tsc is handled externally
+        println!("  Note: --wasm flag requires compilation via tsc. Use `tsc --outDir dist`");
     }
 
     println!("\nRBV compiled successfully");
@@ -3179,7 +3132,101 @@ fn run_wasm(
     }
 }
 
-/// Intent: Generate Rust source with wasm-bindgen glue, then optionally compile with wasm-pack.
+/// Compile a .bv file to a .wasm module for use with (wasm) import.
+/// Runs the standard LLVM pipeline but compiles to wasm32 target.
+fn compile_wasm32_module(
+    file_path: &PathBuf,
+    out_dir: &Path,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("module");
+    let out_base = out_dir.to_path_buf();
+
+    println!("  Compiling WASM module: {} ...", file_path.display());
+
+    // Shared pipeline: parse → resolve → typecheck → LLVM IR
+    let source = fs::read_to_string(file_path)?;
+    let clean_source = strip_annotations(&source);
+    let mut parser = parser::Parser::new(&clean_source);
+    let mut program = parser.parse().map_err(|e| format!("Parse error: {}", e))?;
+
+    let mut import_resolver = import_resolver::ImportResolver::new()
+        .with_use_stdlib(!no_stdlib)
+        .with_stdlib_path(stdlib_path);
+    let mut program = import_resolver
+        .resolve_imports(&program, file_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    program.synthesize_builtin_types();
+    program.synthesize_init_txn();
+
+    let mut tc = typechecker::TypeChecker::new()
+        .with_target(typechecker::CompilationTarget::Interpreter);
+    let type_errors = tc.check_program(&mut program.clone());
+    if !type_errors.is_empty() {
+        return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
+    }
+
+    let _analysis = backend::analyze_program(&program, false);
+
+    // Skip simplify pass for WASM (budget = 0)
+
+    let mut llvm_backend = crate::backend::llvm::LlvmBackend::new()
+        .with_optimize_budget(256)
+        .with_embedded_mode(false);
+    let output = llvm_backend.generate(&program);
+
+    let ll_path = out_base.join(format!("{}.wasm.ll", stem));
+    fs::write(&ll_path, &output)?;
+
+    // Compile .ll → .o via llc (wasm32 target)
+    let obj_path = out_base.join(format!("{}.wasm.o", stem));
+    let llc_result = std::process::Command::new("llc")
+        .args([
+            "-filetype=obj", "-O3",
+            "--mtriple=wasm32-unknown-unknown",
+            "-o",
+        ])
+        .arg(&obj_path)
+        .arg(&ll_path)
+        .status();
+    match llc_result {
+        Ok(status) if status.success() => {}
+        _ => {
+            eprintln!("  Warning: llc wasm32 compilation failed.");
+            eprintln!("  LLVM IR saved at: {}", ll_path.display());
+            eprintln!("  Install LLVM with wasm32 support:");
+            eprintln!("    llc --version  | grep wasm32");
+            return Ok(ll_path);
+        }
+    }
+
+    // Link .o → .wasm via wasm-ld
+    let wasm_path = out_base.join(format!("{}.wasm", stem));
+    let link_result = std::process::Command::new("wasm-ld")
+        .args([
+            "--no-entry", "--export-all",
+            "-o",
+        ])
+        .arg(&wasm_path)
+        .arg(&obj_path)
+        .status();
+    match link_result {
+        Ok(status) if status.success() => {
+            println!("    WASM module: {}", wasm_path.display());
+            Ok(wasm_path)
+        }
+        _ => {
+            eprintln!("  Warning: wasm-ld failed. Install wasm-ld (part of LLVM or wabt).");
+            eprintln!("  Object file: {}", obj_path.display());
+            eprintln!("  Link manually:");
+            eprintln!("    wasm-ld --no-entry --export-all {} -o {}.wasm", obj_path.display(), stem);
+            Ok(obj_path)
+        }
+    }
+}
+
 fn run_webstack(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -3273,7 +3320,7 @@ js-sys = "0.3"
             program = desug.desugar(&program);
 
             let mut tc = typechecker::TypeChecker::new()
-                .with_stdlib_config(no_stdlib, stdlib_path)
+        .with_stdlib_config(no_stdlib, stdlib_path.clone())
                 .with_target(typechecker::CompilationTarget::Wasm);
             let type_errors = tc.check_program(&mut program);
             if !type_errors.is_empty() {

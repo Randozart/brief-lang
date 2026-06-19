@@ -81,6 +81,7 @@ pub struct WebstackGenerator {
     trigger_names: Vec<String>,
     promise_counter: usize,
     pending_promises: Vec<PendingPromise>,
+    wasm_modules: Vec<(String, Vec<u8>)>,   // (module_name, wasm binary) for (wasm) import embedding
 }
 
 #[derive(Debug, Clone)]
@@ -114,7 +115,13 @@ impl WebstackGenerator {
             trigger_names: Vec::new(),
             promise_counter: 0,
             pending_promises: Vec::new(),
+            wasm_modules: Vec::new(),
         }
+    }
+
+    pub fn with_wasm_module(mut self, name: String, binary: Vec<u8>) -> Self {
+        self.wasm_modules.push((name, binary));
+        self
     }
 
     /// Intent: with_spec function.
@@ -653,7 +660,50 @@ impl WebstackGenerator {
         out.push_str("export function createApp(): App {\n");
         out.push_str("  const app = new App();\n");
         out.push_str("  return app;\n");
-        out.push_str("}\n");
+        out.push_str("}\n\n");
+
+        // WASM module embedding from (wasm) import directives
+        if !self.wasm_modules.is_empty() {
+            out.push_str("// WASM modules — compiled from (wasm) import directives\n\n");
+            for (module_name, binary) in &self.wasm_modules {
+                let ts_name = self.ts_ident(module_name);
+                // Embed as byte array literal (compact enough for typical Brief WASM modules)
+                let bytes_ts = binary.iter()
+                    .map(|b| format!("{}", b))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.push_str(&format!(
+                    "const __wasm_{}_bytes = new Uint8Array([{}]);\n",
+                    ts_name, bytes_ts
+                ));
+                out.push_str(&format!(
+                    "let __wasm_{}_instance: WebAssembly.Instance | null = null;\n\n",
+                    ts_name
+                ));
+                out.push_str(&format!(
+                    "export async function init_{}_wasm(): Promise<WebAssembly.Instance> {{\n",
+                    ts_name
+                ));
+                out.push_str(&format!(
+                    "  if (__wasm_{}_instance) return __wasm_{}_instance;\n",
+                    ts_name, ts_name
+                ));
+                out.push_str("  const result = await WebAssembly.instantiate(__wasm_${ts_name}_bytes, {\n");
+                out.push_str("    env: {\n");
+                out.push_str("      print_int: (n: number) => console.log(n),\n");
+                out.push_str("      print_float: (n: number) => console.log(n),\n");
+                out.push_str("      put_char: (c: number) => process.stdout.write(String.fromCharCode(c)),\n");
+                out.push_str("      abort: () => { throw new Error('WASM abort'); },\n");
+                out.push_str("    },\n");
+                out.push_str("  });\n");
+                out.push_str(&format!(
+                    "  __wasm_{}_instance = result.instance;\n",
+                    ts_name
+                ));
+                out.push_str("  return result.instance;\n");
+                out.push_str("}\n\n");
+            }
+        }
 
         out
     }
