@@ -40,6 +40,10 @@ impl LlvmBackend {
     pub(crate) fn emit_stmt(&mut self, out: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
             Statement::Term { values, swan_song, .. } => {
+                // Async/await barrier: wait for all pending async_await calls
+                if self.pending_async_await_count > 0 {
+                    writeln!(out, "{}call void @__barrier_wait__()", indent).ok();
+                }
                 let c = self.pending_cleanup.clone();
                 for s in &c { self.emit_stmt(out, s, indent); }
                 if let Some(swan) = swan_song {
@@ -94,6 +98,10 @@ impl LlvmBackend {
                 }
             }
             Statement::TermBang { values, swan_song, .. } => {
+                // Async/await barrier: wait for all pending async_await calls
+                if self.pending_async_await_count > 0 {
+                    writeln!(out, "{}call void @__barrier_wait__()", indent).ok();
+                }
                 let c = self.pending_cleanup.clone();
                 for s in &c { self.emit_stmt(out, s, indent); }
                 if let Some(swan) = swan_song {
@@ -613,16 +621,29 @@ impl LlvmBackend {
                 }
             }
             Statement::Await { expr, .. } => {
-                let _ = self.emit_expr(out, expr, indent);
+                // Emit call expression and capture result for subsequent use
+                let reg = self.emit_expr(out, expr, indent);
+                // Store result in a temp SSA value that subsequent statements can reference
+                // The TypedRegister from emit_expr already points to the result value.
+                // If the backend needs to reference it later via a named alloca:
+                if !reg.name.is_empty() {
+                    let temp_name = format!("%__await_result_{}", self.txn_counter);
+                    self.txn_counter += 1;
+                    writeln!(out, "{} = alloca i64, align 8", temp_name).ok();
+                    writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, reg, temp_name).ok();
+                }
             }
             Statement::Async { body, .. } => {
+                // Fire-and-forget: emit body but discard any return value
                 self.emit_stmt(out, body, indent);
             }
             Statement::AsyncAwait { body, lhs, .. } => {
+                // Fork-join: emit body, optionally capture result, track barrier
                 self.emit_stmt(out, body, indent);
                 if let Some(name) = lhs {
                     writeln!(out, "{}; %{} = alloca i64, align 8", indent, name).ok();
                 }
+                self.pending_async_await_count += 1;
             }
         }
     }

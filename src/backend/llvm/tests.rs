@@ -4690,3 +4690,53 @@ let spec = crate::target_spec::TargetSpec {
         let has_warning = backend.warnings().iter().any(|w| w.contains("unbounded recursion"));
         assert!(has_warning, "Embedded mode should warn about recursion cycles. Warnings: {:?}", backend.warnings());
     }
+
+    #[test]
+    fn test_llvm_await_emits_call() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let stmt = Statement::Await {
+            expr: Expr::Call("compute".to_string(), vec![Expr::Integer(42)]),
+            modifiers: vec![],
+        };
+        // emit_stmt will try to emit the call — in a minimal context it produces LLVM IR
+        backend.emit_stmt(&mut out, &stmt, "");
+        // Should at least reference the called function
+        assert!(out.contains("compute"), "Await should emit call to compute. Got:\n{}", out);
+    }
+
+    #[test]
+    fn test_llvm_async_await_barrier() {
+        let mut backend = LlvmBackend::new();
+        let mut out = String::new();
+        let inner = Statement::Expression(Expr::Call("work".to_string(), vec![]));
+        let stmt = Statement::AsyncAwait {
+            body: Box::new(inner),
+            lhs: Some("result".to_string()),
+            modifiers: vec![],
+        };
+        backend.emit_stmt(&mut out, &stmt, "");
+        // Should increment pending count
+        assert_eq!(backend.pending_async_await_count, 1, "AsyncAwait should increment pending count");
+        assert!(out.contains("result"), "AsyncAwait with lhs should reference result. Got:\n{}", out);
+    }
+
+    #[test]
+    fn test_llvm_term_barrier_emitted() {
+        let mut backend = LlvmBackend::new();
+        backend.pending_async_await_count = 2;
+        let mut out = String::new();
+        let stmt = Statement::Term { values: vec![], modifiers: vec![], swan_song: None };
+        backend.emit_stmt(&mut out, &stmt, "");
+        assert!(out.contains("__barrier_wait__"), "Term should emit barrier when pending > 0. Got:\n{}", out);
+    }
+
+    #[test]
+    fn test_llvm_term_no_barrier_no_pending() {
+        let mut backend = LlvmBackend::new();
+        backend.pending_async_await_count = 0;
+        let mut out = String::new();
+        let stmt = Statement::Term { values: vec![], modifiers: vec![], swan_song: None };
+        backend.emit_stmt(&mut out, &stmt, "");
+        assert!(!out.contains("__barrier_wait__"), "Term should not emit barrier when pending == 0. Got:\n{}", out);
+    }

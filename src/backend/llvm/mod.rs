@@ -612,6 +612,7 @@ pub struct LlvmBackend {
 
     // ── Embedded Mode ──────────────────────────────────────
     pub(crate) is_embedded: bool,
+    pub(crate) pending_async_await_count: usize,
 }
 
 /// Configuration for embedded (bare-metal) LLVM codegen.
@@ -705,6 +706,7 @@ impl LlvmBackend {
             spirv_kernels: Vec::new(),
             spirv_blobs: Vec::new(),
             is_embedded: false,
+            pending_async_await_count: 0,
         }
     }
 

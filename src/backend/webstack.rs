@@ -76,6 +76,14 @@ pub struct WebstackGenerator {
     pending_cleanup: RefCell<Vec<Statement>>,
     has_cycles: bool,
     trigger_names: Vec<String>,           // trg variable names for dirty-flag integration
+    promise_counter: usize,
+    pending_promises: Vec<PendingPromise>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingPromise {
+    var: String,
+    capture: Option<String>,
 }
 
 /// Intent: WebstackGenerator implementation block.
@@ -101,6 +109,8 @@ impl WebstackGenerator {
             pending_cleanup: RefCell::new(Vec::new()),
             has_cycles: false,
             trigger_names: Vec::new(),
+            promise_counter: 0,
+            pending_promises: Vec::new(),
         }
     }
 
@@ -1282,6 +1292,16 @@ impl WebstackGenerator {
             self.statement_to_rust(output, stmt);
         }
 
+        // Barrier: await all pending async_await promises
+        for promise in &self.pending_promises {
+            if let Some(capture) = &promise.capture {
+                output.push_str(&format!("        let {} = await {};\n", capture, promise.var));
+            } else {
+                output.push_str(&format!("        await {};\n", promise.var));
+            }
+        }
+        self.pending_promises.clear();
+
         output.push_str("\n");
         output.push_str("        // Postcondition\n");
         let post_code = self.expr_to_js_value_for_condition(&txn.contract.post_condition);
@@ -1494,13 +1514,30 @@ impl WebstackGenerator {
             Statement::Oracle { .. } => { /* oracle: not yet implemented */ }
             Statement::Await { expr, .. } => {
                 let expr_code = self.expr_to_js_value(expr);
-                output.push_str(&format!("        {};\n", expr_code));
+                output.push_str(&format!("        let __await_result = await {};\n", expr_code));
             }
             Statement::Async { body, .. } => {
-                self.statement_to_rust(output, body);
+                // Fire-and-forget: emit as plain statement (no await)
+                if let Statement::Expression(expr) = body.as_ref() {
+                    let expr_code = self.expr_to_js_value(expr);
+                    output.push_str(&format!("        {};\n", expr_code));
+                } else {
+                    self.statement_to_rust(output, body);
+                }
             }
-            Statement::AsyncAwait { body, .. } => {
-                self.statement_to_rust(output, body);
+            Statement::AsyncAwait { body, lhs, .. } => {
+                let promise_var = format!("__promise_{}", self.promise_counter);
+                self.promise_counter += 1;
+                if let Statement::Expression(expr) = body.as_ref() {
+                    let expr_code = self.expr_to_js_value(expr);
+                    output.push_str(&format!("        let {} = {};\n", promise_var, expr_code));
+                } else {
+                    self.statement_to_rust(output, body);
+                }
+                self.pending_promises.push(PendingPromise {
+                    var: promise_var,
+                    capture: lhs.clone(),
+                });
             }
         }
     }
