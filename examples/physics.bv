@@ -1,0 +1,18 @@
+// physics.bv — pure compute, no view, no UI dependencies
+// Compiled to WASM via LLVM wasm32 target when imported with (wasm) from a .rbv file.
+// Runs as native WASM with WASI-linked intrinsics.
+
+frgn submit_triangles(verts: Ptr<Float>, count: Int) -> Bool ;
+
+txn simulate(p: Ptr<Float>, n: Int) -> Float {
+    let result: Float = 0.0;
+    var i: Int = 0;
+    rct txn loop [i < n][i == n] {
+        [i < n] {
+            &result = result + (p[i] * p[i]);
+            &i = i + 1;
+        };
+        term;
+    };
+    term result;
+};

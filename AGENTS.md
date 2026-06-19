@@ -19,6 +19,15 @@ proven at compile time, not `unsafe` blocks. See
 - **Compile RBV**: `./target/release/brief-compiler rbv <file.rbv>`
 - **Benchmark**: `bash benchmarks/build_and_bench.sh` — always use this harness (nanosecond CLOCK_MONOTONIC, 5-iteration average). Ad-hoc timing produces false hangs and imprecise numbers.
 
+### Examples Library
+
+Whenever you encounter an obscure or under-documented Brief syntax pattern, create
+a minimal self-contained example in `examples/` and mention it in the relevant
+architecture doc. Name the file after the pattern (e.g., `examples/wasm-import.rbv`).
+
+This builds a living library of real syntax usage. If an example already exists
+for a pattern, add a comment referencing it rather than duplicating.
+
 ### File Types
 - **.bv** - Brief (standard Brief file, cosmopolitan tier — any FFI, any language, OS assumed)
 - **.sbv** - Strict Brief (full contracts required, no sugar defaults)

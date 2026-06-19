@@ -1,0 +1,34 @@
+// rbv-no-script-tags.rbv — Brief-as-default .rbv format
+//
+// Brief code is the default content — no <script> wrapper needed.
+// The <view> section contains the HTML template with b-* directives.
+// The <style> section is optional; CSS can also be imported via:
+//   import "styles.css";
+//
+// The old <script>-wrapped format still works for backward compatibility.
+
+let count: Int = 0;
+let step: Int = 1;
+
+txn increment [true][@count + step == count] {
+    &count = count + step;
+    term;
+};
+
+txn decrement [true][@count - step == count] {
+    &count = count - step;
+    term;
+};
+
+<view>
+<div>
+    <span b-text="count">0</span>
+    <button b-trigger:click="increment">+</button>
+    <button b-trigger:click="decrement">-</button>
+</div>
+</view>
+
+<style>
+body { font-family: sans-serif; }
+button { margin: 0.25em; }
+</style>
