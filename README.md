@@ -49,6 +49,7 @@ Most programming languages are built around _operations in sequence_. Brief desc
 
 *   **All operations are expressed in transactions, and only transactions can call operations. They either complete fully, or not at all.**
     *   Transactions are inherently cyclical. If you properly define a postcondition a cyclically executed transaction will eventually reach, it automatically starts behaving like a loop, but one that can predictably halt.
+    *   A transaction with `[pre][post]` converges when the precondition becomes false. This means the postcondition describes the terminal state, and the precondition is the loop condition. You do not write `while (counter < 100)` -- the precondition `[counter < 100]` already says "keep running while this holds." You do not write `for (i = 0; i < N; i++)` -- the postcondition `[i == @i + 1]` expresses the step and the invariant all at once. The compiler proves the postcondition is reachable and that the loop terminates. One declaration, two jobs.
 *   **Brief doesn't need you to be correct, it just needs you to be right.**
     *   The contract logic often just requires you to declare either the precondition or postcondition, not both.
     *   Contracts are simultaneously specification AND optimization input. In most languages, types/specs are safety rails that constrain what you can do. In Brief, they're also what the optimizer feeds on. The more you declare, the more the compiler can prove, and the faster your program runs.    
@@ -71,6 +72,13 @@ Most programming languages are built around _operations in sequence_. Brief desc
     *   A precondition like `[x < N]` does more than guard the transaction, and uses this information to emit `!range` metadata on the field load, which lets LLVM eliminate bounds checks in the loop body. Because of contracts, we have more metadata, and thus more guarantees about the code. The optimizer feeds on what the prover proves.
     *   This is why strict variants (`.sbv`, `.cbv`) ban sugar syntax. If you are writing hardware or safety-critical code, you should not take shortcuts. The full `[pre][post]` contract is the compiler's primary optimization signal. When you omit one side, you are leaving performance on the table, but also opening yourself up to unpredictable and undefined behaviour. However, sometimes this asks too much of a programmer, which is why the file extension serves as the opt-in.
     *   So, instead of thinking *"safety checks slow me down, I will add them later."*, think *"the compiler cannot optimize what it cannot prove."* Write the contract first. The performance follows.
+*   **Friction is a signal.**
+    *   There is no `if/else` in Brief. There are guarded blocks: `[condition] { body }`. This is not an omission. A guard forces you to ask "what must be true for this to execute?" rather than "which branch do I take?" If it feels harder than `if`, that is because you are specifying an invariant instead of a jump. The friction is the point.
+    *   Operators that alter normal flow are marked with `!`: `term!` exits the program, `trg!` fires a hardware trigger, `sync!` forces a barrier, `$!` marks a high-power macro with access to `compile#`, `gensym#`, and `error#`. The `!` is the language saying "this is not a normal operation." If it feels heavy, good. It should.
+    *   The strict variants (`.sbv`, `.cbv`) exist precisely to add friction. Sugar is banned, full contracts are required. You opt into strictness as your understanding deepens. The compiler does not let you take shortcuts when the material (hardware, safety) cannot afford them.
+*   **...but the compiler must help you through it.**
+    *   Friction without explanation is frustration. Every denied sugar, every strict-mode requirement, every full-contract demand should tell you *why* and *what to do instead*. If the compiler says "no," it should say "here is the path I can accept."
+    *   This is why the language design keeps error messages concrete. A warning like `sugar syntax [[post]] not allowed in .cbv files, write [pre][post] explicitly` is better than `invalid syntax`. The friction exists to make you think, not to waste your time. The compiler's job is to make sure you know the difference.
 
 ## Quick Start
 
