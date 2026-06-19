@@ -3006,7 +3006,7 @@ fn run_rbv(
     let src_dir = output_path.join("src");
     fs::create_dir_all(&src_dir)?;
 
-    let wasm_rs = output.rust_code.clone();
+    let wasm_rs = output.ts_code.clone();
     let module_name = if stem == "main" { "app" } else { stem };
     fs::write(src_dir.join(format!("{}.rs", module_name)), wasm_rs)?;
 
@@ -3292,16 +3292,17 @@ js-sys = "0.3"
                 .unwrap_or_else(|| PathBuf::from("."));
             fs::create_dir_all(&output_path)?;
 
-            let rs_path = output_path.join(format!("{}.rs", stem));
-            fs::write(&rs_path, &output.rust_code)?;
-            println!("  Generated Rust: {}", rs_path.display());
+            let rs_path = output_path.join(format!("{}.ts", stem));
+            fs::write(&rs_path, &output.ts_code)?;
+            println!("  Generated TS: {}", rs_path.display());
 
             let js_path = output_path.join(format!("{}.js", stem));
             fs::write(&js_path, &output.js_glue)?;
             println!("  Generated JS: {}", js_path.display());
 
             if build_wasm {
-                compile_via_wasm_pack(stem, &output_path, &rs_path);
+                // WASM compilation via tsc is handled externally
+                println!("  Note: --wasm flag requires compilation via tsc. Use `tsc --outDir dist`");
             }
 
             Ok(output_path)

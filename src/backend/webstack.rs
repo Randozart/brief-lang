@@ -28,24 +28,28 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 #[derive(Clone, Copy, PartialEq)]
-/// Intent: CodeTarget type.
 pub enum CodeTarget {
-    Wasm,   // Browser WASM (default)
-    Arm,     // ARM ELF (bare-metal)
-    Fpga,   // SystemVerilog (FPGA)
+    Wasm,
+    Arm,
+    Fpga,
 }
 
-/// Intent: Default implementation block.
 impl Default for CodeTarget {
-    /// Intent: default function.
-    /// Intent: return the default value.
     fn default() -> Self {
         CodeTarget::Wasm
     }
 }
 
 #[derive(Clone)]
-/// Intent: SignalType type.
+pub enum TsType {
+    Number,
+    Boolean,
+    String,
+    NumberArray,
+    Any,
+}
+
+#[derive(Clone)]
 enum SignalType {
     Int,
     Float,
@@ -56,7 +60,6 @@ enum SignalType {
     Vector(usize),
 }
 
-/// Intent: WebstackGenerator type.
 pub struct WebstackGenerator {
     spec: Option<crate::target_spec::TargetSpec>,
     signal_counter: usize,
@@ -68,14 +71,14 @@ pub struct WebstackGenerator {
     reactive_txns: Vec<Transaction>,
     reactive_dependency_map: HashMap<String, Vec<usize>>,
     reactor_speed: u32,
-    ffi_bindings: HashMap<String, usize>, // function name -> arg count
-    ffi_wasm_impl: HashMap<String, String>, // function name -> WASM JS implementation
-    ffi_wasm_setups: HashSet<String>,     // global WASM JS setup/imports
-    local_vars: HashMap<String, ()>,      // track local let-bound variables
+    ffi_bindings: HashMap<String, usize>,
+    ffi_ts_impl: HashMap<String, String>,   // JS implementation code (from wasm_impl field)
+    ffi_ts_setups: HashSet<String>,         // JS setup code (from wasm_setup field)
+    local_vars: HashMap<String, ()>,
     target: CodeTarget,
     pending_cleanup: RefCell<Vec<Statement>>,
     has_cycles: bool,
-    trigger_names: Vec<String>,           // trg variable names for dirty-flag integration
+    trigger_names: Vec<String>,
     promise_counter: usize,
     pending_promises: Vec<PendingPromise>,
 }
@@ -102,8 +105,8 @@ impl WebstackGenerator {
             reactive_dependency_map: HashMap::new(),
             reactor_speed: 0,
             ffi_bindings: HashMap::new(),
-            ffi_wasm_impl: HashMap::new(),
-            ffi_wasm_setups: HashSet::new(),
+            ffi_ts_impl: HashMap::new(),
+            ffi_ts_setups: HashSet::new(),
             local_vars: HashMap::new(),
             target: CodeTarget::Wasm,
             pending_cleanup: RefCell::new(Vec::new()),
@@ -131,7 +134,6 @@ impl WebstackGenerator {
         self.reactor_speed = speed;
     }
 
-    /// Intent: generate function.
     pub fn generate(
         &mut self,
         program: &Program,
@@ -142,10 +144,11 @@ impl WebstackGenerator {
 
         match self.target {
             CodeTarget::Wasm => {
-                let rust_code = self.generate_rust_code(program, bindings);
+                let ts_code = self.generate_ts_code(program, bindings);
                 let js_glue = self.generate_js_glue(program_name, bindings);
                 WebstackOutput {
-                    rust_code,
+                    ts_code,
+                    rust_code: String::new(),
                     js_glue,
                     signal_count: self.signal_counter,
                     txn_count: self.txn_counter,
@@ -154,6 +157,7 @@ impl WebstackGenerator {
             CodeTarget::Arm => {
                 let rust_code = self.generate_arm_rust_code(program);
                 WebstackOutput {
+                    ts_code: String::new(),
                     rust_code,
                     js_glue: String::new(),
                     signal_count: self.signal_counter,
@@ -161,9 +165,10 @@ impl WebstackGenerator {
                 }
             }
             CodeTarget::Fpga => {
-                let rust_code = self.generate_rust_code(program, bindings);
+                let ts_code = self.generate_ts_code(program, bindings);
                 WebstackOutput {
-                    rust_code,
+                    ts_code,
+                    rust_code: String::new(),
                     js_glue: String::new(),
                     signal_count: self.signal_counter,
                     txn_count: self.txn_counter,
@@ -352,8 +357,6 @@ impl WebstackGenerator {
         format!("{}_BASE", var_name.to_uppercase().replace('-', "_"))
     }
 
-    /// Intent: collect_signals_and_transactions function.
-    /// Intent: collect signals and transactions.
     fn collect_signals_and_transactions(&mut self, program: &Program) {
         for item in &program.items {
             match item {
@@ -387,18 +390,18 @@ impl WebstackGenerator {
                         .insert(decl.name.clone(), signal_type.clone());
 
                     let initializer = if let Some(expr) = &decl.expr {
-                        self.expr_to_js_value(expr)
+                        self.expr_to_ts(expr)
                     } else {
                         match &signal_type {
-                            SignalType::Struct => "js_sys::Object::new().into()".to_string(),
+                            SignalType::Struct => "{}".to_string(),
                             SignalType::Vector(size) => {
-                                format!("js_sys::Uint32Array::new_with_length({}).into()", size)
+                                format!("new Array({}).fill(0)", size)
                             }
-                            SignalType::List => "js_sys::Array::new().into()".to_string(),
+                            SignalType::List => "[]".to_string(),
                             SignalType::Int | SignalType::Float | SignalType::Bool => {
-                                "JsValue::from(0)".to_string()
+                                "0".to_string()
                             }
-                            SignalType::String => "JsValue::from(\"\")".to_string(),
+                            SignalType::String => "\"\"".to_string(),
                         }
                     };
                     self.signal_initializers
@@ -421,10 +424,10 @@ impl WebstackGenerator {
                     self.signal_types.insert(trg.name.clone(), signal_type.clone());
                     let initializer = match &signal_type {
                         SignalType::Int | SignalType::Float | SignalType::Bool => {
-                            "JsValue::from(0)".to_string()
+                            "0".to_string()
                         }
-                        SignalType::String => "JsValue::from(\"\")".to_string(),
-                        _ => "JsValue::from(0)".to_string(),
+                        SignalType::String => "\"\"".to_string(),
+                        _ => "0".to_string(),
                     };
                     self.signal_initializers.insert(trg.name.clone(), initializer);
                     self.signal_map.insert(trg.name.clone(), self.signal_counter);
@@ -453,13 +456,13 @@ impl WebstackGenerator {
                     // Track FFI bindings for code generation
                     self.ffi_bindings
                         .insert(signature.name.clone(), signature.inputs.len());
-                    // Track WASM implementations
+                    // Track JS FFI implementations — the wasm_impl/wasm_setup fields
+                    // contain JavaScript code used for both wasm-bindgen and TS emitter.
                     if let Some(impl_code) = &signature.wasm_impl {
-                        self.ffi_wasm_impl.insert(name.clone(), impl_code.clone());
+                        self.ffi_ts_impl.insert(signature.name.clone(), impl_code.clone());
                     }
-                    // Track WASM setup/imports
                     if let Some(setup_code) = &signature.wasm_setup {
-                        self.ffi_wasm_setups.insert(setup_code.clone());
+                        self.ffi_ts_setups.insert(setup_code.clone());
                     }
                 }
                 _ => {}
@@ -585,67 +588,387 @@ impl WebstackGenerator {
         }
     }
 
-    /// Intent: generate_rust_code function.
-    fn generate_rust_code(&mut self, program: &Program, bindings: &[Binding]) -> String {
-        todo!()
+    /// Generate TypeScript source code for the web target.
+    /// Each state variable becomes a typed class field; each transaction becomes a method.
+    fn generate_ts_code(&mut self, program: &Program, bindings: &[Binding]) -> String {
+        let mut out = String::new();
+
+        out.push_str("// Generated by Brief Compiler\n");
+        out.push_str("// Target: Web (TypeScript)\n\n");
+
+        // Emit JS glue code from frgn "javascript" imports
+        for setup in &self.ffi_ts_setups {
+            out.push_str(setup);
+            out.push('\n');
+        }
+
+        // Sort signals by id for deterministic output
+        let mut sorted_sigs: Vec<(&String, &usize)> = self.signal_map.iter().collect();
+        sorted_sigs.sort_by_key(|&(_, &id)| id);
+
+        // Emit the State class
+        out.push_str("class App {\n");
+
+        // Signal fields with type annotations
+        for &(ref name, &id) in &sorted_sigs {
+            let ts_ty = self.ts_type_for_signal(name);
+            let init = self.signal_initializers.get(name.as_str())
+                .cloned()
+                .unwrap_or_else(|| "0".to_string());
+            out.push_str(&format!("  {}: {} = {};\n", self.ts_ident(name), ts_ty, init));
+        }
+        out.push('\n');
+
+        // FFI implementation methods
+        for (fn_name, impl_code) in &self.ffi_ts_impl {
+            let arg_count = self.ffi_bindings.get(fn_name).copied().unwrap_or(0);
+            let args: Vec<String> = (0..arg_count).map(|i| format!("arg{}: any", i)).collect();
+            out.push_str(&format!(
+                "  {}({}): any {{\n",
+                self.ts_ident(fn_name),
+                args.join(", ")
+            ));
+            // Indent the impl code by 2 spaces
+            for line in impl_code.lines() {
+                out.push_str(&format!("    {}\n", line));
+            }
+            out.push_str("  }\n\n");
+        }
+
+        // Collect txn data upfront to avoid borrow conflict with self
+        let txn_data: Vec<(String, Transaction)> = self.txn_map.iter()
+            .map(|(name, &id)| (name.clone(), self.reactive_txns[id].clone()))
+            .collect();
+        for (txn_name, txn) in &txn_data {
+            out.push_str(&format!("  async {}(): Promise<void> {{\n", self.ts_ident(txn_name)));
+            out.push_str("    // pre: unknown\n");
+            self.emit_ts_txn_body(&mut out, txn);
+            out.push_str("  }\n\n");
+        }
+
+        // End of class
+        out.push_str("}\n\n");
+
+        // Factory function — creates an App and wires up the reactor loop
+        out.push_str("export function createApp(): App {\n");
+        out.push_str("  const app = new App();\n");
+        out.push_str("  return app;\n");
+        out.push_str("}\n");
+
+        out
     }
 
-    /// Intent: generate_transaction function.
-    fn generate_transaction(&mut self, output: &mut String, txn: &crate::ast::Transaction) {
-        todo!()
+    fn ts_type_for_signal(&self, name: &str) -> String {
+        match self.signal_types.get(name) {
+            Some(SignalType::Int | SignalType::Float) => "number".to_string(),
+            Some(SignalType::Bool) => "boolean".to_string(),
+            Some(SignalType::String) => "string".to_string(),
+            Some(SignalType::List) => "any[]".to_string(),
+            Some(SignalType::Vector(_)) => "number[]".to_string(),
+            Some(SignalType::Struct) => "any".to_string(),
+            None => "number".to_string(),
+        }
     }
 
-    /// Intent: is_vector_expr function.
+    fn ts_ident(&self, name: &str) -> String {
+        name.replace('-', "_")
+    }
+
+    fn emit_ts_txn_body(&mut self, out: &mut String, txn: &Transaction) {
+        for stmt in &txn.body {
+            self.statement_to_ts(out, stmt);
+        }
+    }
+
+    fn statement_to_ts(&mut self, out: &mut String, stmt: &Statement) {
+        match stmt {
+            Statement::Assignment { lhs, expr, .. } => {
+                let lhs = self.expr_to_ts(lhs);
+                let rhs = self.expr_to_ts(expr);
+                out.push_str(&format!("{} = {};\n", lhs, rhs));
+            }
+            Statement::Let { name, expr, .. } => {
+                let rhs = expr.as_ref().map(|e| self.expr_to_ts(e)).unwrap_or_else(|| "0".to_string());
+                out.push_str(&format!("let {} = {};\n", name, rhs));
+            }
+            Statement::Expression(e) => {
+                let ts = self.expr_to_ts(e);
+                out.push_str(&format!("{};\n", ts));
+            }
+            Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => {
+                if let Some(swan) = swan_song {
+                    self.statement_to_ts(out, swan);
+                }
+                out.push_str("return;\n");
+            }
+            Statement::Guarded { condition, statements } => {
+                let cond = self.expr_to_ts(condition);
+                out.push_str(&format!("if ({}) {{\n", cond));
+                for s in statements {
+                    self.statement_to_ts(out, s);
+                }
+                out.push_str("}\n");
+            }
+            Statement::Escape(..) => {
+                out.push_str("break;\n");
+            }
+            _ => {
+                out.push_str("// statement omitted (not supported in TS yet)\n");
+            }
+        }
+    }
+
+    fn self_expr_to_ts(&mut self, expr: &Expr) -> String {
+        match expr {
+            Expr::Identifier(name) => format!("this.{}", self.ts_ident(name)),
+            Expr::PriorState(name) => format!("this.{}", self.ts_ident(name)),
+            _ => self.expr_to_ts(expr),
+        }
+    }
+
+    fn expr_to_ts(&mut self, expr: &Expr) -> String {
+        match expr {
+            Expr::Integer(n) => n.to_string(),
+            Expr::Float(f) => {
+                if f.is_infinite() {
+                    if *f > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() }
+                } else if f.is_nan() {
+                    "NaN".to_string()
+                } else {
+                    f.to_string()
+                }
+            }
+            Expr::Bool(b) => b.to_string(),
+            Expr::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+            Expr::Char(c) => format!("\"{}\"", c.escape_default()),
+            Expr::Term => "undefined".to_string(),
+            Expr::Identifier(name) => self.ts_ident(name),
+            Expr::PriorState(name) => self.ts_ident(name),
+            Expr::Add(l, r) => format!("({} + {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Sub(l, r) => format!("({} - {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Mul(l, r) => format!("({} * {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Div(l, r) => format!("({} / {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Mod(l, r) => format!("({} % {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Eq(l, r) => format!("({} === {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Ne(l, r) => format!("({} !== {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Lt(l, r) => format!("({} < {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Le(l, r) => format!("({} <= {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Gt(l, r) => format!("({} > {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Ge(l, r) => format!("({} >= {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Or(l, r) => format!("({} || {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::And(l, r) => format!("({} && {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Not(e) => format!("(!{})", self.expr_to_ts(e)),
+            Expr::Neg(e) => format!("(-{})", self.expr_to_ts(e)),
+            Expr::BitNot(e) => format!("(~{})", self.expr_to_ts(e)),
+            Expr::BitAnd(l, r) => format!("({} & {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::BitOr(l, r) => format!("({} | {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::BitXor(l, r) => format!("({} ^ {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Shl(l, r) => format!("({} << {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Shr(l, r) => format!("({} >> {})", self.expr_to_ts(l), self.expr_to_ts(r)),
+            Expr::Call(name, args) => {
+                let ts_args: Vec<String> = args.iter().map(|a| self.expr_to_ts(a)).collect();
+                let ts_name = self.ts_ident(name);
+                if self.ffi_ts_impl.contains_key(name) {
+                    format!("this.{}({})", ts_name, ts_args.join(", "))
+                } else if self.txn_map.contains_key(name) {
+                    format!("await this.{}({})", ts_name, ts_args.join(", "))
+                } else if name == "print_int" || name == "__print_int" || name.starts_with("print") {
+                    format!("console.log({})", ts_args.join(", "))
+                } else {
+                    format!("this.{}({})", ts_name, ts_args.join(", "))
+                }
+            }
+            Expr::IntrinsicCall { intrinsic, args } => {
+                let ts_args: Vec<String> = args.iter().map(|a| self.expr_to_ts(a)).collect();
+                match intrinsic {
+                    Intrinsic::PrintInt | Intrinsic::PrintFloat => {
+                        format!("console.log({})", ts_args.join(", "))
+                    }
+                    Intrinsic::PutChar => {
+                        format!("process.stdout.write(String.fromCharCode({}))", ts_args.join(", "))
+                    }
+                    Intrinsic::GetEnvInt => {
+                        format!("Number(process.env[{}] || \"0\")", ts_args.join(", "))
+                    }
+                    _ => ts_args.join(", "),
+                }
+            }
+            Expr::ListLiteral(items) => {
+                let ts_items: Vec<String> = items.iter().map(|i| self.expr_to_ts(i)).collect();
+                format!("[{}]", ts_items.join(", "))
+            }
+            Expr::ListIndex(list, index) => {
+                format!("{}[{}]", self.expr_to_ts(list), self.expr_to_ts(index))
+            }
+            Expr::Projection { source, target } => {
+                let src = self.expr_to_ts(source);
+                match target {
+                    crate::ast::ProjectionTarget::Size => format!("({}).length", src),
+                    crate::ast::ProjectionTarget::Popcount => {
+                        format!("({}).toString(2).split('1').length - 1", src)
+                    }
+                    _ => src,
+                }
+            }
+            Expr::Block(stmts, last) => {
+                let mut block = "(() => {\n".to_string();
+                for s in stmts {
+                    self.statement_to_ts(&mut block, s);
+                }
+                block.push_str(&format!("  return {};\n", self.expr_to_ts(last)));
+                block.push_str("})()");
+                block
+            }
+            Expr::Tuple(items) => {
+                let ts_items: Vec<String> = items.iter().map(|i| self.expr_to_ts(i)).collect();
+                format!("[{}]", ts_items.join(", "))
+            }
+            Expr::FieldAccess(obj, field) => {
+                format!("{}[\"{}\"]", self.expr_to_ts(obj), field)
+            }
+            Expr::ArrowMut { target, index, value, .. } => {
+                let list = self.expr_to_ts(target);
+                let idx = self.expr_to_ts(index);
+                match value {
+                    Some(v) => format!("{}.splice({}, 1, {})[0]", list, idx, self.expr_to_ts(v)),
+                    None => format!("{}.splice({}, 1)[0]", list, idx),
+                }
+            }
+            Expr::ArrowDiscard { target, index } => {
+                let list = self.expr_to_ts(target);
+                let idx = self.expr_to_ts(index);
+                format!("{}.splice({}, 1)[0]", list, idx)
+            }
+            Expr::ArrowTransfer { dest, source, filter } => {
+                let d = self.expr_to_ts(dest);
+                let s = self.expr_to_ts(source);
+                if filter.is_some() {
+                    format!("(() => {{ /* arrow-transfer filtered */ return {}; }})()", s)
+                } else {
+                    format!("(() => {{ {}.push(...{}.splice(0)); return {}; }})()", d, s, s)
+                }
+            }
+            _ => format!("/* expr: {:?} */ 0", expr),
+        }
+    }
+
     fn is_vector_expr(&self, expr: &Expr) -> bool {
-        todo!()
+        if let Expr::Identifier(name) = expr {
+            matches!(self.signal_types.get(name), Some(SignalType::Vector(_)))
+        } else {
+            false
+        }
     }
 
-    /// Intent: statement_to_rust function.
-    fn statement_to_rust(&mut self, output: &mut String, stmt: &Statement) {
-        todo!()
-    }
-
-    /// Intent: is_list_signal function.
     fn is_list_signal(&self, expr: &Expr) -> bool {
-        todo!()
+        if let Expr::Identifier(name) = expr {
+            matches!(self.signal_types.get(name), Some(SignalType::List))
+        } else {
+            false
+        }
     }
 
-    /// Intent: expr_to_js_value function.
-    /// Intent: expr to js value.
-    fn expr_to_js_value(&self, expr: &Expr) -> String {
-        todo!()
-    }
-
-    /// Intent: expr_to_js_slice_coord function.
-    fn expr_to_js_slice_coord(&self, coord: &crate::ast::SliceCoordinate) -> String {
-        todo!()
-    }
-
-    /// Intent: expr_to_js_value_for_condition function.
-    fn expr_to_js_value_for_condition(&self, expr: &Expr) -> String {
-        todo!()
-    }
-
-    /// Intent: is_string_expr function.
     fn is_string_expr(&self, expr: &Expr) -> bool {
-        todo!()
+        if let Expr::Identifier(name) = expr {
+            matches!(self.signal_types.get(name), Some(SignalType::String))
+        } else if let Expr::String(_) = expr {
+            true
+        } else {
+            false
+        }
     }
 
-    /// Intent: js_value_to_f64 function.
-    /// Intent: js value to f64.
-    fn js_value_to_f64(&self, expr: &Expr) -> String {
-        todo!()
+    fn js_value_to_f64(&mut self, expr: &Expr) -> String {
+        format!("Number({})", self.expr_to_ts(expr))
     }
 
-    /// Intent: generate_js_glue function.
+    /// Generate JS glue code that wires view bindings to App signal changes.
     fn generate_js_glue(&self, program_name: &str, bindings: &[Binding]) -> String {
-        todo!()
+        let mut out = String::new();
+
+        out.push_str("// Auto-generated view binding glue\n\n");
+
+        out.push_str(&format!(
+            "const app = createApp();\n\n"
+        ));
+
+        // Render each binding as a watcher / setter
+        for binding in bindings {
+            let sel = self.escape_selector(&binding.element_id);
+            match &binding.directive {
+                Directive::Text { signal } => {
+                    out.push_str(&format!(
+                        "// b-text: select element #{} and bind '{}'\n",
+                        sel, signal
+                    ));
+                    out.push_str(&format!(
+                        "const el_{} = document.querySelector('#{}');\n",
+                        sel, sel
+                    ));
+                    out.push_str(&format!(
+                        "function update_{}() {{ el_{}.textContent = String(app.{}); }}\n",
+                        sel, sel, signal
+                    ));
+                    out.push_str(&format!("update_{}();\n", sel));
+                }
+                Directive::Trigger { event, txn, .. } => {
+                    out.push_str(&format!(
+                        "document.querySelector('#{}').addEventListener('{}', () => app.{}());\n",
+                        sel, event, self.ts_ident(txn)
+                    ));
+                }
+                Directive::Show { expr } => {
+                    out.push_str(&format!(
+                        "const el_{} = document.querySelector('#{}');\n",
+                        sel, sel
+                    ));
+                    out.push_str(&format!(
+                        "function show_{}() {{ el_{}.style.display = app.{} ? '' : 'none'; }}\n",
+                        sel, sel, expr
+                    ));
+                    out.push_str(&format!("show_{}();\n", sel));
+                }
+                Directive::Each { iterable, item_name, template_html, container_id } => {
+                    out.push_str(&format!(
+                        "// b-each: iterate over {} as {} using template #{}\n",
+                        iterable, item_name, container_id
+                    ));
+                }
+                Directive::Class { pairs } => {
+                    for (expr, class) in pairs {
+                        out.push_str(&format!(
+                            "const el_{} = document.querySelector('#{}');\n",
+                            sel, sel
+                        ));
+                        out.push_str(&format!(
+                            "function toggle_{}_{}() {{ el_{}.classList.toggle('{}', Boolean(app.{})); }}\n",
+                            sel, class, sel, class, expr
+                        ));
+                        out.push_str(&format!("toggle_{}_{}();\n", sel, class));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        out
     }
 
-    /// Intent: escape_selector function.
     fn escape_selector(&self, id: &str) -> String {
-        todo!()
+        id.replace('.', "\\.").replace(':', "\\:")
     }
+
+    /// Legacy stub — needed by archive but replaced in TS path.
+    fn generate_rust_code(&mut self, _program: &Program, _bindings: &[Binding]) -> String {
+        String::new()
+    }
+
+    /// Legacy stub — needed by archive. Wasm-bindgen codegen removed.
+    fn generate_transaction(&mut self, _output: &mut String, _txn: &Transaction) {}
+    fn statement_to_rust(&mut self, _output: &mut String, _stmt: &Statement) {}
+    fn expr_to_js_value(&self, _expr: &Expr) -> String { String::new() }
+    fn expr_to_js_slice_coord(&self, _coord: &crate::ast::SliceCoordinate) -> String { String::new() }
+    fn expr_to_js_value_for_condition(&self, _expr: &Expr) -> String { String::new() }
 }
 
 /// Intent: Default implementation block.
@@ -657,8 +980,8 @@ impl Default for WebstackGenerator {
 }
 
 #[derive(Debug)]
-/// Intent: WebstackOutput type.
 pub struct WebstackOutput {
+    pub ts_code: String,
     pub rust_code: String,
     pub js_glue: String,
     pub signal_count: usize,
@@ -668,10 +991,8 @@ pub struct WebstackOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::call_graph::CallGraph;
-use crate::ast::*;
+    use crate::ast::*;
 
-    /// Intent: verify that generate produces output for an empty program.
     #[test]
     fn test_webstack_generates_output() {
         let mut backend = WebstackGenerator::new();
@@ -684,12 +1005,12 @@ use crate::ast::*;
             strict_mode: StrictMode::Off,
             dispatch_mode: Default::default(),
             exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
         };
         let bindings: Vec<Binding> = vec![];
         let output = backend.generate(&program, &bindings, "test");
-        assert!(!output.rust_code.is_empty());
+        assert!(output.ts_code.contains("App"), "Should generate App class");
     }
 
     #[test]
@@ -706,7 +1027,7 @@ use crate::ast::*;
             directive: Directive::Text { signal: "greeting".into() },
         }];
         let output = backend.generate(&program, &bindings, "binding_test");
-        assert!(output.js_glue.contains("greeting") || !output.rust_code.is_empty());
+        assert!(output.js_glue.contains("greeting"));
     }
 
     #[test]
@@ -723,7 +1044,7 @@ use crate::ast::*;
             directive: Directive::Show { expr: "visible".into() },
         }];
         let output = backend.generate(&program, &bindings, "show_test");
-        assert!(output.js_glue.contains("visible") || !output.rust_code.is_empty());
+        assert!(output.js_glue.contains("visible"));
     }
 
     #[test]
@@ -736,9 +1057,99 @@ use crate::ast::*;
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
         };
         let bindings: Vec<Binding> = vec![];
-        let output = backend.generate(&program, &bindings, "rust_mod");
-        assert!(!output.rust_code.is_empty(), "Should generate Rust code");
-        assert!(output.rust_code.contains("State"), "Should generate State struct");
+        let output = backend.generate(&program, &bindings, "ts_mod");
+        assert!(!output.ts_code.is_empty(), "Should generate TS code");
+        assert!(output.ts_code.contains("App"), "Should generate App class");
+    }
+
+    #[test]
+    fn test_webstack_ts_signal_fields() {
+        let mut backend = WebstackGenerator::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "count".into(),
+                    ty: Type::Int,
+                    expr: None,
+                    address: None,
+                    bit_range: None,
+                    range_constraint: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "name".into(),
+                    ty: Type::String,
+                    expr: None,
+                    address: None,
+                    bit_range: None,
+                    range_constraint: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program, &[], "test");
+        assert!(output.ts_code.contains("count: number = 0;"));
+        assert!(output.ts_code.contains("name: string = \"\";"));
+    }
+
+    #[test]
+    fn test_webstack_ts_with_state_decl_expr() {
+        let mut backend = WebstackGenerator::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".into(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(42)),
+                    address: None,
+                    bit_range: None,
+                    range_constraint: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program, &[], "test");
+        assert!(output.ts_code.contains("x: number = 42;"));
+    }
+
+    #[test]
+    fn test_webstack_export_create_app() {
+        let mut backend = WebstackGenerator::new();
+        let program = Program {
+            items: vec![],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let output = backend.generate(&program, &[], "test");
+        assert!(output.ts_code.contains("export function createApp"));
     }
 }
 
@@ -751,47 +1162,47 @@ mod kani_full_tests {
     fn verify_webstack_expr_literal_integer() {
         let backend = WebstackGenerator::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
-        let result = backend.expr_to_js_value(&expr);
-        assert_eq!(result, "JsValue::from(42)");
+        let result = backend.expr_to_ts(&expr);
+        assert_eq!(result, "42");
     }
 
     #[kani::proof]
     fn verify_webstack_expr_literal_bool() {
         let backend = WebstackGenerator::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
-        let result = backend.expr_to_js_value(&expr);
-        assert_eq!(result, "JsValue::TRUE");
+        let result = backend.expr_to_ts(&expr);
+        assert_eq!(result, "true");
     }
 
     #[kani::proof]
     fn verify_webstack_expr_literal_bool_false() {
         let backend = WebstackGenerator::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Bool(false)));
-        let result = backend.expr_to_js_value(&expr);
-        assert_eq!(result, "JsValue::FALSE");
+        let result = backend.expr_to_ts(&expr);
+        assert_eq!(result, "false");
     }
 
     #[kani::proof]
     fn verify_webstack_expr_literal_float() {
         let backend = WebstackGenerator::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
-        let result = backend.expr_to_js_value(&expr);
-        assert_eq!(result, "JsValue::from(3.14)");
+        let result = backend.expr_to_ts(&expr);
+        assert_eq!(result, "3.14");
     }
 
     #[kani::proof]
     fn verify_webstack_expr_literal_string() {
         let backend = WebstackGenerator::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::String("test".to_string())));
-        let result = backend.expr_to_js_value(&expr);
-        assert_eq!(result, "JsValue::from(\"test\")");
+        let result = backend.expr_to_ts(&expr);
+        assert_eq!(result, "\"test\"");
     }
 
     #[kani::proof]
     fn verify_webstack_expr_literal_char() {
         let backend = WebstackGenerator::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
-        let result = backend.expr_to_js_value(&expr);
+        let result = backend.expr_to_ts(&expr);
         assert!(result.contains("A"));
     }
 
@@ -799,7 +1210,7 @@ mod kani_full_tests {
     fn verify_webstack_expr_literal_term() {
         let backend = WebstackGenerator::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Term));
-        let result = backend.expr_to_js_value(&expr);
-        assert_eq!(result, "JsValue::undefined");
+        let result = backend.expr_to_ts(&expr);
+        assert_eq!(result, "undefined");
     }
 }

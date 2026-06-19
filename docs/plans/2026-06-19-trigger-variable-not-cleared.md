@@ -5,11 +5,11 @@
 
 ## Overview
 
-Two-phased work: (A) immediate fixes for the officina character-repeat bug, (B) architectural addition to let macros emit top-level items so keyboard input becomes a one-line decorator.
+Three-phased work: (A) immediate fixes for the officina character-repeat bug, (B) macro decorator architecture for painless keyboard input, (C) interactive-only spurious epoll wakeup fix.
 
 ---
 
-## Phase A — Immediate Fixes (ready now)
+## Phase A — Immediate Fixes (committed at 28e2195)
 
 ### A1: `loop_engine.rs:1264-1272` — type-correct load/store in `step()`
 
@@ -203,8 +203,86 @@ let orc    = Enemy{ hp: 20, ... };
 
 This is future work. The `$!keyboard_input` decorator (Phase B) works within the current single-instance reactor model. Per-instance reactivity only becomes relevant when we need hundreds of independently ticking entities — a game engine use case.
 
+### Phase C — Spurious Epoll Wakeup Guard (ready now)
+
+### C1: Root cause
+
+The stdin handler in `emit_trg_event_epoll_wait` (`loop_engine.rs:1436`) discards `read()`'s return value:
+
+```rust
+// loop_engine.rs:1436 — return value assigned but NEVER checked:
+writeln!(out, "  %rd_{}_{} = call i64 @read(i32 0, i8* {}, i64 1)", ...)
+// ...
+// loop_engine.rs:1440-1441 — loads garbage if read() returned -1 or 0:
+let ch_ld = format!("%chld_{}_{}", tc, name);
+writeln!(out, "  {} = load i8, i8* {}, align 1", ch_ld, ch_slot)
+```
+
+On some Linux kernels, `epoll_wait` on a TTY fd with `O_NONBLOCK` + raw mode can return spurious wakeups. `read()` returns `-1/EAGAIN`, but the handler stores the **uninitialized `alloca` garbage** into the `keypress` state field. This garbage is non-zero, so `process_input` fires with it every tick — creating a tight 100% CPU loop.
+
+When the user presses Enter, the byte `\n` finally succeeds on `read()`, triggering `[k == '\n'] { &running = false; }` which causes the render txn to exit the program.
+
+### C2: Fix — `loop_engine.rs:1432-1484`
+
+**Before**: All trigger arms (`Stdin`, `Timer`, `Signal`, `_`) share a common `step()` + `br %t_skip` after the match block. `Stdin` never validates `read()`'s result.
+
+**After**: Each arm gets its own `step()` + `br %t_skip`. `Stdin` checks `read() > 0` before storing the byte or calling `step()`.
+
+| Arm | Change |
+|-----|--------|
+| `Stdin` | After `read()`: `icmp sgt i64 %rd, 0` → if true, store byte + step() + br t_skip; if false, br t_skip (skip store and step entirely) |
+| `Timer` | Add `step()` + `br %t_skip` inside arm (moved from post-match) |
+| `Signal` | Add `step()` + `br %t_skip` inside arm (moved from post-match) |
+| `_` | Add `step()` + `br %t_skip` inside arm (moved from post-match) |
+| Post-match (lines 1480-1484) | Remove step/br lines, keep only `t_skip:` label |
+
+**Stdin arm code after**:
+
+```rust
+crate::ast::LinkRef::Stdin => {
+    let ch_slot = format!("%ch_{}_{}", tc, name);
+    writeln!(out, "  {} = alloca i8, i64 1, align 1", ch_slot).ok();
+    let rd_res = format!("%rd_{}_{}", tc, name);
+    writeln!(out, "  {} = call i64 @read(i32 0, i8* {}, i64 1)", rd_res, ch_slot).ok();
+    let rd_ok = format!("%rdok_{}_{}", tc, name);
+    writeln!(out, "  {} = icmp sgt i64 {}, 0", rd_ok, rd_res).ok();
+    let store_lbl = format!("rds_{}_{}", tc, name);
+    writeln!(out, "  br i1 {}, label %{}, label %{}", rd_ok, store_lbl, t_skip).ok();
+    writeln!(out, "{}:", store_lbl).ok();
+    if let Some(&idx) = backend.field_index_map.get(name) {
+        // ... existing typed store logic unchanged ...
+    }
+    let drx = format!("%drx_{}_{}", tc, name);
+    writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
+    writeln!(out, "  call void @step(%State* %state, i64 {})", drx).ok();
+    writeln!(out, "  br label %{}", t_skip).ok();
+}
+```
+
+### C3: What happens on a spurious wakeup
+
+1. `epoll_wait` returns (spurious — no actual data on fd 0)
+2. Handler matches bit → enters Stdin arm
+3. `read(0, &ch, 1)` returns -1 (EAGAIN)
+4. `icmp sgt i64 %rd, 0` → false
+5. `br %t_skip` → **skip store, skip step()**
+6. Back to `tick:` → guard `keypress != '\0'` still false (unchanged)
+7. `epoll_wait` called again — blocks normally
+
+On a REAL wakeup (user types a key), `read()` returns 1, store+step+process_input fire normally. One character, one fire, no repeat.
+
+### C4: Verification
+
+```bash
+cargo test --lib             # all tests pass
+./target/release/brief-compiler build ~/Desktop/Projects/officina-cli/officina.bv
+# Interactive: run ./officina, type characters — no repeats, no freeze
+printf "hello\x03" | timeout 3 ./officina    # pipe test still works
+```
+
 ### Execution Order
 
-1. Phase A fixes (proven, scoped, ready now)
-2. Phase B architecture (requires AST + parser + expander + stdlib changes)
-3. Future: per-instance reactive structs (when game-engine work begins)
+1. ~~Phase A fixes (committed at 28e2195)~~
+2. **Phase C — spurious epoll guard (ready now)**
+3. Phase B architecture (requires AST + parser + expander + stdlib changes)
+4. Future: per-instance reactive structs (when game-engine work begins)
