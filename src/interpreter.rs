@@ -10172,4 +10172,40 @@ mod kani_full_tests {
         }
     }
 
+    #[test]
+    fn test_interp_await() {
+        let mut i = Interpreter::new();
+        let stmt = Statement::Await {
+            expr: Expr::Integer(42),
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.return_value, Some(Value::Int(42)));
+    }
+
+    #[test]
+    fn test_interp_async() {
+        let mut i = Interpreter::new();
+        let inner = Statement::Expression(Expr::Integer(42));
+        let stmt = Statement::Async {
+            body: Box::new(inner),
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        // Async is fire-and-forget — return_value should not be set
+        assert!(i.return_value.is_none());
+    }
+
+    #[test]
+    fn test_interp_async_await() {
+        let mut i = Interpreter::new();
+        let inner = Statement::Expression(Expr::Integer(99));
+        let stmt = Statement::AsyncAwait {
+            body: Box::new(inner),
+            lhs: Some("result".to_string()),
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("result"), Some(&Value::Int(99)));
+    }
 }

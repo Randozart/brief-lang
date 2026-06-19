@@ -9203,4 +9203,62 @@ mod kani_full_tests {
             }
         }
     }
+
+    #[test]
+    fn test_parse_await_expr() {
+        let s = r#"txn Test [true][true] { await compute(x); };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse await");
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            assert!(matches!(&txn.body[0], Statement::Await { .. }));
+        } else {
+            panic!("Expected Transaction");
+        }
+    }
+
+    #[test]
+    fn test_parse_async_expr() {
+        let s = r#"txn Test [true][true] { async compute(x); };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse async");
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            assert!(matches!(&txn.body[0], Statement::Async { .. }));
+        } else {
+            panic!("Expected Transaction");
+        }
+    }
+
+    #[test]
+    fn test_parse_async_await_expr() {
+        let s = r#"txn Test [true][true] { async await compute(x); };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse async await");
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::AsyncAwait { lhs, .. } => assert!(lhs.is_none()),
+                _ => panic!("Expected AsyncAwait with no lhs"),
+            }
+        } else {
+            panic!("Expected Transaction");
+        }
+    }
+
+    #[test]
+    fn test_parse_async_await_let() {
+        let s = r#"txn Test [true][true] { async await let r = compute(x); };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse async await let");
+        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
+            match &txn.body[0] {
+                Statement::AsyncAwait { lhs, .. } => assert_eq!(lhs.as_deref(), Some("r")),
+                _ => panic!("Expected AsyncAwait with lhs=r"),
+            }
+        } else {
+            panic!("Expected Transaction");
+        }
+    }
 }
