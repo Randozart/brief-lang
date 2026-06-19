@@ -469,3 +469,21 @@ Line-buffered stdout (`_IOLBF = 1`). Only `println#` emits explicit `fflush(stdo
 `print_int#`, `print_float#`, and `putchar#` rely on automatic line-buffering to flush.
 This is a single declarative policy at program startup — no per-intrinsic flush logic
 to maintain.
+
+## Known Limitations (2026-06-19)
+
+The following are tracked but not yet implemented:
+
+| Area | Issue | Priority |
+|------|-------|----------|
+| `PriorState` | `@var` fixed — now loads from committed SSA state | ✅ Fixed |
+| Named addresses | `@FOO` now produces clear error instead of 0 | ✅ Fixed |
+| `to_str`/`float_to_str` | LLVM panics fixed — uses `__int_to_str__`/`snprintf` | ✅ Fixed |
+| Webstack `IntrinsicCall` | Replaced `unimplemented!()` panic with JS codegen | ✅ Fixed |
+| Webstack `foreach`/`oracle` | Replaced silent no-op with implementations | ✅ Fixed |
+| Pattern B dispatch | 13 `features/stmt/` files + 16 interpreter arms — stub | Deferred |
+| `$!` macro expansion | Full engine required — `expand_macro_call` returns error | Deferred |
+| `Private` field visibility | Parsed but silently not enforced in typechecker | Low |
+| LLVM `add i64 0, 0` no-ops | 38 error-handling fallbacks across LLVM backend | Low |
+| Webstack Arm codegen | `generate_arm_rust_code` uses placeholder body (no `&mut self`) | Low |
+
