@@ -11,7 +11,7 @@
 
 **Status:** v0.15.0 - Three Canonical Backends, Contract-Proven Optimizations
 
-Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target — each one optimizes the same contract-proven logic for a different material:
+Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target. Each one optimizes the same contract-proven logic for a different material:
 
 | Extension | Variant | Compiles to |
 |-----------|---------|-------------|
@@ -20,7 +20,8 @@ Brief is a declarative, contract-enforced logic language designed for building v
 | `.ebv` | **Embedded Brief** | LLVM microcontroller binary |
 | `.abv` | **Accelerated Brief** | SPIR-V GPU kernel |
 | `.cbv` | **Circuit Brief** | CIRCT hardware description (Verilog/VHDL) |
-| `.dbv` | **Data Brief** | Configuration data parsed by Brief itself |
+| `.dbv` / `.dbvs` / `.dbvl` | **Data Brief** | Configuration data parsed by Brief itself |
+| `.sbv` / `.sebv` / `.srbv` | **Strict Brief** | Same as base variant, but full contracts required |
 
 The main sources of inspiration are Rust (by Graydon Hoare and the Rust community) and Dialog (by Linus Åkesson). Specifically the fact that both have a very strict compiler, that catches bad code before it ever compiles, simply through smart conventions. Especially the declarative nature is inspired by Dialog, as a direct successor of Prolog, since Dialog showed that setting up a series of predicates could be sufficient to have a compiler figure out a complex runtime capable of simulating a world. And the reactor loop? That was inspired by, well... React. As such, everything in Brief is designed to, in some way, aid in predictable runtime cascades. You set up the first billiard ball, and based on the variables present describing the overall "state", the rest of the balls predictably scatter.
 
@@ -136,20 +137,32 @@ txn main() [true][true] {
 
 ## Language Variants
 
-The file extension selects which backend compiles your program:
+The file extension selects which backend compiles your program, and what syntax rules apply. Each variant is a different *view* of the same contract-proven core — the same reactive transaction model, the same `[pre][post]` contracts — but adapted for a different material or strictness tier:
 
 | Type | File Ext | Description | Compilation Target |
 |------|----------|-------------|-------------------|
 | <img src="assets/brief-icon.svg" alt="Brief" width="25"/> **Brief** | `.bv` | Pure declarative logic | LLVM → native binary, optional SPIR-V offload |
-| <img src="assets/a-brief-icon.svg" alt="Brief Accel" width="25"/> **Accelerated Brief** | `.abv` | GPU compute kernel | SPIR-V |
+| <img src="assets/a-brief-icon.svg" alt="Brief Accel" width="25"/> **Accelerated Brief** | `.abv` | GPU compute kernel | SPIR-V (GPU intrinsics, no FFI, restricted types) |
 | <img src="assets/r-brief-icon.svg" alt="Rendered Brief" width="25"/> **Rendered Brief** | `.rbv` | Reactive web UI | TypeScript + WASM sidecars + view bindings |
-| <img src="assets/e-brief-icon.svg" alt="Embedded Brief" width="25"/> **Embedded Brief** | `.ebv` | Microcontroller bare-metal | LLVM → microcontroller binary |
-| <img src="assets/c-brief-icon.svg" alt="Circuit Brief" width="25"/> **Circuit Brief** | `.cbv` | Pure hardware logic graph | CIRCT → Verilog/VHDL |
-| <img src="assets/d-brief-icon.svg" alt="Data Brief" width="25"/> **Data Brief** | `.dbv` | Configuration data + schema | Data validation only |
-| <img src="assets/d-brief-icon.svg" alt="Data Brief Schema" width="25"/> **Data Brief Schema** | `.dbvs` | FFI bindings schema | Used by `brief bind` |
-| <img src="assets/d-brief-icon.svg" alt="Data Brief Lines" width="25"/> **Data Brief Lines** | `.dbvl` | Line-based databases | All targets |
+| <img src="assets/e-brief-icon.svg" alt="Embedded Brief" width="25"/> **Embedded Brief** | `.ebv` | Microcontroller bare-metal | LLVM → microcontroller binary (no OS, no GC) |
+| <img src="assets/c-brief-icon.svg" alt="Circuit Brief" width="25"/> **Circuit Brief** | `.cbv` | Pure hardware logic graph | CIRCT → Verilog/VHDL (no FFI, no external deps) |
+| <img src="assets/d-brief-icon.svg" alt="Data Brief" width="25"/> **Data Brief** | `.dbv` / `.dbvs` / `.dbvl` | Configuration data, schemas, line-based databases | Parsed and validated by Brief itself, consumed by all targets |
 
-**Strict variants** (`.sbv`, `.srbv`, `.sebv`) require full both-sided contracts — sugar syntax (`[[`, `]]`) is banned.
+### Why Variants Exist
+
+Each variant has a different *contract baseline* and *feature set* appropriate to its target. The `s` prefix (Strict Brief — `.sbv`, `.srbv`, `.sebv`) uses the **same backend** as its base variant but enforces stricter syntax rules:
+
+| Variant | Contract Sugar | FFI Targets Allowed | Intrinsics vs `frgn` | Typical Use |
+|---------|---------------|---------------------|---------------------|-------------|
+| `.bv` (Brief) | ✅ `[[post]]`, `[pre]]` | C, Rust, Python, Java, JavaScript | Prefer `frgn`; intrinsics fallback | General-purpose, prototyping |
+| `.abv` (Accel) | ✅ sugar allowed | None (GPU only) | Prefer intrinsics; `frgn` banned | GPU compute |
+| `.rbv` (Render) | ✅ sugar allowed | JavaScript (+ C/Rust via WASM) | Prefer `frgn` | Web frontends |
+| `.ebv` (Embed) | ✅ sugar allowed | C, Rust (Python/Java warned) | Prefer `frgn` | Bare-metal MCU |
+| `.cbv` (Circuit) | **❌ sugar banned** — full contracts required | None (FFI banned) | Prefer intrinsics; `frgn` banned | Hardware synthesis |
+| `.dbv` (Data) | No contracts | None | No codegen | Configuration |
+| **Strict** (`.sbv`, `.sebv`, `.srbv`) | **❌ sugar banned** — same as base variant but full `[pre][post]` required | Same as base variant | Same as base variant | Safety-critical, formal verification |
+
+The rationale: **contracts are optimization information**. The more complete your contracts, the more the compiler can prove, and the faster your program runs. Sugar syntax (`[[post]]`, `[pre]]`) is a convenience for prototyping, but strict variants force you to commit to full specifications. This is what makes Brief different from total languages (Coq, Agda — must prove everything upfront) and mainstream languages (C, Rust — prove nothing by default).
 
 **Planned:** COBOL backend (future target for enterprise integration).
 
