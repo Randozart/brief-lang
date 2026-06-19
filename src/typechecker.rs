@@ -1428,6 +1428,33 @@ impl TypeChecker {
                 }
             }
             Statement::Alka(_) => {} // opaque passthrough, no validation
+            Statement::Await { expr, .. } => {
+                self.check_async_await_callable(expr);
+                self.infer_expression(expr);
+            }
+            Statement::Async { body, .. } => {
+                self.check_statement(body, is_async);
+            }
+            Statement::AsyncAwait { body, lhs, .. } => {
+                if let Statement::Expression(expr) = body.as_ref() {
+                    let return_ty = self.infer_expression(expr);
+                    if let Some(name) = lhs {
+                        if let Some(decl_ty) = self.lookup_variable(name) {
+                            if !self.types_compatible(&decl_ty, &return_ty) {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: self.type_to_string(&decl_ty),
+                                    found: self.type_to_string(&return_ty),
+                                    context: format!("async await let {} = ...", name),
+                                });
+                            }
+                        } else {
+                            self.declare_variable(name.as_str(), return_ty);
+                        }
+                    }
+                } else {
+                    self.check_statement(body, is_async);
+                }
+            }
             _ => {}
         }
     }
@@ -2390,6 +2417,18 @@ Expr::ObjectLiteral(fields) => {
 
     fn type_to_string(&self, ty: &Type) -> String {
         format!("{:?}", ty)
+    }
+
+    fn check_async_await_callable(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Call(..) | Expr::IntrinsicCall { .. } | Expr::FieldAccess(..) => {} // callable forms
+            _ => {
+                self.errors.borrow_mut().push(TypeError::InvalidOperation {
+                    operation: "await".to_string(),
+                    type_name: format!("non-callable expression: {:?}", expr),
+                });
+            }
+        }
     }
 
     fn check_expr_for_ffi_errors(&mut self, expr: &Expr) {

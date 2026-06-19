@@ -2823,6 +2823,33 @@ impl ProofEngine {
                 }
             }
         }
+
+        // Scan for `await` calls in non-async txns that create implicit read deps.
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                for stmt in &txn.body {
+                    if let Statement::Await { expr, .. } = stmt {
+                        if let Expr::Call(name, _) = expr {
+                            let mut err = ProofError::new(
+                                "P003",
+                                "await creates implicit read dependency",
+                            );
+                            err.explanation = format!(
+                                "transaction '{}' awaits '{}' — postcondition depends on call result",
+                                txn.name, name
+                            );
+                            err.proof_chain.push(format!(
+                                "1. '{}' awaits '{}' — blocking on its result", txn.name, name
+                            ));
+                            err.hints.push(
+                                "use 'async await' instead of 'await' if the call can run concurrently".to_string()
+                            );
+                            self.errors.push(err);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Suggest `async` for reactive transactions that are proven conflict-free.
@@ -3505,6 +3532,9 @@ pub(crate) fn contains_call_to(stmt: &Statement, name: &str) -> bool {
         Statement::SyncBlock { body } => body.iter().any(|s| contains_call_to(s, name)),
         Statement::Unification { expr, .. } => expr_contains_call_to(expr, name),
         Statement::OnExit { body, .. } => body.iter().any(|s| contains_call_to(s, name)),
+        Statement::Await { expr, .. } => expr_contains_call_to(expr, name),
+        Statement::Async { body, .. } => contains_call_to(body, name),
+        Statement::AsyncAwait { body, .. } => contains_call_to(body, name),
         _ => false,
     }
 }
