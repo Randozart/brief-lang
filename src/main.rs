@@ -3163,19 +3163,19 @@ fn compile_wasm32_module(
 
     // Validate FFI cross-compilation rules for WASM target (B.5)
     for item in &program.items {
-        if let ast::TopLevel::ForeignBinding { signature, .. } = item {
-            match signature.frgn_target {
-                ast::ForeignTarget::Named(ref lang) if lang == "javascript" => {
+        if let ast::TopLevel::ForeignBinding { signature, target, .. } = item {
+            match target {
+                ast::ForeignTarget::Js => {
                     eprintln!("  Error: 'frgn from \"javascript\"' not available in WASM-compiled modules");
                     eprintln!("  Offending declaration: frgn {} from \"javascript\"", signature.name);
                     return Err("FFI target 'javascript' not available in WASM modules".into());
                 }
-                ast::ForeignTarget::Named(ref lang) if lang != "c" => {
-                    eprintln!("  Error: 'frgn from \"{}\"' not available in WASM-compiled modules", lang);
-                    eprintln!("  Offending declaration: frgn {} from \"{}\"", signature.name, lang);
-                    return Err(format!("FFI target '{}' not available in WASM modules", lang).into());
+                ast::ForeignTarget::C => {}
+                _ => {
+                    eprintln!("  Error: 'frgn from \"{}\"' not available in WASM-compiled modules", target);
+                    eprintln!("  Offending declaration: frgn {}", signature.name);
+                    return Err(format!("FFI target '{}' not available in WASM modules", target).into());
                 }
-                _ => {}
             }
         }
     }
