@@ -1,20 +1,43 @@
 // CIRCT Backend — emits MLIR text in HW + Comb + Seq dialects.
-// Invoked externally: brief-compiler circt <file.bv> → program.mlir → circt-opt → circt-translate → verilog
+// Invoked via: brief build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
 use crate::analysis::dependency_graph::DependencyGraph;
-use crate::ast::{Expr, Program, TopLevel, Type};
+use crate::ast::{Expr, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
 
 /// CIRCT backend state for MLIR code generation.
 #[derive(Debug, Clone)]
 pub struct CirctBackend {
-    /// Variable name → HW module port name (for trg variables)
     pub trg_ports: Vec<String>,
-    /// Variable name → its type
     pub var_types: HashMap<String, Type>,
-    /// Variable name → its initializer expression
     pub var_exprs: HashMap<String, Option<Expr>>,
+}
+
+/// Per-generation counters for unique MLIR value names.
+#[derive(Debug, Default)]
+struct NameGen {
+    reg_counter: usize,
+    wire_counter: usize,
+    const_counter: usize,
+}
+
+impl NameGen {
+    fn fresh_reg(&mut self, prefix: &str) -> String {
+        let n = self.reg_counter;
+        self.reg_counter += 1;
+        format!("%{}_{}", prefix, n)
+    }
+    fn fresh_wire(&mut self, prefix: &str) -> String {
+        let n = self.wire_counter;
+        self.wire_counter += 1;
+        format!("%{}_{}", prefix, n)
+    }
+    fn fresh_const(&mut self, prefix: &str) -> String {
+        let n = self.const_counter;
+        self.const_counter += 1;
+        format!("%c{}_{}", prefix, n)
+    }
 }
 
 impl CirctBackend {
@@ -26,7 +49,6 @@ impl CirctBackend {
         }
     }
 
-    /// Generate MLIR text for a program.
     pub fn generate(&mut self, program: &Program) -> String {
         let dep_graph = DependencyGraph::build(program)
             .unwrap_or_else(|_| DependencyGraph {
@@ -38,7 +60,6 @@ impl CirctBackend {
                 all_vars: std::collections::HashSet::new(),
             });
 
-        // Pass 1: collect state decls and trigger declarations
         for item in &program.items {
             match item {
                 TopLevel::StateDecl(decl) => {
@@ -56,7 +77,7 @@ impl CirctBackend {
 
         let mut out = String::new();
         self.emit_header(&mut out);
-        self.emit_module(&mut out, &dep_graph);
+        self.emit_module(&mut out, &dep_graph, program);
         out
     }
 
@@ -76,14 +97,12 @@ impl CirctBackend {
         }
     }
 
-    fn emit_module(&self, out: &mut String, dep_graph: &DependencyGraph) {
-        // Collect all port names (trg variables first, then clock/reset)
+    fn emit_module(&mut self, out: &mut String, dep_graph: &DependencyGraph, program: &Program) {
+        let mut ng = NameGen::default();
         let mut port_decls: Vec<String> = Vec::new();
-        // clock and reset are implicit for Seq dialect registers
         port_decls.push("clock: i1".to_string());
         port_decls.push("reset: i1".to_string());
 
-        // Trigger variables become top-level input ports
         for trg_name in &self.trg_ports {
             if let Some(ty) = self.var_types.get(trg_name) {
                 let mlir_ty = self.mlir_type(ty);
@@ -91,8 +110,6 @@ impl CirctBackend {
             }
         }
 
-        // State variables that are NOT triggers become output ports or internal wires
-        // For simplicity, emit them as output ports
         let sorted_vars = &dep_graph.topo_order;
         for var_name in sorted_vars {
             if !self.trg_ports.contains(var_name) {
@@ -103,7 +120,6 @@ impl CirctBackend {
             }
         }
 
-        // Emit hw.module with all ports
         write!(out, "hw.module @top(").ok();
         for (i, port) in port_decls.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
@@ -111,52 +127,182 @@ impl CirctBackend {
         }
         writeln!(out, ") -> () {{").ok();
 
-        // Emit internal wire declarations for computed variables
+        // Emit sequential registers for state variables
+        let mut reg_names: HashMap<String, String> = HashMap::new();
         for var_name in sorted_vars {
             if !self.trg_ports.contains(var_name) {
                 if let Some(ty) = self.var_types.get(var_name) {
                     let mlir_ty = self.mlir_type(ty);
-                    writeln!(out, "  %{} = hw.wire : {}", var_name, mlir_ty).ok();
+                    let init_val = self.initial_value(var_name);
+                    let reg = ng.fresh_reg(var_name);
+                    writeln!(out, "  {} = seq.firreg initial_value {{ init_value = {} : {} }} : {}", reg, init_val, mlir_ty, mlir_ty).ok();
+                    reg_names.insert(var_name.clone(), reg);
                 }
             }
         }
 
-        // Emit combinational logic for each computed variable
+        // Emit combinational expressions for each variable
         for var_name in sorted_vars {
             if self.trg_ports.contains(var_name) {
-                continue; // trg vars are input ports, not computed
+                continue;
             }
-            let deps = dep_graph.dependencies.get(var_name);
-            if let Some(dep_list) = deps {
-                if !dep_list.is_empty() {
-                    // Simple forwarding: assign first dependency value as proxy
-                    // Full expression-to-MLIR emission is future work
-                    if let Some(first_dep) = dep_list.first() {
-                        let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Int));
-                        writeln!(out, "  hw.output_assign {}_out, %{} : {}", var_name, first_dep, mlir_ty).ok();
+            let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Int));
+            if let Some(expr) = self.var_exprs.get(var_name).and_then(|e| e.as_ref()) {
+                let result = self.emit_expr(&mut ng, out, expr, &reg_names, mlir_ty);
+                if let Some(r) = result {
+                    if let Some(reg) = reg_names.get(var_name) {
+                        writeln!(out, "  seq.always(posedge %clock) {{").ok();
+                        writeln!(out, "    {} <= comb.mux %reset, {}_init, {}", reg, r, r).ok();
+                        writeln!(out, "  }}").ok();
+                    }
+                }
+            } else {
+                let c = ng.fresh_const(var_name);
+                writeln!(out, "  {} = hw.constant 0 : {}", c, mlir_ty).ok();
+            }
+        }
+
+        // Connect output ports to register values
+        for var_name in sorted_vars {
+            if !self.trg_ports.contains(var_name) {
+                if let Some(ty) = self.var_types.get(var_name) {
+                    let mlir_ty = self.mlir_type(ty);
+                    if let Some(reg) = reg_names.get(var_name) {
+                        writeln!(out, "  hw.output_assign {}, {} : {}", var_name, reg, mlir_ty).ok();
                     }
                 }
             }
-            // If no deps, assign constant 0
-            if deps.map_or(true, |d| d.is_empty()) {
-                let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Int));
-                writeln!(out, "  %c0_{} = hw.constant 0 : {}", var_name, mlir_ty).ok();
-            }
         }
 
-        // Connect outputs — assign each computed variable to its output port
-        for var_name in sorted_vars {
-            if !self.trg_ports.contains(var_name) {
-                if let Some(ty) = self.var_types.get(var_name) {
-                    let mlir_ty = self.mlir_type(ty);
-                    writeln!(out, "  hw.output_assign {}, %{} : {}", var_name, var_name, mlir_ty).ok();
-                }
+        // Emit transaction body logic if any
+        for item in &program.items {
+            if let TopLevel::Transaction(txn) = item {
+                self.emit_txn_body(&mut ng, out, &txn.name, &txn.body, &reg_names);
             }
         }
 
         writeln!(out, "  hw.output").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
+    }
+
+    fn initial_value(&self, var_name: &str) -> String {
+        if let Some(Some(expr)) = self.var_exprs.get(var_name) {
+            match expr {
+                Expr::Integer(n) => format!("{}", n),
+                Expr::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
+                Expr::Float(f) => format!("{}", f),
+                _ => "0".to_string(),
+            }
+        } else {
+            "0".to_string()
+        }
+    }
+
+    fn emit_expr(&self, ng: &mut NameGen, out: &mut String, expr: &Expr, reg_names: &HashMap<String, String>, result_ty: &str) -> Option<String> {
+        match expr {
+            Expr::Integer(n) => {
+                let c = ng.fresh_const("int");
+                writeln!(out, "  {} = hw.constant {} : {}", c, n, result_ty).ok();
+                Some(c)
+            }
+            Expr::Bool(b) => {
+                let c = ng.fresh_const("bool");
+                let v = if *b { "1" } else { "0" };
+                writeln!(out, "  {} = hw.constant {} : i1", c, v).ok();
+                Some(c)
+            }
+            Expr::Float(f) => {
+                let c = ng.fresh_const("float");
+                writeln!(out, "  {} = hw.constant {} : f64", c, f).ok();
+                Some(c)
+            }
+            Expr::Identifier(name) => {
+                if let Some(reg) = reg_names.get(name) {
+                    Some(reg.clone())
+                } else if self.trg_ports.contains(name) {
+                    Some(format!("%{}", name))
+                } else {
+                    None
+                }
+            }
+            Expr::Add(l, r) => self.emit_binary_comb(ng, out, "comb.add", l, r, reg_names, result_ty),
+            Expr::Sub(l, r) => self.emit_binary_comb(ng, out, "comb.sub", l, r, reg_names, result_ty),
+            Expr::Mul(l, r) => self.emit_binary_comb(ng, out, "comb.mul", l, r, reg_names, result_ty),
+            Expr::Div(l, r) => self.emit_binary_comb(ng, out, "comb.divu", l, r, reg_names, result_ty),
+            Expr::Mod(l, r) => self.emit_binary_comb(ng, out, "comb.mod", l, r, reg_names, result_ty),
+            Expr::Eq(l, r) => self.emit_binary_comb(ng, out, "comb.icmp eq", l, r, reg_names, "i1"),
+            Expr::Ne(l, r) => self.emit_binary_comb(ng, out, "comb.icmp ne", l, r, reg_names, "i1"),
+            Expr::Lt(l, r) => self.emit_binary_comb(ng, out, "comb.icmp ult", l, r, reg_names, "i1"),
+            Expr::Le(l, r) => self.emit_binary_comb(ng, out, "comb.icmp ule", l, r, reg_names, "i1"),
+            Expr::Gt(l, r) => self.emit_binary_comb(ng, out, "comb.icmp ugt", l, r, reg_names, "i1"),
+            Expr::Ge(l, r) => self.emit_binary_comb(ng, out, "comb.icmp uge", l, r, reg_names, "i1"),
+            Expr::And(l, r) => self.emit_binary_comb(ng, out, "comb.and", l, r, reg_names, "i1"),
+            Expr::Or(l, r) => self.emit_binary_comb(ng, out, "comb.or", l, r, reg_names, "i1"),
+            Expr::Not(inner) => self.emit_unary_comb(ng, out, "comb.xor", inner, reg_names, "i1"),
+            Expr::Neg(inner) => self.emit_unary_comb(ng, out, "comb.neg", inner, reg_names, result_ty),
+            Expr::BitAnd(l, r) => self.emit_binary_comb(ng, out, "comb.and", l, r, reg_names, result_ty),
+            Expr::BitOr(l, r) => self.emit_binary_comb(ng, out, "comb.or", l, r, reg_names, result_ty),
+            Expr::BitXor(l, r) => self.emit_binary_comb(ng, out, "comb.xor", l, r, reg_names, result_ty),
+            Expr::BitNot(inner) => self.emit_unary_comb(ng, out, "comb.xor", inner, reg_names, result_ty),
+            Expr::Cast(inner, target_ty) => {
+                let inner_mlir_ty = self.mlir_type(&crate::ast::Type::Int);
+                let target_mlir_ty = self.mlir_type(target_ty);
+                let val = self.emit_expr(ng, out, inner, reg_names, inner_mlir_ty)?;
+                let w = ng.fresh_wire("cast");
+                // For same-width casts, just forward; for truncation/extraction, emit comb.extract
+                if inner_mlir_ty == target_mlir_ty {
+                    Some(val)
+                } else {
+                    writeln!(out, "  {} = comb.extract {} from 0 : ({}) -> {}", w, val, inner_mlir_ty, target_mlir_ty).ok();
+                    Some(w)
+                }
+            }
+            Expr::Call(name, _args) => {
+                // Function calls become submodule instantiations (stub for now)
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn emit_binary_comb(&self, ng: &mut NameGen, out: &mut String, op: &str, l: &Expr, r: &Expr, reg_names: &HashMap<String, String>, result_ty: &str) -> Option<String> {
+        let left = self.emit_expr(ng, out, l, reg_names, result_ty)?;
+        let right = self.emit_expr(ng, out, r, reg_names, result_ty)?;
+        let w = ng.fresh_wire("bin");
+        writeln!(out, "  {} = {} {}, {} : {}", w, op, left, right, result_ty).ok();
+        Some(w)
+    }
+
+    fn emit_unary_comb(&self, ng: &mut NameGen, out: &mut String, op: &str, inner: &Expr, reg_names: &HashMap<String, String>, result_ty: &str) -> Option<String> {
+        let val = self.emit_expr(ng, out, inner, reg_names, result_ty)?;
+        let w = ng.fresh_wire("un");
+        writeln!(out, "  {} = {} {}, {}_one : {}", w, op, val, result_ty, result_ty).ok();
+        Some(w)
+    }
+
+    fn emit_txn_body(&self, ng: &mut NameGen, out: &mut String, _name: &str, body: &[Statement], reg_names: &HashMap<String, String>) {
+        for stmt in body {
+            match stmt {
+                Statement::Assignment { lhs, expr, .. } => {
+                    if let Expr::OwnedRef(var_name) = lhs {
+                        let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Int));
+                        if let Some(reg) = reg_names.get(var_name) {
+                            let val = self.emit_expr(ng, out, expr, reg_names, mlir_ty);
+                            if let Some(v) = val {
+                                writeln!(out, "  seq.always(posedge %clock) {{").ok();
+                                writeln!(out, "    {} <= {}", reg, v).ok();
+                                writeln!(out, "  }}").ok();
+                            }
+                        }
+                    }
+                }
+                Statement::Expression(expr) => {
+                    self.emit_expr(ng, out, expr, reg_names, "i64");
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -227,13 +373,47 @@ mod tests {
     }
 
     #[test]
-    fn test_circt_derived_var() {
+    fn test_circt_state_var_has_seq_register() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_trigger("a", Type::Int),
-            make_state_decl("b", Type::Int, Some(Expr::Identifier("a".to_string()))),
+            make_state_decl("counter", Type::Int, Some(Expr::Integer(0))),
         ]));
-        assert!(output.contains("a: i64"));
-        assert!(output.contains("b: i64"));
+        assert!(output.contains("seq.firreg"), "State vars should use seq.firreg. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_expr_add() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("x", Type::Int, Some(Expr::Add(
+                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Integer(2)),
+            ))),
+        ]));
+        assert!(output.contains("comb.add"), "Add expr should emit comb.add. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_expr_mul() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("y", Type::Int, Some(Expr::Mul(
+                Box::new(Expr::Integer(3)),
+                Box::new(Expr::Integer(4)),
+            ))),
+        ]));
+        assert!(output.contains("comb.mul"), "Mul expr should emit comb.mul. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_expr_lt() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("cond", Type::Bool, Some(Expr::Lt(
+                Box::new(Expr::Integer(5)),
+                Box::new(Expr::Integer(10)),
+            ))),
+        ]));
+        assert!(output.contains("comb.icmp ult"), "Lt expr should emit comb.icmp ult. Got:\n{}", output);
     }
 }
