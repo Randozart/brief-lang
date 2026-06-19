@@ -57,20 +57,20 @@ Most programming languages are built around _operations in sequence_. Brief desc
     *   Programs are declared through a combination of variables, definitions and transactions.
     *   The entire program runs on a non-polling reactor loop. It indexes which variable changes lead to which `rct txn` preconditions to be fulfilled, and fires them automatically when it's their time to act.
     *   Because these paths are laid out predictably, the compiler has great leeway in folding these paths. If X through A, B and C will always lead to Y with side-effect Z, the compiler will simply draw a short route from X to YZ.
-*   **No magic — but I had to compromise somewhere.**
-    *   Every function and keyword in Brief must be traceable to a source following the same rules as every other definition. If it looks like `foo(x)`, it's user-defined. Period.
-    *   The exception: `#`-suffixed intrinsics like `print_int#`, `sqrt#`, `put_char#`. Yes, these are baked into `Expr::IntrinsicCall` in the AST. But they're *explicitly* marked with the `#` at every call site — you can never mistake `sqrt` for `sqrt#`. The `#` is the compiler saying "I have a hand in this one." It's a compromise I made, but it's an honest one.
-    *   The "coding" system — where top-level `let` declarations and guarded blocks get implicitly wrapped into a reactive transaction — is the one invisible transformation the compiler does. But it's not *hidden* magic: it's the same transformation for every program, it's predictable, and it's the practical muscle behind "execution is inferred, not prescribed." The compiler tells you what it inferred. You can always look at the expanded form.
+*   **No magic, but I had to compromise somewhere.**
+    *   Every function and keyword in Brief must be traceable to a source following the same rules as every other definition. If it looks like `foo(x)`, it is user-defined. Period.
+    *   The exception is `#`-suffixed intrinsics like `print_int#`, `sqrt#`, `put_char#`. These are baked into `Expr::IntrinsicCall` in the AST, but they are *explicitly* marked with the `#` at every call site. You can never mistake `sqrt` for `sqrt#`. The `#` is the compiler saying "I have a hand in this one." It is a compromise, but an honest one.
+    *   The "coding" system, where top-level `let` declarations and guarded blocks get implicitly wrapped into a reactive transaction, is the one invisible transformation the compiler does. But the transformation is predictable and the same for every program. It is the practical muscle behind "execution is inferred, not prescribed." The compiler tells you what it inferred. You can always look at the expanded form.
     *   Anything interacting with an external language or interrupt source must be declared explicitly. Which FFI path that takes depends on your target:
-        *   **LLVM target** (`.bv`, `.ebv`): `frgn from "c"` resolved via `brief_rt.c` — you get C interop.
-        *   **Web target** (`.rbv`): `frgn from "javascript"` — the implementation is inlined into the generated TypeScript.
-        *   **Hardware target** (`.cbv`): no FFI allowed at all. If you need something external, it has to come through an intrinsic. This is the strictest tier, because you're describing copper.
-        *   **GPU target** (`.abv`): intrinsics only, same as hardware — the `#`-suffixed operations are your only bridge to the outside.
+        *   **LLVM target** (`.bv`, `.ebv`): `frgn from "c"` resolved via `brief_rt.c`.
+        *   **Web target** (`.rbv`): `frgn from "javascript"` inlined into generated TypeScript.
+        *   **Hardware target** (`.cbv`): no FFI allowed. If you need something external, it comes through an intrinsic. This is the strictest tier, because you are describing copper.
+        *   **GPU target** (`.abv`): intrinsics only, same as hardware.
 *   **Contracts are optimization fuel, not a correctness tax.**
-    *   This is the one that makes Brief weird, and I mean that as a compliment. In most languages, writing a precondition is you doing the compiler a favor — you're holding its hand through your logic so it can check your work. In Brief, the contract *is* the optimization input. The more you declare, the more the compiler proves, and the faster your program runs. Safety *enables* speed.
-    *   A precondition like `[x < N]` doesn't just guard the transaction — the compiler uses it to emit `!range` metadata on the field load, which lets LLVM eliminate bounds checks in the loop body. No contract, no metadata, slower code. The optimizer *feeds* on what the prover proves.
-    *   This is why strict variants (`.sbv`, `.cbv`) ban sugar syntax. If you're writing hardware or safety-critical code, I don't want you taking shortcuts. The full `[pre][post]` contract is not busywork — it's the compiler's primary optimization signal. When you omit one side, you're leaving performance on the table.
-    *   The old way of thinking: "contracts slow me down, I'll add them later." The Brief way: "the compiler can't optimize what it can't prove." Write the contract first. The performance follows.
+    *   This is an odd one I discovered I could do while optimizing Brief. In most languages, a precondition, assertion or some other safety wrapper is you doing the compiler or even just the runtime a favor to prevent messy logic from crashing the program. In Brief, the contract *is* the optimization input. The more you declare, the more the compiler proves, and the faster your program runs. Safety enables speed.
+    *   A precondition like `[x < N]` does more than guard the transaction, and uses this information to emit `!range` metadata on the field load, which lets LLVM eliminate bounds checks in the loop body. Because of contracts, we have more metadata, and thus more guarantees about the code. The optimizer feeds on what the prover proves.
+    *   This is why strict variants (`.sbv`, `.cbv`) ban sugar syntax. If you are writing hardware or safety-critical code, you should not take shortcuts. The full `[pre][post]` contract is the compiler's primary optimization signal. When you omit one side, you are leaving performance on the table, but also opening yourself up to unpredictable and undefined behaviour. However, sometimes this asks too much of a programmer, which is why the file extension serves as the opt-in.
+    *   So, instead of thinking *"safety checks slow me down, I will add them later."*, think *"the compiler cannot optimize what it cannot prove."* Write the contract first. The performance follows.
 
 ## Quick Start
 
