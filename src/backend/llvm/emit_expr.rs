@@ -3659,9 +3659,12 @@ impl LlvmBackend {
 
     /// Emit inline string concatenation: malloc + header setup + memcpy + free.
     /// Both operands are i8* (Brief header pointers). Returns i8*.
-    /// Frees temporary operands after copying (detected by bit-1 tag:
-    /// concat results are tagged with 2, state fields have bit 1 clear).
-    /// Static string constants have bit 0 set and are never freed.
+    ///
+    /// Tag convention (2026-06-19):
+    ///   bit 0 = static string constant (don't free, don't read header at -16)
+    ///   bit 1 = temporary concat result (safe to free when consumed)
+    /// State-loaded strings have both bits clear (heap, state-owned).
+    /// Only concat results get bit 1 set.
     fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &TypedRegister, b: &TypedRegister) -> TypedRegister {
         let a_boxed = self.adapt_to_i64(out, indent, a);
         let b_boxed = self.adapt_to_i64(out, indent, b);

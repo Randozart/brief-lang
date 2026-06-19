@@ -281,4 +281,33 @@ mod tests {
         let c_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "c"));
         assert!(a_pos < b_pos && b_pos < c_pos, "chain order must be preserved");
     }
+
+    #[test]
+    fn test_topological_sort_cycle_detected() {
+        // 2026-06-19: Verify cycle detection in the internal topological_sort.
+        // reorder_body_statements cannot produce cycles (edges are always forward),
+        // so test topological_sort directly with a manually constructed cycle graph.
+        let body = vec![
+            Statement::Assignment { lhs: Expr::OwnedRef("x".into()), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::OwnedRef("y".into()), expr: Expr::Integer(2), timeout: None, modifiers: vec![] },
+        ];
+        let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
+        deps.insert(0, HashSet::from([1]));
+        deps.insert(1, HashSet::from([0]));
+        let (reordered, has_cycle) = topological_sort(&body, &deps);
+        assert!(has_cycle, "Cycle in dependency graph should be detected");
+        // Fallback: all statements appear in original order
+        assert_eq!(reordered.len(), 2, "All statements must appear in fallback order");
+    }
+
+    #[test]
+    fn test_reorder_short_body_no_reordering() {
+        // 2026-06-19: Bodies with < 3 statements are returned as-is.
+        let body = vec![
+            Statement::Assignment { lhs: Expr::OwnedRef("x".into()), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
+        ];
+        let (reordered, has_cycle) = reorder_body_statements(&body);
+        assert_eq!(reordered.len(), 1);
+        assert!(!has_cycle);
+    }
 }

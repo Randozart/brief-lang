@@ -4802,3 +4802,69 @@ let spec = crate::target_spec::TargetSpec {
         backend.emit_stmt(&mut out, &stmt, "");
         assert!(!out.contains("__barrier_wait__"), "Term should not emit barrier when pending == 0. Got:\n{}", out);
     }
+
+    #[test]
+    fn test_inline_concat_emits_free_and_temp_tag() {
+        // 2026-06-19: Verify string concat emits conditional free for temporaries
+        // and tags the result with bit 1. Regression test for the memory leak fix.
+        // Use Expr::Concat in a Let statement to ensure the concat codegen fires.
+        // Use a state field + string constant so precomputation cannot fold.
+        // Without a runtime operand, the optimizer folds the concat at compile time.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "s".to_string(), ty: Type::String,
+                    expr: Some(Expr::String("x".to_string())),
+                    address: None, bit_range: None, is_override: false, os_mode: false,
+                    span: None, attrs: vec![], range_constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "main".into(), is_async: false, is_reactive: false,
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
+                        watchdog: None, span: None,
+                    },
+                    body: vec![
+                        Statement::Let {
+                            name: "x".into(), ty: None,
+                            expr: Some(Expr::Concat(
+                                // State field read = runtime-determined, cannot fold
+                                Box::new(Expr::Identifier("s".to_string())),
+                                Box::new(Expr::String("world".to_string())),
+                            )),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![], range_constraint: None,
+                        },
+                        Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], attrs: vec![], modifiers: vec![],
+                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Dump output for debugging if assertions fail
+        let has_concat = output.contains("= and i64") && output.contains("-4");
+        assert!(has_concat,
+            "String header read with -4 mask not found. Try adjusting test to avoid\n\
+             precomputation folding. Output:\n{}", output);
+        // Verify the bit-1 temp tag on the result: or i64 %tN, 2
+        // This is specific to concat results — no other code emits 'or i64 %t..., 2'
+        let has_temp_tag = output.lines().any(|l| l.contains("= or i64") && l.contains(", 2"));
+        assert!(has_temp_tag,
+            "Concat result must be tagged with bit 1. Output:\n{}", output);
+        // Verify free calls are emitted for temporary operands
+        assert!(output.contains("call void @free(i8*"),
+            "Free must be emitted for temporary string operands. Output:\n{}", output);
+        // Verify concat header lines use -4 not -2
+        for line in output.lines() {
+            if line.contains("cam") && line.contains("and i64") {
+                assert!(!line.contains("-2"),
+                    "Old -2 mask must not be used in concat header read. Line: {}", line);
+            }
+        }
+    }
