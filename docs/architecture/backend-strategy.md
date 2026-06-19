@@ -106,29 +106,74 @@ file is small enough to navigate, and no optimization path was touched.
 
 ## CIRCT Backend
 
-(`src/backend/circt.rs`, 240 lines) — emits MLIR text in HW + Comb
-dialects. Trigger variables become top-level input ports. State variables
-with initializer expressions become combinational logic. No dirty-bit
-`step()` function needed — hardware is purely combinatorial.
+(`src/backend/circt.rs`, 860 lines, 17 unit tests) — emits MLIR text in
+HW + Comb + Seq dialects. Trigger variables become input ports, state
+variables become `seq.firreg` sequential registers, contract guards are
+lowered to `comb.icmp` operations, and transaction bodies become FSMs
+with state registers.
+
+### Architecture
+
+```
+CirctBackend
+├── trigger_port_name()      — LinkRef → port name mapping
+├── mlir_type()              — Type → MLIR type (supports sized ints via Constrained)
+├── emit_module()
+│   ├── input_ports          — clock, reset, trg variables (in % prefix)
+│   ├── output_ports         — state vars, wake_<trg>, halt (return signature)
+│   ├── seq.firreg           — sequential registers for state variables
+│   ├── emit_expr()          — recursion into comb/arithmetic ops
+│   │   ├── emit_binary_comb — comb.add/sub/mul/divu/and/or/xor/icmp
+│   │   └── emit_unary_comb  — comb.xor/neg (via xor with 1)
+│   ├── emit_contract_condition — pre/post guards via comb.icmp
+│   └── emit_txn_body()      — FSM state register + body + halt
+│       ├── FSM state reg    — 2-bit seq.firreg for idle/running/done
+│       ├── Await handling   — sub-module start/done handshake + stall
+│       ├── Async handling   — fire-and-forget body emission
+│       ├── SyncBlock        — parallel combinational paths
+│       └── TermBang         — drives halt output port high
+```
+
+### Module Output Convention (modern CIRCT)
 
 ```mlir
-hw.module @top(clock: i1, reset: i1, sensor: i64, c: i64) -> () {
-  %c0_c = hw.constant 0 : i64
-  hw.output_assign c, %sensor : i64
-  hw.output
+hw.module @top(in %clock: i1, in %reset: i1, in %sensor: i64)
+    -> (counter: i64, wake_btn: i1, halt: i1) {
+  %counter_0 = seq.firreg initial_value { init_value = 0 : i64 } : i64
+  %counter_next = comb.add %counter_0, %c1_i64 : i64
+  seq.always(posedge %clock) {
+    %counter_0 <= %counter_next
+  }
+  hw.output %counter_0 : i64, %c0_i1 : i1,
 }
 ```
 
-Invoked via `run_cbv()` in `src/main.rs` when a `.cbv` file is compiled
-through `run_build()` or `run_compile_unified()`:
-```
-brief build file.cbv    → generates file.mlir
-brief compile file.cbv  → infers circt.toml, generates file.mlir
-```
+### FSM State Machine
 
-The MLIR output can then be synthesized through the standard CIRCT pipeline:
-```
-circt-opt file.mlir | circt-translate --export-verilog
+Each `rct txn` body becomes a finite state machine:
+
+| State | Value | Meaning |
+|-------|-------|---------|
+| Idle  | 0 | Waiting for precondition |
+| Running | 1 | Executing body |
+| Done  | 2 | Postcondition met, commit |
+
+State transitions: `pre → run → (stall on await) → post → done → idle`
+
+### Sized Integer Support
+
+`mlir_type()` maps `Type::Constrained(inner, BitRange::Single(N))` to `iN`,
+enabling precise bit-widths (i8, i16, i32, i64) for efficient FPGA synthesis.
+
+### Trigger Port Mapping
+
+| `LinkRef` variant | Port name | Example |
+|-------------------|-----------|---------|
+| `Explicit(addr)` | Trigger name | `sensor` |
+| `Linked("name")` | Linked name | `button0` |
+| `Timer(freq)` | `timer_<freq>hz` | `timer_1000hz` |
+| `Signal("name")` | Signal name | `irq_line` |
+| `#wake` modifier | Additional `wake_<name>` output port | `wake_sensor` |
 
 ## Webstack Backend
 

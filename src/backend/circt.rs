@@ -181,6 +181,9 @@ impl CirctBackend {
             }
         }
 
+        // Always add a halt output port (driven high by term! statements)
+        output_ports.push(("halt".to_string(), "i1".to_string()));
+
         let sorted_vars = &dep_graph.topo_order;
         let trg_names: std::collections::HashSet<String> = self.trg_ports.iter().map(|t| t.trg_name.clone()).collect();
         for var_name in sorted_vars {
@@ -215,9 +218,11 @@ impl CirctBackend {
         writeln!(out, ") {{").ok();
 
         // Emit sequential registers for state variables (skip MMIO vars — they're external ports)
+        // Also skip special output ports like halt (handled separately in txn body)
         let mut reg_names: HashMap<String, String> = HashMap::new();
+        let special_outputs: std::collections::HashSet<&str> = ["halt"].iter().cloned().collect();
         for (var_name, mlir_ty) in &output_ports {
-            if self.mmio_vars.contains(var_name) {
+            if self.mmio_vars.contains(var_name) || special_outputs.contains(var_name.as_str()) {
                 continue;
             }
             let init_val = self.initial_value(var_name);
@@ -225,6 +230,8 @@ impl CirctBackend {
             writeln!(out, "  {} = seq.firreg initial_value {{ init_value = {} : {} }} : {}", reg, init_val, mlir_ty, mlir_ty).ok();
             reg_names.insert(var_name.clone(), reg);
         }
+
+        // Emit combinational expressions for each output variable
 
         // Emit combinational expressions for each output variable
         for (var_name, mlir_ty) in &output_ports {
@@ -246,7 +253,7 @@ impl CirctBackend {
         // Emit transaction body logic if any
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
-                self.emit_txn_body(&mut ng, out, &txn.name, &txn.body, &txn.contract, &reg_names);
+                self.emit_txn_body(&mut ng, out, &txn.name, &txn.body, &txn.contract, &mut reg_names);
             }
         }
 
@@ -255,6 +262,11 @@ impl CirctBackend {
         for (var_name, mlir_ty) in &output_ports {
             if let Some(reg) = reg_names.get(var_name) {
                 write!(out, " {} : {},", reg, mlir_ty).ok();
+            } else if var_name == "halt" {
+                // If no txn drives halt, default to 0
+                let c = ng.fresh_const("halt_default");
+                writeln!(out, "  {} = hw.constant 0 : i1", c).ok();
+                write!(out, " {} : {},", c, mlir_ty).ok();
             }
         }
         writeln!(out).ok();
@@ -356,10 +368,17 @@ impl CirctBackend {
         Some(w)
     }
 
-    fn emit_txn_body(&self, ng: &mut NameGen, out: &mut String, _name: &str, body: &[Statement], contract: &Contract, reg_names: &HashMap<String, String>) {
+    fn emit_txn_body(&self, ng: &mut NameGen, out: &mut String, _name: &str, body: &[Statement], contract: &Contract, reg_names: &mut HashMap<String, String>) {
         // Allocate FSM state register: 2 bits supports 3 states (idle/running/done)
         let state_reg = ng.fresh_reg("txn_state");
         writeln!(out, "  {} = seq.firreg initial_value {{ init_value = 0 : i2 }} : i2", state_reg).ok();
+
+        // Halt register: goes high when term! is encountered (drives module output)
+        let halt_reg = ng.fresh_reg("halt");
+        let c0 = ng.fresh_const("zero_i1");
+        writeln!(out, "  {} = hw.constant 0 : i1", c0).ok();
+        writeln!(out, "  {} = seq.firreg initial_value {{ init_value = 0 : i1 }} : i1", halt_reg).ok();
+        reg_names.insert("halt".to_string(), halt_reg.clone());
 
         // Precondition: evaluate guard condition
         let pre_cond = ng.fresh_wire("pre");
@@ -409,6 +428,14 @@ impl CirctBackend {
                 }
                 Statement::Async { body, .. } | Statement::AsyncAwait { body, .. } => {
                     self.emit_stmt_body(ng, out, body, reg_names);
+                }
+                Statement::TermBang { .. } => {
+                    writeln!(out, "  seq.always(posedge %clock) {{").ok();
+                    writeln!(out, "    {} <= 1 : i1", halt_reg).ok();
+                    writeln!(out, "  }}").ok();
+                }
+                Statement::Term { .. } => {
+                    // Regular term (non-bang): no halt — commit action continues
                 }
                 _ => {}
             }
@@ -666,7 +693,8 @@ mod tests {
         // Modern form: hw.module @top(in %clock: i1, in %reset: i1) -> (counter: i64)
         assert!(output.contains("in %clock: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
         assert!(output.contains("in %reset: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
-        assert!(output.contains("-> (counter: i64)"), "Outputs should be in return signature. Got:\n{}", output);
+        assert!(output.contains("halt: i1"), "Outputs should include halt. Got:\n{}", output);
+        assert!(output.contains("counter: i64"), "Outputs should include counter. Got:\n{}", output);
         assert!(!output.contains("hw.output_assign"), "Should not use deprecated hw.output_assign. Got:\n{}", output);
     }
 
@@ -736,7 +764,7 @@ mod tests {
         ]));
         // MMIO vars with @ address should become input ports, not registers
         assert!(output.contains("in %status: i64"), "MMIO var should be input port. Got:\n{}", output);
-        assert!(output.contains("-> ()"), "MMIO-only module has no output ports. Got:\n{}", output);
+        assert!(output.contains("-> (halt: i1)"), "MMIO-only module has only halt output. Got:\n{}", output);
     }
 
     #[test]
