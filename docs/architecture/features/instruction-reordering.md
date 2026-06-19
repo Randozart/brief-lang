@@ -43,7 +43,7 @@ Statements with no dependency between them can be reordered freely.
 
 1. **Compute `ReadWriteSet`** for each statement via `rw_set_of(stmt)`
 2. **Build dependency DAG**: `build_dependency_graph(sets)` — edges go from i to j when i must come before j
-3. **Kahn's topological sort**: `topological_sort(body, deps)` — emits statements in dependency order, grouping independent ones together. If a cycle is detected (unexpected — suggests a transaction with cyclic assignments), unscheduled statements are appended in original order.
+3. **Kahn's topological sort**: `topological_sort(body, deps)` — emits statements in dependency order, grouping independent ones together, returning a `(Vec<Statement>, has_cycle)` tuple. If a cycle is detected (unexpected — suggests a transaction with cyclic assignments), unscheduled statements are appended in original order and a compiler warning is emitted.
 
 ## Implementation
 
@@ -76,7 +76,10 @@ Statements with no dependency between them can be reordered freely.
 Called from `emit_transaction` in `emit_toplevel.rs`:
 
 ```rust
-let reordered = super::reorder::reorder_body_statements(&txn.body);
+let (reordered, has_cycle) = super::reorder::reorder_body_statements(&txn.body);
+if has_cycle {
+    self.warnings.push(format!("Warning: dependency cycle ..."));
+}
 for s in &reordered { self.emit_stmt(out, s, "  "); }
 ```
 
