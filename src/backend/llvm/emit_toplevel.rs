@@ -743,7 +743,13 @@ impl LlvmBackend {
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
-            let reordered = super::reorder::reorder_body_statements(&txn.body);
+            let (reordered, has_cycle) = super::reorder::reorder_body_statements(&txn.body);
+            if has_cycle {
+                self.warnings.push(format!(
+                    "Warning: dependency cycle detected in transaction '{}' — ILP reordering is suboptimal",
+                    name
+                ));
+            }
             for s in &reordered {
                 if self.terminated { break; }
                 self.emit_stmt(out, s, "  ");
@@ -773,7 +779,13 @@ impl LlvmBackend {
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
-            let reordered = super::reorder::reorder_body_statements(&txn.body);
+            let (reordered, has_cycle) = super::reorder::reorder_body_statements(&txn.body);
+            if has_cycle {
+                self.warnings.push(format!(
+                    "Warning: dependency cycle detected in transaction '{}' — ILP reordering is suboptimal",
+                    name
+                ));
+            }
             for s in &reordered {
                 if self.terminated { break; }
                 self.emit_stmt(out, s, "  ");

@@ -8,9 +8,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Reorder body statements to maximize instruction-level parallelism.
 /// Independent statements (no read-write conflicts) are grouped together
 /// so LLVM's scheduler can issue them simultaneously.
-pub(crate) fn reorder_body_statements(body: &[Statement]) -> Vec<Statement> {
+/// Returns (reordered_statements, has_cycle) where has_cycle indicates
+/// a dependency cycle was detected and sorted order may be suboptimal.
+pub(crate) fn reorder_body_statements(body: &[Statement]) -> (Vec<Statement>, bool) {
     if body.len() < 3 {
-        return body.to_vec();
+        return (body.to_vec(), false);
     }
     let sets: Vec<ReadWriteSet> = body.iter().map(rw_set_of).collect();
     let deps = build_dependency_graph(&sets);
@@ -178,8 +180,8 @@ fn build_dependency_graph(sets: &[ReadWriteSet]) -> HashMap<usize, HashSet<usize
 }
 
 /// Kahn's topological sort — emits independent statements grouped together
-/// for maximum ILP.
-fn topological_sort(body: &[Statement], deps: &HashMap<usize, HashSet<usize>>) -> Vec<Statement> {
+/// for maximum ILP. Returns (sorted_statements, has_cycle).
+fn topological_sort(body: &[Statement], deps: &HashMap<usize, HashSet<usize>>) -> (Vec<Statement>, bool) {
     let n = body.len();
     let mut in_degree = vec![0usize; n];
     for (_, successors) in deps {
@@ -202,16 +204,17 @@ fn topological_sort(body: &[Statement], deps: &HashMap<usize, HashSet<usize>>) -
             }
         }
     }
+    let has_cycle = scheduled.len() < n;
     // If cycle detected (some statements not scheduled), append unscheduled
     // in original order as fallback.
-    if scheduled.len() < n {
+    if has_cycle {
         for (i, s) in body.iter().enumerate() {
             if !scheduled.contains(&i) {
                 result.push(s.clone());
             }
         }
     }
-    result
+    (result, has_cycle)
 }
 
 #[cfg(test)]
@@ -234,8 +237,9 @@ mod tests {
                 timeout: None, modifiers: vec![],
             },
         ];
-        let reordered = reorder_body_statements(&body);
+        let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 2);
+        assert!(!has_cycle);
     }
 
     #[test]
@@ -253,7 +257,7 @@ mod tests {
                 timeout: None, modifiers: vec![],
             },
         ];
-        let reordered = reorder_body_statements(&body);
+        let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 2);
         // y must come after x
         let x_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "x"));
@@ -269,8 +273,9 @@ mod tests {
             Statement::Assignment { lhs: Expr::OwnedRef("b".into()), expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
             Statement::Assignment { lhs: Expr::OwnedRef("c".into()), expr: Expr::Add(Box::new(Expr::Identifier("b".into())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
         ];
-        let reordered = reorder_body_statements(&body);
+        let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 3);
+        assert!(!has_cycle);
         let a_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "a"));
         let b_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "b"));
         let c_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "c"));
